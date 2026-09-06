@@ -41,8 +41,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize Core client
-	client := coreclient.NewCoreClient(cfg.CoreURL, logger)
+	// Initialize Core client with mTLS credentials
+	client := coreclient.NewCoreClient(cfg.CoreURL, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.CACertFile, logger)
 
 	// Initialize health server
 	healthServer := health.NewHealthServer(cfg.HealthPort, diskSpool, logger)

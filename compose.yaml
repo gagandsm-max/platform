@@ -49,6 +49,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    cpus: 1.0
+    mem_limit: 512m
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
     logging:
       driver: "json-file"
       options:
@@ -82,6 +89,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    cpus: 2.0
+    mem_limit: 1536m
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1536M
     logging:
       driver: "json-file"
       options:
@@ -120,6 +134,13 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
+    cpus: 2.0
+    mem_limit: 1024m
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
     logging:
       driver: "json-file"
       options:
@@ -147,6 +168,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    cpus: 0.5
+    mem_limit: 256m
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
     logging:
       driver: "json-file"
       options:
@@ -183,6 +211,8 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     ports:
       - "127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}:8443"
+    volumes:
+      - ./deploy/docker/certs:/certs:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -195,11 +225,18 @@ services:
     networks:
       - platform_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8443/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "curl -k -f https://127.0.0.1:8443/actuator/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+    cpus: 2.0
+    mem_limit: 1024m
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
     logging:
       driver: "json-file"
       options:
@@ -234,6 +271,8 @@ services:
       VALKEY_PORT: 6379
       VALKEY_PASSWORD: ${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./deploy/docker/certs:/certs:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -246,11 +285,18 @@ services:
     networks:
       - platform_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8443/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "curl -k -f https://127.0.0.1:8443/actuator/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+    cpus: 2.0
+    mem_limit: 1024m
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
     logging:
       driver: "json-file"
       options:
@@ -283,6 +329,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    cpus: 0.5
+    mem_limit: 256m
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
     logging:
       driver: "json-file"
       options:
@@ -304,12 +357,18 @@ services:
       SENSOR_ID: ${SENSOR_NETWORK_ID:-sensor-net-01}
       SENSOR_TYPE: network
       PLATFORM_ENV: ${PLATFORM_ENV:-development}
-      CORE_URL: http://core:8443
+      CORE_URL: https://core:8443
+      PLATFORM_TLS_CERT_FILE: /certs/sensor-net.crt
+      PLATFORM_TLS_KEY_FILE: /certs/sensor-net.key
+      PLATFORM_CA_CERT_FILE: /certs/ca.crt
       SENSOR_SPOOL_DIR: /var/lib/platform/sensor/spool
       PLATFORM_STORAGE_WATERMARK_PERCENT: ${PLATFORM_STORAGE_WATERMARK_PERCENT:-80}
       SENSOR_HEALTH_PORT: 8088
     volumes:
       - platform_sensor_net_spool:/var/lib/platform/sensor/spool
+      - ./deploy/docker/certs/sensor-net.crt:/certs/sensor-net.crt:ro
+      - ./deploy/docker/certs/sensor-net.key:/certs/sensor-net.key:ro
+      - ./deploy/docker/certs/ca.crt:/certs/ca.crt:ro
     depends_on:
       core:
         condition: service_healthy
@@ -321,6 +380,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    cpus: 0.5
+    mem_limit: 256m
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
     logging:
       driver: "json-file"
       options:
@@ -342,12 +408,18 @@ services:
       SENSOR_ID: ${SENSOR_INFRA_ID:-sensor-infra-01}
       SENSOR_TYPE: infrastructure
       PLATFORM_ENV: ${PLATFORM_ENV:-development}
-      CORE_URL: http://core:8443
+      CORE_URL: https://core:8443
+      PLATFORM_TLS_CERT_FILE: /certs/sensor-infra.crt
+      PLATFORM_TLS_KEY_FILE: /certs/sensor-infra.key
+      PLATFORM_CA_CERT_FILE: /certs/ca.crt
       SENSOR_SPOOL_DIR: /var/lib/platform/sensor/spool
       PLATFORM_STORAGE_WATERMARK_PERCENT: ${PLATFORM_STORAGE_WATERMARK_PERCENT:-80}
       SENSOR_HEALTH_PORT: 8088
     volumes:
       - platform_sensor_infra_spool:/var/lib/platform/sensor/spool
+      - ./deploy/docker/certs/sensor-infra.crt:/certs/sensor-infra.crt:ro
+      - ./deploy/docker/certs/sensor-infra.key:/certs/sensor-infra.key:ro
+      - ./deploy/docker/certs/ca.crt:/certs/ca.crt:ro
     depends_on:
       core:
         condition: service_healthy
@@ -359,6 +431,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    cpus: 0.5
+    mem_limit: 256m
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
     logging:
       driver: "json-file"
       options:
@@ -380,15 +459,30 @@ services:
       SENSOR_ID: sensor-net-02
       SENSOR_TYPE: network
       PLATFORM_ENV: ${PLATFORM_ENV:-development}
-      CORE_URL: http://core:8443
+      CORE_URL: https://core:8443
+      PLATFORM_TLS_CERT_FILE: /certs/sensor-net.crt
+      PLATFORM_TLS_KEY_FILE: /certs/sensor-net.key
+      PLATFORM_CA_CERT_FILE: /certs/ca.crt
       SENSOR_SPOOL_DIR: /var/lib/platform/sensor/spool
       PLATFORM_STORAGE_WATERMARK_PERCENT: ${PLATFORM_STORAGE_WATERMARK_PERCENT:-80}
       SENSOR_HEALTH_PORT: 8088
+    volumes:
+      - platform_sensor_net_spool:/var/lib/platform/sensor/spool
+      - ./deploy/docker/certs/sensor-net.crt:/certs/sensor-net.crt:ro
+      - ./deploy/docker/certs/sensor-net.key:/certs/sensor-net.key:ro
+      - ./deploy/docker/certs/ca.crt:/certs/ca.crt:ro
     depends_on:
       core:
         condition: service_healthy
     networks:
       - platform_net
+    cpus: 0.5
+    mem_limit: 256m
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   # ----------------------------------------------------------------------------
   # Analytics: Baseline Analytics Engine
@@ -404,7 +498,7 @@ services:
     environment:
       PLATFORM_ENV: ${PLATFORM_ENV:-development}
       PLATFORM_LOG_LEVEL: ${PLATFORM_LOG_LEVEL:-INFO}
-      CORE_URL: http://core:8443
+      CORE_URL: https://core:8443
       ANALYTICS_HEALTH_PORT: 8090
     depends_on:
       core:
@@ -417,6 +511,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    cpus: 1.0
+    mem_limit: 512m
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
     logging:
       driver: "json-file"
       options:

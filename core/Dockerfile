@@ -30,6 +30,6 @@ USER platform
 EXPOSE 8443
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -f http://127.0.0.1:8443/actuator/health || exit 1
+    CMD curl -k -f https://127.0.0.1:8443/actuator/health || exit 1
 
 ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/platform-core.jar"]

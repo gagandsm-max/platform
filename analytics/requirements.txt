@@ -1,7 +1,6 @@
 # ==============================================================================
-# Platform Analytics Dependencies (OSS Approved)
+# Platform Analytics Dependencies (Authoritative OSS Catalogue Compliant)
+# Governing Spec: Platform_07_OSS_Catalog.md
 # ==============================================================================
 numpy==2.1.1
-scipy==1.14.1
-pandas==2.2.2
-requests==2.32.3
+polars==1.8.2

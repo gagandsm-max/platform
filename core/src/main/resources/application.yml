@@ -1,6 +1,16 @@
 server:
   port: 8443
   shutdown: graceful
+  ssl:
+    enabled: true
+    key-store: ${CORE_KEYSTORE_PATH:file:/certs/core-keystore.p12}
+    key-store-password: ${CORE_KEYSTORE_PASSWORD:platform_dev_keystore_pass}
+    key-store-type: PKCS12
+    key-alias: core
+    trust-store: ${CORE_TRUSTSTORE_PATH:file:/certs/core-truststore.p12}
+    trust-store-password: ${CORE_TRUSTSTORE_PASSWORD:platform_dev_truststore_pass}
+    trust-store-type: PKCS12
+    client-auth: want
 
 spring:
   application:

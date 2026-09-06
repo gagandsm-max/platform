@@ -14,7 +14,7 @@ endif
 include $(ENV_FILE)
 export
 
-.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-integration clean dev-reset certs
+.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-integration clean dev-reset certs post-reboot-verify
 
 help: ## Show available Makefile targets
 	@echo "========================================================================"
@@ -93,3 +93,6 @@ dev-reset: ## Clean-slate reset of Platform services and volumes (CONFIRM=yes re
 	@echo "==> Resetting Platform containers and named volumes..."
 	@docker compose down -v --remove-orphans
 	@echo "==> Platform dev environment reset complete."
+
+post-reboot-verify: ## Verify stack integrity and convergence after host machine reboot
+	@bash scripts/post-reboot-verify.sh

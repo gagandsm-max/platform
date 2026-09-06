@@ -87,7 +87,7 @@ Platform services bind exclusively to `127.0.0.1` in the `20000–29999` range:
 | Service | Container Port | Host Port (`127.0.0.1`) | Purpose | Protocol |
 | :--- | :--- | :--- | :--- | :--- |
 | **UI** | `443` | `23000` | HTTPS React SPA & API Gateway | HTTPS (TLS 1.2/1.3) |
-| **Core** | `8443` | `28443` | Spring Boot REST API & Actuator | HTTP (Internal control) |
+| **Core** | `8443` | `28443` | Spring Boot REST API & Actuator | HTTPS (TLS 1.2/1.3, mTLS Sensor Ingestion) |
 | **PostgreSQL** | `5432` | `25432` | Transactional Datastore | PostgreSQL |
 | **ClickHouse HTTP** | `8123` | `28123` | Analytical Telemetry Query API | HTTP |
 | **ClickHouse Native** | `9000` | `29000` | High-throughput ingestion | Native TCP |
@@ -129,10 +129,11 @@ make dev-status
 Access the Web UI at:
 👉 **`https://localhost:23000`** *(Accept the local dev self-signed TLS certificate)*
 
-Core API endpoints:
-- Core Health: `http://localhost:28443/actuator/health`
-- Core Version: `http://localhost:28443/api/v1/version`
-- Connectivity Check: `http://localhost:28443/api/v1/health/connectivity`
+Core API endpoints (Strict HTTPS):
+- Core Health: `https://localhost:28443/actuator/health`
+- Core Version: `https://localhost:28443/api/v1/version`
+- Connectivity Check: `https://localhost:28443/api/v1/health/connectivity`
+- Sensor Ingestion: `https://localhost:28443/api/v1/sensor/heartbeat` *(Requires mTLS client certificate)*
 - Proxied via UI: `https://localhost:23000/api/v1/version`
 
 ---
