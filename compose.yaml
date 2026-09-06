@@ -11,17 +11,17 @@ networks:
 
 volumes:
   platform_pg_data:
-    name: platform_pg_data
+    name: ${PLATFORM_PG_DATA_VOLUME:-platform_pg_data}
   platform_ch_data:
-    name: platform_ch_data
+    name: ${PLATFORM_CH_DATA_VOLUME:-platform_ch_data}
   platform_kafka_data:
-    name: platform_kafka_data
+    name: ${PLATFORM_KAFKA_DATA_VOLUME:-platform_kafka_data}
   platform_valkey_data:
-    name: platform_valkey_data
+    name: ${PLATFORM_VALKEY_DATA_VOLUME:-platform_valkey_data}
   platform_sensor_net_spool:
-    name: platform_sensor_net_spool
+    name: ${PLATFORM_SENSOR_NET_SPOOL_VOLUME:-platform_sensor_net_spool}
   platform_sensor_infra_spool:
-    name: platform_sensor_infra_spool
+    name: ${PLATFORM_SENSOR_INFRA_SPOOL_VOLUME:-platform_sensor_infra_spool}
 
 services:
   # ----------------------------------------------------------------------------

@@ -292,12 +292,22 @@ docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valke
 docker compose down > /dev/null 2>&1
 docker compose up -d > /dev/null 2>&1
 
-# Wait for healthy
-sleep 15
+# Wait for all services to converge to healthy state (no arbitrary sleep)
+for i in $(seq 1 45); do
+    UNHEALTHY=$(docker compose ps --format '{{.Service}}:{{.Health}}' 2>/dev/null | grep -v 'healthy' || true)
+    if [ -z "${UNHEALTHY}" ]; then
+        break
+    fi
+    sleep 2
+done
 
 # Verify marker row and key
 PG_RESTART_VAL=$(docker exec platform-postgres psql -U platform_app -d platform -t -A -c "SELECT count(*) FROM platform.tenant WHERE tenant_id='restart-test-tenant';" 2>/dev/null || echo "0")
 VALKEY_RESTART_VAL=$(docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}" get restart_persist_key 2>/dev/null || echo "")
+
+# Clean up test markers to avoid polluting persistent development state
+docker exec platform-postgres psql -U platform_app -d platform -c "DELETE FROM platform.tenant WHERE tenant_id='restart-test-tenant';" > /dev/null 2>&1 || true
+docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}" del restart_persist_key > /dev/null 2>&1 || true
 
 if [ "${PG_RESTART_VAL}" = "1" ] && [ "${VALKEY_RESTART_VAL}" = "preserved_across_down" ]; then
     pass ${TEST_NUM} "${TEST_DESC}"
@@ -330,15 +340,25 @@ fi
 # ------------------------------------------------------------------------------
 TEST_NUM=20
 TEST_DESC="Isolation Verification (Foreign Containers Untouched, Zero Host Project Runtimes)"
-# Check foreign container screensmart status
-FOREIGN_RUNNING=$(docker ps --filter "name=screensmart" --format '{{.Names}}' | wc -l)
+# Check non-platform containers (ensure any foreign containers on host remain undisturbed)
+FOREIGN_ALL=$(docker ps -a --format '{{.Names}}' | grep -v '^platform' || true)
+FOREIGN_OK=true
+FOREIGN_COUNT=0
+if [ -n "${FOREIGN_ALL}" ]; then
+    FOREIGN_COUNT=$(echo "${FOREIGN_ALL}" | wc -l)
+    FOREIGN_RUNNING=$(docker ps --format '{{.Names}}' | grep -v '^platform' | wc -l)
+    if [ "${FOREIGN_RUNNING}" -lt "${FOREIGN_COUNT}" ]; then
+        FOREIGN_OK=false
+    fi
+fi
+
 # Verify zero host project-specific runtimes installed in PATH
 HOST_RUNTIMES=$(which java go node npm mvn clickhouse-server valkey-server 2>/dev/null || true)
 
-if [ "${FOREIGN_RUNNING}" -gt 0 ] && [ -z "${HOST_RUNTIMES}" ]; then
-    pass ${TEST_NUM} "${TEST_DESC} (${FOREIGN_RUNNING} foreign containers intact, zero host runtimes)"
+if [ "${FOREIGN_OK}" = "true" ] && [ -z "${HOST_RUNTIMES}" ]; then
+    pass ${TEST_NUM} "${TEST_DESC} (${FOREIGN_COUNT} foreign container(s) intact, zero host runtimes)"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "Foreign containers: ${FOREIGN_RUNNING}, Host runtimes: ${HOST_RUNTIMES}"
+    fail ${TEST_NUM} "${TEST_DESC}" "Foreign containers OK: ${FOREIGN_OK}, Host runtimes: ${HOST_RUNTIMES}"
 fi
 
 echo "========================================================================"

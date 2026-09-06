@@ -27,18 +27,16 @@ docker run --rm \
 
 echo "--> [2/3] Running Java Core Unit Tests..."
 docker run --rm \
-    -v "${ROOT_DIR}/core:/build" \
+    -v "${ROOT_DIR}/core:/src:ro" \
     -v "${HOME}/.m2:/root/.m2" \
-    -w /build \
     maven:3.9.9-eclipse-temurin-21-alpine \
-    mvn test -B
+    sh -c "cp -r /src /build && cd /build && mvn test -B"
 
 echo "--> [3/3] Running UI Typecheck..."
 docker run --rm \
-    -v "${ROOT_DIR}/ui:/app" \
-    -w /app \
+    -v "${ROOT_DIR}/ui:/src:ro" \
     node:20-alpine \
-    sh -c "npm install --silent && npx tsc --noEmit"
+    sh -c "cp -r /src /app && cd /app && npm install --silent && npx tsc --noEmit"
 
 echo "========================================================================"
 echo "ALL CONTAINERIZED UNIT TESTS PASSED SUCCESSFULLY"
