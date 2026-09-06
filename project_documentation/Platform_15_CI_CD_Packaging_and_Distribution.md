@@ -1,10 +1,10 @@
 # Platform — CI/CD, Packaging & Distribution Master
 
 **Document ID:** PLATFORM-RELEASEENG-001
-**Version:** 3.2
+**Version:** 3.2.1
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
-**Consolidation rule:** This v3.2 document preserves the normative content of the listed v3.1 source documents. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
+**Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 
 ## 1. Purpose
 
@@ -24,6 +24,13 @@ offline/air-gapped bundles and uninstall semantics.
 ## 1. Pipeline stages
 
 Preflight → compile/build → unit → static analysis → OSS/license scan → SBOM → component tests → integration/contract → security → package → package install tests → performance smoke → sign → publish candidate → environment promotion → release evidence bundle.
+
+CI provider selection is **not** frozen by the GitHub source-of-record decision. Pipelines may run on GitHub Actions or another approved CI system after explicit evaluation; this document does not claim GitHub Actions is a fixed architecture decision.
+
+## 1.1 Source-of-record and change flow
+
+Canonical repository: `https://github.com/gagandsm-max/platform`.
+Material code, packaging and mother-document changes enter through short-lived branches and pull requests. Do not push normal development changes directly to the protected/default branch. Do not force-push shared/default branches. Release artifacts and documentation authority follow merged GitHub history.
 
 ## 2. Reproducibility
 

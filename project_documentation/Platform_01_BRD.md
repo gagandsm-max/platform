@@ -1,7 +1,7 @@
 # Platform — Business Requirements Document (BRD)
 
 **Document ID:** PLATFORM-BRD-001  
-**Version:** 3.2  
+**Version:** 3.2.1  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Product name:** Platform  
 **Implementation model:** Clean-room implementation; independent project, not part of ThoughtData or NetAI  

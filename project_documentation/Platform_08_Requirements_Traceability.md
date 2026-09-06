@@ -2,7 +2,7 @@
 # Platform — Requirements Traceability & Completeness Matrix
 
 **Document ID:** PLATFORM-RTM-001  
-**Version:** 3.2  
+**Version:** 3.2.1  
 **Status:** **Authoritative Mother Reference — Completeness Control**
 
 ## 1. Purpose
@@ -278,7 +278,17 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-OSS-005 | Transitive dependency license/CVE scan mandatory | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-OSS-006 | Vendor MIB/YANG/SDK/API examples/icons/templates require provenance/redistribution rights | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-OSS-007 | Customer-supplied MIBs may be used for that customer but not automatically redistributed | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-OSS-008 | Air-gap bundles contain all pinned/scanned artifacts; no runtime internet dependency install | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| OSS-008 | Air-gap bundles contain all pinned/scanned artifacts; no runtime internet dependency install | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+### Engineering governance (v3.2.1)
+
+These are engineering-governance controls, not customer-facing product features.
+
+| ID | Requirement | Index | Decision Register | Eng/Docker | CI/CD | OSS Catalogue | Traceability |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| GOV-REPO-001 | Canonical source repository is `https://github.com/gagandsm-max/platform`; local clones are working copies; authority follows GitHub merge | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| GOV-DOC-001 | Mother documents are READ-MOSTLY; controlled correction is mandatory when errors/contradictions/decision changes/selected dependencies/resolved P0s/omissions/implementation conflicts occur | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| GOV-OSS-001 | Approved dependencies must match `Platform_07_OSS_Catalog.md` and implementation; catalogue omissions require change control before milestone/release | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 
 ## 3. Completeness gate

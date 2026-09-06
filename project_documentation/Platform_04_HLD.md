@@ -1,7 +1,7 @@
 # Platform — High-Level Design (HLD)
 
 **Document ID:** PLATFORM-HLD-001  
-**Version:** 3.2  
+**Version:** 3.2.1  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD, PRD, Master Architecture  
 
