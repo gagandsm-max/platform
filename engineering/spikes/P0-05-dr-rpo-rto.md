@@ -1,42 +1,66 @@
-# Engineering Spike Record: P0-05 — Final Contractual DR RPO/RTO & Data-Loss Objectives
+# Engineering Spike Record: P0-05 — Contractual DR RPO/RTO & Data-Loss Objectives
 
-**Spike ID:** SPIKE-P0-05  
-**Status:** **OPEN**  
-**Owner:** Staff Product Architect & SRE Lead  
-**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_01_BRD.md` §6.2, `Platform_03_Architecture.md` §7.5  
-**Target Closure Day:** Day 12 (Sprint 2)  
+**Spike ID:** SPIKE-P0-05
+**Status:** **OPEN**
+**Owner:** Staff Product Architect & SRE Lead
+**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_01_BRD.md`, `Platform_03_Architecture.md`
+**Target Closure Day:** Day 12 (Sprint 2)
 
 ---
 
-## 1. Exact Unresolved Question
-What are the finalized, contractually certified Recovery Point Objective (RPO) and Recovery Time Objective (RTO) targets for offsite Disaster Recovery (DR) replication across WAN links?
+## Classification legend
 
-## 2. Why It Matters
-Enterprises deploying multi-site monitoring require binding operational contractual guarantees for catastrophic site recovery.
+| Label | Meaning |
+|---|---|
+| **AUTHORITATIVE FIXED REQUIREMENT** | Mother-reference fixed |
+| **PROPOSED COMMERCIAL/ENGINEERING OPTIONS — NOT APPROVED** | Discussion tiers only |
+| **TBD — DECISION REQUIRED** | Contractual values unresolved |
+| **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION** | Implementation not selected |
 
-## 3. GA Blocking Impact
-**HIGH / COMMERCIAL RELEASE GATE.** Required for enterprise RFPs, Master Service Agreements (MSAs), and disaster recovery validation.
+---
 
-## 4. Evaluated Alternatives (Open for Spike Testing)
-* **Tier 1 (Aggressive):** RPO < 15 minutes, RTO < 1 hour (Continuous WAL streaming + ClickHouse partition rsync).
-* **Tier 2 (Standard Enterprise):** RPO < 1 hour, RTO < 4 hours (Hourly snapshot replication + WAL archiving).
-* **Tier 3 (Batch Asynchronous):** RPO < 4 hours, RTO < 8 hours (Scheduled backup export to remote S3/NFS).
+## 1. Exact unresolved question
 
-## 5. Evidence Required
-1. Full site-recovery drill benchmark: Primary datacenter blackout simulated; Standby DR site restored from replication target.
-2. Exact data loss tally (number of metrics, logs, and configuration changes un-replicated).
+**TBD — DECISION REQUIRED:** Final contractual DR RPO/RTO and data-loss objectives.
 
-## 6. Test & Benchmark Methodology
-Simulate WAN link with 50ms latency and 100 Mbps bandwidth limit; continuously stream telemetry; trigger simulated primary datacenter teardown; execute DR activation runbook.
+---
 
-## 7. Acceptance Criteria
-* Restored DR environment achieves operational status within certified RTO.
-* Inventory metadata verified 100% consistent.
-* Measured data loss conforms to certified RPO limit.
+## 2. Authoritative fixed requirements
 
-## 8. Affected Components & Mother Documents
-* **Components:** Backup/Restore scripts, PostgreSQL replication, ClickHouse backup manager.
-* **Mother Documents:** `Platform_01_BRD.md`, `Platform_03_Architecture.md`, `Platform_16_Installation_Upgrade_Rollback_and_Operations.md`.
+* DR capability is **mandatory in v1.0** (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Exact RPO/RTO remain **TBD — DECISION REQUIRED** until product/architecture freeze them (**AUTHORITATIVE FIXED REQUIREMENT** — do not invent contracts here).
 
-## 9. Dependencies
-* Spike P0-02 (ClickHouse), Spike P0-03 (PostgreSQL).
+---
+
+## 3. Proposed options (not approved)
+
+The following are **PROPOSED COMMERCIAL/ENGINEERING OPTIONS — NOT APPROVED**:
+
+* Aggressive tier examples (e.g. ~15 min RPO / ~1 h RTO).
+* Standard enterprise examples (e.g. ~1 h RPO / ~4 h RTO).
+* Batch asynchronous examples (e.g. ~4 h RPO / ~8 h RTO).
+
+Mention of S3, NFS, rsync, WAL shipping, or similar is **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION** — **not** selected by this document.
+
+---
+
+## 4. Evidence required
+
+Site-loss drill measurements; inventory consistency; quantified unreplicated telemetry/config; runbook timings. Acceptance is to **measure candidate designs and present evidence** so product/architecture can freeze contractual RPO/RTO — not to assert them here.
+
+---
+
+## 5. Closure criteria
+
+Mother-document update recording approved RPO/RTO/data-loss objectives after evidence review.
+
+---
+
+## 6. Affected components & mother documents
+
+* **Components:** backup/restore, replication hooks, DR runbooks.
+* **Mother Documents:** `Platform_01`, `Platform_03`, `Platform_12`, `Platform_16`.
+
+## 7. Dependencies
+
+* P0-02, P0-03.

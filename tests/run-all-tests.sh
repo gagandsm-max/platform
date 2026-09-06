@@ -35,7 +35,7 @@ echo "========================================================================"
 # ------------------------------------------------------------------------------
 TEST_NUM=1
 TEST_DESC="Repository Integrity & Specification Traceability"
-if [ -d ".git" ] && [ -f ".gitignore" ] && [ -f ".env.example" ] && [ -L "AGENTS.md" ] && [ -d "project_documentation" ]; then
+if { [ -d ".git" ] || [ -f ".git" ]; } && [ -f ".gitignore" ] && [ -f ".env.example" ] && [ -L "AGENTS.md" ] && [ -d "project_documentation" ]; then
     pass ${TEST_NUM} "${TEST_DESC}"
 else
     fail ${TEST_NUM} "${TEST_DESC}" "Missing essential git/repo root files"

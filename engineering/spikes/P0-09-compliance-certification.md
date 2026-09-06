@@ -1,42 +1,69 @@
-# Engineering Spike Record: P0-09 — Final Compliance Certification Programme & Scope
+# Engineering Spike Record: P0-09 — Compliance Certification Programme & Scope
 
-**Spike ID:** SPIKE-P0-09  
-**Status:** **OPEN**  
-**Owner:** Director of Security & Governance / Staff Release Engineer  
-**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_01_BRD.md` §6.3, `Platform_18_Security_Threat_Model.md` §8  
-**Target Closure Day:** Day 24 (Sprint 4)  
+**Spike ID:** SPIKE-P0-09
+**Status:** **OPEN**
+**Owner:** Director of Security & Governance / Staff Release Engineer
+**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_01_BRD.md`, `Platform_18_Security_Threat_Model.md`, `Platform_00_Document_Index.md`
+**Target Closure Day:** Day 24 (Sprint 4)
 
 ---
 
-## 1. Exact Unresolved Question
-What are the exact compliance certification milestones (SOC 2 Type II, ISO 27001, FIPS 140-3 cryptography, CIS benchmarks, and Section 508 VPAT) that are formally within v1.0 release scope vs post-GA audit roadmap?
+## Classification legend
 
-## 2. Why It Matters
-`Platform_00` §2 mandates: *Security/compliance readiness must never be represented as achieved certification until independently achieved.* The product must state true audit status accurately.
+| Label | Meaning |
+|---|---|
+| **AUTHORITATIVE FIXED REQUIREMENT** | Mother-reference fixed |
+| **SECURITY/COMPLIANCE READINESS** | Internal engineering evidence — not a certificate |
+| **FORMAL EXTERNAL CERTIFICATION** | Achieved only via appropriate external process |
+| **TBD — DECISION REQUIRED** | Programme scope/status unresolved |
 
-## 3. GA Blocking Impact
-**HIGH / LEGAL & COMMERCIAL COMPLIANCE.** Prevents false commercial claims while ensuring code-level controls (audit logs, cryptographic standards, secret protection) pass independent audits.
+---
 
-## 4. Evaluated Alternatives (Open for Spike Testing)
-* **Tier A (GA Readiness Scope):** Technical audit readiness (FIPS-compatible cipher suites, immutable audit logging, non-root containers, OWASP Top 10 zero critical CVEs, VPAT self-assessment).
-* **Tier B (Formal External Certification):** Accredited external auditor SOC 2 / ISO 27001 assessment scheduled post-GA.
+## 1. Exact unresolved question
 
-## 5. Evidence Required
-1. Static analysis security testing (SAST) and SBOM vulnerability scan reports (zero critical/high CVEs).
-2. FIPS 140-3 cipher suite validation test report.
-3. VPAT (Voluntary Product Accessibility Template) completed self-assessment for Platform Web UI.
+**TBD — DECISION REQUIRED:** Final compliance certification programme/scope and which certifications are achieved (vs roadmap).
 
-## 6. Test & Benchmark Methodology
-Execute Trivy / Syft SBOM security scans; run automated OWASP ZAP dynamic application security testing against Web UI; verify audit event immutability in ClickHouse/Postgres.
+---
 
-## 7. Acceptance Criteria
-* Zero unresolved Critical or High CVEs in shipped images.
-* Complete SPDX and CycloneDX SBOM generated for all release packages.
-* Formally documented security whitepaper and compliance matrix.
+## 2. Authoritative fixed requirements
 
-## 8. Affected Components & Mother Documents
-* **Components:** Release pipeline, packaging scripts, SBOM generators.
-* **Mother Documents:** `Platform_01_BRD.md`, `Platform_07_OSS_Catalog.md`, `Platform_15_CI_CD_Packaging_and_Distribution.md`, `Platform_18_Security_Threat_Model.md`.
+* Security/compliance **readiness** must never be represented as **achieved certification** until independently achieved (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Design for banks/defence/global enterprises and certification readiness pathways without false claims (**AUTHORITATIVE FIXED REQUIREMENT**).
 
-## 9. Dependencies
-* Requires clean dependency audit and packaging automation.
+---
+
+## 3. Distinguish readiness from certification
+
+| Concept | Status |
+|---|---|
+| TLS posture, audit logging, SBOM/CVE gates, secret redaction, non-root containers | **SECURITY/COMPLIANCE READINESS** evidence |
+| SOC 2, ISO 27001, PCI-oriented assessments, defence/BFSI expectations, accessibility (e.g. VPAT), FIPS-capable modules | May be **considered** in the programme; **FORMAL EXTERNAL CERTIFICATION** only after the proper external process — currently **TBD — DECISION REQUIRED** |
+
+**FIPS 140-3** is cryptographic-**module** validation. Do **not** claim a generic “FIPS 140-3 cipher suite validation report” as equivalent to FIPS module validation.
+
+Do **not** predeclare specific certifications as achieved or as mandatory GA certifications unless mother docs explicitly say so (they do not).
+
+---
+
+## 4. Evidence required (readiness)
+
+1. SAST/SBOM/CVE disposition evidence.
+2. Documented control matrix mapping Platform controls to candidate frameworks (**readiness**, not achievement).
+3. Clear public/support wording that avoids false certification claims.
+
+---
+
+## 5. Closure criteria
+
+Approved certification programme/scope + honest status register in mother docs. Achieved certifications listed only when independently completed.
+
+---
+
+## 6. Affected components & mother documents
+
+* **Components:** release/SBOM/security gates, packaging, docs.
+* **Mother Documents:** `Platform_00`, `Platform_01`, `Platform_07`, `Platform_15`, `Platform_18`.
+
+## 7. Dependencies
+
+* Clean dependency/SBOM pipeline; packaging automation.

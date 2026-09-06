@@ -1,8 +1,8 @@
 # Platform v1.0 — Commercial GA Test Infrastructure Readiness Matrix
 
-**Document ID:** PLATFORM-COMPAT-INFRA-001  
-**Status:** **ACTIVE / DAY 01 AUDIT**  
-**Governing Documents:** `AGENTS.md`, `Platform_14_Test_Performance_and_Release_Quality.md`, `Platform_15_CI_CD_Packaging_and_Distribution.md`  
+**Document ID:** PLATFORM-COMPAT-INFRA-001
+**Status:** **ACTIVE / DAY 01 AUDIT**
+**Governing Documents:** `AGENTS.md`, `Platform_14_Test_Performance_and_Release_Quality.md`, `Platform_15_CI_CD_Packaging_and_Distribution.md`
 
 ---
 
@@ -16,6 +16,13 @@ Every target environment and test dependency is classified into one of four stat
 
 ---
 
+
+### Candidate tooling disclaimer
+
+Named simulators/generators (for example `snmpsim`, `flowgen`, `tcpreplay`, `loggen`, `netopeer2`, `mailpit`/`mailhog`, `kind`/`k3s`, `gnmi_target`, `sushy-tools`, database images beyond the Platform data stack) are **CANDIDATE TEST TOOL — OSS/SECURITY REVIEW REQUIRED BEFORE REPOSITORY ADOPTION** unless already admitted in `Platform_07_OSS_Catalog.md`.
+
+The readiness matrix may state that a **capability** can be created locally without selecting a specific implementation. Listing a project name here is **not** catalogue selection.
+
 ## 2. Infrastructure Inventory & Readiness Matrix
 
 | Test Target / Dependency | Classification | Current State / How Provided | Lab / User Action Required |
@@ -26,16 +33,16 @@ Every target environment and test dependency is classified into one of four stat
 | **Kafka Broker Target (Internal)** | **AVAILABLE** | Containerized Apache Kafka 3.8 KRaft in Compose | None. |
 | **Valkey Cache Target (Internal)** | **AVAILABLE** | Containerized Valkey 7.2 Alpine in Compose | None. |
 | **mTLS Sensor Transport Harness** | **AVAILABLE** | Development PKI generated in `deploy/docker/certs/` | None. |
-| **SNMP v1/v2c Simulator** | **NEEDS CREATION** | Can deploy `snmpsim` container in test profile | Build test compose profile with `snmpsim` on Day 2. |
-| **SNMP v3 Simulator (USM: Auth/Priv)** | **NEEDS CREATION** | Can configure `snmpsim` with SHA/AES users | Script users in test compose profile on Day 2. |
+| **SNMP v1/v2c Simulator** | **NEEDS CREATION** | Capability: SNMP simulation via containerized candidate tool (**CANDIDATE TEST TOOL — OSS/SECURITY REVIEW REQUIRED BEFORE REPOSITORY ADOPTION**; e.g. snmpsim only if admitted) | Create local simulator capability when SNMP tests begin. |
+| **SNMP v3 Simulator (USM: Auth/Priv)** | **NEEDS CREATION** | Capability: SNMPv3 USM simulation (candidate tool TBD pending OSS review) | Configure USM users in chosen admitted simulator. |
 | **Real SNMP Physical Device Access** | **NEEDS USER/EXTERNAL ACCESS** | No physical switches/routers on developer laptop | User/Lab to provide lab switch or VPN access for end-to-end testing. |
-| **NetFlow / sFlow / IPFIX Flow Generator**| **NEEDS CREATION** | Can deploy `flowgen` / `nflow-generator` container | Add flow generation service to test compose profile on Day 3. |
-| **Syslog Generator (RFC 5424 / RFC 3164)** | **NEEDS CREATION** | Can deploy `loggen` container in test profile | Add syslog generator script on Day 3. |
+| **NetFlow / sFlow / IPFIX Flow Generator**| **NEEDS CREATION** | Capability: Flow generation (**CANDIDATE TEST TOOL — OSS/SECURITY REVIEW REQUIRED BEFORE REPOSITORY ADOPTION**) | Add flow generator after catalogue admission. |
+| **Syslog Generator (RFC 5424 / RFC 3164)** | **NEEDS CREATION** | Capability: Syslog generation (**CANDIDATE TEST TOOL — OSS/SECURITY REVIEW REQUIRED BEFORE REPOSITORY ADOPTION**) | Add generator after admission. |
 | **SSH / Linux Device Simulator** | **NEEDS CREATION** | Mock OpenSSH container running on test bridge | Script SSH container with pre-seeded test accounts on Day 4. |
 | **Webhook Receiver (PagerDuty / Slack mock)** | **NEEDS CREATION** | Local Go HTTP receiver in test harness | Implement mock receiver container on Day 8. |
-| **SMTP Test Target** | **NEEDS CREATION** | Can deploy `mailpit` or `mailhog` container | Add lightweight mail receiver to test profile on Day 8. |
-| **gNMI Simulator / Target** | **NEEDS CREATION** | Can deploy open-source `gnmi_target` container | Build mock gNMI target container on Day 7. |
-| **NETCONF Target** | **NEEDS CREATION** | Can deploy `netopeer2` container in test network | Add NETCONF mock service on Day 7. |
+| **SMTP Test Target** | **NEEDS CREATION** | Capability: SMTP test sink (**CANDIDATE TEST TOOL — OSS/SECURITY REVIEW REQUIRED BEFORE REPOSITORY ADOPTION**) | Add mail sink after admission. |
+| **gNMI Simulator / Target** | **NEEDS CREATION** | Capability: gNMI target simulation (**CANDIDATE TEST TOOL — OSS/SECURITY REVIEW REQUIRED BEFORE REPOSITORY ADOPTION**) | Build after admission. |
+| **NETCONF Target** | **NEEDS CREATION** | Capability: NETCONF target simulation (**CANDIDATE TEST TOOL — OSS/SECURITY REVIEW REQUIRED BEFORE REPOSITORY ADOPTION**) | Add after admission. |
 | **MySQL / MariaDB Target** | **NEEDS CREATION** | Can deploy `mariadb:10.11` container in test profile | Add database monitoring target container on Day 9. |
 | **MongoDB Target** | **NEEDS CREATION** | Can deploy `mongo:7.0` container in test profile | Add database monitoring target container on Day 9. |
 | **Redis / Valkey Monitored Target** | **NEEDS CREATION** | Dedicated unauthenticated/standalone Valkey target | Add monitored target container on Day 9. |
@@ -46,7 +53,7 @@ Every target environment and test dependency is classified into one of four stat
 | **RHEL 9.x Clean VM (Package Install)** | **NEEDS USER/EXTERNAL ACCESS** | Requires RHEL 9 VM for `.rpm` install, SELinux enforcement, systemd verification | User/Lab to provide clean RHEL 9 VM for `.rpm` packaging certification. |
 | **Windows VM / Test Runner** | **NEEDS USER/EXTERNAL ACCESS** | Windows Service / MSI install and SCM reboot testing cannot run inside Linux Docker | User/Lab to provide Windows Server 2022 / Windows 11 VM with WinRM / PowerShell access. |
 | **WinRM Target** | **NEEDS USER/EXTERNAL ACCESS** | Requires Windows instance listening on 5985/5986 | Part of the Windows test VM noted above. |
-| **Redfish / IPMI Target** | **NEEDS CREATION** | Open-source `sushy-tools` emulator container | Add Redfish mock emulator on Day 6. |
+| **Redfish / IPMI Target** | **NEEDS CREATION** | Capability: Redfish emulation (**CANDIDATE TEST TOOL — OSS/SECURITY REVIEW REQUIRED BEFORE REPOSITORY ADOPTION**) | Add after admission. |
 | **VMware vCenter / ESXi Target** | **NEEDS USER/EXTERNAL ACCESS** | Proprietary hypervisor API | User/Lab to provide vCenter test credentials or nested ESXi VM. |
 | **Hyper-V Target** | **NEEDS USER/EXTERNAL ACCESS** | Proprietary Microsoft hypervisor | Part of Windows Server test VM noted above. |
 | **Proxmox / Nutanix Target** | **NEEDS USER/EXTERNAL ACCESS** | Hypervisor test instance | Lab Proxmox VE test instance for API connector testing. |
@@ -54,7 +61,7 @@ Every target environment and test dependency is classified into one of four stat
 | **AWS Test Account** | **NEEDS USER/EXTERNAL ACCESS** | Cloud API polling (CloudWatch, EC2, VPC) | User to provide dedicated sandboxed AWS IAM credentials (read-only monitoring). |
 | **Azure Test Subscription** | **NEEDS USER/EXTERNAL ACCESS** | Cloud API polling (Azure Monitor, VMs) | User to provide dedicated sandboxed Azure Service Principal. |
 | **GCP Test Project** | **NEEDS USER/EXTERNAL ACCESS** | Cloud API polling (Cloud Monitoring, Compute) | User to provide dedicated sandboxed GCP Service Account JSON. |
-| **Kubernetes Test Cluster** | **NEEDS CREATION** | Can run lightweight local `k3s` / `kind` in container | Can be created locally via `kind` / `k3s` container when K8s monitoring is implemented. |
+| **Kubernetes Test Cluster** | **NEEDS CREATION** | Capability: local Kubernetes API target (**CANDIDATE TEST TOOL — OSS/SECURITY REVIEW REQUIRED BEFORE REPOSITORY ADOPTION** for kind/k3s) | Create when K8s monitoring tests require it. |
 | **SQL Server Target** | **NEEDS CREATION** | Can deploy Microsoft SQL Server Linux container | Add `mcr.microsoft.com/mssql/server` test container on Day 9. |
 | **Oracle Database Target** | **NEEDS USER/EXTERNAL ACCESS** | Oracle license / heavy container requirements | User to provide Oracle test instance if certified under v1. |
 | **ITSM Test Environment (ServiceNow / Jira)**| **NEEDS CREATION** | Local mock REST endpoint simulating incident APIs | Implement mock ITSM container on Day 8. |

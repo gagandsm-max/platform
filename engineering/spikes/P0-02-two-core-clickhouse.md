@@ -1,43 +1,82 @@
-# Engineering Spike Record: P0-02 — Two-Core ClickHouse Replication, Promotion & Fencing
+# Engineering Spike Record: P0-02 — Two-Core ClickHouse Replication / Promotion / Fencing
 
-**Spike ID:** SPIKE-P0-02  
-**Status:** **OPEN**  
-**Owner:** Principal Database / Telemetry Engineer  
-**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_03_Architecture.md` §4.2, §7.3  
-**Target Closure Day:** Day 6 (Sprint 1)  
+**Spike ID:** SPIKE-P0-02
+**Status:** **OPEN**
+**Owner:** Staff Data Platform Architect
+**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_03_Architecture.md`, `Platform_11_Sizing_Capacity_Storage_Master.md`
+**Target Closure Day:** Day 6 (Sprint 1)
 
 ---
 
-## 1. Exact Unresolved Question
-What is the exact ClickHouse replication and promotion design across two Core nodes that ensures historical telemetry, flow, and log continuity without split-brain mutation under a 2-node constraint?
+## Classification legend
 
-## 2. Why It Matters
-ClickHouse stores all time-series metrics, flow records, syslogs, and raw events. If Standby takes over without clean replication and fencing, telemetry data could diverge or suffer table corruption.
+| Label | Meaning |
+|---|---|
+| **AUTHORITATIVE FIXED REQUIREMENT** | Mother-reference fixed |
+| **PROPOSED TEST POINT — NON-AUTHORITATIVE** | Benchmark load/timing only |
+| **TBD — DECISION REQUIRED** | Unresolved mechanism |
 
-## 3. GA Blocking Impact
-**CRITICAL / GA BLOCKER.** Commercial enterprise customers will not accept data divergence or query failure after high-availability failover.
+---
 
-## 4. Evaluated Alternatives (Open for Spike Testing)
-* **Alternative A (ClickHouse Keeper 2-node / Learner topology):** ClickHouse Keeper running on both Core nodes with Raft learner or witness role.
-* **Alternative B (ReplicatedMergeTree with Active-Standby Replication):** Active writes to both nodes (`ReplicatedMergeTree`), with Standby in read-only mode until promoted.
-* **Alternative C (Storage-Level Asynchronous Mirroring):** Active Core writes to local ClickHouse; continuous block/backup synchronization to Standby.
+## 1. Exact unresolved question
 
-## 5. Evidence Required
-1. Benchmark under 50,000 metric rows/sec write load during node failure.
-2. Verification of table partition integrity and `SELECT count(*)` consistency post-promotion.
-3. Proof that the demoted old Active node cannot accept split-brain writes.
+**TBD — DECISION REQUIRED:** Exact two-Core ClickHouse replication/promotion/fencing design for Active/Standby without a third full Core, including behaviour under failed replication and rejoin/resync.
 
-## 6. Test & Benchmark Methodology
-Generate continuous time-series and flow insertion; sever network connectivity between nodes; promote Standby; query data continuity; restore old Active and verify rejoin/catch-up behavior.
+---
 
-## 7. Acceptance Criteria
-* Telemetry write failover completed in <45s.
-* Zero data loss for acknowledged ClickHouse blocks.
-* Clean rejoin of resurrected node without manual table repair.
+## 2. Authoritative fixed requirements
 
-## 8. Affected Components & Mother Documents
-* **Components:** `clickhouse`, `core` ingestion pipeline.
-* **Mother Documents:** `Platform_03_Architecture.md`, `Platform_05_LLD.md`, `Platform_11_Sizing_Capacity_Storage_Master.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`.
+* ClickHouse is the primary high-volume telemetry/analytics store (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Exactly two full Cores (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Overall certified Core service restoration **&lt;60s** (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Absolute zero telemetry loss is **not** a Platform guarantee; 80% storage protection and policy shedding apply at edges/stores as documented (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Durable-ACK behaviour for Sensor ingest must stay consistent with the final ACK contract from P0-01 (**AUTHORITATIVE FIXED REQUIREMENT** once that contract freezes).
+
+---
+
+## 3. Required outcomes to prove empirically
+
+* No split-brain writers.
+* Replay/duplicate handling is deterministic and visible.
+* Failed replication is observable (health/alerts), not silent.
+* Standby is recoverable; rejoin/resync is supported.
+* Acknowledged-data behaviour matches the durable-ACK contract.
+
+---
+
+## 4. Candidate mechanisms (spike only)
+
+Mechanisms (dual-write/backfill, replica promotion patterns, storage-assisted warm standby, etc.) remain **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION** where not already USE in Platform_07. Do not invent a frozen CH Keeper 3-node quorum that implies a third Core.
+
+---
+
+## 5. Evidence required
+
+1. Failover/promotion drill with writer fencing.
+2. Duplicate/replay verification after Standby promotion.
+3. Replication-lag / failure visibility evidence.
+4. Rejoin/resync of former Active.
+
+---
+
+## 6. Test methodology (non-authoritative)
+
+Example write-load stages: 5k / 10k / 25k / 50k rows/sec — **PROPOSED TEST POINT — NON-AUTHORITATIVE** (not acceptance).
+Example timing observations during promotion — **PROPOSED TEST POINT — NON-AUTHORITATIVE**. Do **not** treat “&lt;45s” or “50,000 rows/sec” as frozen acceptance.
+
+---
+
+## 7. Closure criteria
+
+Architecture approval of the two-Core CH design + measured evidence recorded; mother docs updated if thresholds become contractual. Overall Core restoration remains **&lt;60s**.
+
+---
+
+## 8. Affected components & mother documents
+
+* **Components:** ClickHouse, `core` ingest/analytics paths.
+* **Mother Documents:** `Platform_03`, `Platform_05`, `Platform_06`, `Platform_11`, `Platform_12`.
 
 ## 9. Dependencies
-* Spike P0-01 (Kafka event bus), Spike P0-04 (Fencing).
+
+* P0-01 durable ACK; P0-04 fencing.

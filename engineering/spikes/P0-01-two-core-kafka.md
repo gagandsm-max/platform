@@ -1,43 +1,92 @@
 # Engineering Spike Record: P0-01 — Two-Core Kafka Implementation & Failover
 
-**Spike ID:** SPIKE-P0-01  
-**Status:** **OPEN**  
-**Owner:** Staff Infrastructure / Streaming Architect  
-**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_03_Architecture.md` §4.3, §7.2  
-**Target Closure Day:** Day 5 (Sprint 1)  
+**Spike ID:** SPIKE-P0-01
+**Status:** **OPEN**
+**Owner:** Staff Infrastructure / Streaming Architect
+**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_03_Architecture.md`, `Platform_05_LLD.md`
+**Target Closure Day:** Day 5 (Sprint 1)
 
 ---
 
-## 1. Exact Unresolved Question
-How can Apache Kafka KRaft mode be deployed across exactly two Core nodes (Active/Standby) to provide transparent streaming failover without violating the non-negotiable architectural constraint prohibiting a third full Core node or external quorum node?
+## Classification legend
 
-## 2. Why It Matters
-Kafka is the internal event and streaming backbone for all Sensor telemetry ingestion, incident qualification, and control signals. During a Core failover (<60s target), Sensors must not permanently drop events or block ingestion buffers.
+| Label | Meaning |
+|---|---|
+| **AUTHORITATIVE FIXED REQUIREMENT** | Mother-reference fixed; must not be weakened by this spike |
+| **PROPOSED TEST POINT — NON-AUTHORITATIVE** | Exploratory load/timing point only; not acceptance until mother docs are updated |
+| **TBD — DECISION REQUIRED** | Unresolved; inventing a frozen answer here is non-conformant |
+| **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION** | Technology may be experimented with; not catalogue-selected |
 
-## 3. GA Blocking Impact
-**CRITICAL / GA BLOCKER.** Without an agreed two-node Kafka HA topology, dual-Core Active/Standby failover cannot be tested, certified, or deployed commercially.
+---
 
-## 4. Evaluated Alternatives (Open for Spike Testing)
-* **Alternative A (Active KRaft Broker + Mirrored Standby):** Run an active Kafka broker on Core-1 and an active broker on Core-2 with replication factor 2 and min.insync.replicas=1, with an automated controller tie-breaker.
-* **Alternative B (Active Broker + Passive Standby Cold/Warm Standby):** Run Kafka strictly on Active Core, with persistent volume block-level replication (e.g. DRBD or shared SAN) to Standby.
-* **Alternative C (Valkey/Raft-Assisted Quorum Fencing):** Use lightweight internal KRaft quorum with dynamic re-assignment on supervisor failover.
+## 1. Exact unresolved question
 
-## 5. Evidence Required
-1. Chaos test results: Network partition between Core-1 and Core-2; kill Active Core process.
-2. Measurements of ingestion delay, message loss count, and recovery time.
-3. Verification that zero Sensor spools are corrupted during failover.
+**TBD — DECISION REQUIRED:** What is the exact two-Core Kafka implementation/failover design (and durable ACK boundary) while honouring **exactly two full Core nodes** and **no third full Core / mandatory external quorum node**?
 
-## 6. Test & Benchmark Methodology
-Simulate 10,000 events/sec streaming from 2 Sensors into Core-1; execute `docker pause` / SIGKILL on Core-1; measure Standby promotion time, broker failover latency, and verify consumer group offset continuity.
+Do **not** assume the production answer is “two-node KRaft quorum.” Kafka as product technology is fixed; the **two-Core mechanism** is not.
 
-## 7. Acceptance Criteria
-* Standby Core Kafka broker promotes and accepts traffic in <30 seconds.
-* Zero uncommitted message duplicates that violate idempotency.
-* No third full Core node required.
+---
 
-## 8. Affected Components & Mother Documents
-* **Components:** `core`, `kafka`, `sensor` (coreclient).
-* **Mother Documents:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_10_Protocol_Security_Connector_Master.md`.
+## 2. Authoritative fixed requirements
+
+* Kafka is the **internal** Core streaming backbone (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Sensors **never** connect directly to Kafka; Sensor → Core is HTTPS/gRPC over mTLS (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Sensor local spool is part of edge replay protection during Core/WAN loss (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Exactly two full Cores, Active/Standby (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Overall certified Core **service restoration** target remains **&lt;60 seconds** (**AUTHORITATIVE FIXED REQUIREMENT**). Any internal Kafka promotion budget is **benchmark-derived**, not invented here.
+* Do **not** claim that two Kafka/KRaft voters are inherently fault-tolerant or that a two-voter quorum is safe (**AUTHORITATIVE FIXED REQUIREMENT** — no false quorum safety claim).
+
+---
+
+## 3. Why it matters
+
+Without an evidence-backed two-Core Kafka design and durable ACK contract, HA failover cannot be certified. Sensors continue polling/buffering while capacity permits; absolute zero-loss is **not** promised.
+
+---
+
+## 4. Candidate mechanisms (spike only)
+
+* **Alternative A — Active broker + standby mirror/replication path:** **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION** for any non-catalogue companion tooling.
+* **Alternative B — Active-only Kafka with storage-level standby warm/cold restart:** **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION** (e.g. block replication tools are not Platform_07 selections).
+* **Alternative C — Other controller/fencing-assisted designs:** **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION**.
+
+KRaft may appear in Docker bootstrap; that does **not** freeze the two-Core production failover design.
+
+---
+
+## 5. Evidence required
+
+1. Failure matrix: Active kill, network partition, Standby promotion, former-Active rejoin.
+2. Measured ingestion delay, duplicate/idempotent handling, and recovery time (**PROPOSED TEST POINT — NON-AUTHORITATIVE** until frozen).
+3. Proof Sensors do not require direct Kafka access; spool replay remains coherent.
+4. Explicit durable-ACK boundary definition (when Core may ACK Sensor batches).
+
+---
+
+## 6. Test methodology (non-authoritative load points)
+
+* Example load steps: 1k / 5k / 10k events/sec — **PROPOSED TEST POINT — NON-AUTHORITATIVE**.
+* Chaos: pause/SIGKILL Active; measure promotion and consumer continuity — timings are **PROPOSED TEST POINT — NON-AUTHORITATIVE**.
+
+---
+
+## 7. Closure criteria (not invented SLAs)
+
+Spike closes only when architecture/product formally approve:
+
+* the two-Core Kafka mechanism;
+* durable ACK semantics;
+* measured promotion/recovery budgets that roll into mother docs / certification evidence;
+
+while preserving overall Core restoration **&lt;60s** and no third full Core.
+
+---
+
+## 8. Affected components & mother documents
+
+* **Components:** `core`, internal Kafka, `sensor` (spool / coreclient).
+* **Mother Documents:** `Platform_03`, `Platform_04`, `Platform_05`, `Platform_06`, `Platform_12`.
 
 ## 9. Dependencies
-* Spike P0-04 (Core fencing and VIP mechanism).
+
+* Spike P0-04 (Core fencing / VIP failure matrix).

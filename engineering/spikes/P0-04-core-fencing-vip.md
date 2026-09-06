@@ -1,42 +1,76 @@
-# Engineering Spike Record: P0-04 — Core Service Fencing & VIP Failure Matrix
+# Engineering Spike Record: P0-04 — Core Service Fencing / VIP Failure Matrix
 
-**Spike ID:** SPIKE-P0-04  
-**Status:** **OPEN**  
-**Owner:** Staff Site Reliability / Systems Architect  
-**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_03_Architecture.md` §7.4, `Platform_04_HLD.md` §6.1  
-**Target Closure Day:** Day 7 (Sprint 1)  
+**Spike ID:** SPIKE-P0-04
+**Status:** **OPEN**
+**Owner:** Staff SRE / HA Architect
+**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_03_Architecture.md`, `Platform_04_HLD.md`
+**Target Closure Day:** Day 7 (Sprint 1)
 
 ---
 
-## 1. Exact Unresolved Question
-What concrete IP takeover (Virtual IP / keepalived / ARP announcement) and fencing mechanism (STONITH / storage fencing / lease lock) will govern Active/Standby Core role transitions?
+## Classification legend
 
-## 2. Why It Matters
-Sensors, Agents, and Web UI users communicate with Core via a single logical IP or DNS name. If network partition occurs, both Core nodes must never believe they are Active simultaneously (split-brain).
+| Label | Meaning |
+|---|---|
+| **AUTHORITATIVE FIXED REQUIREMENT** | Mother-reference fixed |
+| **PROPOSED TEST POINT — NON-AUTHORITATIVE** | Candidate mechanism or timing observation |
+| **TBD — DECISION REQUIRED** | Exact implementation unresolved |
+| **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION** | Not selected |
 
-## 3. GA Blocking Impact
-**CRITICAL / GA BLOCKER.** Prevents dual-write corruption and establishes the deterministic failover boundary required for enterprise HA.
+---
 
-## 4. Evaluated Alternatives (Open for Spike Testing)
-* **Alternative A (Keepalived VRRP + Node Watchdog):** Standard Linux VRRP daemon with priority health checks and hardware/kernel watchdog.
-* **Alternative B (DNS-based dynamic routing + Health Probe):** Short-TTL DNS or external load balancer with automatic health probing.
-* **Alternative C (BGP Anycast / Cloud IP re-assignment):** Suitable for cloud deployments (AWS ENI / Azure IP swap).
+## 1. Exact unresolved question
 
-## 5. Evidence Required
-1. Matrix of 12 distinct failure modes: Primary NIC loss, Power loss, Process crash, Storage saturation, CPU starvation, Network partition, Split-brain, Intermittent packet drop, Standby failure, Primary recovery, Simultaneous boot, Standby partition.
-2. Verified failover timing <60 seconds across all recoverable failure modes.
+**TBD — DECISION REQUIRED:** Exact Core service fencing / VIP (or equivalent endpoint ownership) implementation and the certified failure matrix for Active/Standby transitions.
 
-## 6. Test & Benchmark Methodology
-Implement dual-node virtualized test network; run continuous heartbeat and REST polling loop; systematically trigger each of the 12 failure modes; measure downtime and packet loss.
+---
 
-## 7. Acceptance Criteria
-* Maximum failover detection and VIP binding time <45s.
-* Deterministic split-brain prevention (isolated node unconditionally self-fences).
-* Clean recovery of Standby without flapping.
+## 2. Authoritative fixed requirements
 
-## 8. Affected Components & Mother Documents
-* **Components:** `core`, `ui`, `scripts/platform.sh`.
-* **Mother Documents:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_10_Protocol_Security_Connector_Master.md`, `Platform_16_Installation_Upgrade_Rollback_and_Operations.md`.
+* Exactly one authoritative Active at a time (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Ambiguous partition must not produce dual-active (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Automatic promotion only with safe fencing / positive failure determination (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Certified overall Core service restoration **&lt;60 seconds** (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Returning former Active rejoins only after safe resynchronization (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Sensors continue polling/buffering during Core failover while capacity permits (**AUTHORITATIVE FIXED REQUIREMENT**).
 
-## 9. Dependencies
-* Relies on local network environment / VM hypervisor capabilities.
+---
+
+## 3. Explicitly not frozen
+
+Do **not** freeze Keepalived, VRRP, BGP, a specific STONITH implementation, “&lt;45s VIP transition,” or unconditional self-fencing semantics. These may be listed only as **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION** or as **PROPOSED TEST POINT — NON-AUTHORITATIVE** experiments.
+
+---
+
+## 4. Failure matrix to build (outcomes TBD until evidenced)
+
+| Scenario | Required property (fixed) | Implementation result |
+|---|---|---|
+| Active process crash | Single Active; restore &lt;60s overall | **TBD — DECISION REQUIRED** |
+| Network partition | No dual-active | **TBD — DECISION REQUIRED** |
+| Standby unreachable | Active remains Active | **TBD — DECISION REQUIRED** |
+| Former Active returns | Rejoin only after safe resync | **TBD — DECISION REQUIRED** |
+| Split-brain attempt | Fenced / refused | **TBD — DECISION REQUIRED** |
+
+---
+
+## 5. Evidence required
+
+Chaos drills for each matrix row; observed VIP/endpoint ownership; fencing evidence; Sensor reconnect behaviour.
+
+---
+
+## 6. Closure criteria
+
+Approved fencing/VIP (or equivalent) design + filled failure matrix with measured evidence; no invented SLA below the overall **&lt;60s** Core restoration requirement.
+
+---
+
+## 7. Affected components & mother documents
+
+* **Components:** Core HA supervisor, installers, Sensor/Agent endpoint config.
+* **Mother Documents:** `Platform_03`, `Platform_04`, `Platform_12`, `Platform_16`.
+
+## 8. Dependencies
+
+* P0-01 / P0-02 / P0-03 data-plane behaviours.

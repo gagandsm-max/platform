@@ -1,43 +1,81 @@
-# Engineering Spike Record: P0-03 — PostgreSQL Failover, Fencing & Rewind Mechanics
+# Engineering Spike Record: P0-03 — PostgreSQL Two-Core Failover / Fencing / Rewind
 
-**Spike ID:** SPIKE-P0-03  
-**Status:** **OPEN**  
-**Owner:** Principal Database / Data Platform Architect  
-**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_03_Architecture.md` §4.1, §7.1  
-**Target Closure Day:** Day 5 (Sprint 1)  
+**Spike ID:** SPIKE-P0-03
+**Status:** **OPEN**
+**Owner:** Staff Data / Control-Plane Architect
+**Authoritative Source:** `Platform_12_Decision_Source_Register.md` §5, `Platform_03_Architecture.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`
+**Target Closure Day:** Day 6 (Sprint 1)
 
 ---
 
-## 1. Exact Unresolved Question
-What automated PostgreSQL streaming replication, promotion, and `pg_rewind` mechanism will be packaged to handle Core failover and rejoin without requiring manual DBA intervention?
+## Classification legend
 
-## 2. Why It Matters
-PostgreSQL stores all authoritative entity inventory, credentials, tenant metadata, topologies, and alert configurations. Split-brain or lost commits corrupt the entire monitoring control plane.
+| Label | Meaning |
+|---|---|
+| **AUTHORITATIVE FIXED REQUIREMENT** | Mother-reference fixed |
+| **PROPOSED TEST POINT — NON-AUTHORITATIVE** | Exploratory only |
+| **TBD — DECISION REQUIRED** | Unresolved |
+| **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION** | Not selected |
 
-## 3. GA Blocking Impact
-**CRITICAL / GA BLOCKER.** Automated HA failover is a core Tier-1 commercial SLA requirement.
+---
 
-## 4. Evaluated Alternatives (Open for Spike Testing)
-* **Alternative A (Patroni with 2-node consensus / external watchdog):** Patroni supervising PostgreSQL replication with software watchdog/VIP fencing.
-* **Alternative B (Native Streaming Replication + Supervisor Scripting):** PostgreSQL physical streaming replication with `pg_ctl promote` and automated `pg_rewind` on rejoin.
-* **Alternative C (Repmgr 2-node setup with witness daemon):** Standard enterprise repmgr tooling.
+## 1. Exact unresolved question
 
-## 5. Evidence Required
-1. Automated failover execution log showing primary shutdown -> Standby promotion in <30s.
-2. Automated rejoin log showing resurrected primary rewound with `pg_rewind` and re-attached as standby.
-3. Zero lost committed configuration transactions.
+**TBD — DECISION REQUIRED:** Exact PostgreSQL two-Core failover, fencing, and rejoin/rewind mechanics — including failover controller choice, synchronous vs asynchronous commit behaviour, and resulting availability/data-loss window.
 
-## 6. Test & Benchmark Methodology
-Run transactional API write loop (creating devices, changing alert rules); inject kernel panic / SIGKILL on primary Postgres container; record failover time and state validation.
+---
 
-## 7. Acceptance Criteria
-* Promotion completed in <30s.
-* Rejoin automated via `pg_rewind` without database re-initialization.
-* Liquibase migration compatibility confirmed across failover.
+## 2. Authoritative fixed requirements
 
-## 8. Affected Components & Mother Documents
-* **Components:** `postgres`, `core`.
-* **Mother Documents:** `Platform_03_Architecture.md`, `Platform_05_LLD.md`, `Platform_16_Installation_Upgrade_Rollback_and_Operations.md`.
+* PostgreSQL is authoritative transactional/control state (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Architecture currently describes **primary + standby streaming replication** as the direction (**AUTHORITATIVE FIXED REQUIREMENT** for store role; mechanism details remain spike scope).
+* Exactly two full Cores; overall Core service restoration **&lt;60s** (**AUTHORITATIVE FIXED REQUIREMENT**).
+* Schema migrations must be **versioned, automated, upgrade-tested** (**AUTHORITATIVE FIXED REQUIREMENT**).
+* **Liquibase and Flyway are not selected** as frozen architecture choices (**AUTHORITATIVE FIXED REQUIREMENT** — do not treat either as mandatory).
 
-## 9. Dependencies
-* Spike P0-04 (Core fencing/VIP).
+---
+
+## 3. Explicitly not frozen by this spike
+
+Do **not** freeze as mandatory:
+
+* `pg_rewind`;
+* Patroni;
+* repmgr;
+* Liquibase/Flyway;
+* “&lt;30 second PostgreSQL promotion”;
+* “zero lost committed transactions” regardless of commit policy.
+
+These may appear only as **CANDIDATE FOR SPIKE ONLY — OSS/ARCHITECTURE APPROVAL REQUIRED BEFORE SELECTION** or as **PROPOSED TEST POINT — NON-AUTHORITATIVE** observations.
+
+---
+
+## 4. Evidence required
+
+1. Promotion and fencing under Active failure / partition.
+2. Rejoin of former primary after safe resync (mechanism **TBD**).
+3. Measured behaviour under sync vs async commit candidates — **data-loss window is itself evidence**, not assumed zero.
+4. Migration/upgrade behaviour across failover for the **bootstrap schema_migration / chosen future migrator** (not Liquibase by default).
+
+---
+
+## 5. Test methodology (non-authoritative)
+
+Promotion timing measurements are **PROPOSED TEST POINT — NON-AUTHORITATIVE**. Overall Core restoration budget remains **&lt;60s**.
+
+---
+
+## 6. Closure criteria
+
+Formal approval of: failover controller, fencing, rejoin/rewind, commit policy, and documented data-loss/availability window; mother docs updated accordingly.
+
+---
+
+## 7. Affected components & mother documents
+
+* **Components:** PostgreSQL, `core` JDBC/state.
+* **Mother Documents:** `Platform_03`, `Platform_05`, `Platform_12`, `Platform_17`.
+
+## 8. Dependencies
+
+* P0-04 fencing/VIP matrix.
