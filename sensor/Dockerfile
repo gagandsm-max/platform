@@ -2,10 +2,10 @@
 # Platform Sensor Dockerfile (Clean-room Multi-stage Build)
 # ==============================================================================
 
-FROM golang:1.23-alpine AS builder
+FROM golang:1.27.1-alpine3.24 AS builder
 WORKDIR /build
 
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
