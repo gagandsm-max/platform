@@ -1,7 +1,7 @@
 # Platform — Low-Level Design (LLD)
 
 **Document ID:** PLATFORM-LLD-001  
-**Version:** 3.2  
+**Version:** 3.2.1  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD → PRD → Architecture → HLD  
 
@@ -11,7 +11,7 @@
 
 This document defines concrete implementation contracts, schemas, state machines, topic families, API resources, sequencing rules, persistence ownership, worker behavior, error taxonomies and failure-handling expectations.
 
-Where implementation has not been safely resolved, this document marks `TBD/P0 SPIKE`; engineers may prototype alternatives but may not silently select a design that contradicts the two-Core HA, resource, security or no-data-loss requirements.
+Where implementation has not been safely resolved, this document marks `TBD/P0 SPIKE`; engineers may prototype alternatives but may not silently select a design that contradicts the two-Core HA, resource, security or Sensor/Core **80% storage-protection** requirements. Absolute zero telemetry/data loss is not a Platform guarantee; Sensors continue polling/buffering while capacity permits and may shed oldest eligible lower-priority buffered data under prolonged outage/storage pressure while exposing data-loss risk.
 
 All identifiers shown are examples of canonical names, not mandates for package/class naming unless explicitly stated.
 

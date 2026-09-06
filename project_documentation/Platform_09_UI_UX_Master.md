@@ -1,7 +1,7 @@
 # Platform — UI/UX, Navigation & Out-of-Box Dashboard Master
 
 **Document ID:** PLATFORM-UIUX-001  
-**Version:** 3.2  
+**Version:** 3.2.1  
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**  
 **Product:** Platform  
 **Last reconciliation:** 2026-09-06

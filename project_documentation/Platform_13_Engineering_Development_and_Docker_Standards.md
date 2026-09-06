@@ -1,10 +1,10 @@
 # Platform — Engineering, Development & Docker Standards
 
 **Document ID:** PLATFORM-ENGDEV-001
-**Version:** 3.2
+**Version:** 3.2.1
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
-**Consolidation rule:** This v3.2 document preserves the normative content of the listed v3.1 source documents. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
+**Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 
 ## 1. Purpose
 
@@ -33,10 +33,16 @@ Before modifying code, the engineer/agent must read: `Platform_00_Document_Index
 ## 3. Repository principles
 
 - Clean-room codebase independent of ThoughtData/NetAI proprietary assets.
-- One canonical repository unless engineering later approves a multi-repo split.
+- One canonical repository: `https://github.com/gagandsm-max/platform` (USER-FIXED). Local clones are working copies; authority follows GitHub merge. Multi-repo splits require later engineering approval.
+- Normal development uses short-lived branches; material changes use pull requests. Do not push normal development changes directly to the protected/default branch. Do not force-push shared/default branches. Commits must be traceable to the change; history preserves decision provenance.
+- Selecting GitHub as source of record does **not** freeze a CI provider. GitHub Actions may be evaluated later and is not a fixed architecture decision unless separately approved.
 - Clear top-level boundaries for Core, UI, Sensor, Agent, NCM/analytics workers, contracts, packaging, test assets and documentation.
 - Shared schemas/contracts are versioned and generated where practical; duplicate hand-written DTOs across languages are discouraged.
 - No customer-specific behavior should require source-code changes when it belongs in policies, Device Packs, connectors or configuration.
+
+### 3.1 Mother-document change control
+
+Mother documents are READ-MOSTLY and authoritative. Coding agents must not casually modify them while implementing features. Mother documents **must** be updated under deliberate change control when factual errors, contradictions, approved product/architecture decision changes, formally selected dependencies, resolved P0/TBD items, omitted requirements, or implementation/document conflicts are found. Cross-document reconciliation and Decision Register updates are required where decisions change. Implementation must not permanently diverge from mother-reference truth.
 
 ## 4. Modularity
 

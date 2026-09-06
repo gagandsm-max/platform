@@ -1,7 +1,7 @@
 # Platform — Product Requirements Document (PRD)
 
 **Document ID:** PLATFORM-PRD-001  
-**Version:** 3.2  
+**Version:** 3.2.1  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Depends on:** `Platform_01_BRD.md`  
 **Engineering companions:** Architecture, HLD, LLD and Dataflow documents in this set  

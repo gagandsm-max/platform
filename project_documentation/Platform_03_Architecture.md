@@ -1,7 +1,7 @@
 # Platform — Master Architecture Document
 
 **Document ID:** PLATFORM-ARC-001  
-**Version:** 3.2  
+**Version:** 3.2.1  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Business requirements:** `Platform_01_BRD.md`  
 **Product requirements:** `Platform_02_PRD.md`  
@@ -752,6 +752,9 @@ The following are recommended/approved candidates subject to version-level OSS c
 | OTel | OpenTelemetry Collector/libraries | OTLP ingest |
 | NCM | Nornir/scrapli/scrapli_cfg/NAPALM/NTC Templates/Jinja2 where licence/dependency scan passes | NCM execution/parsing |
 | UI | React/TypeScript | Web application |
+| UI build tooling | Node.js 20 / npm / Vite / TypeScript | Docker-only UI build toolchain (see OSS-111..115) |
+| UI HTTPS proxy (dev) | NGINX Open Source | Dev UI static/TLS reverse proxy only (OSS-110; not mandatory production Core) |
+| Core JSON logging | logstash-logback-encoder | Structured log encoding (OSS-116; Platform owns fields/redaction/taxonomy) |
 | Charts | Apache ECharts | Charts |
 | Tables | TanStack Table | Large grids |
 | Topology | Cytoscape.js | Graph visualization |

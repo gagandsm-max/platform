@@ -2,9 +2,9 @@
 # Platform — Authoritative Open-Source Software Catalogue
 
 **Document ID:** PLATFORM-OSS-001  
-**Version:** 3.2  
+**Version:** 3.2.1  
 **Status:** **Authoritative Mother Reference — Dependency Allow-List Baseline**  
-**Verification date:** 2026-09-06  
+**Verification date:** 2026-09-06 (v3.2.1 bootstrap UI/build/logging admissions)  
 **Important:** This is an engineering/licensing governance baseline, not legal advice. Exact pinned versions and their complete transitive/bundled licenses must be scanned before release.
 
 ## 1. Purpose
@@ -88,6 +88,13 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 | OSS-107 | GNN | Deep learning runtime | PyTorch | BSD-3-Clause top-level; installed-package license expression includes bundled components | CANDIDATE/P0 BENCHMARK | AI/GNN Worker | Primary candidate for GNN R&D/training/inference because of mature ecosystem. | Not frozen until CPU/GPU footprint, reproducibility, packaging and transitive licenses pass benchmark/review. |
 | OSS-108 | GNN | Graph neural networks | PyTorch Geometric | MIT | CANDIDATE/P0 BENCHMARK | AI/GNN Worker | Primary candidate for temporal/topology graph experiments and message-passing models. | GNN only ranks hypotheses/impact; deterministic/protocol evidence remains authoritative. |
 | OSS-109 | Graph Analytics | Graph algorithms prototype | NetworkX | BSD-3-Clause | OPTIONAL/DEV | AI/Engineering | Offline prototyping/evaluation of graph algorithms. | Not suitable for high-rate production graph serving at scale without benchmark. |
+| OSS-110 | UI runtime (dev) | HTTPS static UI reverse proxy | NGINX Open Source | BSD-2-Clause (simplified two-clause BSD-like) | USE-DEV / USE-TOOLING | UI Docker image (`nginx:1.27-alpine`) | Serves built React SPA over HTTPS and reverse-proxies API paths in local/dev Compose. | Do **not** treat NGINX as a mandatory customer production Core dependency solely because Docker development uses it. Production UI serving remains an architecture packaging decision. Platform owns TLS posture, no-port-80 policy, proxy routes and secret handling. Top-level licence insufficient; image OS packages require SBOM/CVE scan. |
+| OSS-111 | UI build | JavaScript runtime for UI builds | Node.js | MIT (Node.js core) + bundled third-party licence obligations | USE-TOOLING | UI build image (`node:20-alpine`) | Runs npm/Vite/TypeScript builds inside Docker. Baseline: Node.js 20.x (image tag `20-alpine`). | Must not become a required runtime on customer Core merely because React is built with Node. Transitive/bundled notices require SBOM/license scan; arbitrary npm packages are not individually pre-approved here. |
+| OSS-112 | UI build | Package manager CLI | npm CLI | Artistic License 2.0 (npm CLI) + dependency-specific licences | YELLOW/USE-TOOLING | UI build image / lockfile workflow | Installs and locks UI dependencies from `package.json`/`package-lock.json`. | Unusual top-level licence and transitive review required. Release pipeline derives transitive packages from the lockfile/SBOM and enforces policy; catalogue does not individually approve every npm transitive. |
+| OSS-113 | UI build | Bundler / dev server | Vite | MIT | USE-TOOLING | UI (`vite@5.4.21` resolved via `package-lock.json`; manifest `^5.4.6`) | React/TypeScript UI production bundling and local Vite tooling inside Docker. | Platform owns SPA architecture, HTTPS delivery and API contracts. Transitive npm packages subject to lockfile/SBOM policy. |
+| OSS-114 | UI build | React Vite plugin | @vitejs/plugin-react | MIT | USE-TOOLING | UI (`@vitejs/plugin-react@4.7.0` resolved via lockfile; manifest `^4.3.1`) | Enables React Fast Refresh / JSX transform in Vite builds. | Tooling only; not a customer runtime. |
+| OSS-115 | UI language | TypeScript toolchain | TypeScript | Apache-2.0 | USE-TOOLING / approved UI toolchain | UI (`typescript@5.9.3` resolved via lockfile; manifest `^5.5.4`) | Compile and type-check Platform UI TypeScript sources. | Platform owns UI domain models and UX. |
+| OSS-116 | Core logging | Structured JSON log encoder | logstash-logback-encoder | Apache-2.0 principal; MIT-licensed incorporated portions/notices | USE/WRAP | Core (`7.4` in `core/pom.xml`) | JSON/log encoding for structured Core logs. | Platform owns canonical log fields, secret redaction, event/error taxonomy, correlation IDs, retention policy and audit semantics. Library provides encoding only. Transitive Maven review required. |
 | OSS-120 | OSS Governance | OSS policy/compliance | OSS Review Toolkit (ORT) | Apache-2.0 overall | USE-TOOLING | CI/CD | Dependency analysis, policy-as-code, attribution, SPDX/CycloneDX SBOM and source archive. | Tooling only; still requires policy/legal review. |
 | OSS-121 | OSS Governance | SBOM generation | Syft | Apache-2.0 | USE-TOOLING | CI/CD | Generate SPDX/CycloneDX SBOM. | Tooling output must be archived per release. |
 | OSS-122 | OSS Governance | Vulnerability/license/secret scanning | Trivy | Apache-2.0 | USE-TOOLING | CI/CD | Scan containers/filesystems/SBOMs for vulnerabilities, licenses and secrets. | Scanner classifications do not replace legal policy. |
@@ -165,6 +172,9 @@ Dependency proposed
 | OTel | OpenTelemetry Collector/libraries | tenant mapping, canonical schema and non-APM product UX |
 | NCM | Nornir + scrapli + scrapli_cfg + selected NAPALM/NTC/Jinja2 | approval, compliance, golden config, rollback, RCA evidence, audit |
 | UI | React + ECharts + TanStack + react-grid-layout + Cytoscape + MapLibre + xterm.js | complete Platform UX, Studios, RBAC behavior, query model |
+| UI build/tooling | Node.js 20 + npm + Vite + TypeScript (+ @vitejs/plugin-react) | Docker-only UI compile/bundle; not customer Core runtime |
+| UI HTTPS (dev) | NGINX Open Source | local/dev static+TLS proxy only unless separately selected for production packaging |
+| Core logging encode | logstash-logback-encoder | JSON encoding only; Platform owns fields/redaction/taxonomy/correlation/audit |
 | Core control | Java 21 + Spring Boot | Platform domain model and workflows |
 | Identity | Keycloak | Platform resource authorization/tenant isolation |
 | Policy expressions | CEL | Platform policy hierarchy, variables, safety limits and simulation |

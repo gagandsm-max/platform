@@ -1,10 +1,10 @@
 # Platform — API, Event, Data Model & Schema Contracts
 
 **Document ID:** PLATFORM-CONTRACTDATA-001
-**Version:** 3.2
+**Version:** 3.2.1
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
-**Consolidation rule:** This v3.2 document preserves the normative content of the listed v3.1 source documents. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
+**Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 
 ## 1. Purpose
 

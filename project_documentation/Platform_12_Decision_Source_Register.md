@@ -1,7 +1,7 @@
 # Platform — Decision, Source & Assumption-Control Register
 
 **Document ID:** PLATFORM-DECISION-001  
-**Version:** 3.2  
+**Version:** 3.2.1  
 **Status:** **Authoritative Mother Reference — Decision Provenance**
 
 ## 1. Purpose
@@ -39,6 +39,8 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 | Security posture | USER-FIXED | Design from day 1 for banks, defence and global enterprises; standards/certification readiness required, but no false certification claims. |
 | UI | USER-FIXED | Excellent/easy/fast/readable UX; SSL/TLS only; no application port 80. |
 | Master docs | USER-FIXED | Split mother-reference set is authoritative; no silent assumptions. |
+| Canonical source repository | USER-FIXED | Canonical Platform source repository is `https://github.com/gagandsm-max/platform`. GitHub is the system of record; local clones (including `~/nms`) are working copies. Code/build/test/mother-document changes become authoritative only after push and merge to GitHub. Short-lived branches and pull requests are required for material changes; do not push normal development to the protected/default branch; do not force-push shared/default branches; preserve decision provenance in Git history. Selecting GitHub does **not** freeze a CI provider (GitHub Actions remains unevaluated unless separately approved). |
+| Mother-document change control | USER-FIXED | Mother documents are READ-MOSTLY. Agents must not casually modify them during feature work, but **must** update them under deliberate change control when factual errors, contradictions, approved decision changes, formally selected dependencies, resolved P0/TBD items, omitted requirements, or implementation/document conflicts are found. Implementation must not permanently diverge from mother-reference truth. |
 
 ## 3. ARCH-DELEGATED decisions
 
@@ -105,3 +107,13 @@ Any implementation document that fills one of these with a guessed value is non-
 | Windows release testing | ARCH-DELEGATED | Local development remains Docker-first, but Windows Service/MSI/reboot certification requires isolated Windows VM/runner because Linux Docker cannot validate SCM behavior. |
 
 These decisions supersede any earlier wording implying `.bat` is itself the Windows Agent binary or that Podman compatibility is required.
+
+## 7. v3.2.1 USER-FIXED governance decisions
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Canonical GitHub repository | USER-FIXED | `https://github.com/gagandsm-max/platform` is authoritative; see §2. |
+| Mother-document controlled correction | USER-FIXED | READ-MOSTLY with mandatory correction triggers; see §2 and `Platform_00_Document_Index.md` §11. |
+| Bootstrap UI/build/logging OSS admissions | ARCH-DELEGATED + catalogue update | NGINX (dev UI proxy), Node.js/npm/Vite/@vitejs/plugin-react/TypeScript (UI tooling), and logstash-logback-encoder (Core JSON logging) recorded in `Platform_07_OSS_Catalog.md` at pinned bootstrap versions. Top-level licence is insufficient; lockfile/SBOM transitive review remains mandatory. NGINX is not silently promoted to mandatory customer production Core dependency solely because Docker development uses it. |
+
+v3.2.1 does not reopen fixed product/architecture decisions and does not replace §5 P0/TBD items with implementation-option lists.

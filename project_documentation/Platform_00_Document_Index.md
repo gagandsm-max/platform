@@ -1,15 +1,17 @@
 # Platform — Mother Reference Documentation Set
 
 **Document ID:** PLATFORM-INDEX-001  
-**Version:** 3.2  
+**Version:** 3.2.1  
 **Status:** **Authoritative Mother Reference — 20-File Consolidated Engineering Source of Truth**  
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-06 — v3.2 file-count consolidation for engineering/ChatGPT Project use
+**Last reconciliation:** 2026-09-06 — v3.2.1 corrective/governance patch (GitHub SoR, mother-document change control, OSS catalogue bootstrap admissions)
 
 ## 1. Authority
 
-This v3.2 set supersedes v3.1 as a **documentation-packaging revision**. No product requirement from v3.1 is intentionally removed.
+**v3.2.1 supersedes v3.2 as the authoritative Platform mother-reference set.**
+This is a corrective/governance patch and does **not** intentionally remove product requirements from v3.2.
+v3.2 superseded v3.1 as a documentation-packaging revision; no product requirement from v3.1 was intentionally removed.
 The reduction from the v3.1 file set to 20 Markdown files is achieved only by consolidating closely related engineering
 governance documents.
 
@@ -63,6 +65,7 @@ reference/evidence only and never overrides this set.
 | `Platform_21_Security_Threat_Model.md` | `Platform_18_Security_Threat_Model.md` |
 
 Every source section is retained in the destination document. Consolidation is not permission to drop a requirement.
+v3.2.1 preserves this map and does not add mother files.
 
 ## 5. Precedence
 
@@ -83,9 +86,9 @@ Conflicts require documented change control; implementation must not silently ch
 
 - Product name: **Platform**.
 - Clean-room implementation; no ThoughtData/NetAI proprietary implementation reuse.
-- Core/Sensor: Ubuntu LTS and RHEL first; Windows Core/Sensor not initial scope.
+- Core/Sensor: **Ubuntu 24.x LTS family** and **RHEL 9.x family** first (subject to certification matrix); Windows Core/Sensor not initial scope.
 - Standalone: one Core. HA: exactly two full Core nodes, Active/Standby, target <60s Core-service restoration.
-- Sensors continue polling and locally buffer through Core failure/WAN loss.
+- Sensors continue polling and locally buffer through Core failure/WAN loss while capacity permits; 80% storage protection may reclaim/shed eligible oldest lower-priority data and must expose data-loss risk. Absolute zero-loss is not promised.
 - Sensor/Agent external channel: HTTPS/gRPC over mTLS; Kafka stays internal.
 - Data stack: PostgreSQL authoritative control state, ClickHouse high-volume telemetry analytics, Kafka streaming backbone, Valkey cache/ephemeral state.
 - Go Sensors/Agents; Java 21 Core; React/TypeScript UI; Python for selected NCM/AI/analytics workers.
@@ -103,12 +106,14 @@ Conflicts require documented change control; implementation must not silently ch
 - Development/test: Docker Compose standard; host laptop kept free of project-specific runtimes.
 - Production packaging: Core/Sensor/Linux Agent `.deb` + `.rpm`; Windows Agent signed service EXE + MSI + BAT wrappers.
 - Core, Sensors and Agents auto-start after reboot and emit structured diagnostics/logs.
+- Canonical source repository: `https://github.com/gagandsm-max/platform` (see §12).
 
 ## 7. OSS governance
 
 Only components admitted by `Platform_07_OSS_Catalog.md` at an approved pinned version may ship.
 Top-level licence alone is insufficient; transitive/bundled licences, notices, vulnerabilities and exact artifacts must be scanned.
 Every release produces SPDX and CycloneDX SBOMs, third-party notices/licence texts, version locks, checksums and provenance.
+Implementation dependencies must match the catalogue; catalogue omissions discovered in implementation require catalogue/change-control updates before milestone/release.
 
 ## 8. Completeness control
 
@@ -118,15 +123,18 @@ product, architecture, implementation/dataflow and test/acceptance documentation
 
 ## 9. Explicit unresolved/P0 items
 
-- Exact two-Core Kafka failover implementation without a third full Core.
-- Exact two-Core ClickHouse replication/promotion/fencing implementation.
-- Exact PostgreSQL two-Core failover/fencing/rewind mechanics.
-- Exact HA endpoint/VIP/fencing failure matrix.
-- Contractual DR RPO/RTO/data-loss objectives.
-- Final SNWP-2500-v1 workload constants and certified benchmark results.
-- Certified Streaming Sensor Flow records/sec and Syslog EPS.
-- Final production GNN runtime/model/compute profile.
-- Achieved compliance certifications and final certification scope.
+Authoritative list is `Platform_12_Decision_Source_Register.md` §5. Restated here for navigation:
+
+- exact two-Core Kafka implementation/failover while honoring no third full Core;
+- exact two-Core ClickHouse replication/promotion/fencing design;
+- exact PostgreSQL two-Core failover/fencing/rewind mechanics;
+- exact Core service fencing/VIP implementation and failure matrix;
+- final contractual DR RPO/RTO and data-loss objectives;
+- final SNWP-2500-v1 metric/interface/event mix and certified performance results;
+- Streaming Sensor certified Flow records/sec and Syslog EPS;
+- exact GNN model architecture, training labels, inference latency, CPU/GPU footprint and production enablement threshold;
+- final compliance certification program/scope and achieved certifications;
+- exact product SKUs/licensing quantities beyond the agreed behavioral rules.
 
 These remain unresolved until formally approved; no coding tool may invent them.
 
@@ -137,8 +145,45 @@ Architecture/HLD/LLD/Dataflow sections, OSS Catalogue, specialized master and De
 A feature is not complete when it only compiles: tests, observability, error/failure behavior, upgrade/migration impact,
 security/OSS implications, traceability and acceptance evidence are part of Definition of Done.
 
-## 11. Repository placement
+## 11. Mother-document change control (READ-MOSTLY)
+
+Mother documents are **READ-MOSTLY** and authoritative.
+
+Coding agents must **not casually** modify them while implementing features.
+
+A mother document **MUST** be updated when:
+
+1. a factual/documentation error is identified;
+2. two mother documents contradict one another;
+3. an approved product decision changes;
+4. an approved architecture decision changes;
+5. an implementation dependency becomes formally selected;
+6. a P0/TBD item is resolved;
+7. a requirement was accidentally omitted;
+8. an implemented behavior would otherwise conflict with documented truth.
+
+Such changes require deliberate change control, cross-document reconciliation, Decision Register update where a decision changes, and review through the canonical GitHub repository.
+No implementation is allowed to permanently diverge from the mother-reference truth.
+If implementation discovers an error in the mother documents, engineering must correct the mother documents rather than knowingly preserve a false specification.
+
+## 12. Canonical repository and working clone
+
+**USER-FIXED:** Canonical Platform source repository is `https://github.com/gagandsm-max/platform`.
+
+- GitHub is the authoritative repository/system of record.
+- Local `~/nms` (or any other clone path) is a **working clone**, not an independent source of truth.
+- Code, build, test and mother-document changes become authoritative only after being pushed and merged into the canonical GitHub repository.
+- Normal development uses short-lived branches.
+- Material changes use pull requests.
+- Do not directly push normal development changes to the protected/default branch.
+- Commits must be traceable to the implementation/change being made.
+- Do not force-push shared/default branches.
+- GitHub history must preserve architecture/document decision provenance.
+- Selecting GitHub as source of record does **not** by itself freeze a CI provider. GitHub Actions may be evaluated later; it is not a fixed architecture decision unless separately approved.
+
+## 13. Repository placement
 
 For ChatGPT Project use, these 20 Markdown files are sufficient as the authoritative source set.
-For code-agent enforcement, `AGENTS.md` should also be available at repository root (`~/nms/AGENTS.md`), preferably as a
+For code-agent enforcement, `AGENTS.md` should also be available at repository root (`~/nms/AGENTS.md` in a working clone), preferably as a
 copy or symlink to `project_documentation/AGENTS.md`, so tools that auto-discover root instructions see the same content.
+Authority of the clone follows §12 after merge to the canonical GitHub repository.
