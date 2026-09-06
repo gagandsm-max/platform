@@ -35,7 +35,7 @@ echo "========================================================================"
 # ------------------------------------------------------------------------------
 TEST_NUM=1
 TEST_DESC="Repository Integrity & Specification Traceability"
-if [ -d ".git" ] && [ -f ".gitignore" ] && [ -f ".env.example" ] && [ -L "AGENTS.md" ] && [ -d "project_documentation" ]; then
+if { [ -d ".git" ] || [ -f ".git" ]; } && [ -f ".gitignore" ] && [ -f ".env.example" ] && [ -L "AGENTS.md" ] && [ -d "project_documentation" ]; then
     pass ${TEST_NUM} "${TEST_DESC}"
 else
     fail ${TEST_NUM} "${TEST_DESC}" "Missing essential git/repo root files"
@@ -416,17 +416,28 @@ if [ -n "${FOREIGN_ALL}" ]; then
         FOREIGN_OK=false
     fi
 fi
-HOST_RUNTIMES=$(which java go node npm mvn clickhouse-server valkey-server 2>/dev/null || true)
+# Host runtime isolation: verify no prohibited Platform runtimes on system PATH,
+# while distinguishing private IDE/agent bundles and proving detector with synthetic tests.
+HOST_POLLUTION=$(bash "${ROOT_DIR}/scripts/check-host-runtime-isolation.sh" 2>&1 || true)
+SYNTHETIC_TEST_OK=false
+if bash "${ROOT_DIR}/scripts/check-host-runtime-isolation.sh" --synthetic-test > /dev/null 2>&1; then
+    SYNTHETIC_TEST_OK=true
+fi
+
+HOST_ISOLATION_OK=false
+if [ -z "${HOST_POLLUTION}" ] && [ "${SYNTHETIC_TEST_OK}" = "true" ]; then
+    HOST_ISOLATION_OK=true
+fi
 
 PERSIST_OK=false
 if [ "${PG_RESTART_VAL}" = "1" ] && [ "${VALKEY_RESTART_VAL}" = "preserved_across_down" ]; then
     PERSIST_OK=true
 fi
 
-if [ "${PERSIST_OK}" = "true" ] && [ "${LOGS_OK}" = "true" ] && [ "${FOREIGN_OK}" = "true" ] && [ -z "${HOST_RUNTIMES}" ]; then
-    pass ${TEST_NUM} "${TEST_DESC} (Persistence verified, JSON logs valid, ${FOREIGN_COUNT} foreign container(s) intact)"
+if [ "${PERSIST_OK}" = "true" ] && [ "${LOGS_OK}" = "true" ] && [ "${FOREIGN_OK}" = "true" ] && [ "${HOST_ISOLATION_OK}" = "true" ]; then
+    pass ${TEST_NUM} "${TEST_DESC} (Persistence verified, JSON logs valid, ${FOREIGN_COUNT} foreign container(s) intact, host isolation & synthetic test verified)"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "Persistence: ${PERSIST_OK}, Logs: ${LOGS_OK}, Foreign: ${FOREIGN_OK}, Host runtimes: ${HOST_RUNTIMES}"
+    fail ${TEST_NUM} "${TEST_DESC}" "Persistence: ${PERSIST_OK}, Logs: ${LOGS_OK}, Foreign: ${FOREIGN_OK}, Isolation: ${HOST_ISOLATION_OK} (Pollution: ${HOST_POLLUTION}, SyntheticOK: ${SYNTHETIC_TEST_OK})"
 fi
 
 echo "========================================================================"

@@ -14,7 +14,7 @@ endif
 include $(ENV_FILE)
 export
 
-.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-integration clean dev-reset certs post-reboot-verify
+.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-integration test-contract test-security-smoke evidence clean dev-reset certs post-reboot-verify
 
 help: ## Show available Makefile targets
 	@echo "========================================================================"
@@ -79,6 +79,18 @@ test-integration: ## Run full 20-test integration verification suite
 	@bash tests/run-all-tests.sh
 
 test: test-unit test-integration ## Run both unit and integration tests
+
+test-contract: ## Run API, event, and data model contract verification suite
+	@echo "==> Running Platform contract tests..."
+	@bash tests/run-contract-tests.sh
+
+test-security-smoke: ## Run mTLS, port isolation, and host runtime security smoke tests
+	@echo "==> Running Platform security smoke tests..."
+	@bash tests/run-security-smoke.sh
+
+evidence: test test-contract test-security-smoke ## Run full regression and generate engineering evidence
+	@echo "==> Capturing complete GA engineering evidence..."
+	@bash scripts/post-reboot-verify.sh
 
 clean: ## Clean local temporary build caches (does NOT delete persistent data)
 	@echo "==> Cleaning ephemeral build caches..."
