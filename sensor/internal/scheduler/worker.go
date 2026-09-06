@@ -27,7 +27,6 @@ func (s *Scheduler) beginExecution(job Job) (context.Context, func(), error) {
 	}
 	if !job.LeaseExpiresAt.After(now) {
 		s.metrics.expired.Add(1)
-		s.metrics.failed.Add(1)
 		s.mu.Unlock()
 		return nil, nil, newError(CodeLeaseExpired, "job lease expired before execution started", nil)
 	}
@@ -93,7 +92,7 @@ func (s *Scheduler) beginExecution(job Job) (context.Context, func(), error) {
 func (s *Scheduler) executeWithRetry(ctx context.Context, job Job) {
 	for attempt := 1; attempt <= s.cfg.Retry.MaxAttempts; attempt++ {
 		if code := contextOutcomeCode(ctx); code != "" {
-			s.recordExecutionOutcome(code)
+			s.recordExecutionOutcome(job, code)
 			return
 		}
 
@@ -102,10 +101,13 @@ func (s *Scheduler) executeWithRetry(ctx context.Context, job Job) {
 		_, err := s.executor.Execute(ctx, execJob)
 		if err == nil {
 			if code := contextOutcomeCode(ctx); code != "" {
-				s.recordExecutionOutcome(code)
+				s.recordExecutionOutcome(job, code)
 				return
 			}
 			s.metrics.completed.Add(1)
+			s.mu.Lock()
+			s.releaseTrackedJobLocked(job.AssignmentKey, job.JobID)
+			s.mu.Unlock()
 			return
 		}
 
@@ -114,14 +116,14 @@ func (s *Scheduler) executeWithRetry(ctx context.Context, job Job) {
 			delay := backoffDuration(s.cfg.Retry, attempt, s.hooks.jitter)
 			if waitErr := s.hooks.wait(ctx, delay); waitErr != nil {
 				waitCode := executionErrorCode(ctx, waitErr)
-				s.recordExecutionOutcome(waitCode)
+				s.recordExecutionOutcome(job, waitCode)
 				return
 			}
 			s.metrics.retries.Add(1)
 			continue
 		}
 
-		s.recordExecutionOutcome(code)
+		s.recordExecutionOutcome(job, code)
 		if s.logger != nil && code != CodeCancelled && code != CodeShuttingDown && code != CodeStaleFence {
 			s.logger.Debug("sensor scheduler job finished with error", "error_code", code, "execution_class", job.Class, "job_kind", job.Kind, "attempt", attempt)
 		}
@@ -166,14 +168,18 @@ func executionErrorCode(ctx context.Context, err error) ErrorCode {
 	return CodePermanent
 }
 
-func (s *Scheduler) recordExecutionOutcome(code ErrorCode) {
+func (s *Scheduler) recordExecutionOutcome(job Job, code ErrorCode) {
+	s.mu.Lock()
+	s.releaseTrackedJobLocked(job.AssignmentKey, job.JobID)
+	s.mu.Unlock()
+
 	switch code {
 	case CodeStaleFence:
-		s.metrics.rejectedStaleLease.Add(1)
+		// In-flight cancel due to newer fence — count as cancelled only (submit/begin paths
+		// already use rejectedStaleLease for pre-execution rejection).
 		s.metrics.cancelled.Add(1)
 	case CodeLeaseExpired:
 		s.metrics.expired.Add(1)
-		s.metrics.failed.Add(1)
 	case CodeDeadlineExceeded:
 		s.metrics.deadlineExceeded.Add(1)
 		s.metrics.failed.Add(1)

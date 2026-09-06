@@ -234,7 +234,8 @@ func TestQueueFullTypedRejection(t *testing.T) {
 	cfg := testConfig()
 	cfg.MaxWorkers = 1
 	cfg.MaxQueueDepth = 1
-	cfg.MaxTrackedJobs = 2
+	cfg.MaxTrackedJobs = 8
+	cfg.MaxTrackedAssignments = 8
 	cfg.Pools = map[ExecutionClass]PoolConfig{ClassNetworkPoll: {Workers: 1, QueueDepth: 1}}
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -674,4 +675,206 @@ func TestExecutionClassesUseIndependentPools(t *testing.T) {
 		t.Fatal("NCM pool was starved by blocked network pool")
 	}
 	close(releaseNetwork)
+}
+
+func TestCompletedJobsReleaseTrackingCapacity(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxTrackedJobs = 4
+	cfg.MaxWorkers = 1
+	cfg.MaxQueueDepth = 2
+	cfg.Pools = map[ExecutionClass]PoolConfig{ClassNetworkPoll: {Workers: 1, QueueDepth: 2}}
+	s := newTestScheduler(t, cfg, executorFunc(func(_ context.Context, _ Job) (ExecutionResult, error) {
+		return ExecutionResult{}, nil
+	}))
+
+	for i := 0; i < 12; i++ {
+		job := baseJob(fmt.Sprintf("job-%d", i), "assignment-stable", 1, ClassNetworkPoll)
+		if _, err := s.Submit(job); err != nil {
+			t.Fatalf("Submit(%d) error = %v", i, err)
+		}
+		waitFor(t, func() bool { return s.Snapshot().Completed == uint64(i+1) }, "completion")
+		if snap := s.Snapshot(); snap.TrackedJobs != 0 {
+			t.Fatalf("after job %d TrackedJobs=%d, want 0", i, snap.TrackedJobs)
+		}
+	}
+}
+
+func TestLeaseExpiryReleasesTrackedJobsWithoutSnapshot(t *testing.T) {
+	now := time.Now()
+	cfg := testConfig()
+	cfg.MaxTrackedJobs = 4
+	cfg.MaxWorkers = 1
+	cfg.MaxQueueDepth = 2
+	cfg.Pools = map[ExecutionClass]PoolConfig{ClassNetworkPoll: {Workers: 1, QueueDepth: 2}}
+	blocked := make(chan struct{})
+	var nowMu sync.Mutex
+	current := now
+	s := newTestScheduler(t, cfg, executorFunc(func(ctx context.Context, _ Job) (ExecutionResult, error) {
+		select {
+		case <-blocked:
+			return ExecutionResult{}, nil
+		case <-ctx.Done():
+			return ExecutionResult{}, ctx.Err()
+		}
+	}), withRuntimeHooks(runtimeHooks{
+		now: func() time.Time {
+			nowMu.Lock()
+			defer nowMu.Unlock()
+			return current
+		},
+		wait: func(ctx context.Context, d time.Duration) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(d):
+				return nil
+			}
+		},
+		jitter: func(d time.Duration, _ float64) time.Duration { return d },
+	}))
+
+	job1 := baseJob("a", "asg", 1, ClassNetworkPoll)
+	job1.LeaseExpiresAt = now.Add(50 * time.Millisecond)
+	job2 := baseJob("b", "asg", 1, ClassNetworkPoll)
+	job2.LeaseExpiresAt = now.Add(50 * time.Millisecond)
+	if _, err := s.Submit(job1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Submit(job2); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return s.Snapshot().ActiveWorkers == 1 }, "worker busy")
+	nowMu.Lock()
+	current = now.Add(100 * time.Millisecond)
+	nowMu.Unlock()
+	job3 := baseJob("c", "asg", 1, ClassNetworkPoll)
+	job3.LeaseExpiresAt = current.Add(time.Second)
+	if _, err := s.Submit(job3); err != nil {
+		t.Fatalf("Submit after expiry prune error = %v", err)
+	}
+	close(blocked)
+}
+
+func TestAssignmentChurnRequiresRetireThenForget(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxTrackedAssignments = 2
+	s := newTestScheduler(t, cfg, executorFunc(func(_ context.Context, _ Job) (ExecutionResult, error) {
+		return ExecutionResult{}, nil
+	}))
+	if _, err := s.Submit(baseJob("j1", "a1", 1, ClassNetworkPoll)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Submit(baseJob("j2", "a2", 1, ClassNetworkPoll)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Submit(baseJob("j3", "a3", 1, ClassNetworkPoll)); !IsCode(err, CodeTrackingCapacity) {
+		t.Fatalf("expected tracking capacity, got %v", err)
+	}
+	waitFor(t, func() bool { return s.Snapshot().Completed >= 2 }, "initial completions")
+	if err := s.RetireAssignment(AssignmentKey("a1"), 1); err != nil {
+		t.Fatal(err)
+	}
+	// Still at capacity due to tombstone + a2.
+	if _, err := s.Submit(baseJob("j3", "a3", 1, ClassNetworkPoll)); !IsCode(err, CodeTrackingCapacity) {
+		t.Fatalf("expected capacity with tombstone present, got %v", err)
+	}
+	if err := s.ForgetAssignmentFence(AssignmentKey("a1"), 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Submit(baseJob("j3", "a3", 1, ClassNetworkPoll)); err != nil {
+		t.Fatalf("after forget, Submit = %v", err)
+	}
+	waitFor(t, func() bool { return s.Snapshot().Completed >= 3 }, "a3 completed")
+	if err := s.RetireAssignment(AssignmentKey("a2"), 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetAssignmentFence(AssignmentKey("a2"), 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RetireAssignment(AssignmentKey("a3"), 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetAssignmentFence(AssignmentKey("a3"), 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Submit(baseJob("old", "a1", 1, ClassNetworkPoll)); err != nil {
+		t.Fatalf("reactivation after forget should allow new work: %v", err)
+	}
+}
+
+func TestRetireKeepsFenceTombstone(t *testing.T) {
+	s := newTestScheduler(t, testConfig(), executorFunc(func(_ context.Context, _ Job) (ExecutionResult, error) {
+		return ExecutionResult{}, nil
+	}))
+	if _, err := s.Submit(baseJob("j1", "asg", 5, ClassNetworkPoll)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return s.Snapshot().Completed == 1 }, "done")
+	if err := s.RetireAssignment(AssignmentKey("asg"), 5); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Submit(baseJob("stale", "asg", 4, ClassNetworkPoll)); !IsCode(err, CodeStaleFence) {
+		t.Fatalf("expected stale fence against tombstone, got %v", err)
+	}
+	if _, err := s.Submit(baseJob("fresh", "asg", 6, ClassNetworkPoll)); err != nil {
+		t.Fatalf("newer fence reactivation failed: %v", err)
+	}
+}
+
+func TestDuplicateIdentityConflict(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	s := newTestScheduler(t, testConfig(), executorFunc(func(ctx context.Context, _ Job) (ExecutionResult, error) {
+		close(started)
+		select {
+		case <-release:
+			return ExecutionResult{}, nil
+		case <-ctx.Done():
+			return ExecutionResult{}, ctx.Err()
+		}
+	}))
+	job := baseJob("same", "asg", 1, ClassNetworkPoll)
+	if _, err := s.Submit(job); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	conflict := job
+	conflict.Payload = []byte(`{"test":"different"}`)
+	if _, err := s.Submit(conflict); !IsCode(err, CodeJobConflict) {
+		t.Fatalf("expected job conflict, got %v", err)
+	}
+	dup := job.clone()
+	if submission, err := s.Submit(dup); err != nil || submission.Status != SubmissionDuplicate {
+		t.Fatalf("identical duplicate = %+v err=%v", submission, err)
+	}
+	close(release)
+}
+
+func TestNonCooperativeExecutorShutdown(t *testing.T) {
+	cfg := testConfig()
+	cfg.ShutdownGracePeriod = 50 * time.Millisecond
+	release := make(chan struct{})
+	s, err := New(cfg, executorFunc(func(_ context.Context, _ Job) (ExecutionResult, error) {
+		<-release // ignores ctx
+		return ExecutionResult{}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Submit(baseJob("block", "asg", 1, ClassNetworkPoll)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return s.Snapshot().ActiveWorkers == 1 }, "worker active")
+	err = s.Shutdown(context.Background())
+	if err == nil {
+		t.Fatal("expected shutdown grace failure")
+	}
+	if !IsCode(err, CodeDeadlineExceeded) {
+		t.Fatalf("shutdown error = %v, want deadline", err)
+	}
+	if snap := s.Snapshot(); snap.State == StateStopped {
+		t.Fatalf("state incorrectly STOPPED while executor still running: %s", snap.State)
+	}
+	close(release)
+	waitFor(t, func() bool { return s.Snapshot().State == StateStopped }, "eventual stop")
 }

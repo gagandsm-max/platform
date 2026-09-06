@@ -20,6 +20,7 @@ const (
 	CodePermanent                 ErrorCode = "SCHEDULER_PERMANENT"
 	CodeExecutionClassUnavailable ErrorCode = "SCHEDULER_EXECUTION_CLASS_UNAVAILABLE"
 	CodeTrackingCapacity          ErrorCode = "SCHEDULER_TRACKING_CAPACITY"
+	CodeJobConflict               ErrorCode = "SCHEDULER_JOB_CONFLICT"
 )
 
 // Error is the stable machine-readable scheduler error contract.

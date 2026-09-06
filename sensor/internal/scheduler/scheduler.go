@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"sync"
 	"time"
@@ -52,6 +54,7 @@ type workerPool struct {
 type jobRecord struct {
 	version        uint64
 	leaseExpiresAt time.Time
+	fingerprint    [32]byte
 }
 
 type assignmentState struct {
@@ -74,6 +77,7 @@ type Scheduler struct {
 	state                State
 	pools                map[ExecutionClass]*workerPool
 	assignments          map[AssignmentKey]*assignmentState
+	fenceTombstones      map[AssignmentKey]uint64
 	trackedJobs          int
 	active               map[AssignmentKey]map[JobID]activeExecution
 	activeByClass        map[ExecutionClass]int
@@ -110,12 +114,13 @@ func New(cfg Config, executor Executor, opts ...Option) (*Scheduler, error) {
 		hooks:         resolved.hooks,
 		state:         StateRunning,
 		pools:         make(map[ExecutionClass]*workerPool, len(cfg.Pools)),
-		assignments:   make(map[AssignmentKey]*assignmentState),
-		active:        make(map[AssignmentKey]map[JobID]activeExecution),
-		activeByClass: make(map[ExecutionClass]int, len(cfg.Pools)),
-		rootCtx:       rootCtx,
-		rootCancel:    rootCancel,
-		stopped:       make(chan struct{}),
+		assignments:     make(map[AssignmentKey]*assignmentState),
+		fenceTombstones: make(map[AssignmentKey]uint64),
+		active:          make(map[AssignmentKey]map[JobID]activeExecution),
+		activeByClass:   make(map[ExecutionClass]int, len(cfg.Pools)),
+		rootCtx:         rootCtx,
+		rootCancel:      rootCancel,
+		stopped:         make(chan struct{}),
 	}
 
 	for class, poolCfg := range s.cfg.Pools {
@@ -146,6 +151,7 @@ func (s *Scheduler) Submit(job Job) (Submission, error) {
 	}
 
 	now := s.hooks.now()
+	fingerprint := jobContentFingerprint(job)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -153,9 +159,19 @@ func (s *Scheduler) Submit(job Job) (Submission, error) {
 		return Submission{}, newError(CodeShuttingDown, "scheduler is not accepting new work", nil)
 	}
 
+	if tombstone, ok := s.fenceTombstones[job.AssignmentKey]; ok && job.AssignmentVersion < tombstone {
+		s.metrics.rejectedStaleLease.Add(1)
+		return Submission{}, newError(CodeStaleFence, "job fencing version is older than retired assignment tombstone", nil)
+	}
+
 	assignment, exists := s.assignments[job.AssignmentKey]
 	if !exists {
-		if len(s.assignments) >= s.cfg.MaxTrackedAssignments {
+		if tombstone, ok := s.fenceTombstones[job.AssignmentKey]; ok && job.AssignmentVersion > tombstone {
+			// Newer authoritative fence reactivates the key; drop tombstone first so the
+			// assignment slot can be reused without falsely exhausting capacity.
+			delete(s.fenceTombstones, job.AssignmentKey)
+		}
+		if s.trackedAssignmentSlots() >= s.cfg.MaxTrackedAssignments {
 			s.metrics.rejectedTrackingCapacity.Add(1)
 			return Submission{}, newError(CodeTrackingCapacity, "tracked assignment capacity reached", nil)
 		}
@@ -187,6 +203,9 @@ func (s *Scheduler) Submit(job Job) (Submission, error) {
 	}
 
 	if record, duplicate := assignment.jobs[job.JobID]; duplicate && record.version == job.AssignmentVersion {
+		if record.fingerprint != fingerprint {
+			return Submission{}, newError(CodeJobConflict, "duplicate job identity with conflicting immutable content", nil)
+		}
 		s.metrics.duplicates.Add(1)
 		return Submission{Status: SubmissionDuplicate}, nil
 	}
@@ -201,6 +220,7 @@ func (s *Scheduler) Submit(job Job) (Submission, error) {
 		assignment.jobs[job.JobID] = jobRecord{
 			version:        job.AssignmentVersion,
 			leaseExpiresAt: job.LeaseExpiresAt,
+			fingerprint:    fingerprint,
 		}
 		s.trackedJobs++
 		if job.AssignmentVersion > s.highestAcceptedFence {
@@ -211,6 +231,117 @@ func (s *Scheduler) Submit(job Job) (Submission, error) {
 	default:
 		s.metrics.rejectedQueueFull.Add(1)
 		return Submission{}, newError(CodeQueueFull, "execution-class queue is full", nil)
+	}
+}
+
+func jobContentFingerprint(job Job) [32]byte {
+	h := sha256.New()
+	writeFingerprintString(h, string(job.JobID))
+	writeFingerprintString(h, string(job.AssignmentKey))
+	writeFingerprintString(h, string(job.TenantID))
+	writeFingerprintString(h, string(job.EntityID))
+	writeFingerprintString(h, string(job.Kind))
+	writeFingerprintString(h, string(job.Class))
+	var versionBuf [8]byte
+	binary.BigEndian.PutUint64(versionBuf[:], job.AssignmentVersion)
+	_, _ = h.Write(versionBuf[:])
+	_, _ = h.Write(job.Payload)
+	var sum [32]byte
+	copy(sum[:], h.Sum(nil))
+	return sum
+}
+
+func writeFingerprintString(h interface{ Write([]byte) (int, error) }, value string) {
+	var lenBuf [8]byte
+	binary.BigEndian.PutUint64(lenBuf[:], uint64(len(value)))
+	_, _ = h.Write(lenBuf[:])
+	_, _ = h.Write([]byte(value))
+}
+
+func (s *Scheduler) trackedAssignmentSlots() int {
+	return len(s.assignments) + len(s.fenceTombstones)
+}
+
+// RetireAssignment is the authoritative Core-driven lifecycle API that releases
+// assignment job-tracking capacity while retaining a fencing tombstone so older
+// versions remain stale-rejected. It does not silently forget fencing history.
+func (s *Scheduler) RetireAssignment(key AssignmentKey, version uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if key == "" {
+		return newError(CodeInvalidJob, "AssignmentKey must not be empty", nil)
+	}
+
+	highest := version
+	if assignment, exists := s.assignments[key]; exists {
+		if version < assignment.highestSeen {
+			return newError(CodeStaleFence, "retire version is older than highest observed fencing version", nil)
+		}
+		highest = assignment.highestSeen
+		if version > highest {
+			highest = version
+		}
+		for jobID := range assignment.jobs {
+			delete(assignment.jobs, jobID)
+			if s.trackedJobs > 0 {
+				s.trackedJobs--
+			}
+		}
+		for _, active := range s.active[key] {
+			active.cancel(causeShuttingDown)
+		}
+		delete(s.assignments, key)
+		// Converting an active assignment into a tombstone reuses the same capacity slot.
+	} else {
+		if tombstone, ok := s.fenceTombstones[key]; ok && version < tombstone {
+			return newError(CodeStaleFence, "retire version is older than existing fence tombstone", nil)
+		}
+		if _, ok := s.fenceTombstones[key]; !ok && s.trackedAssignmentSlots() >= s.cfg.MaxTrackedAssignments {
+			return newError(CodeTrackingCapacity, "tracked assignment capacity reached", nil)
+		}
+	}
+	if tombstone, ok := s.fenceTombstones[key]; ok && version < tombstone {
+		return newError(CodeStaleFence, "retire version is older than existing fence tombstone", nil)
+	}
+	if highest > s.highestObservedFence {
+		s.highestObservedFence = highest
+	}
+	s.fenceTombstones[key] = highest
+	return nil
+}
+
+// ForgetAssignmentFence removes a fencing tombstone after Core authoritatively
+// confirms the assignment key will never be reused below the provided version.
+func (s *Scheduler) ForgetAssignmentFence(key AssignmentKey, version uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.assignments[key]; exists {
+		return newError(CodeInvalidJob, "assignment still active; retire before forgetting fence", nil)
+	}
+	tombstone, ok := s.fenceTombstones[key]
+	if !ok {
+		return nil
+	}
+	if version < tombstone {
+		return newError(CodeStaleFence, "forget version is older than fence tombstone", nil)
+	}
+	delete(s.fenceTombstones, key)
+	return nil
+}
+
+func (s *Scheduler) releaseTrackedJobLocked(key AssignmentKey, id JobID) {
+	assignment, ok := s.assignments[key]
+	if !ok {
+		return
+	}
+	if _, exists := assignment.jobs[id]; !exists {
+		return
+	}
+	delete(assignment.jobs, id)
+	if s.trackedJobs > 0 {
+		s.trackedJobs--
 	}
 }
 
@@ -288,7 +419,7 @@ func (s *Scheduler) Snapshot() Snapshot {
 
 	snapshot := Snapshot{
 		State:                         s.state,
-		TrackedAssignments:            len(s.assignments),
+		TrackedAssignments:            s.trackedAssignmentSlots(),
 		TrackedJobs:                   s.trackedJobs,
 		HighestObservedFencingVersion: s.highestObservedFence,
 		HighestAcceptedFencingVersion: s.highestAcceptedFence,
