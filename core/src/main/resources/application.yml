@@ -1,0 +1,57 @@
+server:
+  port: 8443
+  shutdown: graceful
+
+spring:
+  application:
+    name: platform-core
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:platform}
+    username: ${POSTGRES_USER:platform_app}
+    password: ${POSTGRES_PASSWORD:platform_dev_pg_password_change_in_prod}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      connection-test-query: SELECT 1
+  data:
+    redis:
+      host: ${VALKEY_HOST:valkey}
+      port: ${VALKEY_PORT:6379}
+      password: ${VALKEY_PASSWORD:platform_dev_valkey_password_change_in_prod}
+      timeout: 5000ms
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    producer:
+      acks: all
+      retries: 3
+    consumer:
+      group-id: platform-core-group
+      auto-offset-reset: earliest
+    listener:
+      auto-startup: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+platform:
+  node-id: ${CORE_NODE_ID:core-node-01}
+  version: ${PLATFORM_VERSION:0.1.0-dev}
+  clickhouse:
+    host: ${CLICKHOUSE_HOST:clickhouse}
+    port: ${CLICKHOUSE_HTTP_PORT:8123}
+    user: ${CLICKHOUSE_USER:platform_app}
+    password: ${CLICKHOUSE_PASSWORD:platform_dev_ch_password_change_in_prod}

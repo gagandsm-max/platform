@@ -1,0 +1,424 @@
+# ==============================================================================
+# Platform Docker Compose Specification
+# Governing Specs: AGENTS.md, Platform_03_Architecture.md, Platform_04_HLD.md
+# ==============================================================================
+
+name: platform
+
+networks:
+  platform_net:
+    driver: bridge
+
+volumes:
+  platform_pg_data:
+    name: platform_pg_data
+  platform_ch_data:
+    name: platform_ch_data
+  platform_kafka_data:
+    name: platform_kafka_data
+  platform_valkey_data:
+    name: platform_valkey_data
+  platform_sensor_net_spool:
+    name: platform_sensor_net_spool
+  platform_sensor_infra_spool:
+    name: platform_sensor_infra_spool
+
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL: Authoritative Transactional Database
+  # ----------------------------------------------------------------------------
+  postgres:
+    profiles: ["dev", "test", "ha", "scale", "security", "dr"]
+    image: postgres:16-alpine
+    container_name: platform-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-platform}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_dev_pg_password_change_in_prod}
+    ports:
+      - "127.0.0.1:${PLATFORM_POSTGRES_HOST_PORT:-25432}:5432"
+    volumes:
+      - platform_pg_data:/var/lib/postgresql/data
+      - ./deploy/docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - platform_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-platform_app} -d $${POSTGRES_DB:-platform}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # ClickHouse: Analytical High-Volume Telemetry Database
+  # ----------------------------------------------------------------------------
+  clickhouse:
+    profiles: ["dev", "test", "ha", "scale", "security", "dr"]
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: platform-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-platform}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-platform_app}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-platform_dev_ch_password_change_in_prod}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "127.0.0.1:${PLATFORM_CLICKHOUSE_HTTP_HOST_PORT:-28123}:8123"
+      - "127.0.0.1:${PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT:-29000}:9000"
+    volumes:
+      - platform_ch_data:/var/lib/clickhouse
+      - ./deploy/docker/clickhouse/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - platform_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # Apache Kafka: Internal Streaming Backbone (KRaft mode, No Host Port)
+  # ----------------------------------------------------------------------------
+  kafka:
+    profiles: ["dev", "test", "ha", "scale", "security", "dr"]
+    image: apache/kafka:3.8.0
+    container_name: platform-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    volumes:
+      - platform_kafka_data:/var/lib/kafka/data
+    networks:
+      - platform_net
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # Valkey: Ephemeral State and Fast Cache
+  # ----------------------------------------------------------------------------
+  valkey:
+    profiles: ["dev", "test", "ha", "scale", "security", "dr"]
+    image: valkey/valkey:7.2-alpine
+    container_name: platform-valkey
+    restart: unless-stopped
+    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${PLATFORM_VALKEY_HOST_PORT:-26379}:6379"
+    volumes:
+      - platform_valkey_data:/data
+    networks:
+      - platform_net
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a \"$${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}\" ping | grep PONG || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # Platform Core (Primary Node)
+  # ----------------------------------------------------------------------------
+  core:
+    profiles: ["dev", "test", "ha", "scale", "security", "dr"]
+    build:
+      context: ./core
+      dockerfile: Dockerfile
+    image: platform-core:dev
+    container_name: platform-core
+    restart: unless-stopped
+    environment:
+      PLATFORM_ENV: ${PLATFORM_ENV:-development}
+      PLATFORM_LOG_LEVEL: ${PLATFORM_LOG_LEVEL:-INFO}
+      CORE_NODE_ID: ${CORE_NODE_ID:-core-node-01}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-platform}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_dev_pg_password_change_in_prod}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_HTTP_PORT: 8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-platform_app}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-platform_dev_ch_password_change_in_prod}
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}:8443"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    networks:
+      - platform_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8443/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # Platform Core Standby (HA Profile)
+  # ----------------------------------------------------------------------------
+  core-standby:
+    profiles: ["ha"]
+    build:
+      context: ./core
+      dockerfile: Dockerfile
+    image: platform-core:dev
+    container_name: platform-core-standby
+    restart: unless-stopped
+    environment:
+      PLATFORM_ENV: ${PLATFORM_ENV:-development}
+      PLATFORM_LOG_LEVEL: ${PLATFORM_LOG_LEVEL:-INFO}
+      CORE_NODE_ID: core-node-02
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-platform}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_dev_pg_password_change_in_prod}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_HTTP_PORT: 8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-platform_app}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-platform_dev_ch_password_change_in_prod}
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    networks:
+      - platform_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8443/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # Platform UI (HTTPS-Only Reverse Proxy + React SPA)
+  # ----------------------------------------------------------------------------
+  ui:
+    profiles: ["dev", "test", "ha", "scale", "security", "dr"]
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    image: platform-ui:dev
+    container_name: platform-ui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PLATFORM_UI_HOST_PORT:-23000}:443"
+    volumes:
+      - ./deploy/docker/certs:/etc/nginx/certs:ro
+    depends_on:
+      core:
+        condition: service_healthy
+    networks:
+      - platform_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -k -f https://127.0.0.1:443/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # Sensor: Network Collector
+  # ----------------------------------------------------------------------------
+  sensor-net:
+    profiles: ["dev", "test", "ha", "scale", "security", "dr"]
+    build:
+      context: ./sensor
+      dockerfile: Dockerfile
+    image: platform-sensor:dev
+    container_name: platform-sensor-net
+    restart: unless-stopped
+    environment:
+      SENSOR_ID: ${SENSOR_NETWORK_ID:-sensor-net-01}
+      SENSOR_TYPE: network
+      PLATFORM_ENV: ${PLATFORM_ENV:-development}
+      CORE_URL: http://core:8443
+      SENSOR_SPOOL_DIR: /var/lib/platform/sensor/spool
+      PLATFORM_STORAGE_WATERMARK_PERCENT: ${PLATFORM_STORAGE_WATERMARK_PERCENT:-80}
+      SENSOR_HEALTH_PORT: 8088
+    volumes:
+      - platform_sensor_net_spool:/var/lib/platform/sensor/spool
+    depends_on:
+      core:
+        condition: service_healthy
+    networks:
+      - platform_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8088/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # Sensor: Infrastructure Collector
+  # ----------------------------------------------------------------------------
+  sensor-infra:
+    profiles: ["dev", "test", "ha", "scale", "security", "dr"]
+    build:
+      context: ./sensor
+      dockerfile: Dockerfile
+    image: platform-sensor:dev
+    container_name: platform-sensor-infra
+    restart: unless-stopped
+    environment:
+      SENSOR_ID: ${SENSOR_INFRA_ID:-sensor-infra-01}
+      SENSOR_TYPE: infrastructure
+      PLATFORM_ENV: ${PLATFORM_ENV:-development}
+      CORE_URL: http://core:8443
+      SENSOR_SPOOL_DIR: /var/lib/platform/sensor/spool
+      PLATFORM_STORAGE_WATERMARK_PERCENT: ${PLATFORM_STORAGE_WATERMARK_PERCENT:-80}
+      SENSOR_HEALTH_PORT: 8088
+    volumes:
+      - platform_sensor_infra_spool:/var/lib/platform/sensor/spool
+    depends_on:
+      core:
+        condition: service_healthy
+    networks:
+      - platform_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8088/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # Scale Profile: Additional Network Sensor
+  # ----------------------------------------------------------------------------
+  sensor-net-02:
+    profiles: ["scale"]
+    build:
+      context: ./sensor
+      dockerfile: Dockerfile
+    image: platform-sensor:dev
+    container_name: platform-sensor-net-02
+    restart: unless-stopped
+    environment:
+      SENSOR_ID: sensor-net-02
+      SENSOR_TYPE: network
+      PLATFORM_ENV: ${PLATFORM_ENV:-development}
+      CORE_URL: http://core:8443
+      SENSOR_SPOOL_DIR: /var/lib/platform/sensor/spool
+      PLATFORM_STORAGE_WATERMARK_PERCENT: ${PLATFORM_STORAGE_WATERMARK_PERCENT:-80}
+      SENSOR_HEALTH_PORT: 8088
+    depends_on:
+      core:
+        condition: service_healthy
+    networks:
+      - platform_net
+
+  # ----------------------------------------------------------------------------
+  # Analytics: Baseline Analytics Engine
+  # ----------------------------------------------------------------------------
+  analytics:
+    profiles: ["dev", "test", "ha", "scale", "security", "dr"]
+    build:
+      context: ./analytics
+      dockerfile: Dockerfile
+    image: platform-analytics:dev
+    container_name: platform-analytics
+    restart: unless-stopped
+    environment:
+      PLATFORM_ENV: ${PLATFORM_ENV:-development}
+      PLATFORM_LOG_LEVEL: ${PLATFORM_LOG_LEVEL:-INFO}
+      CORE_URL: http://core:8443
+      ANALYTICS_HEALTH_PORT: 8090
+    depends_on:
+      core:
+        condition: service_healthy
+    networks:
+      - platform_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8090/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
