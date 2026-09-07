@@ -73,7 +73,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           aria-label="Open workspace navigation"
         >
           <span>Navigate workspaces</span>
-          <kbd>Ctrl K</kbd>
+          <kbd>Ctrl/⌘ K</kbd>
         </button>
 
         <div className="topbar-actions">
@@ -184,7 +184,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 placeholder="Navigate to a workspace"
                 aria-label="Search workspaces"
               />
-              <button type="button" className="icon-button" onClick={() => setPaletteOpen(false)}>
+              <button type="button" className="palette-close" onClick={() => setPaletteOpen(false)}>
                 Close
               </button>
             </div>
