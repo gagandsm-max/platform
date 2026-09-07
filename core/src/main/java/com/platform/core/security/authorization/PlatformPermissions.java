@@ -1,8 +1,8 @@
 package com.platform.core.security.authorization;
 
 /**
- * Small Day-03 foundation for resources already authoritative in Day-02, plus mandatory credential USE/REVEAL.
- * This is not the final Platform permission catalog or a role definition.
+ * Small Day-03 foundation for resources already authoritative in Day-02, plus mandatory
+ * credential USE / EDIT / REVEAL boundaries (Mother Reference). Not a role catalog.
  */
 public final class PlatformPermissions {
     public static final Permission TENANT_READ = Permission.of("tenant.read");
@@ -37,6 +37,7 @@ public final class PlatformPermissions {
     public static final Permission ENTITY_TAG_REMOVE = Permission.of("entity.tag.remove");
 
     public static final Permission CREDENTIAL_USE = Permission.of("credential.use");
+    public static final Permission CREDENTIAL_EDIT = Permission.of("credential.edit");
     public static final Permission CREDENTIAL_REVEAL = Permission.of("credential.reveal");
 
     private PlatformPermissions() {

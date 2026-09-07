@@ -2,6 +2,10 @@ package com.platform.core.security.authorization;
 
 import java.util.Objects;
 
+/**
+ * Immutable authorization outcome. Does not embed principal/grant dumps or secrets.
+ * DenyReason is an internal classification; HTTP layers should avoid leaking existence oracles.
+ */
 public record AuthorizationDecision(Outcome outcome, DenyReason denyReason) {
     public enum Outcome {
         ALLOW,
@@ -36,5 +40,13 @@ public record AuthorizationDecision(Outcome outcome, DenyReason denyReason) {
 
     public boolean allowed() {
         return outcome == Outcome.ALLOW;
+    }
+
+    @Override
+    public String toString() {
+        if (outcome == Outcome.ALLOW) {
+            return "AuthorizationDecision[ALLOW]";
+        }
+        return "AuthorizationDecision[DENY," + denyReason + "]";
     }
 }

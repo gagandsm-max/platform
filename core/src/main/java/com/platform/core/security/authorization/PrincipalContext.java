@@ -8,6 +8,9 @@ import java.util.UUID;
 /**
  * Identity-provider-agnostic principal context consumed by Platform authorization.
  * It intentionally carries no passwords, tokens, certificates, JWTs, assertions, or role names.
+ *
+ * <p>Lean invariant: an UNAUTHENTICATED principal must not carry tenant scopes or grants.
+ * Authenticated principals may only carry grants whose tenants are in explicit tenantScopes.
  */
 public final class PrincipalContext {
     public static final int MAX_SUBJECT_LENGTH = 256;
@@ -37,6 +40,16 @@ public final class PrincipalContext {
 
         this.tenantScopes = Set.copyOf(tenantScopes);
         this.permissionGrants = Set.copyOf(permissionGrants);
+
+        if (this.authenticationState == AuthenticationState.UNAUTHENTICATED) {
+            if (!this.tenantScopes.isEmpty()) {
+                throw new IllegalArgumentException("unauthenticated principal must not carry tenant scopes");
+            }
+            if (!this.permissionGrants.isEmpty()) {
+                throw new IllegalArgumentException("unauthenticated principal must not carry permission grants");
+            }
+        }
+
         for (PermissionGrant grant : this.permissionGrants) {
             if (!this.tenantScopes.contains(grant.tenantId())) {
                 throw new IllegalArgumentException("permission grant tenant must be in explicit tenant scopes");
@@ -71,9 +84,21 @@ public final class PrincipalContext {
         if (!subjectId.equals(subjectId.strip())) {
             throw new IllegalArgumentException("subjectId must not contain leading or trailing whitespace");
         }
-        if (subjectId.codePoints().anyMatch(Character::isISOControl)) {
-            throw new IllegalArgumentException("subjectId must not contain control characters");
+        if (subjectId.codePoints().anyMatch(PrincipalContext::isDangerousCodePoint)) {
+            throw new IllegalArgumentException("subjectId must not contain control or format characters");
         }
         return subjectId;
+    }
+
+    private static boolean isDangerousCodePoint(int codePoint) {
+        if (Character.isISOControl(codePoint)) {
+            return true;
+        }
+        int type = Character.getType(codePoint);
+        return type == Character.FORMAT
+                || type == Character.PRIVATE_USE
+                || type == Character.SURROGATE
+                || type == Character.LINE_SEPARATOR
+                || type == Character.PARAGRAPH_SEPARATOR;
     }
 }
