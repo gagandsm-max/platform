@@ -156,6 +156,7 @@ Authoritative list is `Platform_12_Decision_Source_Register.md` §5. Restated he
 - final compliance certification program/scope and achieved certifications;
 - exact product SKUs/licensing quantities beyond the agreed behavioral rules.
 
+These remain unresolved until formally approved; no coding tool may invent them.
 The new OIV scope does not resolve any of these P0/TBD items by declaration.
 
 ## 10. Development-stage readiness
