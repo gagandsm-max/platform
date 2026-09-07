@@ -62,7 +62,10 @@ public final class AuthenticatedExternalIdentity {
         return new ProviderIdentityKey(providerType, providerInstanceId, externalSubject);
     }
 
-    /** Deterministic freshness check using an explicit evaluation instant. */
+    /**
+     * Deterministic freshness check using an explicit evaluation instant and an exclusive expiry boundary.
+     * Provider clock-skew tolerance belongs in the adapter that constructs this evidence.
+     */
     public boolean isCurrentAt(Instant evaluatedAt) {
         Objects.requireNonNull(evaluatedAt, "evaluatedAt");
         if (evaluatedAt.isBefore(authenticatedAt)) {
