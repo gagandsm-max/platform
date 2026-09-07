@@ -2,7 +2,7 @@
 
 This file should be available at the repository root of a working clone (commonly `~/nms/AGENTS.md`). For ChatGPT Project/source management it may also be stored in `project_documentation`; the preferred repository setup is a root copy or symlink to this authoritative file. It is a navigation and enforcement file, not a replacement for the mother-reference documents.
 
-**Mother-reference version:** 3.2.1  
+**Mother-reference version:** 3.2.2  
 **Canonical repository (USER-FIXED):** https://github.com/gagandsm-max/platform  
 
 Local clones (including `~/nms`) are working copies. Changes become authoritative only after push and merge into the canonical GitHub repository.
@@ -16,8 +16,9 @@ Before changing code or build/deployment assets, read in this order:
 3. `Platform_03_Architecture.md`
 4. Relevant HLD/LLD/Dataflow sections
 5. `Platform_07_OSS_Catalog.md`
-6. Relevant specialized master (`09` through `18`)
-7. `Platform_12_Decision_Source_Register.md` when a decision/source is unclear
+6. Relevant specialized master (`09` through `19`)
+7. **Mandatory when the task touches operational intelligence/value:** `Platform_19_Operational_Intelligence_MTTR_and_Value.md`
+8. `Platform_12_Decision_Source_Register.md` when a decision/source is unclear
 
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
@@ -47,8 +48,7 @@ A mother document **MUST** be updated when:
 7. a requirement was accidentally omitted;
 8. an implemented behavior would otherwise conflict with documented truth.
 
-Such updates require deliberate change control, cross-document reconciliation, Decision Register update where a decision changes, and GitHub review/merge.
-No implementation may permanently diverge from mother-reference truth. If implementation discovers a mother-document error, correct the mother documents rather than knowingly preserve a false specification.
+Such updates require deliberate change control, cross-document reconciliation, Decision Register update where a decision changes, and GitHub review/merge. No implementation may permanently diverge from mother-reference truth. If implementation discovers a mother-document error, correct the mother documents rather than knowingly preserve a false specification.
 
 ## Non-negotiable engineering rules
 
@@ -66,6 +66,10 @@ No implementation may permanently diverge from mother-reference truth. If implem
 - UI is HTTPS-only; no application listener on port 80.
 - Do not declare device-down solely because SNMP or another primary monitor fails when corroborating evidence shows the device remains reachable.
 - AI/GNN output is evidence/hypothesis support, not unquestioned causal truth. RCA must support INCONCLUSIVE.
+- First-class SaaS monitoring, carrier/ISP enrichment, external change/deployment telemetry, Incident Flight Recorder, Similar Incident Memory, cloud-native dependency discovery, cross-domain Change Intelligence, controlled remediation and Platform Value/MTTR evidence are governed by `Platform_19_Operational_Intelligence_MTTR_and_Value.md`.
+- Triggered packet evidence is bounded incident diagnostics, not always-on DPI. Privilege, capture scope, duration/volume, retention, tenant isolation and resource limits are mandatory.
+- Controlled remediation never means direct LLM privileged execution. Use the approved diagnose → precondition/blast-radius → approval/policy → execute → validate → rollback/escalate workflow.
+- Never claim customer MTTR or financial benefit without the evidence/methodology required by Platform_19.
 
 ## Definition of done
 
