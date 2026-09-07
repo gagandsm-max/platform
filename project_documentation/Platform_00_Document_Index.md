@@ -75,6 +75,8 @@ For the OIV capability family, `Platform_19` contains logical business/product, 
 
 The older files remain authoritative for their existing scope and are explicitly supplemented by `Platform_19`; they are not considered obsolete.
 
+This packaging choice is deliberate change control, not a waiver of traceability. `Platform_19` §14 maps every OIV requirement to its governing logical layers, and `AGENTS.md` makes the specialized master mandatory preflight for OIV work.
+
 ## 5. Precedence
 
 When requirements appear to conflict:
