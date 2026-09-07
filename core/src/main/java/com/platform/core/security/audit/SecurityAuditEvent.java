@@ -8,8 +8,13 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Immutable security/control-plane audit fact. Persistence/transport is deliberately out of scope.
- * Security-sensitive audit events must not be silently discarded by future writers.
+ * Immutable security/control-plane audit fact contract.
+ *
+ * <p>Persistence, transport, retry, and durability are deliberately out of scope.
+ * Future writers must surface write failures and must not silently discard security-sensitive facts.
+ *
+ * <p>Audit records authorization outcomes; they never grant authority.
+ * Deny/reason detail may be richer than future HTTP client responses should expose.
  */
 public final class SecurityAuditEvent {
     private final UUID eventId;
@@ -39,6 +44,7 @@ public final class SecurityAuditEvent {
         this.action = Objects.requireNonNull(action, "action");
         this.outcome = Objects.requireNonNull(outcome, "outcome");
         this.actorType = Objects.requireNonNull(actorType, "actorType");
+        validateActor(actorType, actorSubjectId);
         if ((resourceType == null) != (resourceId == null)) {
             throw new IllegalArgumentException("resourceType and resourceId must both be present or absent");
         }
@@ -61,6 +67,12 @@ public final class SecurityAuditEvent {
                 metadata == null ? AuditMetadata.empty() : new AuditMetadata(metadata));
     }
 
+    private static void validateActor(ActorType actorType, UUID actorSubjectId) {
+        if (actorType == ActorType.SYSTEM && actorSubjectId != null) {
+            throw new IllegalArgumentException("SYSTEM actor must not carry a Platform subject id");
+        }
+    }
+
     public UUID eventId() { return eventId; }
     public Instant occurredAt() { return occurredAt; }
     public CorrelationId correlationId() { return correlationId; }
@@ -76,13 +88,16 @@ public final class SecurityAuditEvent {
     public AuditReasonCode reasonCode() { return reasonCode; }
     public AuditMetadata metadata() { return metadata; }
 
+    /** Equality is by event identity only; identical facts with distinct IDs remain distinct. */
     @Override
     public boolean equals(Object other) {
         return this == other || (other instanceof SecurityAuditEvent that && eventId.equals(that.eventId));
     }
 
     @Override
-    public int hashCode() { return eventId.hashCode(); }
+    public int hashCode() {
+        return eventId.hashCode();
+    }
 
     @Override
     public String toString() {

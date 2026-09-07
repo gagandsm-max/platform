@@ -8,11 +8,21 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+/**
+ * Bounded diagnostic metadata for an audit fact.
+ *
+ * <p>This contract rejects known secret-bearing field <em>names</em> (and nested separator variants).
+ * It cannot reliably detect secrets embedded in arbitrary values (e.g. {@code note=password=...}).
+ * Emitters remain responsible for never supplying secrets, tokens, credentials, or raw payloads.
+ */
 public final class AuditMetadata {
     private static final Pattern SAFE_KEY = Pattern.compile("[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*");
     private static final Set<String> FORBIDDEN = Set.of(
-            "password", "passwd", "secret", "token", "access_token", "refresh_token", "id_token",
-            "authorization", "cookie", "set_cookie", "private_key", "client_secret", "api_key", "credential_value"
+            "password", "passwd", "secret", "token", "access_token", "accesstoken",
+            "refresh_token", "refreshtoken", "id_token", "idtoken",
+            "authorization", "cookie", "set_cookie", "setcookie",
+            "private_key", "privatekey", "client_secret", "clientsecret",
+            "api_key", "apikey", "credential_value", "credentialvalue"
     );
     private static final AuditMetadata EMPTY = new AuditMetadata(Map.of());
     private final Map<String, String> values;
@@ -33,11 +43,12 @@ public final class AuditMetadata {
             if (isForbidden(key)) {
                 throw new IllegalArgumentException("audit metadata key is forbidden");
             }
-            if (value.length() > AuditLimits.METADATA_VALUE_MAX || containsControl(value)) {
+            int valueBytes = value.getBytes(StandardCharsets.UTF_8).length;
+            if (valueBytes > AuditLimits.METADATA_VALUE_MAX || containsUnsafeText(value)) {
                 throw new IllegalArgumentException("audit metadata value is invalid");
             }
             totalBytes = Math.addExact(totalBytes, key.getBytes(StandardCharsets.UTF_8).length);
-            totalBytes = Math.addExact(totalBytes, value.getBytes(StandardCharsets.UTF_8).length);
+            totalBytes = Math.addExact(totalBytes, valueBytes);
             if (totalBytes > AuditLimits.METADATA_TOTAL_UTF8_BYTES_MAX) {
                 throw new IllegalArgumentException("audit metadata exceeds total size limit");
             }
@@ -46,15 +57,37 @@ public final class AuditMetadata {
         this.values = Collections.unmodifiableMap(copy);
     }
 
-    public static AuditMetadata empty() { return EMPTY; }
-    public Map<String, String> values() { return values; }
-    public int size() { return values.size(); }
+    public static AuditMetadata empty() {
+        return EMPTY;
+    }
 
-    private static boolean isForbidden(String key) {
+    public Map<String, String> values() {
+        return values;
+    }
+
+    public int size() {
+        return values.size();
+    }
+
+    /**
+     * Forbidden classification after normalizing separators to '_'.
+     * {@code auth.token}/{@code my_token} are rejected; innocent {@code token_count} is allowed
+     * (does not use startsWith("token_") alone).
+     */
+    static boolean isForbidden(String key) {
         String normalized = key.replace('-', '_').replace('.', '_');
         for (String forbidden : FORBIDDEN) {
-            if (normalized.equals(forbidden)
-                    || normalized.startsWith(forbidden + "_")
+            if (normalized.equals(forbidden)) {
+                return true;
+            }
+            if (forbidden.equals("token")) {
+                // Exact handled above. Allow token_count; reject *.token nesting.
+                if (normalized.endsWith("_" + forbidden) || normalized.contains("_" + forbidden + "_")) {
+                    return true;
+                }
+                continue;
+            }
+            if (normalized.startsWith(forbidden + "_")
                     || normalized.endsWith("_" + forbidden)
                     || normalized.contains("_" + forbidden + "_")) {
                 return true;
@@ -63,14 +96,22 @@ public final class AuditMetadata {
         return false;
     }
 
-    private static boolean containsControl(String value) {
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (c <= 0x1f || c == 0x7f) return true;
+    private static boolean containsUnsafeText(String value) {
+        return value.codePoints().anyMatch(AuditMetadata::isUnsafeCodePoint);
+    }
+
+    private static boolean isUnsafeCodePoint(int codePoint) {
+        if (Character.isISOControl(codePoint)) {
+            return true;
         }
-        return false;
+        int type = Character.getType(codePoint);
+        return type == Character.FORMAT
+                || type == Character.LINE_SEPARATOR
+                || type == Character.PARAGRAPH_SEPARATOR;
     }
 
     @Override
-    public String toString() { return "AuditMetadata[entries=" + values.size() + "]"; }
+    public String toString() {
+        return "AuditMetadata[entries=" + values.size() + "]";
+    }
 }
