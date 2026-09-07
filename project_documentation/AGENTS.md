@@ -2,7 +2,7 @@
 
 This file should be available at the repository root of a working clone (commonly `~/nms/AGENTS.md`). For ChatGPT Project/source management it may also be stored in `project_documentation`; the preferred repository setup is a root copy or symlink to this authoritative file. It is a navigation and enforcement file, not a replacement for the mother-reference documents.
 
-**Mother-reference version:** 3.2.1  
+**Mother-reference version:** 3.2.2  
 **Canonical repository (USER-FIXED):** https://github.com/gagandsm-max/platform  
 
 Local clones (including `~/nms`) are working copies. Changes become authoritative only after push and merge into the canonical GitHub repository.
@@ -12,12 +12,14 @@ Local clones (including `~/nms`) are working copies. Changes become authoritativ
 Before changing code or build/deployment assets, read in this order:
 
 1. `project_documentation/Platform_00_Document_Index.md`
-2. Relevant BRD/PRD requirement(s)
+2. Relevant BRD/PRD requirement(s), including formal `PRD-OIV-*` supplements where applicable
 3. `Platform_03_Architecture.md`
 4. Relevant HLD/LLD/Dataflow sections
 5. `Platform_07_OSS_Catalog.md`
-6. Relevant specialized master (`09` through `18`)
+6. Relevant specialized master (`09` through `19`)
 7. `Platform_12_Decision_Source_Register.md` when a decision/source is unclear
+
+For any work involving SaaS monitoring, carrier/ISP integration, external change/deployment telemetry, cloud-native dependency discovery, Incident Flight Recorder, Similar Incident Memory, triggered packet evidence, controlled remediation, MTTR/value measurement or customer-value dashboards, **`Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` is mandatory preflight reading**.
 
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
@@ -65,8 +67,15 @@ No implementation may permanently diverge from mother-reference truth. If implem
 - Core and Sensor 80% storage protection is mandatory.
 - UI is HTTPS-only; no application listener on port 80.
 - Do not declare device-down solely because SNMP or another primary monitor fails when corroborating evidence shows the device remains reachable.
-- AI/GNN output is evidence/hypothesis support, not unquestioned causal truth. RCA must support INCONCLUSIVE.
+- AI/GNN output is evidence/hypothesis support, not unquestioned causal truth. RCA must support `INCONCLUSIVE`.
+- Triggered packet evidence must remain bounded, privileged, tenant-scoped, auditable and resource-limited. It does not authorize full always-on DPI.
+- Similar Incident Memory is advisory; historical similarity must not silently become current root cause.
+- External provider/change evidence is supporting evidence; provider text or temporal proximity alone is not causal proof.
+- Controlled remediation must follow versioned deterministic actions, tenant/resource authorization, preconditions, blast-radius controls, approval/policy, audit, post-action validation and rollback/fail-safe behavior. LLM output may not directly execute privileged actions.
+- Platform Value/MTTR metrics must expose data quality, cohort/sample methodology and assumptions. Do not fabricate generic customer savings or causal percentages.
 
 ## Definition of done
 
 A task is not complete until code, tests, observability, error behavior, upgrade/migration impact, OSS/security implications and relevant documentation/traceability are complete.
+
+For OIV capabilities, Definition of Done also includes applicable tenant-isolation, evidence-quality, packet-artifact protection, similarity false-positive, remediation deny/rollback, value-attribution and resource-regression tests defined in `Platform_19`.
