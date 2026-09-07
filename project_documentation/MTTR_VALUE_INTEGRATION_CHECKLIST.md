@@ -55,7 +55,22 @@ For this capability family, `Platform_19` contains the additive v3.2.2 requireme
 
 A future documentation-packaging consolidation may physically fold these sections back into the older files, but that is not required for implementation authority and must not alter requirement meaning.
 
-## 4. Implementation readiness rule
+## 4. Acceptance rationale
+
+The original integration checklist expected physical edits across many legacy files. Architecture review selected a stronger consolidation model instead: one specialized mother master carrying formal PRD, architecture, HLD, LLD, dataflow, UI, security, quality and RTM sections, plus Index/Decision/AGENTS updates.
+
+This is compliant with the Mother Reference completeness rule because every new requirement now has:
+
+- a formal product ID;
+- a formal RTM ID;
+- affected-layer mapping;
+- normative implementation/dataflow contracts;
+- security/quality/runbook requirements;
+- explicit precedence and mandatory engineering preflight.
+
+No load-bearing behavior is left only in an informal engineering note.
+
+## 5. Implementation readiness rule
 
 Engineering may implement the `PRD-OIV-*` / `REQ-OIV-*` scope after this documentation branch is reviewed and merged to canonical `main`.
 
