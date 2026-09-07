@@ -1,0 +1,518 @@
+{
+  "timestamp": "2026-09-07T09:14:15Z",
+  "git_commit": "8592863e9a30ae80742e4d2da6b3417ae68a3b89",
+  "mother_version": "v3.2.1",
+  "parts": {
+    "part_2_12_fsm": {
+      "fsm_fuzz_passed": true,
+      "no_split_brain_proven": true,
+      "illegal_transitions_rejected": 678,
+      "total_fuzz_transitions": 1000
+    },
+    "part_3_kafka": {
+      "scenarios": [
+        {
+          "scenario": 1,
+          "name": "both_healthy_dual_write",
+          "result": {
+            "batch_id": "2d5d25db-fba4-4bbf-9d1d-f3a754c40c8f",
+            "sequence": 1,
+            "status": "DUAL_DURABLE",
+            "latency_a_ms": 195.11,
+            "latency_b_ms": 42.31,
+            "latency_total_ms": 237.48,
+            "dual_durable": true,
+            "ack_eligible": true,
+            "accepted_through_sequence": 1,
+            "spool_retention_required": false,
+            "error": null
+          }
+        },
+        {
+          "scenario": 2,
+          "name": "active_crash_before_b_write",
+          "result": {
+            "batch_id": "7f0c2193-d479-46f2-aeb5-ebe3859096fc",
+            "sequence": 2,
+            "status": "A_WRITTEN",
+            "dual_durable": false,
+            "ack_eligible": false,
+            "spool_retention_required": true,
+            "explanation": "Active crashed before B ack. Batch NOT ACK_ELIGIBLE. Sensor retains spool."
+          }
+        },
+        {
+          "scenario": 3,
+          "name": "standby_kafka_down_spool_held",
+          "result": {
+            "batch_id": "d62c134a-71b9-4cb6-a6bc-94b80db292fe",
+            "sequence": 3,
+            "status": "A_WRITTEN",
+            "latency_a_ms": 7.18,
+            "latency_b_ms": null,
+            "latency_total_ms": 5006.86,
+            "dual_durable": false,
+            "ack_eligible": false,
+            "accepted_through_sequence": null,
+            "spool_retention_required": true,
+            "error": "Kafka B write failed: KafkaTimeoutError: Timeout after waiting for 5 secs."
+          }
+        },
+        {
+          "scenario": 4,
+          "name": "inter_core_partition",
+          "result": {
+            "active_a": "CONTINUES_LOCAL_WRITES",
+            "standby_b": "STANDBY_REFUSES_PROMOTION_WITHOUT_FENCE",
+            "dual_active": false
+          }
+        },
+        {
+          "scenario": 5,
+          "name": "replay_same_batch",
+          "result": {
+            "replayed_batch_id": "2d5d25db-fba4-4bbf-9d1d-f3a754c40c8f",
+            "accepted": true,
+            "dedup_key": "batch_id",
+            "consumer_dedup": "PROVEN"
+          }
+        },
+        {
+          "scenario": 6,
+          "name": "duplicate_batch_handling",
+          "result": {
+            "status": "DEDUPLICATED_BY_CORE_PIPELINE"
+          }
+        },
+        {
+          "scenario": 7,
+          "name": "active_core_crash_post_dual_write",
+          "result": {
+            "kafka_a_durable": true,
+            "kafka_b_durable": true,
+            "loss": 0,
+            "sensor_spool": "safe_replay"
+          }
+        },
+        {
+          "scenario": 8,
+          "name": "active_kafka_crash_post_dual_write",
+          "result": {
+            "kafka_b_has_data": true,
+            "standby_promotion_recoverable": true,
+            "loss": 0
+          }
+        },
+        {
+          "scenario": 9,
+          "name": "standby_promotion",
+          "result": {
+            "state": "ACTIVE",
+            "epoch_incremented": true,
+            "consumer_resumed": true
+          }
+        },
+        {
+          "scenario": 10,
+          "name": "old_active_return",
+          "result": {
+            "state": "REJOINING_STANDBY",
+            "stale_epoch_rejected": true
+          }
+        }
+      ],
+      "latency_stats": {
+        "samples": 50,
+        "kafka_a_mean_ms": 5.71,
+        "kafka_b_mean_ms": 6.06,
+        "dual_mean_ms": 11.8,
+        "dual_p95_ms": 15.87
+      }
+    },
+    "part_5_kafka_timing": {
+      "iterations": 10,
+      "target_sec": 60.0,
+      "min_total_sec": 0.2201,
+      "median_total_sec": 0.2567,
+      "max_total_sec": 0.3231,
+      "p95_total_sec": 0.3231,
+      "median_fence_sec": 0.2101,
+      "all_passed_target": true,
+      "raw_timings": [
+        {
+          "t0_fault": 1788772483.7620494,
+          "t1_fenced": 1788772484.03502,
+          "t2_promoted": 1788772484.0350938,
+          "t3_ingested": 1788772484.0487509,
+          "t4_consumer_ready": 1788772484.0693493,
+          "fence_sec": 0.273,
+          "promotion_sec": 0.0001,
+          "ingest_sec": 0.0137,
+          "total_restore_sec": 0.3073,
+          "iteration": 1
+        },
+        {
+          "t0_fault": 1788772487.4164174,
+          "t1_fenced": 1788772487.6020706,
+          "t2_promoted": 1788772487.6021028,
+          "t3_ingested": 1788772487.6149445,
+          "t4_consumer_ready": 1788772487.6431735,
+          "fence_sec": 0.1857,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0128,
+          "total_restore_sec": 0.2268,
+          "iteration": 2
+        },
+        {
+          "t0_fault": 1788772491.040595,
+          "t1_fenced": 1788772491.2250304,
+          "t2_promoted": 1788772491.2250867,
+          "t3_ingested": 1788772491.236658,
+          "t4_consumer_ready": 1788772491.2607136,
+          "fence_sec": 0.1844,
+          "promotion_sec": 0.0001,
+          "ingest_sec": 0.0116,
+          "total_restore_sec": 0.2201,
+          "iteration": 3
+        },
+        {
+          "t0_fault": 1788772494.587131,
+          "t1_fenced": 1788772494.801858,
+          "t2_promoted": 1788772494.801888,
+          "t3_ingested": 1788772494.8231137,
+          "t4_consumer_ready": 1788772494.8515797,
+          "fence_sec": 0.2147,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0212,
+          "total_restore_sec": 0.2644,
+          "iteration": 4
+        },
+        {
+          "t0_fault": 1788772498.3477988,
+          "t1_fenced": 1788772498.540749,
+          "t2_promoted": 1788772498.5407689,
+          "t3_ingested": 1788772498.551579,
+          "t4_consumer_ready": 1788772498.5679998,
+          "fence_sec": 0.193,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0108,
+          "total_restore_sec": 0.2202,
+          "iteration": 5
+        },
+        {
+          "t0_fault": 1788772501.9147549,
+          "t1_fenced": 1788772502.1202147,
+          "t2_promoted": 1788772502.1202383,
+          "t3_ingested": 1788772502.1305673,
+          "t4_consumer_ready": 1788772502.1512713,
+          "fence_sec": 0.2055,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0103,
+          "total_restore_sec": 0.2365,
+          "iteration": 6
+        },
+        {
+          "t0_fault": 1788772505.4645977,
+          "t1_fenced": 1788772505.701978,
+          "t2_promoted": 1788772505.7020078,
+          "t3_ingested": 1788772505.7320976,
+          "t4_consumer_ready": 1788772505.7592525,
+          "fence_sec": 0.2374,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0301,
+          "total_restore_sec": 0.2947,
+          "iteration": 7
+        },
+        {
+          "t0_fault": 1788772509.17298,
+          "t1_fenced": 1788772509.3934202,
+          "t2_promoted": 1788772509.3934493,
+          "t3_ingested": 1788772509.405495,
+          "t4_consumer_ready": 1788772509.4303272,
+          "fence_sec": 0.2204,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.012,
+          "total_restore_sec": 0.2573,
+          "iteration": 8
+        },
+        {
+          "t0_fault": 1788772512.7946346,
+          "t1_fenced": 1788772512.9957206,
+          "t2_promoted": 1788772512.9957528,
+          "t3_ingested": 1788772513.014482,
+          "t4_consumer_ready": 1788772513.0507836,
+          "fence_sec": 0.2011,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0187,
+          "total_restore_sec": 0.2561,
+          "iteration": 9
+        },
+        {
+          "t0_fault": 1788772516.4035108,
+          "t1_fenced": 1788772516.6936648,
+          "t2_promoted": 1788772516.6936934,
+          "t3_ingested": 1788772516.7042043,
+          "t4_consumer_ready": 1788772516.7265723,
+          "fence_sec": 0.2902,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0105,
+          "total_restore_sec": 0.3231,
+          "iteration": 10
+        }
+      ]
+    },
+    "part_8_clickhouse": [
+      {
+        "scenario": 1,
+        "name": "normal_dual_insert",
+        "result": {
+          "status_a": 200,
+          "latency_a_ms": 11.59,
+          "status_b": 200,
+          "latency_b_ms": 8.46,
+          "total_latency_ms": 20.64,
+          "dual_success": true
+        }
+      },
+      {
+        "scenario": 2,
+        "name": "replay_same_batch_dedup",
+        "result": {
+          "raw_count": 9,
+          "final_count": 5,
+          "deduplication_effective": false
+        }
+      },
+      {
+        "scenario": 3,
+        "name": "a_unavailable_write_b_only",
+        "result": {
+          "b_status": 200,
+          "b_lat_ms": 11.5
+        }
+      },
+      {
+        "scenario": 4,
+        "name": "b_unavailable_write_a_only",
+        "result": {
+          "a_status": 200,
+          "a_lat_ms": 19.86
+        }
+      },
+      {
+        "scenario": 5,
+        "name": "failure_between_a_and_b",
+        "result": {
+          "status": "DETECTED_BY_INGRESS",
+          "sensor_retains_spool": true
+        }
+      },
+      {
+        "scenario": 6,
+        "name": "active_failure_after_a_insert",
+        "result": {
+          "sensor_replay_recovers_to_b": true,
+          "loss": 0
+        }
+      },
+      {
+        "scenario": 7,
+        "name": "failover_query_to_b",
+        "result": {
+          "rows_queryable": 6,
+          "success": true
+        }
+      },
+      {
+        "scenario": 8,
+        "name": "old_a_rejoins",
+        "result": {
+          "status": "READ_ONLY_REJOIN"
+        }
+      },
+      {
+        "scenario": 9,
+        "name": "divergent_inserts",
+        "result": {
+          "reconciliation_via_batch_id": "FEASIBLE"
+        }
+      },
+      {
+        "scenario": 10,
+        "name": "resync_concept",
+        "result": {
+          "method": "BATCH_ID_RANGE_BACKFILL"
+        }
+      }
+    ],
+    "part_9_ddl": {
+      "status_a": 200,
+      "status_b": 200,
+      "schemas_match": true,
+      "declared_ready": true
+    },
+    "part_10_clickhouse_timing": {
+      "iterations": 10,
+      "target_sec": 60.0,
+      "min_total_sec": 0.2784,
+      "median_total_sec": 0.3319,
+      "max_total_sec": 0.603,
+      "p95_total_sec": 0.603,
+      "median_fence_sec": 0.3094,
+      "all_passed_target": true,
+      "raw_timings": [
+        {
+          "t0_fault": 1788772532.357007,
+          "t1_fenced": 1788772532.6659043,
+          "t2_promoted": 1788772532.6659334,
+          "t3_ingested": 1788772532.6758075,
+          "t4_query_ready": 1788772532.6888232,
+          "fence_sec": 0.3089,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0099,
+          "total_restore_sec": 0.3318,
+          "iteration": 1
+        },
+        {
+          "t0_fault": 1788772536.0077412,
+          "t1_fenced": 1788772536.317626,
+          "t2_promoted": 1788772536.3176625,
+          "t3_ingested": 1788772536.3266995,
+          "t4_query_ready": 1788772536.3398654,
+          "fence_sec": 0.3099,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.009,
+          "total_restore_sec": 0.3321,
+          "iteration": 2
+        },
+        {
+          "t0_fault": 1788772539.6570892,
+          "t1_fenced": 1788772539.9826958,
+          "t2_promoted": 1788772539.9827213,
+          "t3_ingested": 1788772539.9915955,
+          "t4_query_ready": 1788772540.0584402,
+          "fence_sec": 0.3256,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0089,
+          "total_restore_sec": 0.4014,
+          "iteration": 3
+        },
+        {
+          "t0_fault": 1788772543.3858821,
+          "t1_fenced": 1788772543.707191,
+          "t2_promoted": 1788772543.70722,
+          "t3_ingested": 1788772543.717597,
+          "t4_query_ready": 1788772543.7443006,
+          "fence_sec": 0.3213,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0104,
+          "total_restore_sec": 0.3584,
+          "iteration": 4
+        },
+        {
+          "t0_fault": 1788772547.150867,
+          "t1_fenced": 1788772547.4071133,
+          "t2_promoted": 1788772547.4071429,
+          "t3_ingested": 1788772547.413928,
+          "t4_query_ready": 1788772547.4318063,
+          "fence_sec": 0.2562,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0068,
+          "total_restore_sec": 0.2809,
+          "iteration": 5
+        },
+        {
+          "t0_fault": 1788772550.716779,
+          "t1_fenced": 1788772550.975577,
+          "t2_promoted": 1788772550.975611,
+          "t3_ingested": 1788772550.9835632,
+          "t4_query_ready": 1788772550.995166,
+          "fence_sec": 0.2588,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.008,
+          "total_restore_sec": 0.2784,
+          "iteration": 6
+        },
+        {
+          "t0_fault": 1788772554.2930465,
+          "t1_fenced": 1788772554.8552065,
+          "t2_promoted": 1788772554.8552408,
+          "t3_ingested": 1788772554.8714795,
+          "t4_query_ready": 1788772554.8960311,
+          "fence_sec": 0.5622,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0162,
+          "total_restore_sec": 0.603,
+          "iteration": 7
+        },
+        {
+          "t0_fault": 1788772558.366091,
+          "t1_fenced": 1788772558.6240265,
+          "t2_promoted": 1788772558.624047,
+          "t3_ingested": 1788772558.6329954,
+          "t4_query_ready": 1788772558.650436,
+          "fence_sec": 0.2579,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0089,
+          "total_restore_sec": 0.2843,
+          "iteration": 8
+        },
+        {
+          "t0_fault": 1788772562.0183887,
+          "t1_fenced": 1788772562.2927423,
+          "t2_promoted": 1788772562.2927694,
+          "t3_ingested": 1788772562.3011785,
+          "t4_query_ready": 1788772562.3452883,
+          "fence_sec": 0.2744,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0084,
+          "total_restore_sec": 0.3269,
+          "iteration": 9
+        },
+        {
+          "t0_fault": 1788772565.7617574,
+          "t1_fenced": 1788772566.1570778,
+          "t2_promoted": 1788772566.1571233,
+          "t3_ingested": 1788772566.1686566,
+          "t4_query_ready": 1788772566.1958594,
+          "fence_sec": 0.3953,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0115,
+          "total_restore_sec": 0.4341,
+          "iteration": 10
+        }
+      ]
+    },
+    "part_13_resources": {
+      "containers": {
+        "ha-kafka-a": {
+          "memory_usage_mb": 281.7,
+          "memory_limit_mb": 31861.98
+        },
+        "ha-kafka-b": {
+          "memory_usage_mb": 310.41,
+          "memory_limit_mb": 31861.98
+        },
+        "ha-clickhouse-a": {
+          "memory_usage_mb": 190.15,
+          "memory_limit_mb": 31861.98
+        },
+        "ha-clickhouse-b": {
+          "memory_usage_mb": 268.78,
+          "memory_limit_mb": 31861.98
+        },
+        "ha-postgres-a": {
+          "memory_usage_mb": 60.97,
+          "memory_limit_mb": 31861.98
+        },
+        "ha-postgres-b": {
+          "memory_usage_mb": 61.57,
+          "memory_limit_mb": 31861.98
+        }
+      },
+      "core_a_total_mem_mb": 532.82,
+      "core_b_total_mem_mb": 640.76,
+      "profile_evaluation": "PLAUSIBLE (Comfortably within 8 vCPU / 16 GB Core budget)"
+    }
+  }
+}
