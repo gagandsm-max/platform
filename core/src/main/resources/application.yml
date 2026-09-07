@@ -60,6 +60,8 @@ management:
 platform:
   node-id: ${CORE_NODE_ID:core-node-01}
   version: ${PLATFORM_VERSION:0.1.0-dev}
+  migrations:
+    enabled: ${PLATFORM_MIGRATIONS_ENABLED:true}
   clickhouse:
     host: ${CLICKHOUSE_HOST:clickhouse}
     port: ${CLICKHOUSE_HTTP_PORT:8123}
