@@ -32,6 +32,10 @@ const REFERENCE_KINDS = new Set(['MIB', 'YANG', 'OPENAPI', 'MODEL', 'OTHER']);
 const VALUE_TYPES = new Set(['BOOLEAN', 'INTEGER', 'NUMBER', 'STRING', 'STATE']);
 const TRANSFORM_TYPES = new Set(['IDENTITY', 'SCALE', 'OFFSET']);
 
+const TOP_KEYS = new Set([
+  'schemaVersion', 'packId', 'packVersion', 'name', 'publisher', 'certification', 'metadata',
+  'matchRules', 'capabilities', 'protocols', 'references', 'normalization', 'dependencies', 'provenance',
+]);
 const FORBIDDEN_SECRET_KEYS = new Set([
   'password', 'passwd', 'community', 'secret', 'apitoken', 'accesstoken', 'refreshtoken',
   'bearertoken', 'privatekey', 'clientsecret', 'cookie', 'cookies', 'credentialvalue',
@@ -42,88 +46,64 @@ const FORBIDDEN_EXECUTABLE_KEYS = new Set([
   'python', 'code', 'inlinecode',
 ]);
 
-const TOP_KEYS = new Set([
-  'schemaVersion', 'packId', 'packVersion', 'name', 'publisher', 'certification', 'metadata',
-  'matchRules', 'capabilities', 'protocols', 'references', 'normalization', 'dependencies', 'provenance',
-]);
-
 const PACK_ID_RE = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 const SHORT_ID_RE = /^[a-z][a-z0-9-]*$/;
 const SEMANTIC_KEY_RE = /^[a-z][a-z0-9]*(?:\.[a-z0-9][a-z0-9_-]*)+$/;
 const ENTITY_TYPE_RE = /^[a-z][a-z0-9_.-]*$/;
 const SEMVER_RE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
-function isObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const token = (k) => k.toLowerCase().replace(/[_\-.]/g, '');
+const issue = (issues, code, source, jsonPath, message) => issues.push({ code, source, path: jsonPath, message });
 
-function add(issues, code, source, jsonPath, message) {
-  issues.push({ code, source, path: jsonPath, message });
-}
-
-function keyToken(key) {
-  return key.toLowerCase().replace(/[_\-.]/g, '');
-}
-
-function assertKeys(object, allowed, issues, source, jsonPath) {
-  if (!isObject(object)) return;
+function keys(object, allowed, required, issues, source, jsonPath) {
+  if (!isObject(object)) {
+    issue(issues, 'INVALID_TYPE', source, jsonPath, 'Expected object.');
+    return false;
+  }
   for (const key of Object.keys(object)) {
-    if (!allowed.has(key)) add(issues, 'UNKNOWN_FIELD', source, `${jsonPath}.${key}`, 'Field is not defined by the Device Pack contract.');
+    if (!allowed.has(key)) issue(issues, 'UNKNOWN_FIELD', source, `${jsonPath}.${key}`, 'Field is not defined by the Device Pack contract.');
   }
-}
-
-function requireKeys(object, required, issues, source, jsonPath) {
-  if (!isObject(object)) return;
   for (const key of required) {
-    if (!(key in object)) add(issues, 'MISSING_REQUIRED_FIELD', source, `${jsonPath}.${key}`, 'Required field is missing.');
+    if (!(key in object)) issue(issues, 'MISSING_REQUIRED_FIELD', source, `${jsonPath}.${key}`, 'Required field is missing.');
   }
+  return true;
 }
 
 function stringValue(value, min, max, issues, source, jsonPath) {
   if (typeof value !== 'string') {
-    add(issues, 'INVALID_TYPE', source, jsonPath, 'Expected string.');
+    issue(issues, 'INVALID_TYPE', source, jsonPath, 'Expected string.');
     return false;
   }
   if (value.length < min || value.length > max) {
-    add(issues, 'STRING_BOUNDS', source, jsonPath, `String length must be ${min}-${max}.`);
+    issue(issues, 'STRING_BOUNDS', source, jsonPath, `String length must be ${min}-${max}.`);
     return false;
   }
-  if (/\p{Cc}/u.test(value)) add(issues, 'CONTROL_CHARACTER', source, jsonPath, 'Control characters are not allowed.');
+  if (/\p{Cc}/u.test(value)) issue(issues, 'CONTROL_CHARACTER', source, jsonPath, 'Control characters are prohibited.');
   return true;
 }
 
 function arrayValue(value, min, max, issues, source, jsonPath) {
   if (!Array.isArray(value)) {
-    add(issues, 'INVALID_TYPE', source, jsonPath, 'Expected array.');
+    issue(issues, 'INVALID_TYPE', source, jsonPath, 'Expected array.');
     return false;
   }
-  if (value.length < min || value.length > max) add(issues, 'ARRAY_BOUNDS', source, jsonPath, `Array length must be ${min}-${max}.`);
+  if (value.length < min || value.length > max) issue(issues, 'ARRAY_BOUNDS', source, jsonPath, `Array length must be ${min}-${max}.`);
   return true;
 }
 
 function enumValue(value, allowed, issues, source, jsonPath, code = 'UNKNOWN_ENUM') {
   if (!allowed.has(value)) {
-    add(issues, code, source, jsonPath, `Unsupported value: ${String(value)}.`);
+    issue(issues, code, source, jsonPath, `Unsupported value: ${String(value)}.`);
     return false;
   }
   return true;
 }
 
-function validPackId(value) {
-  return typeof value === 'string' && value.length >= 3 && value.length <= 128 && PACK_ID_RE.test(value);
-}
-
-function validShortId(value) {
-  return typeof value === 'string' && value.length >= 1 && value.length <= 64 && SHORT_ID_RE.test(value);
-}
-
-function validSemver(value) {
-  return typeof value === 'string' && value.length >= 5 && value.length <= 64 && SEMVER_RE.test(value);
-}
-
-function validSemanticKey(value) {
-  return typeof value === 'string' && value.length >= 3 && value.length <= 128 && SEMANTIC_KEY_RE.test(value);
-}
+const validPackId = (v) => typeof v === 'string' && v.length >= 3 && v.length <= 128 && PACK_ID_RE.test(v);
+const validShortId = (v) => typeof v === 'string' && v.length >= 1 && v.length <= 64 && SHORT_ID_RE.test(v);
+const validSemver = (v) => typeof v === 'string' && v.length >= 5 && v.length <= 64 && SEMVER_RE.test(v);
+const validSemanticKey = (v) => typeof v === 'string' && v.length >= 3 && v.length <= 128 && SEMANTIC_KEY_RE.test(v);
 
 function safePackagePath(value) {
   if (typeof value !== 'string' || value.length < 1 || value.length > 240) return false;
@@ -131,326 +111,312 @@ function safePackagePath(value) {
   if (path.posix.isAbsolute(value) || path.win32.isAbsolute(value) || value.includes('\\')) return false;
   if (lowered.includes('%2e') || lowered.includes('%2f') || lowered.includes('%5c')) return false;
   const parts = value.split('/');
-  return !parts.some((part) => part === '..' || part === '.' || part === '');
+  return !parts.some((part) => part === '' || part === '.' || part === '..');
+}
+
+function absoluteFilesystemReference(value) {
+  return typeof value === 'string' && (
+    path.posix.isAbsolute(value) || path.win32.isAbsolute(value) || /^file:/i.test(value)
+  );
 }
 
 function scanForbidden(value, issues, source, jsonPath = '$') {
   if (Array.isArray(value)) {
-    value.forEach((item, index) => scanForbidden(item, issues, source, `${jsonPath}[${index}]`));
+    value.forEach((child, index) => scanForbidden(child, issues, source, `${jsonPath}[${index}]`));
     return;
   }
   if (!isObject(value)) return;
 
   for (const [key, child] of Object.entries(value)) {
-    const token = keyToken(key);
+    const t = token(key);
     const childPath = `${jsonPath}.${key}`;
-    if (FORBIDDEN_SECRET_KEYS.has(token)) add(issues, 'FORBIDDEN_SECRET_FIELD', source, childPath, 'Device Packs must not contain credential secret values or Credential Profile IDs.');
-    if (FORBIDDEN_EXECUTABLE_KEYS.has(token)) add(issues, 'FORBIDDEN_EXECUTABLE_FIELD', source, childPath, 'Executable/script/command content is prohibited.');
-    if (token === 'packagepath' && !safePackagePath(child)) add(issues, 'PATH_TRAVERSAL', source, childPath, 'Package path must be a safe relative POSIX path.');
+    if (FORBIDDEN_SECRET_KEYS.has(t)) issue(issues, 'FORBIDDEN_SECRET_FIELD', source, childPath, 'Credential secret values and Credential Profile IDs are prohibited.');
+    if (FORBIDDEN_EXECUTABLE_KEYS.has(t)) issue(issues, 'FORBIDDEN_EXECUTABLE_FIELD', source, childPath, 'Executable/script/command content is prohibited.');
+    if (t === 'packagepath' && !safePackagePath(child)) issue(issues, 'PATH_TRAVERSAL', source, childPath, 'Package path must be a safe relative POSIX path.');
+    if (t === 'sourcereference' && absoluteFilesystemReference(child)) issue(issues, 'ABSOLUTE_FILESYSTEM_REFERENCE', source, childPath, 'Absolute filesystem references are prohibited.');
 
     if (typeof child === 'string') {
-      if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(child)) add(issues, 'FORBIDDEN_SECRET_VALUE', source, childPath, 'Private-key material is prohibited.');
-      if (/:\/\/[^/\s:@]+:[^/\s@]+@/.test(child)) add(issues, 'EMBEDDED_URL_CREDENTIAL', source, childPath, 'Credentials embedded in URLs are prohibited.');
-      if (/^Bearer\s+\S+/i.test(child) || /[?&](?:token|api[_-]?key|password|secret)=/i.test(child)) add(issues, 'FORBIDDEN_SECRET_VALUE', source, childPath, 'Token/secret material is prohibited.');
+      if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(child)) issue(issues, 'FORBIDDEN_SECRET_VALUE', source, childPath, 'Private-key material is prohibited.');
+      if (/:\/\/[^/\s:@]+:[^/\s@]+@/.test(child)) issue(issues, 'EMBEDDED_URL_CREDENTIAL', source, childPath, 'Credentials embedded in URLs are prohibited.');
+      if (/^Bearer\s+\S+/i.test(child) || /[?&](?:token|api[_-]?key|password|secret)=/i.test(child)) issue(issues, 'FORBIDDEN_SECRET_VALUE', source, childPath, 'Token/secret material is prohibited.');
     }
     scanForbidden(child, issues, source, childPath);
   }
 }
 
-function uniqueValues(items, getValue, code, issues, source, jsonPath) {
+function unique(items, selector, code, issues, source, jsonPath) {
   const seen = new Set();
   items.forEach((item, index) => {
-    const value = getValue(item);
+    const value = selector(item);
     if (typeof value !== 'string' && typeof value !== 'number') return;
-    if (seen.has(value)) add(issues, code, source, `${jsonPath}[${index}]`, `Duplicate value: ${String(value)}.`);
+    if (seen.has(value)) issue(issues, code, source, `${jsonPath}[${index}]`, `Duplicate value: ${String(value)}.`);
     else seen.add(value);
   });
 }
 
-function validatePublisher(publisher, issues, source) {
-  const p = '$.publisher';
-  if (!isObject(publisher)) return add(issues, 'INVALID_TYPE', source, p, 'Expected object.');
-  assertKeys(publisher, new Set(['type', 'name']), issues, source, p);
-  requireKeys(publisher, ['type', 'name'], issues, source, p);
-  if ('type' in publisher) enumValue(publisher.type, PUBLISHER_TYPES, issues, source, `${p}.type`);
-  if ('name' in publisher) stringValue(publisher.name, 1, 160, issues, source, `${p}.name`);
-}
-
-function validateMetadata(metadata, issues, source) {
-  if (metadata === undefined) return;
-  const p = '$.metadata';
-  if (!isObject(metadata)) return add(issues, 'INVALID_TYPE', source, p, 'Expected object.');
-  assertKeys(metadata, new Set(['vendor', 'family', 'product', 'description']), issues, source, p);
-  for (const key of ['vendor', 'family', 'product']) if (key in metadata) stringValue(metadata[key], 1, 160, issues, source, `${p}.${key}`);
-  if ('description' in metadata) stringValue(metadata.description, 1, 512, issues, source, `${p}.description`);
-}
-
-function validateMatchRules(rules, issues, source) {
-  const p = '$.matchRules';
-  if (!arrayValue(rules, 1, 64, issues, source, p)) return;
-  uniqueValues(rules, (r) => r?.ruleId, 'DUPLICATE_MATCH_RULE_ID', issues, source, p);
-  uniqueValues(rules, (r) => r?.priority, 'AMBIGUOUS_MATCH_PRIORITY', issues, source, p);
-  const signatures = new Set();
-
-  rules.forEach((rule, i) => {
-    const rp = `${p}[${i}]`;
-    if (!isObject(rule)) return add(issues, 'INVALID_TYPE', source, rp, 'Expected object.');
-    assertKeys(rule, new Set(['ruleId', 'priority', 'conditions']), issues, source, rp);
-    requireKeys(rule, ['ruleId', 'priority', 'conditions'], issues, source, rp);
-    if ('ruleId' in rule && !validShortId(rule.ruleId)) add(issues, 'INVALID_MATCH_RULE_ID', source, `${rp}.ruleId`, 'Invalid match rule ID.');
-    if ('priority' in rule && (!Number.isInteger(rule.priority) || rule.priority < 0 || rule.priority > 1000)) add(issues, 'INVALID_MATCH_PRIORITY', source, `${rp}.priority`, 'Priority must be an integer from 0 to 1000.');
-    if (!arrayValue(rule.conditions, 1, 16, issues, source, `${rp}.conditions`)) return;
-
-    const seenFields = new Set();
-    rule.conditions.forEach((condition, j) => {
-      const cp = `${rp}.conditions[${j}]`;
-      if (!isObject(condition)) return add(issues, 'INVALID_TYPE', source, cp, 'Expected object.');
-      assertKeys(condition, new Set(['field', 'operator', 'value', 'caseSensitive']), issues, source, cp);
-      requireKeys(condition, ['field', 'operator', 'value', 'caseSensitive'], issues, source, cp);
-      if ('field' in condition) {
-        enumValue(condition.field, MATCH_FIELDS, issues, source, `${cp}.field`, 'UNKNOWN_MATCH_FIELD');
-        if (seenFields.has(condition.field)) add(issues, 'DUPLICATE_MATCH_FIELD', source, `${cp}.field`, 'A rule may declare a selector field only once.');
-        seenFields.add(condition.field);
-      }
-      if ('operator' in condition) enumValue(condition.operator, MATCH_OPERATORS, issues, source, `${cp}.operator`, 'UNKNOWN_MATCH_OPERATOR');
-      if ('value' in condition && stringValue(condition.value, 1, 160, issues, source, `${cp}.value`)) {
-        if (condition.operator === 'EXACT' && /[*?]/.test(condition.value)) add(issues, 'EXACT_MATCH_HAS_WILDCARD', source, `${cp}.value`, 'EXACT values must be literal.');
-        if (condition.operator === 'GLOB') {
-          if (/[\[\]{}()|^$\\]/.test(condition.value) || condition.value.includes('**')) add(issues, 'UNSAFE_GLOB', source, `${cp}.value`, 'GLOB supports bounded * and ? wildcards only; regex syntax and ** are rejected.');
-        }
-      }
-      if ('caseSensitive' in condition && typeof condition.caseSensitive !== 'boolean') add(issues, 'INVALID_TYPE', source, `${cp}.caseSensitive`, 'Expected boolean.');
-    });
-
-    const signature = canonicalRuleSignature(rule);
-    if (signatures.has(signature)) add(issues, 'DUPLICATE_MATCH_RULE', source, rp, 'Equivalent match rule already exists in this pack.');
-    signatures.add(signature);
-  });
-}
-
-function canonicalRuleSignature(rule) {
+function ruleSignature(rule) {
   if (!isObject(rule) || !Array.isArray(rule.conditions)) return 'invalid';
   const parts = rule.conditions.map((c) => `${c?.field}|${c?.operator}|${c?.caseSensitive}|${c?.value}`).sort();
   return `${rule.priority}|${parts.join('::')}`;
 }
 
-function validateCapabilities(capabilities, issues, source) {
+function validatePublisher(value, issues, source) {
+  const p = '$.publisher';
+  if (!keys(value, new Set(['type', 'name']), ['type', 'name'], issues, source, p)) return;
+  if ('type' in value) enumValue(value.type, PUBLISHER_TYPES, issues, source, `${p}.type`);
+  if ('name' in value) stringValue(value.name, 1, 160, issues, source, `${p}.name`);
+}
+
+function validateMetadata(value, issues, source) {
+  if (value === undefined) return;
+  const p = '$.metadata';
+  if (!keys(value, new Set(['vendor', 'family', 'product', 'description']), [], issues, source, p)) return;
+  for (const key of ['vendor', 'family', 'product']) if (key in value) stringValue(value[key], 1, 160, issues, source, `${p}.${key}`);
+  if ('description' in value) stringValue(value.description, 1, 512, issues, source, `${p}.description`);
+}
+
+function validateMatchRules(value, issues, source) {
+  const p = '$.matchRules';
+  if (!arrayValue(value, 1, 64, issues, source, p)) return;
+  unique(value, (r) => r?.ruleId, 'DUPLICATE_MATCH_RULE_ID', issues, source, p);
+  unique(value, (r) => r?.priority, 'AMBIGUOUS_MATCH_PRIORITY', issues, source, p);
+  const signatures = new Set();
+
+  value.forEach((rule, i) => {
+    const rp = `${p}[${i}]`;
+    if (!keys(rule, new Set(['ruleId', 'priority', 'conditions']), ['ruleId', 'priority', 'conditions'], issues, source, rp)) return;
+    if ('ruleId' in rule && !validShortId(rule.ruleId)) issue(issues, 'INVALID_MATCH_RULE_ID', source, `${rp}.ruleId`, 'Invalid match rule ID.');
+    if ('priority' in rule && (!Number.isInteger(rule.priority) || rule.priority < 0 || rule.priority > 1000)) issue(issues, 'INVALID_MATCH_PRIORITY', source, `${rp}.priority`, 'Priority must be an integer from 0 to 1000.');
+    if (!arrayValue(rule.conditions, 1, 16, issues, source, `${rp}.conditions`)) return;
+
+    const seenFields = new Set();
+    rule.conditions.forEach((condition, j) => {
+      const cp = `${rp}.conditions[${j}]`;
+      if (!keys(condition, new Set(['field', 'operator', 'value', 'caseSensitive']), ['field', 'operator', 'value', 'caseSensitive'], issues, source, cp)) return;
+      if ('field' in condition) {
+        enumValue(condition.field, MATCH_FIELDS, issues, source, `${cp}.field`, 'UNKNOWN_MATCH_FIELD');
+        if (seenFields.has(condition.field)) issue(issues, 'DUPLICATE_MATCH_FIELD', source, `${cp}.field`, 'A match rule may declare a selector field only once.');
+        seenFields.add(condition.field);
+      }
+      if ('operator' in condition) enumValue(condition.operator, MATCH_OPERATORS, issues, source, `${cp}.operator`, 'UNKNOWN_MATCH_OPERATOR');
+      if ('value' in condition && stringValue(condition.value, 1, 160, issues, source, `${cp}.value`)) {
+        if (condition.operator === 'EXACT' && /[*?]/.test(condition.value)) issue(issues, 'EXACT_MATCH_HAS_WILDCARD', source, `${cp}.value`, 'EXACT values must be literal.');
+        if (condition.operator === 'GLOB' && (/[\[\]{}()|^$\\]/.test(condition.value) || condition.value.includes('**'))) issue(issues, 'UNSAFE_GLOB', source, `${cp}.value`, 'GLOB supports only bounded * and ? wildcards; regex syntax and ** are rejected.');
+      }
+      if ('caseSensitive' in condition && typeof condition.caseSensitive !== 'boolean') issue(issues, 'INVALID_TYPE', source, `${cp}.caseSensitive`, 'Expected boolean.');
+    });
+
+    const signature = ruleSignature(rule);
+    if (signatures.has(signature)) issue(issues, 'DUPLICATE_MATCH_RULE', source, rp, 'Equivalent match rule already exists in this pack.');
+    signatures.add(signature);
+  });
+}
+
+function validateCapabilities(value, issues, source) {
   const p = '$.capabilities';
-  if (!arrayValue(capabilities, 0, 128, issues, source, p)) return;
-  uniqueValues(capabilities, (c) => c?.id, 'DUPLICATE_CAPABILITY', issues, source, p);
-  capabilities.forEach((capability, i) => {
+  if (!arrayValue(value, 0, 128, issues, source, p)) return;
+  unique(value, (c) => c?.id, 'DUPLICATE_CAPABILITY', issues, source, p);
+  value.forEach((capability, i) => {
     const cp = `${p}[${i}]`;
-    if (!isObject(capability)) return add(issues, 'INVALID_TYPE', source, cp, 'Expected object.');
-    assertKeys(capability, new Set(['id', 'description', 'requiresProtocols']), issues, source, cp);
-    requireKeys(capability, ['id'], issues, source, cp);
-    if ('id' in capability && !validSemanticKey(capability.id)) add(issues, 'INVALID_CAPABILITY_ID', source, `${cp}.id`, 'Capability ID must use canonical dotted lower-case form.');
+    if (!keys(capability, new Set(['id', 'description', 'requiresProtocols']), ['id'], issues, source, cp)) return;
+    if ('id' in capability && !validSemanticKey(capability.id)) issue(issues, 'INVALID_CAPABILITY_ID', source, `${cp}.id`, 'Capability ID must use dotted lower-case form.');
     if ('description' in capability) stringValue(capability.description, 1, 512, issues, source, `${cp}.description`);
     if ('requiresProtocols' in capability && arrayValue(capability.requiresProtocols, 0, 16, issues, source, `${cp}.requiresProtocols`)) {
-      uniqueValues(capability.requiresProtocols, (v) => v, 'DUPLICATE_PROTOCOL_REFERENCE', issues, source, `${cp}.requiresProtocols`);
+      unique(capability.requiresProtocols, (v) => v, 'DUPLICATE_PROTOCOL_REFERENCE', issues, source, `${cp}.requiresProtocols`);
       capability.requiresProtocols.forEach((family, j) => enumValue(family, PROTOCOLS, issues, source, `${cp}.requiresProtocols[${j}]`, 'UNKNOWN_PROTOCOL'));
     }
   });
 }
 
-function validateProtocols(protocols, issues, source) {
+function validateProtocols(value, issues, source) {
   const p = '$.protocols';
-  if (!arrayValue(protocols, 0, 32, issues, source, p)) return;
-  uniqueValues(protocols, (v) => v?.family, 'DUPLICATE_PROTOCOL', issues, source, p);
+  if (!arrayValue(value, 0, 32, issues, source, p)) return;
+  unique(value, (v) => v?.family, 'DUPLICATE_PROTOCOL', issues, source, p);
 
-  protocols.forEach((protocol, i) => {
+  value.forEach((protocol, i) => {
     const pp = `${p}[${i}]`;
-    if (!isObject(protocol)) return add(issues, 'INVALID_TYPE', source, pp, 'Expected object.');
-    assertKeys(protocol, new Set(['family', 'requirement', 'legacy', 'suggestedPort', 'transportModes', 'securityModes', 'credentialProfileType', 'prerequisiteCapabilities']), issues, source, pp);
-    requireKeys(protocol, ['family', 'requirement', 'legacy'], issues, source, pp);
+    const allowed = new Set(['family', 'requirement', 'legacy', 'suggestedPort', 'transportModes', 'securityModes', 'credentialProfileType', 'prerequisiteCapabilities']);
+    if (!keys(protocol, allowed, ['family', 'requirement', 'legacy'], issues, source, pp)) return;
     if ('family' in protocol) enumValue(protocol.family, PROTOCOLS, issues, source, `${pp}.family`, 'UNKNOWN_PROTOCOL');
-    if ('requirement' in protocol && !new Set(['REQUIRED', 'OPTIONAL']).has(protocol.requirement)) add(issues, 'UNKNOWN_REQUIREMENT', source, `${pp}.requirement`, 'Protocol requirement must be REQUIRED or OPTIONAL.');
-    if ('legacy' in protocol && typeof protocol.legacy !== 'boolean') add(issues, 'INVALID_TYPE', source, `${pp}.legacy`, 'Expected boolean.');
+    if ('requirement' in protocol && !new Set(['REQUIRED', 'OPTIONAL']).has(protocol.requirement)) issue(issues, 'UNKNOWN_REQUIREMENT', source, `${pp}.requirement`, 'Protocol requirement must be REQUIRED or OPTIONAL.');
+    if ('legacy' in protocol && typeof protocol.legacy !== 'boolean') issue(issues, 'INVALID_TYPE', source, `${pp}.legacy`, 'Expected boolean.');
     if (LEGACY_PROTOCOLS.has(protocol.family)) {
-      if (protocol.legacy !== true) add(issues, 'LEGACY_PROTOCOL_NOT_FLAGGED', source, `${pp}.legacy`, `${protocol.family} must be explicitly marked legacy.`);
-      if (protocol.requirement === 'REQUIRED') add(issues, 'LEGACY_PROTOCOL_CANNOT_BE_REQUIRED', source, `${pp}.requirement`, `${protocol.family} cannot be required by a pack; Platform policy controls explicit legacy enablement.`);
+      if (protocol.legacy !== true) issue(issues, 'LEGACY_PROTOCOL_NOT_FLAGGED', source, `${pp}.legacy`, `${protocol.family} must be explicitly marked legacy.`);
+      if (protocol.requirement === 'REQUIRED') issue(issues, 'LEGACY_PROTOCOL_CANNOT_BE_REQUIRED', source, `${pp}.requirement`, `${protocol.family} cannot be required by a Device Pack.`);
     }
-    if ('suggestedPort' in protocol && (!Number.isInteger(protocol.suggestedPort) || protocol.suggestedPort < 1 || protocol.suggestedPort > 65535)) add(issues, 'INVALID_PORT', source, `${pp}.suggestedPort`, 'Suggested port must be 1-65535.');
+    if ('suggestedPort' in protocol && (!Number.isInteger(protocol.suggestedPort) || protocol.suggestedPort < 1 || protocol.suggestedPort > 65535)) issue(issues, 'INVALID_PORT', source, `${pp}.suggestedPort`, 'Suggested port must be 1-65535.');
     if ('transportModes' in protocol && arrayValue(protocol.transportModes, 0, 8, issues, source, `${pp}.transportModes`)) {
-      uniqueValues(protocol.transportModes, (v) => v, 'DUPLICATE_TRANSPORT_MODE', issues, source, `${pp}.transportModes`);
-      protocol.transportModes.forEach((mode, j) => enumValue(mode, TRANSPORT_MODES, issues, source, `${pp}.transportModes[${j}]`, 'UNKNOWN_TRANSPORT_MODE'));
+      unique(protocol.transportModes, (v) => v, 'DUPLICATE_TRANSPORT_MODE', issues, source, `${pp}.transportModes`);
+      protocol.transportModes.forEach((v, j) => enumValue(v, TRANSPORT_MODES, issues, source, `${pp}.transportModes[${j}]`, 'UNKNOWN_TRANSPORT_MODE'));
     }
     if ('securityModes' in protocol && arrayValue(protocol.securityModes, 0, 12, issues, source, `${pp}.securityModes`)) {
-      uniqueValues(protocol.securityModes, (v) => v, 'DUPLICATE_SECURITY_MODE', issues, source, `${pp}.securityModes`);
-      protocol.securityModes.forEach((mode, j) => enumValue(mode, SECURITY_MODES, issues, source, `${pp}.securityModes[${j}]`, 'UNKNOWN_SECURITY_MODE'));
+      unique(protocol.securityModes, (v) => v, 'DUPLICATE_SECURITY_MODE', issues, source, `${pp}.securityModes`);
+      protocol.securityModes.forEach((v, j) => enumValue(v, SECURITY_MODES, issues, source, `${pp}.securityModes[${j}]`, 'UNKNOWN_SECURITY_MODE'));
     }
     if ('credentialProfileType' in protocol) enumValue(protocol.credentialProfileType, CREDENTIAL_TYPES, issues, source, `${pp}.credentialProfileType`, 'UNKNOWN_CREDENTIAL_PROFILE_TYPE');
     if ('prerequisiteCapabilities' in protocol && arrayValue(protocol.prerequisiteCapabilities, 0, 16, issues, source, `${pp}.prerequisiteCapabilities`)) {
-      uniqueValues(protocol.prerequisiteCapabilities, (v) => v, 'DUPLICATE_CAPABILITY_REFERENCE', issues, source, `${pp}.prerequisiteCapabilities`);
+      unique(protocol.prerequisiteCapabilities, (v) => v, 'DUPLICATE_CAPABILITY_REFERENCE', issues, source, `${pp}.prerequisiteCapabilities`);
       protocol.prerequisiteCapabilities.forEach((id, j) => {
-        if (!validSemanticKey(id)) add(issues, 'INVALID_CAPABILITY_ID', source, `${pp}.prerequisiteCapabilities[${j}]`, 'Invalid capability reference.');
+        if (!validSemanticKey(id)) issue(issues, 'INVALID_CAPABILITY_ID', source, `${pp}.prerequisiteCapabilities[${j}]`, 'Invalid capability reference.');
       });
     }
   });
 }
 
-function validateReferences(references, issues, source) {
+function validateReferences(value, issues, source) {
   const p = '$.references';
-  if (!arrayValue(references, 0, 256, issues, source, p)) return;
-  uniqueValues(references, (r) => r?.id, 'DUPLICATE_REFERENCE', issues, source, p);
-  references.forEach((reference, i) => {
+  if (!arrayValue(value, 0, 256, issues, source, p)) return;
+  unique(value, (r) => r?.id, 'DUPLICATE_REFERENCE', issues, source, p);
+  value.forEach((reference, i) => {
     const rp = `${p}[${i}]`;
-    if (!isObject(reference)) return add(issues, 'INVALID_TYPE', source, rp, 'Expected object.');
-    assertKeys(reference, new Set(['id', 'kind', 'version', 'packagePath', 'sourceReference', 'provenanceId']), issues, source, rp);
-    requireKeys(reference, ['id', 'kind', 'provenanceId'], issues, source, rp);
-    if ('id' in reference && !validShortId(reference.id)) add(issues, 'INVALID_REFERENCE_ID', source, `${rp}.id`, 'Invalid reference ID.');
+    const allowed = new Set(['id', 'kind', 'version', 'packagePath', 'sourceReference', 'provenanceId']);
+    if (!keys(reference, allowed, ['id', 'kind', 'provenanceId'], issues, source, rp)) return;
+    if ('id' in reference && !validShortId(reference.id)) issue(issues, 'INVALID_REFERENCE_ID', source, `${rp}.id`, 'Invalid reference ID.');
     if ('kind' in reference) enumValue(reference.kind, REFERENCE_KINDS, issues, source, `${rp}.kind`, 'UNKNOWN_REFERENCE_KIND');
     if ('version' in reference) stringValue(reference.version, 1, 80, issues, source, `${rp}.version`);
-    if ('packagePath' in reference && !safePackagePath(reference.packagePath)) add(issues, 'PATH_TRAVERSAL', source, `${rp}.packagePath`, 'Package path must be safe and relative.');
-    if ('sourceReference' in reference) stringValue(reference.sourceReference, 1, 512, issues, source, `${rp}.sourceReference`);
-    if ('provenanceId' in reference && !validShortId(reference.provenanceId)) add(issues, 'INVALID_PROVENANCE_ID', source, `${rp}.provenanceId`, 'Invalid provenance reference.');
-    if (!('packagePath' in reference) && !('sourceReference' in reference)) add(issues, 'REFERENCE_LOCATION_REQUIRED', source, rp, 'Reference requires packagePath or sourceReference metadata.');
+    if ('packagePath' in reference && !safePackagePath(reference.packagePath)) issue(issues, 'PATH_TRAVERSAL', source, `${rp}.packagePath`, 'Package path must be safe and relative.');
+    if ('sourceReference' in reference) {
+      stringValue(reference.sourceReference, 1, 512, issues, source, `${rp}.sourceReference`);
+      if (absoluteFilesystemReference(reference.sourceReference)) issue(issues, 'ABSOLUTE_FILESYSTEM_REFERENCE', source, `${rp}.sourceReference`, 'Absolute filesystem references are prohibited.');
+    }
+    if ('provenanceId' in reference && !validShortId(reference.provenanceId)) issue(issues, 'INVALID_PROVENANCE_ID', source, `${rp}.provenanceId`, 'Invalid provenance reference.');
+    if (!('packagePath' in reference) && !('sourceReference' in reference)) issue(issues, 'REFERENCE_LOCATION_REQUIRED', source, rp, 'Reference requires packagePath or sourceReference metadata.');
   });
 }
 
-function validateNormalization(normalization, issues, source) {
-  const p = '$.normalization';
-  if (!arrayValue(normalization, 0, 512, issues, source, p)) return;
-  uniqueValues(normalization, (n) => n?.key, 'NORMALIZATION_COLLISION', issues, source, p);
+function validateTransform(value, issues, source, p) {
+  if (!keys(value, new Set(['type', 'factor', 'offset']), ['type'], issues, source, p)) return;
+  if (!('type' in value) || !enumValue(value.type, TRANSFORM_TYPES, issues, source, `${p}.type`, 'UNKNOWN_TRANSFORM')) return;
+  if (value.type === 'IDENTITY' && ('factor' in value || 'offset' in value)) issue(issues, 'INVALID_TRANSFORM_PARAMETERS', source, p, 'IDENTITY accepts no parameters.');
+  if (value.type === 'SCALE') {
+    if (typeof value.factor !== 'number' || !Number.isFinite(value.factor)) issue(issues, 'INVALID_TRANSFORM_PARAMETERS', source, `${p}.factor`, 'SCALE requires a finite factor.');
+    if ('offset' in value) issue(issues, 'INVALID_TRANSFORM_PARAMETERS', source, `${p}.offset`, 'SCALE does not accept offset.');
+  }
+  if (value.type === 'OFFSET') {
+    if (typeof value.offset !== 'number' || !Number.isFinite(value.offset)) issue(issues, 'INVALID_TRANSFORM_PARAMETERS', source, `${p}.offset`, 'OFFSET requires a finite offset.');
+    if ('factor' in value) issue(issues, 'INVALID_TRANSFORM_PARAMETERS', source, `${p}.factor`, 'OFFSET does not accept factor.');
+  }
+}
 
-  normalization.forEach((mapping, i) => {
+function validateNormalization(value, issues, source) {
+  const p = '$.normalization';
+  if (!arrayValue(value, 0, 512, issues, source, p)) return;
+  unique(value, (n) => n?.key, 'NORMALIZATION_COLLISION', issues, source, p);
+  value.forEach((mapping, i) => {
     const mp = `${p}[${i}]`;
-    if (!isObject(mapping)) return add(issues, 'INVALID_TYPE', source, mp, 'Expected object.');
-    assertKeys(mapping, new Set(['key', 'source', 'valueType', 'unit', 'target', 'qualityFallback', 'provenanceId', 'transform']), issues, source, mp);
-    requireKeys(mapping, ['key', 'source', 'valueType', 'target', 'qualityFallback', 'provenanceId'], issues, source, mp);
-    if ('key' in mapping && !validSemanticKey(mapping.key)) add(issues, 'INVALID_NORMALIZATION_KEY', source, `${mp}.key`, 'Normalization key must use canonical dotted lower-case form.');
+    const allowed = new Set(['key', 'source', 'valueType', 'unit', 'target', 'qualityFallback', 'provenanceId', 'transform']);
+    if (!keys(mapping, allowed, ['key', 'source', 'valueType', 'target', 'qualityFallback', 'provenanceId'], issues, source, mp)) return;
+    if ('key' in mapping && !validSemanticKey(mapping.key)) issue(issues, 'INVALID_NORMALIZATION_KEY', source, `${mp}.key`, 'Normalization key must use dotted lower-case form.');
     if ('valueType' in mapping) enumValue(mapping.valueType, VALUE_TYPES, issues, source, `${mp}.valueType`, 'UNKNOWN_VALUE_TYPE');
     if ('unit' in mapping) stringValue(mapping.unit, 1, 32, issues, source, `${mp}.unit`);
-    if ('qualityFallback' in mapping && mapping.qualityFallback !== 'UNKNOWN') add(issues, 'UNSAFE_QUALITY_FALLBACK', source, `${mp}.qualityFallback`, 'Pack fallback quality may only be UNKNOWN; packs must not fabricate GOOD health.');
-    if ('provenanceId' in mapping && !validShortId(mapping.provenanceId)) add(issues, 'INVALID_PROVENANCE_ID', source, `${mp}.provenanceId`, 'Invalid provenance reference.');
+    if ('qualityFallback' in mapping && mapping.qualityFallback !== 'UNKNOWN') issue(issues, 'UNSAFE_QUALITY_FALLBACK', source, `${mp}.qualityFallback`, 'Fallback quality may only be UNKNOWN; packs must not fabricate healthy data.');
+    if ('provenanceId' in mapping && !validShortId(mapping.provenanceId)) issue(issues, 'INVALID_PROVENANCE_ID', source, `${mp}.provenanceId`, 'Invalid provenance reference.');
 
     if ('source' in mapping) {
       const sp = `${mp}.source`;
-      if (!isObject(mapping.source)) add(issues, 'INVALID_TYPE', source, sp, 'Expected object.');
-      else {
-        assertKeys(mapping.source, new Set(['protocol', 'field', 'referenceId']), issues, source, sp);
-        requireKeys(mapping.source, ['protocol', 'field'], issues, source, sp);
+      if (keys(mapping.source, new Set(['protocol', 'field', 'referenceId']), ['protocol', 'field'], issues, source, sp)) {
         if ('protocol' in mapping.source) enumValue(mapping.source.protocol, PROTOCOLS, issues, source, `${sp}.protocol`, 'UNKNOWN_PROTOCOL');
         if ('field' in mapping.source) stringValue(mapping.source.field, 1, 256, issues, source, `${sp}.field`);
-        if ('referenceId' in mapping.source && !validShortId(mapping.source.referenceId)) add(issues, 'INVALID_REFERENCE_ID', source, `${sp}.referenceId`, 'Invalid reference ID.');
+        if ('referenceId' in mapping.source && !validShortId(mapping.source.referenceId)) issue(issues, 'INVALID_REFERENCE_ID', source, `${sp}.referenceId`, 'Invalid reference ID.');
       }
     }
 
     if ('target' in mapping) {
       const tp = `${mp}.target`;
-      if (!isObject(mapping.target)) add(issues, 'INVALID_TYPE', source, tp, 'Expected object.');
-      else {
-        assertKeys(mapping.target, new Set(['entityType', 'component']), issues, source, tp);
-        requireKeys(mapping.target, ['entityType'], issues, source, tp);
-        if ('entityType' in mapping.target && (!stringValue(mapping.target.entityType, 1, 80, issues, source, `${tp}.entityType`) || !ENTITY_TYPE_RE.test(mapping.target.entityType))) add(issues, 'INVALID_ENTITY_TYPE', source, `${tp}.entityType`, 'Invalid entity type identifier.');
+      if (keys(mapping.target, new Set(['entityType', 'component']), ['entityType'], issues, source, tp)) {
+        if ('entityType' in mapping.target) {
+          const okay = stringValue(mapping.target.entityType, 1, 80, issues, source, `${tp}.entityType`);
+          if (okay && !ENTITY_TYPE_RE.test(mapping.target.entityType)) issue(issues, 'INVALID_ENTITY_TYPE', source, `${tp}.entityType`, 'Invalid entity type identifier.');
+        }
         if ('component' in mapping.target) stringValue(mapping.target.component, 1, 160, issues, source, `${tp}.component`);
       }
     }
-
     if ('transform' in mapping) validateTransform(mapping.transform, issues, source, `${mp}.transform`);
   });
 }
 
-function validateTransform(transform, issues, source, p) {
-  if (!isObject(transform)) return add(issues, 'INVALID_TYPE', source, p, 'Expected object.');
-  assertKeys(transform, new Set(['type', 'factor', 'offset']), issues, source, p);
-  requireKeys(transform, ['type'], issues, source, p);
-  if (!('type' in transform) || !enumValue(transform.type, TRANSFORM_TYPES, issues, source, `${p}.type`, 'UNKNOWN_TRANSFORM')) return;
-  if (transform.type === 'IDENTITY' && ('factor' in transform || 'offset' in transform)) add(issues, 'INVALID_TRANSFORM_PARAMETERS', source, p, 'IDENTITY takes no parameters.');
-  if (transform.type === 'SCALE') {
-    if (typeof transform.factor !== 'number' || !Number.isFinite(transform.factor)) add(issues, 'INVALID_TRANSFORM_PARAMETERS', source, `${p}.factor`, 'SCALE requires a finite factor.');
-    if ('offset' in transform) add(issues, 'INVALID_TRANSFORM_PARAMETERS', source, `${p}.offset`, 'SCALE does not accept offset.');
-  }
-  if (transform.type === 'OFFSET') {
-    if (typeof transform.offset !== 'number' || !Number.isFinite(transform.offset)) add(issues, 'INVALID_TRANSFORM_PARAMETERS', source, `${p}.offset`, 'OFFSET requires a finite offset.');
-    if ('factor' in transform) add(issues, 'INVALID_TRANSFORM_PARAMETERS', source, `${p}.factor`, 'OFFSET does not accept factor.');
-  }
-}
-
-function validateDependencies(dependencies, issues, source) {
+function validateDependencies(value, issues, source) {
   const p = '$.dependencies';
-  if (!arrayValue(dependencies, 0, 64, issues, source, p)) return;
+  if (!arrayValue(value, 0, 64, issues, source, p)) return;
   const seen = new Set();
-  dependencies.forEach((dependency, i) => {
+  value.forEach((dependency, i) => {
     const dp = `${p}[${i}]`;
-    if (!isObject(dependency)) return add(issues, 'INVALID_TYPE', source, dp, 'Expected object.');
-    assertKeys(dependency, new Set(['packId', 'packVersion', 'optional']), issues, source, dp);
-    requireKeys(dependency, ['packId', 'packVersion', 'optional'], issues, source, dp);
-    if ('packId' in dependency && !validPackId(dependency.packId)) add(issues, 'INVALID_PACK_ID', source, `${dp}.packId`, 'Invalid dependency packId.');
-    if ('packVersion' in dependency && !validSemver(dependency.packVersion)) add(issues, 'MALFORMED_VERSION', source, `${dp}.packVersion`, 'Dependency packVersion must use SemVer shape.');
-    if ('optional' in dependency && typeof dependency.optional !== 'boolean') add(issues, 'INVALID_TYPE', source, `${dp}.optional`, 'Expected boolean.');
+    if (!keys(dependency, new Set(['packId', 'packVersion']), ['packId', 'packVersion'], issues, source, dp)) return;
+    if ('packId' in dependency && !validPackId(dependency.packId)) issue(issues, 'INVALID_PACK_ID', source, `${dp}.packId`, 'Invalid dependency packId.');
+    if ('packVersion' in dependency && !validSemver(dependency.packVersion)) issue(issues, 'MALFORMED_VERSION', source, `${dp}.packVersion`, 'Dependency version must use SemVer shape.');
     const identity = `${dependency.packId}@${dependency.packVersion}`;
-    if (seen.has(identity)) add(issues, 'DUPLICATE_DEPENDENCY', source, dp, `Duplicate dependency ${identity}.`);
+    if (seen.has(identity)) issue(issues, 'DUPLICATE_DEPENDENCY', source, dp, `Duplicate dependency ${identity}.`);
     seen.add(identity);
   });
 }
 
-function validateProvenance(provenance, issues, source) {
+function validateProvenance(value, issues, source) {
   const p = '$.provenance';
-  if (!arrayValue(provenance, 1, 128, issues, source, p)) return;
-  uniqueValues(provenance, (v) => v?.id, 'DUPLICATE_PROVENANCE', issues, source, p);
-  provenance.forEach((entry, i) => {
+  if (!arrayValue(value, 1, 128, issues, source, p)) return;
+  unique(value, (v) => v?.id, 'DUPLICATE_PROVENANCE', issues, source, p);
+  value.forEach((entry, i) => {
     const ep = `${p}[${i}]`;
-    if (!isObject(entry)) return add(issues, 'INVALID_TYPE', source, ep, 'Expected object.');
-    assertKeys(entry, new Set(['id', 'sourceType', 'sourceReference', 'license', 'redistribution']), issues, source, ep);
-    requireKeys(entry, ['id', 'sourceType', 'sourceReference', 'redistribution'], issues, source, ep);
-    if ('id' in entry && !validShortId(entry.id)) add(issues, 'INVALID_PROVENANCE_ID', source, `${ep}.id`, 'Invalid provenance ID.');
+    const allowed = new Set(['id', 'sourceType', 'sourceReference', 'license', 'redistribution']);
+    if (!keys(entry, allowed, ['id', 'sourceType', 'sourceReference', 'redistribution'], issues, source, ep)) return;
+    if ('id' in entry && !validShortId(entry.id)) issue(issues, 'INVALID_PROVENANCE_ID', source, `${ep}.id`, 'Invalid provenance ID.');
     if ('sourceType' in entry) enumValue(entry.sourceType, SOURCE_TYPES, issues, source, `${ep}.sourceType`, 'UNKNOWN_SOURCE_TYPE');
-    if ('sourceReference' in entry) stringValue(entry.sourceReference, 1, 512, issues, source, `${ep}.sourceReference`);
+    if ('sourceReference' in entry) {
+      stringValue(entry.sourceReference, 1, 512, issues, source, `${ep}.sourceReference`);
+      if (absoluteFilesystemReference(entry.sourceReference)) issue(issues, 'ABSOLUTE_FILESYSTEM_REFERENCE', source, `${ep}.sourceReference`, 'Absolute filesystem references are prohibited.');
+    }
     if ('license' in entry) stringValue(entry.license, 1, 160, issues, source, `${ep}.license`);
     if ('redistribution' in entry) enumValue(entry.redistribution, REDISTRIBUTION, issues, source, `${ep}.redistribution`, 'UNKNOWN_REDISTRIBUTION');
   });
 }
 
 function validateInternalReferences(manifest, issues, source) {
-  if (!isObject(manifest)) return;
-  const protocols = new Set(Array.isArray(manifest.protocols) ? manifest.protocols.map((p) => p?.family).filter((v) => PROTOCOLS.has(v)) : []);
-  const capabilities = new Set(Array.isArray(manifest.capabilities) ? manifest.capabilities.map((c) => c?.id).filter(validSemanticKey) : []);
-  const references = new Set(Array.isArray(manifest.references) ? manifest.references.map((r) => r?.id).filter(validShortId) : []);
-  const provenance = new Set(Array.isArray(manifest.provenance) ? manifest.provenance.map((v) => v?.id).filter(validShortId) : []);
+  const protocols = new Set(Array.isArray(manifest.protocols) ? manifest.protocols.map((v) => v?.family).filter((v) => PROTOCOLS.has(v)) : []);
+  const capabilities = new Set(Array.isArray(manifest.capabilities) ? manifest.capabilities.map((v) => v?.id).filter((v) => validSemanticKey(v)) : []);
+  const references = new Set(Array.isArray(manifest.references) ? manifest.references.map((v) => v?.id).filter((v) => validShortId(v)) : []);
+  const provenance = new Set(Array.isArray(manifest.provenance) ? manifest.provenance.map((v) => v?.id).filter((v) => validShortId(v)) : []);
 
   if (Array.isArray(manifest.capabilities)) manifest.capabilities.forEach((capability, i) => {
     if (!Array.isArray(capability?.requiresProtocols)) return;
     capability.requiresProtocols.forEach((family, j) => {
-      if (PROTOCOLS.has(family) && !protocols.has(family)) add(issues, 'CAPABILITY_PROTOCOL_NOT_DECLARED', source, `$.capabilities[${i}].requiresProtocols[${j}]`, `Protocol ${family} is not declared by this pack.`);
+      if (PROTOCOLS.has(family) && !protocols.has(family)) issue(issues, 'CAPABILITY_PROTOCOL_NOT_DECLARED', source, `$.capabilities[${i}].requiresProtocols[${j}]`, `Protocol ${family} is not declared.`);
     });
   });
 
   if (Array.isArray(manifest.protocols)) manifest.protocols.forEach((protocol, i) => {
     if (!Array.isArray(protocol?.prerequisiteCapabilities)) return;
     protocol.prerequisiteCapabilities.forEach((id, j) => {
-      if (validSemanticKey(id) && !capabilities.has(id)) add(issues, 'CAPABILITY_REFERENCE_NOT_FOUND', source, `$.protocols[${i}].prerequisiteCapabilities[${j}]`, `Capability ${id} is not declared.`);
+      if (validSemanticKey(id) && !capabilities.has(id)) issue(issues, 'CAPABILITY_REFERENCE_NOT_FOUND', source, `$.protocols[${i}].prerequisiteCapabilities[${j}]`, `Capability ${id} is not declared.`);
     });
   });
 
   if (Array.isArray(manifest.references)) manifest.references.forEach((reference, i) => {
-    if (validShortId(reference?.provenanceId) && !provenance.has(reference.provenanceId)) add(issues, 'PROVENANCE_REFERENCE_NOT_FOUND', source, `$.references[${i}].provenanceId`, `Provenance ${reference.provenanceId} is not declared.`);
+    if (validShortId(reference?.provenanceId) && !provenance.has(reference.provenanceId)) issue(issues, 'PROVENANCE_REFERENCE_NOT_FOUND', source, `$.references[${i}].provenanceId`, `Provenance ${reference.provenanceId} is not declared.`);
   });
 
   if (Array.isArray(manifest.normalization)) manifest.normalization.forEach((mapping, i) => {
-    if (PROTOCOLS.has(mapping?.source?.protocol) && !protocols.has(mapping.source.protocol)) add(issues, 'NORMALIZATION_PROTOCOL_NOT_DECLARED', source, `$.normalization[${i}].source.protocol`, `Protocol ${mapping.source.protocol} is not declared.`);
-    if (validShortId(mapping?.source?.referenceId) && !references.has(mapping.source.referenceId)) add(issues, 'REFERENCE_NOT_FOUND', source, `$.normalization[${i}].source.referenceId`, `Reference ${mapping.source.referenceId} is not declared.`);
-    if (validShortId(mapping?.provenanceId) && !provenance.has(mapping.provenanceId)) add(issues, 'PROVENANCE_REFERENCE_NOT_FOUND', source, `$.normalization[${i}].provenanceId`, `Provenance ${mapping.provenanceId} is not declared.`);
+    if (PROTOCOLS.has(mapping?.source?.protocol) && !protocols.has(mapping.source.protocol)) issue(issues, 'NORMALIZATION_PROTOCOL_NOT_DECLARED', source, `$.normalization[${i}].source.protocol`, `Protocol ${mapping.source.protocol} is not declared.`);
+    if (validShortId(mapping?.source?.referenceId) && !references.has(mapping.source.referenceId)) issue(issues, 'REFERENCE_NOT_FOUND', source, `$.normalization[${i}].source.referenceId`, `Reference ${mapping.source.referenceId} is not declared.`);
+    if (validShortId(mapping?.provenanceId) && !provenance.has(mapping.provenanceId)) issue(issues, 'PROVENANCE_REFERENCE_NOT_FOUND', source, `$.normalization[${i}].provenanceId`, `Provenance ${mapping.provenanceId} is not declared.`);
   });
 }
 
 export function validateManifest(manifest, source = '<memory>') {
   const issues = [];
   if (!isObject(manifest)) {
-    add(issues, 'INVALID_MANIFEST', source, '$', 'Manifest must be a JSON object.');
+    issue(issues, 'INVALID_MANIFEST', source, '$', 'Manifest must be a JSON object.');
     return issues;
   }
 
-  let serialized;
+  let serialized = '';
   try { serialized = JSON.stringify(manifest); } catch { serialized = ''; }
-  if (Buffer.byteLength(serialized, 'utf8') > MAX_MANIFEST_BYTES) add(issues, 'MANIFEST_TOO_LARGE', source, '$', `Manifest exceeds ${MAX_MANIFEST_BYTES} bytes.`);
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_MANIFEST_BYTES) issue(issues, 'MANIFEST_TOO_LARGE', source, '$', `Manifest exceeds ${MAX_MANIFEST_BYTES} bytes.`);
 
   scanForbidden(manifest, issues, source);
-  assertKeys(manifest, TOP_KEYS, issues, source, '$');
-  requireKeys(manifest, ['schemaVersion', 'packId', 'packVersion', 'name', 'publisher', 'certification', 'matchRules', 'capabilities', 'protocols', 'references', 'normalization', 'dependencies', 'provenance'], issues, source, '$');
+  if (!keys(manifest, TOP_KEYS, ['schemaVersion', 'packId', 'packVersion', 'name', 'publisher', 'certification', 'matchRules', 'capabilities', 'protocols', 'references', 'normalization', 'dependencies', 'provenance'], issues, source, '$')) return issues;
 
-  if ('schemaVersion' in manifest && manifest.schemaVersion !== CONTRACT_VERSION) add(issues, 'UNSUPPORTED_SCHEMA_VERSION', source, '$.schemaVersion', `Expected ${CONTRACT_VERSION}.`);
-  if ('packId' in manifest && !validPackId(manifest.packId)) add(issues, 'INVALID_PACK_ID', source, '$.packId', 'packId must be stable lower-case dotted/hyphenated identifier.');
-  if ('packVersion' in manifest && !validSemver(manifest.packVersion)) add(issues, 'MALFORMED_VERSION', source, '$.packVersion', 'packVersion must use SemVer 2.0 shape.');
+  if ('schemaVersion' in manifest && manifest.schemaVersion !== CONTRACT_VERSION) issue(issues, 'UNSUPPORTED_SCHEMA_VERSION', source, '$.schemaVersion', `Expected ${CONTRACT_VERSION}.`);
+  if ('packId' in manifest && !validPackId(manifest.packId)) issue(issues, 'INVALID_PACK_ID', source, '$.packId', 'packId must be stable lower-case dotted/hyphenated identifier.');
+  if ('packVersion' in manifest && !validSemver(manifest.packVersion)) issue(issues, 'MALFORMED_VERSION', source, '$.packVersion', 'packVersion must use SemVer 2.0 shape.');
   if ('name' in manifest) stringValue(manifest.name, 1, 160, issues, source, '$.name');
   if ('publisher' in manifest) validatePublisher(manifest.publisher, issues, source);
   if ('certification' in manifest) enumValue(manifest.certification, CERTIFICATIONS, issues, source, '$.certification', 'UNKNOWN_CERTIFICATION');
@@ -466,50 +432,8 @@ export function validateManifest(manifest, source = '<memory>') {
   return issues;
 }
 
-export function validateManifestSet(entries) {
-  const issues = [];
-  const manifests = entries.map((entry) => ({ manifest: entry.manifest, source: entry.source ?? '<memory>' }));
-  manifests.forEach(({ manifest, source }) => issues.push(...validateManifest(manifest, source)));
-
-  const byId = new Map();
-  for (const entry of manifests) {
-    const { manifest, source } = entry;
-    if (!isObject(manifest) || !validPackId(manifest.packId) || !validSemver(manifest.packVersion)) continue;
-    if (byId.has(manifest.packId)) {
-      add(issues, 'DUPLICATE_PACK_ID', source, '$.packId', `packId ${manifest.packId} is already present in this validation set.`);
-    } else byId.set(manifest.packId, entry);
-  }
-
-  const staticMatch = new Map();
-  for (const { manifest, source } of manifests) {
-    if (!isObject(manifest) || !Array.isArray(manifest.matchRules)) continue;
-    for (const rule of manifest.matchRules) {
-      if (!isObject(rule) || !Number.isInteger(rule.priority) || !Array.isArray(rule.conditions)) continue;
-      const exactCount = rule.conditions.filter((c) => c?.operator === 'EXACT').length;
-      const key = `${rule.priority}|${exactCount}|${rule.conditions.length}|${canonicalRuleSignature(rule)}`;
-      const prior = staticMatch.get(key);
-      if (prior && prior.packId !== manifest.packId) add(issues, 'AMBIGUOUS_MATCH_DEFINITION', source, '$.matchRules', `Equivalent equal-strength match is also declared by ${prior.packId}.`);
-      else staticMatch.set(key, { packId: manifest.packId, source });
-    }
-  }
-
-  for (const { manifest, source } of manifests) {
-    if (!isObject(manifest) || !Array.isArray(manifest.dependencies) || !validPackId(manifest.packId)) continue;
-    for (let i = 0; i < manifest.dependencies.length; i += 1) {
-      const dependency = manifest.dependencies[i];
-      if (!isObject(dependency) || !validPackId(dependency.packId) || !validSemver(dependency.packVersion)) continue;
-      if (dependency.packId === manifest.packId) {
-        add(issues, 'SELF_DEPENDENCY', source, `$.dependencies[${i}]`, 'A pack cannot depend on itself.');
-        continue;
-      }
-      const target = byId.get(dependency.packId);
-      if (!target) add(issues, 'DEPENDENCY_NOT_FOUND', source, `$.dependencies[${i}]`, `Dependency ${dependency.packId}@${dependency.packVersion} is not present.`);
-      else if (target.manifest.packVersion !== dependency.packVersion) add(issues, 'DEPENDENCY_VERSION_MISMATCH', source, `$.dependencies[${i}]`, `Dependency requires ${dependency.packVersion}, validation set contains ${target.manifest.packVersion}.`);
-    }
-  }
-
-  issues.push(...detectDependencyCycles(byId));
-  return stableIssues(issues);
+function stableIssues(issues) {
+  return [...issues].sort((a, b) => `${a.source}|${a.path}|${a.code}`.localeCompare(`${b.source}|${b.path}|${b.code}`));
 }
 
 function detectDependencyCycles(byId) {
@@ -524,7 +448,7 @@ function detectDependencyCycles(byId) {
       const start = stack.indexOf(packId);
       const cycle = [...stack.slice(start), packId];
       const entry = byId.get(packId);
-      add(issues, 'DEPENDENCY_CYCLE', entry?.source ?? '<set>', '$.dependencies', `Dependency cycle: ${cycle.join(' -> ')}.`);
+      issue(issues, 'DEPENDENCY_CYCLE', entry?.source ?? '<set>', '$.dependencies', `Dependency cycle: ${cycle.join(' -> ')}.`);
       return;
     }
     state.set(packId, 1);
@@ -540,8 +464,49 @@ function detectDependencyCycles(byId) {
   return issues;
 }
 
-function stableIssues(issues) {
-  return [...issues].sort((a, b) => `${a.source}|${a.path}|${a.code}`.localeCompare(`${b.source}|${b.path}|${b.code}`));
+export function validateManifestSet(entries) {
+  const issues = [];
+  const manifests = entries.map((entry) => ({ manifest: entry.manifest, source: entry.source ?? '<memory>' }));
+  manifests.forEach(({ manifest, source }) => issues.push(...validateManifest(manifest, source)));
+
+  const byId = new Map();
+  for (const entry of manifests) {
+    const { manifest, source } = entry;
+    if (!isObject(manifest) || !validPackId(manifest.packId) || !validSemver(manifest.packVersion)) continue;
+    if (byId.has(manifest.packId)) issue(issues, 'DUPLICATE_PACK_ID', source, '$.packId', `packId ${manifest.packId} is already present in this validation set.`);
+    else byId.set(manifest.packId, entry);
+  }
+
+  const definitions = new Map();
+  for (const { manifest, source } of manifests) {
+    if (!isObject(manifest) || !Array.isArray(manifest.matchRules)) continue;
+    for (const rule of manifest.matchRules) {
+      if (!isObject(rule) || !Number.isInteger(rule.priority) || !Array.isArray(rule.conditions)) continue;
+      const exactCount = rule.conditions.filter((c) => c?.operator === 'EXACT').length;
+      const key = `${rule.priority}|${exactCount}|${rule.conditions.length}|${ruleSignature(rule)}`;
+      const prior = definitions.get(key);
+      if (prior && prior.packId !== manifest.packId) issue(issues, 'AMBIGUOUS_MATCH_DEFINITION', source, '$.matchRules', `Equivalent equal-strength match is also declared by ${prior.packId}.`);
+      else definitions.set(key, { packId: manifest.packId });
+    }
+  }
+
+  for (const { manifest, source } of manifests) {
+    if (!isObject(manifest) || !Array.isArray(manifest.dependencies) || !validPackId(manifest.packId)) continue;
+    for (let i = 0; i < manifest.dependencies.length; i += 1) {
+      const dependency = manifest.dependencies[i];
+      if (!isObject(dependency) || !validPackId(dependency.packId) || !validSemver(dependency.packVersion)) continue;
+      if (dependency.packId === manifest.packId) {
+        issue(issues, 'SELF_DEPENDENCY', source, `$.dependencies[${i}]`, 'A pack cannot depend on itself.');
+        continue;
+      }
+      const target = byId.get(dependency.packId);
+      if (!target) issue(issues, 'DEPENDENCY_NOT_FOUND', source, `$.dependencies[${i}]`, `Dependency ${dependency.packId}@${dependency.packVersion} is not present.`);
+      else if (target.manifest.packVersion !== dependency.packVersion) issue(issues, 'DEPENDENCY_VERSION_MISMATCH', source, `$.dependencies[${i}]`, `Dependency requires ${dependency.packVersion}, validation set contains ${target.manifest.packVersion}.`);
+    }
+  }
+
+  issues.push(...detectDependencyCycles(byId));
+  return stableIssues(issues);
 }
 
 function parseJsonFile(file) {
@@ -572,17 +537,17 @@ function discoverManifestFiles(inputPath) {
 }
 
 function printIssues(issues) {
-  for (const issue of stableIssues(issues)) console.error(`${issue.code}\t${issue.source}\t${issue.path}\t${issue.message}`);
+  for (const item of stableIssues(issues)) console.error(`${item.code}\t${item.source}\t${item.path}\t${item.message}`);
 }
 
-function validateFiles(paths) {
-  const files = paths.flatMap(discoverManifestFiles);
+function validateFiles(inputs) {
+  const files = inputs.flatMap(discoverManifestFiles);
   if (files.length === 0) throw new Error('No manifest.json files found.');
   const entries = [];
   const parseIssues = [];
   for (const file of files) {
     try { entries.push({ manifest: parseJsonFile(file), source: path.relative(process.cwd(), file) }); }
-    catch (error) { add(parseIssues, 'JSON_PARSE_ERROR', path.relative(process.cwd(), file), '$', error.message); }
+    catch (error) { issue(parseIssues, 'JSON_PARSE_ERROR', path.relative(process.cwd(), file), '$', error.message); }
   }
   const issues = [...parseIssues, ...validateManifestSet(entries)];
   if (issues.length > 0) {
@@ -594,8 +559,7 @@ function validateFiles(paths) {
 }
 
 function runFixtureSuite() {
-  const fixtureFile = path.join(ROOT, 'fixtures', 'cases.json');
-  const suite = parseJsonFile(fixtureFile);
+  const suite = parseJsonFile(path.join(ROOT, 'fixtures', 'cases.json'));
   let failures = 0;
 
   if (Array.isArray(suite.examples)) {
@@ -608,10 +572,10 @@ function runFixtureSuite() {
         failures += 1;
       }
     }
-    const exampleIssues = validateManifestSet(exampleEntries);
-    if (exampleIssues.length > 0) {
+    const issues = validateManifestSet(exampleEntries);
+    if (issues.length > 0) {
       console.error('EXAMPLE VALIDATION FAILURE');
-      printIssues(exampleIssues);
+      printIssues(issues);
       failures += 1;
     }
   }
@@ -624,13 +588,13 @@ function runFixtureSuite() {
     const issues = validateManifestSet(entries);
     const actualValid = issues.length === 0;
     const expectedValid = fixture.valid === true;
-    const codes = new Set(issues.map((issue) => issue.code));
+    const actualCodes = new Set(issues.map((item) => item.code));
     const expectedCodes = Array.isArray(fixture.expectedCodes) ? fixture.expectedCodes : [];
-    const missingCodes = expectedCodes.filter((code) => !codes.has(code));
-    if (actualValid !== expectedValid || missingCodes.length > 0) {
+    const missing = expectedCodes.filter((code) => !actualCodes.has(code));
+    if (actualValid !== expectedValid || missing.length > 0) {
       console.error(`FIXTURE FAILURE: ${fixture.name}`);
       console.error(`  expected valid=${expectedValid}, actual valid=${actualValid}`);
-      if (missingCodes.length > 0) console.error(`  missing expected codes: ${missingCodes.join(', ')}`);
+      if (missing.length > 0) console.error(`  missing expected codes: ${missing.join(', ')}`);
       printIssues(issues);
       failures += 1;
     }

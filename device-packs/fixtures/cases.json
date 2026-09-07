@@ -1,36 +1,19 @@
 {
   "description": "Fictional non-production Device Pack validator fixtures. No real vendor compatibility or credentials.",
-  "examples": [
-    "examples/minimal/manifest.json",
-    "examples/multi-protocol/manifest.json"
-  ],
+  "examples": ["examples/minimal/manifest.json","examples/multi-protocol/manifest.json"],
   "cases": [
     {
-      "name": "valid-optional-legacy-protocol-flagged",
-      "valid": true,
-      "manifests": [{
-        "schemaVersion":"1.0.0","packId":"fixture.fictional.valid-legacy","packVersion":"1.0.0","name":"Fictional Legacy Fixture","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL",
-        "matchRules":[{"ruleId":"r","priority":10,"conditions":[{"field":"product","operator":"EXACT","value":"Fictional Device","caseSensitive":false}]}],
-        "capabilities":[],"protocols":[{"family":"TELNET","requirement":"OPTIONAL","legacy":true,"suggestedPort":23,"transportModes":["TCP"],"credentialProfileType":"SSH"}],"references":[],"normalization":[],"dependencies":[],
-        "provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional-fixture","redistribution":"RESTRICTED"}]
-      }]
+      "name":"valid-optional-legacy-protocol-flagged","valid":true,"manifests":[
+        {"schemaVersion":"1.0.0","packId":"fixture.fictional.valid-legacy","packVersion":"1.0.0","name":"Fictional Legacy Fixture","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"r","priority":10,"conditions":[{"field":"product","operator":"EXACT","value":"Fictional Device","caseSensitive":false}]}],"capabilities":[],"protocols":[{"family":"TELNET","requirement":"OPTIONAL","legacy":true,"suggestedPort":23,"transportModes":["TCP"]}],"references":[],"normalization":[],"dependencies":[],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional-fixture","redistribution":"RESTRICTED"}]}
+      ]
     },
     {
-      "name": "valid-deterministic-multiple-match-rules",
-      "valid": true,
-      "manifests": [{
-        "schemaVersion":"1.0.0","packId":"fixture.fictional.valid-multiple","packVersion":"1.0.0","name":"Fictional Multiple Match Fixture","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL",
-        "matchRules":[
-          {"ruleId":"exact","priority":10,"conditions":[{"field":"vendor","operator":"EXACT","value":"Fictional Labs","caseSensitive":false},{"field":"model","operator":"EXACT","value":"Model A","caseSensitive":false}]},
-          {"ruleId":"fallback","priority":20,"conditions":[{"field":"vendor","operator":"EXACT","value":"Fictional Labs","caseSensitive":false},{"field":"model","operator":"GLOB","value":"Model-*","caseSensitive":false}]}
-        ],
-        "capabilities":[],"protocols":[],"references":[],"normalization":[],"dependencies":[],
-        "provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional-fixture","redistribution":"RESTRICTED"}]
-      }]
+      "name":"valid-deterministic-multiple-match-rules","valid":true,"manifests":[
+        {"schemaVersion":"1.0.0","packId":"fixture.fictional.valid-multiple","packVersion":"1.0.0","name":"Fictional Multiple Match Fixture","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"exact","priority":10,"conditions":[{"field":"vendor","operator":"EXACT","value":"Fictional Labs","caseSensitive":false},{"field":"model","operator":"EXACT","value":"Model A","caseSensitive":false}]},{"ruleId":"fallback","priority":20,"conditions":[{"field":"vendor","operator":"EXACT","value":"Fictional Labs","caseSensitive":false},{"field":"model","operator":"GLOB","value":"Model-*","caseSensitive":false}]}],"capabilities":[],"protocols":[],"references":[],"normalization":[],"dependencies":[],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional-fixture","redistribution":"RESTRICTED"}]}
+      ]
     },
     {
-      "name":"invalid-duplicate-pack-id","valid":false,"expectedCodes":["DUPLICATE_PACK_ID"],
-      "manifests":[
+      "name":"invalid-duplicate-pack-id","valid":false,"expectedCodes":["DUPLICATE_PACK_ID"],"manifests":[
         {"schemaVersion":"1.0.0","packId":"fixture.fictional.duplicate","packVersion":"1.0.0","name":"Duplicate A","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"a","priority":10,"conditions":[{"field":"product","operator":"EXACT","value":"Fictional A","caseSensitive":false}]}],"capabilities":[],"protocols":[],"references":[],"normalization":[],"dependencies":[],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional-a","redistribution":"RESTRICTED"}]},
         {"schemaVersion":"1.0.0","packId":"fixture.fictional.duplicate","packVersion":"1.1.0","name":"Duplicate B","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"b","priority":20,"conditions":[{"field":"product","operator":"EXACT","value":"Fictional B","caseSensitive":false}]}],"capabilities":[],"protocols":[],"references":[],"normalization":[],"dependencies":[],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional-b","redistribution":"RESTRICTED"}]}
       ]
@@ -66,6 +49,11 @@
       ]
     },
     {
+      "name":"invalid-absolute-filesystem-reference","valid":false,"expectedCodes":["ABSOLUTE_FILESYSTEM_REFERENCE"],"manifests":[
+        {"schemaVersion":"1.0.0","packId":"fixture.fictional.absolute-ref","packVersion":"1.0.0","name":"Absolute Reference Fixture","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"r","priority":10,"conditions":[{"field":"product","operator":"EXACT","value":"Fictional","caseSensitive":false}]}],"capabilities":[],"protocols":[],"references":[{"id":"unsafe","kind":"MODEL","sourceReference":"/fictional/absolute/reference","provenanceId":"p"}],"normalization":[],"dependencies":[],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional","redistribution":"RESTRICTED"}]}
+      ]
+    },
+    {
       "name":"invalid-executable-content","valid":false,"expectedCodes":["FORBIDDEN_EXECUTABLE_FIELD"],"manifests":[
         {"schemaVersion":"1.0.0","packId":"fixture.fictional.executable","packVersion":"1.0.0","name":"Executable Fixture","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"r","priority":10,"conditions":[{"field":"product","operator":"EXACT","value":"Fictional","caseSensitive":false}]}],"capabilities":[],"protocols":[],"references":[],"normalization":[],"dependencies":[],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional","redistribution":"RESTRICTED"}],"script":"fictional executable placeholder","command":"fictional command placeholder"}
       ]
@@ -82,13 +70,13 @@
     },
     {
       "name":"invalid-reference-and-dependency","valid":false,"expectedCodes":["REFERENCE_NOT_FOUND","DEPENDENCY_NOT_FOUND"],"manifests":[
-        {"schemaVersion":"1.0.0","packId":"fixture.fictional.missing-refs","packVersion":"1.0.0","name":"Missing References","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"r","priority":10,"conditions":[{"field":"product","operator":"EXACT","value":"Fictional","caseSensitive":false}]}],"capabilities":[],"protocols":[{"family":"REST","requirement":"OPTIONAL","legacy":false}],"references":[],"normalization":[{"key":"device.health_state","source":{"protocol":"REST","field":"fictionalField","referenceId":"missing-ref"},"valueType":"STATE","target":{"entityType":"network_device"},"qualityFallback":"UNKNOWN","provenanceId":"p"}],"dependencies":[{"packId":"fixture.fictional.absent","packVersion":"1.0.0","optional":false}],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional","redistribution":"RESTRICTED"}]}
+        {"schemaVersion":"1.0.0","packId":"fixture.fictional.missing-refs","packVersion":"1.0.0","name":"Missing References","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"r","priority":10,"conditions":[{"field":"product","operator":"EXACT","value":"Fictional","caseSensitive":false}]}],"capabilities":[],"protocols":[{"family":"REST","requirement":"OPTIONAL","legacy":false}],"references":[],"normalization":[{"key":"device.health_state","source":{"protocol":"REST","field":"fictionalField","referenceId":"missing-ref"},"valueType":"STATE","target":{"entityType":"network_device"},"qualityFallback":"UNKNOWN","provenanceId":"p"}],"dependencies":[{"packId":"fixture.fictional.absent","packVersion":"1.0.0"}],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional","redistribution":"RESTRICTED"}]}
       ]
     },
     {
       "name":"invalid-dependency-cycle","valid":false,"expectedCodes":["DEPENDENCY_CYCLE"],"manifests":[
-        {"schemaVersion":"1.0.0","packId":"fixture.fictional.cycle-a","packVersion":"1.0.0","name":"Cycle A","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"a","priority":10,"conditions":[{"field":"product","operator":"EXACT","value":"Cycle A","caseSensitive":false}]}],"capabilities":[],"protocols":[],"references":[],"normalization":[],"dependencies":[{"packId":"fixture.fictional.cycle-b","packVersion":"1.0.0","optional":false}],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional-a","redistribution":"RESTRICTED"}]},
-        {"schemaVersion":"1.0.0","packId":"fixture.fictional.cycle-b","packVersion":"1.0.0","name":"Cycle B","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"b","priority":20,"conditions":[{"field":"product","operator":"EXACT","value":"Cycle B","caseSensitive":false}]}],"capabilities":[],"protocols":[],"references":[],"normalization":[],"dependencies":[{"packId":"fixture.fictional.cycle-a","packVersion":"1.0.0","optional":false}],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional-b","redistribution":"RESTRICTED"}]}
+        {"schemaVersion":"1.0.0","packId":"fixture.fictional.cycle-a","packVersion":"1.0.0","name":"Cycle A","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"a","priority":10,"conditions":[{"field":"product","operator":"EXACT","value":"Cycle A","caseSensitive":false}]}],"capabilities":[],"protocols":[],"references":[],"normalization":[],"dependencies":[{"packId":"fixture.fictional.cycle-b","packVersion":"1.0.0"}],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional-a","redistribution":"RESTRICTED"}]},
+        {"schemaVersion":"1.0.0","packId":"fixture.fictional.cycle-b","packVersion":"1.0.0","name":"Cycle B","publisher":{"type":"CUSTOMER","name":"Fictional Publisher"},"certification":"EXPERIMENTAL","matchRules":[{"ruleId":"b","priority":20,"conditions":[{"field":"product","operator":"EXACT","value":"Cycle B","caseSensitive":false}]}],"capabilities":[],"protocols":[],"references":[],"normalization":[],"dependencies":[{"packId":"fixture.fictional.cycle-a","packVersion":"1.0.0"}],"provenance":[{"id":"p","sourceType":"CUSTOMER_SUPPLIED","sourceReference":"fictional-b","redistribution":"RESTRICTED"}]}
       ]
     },
     {
