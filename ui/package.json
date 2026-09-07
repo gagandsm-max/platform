@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test:unit": "rm -rf .test-dist && tsc src/platform/navigation.ts --rootDir src --outDir .test-dist --target ES2020 --module ES2020 --moduleResolution node --skipLibCheck && node --test tests/navigation.test.mjs; status=$?; rm -rf .test-dist; exit $status",
+    "test:unit": "rm -rf .test-dist && tsc src/platform/navigation.ts src/platform/screen-state.ts src/platform/shell-contract.ts --rootDir src --outDir .test-dist --target ES2020 --module ES2020 --moduleResolution node --skipLibCheck && node --test tests/navigation.test.mjs; status=$?; rm -rf .test-dist; exit $status",
     "preview": "vite preview"
   },
   "dependencies": {

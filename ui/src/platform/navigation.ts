@@ -17,6 +17,8 @@ export type WorkspacePermission =
 
 export type WorkspaceGroup = 'operate' | 'manage' | 'govern';
 
+export const WORKSPACE_GROUPS: readonly WorkspaceGroup[] = ['operate', 'manage', 'govern'] as const;
+
 export interface WorkspaceDefinition {
   id: string;
   label: string;
@@ -174,8 +176,15 @@ export const ALL_WORKSPACE_PERMISSIONS = new Set<WorkspacePermission>(
   WORKSPACES.map((workspace) => workspace.permission),
 );
 
+export const normalizeWorkspacePath = (path: string): string => {
+  const pathOnly = path.split(/[?#]/)[0] || '/';
+  const withLeadingSlash = pathOnly.startsWith('/') ? pathOnly : `/${pathOnly}`;
+  const withoutTrailingSlashes = withLeadingSlash.replace(/\/+$/, '');
+  return withoutTrailingSlashes || '/';
+};
+
 export const findWorkspaceByPath = (path: string): WorkspaceDefinition | undefined => {
-  const normalized = path !== '/' && path.endsWith('/') ? path.slice(0, -1) : path;
+  const normalized = normalizeWorkspacePath(path);
   return WORKSPACES.find((workspace) => workspace.path === normalized);
 };
 
@@ -184,6 +193,37 @@ export const canAccessWorkspace = (
   access: AccessContext,
 ): boolean => access.permissions.has(workspace.permission);
 
+/**
+ * Presentation-only filtering. Server-side tenant/resource authorization remains authoritative.
+ */
 export const visibleWorkspaces = (
   access: AccessContext,
 ): readonly WorkspaceDefinition[] => WORKSPACES.filter((workspace) => canAccessWorkspace(workspace, access));
+
+export const firstAccessibleWorkspace = (access: AccessContext): WorkspaceDefinition | undefined =>
+  visibleWorkspaces(access)[0];
+
+export type WorkspaceRouteResolution =
+  | { kind: 'workspace'; workspace: WorkspaceDefinition }
+  | { kind: 'permission-restricted'; workspace: WorkspaceDefinition }
+  | { kind: 'not-found' };
+
+/**
+ * Resolves browser routes for UI presentation only. A permission-restricted result must never be
+ * treated as an authorization decision; Core APIs remain responsible for authoritative access control.
+ */
+export const resolveWorkspaceRoute = (
+  path: string,
+  access: AccessContext,
+): WorkspaceRouteResolution => {
+  const workspace = findWorkspaceByPath(path);
+  if (!workspace) {
+    return { kind: 'not-found' };
+  }
+
+  if (!canAccessWorkspace(workspace, access)) {
+    return { kind: 'permission-restricted', workspace };
+  }
+
+  return { kind: 'workspace', workspace };
+};

@@ -8,6 +8,8 @@ export type GlobalShellCapabilityId =
   | 'auto-refresh'
   | 'quick-actions'
   | 'notifications'
+  | 'contextual-help'
+  | 'account-menu'
   | 'favorites-recent'
   | 'command-palette'
   | 'theme';
@@ -22,15 +24,15 @@ export interface GlobalShellCapability {
 }
 
 /**
- * Shell capability registry. BACKEND_PENDING controls must remain disabled/non-operational
- * until a real server/session contract exists. This registry does not create backend behavior.
+ * Shell capability registry. BACKEND_PENDING controls remain disabled/non-operational until a real
+ * server/session contract exists. This registry is UI framework metadata, not an authorization or API contract.
  */
 export const GLOBAL_SHELL_CAPABILITIES: readonly GlobalShellCapability[] = [
   {
     id: 'authorized-tenant-selector',
     readiness: 'BACKEND_PENDING',
     serverContractRequired: true,
-    note: 'Only authorized tenant scopes may be supplied by the future session/security bridge.',
+    note: 'Only authorized multi-tenant scopes may be supplied by the future session/security bridge.',
   },
   {
     id: 'global-search',
@@ -81,6 +83,18 @@ export const GLOBAL_SHELL_CAPABILITIES: readonly GlobalShellCapability[] = [
     note: 'Notifications require a real server notification contract.',
   },
   {
+    id: 'contextual-help',
+    readiness: 'BACKEND_PENDING',
+    serverContractRequired: true,
+    note: 'Contextual help requires governed product/help content and context integration.',
+  },
+  {
+    id: 'account-menu',
+    readiness: 'BACKEND_PENDING',
+    serverContractRequired: true,
+    note: 'Account/session actions require the real identity session contract.',
+  },
+  {
     id: 'favorites-recent',
     readiness: 'BACKEND_PENDING',
     serverContractRequired: true,
@@ -90,7 +104,7 @@ export const GLOBAL_SHELL_CAPABILITIES: readonly GlobalShellCapability[] = [
     id: 'command-palette',
     readiness: 'SHELL_READY',
     serverContractRequired: false,
-    note: 'Registered workspace and contextual-screen navigation is available locally.',
+    note: 'Registered accessible workspace navigation is available locally.',
   },
   {
     id: 'theme',

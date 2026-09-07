@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessContext,
   WorkspaceDefinition,
@@ -23,6 +23,15 @@ const GROUP_LABELS: Record<WorkspaceGroup, string> = {
   govern: 'Govern',
 };
 
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
 export const AppShell: React.FC<AppShellProps> = ({
   access,
   activeWorkspace,
@@ -33,26 +42,76 @@ export const AppShell: React.FC<AppShellProps> = ({
 }) => {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const paletteDialogRef = useRef<HTMLElement | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
   const workspaces = useMemo(() => visibleWorkspaces(access), [access]);
+
+  const openPalette = useCallback(() => {
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    setPaletteOpen(true);
+  }, []);
+
+  const closePalette = useCallback(() => {
+    const focusTarget = restoreFocusRef.current;
+    restoreFocusRef.current = null;
+    setPaletteOpen(false);
+    setQuery('');
+    window.requestAnimationFrame(() => focusTarget?.focus());
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setPaletteOpen((open) => !open);
+        if (paletteOpen) {
+          closePalette();
+        } else {
+          openPalette();
+        }
+        return;
       }
-      if (event.key === 'Escape') {
-        setPaletteOpen(false);
+
+      if (event.key === 'Escape' && paletteOpen) {
+        event.preventDefault();
+        closePalette();
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [closePalette, openPalette, paletteOpen]);
 
   const filteredWorkspaces = workspaces.filter((workspace) =>
     workspace.label.toLowerCase().includes(query.trim().toLowerCase()),
   );
+
+  const trapPaletteFocus = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Tab' || !paletteDialogRef.current) {
+      return;
+    }
+
+    const focusable = Array.from(
+      paletteDialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+    );
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (event.shiftKey && (active === first || !paletteDialogRef.current.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
     <div className="app-shell">
@@ -69,8 +128,8 @@ export const AppShell: React.FC<AppShellProps> = ({
         <button
           type="button"
           className="global-search"
-          onClick={() => setPaletteOpen(true)}
-          aria-label="Open workspace navigation"
+          onClick={openPalette}
+          aria-label="Open workspace command palette"
         >
           <span>Navigate workspaces</span>
           <kbd>Ctrl/⌘ K</kbd>
@@ -97,6 +156,15 @@ export const AppShell: React.FC<AppShellProps> = ({
             title="Notifications contract is not wired yet"
           >
             Notifications
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Contextual help not yet connected"
+            disabled
+            title="Governed contextual help content is not wired yet"
+          >
+            Help
           </button>
           <button
             type="button"
@@ -144,23 +212,35 @@ export const AppShell: React.FC<AppShellProps> = ({
       </aside>
 
       <main className="main-content" id="main-content" tabIndex={-1}>
-        <div className="page-toolbar" aria-label="Page context">
-          <div className="breadcrumbs">
+        <div className="page-toolbar">
+          <nav className="breadcrumbs" aria-label="Breadcrumb">
             <span>Platform</span>
             <span aria-hidden="true">/</span>
             <strong>{activeWorkspace.label}</strong>
-          </div>
-          <div className="context-controls">
+          </nav>
+          <div className="context-controls" role="toolbar" aria-label="Global page context controls">
             {access.multiTenant ? (
-              <button type="button" className="context-button" disabled title="Backend tenant context not wired yet">
+              <button type="button" className="context-button" disabled title="Authorized tenant context is not wired yet">
                 Tenant
               </button>
             ) : null}
-            <button type="button" className="context-button" disabled title="Time context contract pending backend integration">
+            <button type="button" className="context-button" disabled title="Time context requires real query integration">
               Time range
             </button>
-            <button type="button" className="context-button" disabled title="Refresh contract pending backend integration">
+            <button type="button" className="context-button" disabled title="Timezone requires real session/query integration">
+              Timezone
+            </button>
+            <button type="button" className="context-button" disabled title="Comparison requires a bounded query contract">
+              Compare
+            </button>
+            <button type="button" className="context-button" disabled title="Refresh requires real query lifecycle integration">
               Auto-refresh
+            </button>
+            <button type="button" className="context-button" disabled title="Favorites and recents require persisted user state">
+              Favorites / Recent
+            </button>
+            <button type="button" className="context-button" disabled title="Quick actions require authoritative server authorization">
+              Quick actions
             </button>
           </div>
         </div>
@@ -168,23 +248,26 @@ export const AppShell: React.FC<AppShellProps> = ({
       </main>
 
       {paletteOpen ? (
-        <div className="command-palette-backdrop" role="presentation" onMouseDown={() => setPaletteOpen(false)}>
+        <div className="command-palette-backdrop" onMouseDown={closePalette}>
           <section
+            ref={paletteDialogRef}
             className="command-palette"
             role="dialog"
             aria-modal="true"
-            aria-label="Command palette"
+            aria-labelledby="command-palette-title"
+            onKeyDown={trapPaletteFocus}
             onMouseDown={(event) => event.stopPropagation()}
           >
+            <h2 id="command-palette-title" className="sr-only">Workspace command palette</h2>
             <div className="command-palette__header">
               <input
                 autoFocus
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Navigate to a workspace"
-                aria-label="Search workspaces"
+                aria-label="Search accessible workspaces"
               />
-              <button type="button" className="palette-close" onClick={() => setPaletteOpen(false)}>
+              <button type="button" className="palette-close" onClick={closePalette}>
                 Close
               </button>
             </div>
@@ -197,8 +280,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                     key={workspace.id}
                     onClick={() => {
                       onNavigate(workspace);
-                      setPaletteOpen(false);
-                      setQuery('');
+                      closePalette();
                     }}
                   >
                     <span className="nav-link__icon" aria-hidden="true">{workspace.shortLabel}</span>
