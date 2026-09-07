@@ -21,20 +21,7 @@ Implement the approved `PRD-OIV-*` / `REQ-OIV-*` capabilities as coherent vertic
 
 ## Cross-cutting acceptance
 
-Every work item must include:
-
-- tenant isolation;
-- RBAC/resource scope;
-- audit/correlation IDs;
-- bounded queues/queries/resource use;
-- failure/partial-data behavior;
-- replay/idempotency where relevant;
-- self-observability;
-- migration/upgrade behavior;
-- security/abuse tests;
-- performance impact;
-- UI error/partial/stale/insufficient-evidence states;
-- documentation/traceability.
+Every work item must include tenant isolation, RBAC/resource scope, audit/correlation IDs, bounded resource use, failure/partial-data behavior, replay/idempotency where relevant, self-observability, migration/upgrade behavior, security/abuse tests, performance impact, UI partial/stale/insufficient-evidence states and documentation/traceability.
 
 ## Required value methodology
 
@@ -44,4 +31,4 @@ MTTR/value features may not publish a claimed improvement unless the UI can show
 
 Before the documentation PR is merged, this workstream is planning only. After merge, implementation may proceed against the formal `PRD-OIV-*` / `REQ-OIV-*` requirements.
 
-The workstream is not complete when feature code exists. Release requires applicable `Platform_19` §12 gates plus existing Mother Reference security, HA, upgrade, packaging, performance and GA evidence requirements.
+Release requires applicable `Platform_19` §12 gates plus existing Mother Reference security, HA, upgrade, packaging, performance and GA evidence requirements.
