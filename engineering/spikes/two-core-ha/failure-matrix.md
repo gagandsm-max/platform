@@ -1,33 +1,38 @@
 # Platform P0 Spike: Two-Core Combined Failure Matrix
 
 **Document ID:** SPIKE-P0-EVIDENCE-002  
-**Baseline SHA:** `8592863e9a30ae80742e4d2da6b3417ae68a3b89`  
+**Evidence SHA (this run):** `2bff6b2091f64e73466e3600abacc5424ce68777`  
 **Mother Reference Version:** `v3.2.1`  
-**Status:** EMPIRICALLY VERIFIED IN TWO-CORE LAB
+**Status:** CORRECTED — evidence classifications only; no PASS without EXECUTED proof
+
+Evidence classes: `EXECUTED` | `MODEL-ONLY` | `ANALYTICALLY REJECTED` | `NOT TESTED` | `PENDING PRODUCTION FENCING`
 
 ---
 
-## Combined Failure Scenarios (12 Cases)
+## Combined Failure Scenarios
 
-| # | Scenario | Active Remains? | Promotion Allowed? | Fencing Required? | Expected Availability | Potential Data Loss | Sensor Spool Role | Operator Intervention | <60s Applicable? | Test Result |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | **Core A App Crash** | NO | YES | YES | Ingest restored on B | ZERO (ACK_ELIGIBLE only after dual-write) | Holds unacked spool until B active | Supervised auto-failover | YES | **PASS** |
-| 2 | **Kafka A Crash** | NO | YES | YES | Promoted to Kafka B | ZERO (Kafka B holds acknowledged batches) | Replays any in-flight unacknowledged batches | None (auto-failover) | YES | **PASS** |
-| 3 | **ClickHouse A Crash** | NO | YES | YES | Ingest & Query restored on B | ZERO (ClickHouse B has duplicate copy) | Retains telemetry if dual-write blocked | None (auto-failover) | YES | **PASS** |
-| 4 | **PostgreSQL A Failure** | NO | YES | YES | Standby PG promoted via Patroni/repmgr | <1 transaction (sync replication) | Spool paused during VIP switch | Supervised or automated | YES | **PASS** |
-| 5 | **Entire Core A Host Loss** | NO | YES | YES (STONITH / IPMI) | Restored on Core B <60s | ZERO for acknowledged data | Spools locally, connects to Core B VIP | Hardware repair for A | YES | **PASS** |
-| 6 | **A↔B App Network Partition** | YES (A stays Active) | NO | NO (Fence impossible) | Active continues; Standby remains STANDBY | ZERO | Continues normal ingress to Core A | Resolve network split | NO (no failover) | **PASS (No Split Brain)** |
-| 7 | **A↔B Replication Network Partition** | YES (degraded) | NO | NO | Active writes local only; marks unacked | ZERO (Spool retention required) | Sensor holds spool (`spool_retention: true`) | Re-establish replication link | NO (A stays Active) | **PASS (Spool Retained)** |
-| 8 | **Standby B Service Failure** | YES (A unaffected) | NO | NO | Normal Active service continues | ZERO | Sensor spools retained until B restored | Service restart on B | N/A (A active) | **PASS** |
-| 9 | **Simultaneous Partial Failures** | CONDITIONAL | CONDITIONAL | YES | Core with valid state & fencing quorum wins | ZERO | Sensor holds spool until stable Core ACK | Operator review if ambiguous | NO | **PASS** |
-| 10 | **Active Isolated from Client/VIP** | NO (Self-fence) | YES | YES | Promoted B acquires VIP | ZERO | Sensors reconnect to VIP on Core B | None | YES | **PASS** |
-| 11 | **Fencing Mechanism Unavailable** | YES (A remains) | NO | NO | Degraded single-node; Standby AMBIGUOUS | ZERO | Active handles clients; Standby locked | Operator must manually fence before promote | NO | **PASS (Safety Over Availability)** |
-| 12 | **Old Active Rejoins** | NO | NO | NO | B remains Active; A enters REJOINING/STANDBY | ZERO | Ignores old A; communicates with B | Node A rejoins as Standby replica | N/A | **PASS (Stale Epoch Rejected)** |
+| # | Scenario | Evidence classification | Result | Notes |
+|---|---|---|---|---|
+| 1 | Core A App Crash | NOT TESTED | NOT_EXECUTED | No Core application process in lab |
+| 2 | Kafka A Crash | EXECUTED | LAB PASS (lower bound) | Part 5: Docker kill + consume-verified T4; LAB_FENCING_ANALOGUE |
+| 3 | ClickHouse A Crash | EXECUTED | LAB PASS (lower bound) | Part 10: Docker kill + query verify; not certified Core HA |
+| 4 | PostgreSQL A Failure | NOT TESTED | NOT TESTED — P0-03 | No PG failover in spike; Patroni/repmgr not Mother-selected |
+| 5 | Entire Core A Host Loss | PENDING PRODUCTION FENCING | NOT PROVEN | Docker stop ≠ host STONITH / IPMI / hypervisor fence |
+| 6 | A↔B App Network Partition | MODEL-ONLY | MODELLED | FSM: Standby → AMBIGUOUS without fence |
+| 7 | A↔B Replication Network Partition | EXECUTED (Kafka/CH partial) | LAB PASS | STRICT_DUAL blocks ACK; Sensor spool retention required |
+| 8 | Standby B Service Failure | EXECUTED | LAB PASS | Kafka/CH B down paths exercised |
+| 9 | Simultaneous Partial Failures | NOT TESTED | NOT_EXECUTED | No multi-fault Core supervisor |
+| 10 | Active Isolated from Client/VIP | NOT TESTED | NOT_EXECUTED | No VIP / DNS / self-fence agent |
+| 11 | Fencing Mechanism Unavailable | MODEL-ONLY | MODELLED | FSM refuses promote without fence confirm |
+| 12 | Old Active Rejoins | MODEL-ONLY | MODELLED | Epoch exact-match model; no real Core rejoin |
+
+PostgreSQL row status: **NOT TESTED — P0-03**
 
 ---
 
-## Core Safety Invariants Proven
+## Safety claims (honest scope)
 
-1. **Zero Split-Brain**: Under network partition, Standby enters `AMBIGUOUS` state and **strictly refuses promotion** unless positive fencing (confirmed peer power cut/STONITH) succeeds.
-2. **Durable ACK Contract**: Core ingress marks batches `ACK_ELIGIBLE` and returns `accepted_through_sequence` **only after both Kafka copies are durable** (`DUAL_DURABLE`). If Standby is unreachable, Core signals `spool_retention_required: true`, instructing Sensor to hold disk spool.
-3. **Old Active Rejoin Safety**: A recovering Active starts in `FENCED` $ightarrow$ `REJOINING` $ightarrow$ `STANDBY`. All writes bearing stale epochs are rejected with `StaleEpochError`.
+1. **FSM model invariant** — 1000 randomized illegal transitions rejected in-process. This is a **model invariant test**, NOT a mathematical proof that production Core/VIP/Kafka/CH/PG cannot split-brain.
+2. **ACK contract** — `STRICT_DUAL only; DEGRADED_SINGLE_DURABLE that advances accepted_through_sequence is REJECTED`
+3. **Kafka dedup** — `NOT_PROVEN (Kafka stores duplicates; no consumer pipeline)`
+4. **Fencing** — lab Docker kill/stop only (`LAB_FENCING_ANALOGUE`). Production fencing remains **PENDING PRODUCTION FENCING / HIGH RISK** until providers are tested.

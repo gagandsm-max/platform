@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir \
     requests==2.32.3 \
     psycopg2-binary==2.9.12
 
-COPY . /workspace/harness/
-
-ENV PYTHONPATH=/workspace
-CMD ["python", "/workspace/harness/run_spike_tests.py"]
+# Image provides deps only; tests execute from the bind-mounted repo.
+ENV PYTHONPATH=/workspace/engineering/spikes/two-core-ha
+CMD ["python", "/workspace/engineering/spikes/two-core-ha/harness/run_spike_tests.py"]

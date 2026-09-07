@@ -1,31 +1,32 @@
 # Platform P0 Engineering Spike: Two-Core Stateful HA Lab
 
-This directory contains the reproducible Docker-based experimental lab and evidence for evaluating Platform's **EXACTLY-TWO-CORE** Stateful HA architecture.
+Corrected evidence spike. Distinguishes **MEASURED / EXECUTED / MODELLED / INFERRED / PENDING PRODUCTION VALIDATION**.
+
+Evidence SHA for last documented run: `2bff6b2091f64e73466e3600abacc5424ce68777`
 
 ## Contents
 
-- `compose.ha-spike.yaml`: Isolated Docker Compose stack (Kafka A/B, ClickHouse A/B, PostgreSQL A/B, HA Harness).
-- `harness/`:
-  - `docker_client.py`: Python Docker API client over `/var/run/docker.sock`.
-  - `ha_state_machine.py`: Finite state machine enforcing transitions and no-split-brain invariant.
-  - `kafka_harness.py`: Kafka dual-write, failure drills, and failover timing runner.
-  - `clickhouse_harness.py`: ClickHouse dual-insert, deduplication, DDL consistency, and failover timing runner.
-  - `run_spike_tests.py`: Master test runner executing all 12 failure scenarios and timing benchmarks.
-- `evidence/`:
-  - `raw_metrics.json`: Complete serialized metrics from all test runs.
-  - `kafka_timings.csv`: Timing breakdown across 10 iterations of Kafka failover.
-  - `clickhouse_timings.csv`: Timing breakdown across 10 iterations of ClickHouse failover.
-- `results.md`: Detailed test results and analysis.
-- `failure-matrix.md`: 12-scenario failure matrix.
-- `architecture-candidate.md`: Concrete Active/Standby candidate specification.
+- `compose.ha-spike.yaml` — isolated lab (Kafka A/B, ClickHouse A/B, PostgreSQL A/B present but PG HA **NOT TESTED**)
+- `harness/` — FSM model, Kafka/ClickHouse harnesses, runner
+- `evidence/` — `raw_metrics.json`, timing CSVs
+- `results.md`, `failure-matrix.md`, `architecture-candidate.md`
 
-## Execution
-
-The entire spike runs inside isolated Docker containers:
+## Execution (Docker only)
 
 ```bash
-docker compose -p platform-ha-spike -f engineering/spikes/two-core-ha/compose.ha-spike.yaml up -d
+cd /path/to/repo
+docker compose -p platform-ha-spike -f engineering/spikes/two-core-ha/compose.ha-spike.yaml up -d --wait || \
+  docker compose -p platform-ha-spike -f engineering/spikes/two-core-ha/compose.ha-spike.yaml up -d
+# wait for healthy if --wait unsupported
 docker build -t platform-ha-harness engineering/spikes/two-core-ha/harness
-docker run --rm --network ha_spike_net -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/workspace platform-ha-harness
+docker run --rm --network ha_spike_net \
+  -e SPIKE_GIT_COMMIT=$(git rev-parse HEAD) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$(pwd)":/workspace \
+  platform-ha-harness
 docker compose -p platform-ha-spike -f engineering/spikes/two-core-ha/compose.ha-spike.yaml down -v
 ```
+
+## What this proves / does not prove
+
+See `results.md` and `failure-matrix.md`. Do not treat lab timings as certified Core HA &lt;60s.

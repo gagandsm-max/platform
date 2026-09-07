@@ -1,518 +1,1008 @@
 {
-  "timestamp": "2026-09-07T09:14:15Z",
-  "git_commit": "8592863e9a30ae80742e4d2da6b3417ae68a3b89",
+  "timestamp": "2026-09-07T09:34:45Z",
+  "git_commit": "2bff6b2091f64e73466e3600abacc5424ce68777",
   "mother_version": "v3.2.1",
+  "evidence_policy": {
+    "pass_requires": "EXECUTED",
+    "classifications": [
+      "EXECUTED",
+      "MODEL-ONLY",
+      "ANALYTICALLY REJECTED",
+      "NOT TESTED",
+      "PENDING PRODUCTION FENCING"
+    ]
+  },
   "parts": {
     "part_2_12_fsm": {
+      "evidence": "EXECUTED",
+      "classification": "MODEL-ONLY",
+      "claim_level": "model_invariant_test",
+      "not_mathematical_proof": true,
+      "not_production_split_brain_proof": true,
       "fsm_fuzz_passed": true,
-      "no_split_brain_proven": true,
-      "illegal_transitions_rejected": 678,
-      "total_fuzz_transitions": 1000
+      "illegal_transitions_rejected": 673,
+      "total_fuzz_transitions": 1000,
+      "epoch_exact_match": {
+        "current_accepted": true,
+        "stale_rejected": true,
+        "future_rejected": true,
+        "evidence": "EXECUTED"
+      }
     },
     "part_3_kafka": {
       "scenarios": [
         {
           "scenario": 1,
           "name": "both_healthy_dual_write",
+          "evidence": "EXECUTED",
           "result": {
-            "batch_id": "2d5d25db-fba4-4bbf-9d1d-f3a754c40c8f",
+            "batch_id": "9490ac38-426f-48a2-835e-d648f2572379",
             "sequence": 1,
             "status": "DUAL_DURABLE",
-            "latency_a_ms": 195.11,
-            "latency_b_ms": 42.31,
-            "latency_total_ms": 237.48,
+            "latency_a_ms": 124.87,
+            "latency_b_ms": 68.39,
+            "latency_total_ms": 193.29,
             "dual_durable": true,
             "ack_eligible": true,
             "accepted_through_sequence": 1,
             "spool_retention_required": false,
+            "degraded_ack_policy": "REJECTED",
             "error": null
-          }
+          },
+          "verdict": "PASS"
         },
         {
           "scenario": 2,
-          "name": "active_crash_before_b_write",
+          "name": "partial_a_write_then_replay",
+          "evidence": "EXECUTED",
           "result": {
-            "batch_id": "7f0c2193-d479-46f2-aeb5-ebe3859096fc",
-            "sequence": 2,
-            "status": "A_WRITTEN",
-            "dual_durable": false,
-            "ack_eligible": false,
-            "spool_retention_required": true,
-            "explanation": "Active crashed before B ack. Batch NOT ACK_ELIGIBLE. Sensor retains spool."
-          }
+            "partial": {
+              "batch_id": "25f68e6c-b410-4ef5-8b89-fa515141b87d",
+              "sequence": 2,
+              "status": "A_WRITTEN",
+              "latency_a_ms": 9.11,
+              "latency_b_ms": null,
+              "latency_total_ms": 9.14,
+              "dual_durable": false,
+              "ack_eligible": false,
+              "accepted_through_sequence": null,
+              "spool_retention_required": true,
+              "degraded_ack_policy": "REJECTED_NO_SEQUENCE_ADVANCE",
+              "error": "Kafka B write failed: Producer B unavailable"
+            },
+            "replay": {
+              "batch_id": "25f68e6c-b410-4ef5-8b89-fa515141b87d",
+              "sequence": 2,
+              "status": "DUAL_DURABLE",
+              "latency_a_ms": 88.09,
+              "latency_b_ms": 57.31,
+              "latency_total_ms": 145.43,
+              "dual_durable": true,
+              "ack_eligible": true,
+              "accepted_through_sequence": 2,
+              "spool_retention_required": false,
+              "degraded_ack_policy": "REJECTED",
+              "error": null
+            },
+            "copies_on_a": 2,
+            "copies_on_b": 1,
+            "ack_blocked_until_dual": true,
+            "replay_dual_ok": true,
+            "note": "Kafka stores replay copies; application consumer dedup NOT proven."
+          },
+          "verdict": "PASS"
         },
         {
           "scenario": 3,
-          "name": "standby_kafka_down_spool_held",
+          "name": "standby_kafka_down_strict_dual_no_ack",
+          "evidence": "EXECUTED",
           "result": {
-            "batch_id": "d62c134a-71b9-4cb6-a6bc-94b80db292fe",
-            "sequence": 3,
-            "status": "A_WRITTEN",
-            "latency_a_ms": 7.18,
-            "latency_b_ms": null,
-            "latency_total_ms": 5006.86,
-            "dual_durable": false,
-            "ack_eligible": false,
-            "accepted_through_sequence": null,
-            "spool_retention_required": true,
-            "error": "Kafka B write failed: KafkaTimeoutError: Timeout after waiting for 5 secs."
-          }
+            "strict_dual": {
+              "batch_id": "33784b76-1af5-4c07-bbd0-031517bd496e",
+              "sequence": 3,
+              "status": "A_WRITTEN",
+              "latency_a_ms": 11.51,
+              "latency_b_ms": null,
+              "latency_total_ms": 11.53,
+              "dual_durable": false,
+              "ack_eligible": false,
+              "accepted_through_sequence": null,
+              "spool_retention_required": true,
+              "degraded_ack_policy": "REJECTED_NO_SEQUENCE_ADVANCE",
+              "error": "Kafka B write failed: Producer B unavailable"
+            },
+            "degraded_request_coerced": {
+              "batch_id": "141c9a7b-4cc9-4d3c-acee-72a46d6710a0",
+              "sequence": 31,
+              "status": "A_WRITTEN",
+              "latency_a_ms": 5.35,
+              "latency_b_ms": null,
+              "latency_total_ms": 5.38,
+              "dual_durable": false,
+              "ack_eligible": false,
+              "accepted_through_sequence": null,
+              "spool_retention_required": true,
+              "degraded_ack_policy": "REJECTED_NO_SEQUENCE_ADVANCE",
+              "error": "Kafka B write failed: Producer B unavailable"
+            },
+            "ack_contract": "STRICT_DUAL_ONLY; DEGRADED_SINGLE_DURABLE sequence advance REJECTED"
+          },
+          "verdict": "PASS"
         },
         {
           "scenario": 4,
           "name": "inter_core_partition",
+          "evidence": "MODEL-ONLY",
           "result": {
-            "active_a": "CONTINUES_LOCAL_WRITES",
-            "standby_b": "STANDBY_REFUSES_PROMOTION_WITHOUT_FENCE",
+            "active_a": "CONTINUES_LOCAL_WRITES (modelled)",
+            "standby_b": "REFUSES_PROMOTION_WITHOUT_FENCE (modelled)",
             "dual_active": false
-          }
+          },
+          "verdict": "MODELLED"
         },
         {
           "scenario": 5,
-          "name": "replay_same_batch",
+          "name": "replay_same_batch_storage_truth",
+          "evidence": "EXECUTED",
           "result": {
-            "replayed_batch_id": "2d5d25db-fba4-4bbf-9d1d-f3a754c40c8f",
-            "accepted": true,
-            "dedup_key": "batch_id",
-            "consumer_dedup": "PROVEN"
-          }
+            "replayed_batch_id": "9490ac38-426f-48a2-835e-d648f2572379",
+            "replay_write": {
+              "batch_id": "9490ac38-426f-48a2-835e-d648f2572379",
+              "sequence": 1,
+              "status": "DUAL_DURABLE",
+              "latency_a_ms": 74.53,
+              "latency_b_ms": 87.4,
+              "latency_total_ms": 161.95,
+              "dual_durable": true,
+              "ack_eligible": true,
+              "accepted_through_sequence": 1,
+              "spool_retention_required": false,
+              "degraded_ack_policy": "REJECTED",
+              "error": null
+            },
+            "copies_on_a": 2,
+            "copies_on_b": 2,
+            "kafka_broker_deduplicates": false,
+            "consumer_pipeline_dedup": "NOT_PROVEN",
+            "note": "Kafka appends duplicate records; no application consumer dedup demonstrated."
+          },
+          "verdict": "PASS"
         },
         {
           "scenario": 6,
           "name": "duplicate_batch_handling",
+          "evidence": "NOT TESTED",
           "result": {
-            "status": "DEDUPLICATED_BY_CORE_PIPELINE"
-          }
+            "note": "No Core consumer pipeline; NOT PROVEN"
+          },
+          "verdict": "NOT_EXECUTED"
         },
         {
           "scenario": 7,
           "name": "active_core_crash_post_dual_write",
+          "evidence": "NOT TESTED",
           "result": {
-            "kafka_a_durable": true,
-            "kafka_b_durable": true,
-            "loss": 0,
-            "sensor_spool": "safe_replay"
-          }
+            "note": "No Core process in lab"
+          },
+          "verdict": "NOT_EXECUTED"
         },
         {
           "scenario": 8,
           "name": "active_kafka_crash_post_dual_write",
+          "evidence": "NOT TESTED",
           "result": {
-            "kafka_b_has_data": true,
-            "standby_promotion_recoverable": true,
-            "loss": 0
-          }
+            "note": "Covered partially by failover drill Part 5"
+          },
+          "verdict": "NOT_EXECUTED"
         },
         {
           "scenario": 9,
           "name": "standby_promotion",
+          "evidence": "MODEL-ONLY",
           "result": {
-            "state": "ACTIVE",
-            "epoch_incremented": true,
-            "consumer_resumed": true
-          }
+            "note": "FSM model + Part 5 lab analogue"
+          },
+          "verdict": "NOT_EXECUTED"
         },
         {
           "scenario": 10,
           "name": "old_active_return",
+          "evidence": "MODEL-ONLY",
           "result": {
-            "state": "REJOINING_STANDBY",
-            "stale_epoch_rejected": true
-          }
+            "note": "FSM model epoch tests only"
+          },
+          "verdict": "NOT_EXECUTED"
         }
       ],
+      "kraft_two_voter": {
+        "evidence": "ANALYTICALLY REJECTED",
+        "lab_topology": "two independent 1-voter KRaft clusters (distinct cluster IDs)",
+        "two_voter_shared_quorum_instantiated": false,
+        "experimental_failure_of_two_voter_quorum": false,
+        "note": "Compose never formed a shared 2-voter KRaft quorum. Rejection is known quorum math (majority of 2 requires both voters), not lab experiment."
+      },
       "latency_stats": {
         "samples": 50,
-        "kafka_a_mean_ms": 5.71,
-        "kafka_b_mean_ms": 6.06,
-        "dual_mean_ms": 11.8,
-        "dual_p95_ms": 15.87
-      }
+        "kafka_a_mean_ms": 4.11,
+        "kafka_b_mean_ms": 4.51,
+        "dual_mean_ms": 8.64,
+        "dual_p95_ms": 11.32,
+        "evidence": "MEASURED"
+      },
+      "ack_contract_verdict": "STRICT_DUAL only; DEGRADED_SINGLE_DURABLE that advances accepted_through_sequence is REJECTED",
+      "dedup_verdict": "NOT_PROVEN (Kafka stores duplicates; no consumer pipeline)"
     },
     "part_5_kafka_timing": {
+      "evidence": "EXECUTED",
       "iterations": 10,
-      "target_sec": 60.0,
-      "min_total_sec": 0.2201,
-      "median_total_sec": 0.2567,
-      "max_total_sec": 0.3231,
-      "p95_total_sec": 0.3231,
-      "median_fence_sec": 0.2101,
-      "all_passed_target": true,
+      "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+      "fencing_level": "LAB_FENCING_ANALOGUE",
+      "not_certified_core_ha_60s": true,
+      "excludes": [
+        "heartbeat timeout",
+        "fencing API latency",
+        "hardware/hypervisor power confirmation",
+        "VIP/DNS move",
+        "Core application promotion",
+        "TLS endpoint readiness",
+        "Sensor reconnect",
+        "Sensor authoritative ACK",
+        "consumer recovery checkpoint",
+        "customer network latency"
+      ],
+      "t4_requires_batch_id_consume": true,
+      "all_batches_consumed": true,
+      "min_total_sec": 0.3912,
+      "median_total_sec": 0.4779,
+      "max_total_sec": 0.6337,
+      "p95_total_sec": 0.6337,
+      "median_fence_sec": 0.2885,
+      "lab_under_60s_lower_bound": true,
       "raw_timings": [
         {
-          "t0_fault": 1788772483.7620494,
-          "t1_fenced": 1788772484.03502,
-          "t2_promoted": 1788772484.0350938,
-          "t3_ingested": 1788772484.0487509,
-          "t4_consumer_ready": 1788772484.0693493,
-          "fence_sec": 0.273,
-          "promotion_sec": 0.0001,
-          "ingest_sec": 0.0137,
-          "total_restore_sec": 0.3073,
-          "iteration": 1
-        },
-        {
-          "t0_fault": 1788772487.4164174,
-          "t1_fenced": 1788772487.6020706,
-          "t2_promoted": 1788772487.6021028,
-          "t3_ingested": 1788772487.6149445,
-          "t4_consumer_ready": 1788772487.6431735,
-          "fence_sec": 0.1857,
-          "promotion_sec": 0.0,
-          "ingest_sec": 0.0128,
-          "total_restore_sec": 0.2268,
-          "iteration": 2
-        },
-        {
-          "t0_fault": 1788772491.040595,
-          "t1_fenced": 1788772491.2250304,
-          "t2_promoted": 1788772491.2250867,
-          "t3_ingested": 1788772491.236658,
-          "t4_consumer_ready": 1788772491.2607136,
-          "fence_sec": 0.1844,
-          "promotion_sec": 0.0001,
-          "ingest_sec": 0.0116,
-          "total_restore_sec": 0.2201,
-          "iteration": 3
-        },
-        {
-          "t0_fault": 1788772494.587131,
-          "t1_fenced": 1788772494.801858,
-          "t2_promoted": 1788772494.801888,
-          "t3_ingested": 1788772494.8231137,
-          "t4_consumer_ready": 1788772494.8515797,
-          "fence_sec": 0.2147,
-          "promotion_sec": 0.0,
-          "ingest_sec": 0.0212,
-          "total_restore_sec": 0.2644,
-          "iteration": 4
-        },
-        {
-          "t0_fault": 1788772498.3477988,
-          "t1_fenced": 1788772498.540749,
-          "t2_promoted": 1788772498.5407689,
-          "t3_ingested": 1788772498.551579,
-          "t4_consumer_ready": 1788772498.5679998,
-          "fence_sec": 0.193,
-          "promotion_sec": 0.0,
-          "ingest_sec": 0.0108,
-          "total_restore_sec": 0.2202,
-          "iteration": 5
-        },
-        {
-          "t0_fault": 1788772501.9147549,
-          "t1_fenced": 1788772502.1202147,
-          "t2_promoted": 1788772502.1202383,
-          "t3_ingested": 1788772502.1305673,
-          "t4_consumer_ready": 1788772502.1512713,
-          "fence_sec": 0.2055,
-          "promotion_sec": 0.0,
-          "ingest_sec": 0.0103,
-          "total_restore_sec": 0.2365,
-          "iteration": 6
-        },
-        {
-          "t0_fault": 1788772505.4645977,
-          "t1_fenced": 1788772505.701978,
-          "t2_promoted": 1788772505.7020078,
-          "t3_ingested": 1788772505.7320976,
-          "t4_consumer_ready": 1788772505.7592525,
-          "fence_sec": 0.2374,
-          "promotion_sec": 0.0,
-          "ingest_sec": 0.0301,
-          "total_restore_sec": 0.2947,
-          "iteration": 7
-        },
-        {
-          "t0_fault": 1788772509.17298,
-          "t1_fenced": 1788772509.3934202,
-          "t2_promoted": 1788772509.3934493,
-          "t3_ingested": 1788772509.405495,
-          "t4_consumer_ready": 1788772509.4303272,
-          "fence_sec": 0.2204,
-          "promotion_sec": 0.0,
-          "ingest_sec": 0.012,
-          "total_restore_sec": 0.2573,
-          "iteration": 8
-        },
-        {
-          "t0_fault": 1788772512.7946346,
-          "t1_fenced": 1788772512.9957206,
-          "t2_promoted": 1788772512.9957528,
-          "t3_ingested": 1788772513.014482,
-          "t4_consumer_ready": 1788772513.0507836,
-          "fence_sec": 0.2011,
-          "promotion_sec": 0.0,
-          "ingest_sec": 0.0187,
-          "total_restore_sec": 0.2561,
-          "iteration": 9
-        },
-        {
-          "t0_fault": 1788772516.4035108,
-          "t1_fenced": 1788772516.6936648,
-          "t2_promoted": 1788772516.6936934,
-          "t3_ingested": 1788772516.7042043,
-          "t4_consumer_ready": 1788772516.7265723,
-          "fence_sec": 0.2902,
-          "promotion_sec": 0.0,
-          "ingest_sec": 0.0105,
-          "total_restore_sec": 0.3231,
-          "iteration": 10
-        }
-      ]
-    },
-    "part_8_clickhouse": [
-      {
-        "scenario": 1,
-        "name": "normal_dual_insert",
-        "result": {
-          "status_a": 200,
-          "latency_a_ms": 11.59,
-          "status_b": 200,
-          "latency_b_ms": 8.46,
-          "total_latency_ms": 20.64,
-          "dual_success": true
-        }
-      },
-      {
-        "scenario": 2,
-        "name": "replay_same_batch_dedup",
-        "result": {
-          "raw_count": 9,
-          "final_count": 5,
-          "deduplication_effective": false
-        }
-      },
-      {
-        "scenario": 3,
-        "name": "a_unavailable_write_b_only",
-        "result": {
-          "b_status": 200,
-          "b_lat_ms": 11.5
-        }
-      },
-      {
-        "scenario": 4,
-        "name": "b_unavailable_write_a_only",
-        "result": {
-          "a_status": 200,
-          "a_lat_ms": 19.86
-        }
-      },
-      {
-        "scenario": 5,
-        "name": "failure_between_a_and_b",
-        "result": {
-          "status": "DETECTED_BY_INGRESS",
-          "sensor_retains_spool": true
-        }
-      },
-      {
-        "scenario": 6,
-        "name": "active_failure_after_a_insert",
-        "result": {
-          "sensor_replay_recovers_to_b": true,
-          "loss": 0
-        }
-      },
-      {
-        "scenario": 7,
-        "name": "failover_query_to_b",
-        "result": {
-          "rows_queryable": 6,
-          "success": true
-        }
-      },
-      {
-        "scenario": 8,
-        "name": "old_a_rejoins",
-        "result": {
-          "status": "READ_ONLY_REJOIN"
-        }
-      },
-      {
-        "scenario": 9,
-        "name": "divergent_inserts",
-        "result": {
-          "reconciliation_via_batch_id": "FEASIBLE"
-        }
-      },
-      {
-        "scenario": 10,
-        "name": "resync_concept",
-        "result": {
-          "method": "BATCH_ID_RANGE_BACKFILL"
-        }
-      }
-    ],
-    "part_9_ddl": {
-      "status_a": 200,
-      "status_b": 200,
-      "schemas_match": true,
-      "declared_ready": true
-    },
-    "part_10_clickhouse_timing": {
-      "iterations": 10,
-      "target_sec": 60.0,
-      "min_total_sec": 0.2784,
-      "median_total_sec": 0.3319,
-      "max_total_sec": 0.603,
-      "p95_total_sec": 0.603,
-      "median_fence_sec": 0.3094,
-      "all_passed_target": true,
-      "raw_timings": [
-        {
-          "t0_fault": 1788772532.357007,
-          "t1_fenced": 1788772532.6659043,
-          "t2_promoted": 1788772532.6659334,
-          "t3_ingested": 1788772532.6758075,
-          "t4_query_ready": 1788772532.6888232,
-          "fence_sec": 0.3089,
+          "t0_fault": 1788773877.0722432,
+          "t1_fenced": 1788773877.283897,
+          "t2_promoted": 1788773877.283923,
+          "t3_ingested": 1788773877.2938442,
+          "t4_consumer_ready": 1788773877.4634342,
+          "fence_sec": 0.2117,
           "promotion_sec": 0.0,
           "ingest_sec": 0.0099,
-          "total_restore_sec": 0.3318,
+          "consume_verify_sec": 0.1696,
+          "total_restore_sec": 0.3912,
+          "batch_consumed": true,
+          "test_batch_id": "failover-verify-1e6b21f2-5ff0-4080-b1eb-03ce69d15b4c",
+          "consume_detail": {
+            "found": true,
+            "batch_id": "failover-verify-1e6b21f2-5ff0-4080-b1eb-03ce69d15b4c",
+            "target": "b",
+            "messages_seen": 20,
+            "matched_offset": 19,
+            "elapsed_ms": 155.98
+          },
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
           "iteration": 1
         },
         {
-          "t0_fault": 1788772536.0077412,
-          "t1_fenced": 1788772536.317626,
-          "t2_promoted": 1788772536.3176625,
-          "t3_ingested": 1788772536.3266995,
-          "t4_query_ready": 1788772536.3398654,
-          "fence_sec": 0.3099,
+          "t0_fault": 1788773902.9047713,
+          "t1_fenced": 1788773903.1539423,
+          "t2_promoted": 1788773903.1539862,
+          "t3_ingested": 1788773903.1623611,
+          "t4_consumer_ready": 1788773903.3695579,
+          "fence_sec": 0.2492,
           "promotion_sec": 0.0,
-          "ingest_sec": 0.009,
-          "total_restore_sec": 0.3321,
+          "ingest_sec": 0.0084,
+          "consume_verify_sec": 0.2072,
+          "total_restore_sec": 0.4648,
+          "batch_consumed": true,
+          "test_batch_id": "failover-verify-748da753-c669-4042-9a55-3ec5c0e75ef0",
+          "consume_detail": {
+            "found": true,
+            "batch_id": "failover-verify-748da753-c669-4042-9a55-3ec5c0e75ef0",
+            "target": "b",
+            "messages_seen": 19,
+            "matched_offset": 18,
+            "elapsed_ms": 193.74
+          },
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
           "iteration": 2
         },
         {
-          "t0_fault": 1788772539.6570892,
-          "t1_fenced": 1788772539.9826958,
-          "t2_promoted": 1788772539.9827213,
-          "t3_ingested": 1788772539.9915955,
-          "t4_query_ready": 1788772540.0584402,
-          "fence_sec": 0.3256,
+          "t0_fault": 1788773929.0529773,
+          "t1_fenced": 1788773929.3371863,
+          "t2_promoted": 1788773929.3372066,
+          "t3_ingested": 1788773929.3440819,
+          "t4_consumer_ready": 1788773929.517107,
+          "fence_sec": 0.2842,
           "promotion_sec": 0.0,
-          "ingest_sec": 0.0089,
-          "total_restore_sec": 0.4014,
+          "ingest_sec": 0.0069,
+          "consume_verify_sec": 0.173,
+          "total_restore_sec": 0.4641,
+          "batch_consumed": true,
+          "test_batch_id": "failover-verify-18d35138-470e-4d63-bed4-837c712f862b",
+          "consume_detail": {
+            "found": true,
+            "batch_id": "failover-verify-18d35138-470e-4d63-bed4-837c712f862b",
+            "target": "b",
+            "messages_seen": 36,
+            "matched_offset": 16,
+            "elapsed_ms": 159.97
+          },
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
           "iteration": 3
         },
         {
-          "t0_fault": 1788772543.3858821,
-          "t1_fenced": 1788772543.707191,
-          "t2_promoted": 1788772543.70722,
-          "t3_ingested": 1788772543.717597,
-          "t4_query_ready": 1788772543.7443006,
-          "fence_sec": 0.3213,
+          "t0_fault": 1788773954.0110025,
+          "t1_fenced": 1788773954.3174074,
+          "t2_promoted": 1788773954.31744,
+          "t3_ingested": 1788773954.334067,
+          "t4_consumer_ready": 1788773954.5717916,
+          "fence_sec": 0.3064,
           "promotion_sec": 0.0,
-          "ingest_sec": 0.0104,
-          "total_restore_sec": 0.3584,
+          "ingest_sec": 0.0166,
+          "consume_verify_sec": 0.2377,
+          "total_restore_sec": 0.5608,
+          "batch_consumed": true,
+          "test_batch_id": "failover-verify-f81bc805-a860-4feb-9c0e-2d5b27b9b8c8",
+          "consume_detail": {
+            "found": true,
+            "batch_id": "failover-verify-f81bc805-a860-4feb-9c0e-2d5b27b9b8c8",
+            "target": "b",
+            "messages_seen": 57,
+            "matched_offset": 17,
+            "elapsed_ms": 204.44
+          },
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
           "iteration": 4
         },
         {
-          "t0_fault": 1788772547.150867,
-          "t1_fenced": 1788772547.4071133,
-          "t2_promoted": 1788772547.4071429,
-          "t3_ingested": 1788772547.413928,
-          "t4_query_ready": 1788772547.4318063,
-          "fence_sec": 0.2562,
+          "t0_fault": 1788773982.1695948,
+          "t1_fenced": 1788773982.472016,
+          "t2_promoted": 1788773982.4720511,
+          "t3_ingested": 1788773982.4830136,
+          "t4_consumer_ready": 1788773982.6756818,
+          "fence_sec": 0.3024,
           "promotion_sec": 0.0,
-          "ingest_sec": 0.0068,
-          "total_restore_sec": 0.2809,
+          "ingest_sec": 0.011,
+          "consume_verify_sec": 0.1927,
+          "total_restore_sec": 0.5061,
+          "batch_consumed": true,
+          "test_batch_id": "failover-verify-160047e9-8ab9-4c9d-86f9-02a54d265fb0",
+          "consume_detail": {
+            "found": true,
+            "batch_id": "failover-verify-160047e9-8ab9-4c9d-86f9-02a54d265fb0",
+            "target": "b",
+            "messages_seen": 58,
+            "matched_offset": 19,
+            "elapsed_ms": 170.91
+          },
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
           "iteration": 5
         },
         {
-          "t0_fault": 1788772550.716779,
-          "t1_fenced": 1788772550.975577,
-          "t2_promoted": 1788772550.975611,
-          "t3_ingested": 1788772550.9835632,
-          "t4_query_ready": 1788772550.995166,
-          "fence_sec": 0.2588,
+          "t0_fault": 1788774006.0683064,
+          "t1_fenced": 1788774006.2973928,
+          "t2_promoted": 1788774006.297414,
+          "t3_ingested": 1788774006.3042767,
+          "t4_consumer_ready": 1788774006.4794364,
+          "fence_sec": 0.2291,
           "promotion_sec": 0.0,
-          "ingest_sec": 0.008,
-          "total_restore_sec": 0.2784,
+          "ingest_sec": 0.0069,
+          "consume_verify_sec": 0.1752,
+          "total_restore_sec": 0.4111,
+          "batch_consumed": true,
+          "test_batch_id": "failover-verify-e23ac05f-2cd8-4e4f-b5a8-e7cd60053712",
+          "consume_detail": {
+            "found": true,
+            "batch_id": "failover-verify-e23ac05f-2cd8-4e4f-b5a8-e7cd60053712",
+            "target": "b",
+            "messages_seen": 59,
+            "matched_offset": 18,
+            "elapsed_ms": 163.83
+          },
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
           "iteration": 6
         },
         {
-          "t0_fault": 1788772554.2930465,
-          "t1_fenced": 1788772554.8552065,
-          "t2_promoted": 1788772554.8552408,
-          "t3_ingested": 1788772554.8714795,
-          "t4_query_ready": 1788772554.8960311,
-          "fence_sec": 0.5622,
+          "t0_fault": 1788774030.9739015,
+          "t1_fenced": 1788774031.266773,
+          "t2_promoted": 1788774031.2668047,
+          "t3_ingested": 1788774031.2805107,
+          "t4_consumer_ready": 1788774031.4649372,
+          "fence_sec": 0.2929,
           "promotion_sec": 0.0,
-          "ingest_sec": 0.0162,
-          "total_restore_sec": 0.603,
+          "ingest_sec": 0.0137,
+          "consume_verify_sec": 0.1844,
+          "total_restore_sec": 0.491,
+          "batch_consumed": true,
+          "test_batch_id": "failover-verify-4ac4451f-1403-4849-9594-10c13e03f549",
+          "consume_detail": {
+            "found": true,
+            "batch_id": "failover-verify-4ac4451f-1403-4849-9594-10c13e03f549",
+            "target": "b",
+            "messages_seen": 21,
+            "matched_offset": 20,
+            "elapsed_ms": 167.14
+          },
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
           "iteration": 7
         },
         {
-          "t0_fault": 1788772558.366091,
-          "t1_fenced": 1788772558.6240265,
-          "t2_promoted": 1788772558.624047,
-          "t3_ingested": 1788772558.6329954,
-          "t4_query_ready": 1788772558.650436,
-          "fence_sec": 0.2579,
+          "t0_fault": 1788774055.8640132,
+          "t1_fenced": 1788774056.1127338,
+          "t2_promoted": 1788774056.1127696,
+          "t3_ingested": 1788774056.1192732,
+          "t4_consumer_ready": 1788774056.2831638,
+          "fence_sec": 0.2487,
           "promotion_sec": 0.0,
-          "ingest_sec": 0.0089,
-          "total_restore_sec": 0.2843,
+          "ingest_sec": 0.0065,
+          "consume_verify_sec": 0.1639,
+          "total_restore_sec": 0.4192,
+          "batch_consumed": true,
+          "test_batch_id": "failover-verify-bf3bf0da-55f9-4bea-858a-4feee5938d5a",
+          "consume_detail": {
+            "found": true,
+            "batch_id": "failover-verify-bf3bf0da-55f9-4bea-858a-4feee5938d5a",
+            "target": "b",
+            "messages_seen": 42,
+            "matched_offset": 20,
+            "elapsed_ms": 153.06
+          },
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
           "iteration": 8
         },
         {
-          "t0_fault": 1788772562.0183887,
-          "t1_fenced": 1788772562.2927423,
-          "t2_promoted": 1788772562.2927694,
-          "t3_ingested": 1788772562.3011785,
-          "t4_query_ready": 1788772562.3452883,
-          "fence_sec": 0.2744,
+          "t0_fault": 1788774079.9166303,
+          "t1_fenced": 1788774080.2506008,
+          "t2_promoted": 1788774080.2506301,
+          "t3_ingested": 1788774080.2610486,
+          "t4_consumer_ready": 1788774080.4550688,
+          "fence_sec": 0.334,
           "promotion_sec": 0.0,
-          "ingest_sec": 0.0084,
-          "total_restore_sec": 0.3269,
+          "ingest_sec": 0.0104,
+          "consume_verify_sec": 0.194,
+          "total_restore_sec": 0.5384,
+          "batch_consumed": true,
+          "test_batch_id": "failover-verify-27c4bd1f-81fe-4356-b73e-f3b8818ecf5d",
+          "consume_detail": {
+            "found": true,
+            "batch_id": "failover-verify-27c4bd1f-81fe-4356-b73e-f3b8818ecf5d",
+            "target": "b",
+            "messages_seen": 43,
+            "matched_offset": 21,
+            "elapsed_ms": 172.48
+          },
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
           "iteration": 9
         },
         {
-          "t0_fault": 1788772565.7617574,
-          "t1_fenced": 1788772566.1570778,
-          "t2_promoted": 1788772566.1571233,
-          "t3_ingested": 1788772566.1686566,
-          "t4_query_ready": 1788772566.1958594,
-          "fence_sec": 0.3953,
+          "t0_fault": 1788774106.9723682,
+          "t1_fenced": 1788774107.3474522,
+          "t2_promoted": 1788774107.34749,
+          "t3_ingested": 1788774107.3641312,
+          "t4_consumer_ready": 1788774107.606051,
+          "fence_sec": 0.3751,
           "promotion_sec": 0.0,
-          "ingest_sec": 0.0115,
-          "total_restore_sec": 0.4341,
+          "ingest_sec": 0.0166,
+          "consume_verify_sec": 0.2419,
+          "total_restore_sec": 0.6337,
+          "batch_consumed": true,
+          "test_batch_id": "failover-verify-812b518d-c54d-4f8e-bcbc-c7399f5d9a9b",
+          "consume_detail": {
+            "found": true,
+            "batch_id": "failover-verify-812b518d-c54d-4f8e-bcbc-c7399f5d9a9b",
+            "target": "b",
+            "messages_seen": 20,
+            "matched_offset": 19,
+            "elapsed_ms": 217.79
+          },
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
           "iteration": 10
         }
       ]
     },
+    "part_8_clickhouse": {
+      "scenarios": [
+        {
+          "scenario": 1,
+          "name": "normal_dual_insert",
+          "evidence": "EXECUTED",
+          "result": {
+            "status_a": 200,
+            "latency_a_ms": 9.35,
+            "status_b": 200,
+            "latency_b_ms": 7.96,
+            "total_latency_ms": 17.81,
+            "dual_success": true
+          },
+          "verdict": "PASS"
+        },
+        {
+          "scenario": 2,
+          "name": "replay_same_batch_final_semantics",
+          "evidence": "EXECUTED",
+          "result": {
+            "before_raw_batch1": 1,
+            "after_raw_batch1": 2,
+            "after_final_batch1": 1,
+            "query_time_idempotent_under_final": true,
+            "physical_dedup_complete": false,
+            "claim": "query-time idempotent result for identical tested ORDER BY key under FINAL; NOT complete physical duplicate elimination"
+          },
+          "verdict": "PASS"
+        },
+        {
+          "scenario": 3,
+          "name": "a_unavailable_write_b_only",
+          "evidence": "EXECUTED",
+          "result": {
+            "b_status": 200,
+            "b_lat_ms": 5.66
+          },
+          "verdict": "PASS"
+        },
+        {
+          "scenario": 4,
+          "name": "b_unavailable_write_a_only",
+          "evidence": "EXECUTED",
+          "result": {
+            "a_status": 200,
+            "a_lat_ms": 5.96
+          },
+          "verdict": "PASS"
+        },
+        {
+          "scenario": 5,
+          "name": "failure_between_a_and_b",
+          "evidence": "EXECUTED",
+          "result": {
+            "status_a": 200,
+            "latency_a_ms": 5.37,
+            "status_b": 500,
+            "latency_b_ms": 2.58,
+            "total_latency_ms": 8.3,
+            "dual_success": false,
+            "sensor_must_retain_spool": true
+          },
+          "verdict": "PASS"
+        },
+        {
+          "scenario": 6,
+          "name": "active_failure_after_a_insert",
+          "evidence": "EXECUTED",
+          "result": {
+            "a_insert_status": 200,
+            "present_on_b_before_replay": 0,
+            "loss_without_replay": true,
+            "note": "Without Sensor replay / reconcile, B lacks A-only row."
+          },
+          "verdict": "PASS"
+        },
+        {
+          "scenario": 7,
+          "name": "failover_query_to_b",
+          "evidence": "EXECUTED",
+          "result": {
+            "rows_queryable": 3,
+            "success": true
+          },
+          "verdict": "PASS"
+        },
+        {
+          "scenario": 8,
+          "name": "old_a_rejoins",
+          "evidence": "NOT TESTED",
+          "result": {
+            "note": "No Core rejoin protocol; container restart \u2260 fenced rejoin"
+          },
+          "verdict": "NOT_EXECUTED"
+        },
+        {
+          "scenario": 9,
+          "name": "divergent_inserts_reconcile",
+          "evidence": "EXECUTED",
+          "result": {
+            "batch_x_a_only_before": true,
+            "batch_y_b_only_before": true,
+            "reconcile": {
+              "evidence": "EXECUTED",
+              "missing_on_b_before": [
+                "0f6d57bd-da35-431a-b388-a8de1a9da07c",
+                "bca67e42-c14b-4a9d-8f95-13f009b6ac4a",
+                "df1ff1b0-f47f-4b1a-bcc1-7cc44ed1a923",
+                "e5aa72cb-d410-41a9-903f-5769f7265339"
+              ],
+              "missing_on_a_before": [
+                "1f3c58d2-c557-4a8b-8d75-b9af497ae1e8",
+                "63ecf503-94e7-42cc-8a1b-91da8dd0a45b"
+              ],
+              "copied_to_b": 4,
+              "copied_to_a": 2,
+              "converged": true,
+              "batches_a_after": [
+                "0f6d57bd-da35-431a-b388-a8de1a9da07c",
+                "1f3c58d2-c557-4a8b-8d75-b9af497ae1e8",
+                "63ecf503-94e7-42cc-8a1b-91da8dd0a45b",
+                "bca67e42-c14b-4a9d-8f95-13f009b6ac4a",
+                "bcf83dfb-e427-4d69-ada0-e8e0a31461a9",
+                "df1ff1b0-f47f-4b1a-bcc1-7cc44ed1a923",
+                "e5aa72cb-d410-41a9-903f-5769f7265339",
+                "e63fbc8f-89b9-4062-b941-041219c3b7a5"
+              ],
+              "batches_b_after": [
+                "0f6d57bd-da35-431a-b388-a8de1a9da07c",
+                "1f3c58d2-c557-4a8b-8d75-b9af497ae1e8",
+                "63ecf503-94e7-42cc-8a1b-91da8dd0a45b",
+                "bca67e42-c14b-4a9d-8f95-13f009b6ac4a",
+                "bcf83dfb-e427-4d69-ada0-e8e0a31461a9",
+                "df1ff1b0-f47f-4b1a-bcc1-7cc44ed1a923",
+                "e5aa72cb-d410-41a9-903f-5769f7265339",
+                "e63fbc8f-89b9-4062-b941-041219c3b7a5"
+              ],
+              "scope": "SPIKE_HELPER_NOT_PRODUCTION_RESYNC"
+            }
+          },
+          "verdict": "PASS"
+        },
+        {
+          "scenario": 10,
+          "name": "resync_implementation",
+          "evidence": "EXECUTED",
+          "result": {
+            "helper": "reconcile_by_batch_id",
+            "production_resync": "PENDING",
+            "p0_02_status_note": "Lab helper proven; production resync design still OPEN",
+            "converged_in_lab": true
+          },
+          "verdict": "PASS"
+        }
+      ],
+      "event_identity": {
+        "evidence": "EXECUTED",
+        "final_row_count_same_logical_different_batch_id": 2,
+        "stable_event_identity_sufficient": false,
+        "requirement": "ORDER BY currently includes batch_id; general event idempotence requires a stable event identity independent of transport batch_id."
+      },
+      "dedup_semantics": "query-time idempotent result for identical tested ORDER BY key under FINAL; NOT complete physical duplicate elimination; production FINAL affordability UNPROVEN"
+    },
+    "part_9_ddl": {
+      "healthy_path": {
+        "path": "healthy_dual_ddl",
+        "status_a": 200,
+        "status_b": 200,
+        "resp_a": "",
+        "resp_b": "",
+        "schemas_match": true,
+        "declared_ready": true
+      },
+      "partial_failure_recovery": {
+        "path": "partial_ddl_failure_recovery",
+        "evidence": "EXECUTED",
+        "column": "ddl_recovery_marker",
+        "status_a_initial": 200,
+        "resp_a_initial": "",
+        "status_b_while_down": 500,
+        "resp_b_while_down": "<urlopen error [Errno -3] Temporary failure in name resolution>",
+        "declared_ready_while_b_down": false,
+        "not_ready_correct": true,
+        "status_b_after_restore": 200,
+        "resp_b_after_restore": "",
+        "schemas_match_final": true,
+        "declared_ready_final": true,
+        "success": true
+      },
+      "evidence": "EXECUTED",
+      "verdict": "PASS"
+    },
+    "part_10_clickhouse_timing": {
+      "evidence": "EXECUTED",
+      "iterations": 10,
+      "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+      "fencing_level": "LAB_FENCING_ANALOGUE",
+      "not_certified_core_ha_60s": true,
+      "min_total_sec": 0.2129,
+      "median_total_sec": 0.2439,
+      "max_total_sec": 0.3416,
+      "p95_total_sec": 0.3416,
+      "median_fence_sec": 0.2171,
+      "lab_under_60s_lower_bound": true,
+      "raw_timings": [
+        {
+          "t0_fault": 1788774159.5407562,
+          "t1_fenced": 1788774159.8476112,
+          "t2_promoted": 1788774159.8476603,
+          "t3_ingested": 1788774159.8565247,
+          "t4_query_ready": 1788774159.8732297,
+          "fence_sec": 0.3069,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0089,
+          "total_restore_sec": 0.3325,
+          "batch_id_verified": "62897df5-4850-4827-9e14-9c3908e3f1b1",
+          "query_found_batch": true,
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
+          "iteration": 1
+        },
+        {
+          "t0_fault": 1788774162.2434251,
+          "t1_fenced": 1788774162.4543772,
+          "t2_promoted": 1788774162.454411,
+          "t3_ingested": 1788774162.4622002,
+          "t4_query_ready": 1788774162.4727924,
+          "fence_sec": 0.211,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0078,
+          "total_restore_sec": 0.2294,
+          "batch_id_verified": "cc565fb1-ba59-49f0-aace-f075a83719c3",
+          "query_found_batch": true,
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
+          "iteration": 2
+        },
+        {
+          "t0_fault": 1788774164.7275157,
+          "t1_fenced": 1788774164.9652474,
+          "t2_promoted": 1788774164.9652987,
+          "t3_ingested": 1788774164.972901,
+          "t4_query_ready": 1788774164.9815543,
+          "fence_sec": 0.2377,
+          "promotion_sec": 0.0001,
+          "ingest_sec": 0.0076,
+          "total_restore_sec": 0.254,
+          "batch_id_verified": "3dd87be2-bbe0-4f5d-8ea8-5aad307f6330",
+          "query_found_batch": true,
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
+          "iteration": 3
+        },
+        {
+          "t0_fault": 1788774167.238671,
+          "t1_fenced": 1788774167.4575586,
+          "t2_promoted": 1788774167.457585,
+          "t3_ingested": 1788774167.4656823,
+          "t4_query_ready": 1788774167.5259473,
+          "fence_sec": 0.2189,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0081,
+          "total_restore_sec": 0.2873,
+          "batch_id_verified": "7624ada7-ba5f-4bd4-958f-bc931f6c35a9",
+          "query_found_batch": true,
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
+          "iteration": 4
+        },
+        {
+          "t0_fault": 1788774169.8043585,
+          "t1_fenced": 1788774170.0191498,
+          "t2_promoted": 1788774170.0191722,
+          "t3_ingested": 1788774170.0281935,
+          "t4_query_ready": 1788774170.0381222,
+          "fence_sec": 0.2148,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.009,
+          "total_restore_sec": 0.2338,
+          "batch_id_verified": "758f53cb-795f-48e4-9914-e3f8bc6f60bb",
+          "query_found_batch": true,
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
+          "iteration": 5
+        },
+        {
+          "t0_fault": 1788774172.3409417,
+          "t1_fenced": 1788774172.6466172,
+          "t2_promoted": 1788774172.646647,
+          "t3_ingested": 1788774172.660151,
+          "t4_query_ready": 1788774172.6825356,
+          "fence_sec": 0.3057,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0135,
+          "total_restore_sec": 0.3416,
+          "batch_id_verified": "9728f1f9-be1f-4346-a25e-ae37cb7ea6f4",
+          "query_found_batch": true,
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
+          "iteration": 6
+        },
+        {
+          "t0_fault": 1788774175.1469905,
+          "t1_fenced": 1788774175.344171,
+          "t2_promoted": 1788774175.3441904,
+          "t3_ingested": 1788774175.3508635,
+          "t4_query_ready": 1788774175.3598652,
+          "fence_sec": 0.1972,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0067,
+          "total_restore_sec": 0.2129,
+          "batch_id_verified": "60b0888f-b668-48da-8f5f-d6c7b5624c0a",
+          "query_found_batch": true,
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
+          "iteration": 7
+        },
+        {
+          "t0_fault": 1788774177.5886312,
+          "t1_fenced": 1788774177.9000225,
+          "t2_promoted": 1788774177.900053,
+          "t3_ingested": 1788774177.9093547,
+          "t4_query_ready": 1788774177.9224074,
+          "fence_sec": 0.3114,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0093,
+          "total_restore_sec": 0.3338,
+          "batch_id_verified": "427b01c0-1b5e-41a4-b3c0-e17258ba11f3",
+          "query_found_batch": true,
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
+          "iteration": 8
+        },
+        {
+          "t0_fault": 1788774180.2931085,
+          "t1_fenced": 1788774180.501724,
+          "t2_promoted": 1788774180.5017424,
+          "t3_ingested": 1788774180.508179,
+          "t4_query_ready": 1788774180.5146453,
+          "fence_sec": 0.2086,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0064,
+          "total_restore_sec": 0.2215,
+          "batch_id_verified": "caadbef7-5040-4247-a4aa-e2e2ca467a68",
+          "query_found_batch": true,
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
+          "iteration": 9
+        },
+        {
+          "t0_fault": 1788774182.7518904,
+          "t1_fenced": 1788774182.9672375,
+          "t2_promoted": 1788774182.9672685,
+          "t3_ingested": 1788774182.9747012,
+          "t4_query_ready": 1788774182.9831858,
+          "fence_sec": 0.2153,
+          "promotion_sec": 0.0,
+          "ingest_sec": 0.0074,
+          "total_restore_sec": 0.2313,
+          "batch_id_verified": "313398e7-8e3f-4fa4-944f-ed6c68fb5edb",
+          "query_found_batch": true,
+          "scope": "LAB_SERVICE_SWITCH_LOWER_BOUND",
+          "fencing_level": "LAB_FENCING_ANALOGUE",
+          "not_certified_core_ha_60s": true,
+          "iteration": 10
+        }
+      ]
+    },
+    "part_postgres_p0_03": {
+      "evidence": "NOT TESTED",
+      "classification": "NOT TESTED \u2014 P0-03",
+      "containers_present": {
+        "ha-postgres-a": true,
+        "ha-postgres-b": true
+      },
+      "failover_implemented": false,
+      "patroni_repmgr_selected_by_mother": false,
+      "note": "Do not cite Patroni/repmgr as selected architecture; Mother Reference has not selected PostgreSQL HA mechanism in this spike scope.",
+      "verdict": "NOT_TESTED"
+    },
     "part_13_resources": {
+      "evidence": "MEASURED",
       "containers": {
         "ha-kafka-a": {
-          "memory_usage_mb": 281.7,
-          "memory_limit_mb": 31861.98
+          "memory_usage_mb": 329.65,
+          "memory_limit_mb": 31861.98,
+          "cpu_percent_sample": 1.6,
+          "network": {
+            "rx_bytes": 9451,
+            "tx_bytes": 3351
+          },
+          "blkio": {
+            "read_bytes": 13926400,
+            "write_bytes": 3727360
+          }
         },
         "ha-kafka-b": {
-          "memory_usage_mb": 310.41,
-          "memory_limit_mb": 31861.98
+          "memory_usage_mb": 321.81,
+          "memory_limit_mb": 31861.98,
+          "cpu_percent_sample": 1.31,
+          "network": {
+            "rx_bytes": 123071,
+            "tx_bytes": 261155
+          },
+          "blkio": {
+            "read_bytes": 86016,
+            "write_bytes": 8237056
+          }
         },
         "ha-clickhouse-a": {
-          "memory_usage_mb": 190.15,
-          "memory_limit_mb": 31861.98
+          "memory_usage_mb": 246.38,
+          "memory_limit_mb": 31861.98,
+          "cpu_percent_sample": 4.73,
+          "network": {
+            "rx_bytes": 5333,
+            "tx_bytes": 3034
+          },
+          "blkio": {
+            "read_bytes": 0,
+            "write_bytes": 0
+          }
         },
         "ha-clickhouse-b": {
-          "memory_usage_mb": 268.78,
-          "memory_limit_mb": 31861.98
+          "memory_usage_mb": 296.58,
+          "memory_limit_mb": 31861.98,
+          "cpu_percent_sample": 4.31,
+          "network": {
+            "rx_bytes": 35166,
+            "tx_bytes": 29526
+          },
+          "blkio": {
+            "read_bytes": 7847936,
+            "write_bytes": 2801664
+          }
         },
         "ha-postgres-a": {
-          "memory_usage_mb": 60.97,
-          "memory_limit_mb": 31861.98
+          "memory_usage_mb": 65.59,
+          "memory_limit_mb": 31861.98,
+          "cpu_percent_sample": 0.0,
+          "network": {
+            "rx_bytes": 17823,
+            "tx_bytes": 126
+          },
+          "blkio": {
+            "read_bytes": 3407872,
+            "write_bytes": 53489664
+          }
         },
         "ha-postgres-b": {
-          "memory_usage_mb": 61.57,
-          "memory_limit_mb": 31861.98
+          "memory_usage_mb": 63.86,
+          "memory_limit_mb": 31861.98,
+          "cpu_percent_sample": 0.0,
+          "network": {
+            "rx_bytes": 17378,
+            "tx_bytes": 126
+          },
+          "blkio": {
+            "read_bytes": 36864,
+            "write_bytes": 53489664
+          }
         }
       },
-      "core_a_total_mem_mb": 532.82,
-      "core_b_total_mem_mb": 640.76,
-      "profile_evaluation": "PLAUSIBLE (Comfortably within 8 vCPU / 16 GB Core budget)"
+      "core_a_total_mem_mb": 641.62,
+      "core_b_total_mem_mb": 682.25,
+      "dimensions": {
+        "cpu": "single Docker stats sample (not load-tested)",
+        "memory": "container RSS-ish usage from Docker stats",
+        "disk": "blkio counters best-effort; may be zero/incomplete under cgroup v2",
+        "network": "cumulative rx/tx bytes counters (not failover overhead delta)"
+      },
+      "profile_evaluation": "INCOMPLETE \u2014 idle/lab container samples only; do NOT claim comfortably within 8 vCPU/16GB Core budget from this evidence alone",
+      "missing_or_weak": []
     }
   }
 }
