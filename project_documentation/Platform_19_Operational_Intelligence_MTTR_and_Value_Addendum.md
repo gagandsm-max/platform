@@ -379,28 +379,11 @@ Similar Incident Memory may use deterministic features, SQL/ClickHouse analytica
 
 ### 5.1 Evidence Window Orchestrator
 
-Logical module within Incident/RCA domain. Owns:
-
-- incident trigger eligibility;
-- before/during/after time window;
-- evidence-source fan-out;
-- completeness status;
-- legal hold/retention reference;
-- evidence manifest;
-- replay timeline coordination.
-
-It must tolerate missing sources and return `PARTIAL` rather than silently claiming completeness.
+Logical module within Incident/RCA domain. Owns incident trigger eligibility, bounded evidence window, evidence-source fan-out, completeness, retention/legal hold references, evidence manifest and replay coordination. Missing sources shall result in `PARTIAL`, not silent success.
 
 ### 5.2 Similar Incident Service
 
-Logical analytics/RCA module. Owns:
-
-- feature extraction;
-- bounded candidate search;
-- similarity scoring/version;
-- quality/provenance filtering;
-- explanation of matching factors;
-- feedback from accepted/rejected suggestions.
+Logical analytics/RCA module. Owns feature extraction, bounded candidate search, similarity scoring/version, quality/provenance filtering, explanation of matching factors and accepted/rejected feedback.
 
 ### 5.3 Change Intelligence Ingestion
 
@@ -408,13 +391,11 @@ Extends Integration Service. Owns connector health, authentication references, p
 
 ### 5.4 Remediation Orchestrator
 
-Logical Automation/NCM module. Owns action definitions, eligibility, precondition checks, blast-radius preview, approval state, execution lease/idempotency, validation, rollback/escalation and immutable audit.
-
-Execution remains on the correct trusted execution boundary (Sensor/Core/Agent/connector) according to action type; Core remains authority.
+Logical Automation/NCM module. Owns action definitions, eligibility, preconditions, blast-radius preview, approval state, idempotent execution, validation, rollback/escalation and immutable audit. Core remains authority; execution occurs on the appropriate trusted boundary.
 
 ### 5.5 Value Analytics
 
-Logical Reporting/SLA/analytics module. Owns timestamp interpretation, metric formulas, cohort definitions, comparison methodology, completeness/quality warnings and export/report semantics.
+Logical Reporting/SLA/analytics module. Owns timestamp interpretation, formula versions, cohorts, comparison methodology, completeness/quality warnings and export/report semantics.
 
 ### 5.6 Packet Evidence Worker
 
@@ -435,8 +416,8 @@ change_fact
   event_time
   ingest_time
   actor_or_service_ref nullable
-  affected_entity_ids[] bounded/reference model
-  affected_service_ids[] bounded/reference model
+  affected_entity_ids/reference model
+  affected_service_ids/reference model
   change_type
   revision_or_version nullable
   result
@@ -621,87 +602,41 @@ Raw payload must never be logged or exposed through ordinary telemetry APIs.
 ### DF-OIV-001 — External change ingestion
 
 ```text
-External system
- -> authenticated connector/webhook
- -> schema/source validation
- -> tenant/source ownership validation
- -> dedupe/idempotency
- -> canonical change_fact
- -> Kafka internal event
- -> ClickHouse/history + graph/entity correlation
- -> RCA/Change Intelligence timeline
+External system -> authenticated connector/webhook -> validation -> tenant/source ownership -> dedupe/idempotency -> canonical change_fact -> Kafka internal event -> history/graph correlation -> RCA/Change Intelligence
 ```
 
 ### DF-OIV-002 — Incident Flight Recorder
 
 ```text
-Qualified incident / authorized investigation
- -> Evidence Window Orchestrator
- -> select bounded before/during/after window
- -> request/query topology + telemetry + events + changes + paths + quality
- -> optional privileged packet evidence trigger
- -> evidence manifest + completeness
- -> immutable incident evidence references
- -> replay timeline / RCA context
+Qualified incident/investigation -> Evidence Window Orchestrator -> bounded before/during/after window -> topology/telemetry/events/changes/path/quality -> optional packet trigger -> evidence manifest/completeness -> immutable evidence references -> replay/RCA
 ```
 
-Failure of one evidence source must result in `PARTIAL` with missing-source disclosure, not silent success.
+One missing source shall produce `PARTIAL` with disclosure.
 
 ### DF-OIV-003 — Similar Incident Memory
 
 ```text
-Current incident
- -> bounded feature extraction
- -> tenant-scoped historical candidate search
- -> quality/provenance filters
- -> rule/ML similarity score
- -> ranked candidates + matching factors
- -> operator/RCA consumption
- -> accept/reject feedback
+Current incident -> bounded features -> tenant-scoped historical search -> quality filters -> similarity score -> ranked candidates/matching factors -> operator/RCA -> feedback
 ```
 
 ### DF-OIV-004 — Controlled remediation
 
 ```text
-Incident/RCA recommendation or authorized manual action
- -> resolve versioned action definition
- -> authorization + tenant/resource scope
- -> precondition checks
- -> blast-radius preview
- -> policy/maker-checker approval
- -> idempotent execution lease
- -> trusted executor
- -> validation
- -> success OR rollback/escalation
- -> audit + incident timeline + value fact
+Recommendation/manual action -> versioned action -> authorization -> preconditions -> blast-radius preview -> approval/policy -> idempotent execution -> trusted executor -> validation -> success OR rollback/escalation -> audit/value fact
 ```
 
 ### DF-OIV-005 — Value computation
 
 ```text
-Incident lifecycle + RCA + remediation + ITSM evidence
- -> timestamp/provenance normalization
- -> completeness check
- -> metric calculation/version
- -> cohort matching
- -> baseline comparison
- -> dashboard/report
+Incident/RCA/remediation/ITSM evidence -> timestamp normalization -> completeness -> metric version -> cohort matching -> baseline comparison -> dashboard/report
 ```
 
-If baseline or sample quality is insufficient, UI shall show `INSUFFICIENT EVIDENCE` rather than an invented percentage improvement.
+Insufficient sample/evidence shall display `INSUFFICIENT EVIDENCE`, not an invented improvement percentage.
 
 ### DF-OIV-006 — Triggered packet evidence
 
 ```text
-Authorized trigger
- -> RBAC/resource scope
- -> Sensor eligibility/resource check
- -> filter + duration/byte/packet bounds
- -> capture
- -> automatic stop at first bound
- -> encrypted artifact + metadata/checksum
- -> evidence manifest
- -> TTL/legal-hold lifecycle
+Authorized trigger -> RBAC/resource scope -> Sensor resource check -> capture bounds/filter -> capture -> auto-stop -> encrypted artifact/metadata/checksum -> evidence manifest -> TTL/legal hold
 ```
 
 ---
@@ -710,23 +645,23 @@ Authorized trigger
 
 ### 8.1 Incident workspace additions
 
-Add role-aware tabs/panels:
+Add role-aware panels/tabs for:
 
-- **Evidence / Flight Recorder** — replayable timeline, evidence completeness, historical topology snapshot;
-- **Similar Incidents** — ranked candidates, matching factors, accepted historical outcome and links;
-- **Changes** — unified cross-domain change timeline with source/filtering and causality disclaimer;
-- **Remediation** — recommendation, preconditions, blast-radius preview, approval state, execution/validation/rollback;
-- **Value / Contribution** — incident timing, Platform capability participation, baseline comparison and limitations.
+- **Evidence / Flight Recorder** — replay timeline, evidence completeness, historical topology;
+- **Similar Incidents** — ranked candidates, matching factors, historical outcome;
+- **Changes** — cross-domain timeline and causality disclaimer;
+- **Remediation** — recommendation, preconditions, blast-radius preview, approval, execution, validation and rollback;
+- **Value / Contribution** — incident timing, capability participation, baseline comparison and limitations.
 
 ### 8.2 Customer Value workspace
 
-Provide a dedicated `Operational Value` / `Platform Value` dashboard accessible according to RBAC. It shall implement the four layers in §3.12 and allow filters for time, tenant, region/site, business service, severity, incident class, technology domain and assisted/remediation mode.
+Provide a dedicated `Platform Value` / `Operational Value` dashboard implementing §3.12. Support time, tenant, region/site, business service, severity, incident class, technology domain and assisted/remediation filters.
 
-Every improvement figure shall provide a drill-down to cohort definition, sample size and calculation basis.
+Every improvement figure shall drill into cohort definition, sample size and calculation basis.
 
 ### 8.3 States
 
-All OIV views shall explicitly support `Loading`, `Empty`, `Partial Data`, `Stale Data`, `Permission Restricted`, `Insufficient Evidence`, `Error` and `Normal` states.
+Support `Loading`, `Empty`, `Partial Data`, `Stale Data`, `Permission Restricted`, `Insufficient Evidence`, `Error` and `Normal`.
 
 ---
 
@@ -735,10 +670,10 @@ All OIV views shall explicitly support `Loading`, `Empty`, `Partial Data`, `Stal
 1. Reuse the existing versioned Connector framework for SaaS, carrier and external-change integrations.
 2. Credentials use existing Credential Profiles and `USE`/`REVEAL` separation.
 3. Webhook receivers require authenticated source validation, replay protection where provider semantics permit, schema bounds and rate limits.
-4. Polling connectors require timeouts, bounded pagination, throttling/backoff and explicit provider rate-limit health.
-5. Provider-specific packs require OSS/licence/API terms review before certification.
-6. No connector may turn provider status text directly into a causal root cause without independent evidence.
-7. Packet capture requires OS capabilities/privilege minimization and must be isolated from ordinary monitoring workers.
+4. Polling connectors require timeouts, bounded pagination, throttling/backoff and provider rate-limit health.
+5. Provider packs require OSS/licence/API terms review before certification.
+6. Provider status text may not directly become a causal root cause without independent evidence.
+7. Packet capture requires privilege minimization and isolation from ordinary monitoring workers.
 
 ---
 
@@ -746,102 +681,88 @@ All OIV views shall explicitly support `Loading`, `Empty`, `Partial Data`, `Stal
 
 Threat-model and test at minimum:
 
-- unauthorized packet capture or artifact access;
-- sensitive payload leakage through logs/support bundles/UI;
+- unauthorized packet capture/artifact access;
+- sensitive payload leakage through logs/support/UI;
 - cross-tenant evidence leakage;
 - forged/replayed external change facts;
-- malicious SaaS/carrier/provider responses;
+- malicious provider responses;
 - connector credential theft;
 - poisoned Similar Incident Memory;
-- similarity-based tenant data leakage;
+- similarity-based tenant leakage;
 - remediation command/parameter injection;
 - approval bypass;
-- replayed remediation requests;
-- excessive remediation blast radius;
-- action execution on stale/incorrect topology;
+- replayed remediation;
+- excessive blast radius;
+- stale-topology action execution;
 - rollback artifact tampering;
 - false MTTR/value attribution;
 - manipulated timestamps/cohorts;
-- untrusted customer-supplied financial assumptions represented as audited savings.
+- untrusted financial assumptions represented as audited savings.
 
-Mandatory mitigations include tenant-scoped authorization, immutable audit, idempotency, signed/versioned action definitions where applicable, bounded inputs, schema validation, redaction, artifact encryption, TTL, checksums, approval policy, blast-radius limits and explicit data-quality labels.
+Mitigations include tenant-scoped authorization, immutable audit, idempotency, versioned action definitions, bounded inputs, schema validation, redaction, artifact encryption, TTL, checksums, approval policy, blast-radius limits and explicit data-quality labels.
 
 ---
 
 ## 11. Performance, capacity and storage requirements
 
-1. Flight Recorder evidence queries/capture must be bounded so incident storms cannot exhaust Core query/storage capacity.
-2. Packet capture worker has hard CPU/memory/disk/network/concurrency limits and lower priority than live monitoring continuity.
-3. Similar Incident candidate search is bounded by tenant, time/class filters and result count; no unbounded all-history scan on every incident.
-4. External connectors expose ingest lag, queue depth, rate-limit state and dropped/rejected events.
-5. Evidence retention uses appropriate retention class; packet payload TTL should be short by default and separate from long-lived incident metadata.
-6. Legal hold may protect selected evidence, but storage-protection rules and explicit capacity warnings still apply.
-7. Value analytics must use rollups/aggregates rather than repeatedly scanning all raw telemetry.
-8. OIV workload is included in SNWP/performance certification for applicable scenarios; the feature must not invalidate the Core footprint silently.
+1. Flight Recorder work is bounded so incident storms cannot exhaust Core query/storage capacity.
+2. Packet capture has hard CPU/memory/disk/network/concurrency limits and lower priority than live monitoring continuity.
+3. Similar Incident search is bounded; no unbounded all-history scan per incident.
+4. External connectors expose lag, queue depth, rate-limit state and dropped/rejected events.
+5. Packet payload retention is short by default and separate from long-lived incident metadata.
+6. Legal hold protects selected evidence while preserving storage-protection warnings/behavior.
+7. Value analytics uses rollups/aggregates rather than repeated raw scans.
+8. OIV workload is included in applicable performance certification and may not silently invalidate the Core footprint.
 
 ---
 
 ## 12. Test and release gates
 
-Before any OIV capability is represented as production-ready, applicable tests shall cover:
+Before an OIV capability is represented as production-ready, applicable tests cover:
 
-- tenant isolation and resource scope;
+- tenant isolation/resource scope;
 - stale/partial topology;
-- missing telemetry/evidence sources;
-- clock skew and out-of-order events;
-- duplicate/replayed change events;
-- provider API timeout/throttling/outage/malformed response;
-- Flight Recorder partial/failure/replay correctness;
-- packet capture permission, bounds, auto-stop, encryption, TTL and resource protection;
-- Similar Incident false positives, adversarial/poisoned history and low-quality evidence;
-- remediation deny/precondition-fail/approval/timeout/cancel/partial/validation/rollback paths;
+- missing telemetry/evidence;
+- clock skew/out-of-order events;
+- duplicate/replayed change facts;
+- provider timeout/throttling/outage/malformed response;
+- Flight Recorder partial/failure/replay;
+- packet capture permission/bounds/auto-stop/encryption/TTL/resource protection;
+- similarity false positives/adversarial/poisoned history;
+- remediation deny/precondition/approval/timeout/cancel/partial/validation/rollback;
 - idempotent remediation replay;
-- blast-radius limit enforcement;
+- blast-radius limits;
 - value timestamp ambiguity;
-- insufficient cohort size;
-- mismatched cohort prevention;
+- insufficient/mismatched cohorts;
 - prevention of unsupported savings claims;
-- formula/version migration behavior;
+- formula/version migration;
 - performance/resource regression;
 - upgrade/rollback compatibility;
 - audit completeness.
 
 ### 12.1 GA claim restrictions
 
-Platform may not externally claim a specific percentage MTTR reduction until reproducible customer/pilot evidence exists for a disclosed population/methodology. Internal engineering targets are not customer claims.
+Platform may not externally claim a specific generic MTTR-reduction percentage until reproducible customer/pilot evidence exists for a disclosed population and methodology. Internal engineering targets are not customer claims.
 
-A dashboard may show a customer's measured/matched comparison if the data and methodology meet §3.10 requirements.
+A customer's own dashboard may show measured/matched comparisons when the data and methodology meet §3.10.
 
 ---
 
 ## 13. Operational/runbook requirements
 
-Add runbooks for:
-
-- Flight Recorder capture failure/partial evidence;
-- similarity index stale/corrupt/low-quality state;
-- external change connector lag/outage;
-- SaaS/carrier connector throttling/auth failure;
-- packet evidence worker failure/storage pressure;
-- remediation stuck/partial/rollback failure;
-- remediation emergency disable/suspension;
-- value/cohort data quality issue;
-- packet artifact access/retention/legal hold;
-- support-bundle generation that excludes sensitive packet payload by default.
-
-Operational teams should use Platform UI/Audit/Support Bundle first; shell access remains exceptional.
+Add runbooks for Flight Recorder partial/failure, similarity stale/low-quality state, external-change connector lag, SaaS/carrier throttling/auth failure, packet evidence failure/storage pressure, remediation stuck/partial/rollback failure, remediation emergency suspension, value/cohort data-quality issue, packet artifact retention/legal hold and support-bundle generation excluding sensitive packet payload by default.
 
 ---
 
 ## 14. Requirements traceability supplement
 
-These `REQ-OIV-*` IDs are authoritative additions to the Platform requirements catalogue. The logical-layer mappings refer to sections of this consolidated master; existing v3.2.1 files are supplemented, not silently rewritten.
+These `REQ-OIV-*` IDs are authoritative additions to the Platform requirements catalogue.
 
 | Requirement ID | PRD ID | Capability | Product | Arch | HLD | LLD/Data | Dataflow | UI | Security | Quality |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `REQ-OIV-001` | `PRD-OIV-001` | First-class SaaS monitoring | §3.1 | §4 | §5.3 | §6.7 | DF-OIV-001 | §8 | §10 | §12 |
 | `REQ-OIV-002` | `PRD-OIV-002` | Triggered packet evidence | §3.2 | §4.2 | §5.6 | §6.8 | DF-OIV-006 | §8.1 | §10 | §12 |
-| `REQ-OIV-003` | `PRD-OIV-003` | Cloud-native dependency discovery | §3.3 | §4.1 | Graph Service §4.1 | existing graph contracts + §6 | DF-OIV-002/003 | §8.1 | §10 | §12 |
+| `REQ-OIV-003` | `PRD-OIV-003` | Cloud-native dependency discovery | §3.3 | §4.1 | Graph Service | existing graph + §6 | DF-OIV-002/003 | §8.1 | §10 | §12 |
 | `REQ-OIV-004` | `PRD-OIV-004` | External change/deployment telemetry | §3.4 | §4.1 | §5.3 | §6.1 | DF-OIV-001 | §8.1 | §10 | §12 |
 | `REQ-OIV-005` | `PRD-OIV-005` | Carrier/ISP operational integration | §3.5 | §4.1 | §5.3 | §6.7 | DF-OIV-001 | §8.1 | §10 | §12 |
 | `REQ-OIV-006` | `PRD-OIV-006` | Incident Flight Recorder | §3.6 | §4.1 | §5.1 | §6.2 | DF-OIV-002 | §8.1 | §10 | §12 |
@@ -850,36 +771,17 @@ These `REQ-OIV-*` IDs are authoritative additions to the Platform requirements c
 | `REQ-OIV-009` | `PRD-OIV-009` | Controlled remediation | §3.9 | §4.1 | §5.4 | §6.4 | DF-OIV-004 | §8.1 | §10 | §12 |
 | `REQ-OIV-010` | `PRD-OIV-010` | Platform Value / MTTR Engine | §3.10 | §4.1 | §5.5 | §6.5/6.6 | DF-OIV-005 | §8.2 | §10 | §12 |
 | `REQ-OIV-011` | `PRD-OIV-011` | Per-incident Platform contribution | §3.11 | §4.1 | §5.5 | §6.5 | DF-OIV-005 | §8.1 | §10 | §12 |
-| `REQ-OIV-012` | `PRD-OIV-012` | Four-layer customer value dashboard | §3.12 | §4.1 | §5.5 | §6.5/6.6 | DF-OIV-005 | §8.2 | §10 | §12 |
+| `REQ-OIV-012` | `PRD-OIV-012` | Four-layer value dashboard | §3.12 | §4.1 | §5.5 | §6.5/6.6 | DF-OIV-005 | §8.2 | §10 | §12 |
 | `REQ-OIV-013` | `PRD-OIV-013` | OIV self-observability | §3 | §4 | §5 | §6 | all | §8.3 | §10 | §12 |
-| `REQ-OIV-014` | `PRD-OIV-014` | Role-aware APIs/UI and audit | §3 | §4 | §5 | §6 | all | §8 | §10 | §12 |
+| `REQ-OIV-014` | `PRD-OIV-014` | Role-aware APIs/UI/audit | §3 | §4 | §5 | §6 | all | §8 | §10 | §12 |
 
 ### 14.1 Affected legacy mother documents
 
-The following legacy files remain governing for their existing scope and are explicitly supplemented by this master for OIV requirements:
-
-- `Platform_01_BRD.md` — business outcomes/value;
-- `Platform_02_PRD.md` — customer-visible requirements;
-- `Platform_03_Architecture.md` — modular Core/graph/AI/data architecture;
-- `Platform_04_HLD.md` — Incident/RCA/Graph/Integration/Reporting/NCM ownership;
-- `Platform_05_LLD.md` — data and action contracts;
-- `Platform_06_Dataflow.md` — incident/change/RCA/control sequences;
-- `Platform_08_Requirements_Traceability.md` — base requirements catalogue;
-- `Platform_09_UI_UX_Master.md` — incident/value UI conventions;
-- `Platform_10_Protocol_Security_Connector_Master.md` — connector/credential rules;
-- `Platform_11_Sizing_Capacity_Storage_Master.md` — workload/storage protection;
-- `Platform_14_Test_Performance_and_Release_Quality.md` — quality/benchmark gates;
-- `Platform_16_Installation_Upgrade_Rollback_and_Operations.md` — runbooks;
-- `Platform_17_API_Event_and_Data_Model_Contracts.md` — API/event/data ownership;
-- `Platform_18_Security_Threat_Model.md` — threats/mitigations.
-
-For implementation tasks in this capability family, engineers must read this document in addition to those base documents.
+This master supplements `Platform_01`, `02`, `03`, `04`, `05`, `06`, `08`, `09`, `10`, `11`, `14`, `16`, `17` and `18` for this additive capability family. They remain authoritative for their existing scope. Engineers must read this document plus the applicable base documents.
 
 ---
 
 ## 15. Implementation sequence
-
-These are engineering sequencing decisions, not permission to defer the existing v1 scope.
 
 1. canonical external change/carrier/SaaS connector normalization;
 2. Flight Recorder evidence contracts/orchestration and incident UI;
@@ -890,14 +792,12 @@ These are engineering sequencing decisions, not permission to defer the existing
 7. triggered packet evidence after security/resource controls pass;
 8. expand certified SaaS/carrier packs based on customer demand/provider API viability.
 
-Implement each as a coherent vertical slice with tests, security, observability and upgrade behavior rather than creating one monolithic future branch.
+Implement coherent vertical slices with tests, security, observability and upgrade behavior; do not build one monolithic AI subsystem.
 
 ---
 
 ## 16. Definition of done
 
-The existence of this document is specification evidence only.
-
-A capability is not complete until implementation, tests, security, tenant isolation, data integrity, observability, capacity/resource bounds, upgrade/migration behavior, operational runbooks, UI behavior, traceability and applicable performance evidence are complete.
+The existence of this document is specification evidence only. A capability is not complete until implementation, tests, security, tenant isolation, data integrity, observability, resource bounds, upgrade/migration behavior, operational runbooks, UI behavior, traceability and applicable performance evidence are complete.
 
 No MTTR-reduction or financial-value percentage becomes a product claim merely because the Value Engine can calculate a number.
