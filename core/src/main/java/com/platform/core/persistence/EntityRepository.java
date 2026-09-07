@@ -86,7 +86,7 @@ public class EntityRepository {
         return rows.stream().findFirst();
     }
 
-    public List<Entity> listByTenant(UUID tenantId, int limit, int offset) {
+    public List<Entity> listByTenant(UUID tenantId, int limit, long offset) {
         return jdbc.query("""
                 SELECT * FROM platform.entity
                  WHERE tenant_id = :tenantId

@@ -56,7 +56,7 @@ public class MembershipRepository {
                 Map.of("tenantId", tenantId, "entityId", entityId, "groupId", groupId));
     }
 
-    public List<GroupMembership> listGroupsForEntity(UUID tenantId, UUID entityId, int limit, int offset) {
+    public List<GroupMembership> listGroupsForEntity(UUID tenantId, UUID entityId, int limit, long offset) {
         return jdbc.query("""
                 SELECT * FROM platform.entity_group_membership
                  WHERE tenant_id = :tenantId AND entity_id = :entityId
@@ -98,7 +98,7 @@ public class MembershipRepository {
                 Map.of("tenantId", tenantId, "entityId", entityId, "tagId", tagId));
     }
 
-    public List<EntityTagAssignment> listTagsForEntity(UUID tenantId, UUID entityId, int limit, int offset) {
+    public List<EntityTagAssignment> listTagsForEntity(UUID tenantId, UUID entityId, int limit, long offset) {
         return jdbc.query("""
                 SELECT * FROM platform.entity_tag
                  WHERE tenant_id = :tenantId AND entity_id = :entityId

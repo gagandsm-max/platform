@@ -23,6 +23,9 @@ import java.util.UUID;
 @Service
 public class EntityService {
 
+    public static final int MAX_INITIAL_IDENTIFIERS = 200;
+    public static final int ATTRIBUTE_JSON_MAX = 65_536;
+
     private final EntityRepository entities;
     private final EntityIdentifierRepository identifiers;
     private final EntityAttributeRepository attributes;
@@ -69,6 +72,10 @@ public class EntityService {
             List<IdentifierInput> initialIdentifiers
     ) {
         tenants.requireExists(tenantId);
+        if (initialIdentifiers != null && initialIdentifiers.size() > MAX_INITIAL_IDENTIFIERS) {
+            throw new DomainException("QUERY_LIMIT_EXCEEDED",
+                    "identifiers must contain at most " + MAX_INITIAL_IDENTIFIERS + " items");
+        }
         if (siteId != null) {
             sites.findByTenantAndId(tenantId, siteId)
                     .orElseThrow(() -> new DomainException("SITE_NOT_FOUND", "Site not found"));
@@ -257,7 +264,7 @@ public class EntityService {
                 tenantId,
                 entityId,
                 TextRules.requireTrimmed(schemaKey, "schemaKey", TextRules.SCHEMA_KEY_MAX, true),
-                TextRules.requireTrimmed(valueJson, "valueJson", 65_536, true),
+                TextRules.requireTrimmed(valueJson, "valueJson", ATTRIBUTE_JSON_MAX, true),
                 TextRules.requireTrimmed(source, "source", TextRules.SOURCE_MAX, true),
                 observedAt == null ? Instant.now() : observedAt
         );

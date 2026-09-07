@@ -27,7 +27,7 @@ public class SiteService {
 
     @Transactional
     public Site create(UUID tenantId, UUID parentSiteId, String name, String description, String timezone) {
-        tenants.requireExists(tenantId);
+        tenants.lockForHierarchyMutation(tenantId);
         if (parentSiteId != null) {
             requireSite(tenantId, parentSiteId);
         }
@@ -61,6 +61,7 @@ public class SiteService {
     @Transactional
     public Site update(UUID tenantId, UUID siteId, UUID parentSiteId, boolean parentProvided,
                        String name, String description, String timezone) {
+        tenants.lockForHierarchyMutation(tenantId);
         Site existing = requireSite(tenantId, siteId);
         UUID newParent = parentProvided ? parentSiteId : existing.parentSiteId();
         if (newParent != null) {

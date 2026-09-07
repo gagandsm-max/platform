@@ -69,4 +69,10 @@ public class TenantService {
             throw new DomainException("TENANT_NOT_FOUND", "Tenant not found");
         }
     }
+
+    public void lockForHierarchyMutation(UUID tenantId) {
+        if (!tenants.lockForHierarchyMutation(tenantId)) {
+            throw new DomainException("TENANT_NOT_FOUND", "Tenant not found");
+        }
+    }
 }

@@ -12,6 +12,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -19,13 +20,15 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
 
     public static final String CORRELATION_ID_HEADER = "X-Correlation-ID";
     public static final String MDC_CORRELATION_ID_KEY = "correlation_id";
+    private static final int MAX_CORRELATION_ID_LENGTH = 128;
+    private static final Pattern SAFE_CORRELATION_ID = Pattern.compile("[A-Za-z0-9._:-]+");
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         String correlationId = request.getHeader(CORRELATION_ID_HEADER);
-        if (correlationId == null || correlationId.trim().isEmpty()) {
+        if (!isSafe(correlationId)) {
             correlationId = UUID.randomUUID().toString();
         }
 
@@ -37,5 +40,12 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
         } finally {
             MDC.remove(MDC_CORRELATION_ID_KEY);
         }
+    }
+
+    private static boolean isSafe(String value) {
+        return value != null
+                && !value.isBlank()
+                && value.length() <= MAX_CORRELATION_ID_LENGTH
+                && SAFE_CORRELATION_ID.matcher(value).matches();
     }
 }

@@ -30,7 +30,7 @@ public record PageResult<T>(
         return value;
     }
 
-    public static int offset(int page, int limit) {
-        return (page - 1) * limit;
+    public static long offset(int page, int limit) {
+        return (long) (page - 1) * limit;
     }
 }

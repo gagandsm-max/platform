@@ -8,19 +8,16 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Small Platform-owned SQL migration runner (Spring JDBC only).
@@ -37,23 +34,17 @@ public class MigrationRunner implements ApplicationRunner {
     static final int LOCK_KEY_2 = 0x4D475254; // 'MGRT'
 
     private final DataSource dataSource;
-    private final JdbcTemplate jdbcTemplate;
-    private final TransactionTemplate transactionTemplate;
     private final MigrationCatalog catalog;
     private final String applicationVersion;
     private final boolean enabled;
 
     public MigrationRunner(
             DataSource dataSource,
-            JdbcTemplate jdbcTemplate,
-            TransactionTemplate transactionTemplate,
             MigrationCatalog catalog,
             @Value("${platform.version:0.1.0-dev}") String applicationVersion,
             @Value("${platform.migrations.enabled:true}") boolean enabled
     ) {
         this.dataSource = dataSource;
-        this.jdbcTemplate = jdbcTemplate;
-        this.transactionTemplate = transactionTemplate;
         this.catalog = catalog;
         this.applicationVersion = applicationVersion;
         this.enabled = enabled;
@@ -69,40 +60,42 @@ public class MigrationRunner implements ApplicationRunner {
     }
 
     public void applyPendingMigrations() {
-        Connection connection = DataSourceUtils.getConnection(dataSource);
-        boolean lockHeld = false;
-        try {
-            lockHeld = tryAdvisoryLock(connection);
-            if (!lockHeld) {
-                throw new MigrationException("MIGRATION_LOCK_FAILED", "Could not acquire Platform schema migration advisory lock");
+        try (Connection connection = dataSource.getConnection()) {
+            boolean lockHeld = false;
+            try {
+                acquireAdvisoryLock(connection);
+                lockHeld = true;
+                ensureHistoryTable(connection);
+                List<MigrationDefinition> definitions = catalog.load();
+                for (MigrationDefinition definition : definitions) {
+                    applyOne(connection, definition);
+                }
+                MDC.put("event_code", "PLT-CORE-MIG-OK");
+                log.info("Platform schema migrations up to date; applied catalog size={}", definitions.size());
+            } finally {
+                MDC.remove("event_code");
+                if (lockHeld) {
+                    releaseAdvisoryLock(connection);
+                }
             }
-            ensureHistoryTable();
-            List<MigrationDefinition> definitions = catalog.load();
-            for (MigrationDefinition definition : definitions) {
-                applyOne(definition);
-            }
-            MDC.put("event_code", "PLT-CORE-MIG-OK");
-            log.info("Platform schema migrations up to date; applied catalog size={}", definitions.size());
-            MDC.remove("event_code");
         } catch (MigrationException e) {
             MDC.put("event_code", "PLT-CORE-MIG-FAIL");
             MDC.put("error_code", e.getCode());
-            log.error("Platform schema migration failed: {}", e.getMessage());
-            MDC.remove("event_code");
-            MDC.remove("error_code");
-            throw e;
-        } catch (DataAccessException e) {
-            throw new MigrationException("DATABASE_UNAVAILABLE", "PostgreSQL unavailable during migration", e);
-        } finally {
-            if (lockHeld) {
-                releaseAdvisoryLock(connection);
+            try {
+                log.error("Platform schema migration failed: {}", e.getMessage());
+            } finally {
+                MDC.remove("event_code");
+                MDC.remove("error_code");
             }
-            DataSourceUtils.releaseConnection(connection, dataSource);
+            throw e;
+        } catch (SQLException e) {
+            throw new MigrationException("DATABASE_UNAVAILABLE", "PostgreSQL unavailable during migration", e);
         }
     }
 
-    private void ensureHistoryTable() {
-        jdbcTemplate.execute("""
+    private void ensureHistoryTable(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
                 CREATE TABLE IF NOT EXISTS platform.schema_history (
                     version VARCHAR(64) PRIMARY KEY,
                     description VARCHAR(255) NOT NULL,
@@ -111,15 +104,12 @@ public class MigrationRunner implements ApplicationRunner {
                     application_version VARCHAR(64) NOT NULL
                 )
                 """);
+        }
     }
 
-    private void applyOne(MigrationDefinition definition) {
-        List<Map<String, Object>> existing = jdbcTemplate.queryForList(
-                "SELECT version, checksum FROM platform.schema_history WHERE version = ?",
-                definition.version()
-        );
-        if (!existing.isEmpty()) {
-            String appliedChecksum = String.valueOf(existing.get(0).get("checksum"));
+    private void applyOne(Connection connection, MigrationDefinition definition) throws SQLException {
+        String appliedChecksum = appliedChecksum(connection, definition.version());
+        if (appliedChecksum != null) {
             if (!appliedChecksum.equalsIgnoreCase(definition.checksum())) {
                 throw new MigrationException(
                         "MIGRATION_CHECKSUM_MISMATCH",
@@ -131,33 +121,56 @@ public class MigrationRunner implements ApplicationRunner {
         }
 
         String sql = catalog.loadSql(definition);
-        transactionTemplate.executeWithoutResult(status -> {
-            executeSqlScript(sql);
-            jdbcTemplate.update(
-                    """
+        boolean originalAutoCommit = connection.getAutoCommit();
+        connection.setAutoCommit(false);
+        try {
+            executeSqlScript(connection, sql);
+            try (PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO platform.schema_history(version, description, checksum, applied_at, application_version)
                     VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)
-                    """,
-                    definition.version(),
-                    definition.description(),
-                    definition.checksum(),
-                    applicationVersion
-            );
-        });
+                    """)) {
+                statement.setString(1, definition.version());
+                statement.setString(2, definition.description());
+                statement.setString(3, definition.checksum());
+                statement.setString(4, applicationVersion);
+                statement.executeUpdate();
+            }
+            connection.commit();
+        } catch (SQLException | RuntimeException e) {
+            rollback(connection, e);
+            throw e;
+        } finally {
+            connection.setAutoCommit(originalAutoCommit);
+        }
         log.info("Applied migration {} ({})", definition.version(), definition.description());
     }
 
-    private void executeSqlScript(String sql) {
+    private static String appliedChecksum(Connection connection, String version) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT checksum FROM platform.schema_history WHERE version = ?")) {
+            statement.setString(1, version);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() ? result.getString("checksum") : null;
+            }
+        }
+    }
+
+    private void executeSqlScript(Connection connection, String sql) {
         List<String> statements = splitSqlStatements(sql);
-        Connection connection = DataSourceUtils.getConnection(dataSource);
         try (Statement statement = connection.createStatement()) {
             for (String stmt : statements) {
                 statement.execute(stmt);
             }
         } catch (SQLException e) {
             throw new MigrationException("MIGRATION_SQL_FAILED", "Failed executing migration SQL", e);
-        } finally {
-            DataSourceUtils.releaseConnection(connection, dataSource);
+        }
+    }
+
+    private static void rollback(Connection connection, Exception original) {
+        try {
+            connection.rollback();
+        } catch (SQLException rollbackFailure) {
+            original.addSuppressed(rollbackFailure);
         }
     }
 
@@ -168,8 +181,10 @@ public class MigrationRunner implements ApplicationRunner {
         List<String> statements = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         boolean inLineComment = false;
-        boolean inBlockComment = false;
+        int blockCommentDepth = 0;
         boolean inSingleQuote = false;
+        boolean backslashEscapes = false;
+        boolean inDoubleQuote = false;
         String dollarTag = null;
         for (int i = 0; i < sql.length(); i++) {
             char c = sql.charAt(i);
@@ -191,12 +206,16 @@ public class MigrationRunner implements ApplicationRunner {
                 }
                 continue;
             }
-            if (inBlockComment) {
+            if (blockCommentDepth > 0) {
                 current.append(c);
-                if (c == '*' && next == '/') {
+                if (c == '/' && next == '*') {
+                    current.append('*');
+                    i++;
+                    blockCommentDepth++;
+                } else if (c == '*' && next == '/') {
                     current.append('/');
                     i++;
-                    inBlockComment = false;
+                    blockCommentDepth--;
                 }
                 continue;
             }
@@ -205,8 +224,19 @@ public class MigrationRunner implements ApplicationRunner {
                 if (c == '\'' && next == '\'') {
                     current.append('\'');
                     i++;
-                } else if (c == '\'') {
+                } else if (c == '\'' && (!backslashEscapes || !isBackslashEscaped(sql, i))) {
                     inSingleQuote = false;
+                    backslashEscapes = false;
+                }
+                continue;
+            }
+            if (inDoubleQuote) {
+                current.append(c);
+                if (c == '"' && next == '"') {
+                    current.append('"');
+                    i++;
+                } else if (c == '"') {
+                    inDoubleQuote = false;
                 }
                 continue;
             }
@@ -217,12 +247,18 @@ public class MigrationRunner implements ApplicationRunner {
             }
             if (c == '/' && next == '*') {
                 current.append(c);
-                inBlockComment = true;
+                blockCommentDepth = 1;
                 continue;
             }
             if (c == '\'') {
                 current.append(c);
                 inSingleQuote = true;
+                backslashEscapes = isEscapeStringPrefix(sql, i);
+                continue;
+            }
+            if (c == '"') {
+                current.append(c);
+                inDoubleQuote = true;
                 continue;
             }
             if (c == '$') {
@@ -254,6 +290,21 @@ public class MigrationRunner implements ApplicationRunner {
         return statements;
     }
 
+    private static boolean isBackslashEscaped(String sql, int position) {
+        int count = 0;
+        for (int i = position - 1; i >= 0 && sql.charAt(i) == '\\'; i--) {
+            count++;
+        }
+        return (count & 1) == 1;
+    }
+
+    private static boolean isEscapeStringPrefix(String sql, int quotePosition) {
+        if (quotePosition == 0 || (sql.charAt(quotePosition - 1) != 'E' && sql.charAt(quotePosition - 1) != 'e')) {
+            return false;
+        }
+        return quotePosition == 1 || !Character.isJavaIdentifierPart(sql.charAt(quotePosition - 2));
+    }
+
     private static String stripLeadingComments(String sqlFragment) {
         String remaining = sqlFragment;
         while (true) {
@@ -267,41 +318,59 @@ public class MigrationRunner implements ApplicationRunner {
                 continue;
             }
             if (trimmed.startsWith("/*")) {
-                int end = trimmed.indexOf("*/");
+                int end = endOfLeadingBlockComment(trimmed);
                 if (end < 0) {
                     return trimmed;
                 }
-                remaining = trimmed.substring(end + 2);
+                remaining = trimmed.substring(end);
                 continue;
             }
             return trimmed;
         }
     }
 
-    private boolean tryAdvisoryLock(Connection connection) {
-        try {
-            Boolean locked = jdbcTemplate.queryForObject(
-                    "SELECT pg_try_advisory_lock(?, ?)",
-                    Boolean.class,
-                    LOCK_KEY_1,
-                    LOCK_KEY_2
-            );
-            return Boolean.TRUE.equals(locked);
-        } catch (DataAccessException e) {
+    private static int endOfLeadingBlockComment(String value) {
+        int depth = 0;
+        for (int i = 0; i + 1 < value.length(); i++) {
+            char c = value.charAt(i);
+            char next = value.charAt(i + 1);
+            if (c == '/' && next == '*') {
+                depth++;
+                i++;
+            } else if (c == '*' && next == '/') {
+                depth--;
+                i++;
+                if (depth == 0) {
+                    return i + 1;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private void acquireAdvisoryLock(Connection connection) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT pg_advisory_lock(?, ?)")) {
+            statement.setInt(1, LOCK_KEY_1);
+            statement.setInt(2, LOCK_KEY_2);
+            statement.execute();
+        } catch (SQLException e) {
             throw new MigrationException("DATABASE_UNAVAILABLE", "Failed to acquire migration lock", e);
         }
     }
 
     private void releaseAdvisoryLock(Connection connection) {
-        try {
-            jdbcTemplate.queryForObject(
-                    "SELECT pg_advisory_unlock(?, ?)",
-                    Boolean.class,
-                    LOCK_KEY_1,
-                    LOCK_KEY_2
-            );
-        } catch (DataAccessException e) {
-            log.warn("Failed to release migration advisory lock: {}", e.getMessage());
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT pg_advisory_unlock(?, ?)")) {
+            statement.setInt(1, LOCK_KEY_1);
+            statement.setInt(2, LOCK_KEY_2);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next() || !result.getBoolean(1)) {
+                    log.warn("Platform schema migration advisory lock was not held at release");
+                }
+            }
+        } catch (SQLException e) {
+            log.warn("Failed to release Platform schema migration advisory lock");
         }
     }
 }

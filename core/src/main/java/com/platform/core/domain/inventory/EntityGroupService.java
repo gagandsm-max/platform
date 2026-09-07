@@ -27,7 +27,7 @@ public class EntityGroupService {
 
     @Transactional
     public EntityGroup create(UUID tenantId, UUID parentGroupId, String name, String description) {
-        tenants.requireExists(tenantId);
+        tenants.lockForHierarchyMutation(tenantId);
         if (parentGroupId != null) {
             requireGroup(tenantId, parentGroupId);
         }
@@ -60,6 +60,7 @@ public class EntityGroupService {
     @Transactional
     public EntityGroup update(UUID tenantId, UUID groupId, UUID parentGroupId, boolean parentProvided,
                               String name, String description) {
+        tenants.lockForHierarchyMutation(tenantId);
         EntityGroup existing = requireGroup(tenantId, groupId);
         UUID newParent = parentProvided ? parentGroupId : existing.parentGroupId();
         if (newParent != null) {

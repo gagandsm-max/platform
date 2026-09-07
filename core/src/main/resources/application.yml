@@ -17,6 +17,9 @@ spring:
     name: platform-core
   lifecycle:
     timeout-per-shutdown-phase: 20s
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:platform}
     username: ${POSTGRES_USER:platform_app}

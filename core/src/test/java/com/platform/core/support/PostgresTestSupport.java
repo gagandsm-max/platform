@@ -1,10 +1,11 @@
 package com.platform.core.support;
 
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import com.platform.core.migration.MigrationCatalog;
 import com.platform.core.migration.MigrationRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -43,7 +44,7 @@ public final class PostgresTestSupport {
     }
 
     public void start() throws Exception {
-        assumeDockerAvailable();
+        requireDockerAvailable();
         exec("docker", "run", "-d", "--rm",
                 "--name", containerName,
                 "-e", "POSTGRES_USER=platform_app",
@@ -54,27 +55,33 @@ public final class PostgresTestSupport {
         waitReady();
         exec("docker", "exec", containerName, "psql", "-U", "platform_app", "-d", "platform",
                 "-c", "CREATE SCHEMA IF NOT EXISTS platform;");
-        DriverManagerDataSource ds = new DriverManagerDataSource();
-        ds.setDriverClassName("org.postgresql.Driver");
-        ds.setUrl(jdbcUrl());
-        ds.setUsername("platform_app");
-        ds.setPassword("platform_test");
-        this.dataSource = ds;
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(jdbcUrl());
+        config.setUsername("platform_app");
+        config.setPassword("platform_test");
+        config.setMaximumPoolSize(4);
+        config.setMinimumIdle(0);
+        config.setPoolName("day02-pg-" + containerName.substring(containerName.length() - 8));
+        this.dataSource = new HikariDataSource(config);
     }
 
-    public static void assumeDockerAvailable() {
+    public static void requireDockerAvailable() {
         try {
             Process p = new ProcessBuilder("docker", "info").redirectErrorStream(true).start();
             boolean finished = p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
-            org.junit.jupiter.api.Assumptions.assumeTrue(finished && p.exitValue() == 0,
-                    "Docker engine required for PostgreSQL integration tests");
+            if (!finished || p.exitValue() != 0) {
+                throw new IllegalStateException("Docker engine required for PostgreSQL integration tests");
+            }
         } catch (Exception e) {
-            org.junit.jupiter.api.Assumptions.assumeTrue(false,
-                    "Docker engine required for PostgreSQL integration tests: " + e.getMessage());
+            throw new IllegalStateException(
+                    "Docker engine required for PostgreSQL integration tests: " + e.getMessage(), e);
         }
     }
 
     public void stop() {
+        if (dataSource instanceof HikariDataSource hikari) {
+            hikari.close();
+        }
         try {
             exec("docker", "rm", "-f", containerName);
         } catch (Exception ignored) {
@@ -105,13 +112,15 @@ public final class PostgresTestSupport {
     public void migrate() {
         MigrationRunner runner = new MigrationRunner(
                 dataSource,
-                jdbc(),
-                tx(),
                 new MigrationCatalog(),
                 "0.1.0-dev-test",
                 true
         );
         runner.applyPendingMigrations();
+    }
+
+    public MigrationRunner runner(MigrationCatalog catalog) {
+        return new MigrationRunner(dataSource, catalog, "0.1.0-dev-test", true);
     }
 
     private void waitReady() throws Exception {

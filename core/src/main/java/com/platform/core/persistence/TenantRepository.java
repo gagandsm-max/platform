@@ -63,7 +63,7 @@ public class TenantRepository {
         return rows.stream().findFirst();
     }
 
-    public List<Tenant> list(int limit, int offset) {
+    public List<Tenant> list(int limit, long offset) {
         return jdbc.query("""
                 SELECT * FROM platform.tenant
                  ORDER BY created_at ASC, tenant_id ASC
@@ -85,6 +85,18 @@ public class TenantRepository {
                 Long.class
         );
         return count != null && count > 0;
+    }
+
+    /**
+     * Serializes hierarchy mutations for one tenant for the life of the caller's transaction.
+     */
+    public boolean lockForHierarchyMutation(UUID tenantId) {
+        List<UUID> rows = jdbc.query(
+                "SELECT tenant_id FROM platform.tenant WHERE tenant_id = :tenantId FOR UPDATE",
+                Map.of("tenantId", tenantId),
+                (rs, rowNum) -> rs.getObject("tenant_id", UUID.class)
+        );
+        return !rows.isEmpty();
     }
 
     private static MapSqlParameterSource params(Tenant tenant) {

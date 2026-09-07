@@ -60,7 +60,7 @@ public class EntityGroupRepository {
         return rows.stream().findFirst();
     }
 
-    public List<EntityGroup> listByTenant(UUID tenantId, int limit, int offset) {
+    public List<EntityGroup> listByTenant(UUID tenantId, int limit, long offset) {
         return jdbc.query("""
                 SELECT * FROM platform.entity_group
                  WHERE tenant_id = :tenantId

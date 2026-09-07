@@ -1,13 +1,11 @@
 package com.platform.core.persistence;
 
 import com.platform.core.domain.inventory.EntityAttribute;
-import org.postgresql.util.PGobject;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +40,7 @@ public class EntityAttributeRepository {
                 INSERT INTO platform.entity_attribute (
                     attribute_id, tenant_id, entity_id, schema_key, value_json, source, observed_at
                 ) VALUES (
-                    :attributeId, :tenantId, :entityId, :schemaKey, :valueJson, :source, :observedAt
+                    :attributeId, :tenantId, :entityId, :schemaKey, CAST(:valueJson AS jsonb), :source, :observedAt
                 )
                 ON CONFLICT (tenant_id, entity_id, schema_key) DO UPDATE
                    SET value_json = EXCLUDED.value_json,
@@ -62,7 +60,7 @@ public class EntityAttributeRepository {
         return rows.stream().findFirst();
     }
 
-    public List<EntityAttribute> listByEntity(UUID tenantId, UUID entityId, int limit, int offset) {
+    public List<EntityAttribute> listByEntity(UUID tenantId, UUID entityId, int limit, long offset) {
         return jdbc.query("""
                 SELECT * FROM platform.entity_attribute
                  WHERE tenant_id = :tenantId AND entity_id = :entityId
@@ -88,19 +86,8 @@ public class EntityAttributeRepository {
                 .addValue("tenantId", attribute.tenantId())
                 .addValue("entityId", attribute.entityId())
                 .addValue("schemaKey", attribute.schemaKey())
-                .addValue("valueJson", toJsonb(attribute.valueJson()))
+                .addValue("valueJson", attribute.valueJson())
                 .addValue("source", attribute.source())
                 .addValue("observedAt", JdbcTime.ts(attribute.observedAt()));
-    }
-
-    private static PGobject toJsonb(String json) {
-        try {
-            PGobject obj = new PGobject();
-            obj.setType("jsonb");
-            obj.setValue(json);
-            return obj;
-        } catch (SQLException e) {
-            throw new IllegalArgumentException("Invalid JSON for entity attribute", e);
-        }
     }
 }

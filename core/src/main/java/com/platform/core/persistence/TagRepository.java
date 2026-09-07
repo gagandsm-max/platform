@@ -47,7 +47,7 @@ public class TagRepository {
         return rows.stream().findFirst();
     }
 
-    public List<Tag> listByTenant(UUID tenantId, int limit, int offset) {
+    public List<Tag> listByTenant(UUID tenantId, int limit, long offset) {
         return jdbc.query("""
                 SELECT * FROM platform.tag
                  WHERE tenant_id = :tenantId

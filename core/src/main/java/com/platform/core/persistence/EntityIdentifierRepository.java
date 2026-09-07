@@ -74,7 +74,7 @@ public class EntityIdentifierRepository {
         return rows.stream().findFirst();
     }
 
-    public List<EntityIdentifier> listByEntity(UUID tenantId, UUID entityId, int limit, int offset) {
+    public List<EntityIdentifier> listByEntity(UUID tenantId, UUID entityId, int limit, long offset) {
         return jdbc.query("""
                 SELECT * FROM platform.entity_identifier
                  WHERE tenant_id = :tenantId AND entity_id = :entityId

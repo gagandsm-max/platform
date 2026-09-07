@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -101,5 +102,26 @@ class TenantApiTest {
         mvc.perform(get("/api/v1/tenants").param("page", "0").param("limit", "50"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("QUERY_LIMIT_EXCEEDED"));
+    }
+
+    @Test
+    void malformedPathAndQueryValuesReturnStableValidationErrors() throws Exception {
+        mockMvc.perform(get("/api/v1/tenants/not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.stackTrace").doesNotExist());
+
+        mockMvc.perform(get("/api/v1/tenants").param("page", "not-an-integer"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void unsafeCorrelationIdIsNotReflected() throws Exception {
+        mockMvc.perform(get("/api/v1/tenants/not-a-uuid")
+                        .header(CorrelationIdFilter.CORRELATION_ID_HEADER, "unsafe value"))
+                .andExpect(status().isBadRequest())
+                .andExpect(header().string(CorrelationIdFilter.CORRELATION_ID_HEADER, not("unsafe value")))
+                .andExpect(jsonPath("$.correlationId", not("unsafe value")));
     }
 }

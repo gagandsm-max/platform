@@ -48,6 +48,10 @@ public class EntityController {
     ) {
         List<EntityService.IdentifierInput> initial = null;
         if (request.identifiers() != null) {
+            if (request.identifiers().size() > EntityService.MAX_INITIAL_IDENTIFIERS) {
+                throw new DomainException("QUERY_LIMIT_EXCEEDED",
+                        "identifiers must contain at most " + EntityService.MAX_INITIAL_IDENTIFIERS + " items");
+            }
             initial = request.identifiers().stream().map(EntityController::toInput).toList();
         }
         Entity created = entities.create(
@@ -250,6 +254,9 @@ public class EntityController {
     }
 
     private static EntityService.IdentifierInput toInput(CreateIdentifierRequest request) {
+        if (request == null) {
+            throw new DomainException("VALIDATION_FAILED", "identifier must not be null");
+        }
         return new EntityService.IdentifierInput(
                 request.identifierType(),
                 request.namespace(),

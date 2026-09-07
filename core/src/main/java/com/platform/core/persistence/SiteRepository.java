@@ -62,7 +62,7 @@ public class SiteRepository {
         return rows.stream().findFirst();
     }
 
-    public List<Site> listByTenant(UUID tenantId, int limit, int offset) {
+    public List<Site> listByTenant(UUID tenantId, int limit, long offset) {
         return jdbc.query("""
                 SELECT * FROM platform.site
                  WHERE tenant_id = :tenantId
