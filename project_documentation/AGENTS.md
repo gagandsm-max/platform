@@ -34,11 +34,23 @@ If documents conflict, stop and resolve through the precedence defined in `Platf
 
 ## Mother-document change control (READ-MOSTLY)
 
-Mother documents under `project_documentation/` are **READ-MOSTLY** and authoritative. Do not casually modify them while implementing features.
+Mother documents under `project_documentation/` are **READ-MOSTLY** and authoritative.
 
-A mother document **MUST** be updated under deliberate change control when a factual error, contradiction, approved product/architecture decision change, formally selected dependency, resolved P0/TBD, omitted requirement or implementation/document conflict is found.
+Do **not casually** modify them while implementing features.
 
-No implementation may permanently diverge from mother-reference truth.
+A mother document **MUST** be updated when:
+
+1. a factual/documentation error is identified;
+2. two mother documents contradict one another;
+3. an approved product decision changes;
+4. an approved architecture decision changes;
+5. an implementation dependency becomes formally selected;
+6. a P0/TBD item is resolved;
+7. a requirement was accidentally omitted;
+8. an implemented behavior would otherwise conflict with documented truth.
+
+Such updates require deliberate change control, cross-document reconciliation, Decision Register update where a decision changes, and GitHub review/merge.
+No implementation may permanently diverge from mother-reference truth. If implementation discovers a mother-document error, correct the mother documents rather than knowingly preserve a false specification.
 
 ## Non-negotiable engineering rules
 
@@ -50,7 +62,7 @@ No implementation may permanently diverge from mother-reference truth.
 - Core, Sensor and Agents auto-start after host reboot and implement supervised recovery with visible crash-loop diagnostics.
 - Structured logs, stable error codes, correlation IDs, health state and support diagnostics are mandatory. Never log secrets.
 - Only dependencies approved in `Platform_07_OSS_Catalog.md` may ship. New OSS requires catalogue + transitive-license/CVE/SBOM review before merge.
-- Two full Core nodes only for HA: Active/Standby, <60s failover target. Sensors continue collecting/buffering during Core failover while capacity permits.
+- Two full Core nodes only for HA: Active/Standby, <60s failover target. Sensors continue collecting/buffering during Core failover while capacity permits (80% storage protection; absolute zero-loss is not promised).
 - Sensor/Agent external transport is HTTPS/gRPC over mTLS; Kafka is internal.
 - Core and Sensor 80% storage protection is mandatory.
 - UI is HTTPS-only; no application listener on port 80.
