@@ -244,7 +244,7 @@ fi
 # ------------------------------------------------------------------------------
 TEST_NUM=15
 TEST_DESC="Sensor 80% Storage Watermark Protection Logic"
-GUARD_TEST=$(docker run --rm -v "${ROOT_DIR}/sensor:/app:ro" -w /app golang:1.23-alpine go test -v -run TestWatermarkThreshold ./internal/spool 2>/dev/null || echo "FAIL")
+GUARD_TEST=$(docker run --rm -v "${ROOT_DIR}/sensor:/app:ro" -w /app golang:1.27.1-alpine3.24 go test -v -run "TestProtectionAndRecoveryAfterFreeSpace|TestFixedWatermarkCannotBeChanged" ./internal/... 2>/dev/null || echo "FAIL")
 if echo "${GUARD_TEST}" | grep -q "PASS"; then
     pass ${TEST_NUM} "${TEST_DESC}"
 else
