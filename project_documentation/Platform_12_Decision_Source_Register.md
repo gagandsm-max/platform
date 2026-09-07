@@ -6,7 +6,12 @@
 
 ## 1. Purpose
 
-This register exists to enforce the instruction **do not assume**. Every material statement in the mother-reference set must be one of `USER-FIXED`, `ARCH-DELEGATED`, `REFERENCE-LEARNING`, or `TBD/P0-SPIKE`.
+This register exists to enforce the instruction **do not assume**. Every material statement in the mother-reference set must be one of:
+
+- **USER-FIXED** — explicitly decided by the product owner in Platform design conversations;
+- **ARCH-DELEGATED** — product owner delegated the decision to the CTO/architecture function;
+- **REFERENCE-LEARNING** — lesson learned from supplied competitor/legacy material; useful for design but not copied and not itself a Platform requirement unless separately adopted;
+- **TBD/P0-SPIKE** — unresolved and explicitly not invented.
 
 Platform is a clean-room product independent of ThoughtData/Enterprise360 and NetAI. Supplied material is learning/reference only; proprietary code/assets are not reused.
 
@@ -14,109 +19,131 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 
 | Decision | Classification | Governing statement |
 |---|---|---|
-| Product name | USER-FIXED | New product/project is **Platform**. |
+| Product name | USER-FIXED | New product/project is **Platform**; do not call it Enterprise360 except when discussing legacy/reference material. |
 | Independence | USER-FIXED | Build from scratch; separate from ThoughtData and NetAI. |
 | Scope | USER-FIXED | Network + Infrastructure + DB + Cloud + Kubernetes + OTel metrics/logs + synthetics; full always-on DPI and full APM excluded initially. |
 | Core HA | USER-FIXED | Exactly two full Core nodes; one Active, one Standby; continuous sync; failover target <60 seconds. |
-| Core install | USER-FIXED | Separate Core build; installer chooses Standalone/HA and pairs two Cores. |
-| Sensor/Agent install | USER-FIXED | Separate Sensor and Agent builds; enroll against Core; Core directs Agent to appropriate Sensor. |
+| Core install | USER-FIXED | Separate Core build; installer chooses Standalone/HA and pairs two Cores through supplied peer/HA addressing. |
+| Sensor/Agent install | USER-FIXED | Separate Sensor and Agent builds; install against current master Core, handshake, download effective config; Core directs Agent to appropriate Sensor. |
 | OS | USER-FIXED | Core/Sensor Ubuntu and RHEL; no Windows Core/Sensor initially. Windows/Linux Agents supported. |
-| Sensor locality | USER-FIXED | Sensors should be close to devices but placement must also avoid overload and respect capacity/security. |
-| Provisioning | USER-FIXED | UI-driven individual, CSV/XLSX bulk and auto-discovery with actionable diagnostics. |
-| Security protocols | USER-FIXED | Enterprise protocol/security choices exposed through Platform. |
-| Storage protection | USER-FIXED | Core and Sensors protect at 80%; live monitoring is prioritized over eligible historical data. |
-| Retention | USER-FIXED | Admin controls retention/rollups. |
-| DR | USER-FIXED | DR architecture mandatory in v1.0. |
-| AI | USER-FIXED | Gemini via AI Gateway initially; deterministic/causal RCA remains independent. |
+| Sensor locality | USER-FIXED | Pollers/Sensors should be close to devices, but assignment must also avoid overload and respect available nearby capacity. |
+| Provisioning | USER-FIXED | UI-driven individual, CSV/XLSX bulk and network auto-discovery; actionable failure/remediation; optional name/description with auto-derived name when blank. |
+| Security protocols | USER-FIXED | Network provisioning exposes and supports configurable enterprise protocol/security options through Platform. |
+| Storage protection | USER-FIXED | Core and Sensors protect at 80%; monitoring must continue during storage pressure and eligible oldest data/logs are reclaimed. |
+| Retention | USER-FIXED | Admin controls raw retention, DB retention, rollup interval/resolution and retention. |
+| DR | USER-FIXED | DR architecture is mandatory in v1.0. |
+| AI | USER-FIXED | Gemini initially through AI Gateway; meaningful AI only; deterministic/causal RCA independent; local/private/offline later. |
 | Data stack | USER-FIXED | Kafka + ClickHouse + PostgreSQL + Valkey. |
-| Languages | USER-FIXED | Go Sensors, Java 21 Core, React/TypeScript UI, Python where appropriate. |
-| Licence expiry | USER-FIXED | 30-day warning; 7-day banner; 7-day default grace; historical data remains after polling stop. |
-| Security posture | USER-FIXED | Design for banks, defence and global enterprises; no false certification claims. |
-| UI | USER-FIXED | Excellent/easy/fast/readable UX; HTTPS only; no app port 80. |
-| Master docs | USER-FIXED | Split mother-reference set authoritative; no silent assumptions. |
-| Canonical source repository | USER-FIXED | `https://github.com/gagandsm-max/platform` is system of record; local clones are working copies; material changes use PRs; no force-push of shared/default branches. |
-| Mother-document change control | USER-FIXED | Mother documents are READ-MOSTLY but must be corrected under deliberate change control when decisions/requirements/errors/conflicts require it. |
-| First-class SaaS monitoring | USER-FIXED | Add reusable/certified SaaS monitoring packs/connectors. |
-| Triggered packet evidence | USER-FIXED | Add bounded privileged incident-triggered packet diagnostics without reopening full always-on DPI. |
-| Cloud-native runtime dependencies | USER-FIXED | Add runtime dependency discovery from Kubernetes/OTel/service-mesh/cloud evidence with provenance/confidence. |
-| External change/deployment telemetry | USER-FIXED | Add normalized CI/CD, release, IaC, cloud, Kubernetes, DB, certificate, patch/reboot and ITSM change evidence. |
-| Carrier/ISP operational integration | USER-FIXED | Add provider outage/maintenance/circuit/ticket/SLA evidence where integrations permit; provider status is evidence, not causal proof. |
-| Incident Flight Recorder | USER-FIXED | Add bounded before/during/after incident evidence preservation. |
-| Similar Incident Memory | USER-FIXED | Add tenant-scoped historical incident similarity/outcomes; advisory only. |
-| Cross-domain Change Intelligence | USER-FIXED | Expand change intelligence beyond NCM to network, cloud, app, DB, Kubernetes, platform and ITSM changes. |
-| Controlled remediation | USER-FIXED | Add diagnose → recommend → precondition → impact preview → authorize/approve → execute → validate → rollback/escalate. No LLM-direct privileged execution. |
-| Platform Value / MTTR Engine | USER-FIXED | Add evidence-backed MTTD/MTTA/time-to-root/MTTR measurement and matched-cohort comparison; no unsupported causal/financial claims. |
-| Four-layer customer value dashboard | USER-FIXED | Show noise reduction, diagnosis effectiveness, incident improvement and evidence-supported operational/economic benefit with methodology. |
+| Languages | USER-FIXED | Go Sensors, Java 21 Core, React/TypeScript UI, Python for AI/analytics/NCM where required. |
+| Licence expiry | USER-FIXED | 30-day warning; dashboard banner from 7 days before; 7-day default grace after expiry; after grace polling stops unless manually extended; historical data remains. |
+| Security posture | USER-FIXED | Design from day 1 for banks, defence and global enterprises; standards/certification readiness required, but no false certification claims. |
+| UI | USER-FIXED | Excellent/easy/fast/readable UX; SSL/TLS only; no application port 80. |
+| Master docs | USER-FIXED | Split mother-reference set is authoritative; no silent assumptions. |
+| Canonical source repository | USER-FIXED | Canonical Platform source repository is `https://github.com/gagandsm-max/platform`. GitHub is the system of record; local clones (including `~/nms`) are working copies. Code/build/test/mother-document changes become authoritative only after push and merge to GitHub. Short-lived branches and pull requests are required for material changes; do not push normal development to the protected/default branch; do not force-push shared/default branches; preserve decision provenance in Git history. Selecting GitHub does **not** freeze a CI provider (GitHub Actions remains unevaluated unless separately approved). |
+| Mother-document change control | USER-FIXED | Mother documents are READ-MOSTLY. Agents must not casually modify them during feature work, but **must** update them under deliberate change control when factual errors, contradictions, approved decision changes, formally selected dependencies, resolved P0/TBD items, omitted requirements, or implementation/document conflicts are found. Implementation must not permanently diverge from mother-reference truth. |
+| First-class SaaS monitoring | USER-FIXED | Add first-class reusable/certified SaaS monitoring packs/connectors rather than requiring every customer to build every SaaS integration from scratch. |
+| Triggered packet evidence | USER-FIXED | Add bounded, privileged incident-triggered packet evidence for diagnostics. This does **not** reopen full always-on DPI as initial scope. |
+| Cloud-native runtime dependencies | USER-FIXED | Add runtime service-dependency discovery/enrichment from Kubernetes, OpenTelemetry, service-mesh/cloud evidence where available, with provenance/confidence and no silent overwrite of customer-defined authoritative dependencies. |
+| External change/deployment telemetry | USER-FIXED | Add normalized change/deployment evidence from CI/CD, Git/release, IaC, cloud, Kubernetes, database, certificate, patch/reboot and ITSM sources for Change Intelligence/RCA. |
+| Carrier/ISP operational integration | USER-FIXED | Add carrier/ISP outage, maintenance, circuit/ticket/SLA operational evidence where provider/customer integrations permit it; provider status remains evidence rather than causal proof. |
+| Incident Flight Recorder | USER-FIXED | Add a bounded incident evidence window preserving before/during/after topology, routing, telemetry, events, changes, paths, service state and authorized packet evidence so transient failures remain diagnosable. |
+| Similar Incident Memory | USER-FIXED | Add tenant-scoped historical incident similarity and prior-outcome evidence. Similarity is advisory and must not silently copy a previous root cause. |
+| Cross-domain Change Intelligence | USER-FIXED | Expand change intelligence beyond NCM to network, firewall/LB, cloud, CI/CD, IaC, Kubernetes, DB, certificate, patch/reboot, Platform and ITSM changes. |
+| Controlled remediation | USER-FIXED | Add controlled remediation using diagnose → recommend → precondition → impact/blast-radius preview → authorization/approval → execute → validate → rollback/escalate. No direct LLM privileged execution. |
+| Platform Value / MTTR Engine | USER-FIXED | Add evidence-backed MTTD/MTTA/time-to-root-candidate/MTTR measurement, matched-cohort comparisons and per-incident Platform contribution evidence. Unsupported causal or financial claims are prohibited. |
+| Four-layer customer value dashboard | USER-FIXED | Show operational noise reduction, diagnosis effectiveness, incident/MTTR improvement and evidence-supported operational/economic benefit with assumptions, sample sizes and methodology. |
 
 ## 3. ARCH-DELEGATED decisions
 
 | Decision | Architecture selection | Status |
 |---|---|---|
 | Core target ≤2,500 devices | 8 vCPU / 16 GB under versioned SNWP-2500-v1 | Mandatory engineering target pending benchmark certification |
-| Core modularity | Modular Core rather than excessive microservices | Fixed architecture direction |
-| Sensor implementation language | Go; Rust only for benchmark-proven hotspot | Fixed architecture direction |
-| Sensor planning | 4C/16G/150GB ~800 normal devices baseline; 8C/16G ~2,000–2,500 benchmark target | Baseline + objective |
-| Sensor transport | Sensor/Agent → HTTPS/gRPC mTLS ingestion → Kafka internal | Fixed architecture direction |
+| Core modularity | Modular Core rather than excessive microservices to meet footprint | Fixed architecture direction |
+| Sensor implementation language | Go for Universal Sensor Runtime; Rust only if benchmark proves a hot-spot need | Fixed architecture direction |
+| Sensor planning | 4C/16G/150GB ~800 normal network devices retained as safe planning baseline; 8C/16G ~2,000–2,500 target benchmark | Baseline + performance objective |
+| Sensor transport | Sensor/Agent → HTTPS/gRPC mTLS ingestion endpoint → Kafka internal | Fixed architecture direction |
 | High-rate events | Dedicated Streaming/Event Sensor when volume threatens polling | Fixed architecture direction |
-| Telemetry DB | ClickHouse primary high-volume telemetry/analytics store | Fixed architecture direction |
-| Optional search | OpenSearch only later if proven need | Optional |
+| Telemetry DB | ClickHouse, not Elasticsearch, as primary high-volume telemetry/analytics DB | Fixed architecture direction |
+| Optional search | OpenSearch only later if Lucene-class full-text need is proven | Optional |
 | Identity foundation | Keycloak with Platform-owned resource authorization | Selected subject to OSS scans |
-| GNN | PyTorch/PyG candidates; GNN is hypothesis/impact scorer, not causal oracle | Candidate pending benchmark/license review |
-| OIV packaging | `Platform_19` carries consolidated product/architecture/HLD/LLD/dataflow/UI/security/quality/RTM additions | Fixed v3.2.2 documentation architecture |
-| OIV service shape | Extend existing modular Core/Sensor domains; no monolithic AI service/new DB by default | Fixed architecture direction |
-| Similar Incident storage/search | Use existing PostgreSQL/ClickHouse/analytics first; no dedicated vector DB without evidence/OSS approval | Fixed architecture direction |
-| Packet artifact storage | Bounded encrypted artifact abstraction with metadata refs; raw packets not indiscriminately stored in PG/CH | Fixed architecture direction |
+| GNN | PyTorch + PyTorch Geometric are P0 candidates; GNN is hypothesis/propagation/blast-radius scorer, not causal oracle | Candidate pending benchmark/license review |
+| OIV packaging | One authoritative specialized OIV mother master (`Platform_19`) carries consolidated product/architecture/HLD/LLD/dataflow/UI/security/quality/RTM additions instead of duplicating the same text across legacy files | Fixed v3.2.2 documentation architecture |
+| OIV service shape | Extend existing modular Core/Sensor domains; do not create a monolithic AI service or new database by default | Fixed architecture direction |
+| Similar Incident storage/search | Use existing PostgreSQL/ClickHouse/analytics capabilities first; no dedicated vector database without benchmark/OSS justification | Fixed architecture direction |
+| Packet artifact storage | Use bounded encrypted artifact-storage abstraction and metadata references; do not store raw packet payload indiscriminately in PostgreSQL/ClickHouse or add an unapproved mandatory storage product | Fixed architecture direction |
 
 ## 4. REFERENCE-LEARNING register
 
 ### 4.1 NetAI / graph-first learning
 
-Retained conceptual lessons: topology as reasoning graph; temporal/topological/protocol correlation; root cause + evidence + causal chain + blast radius; anomaly context; LLM as interaction/explanation rather than causal authority. Platform implements independently.
+Supplied NetAI material was reviewed for product/architecture learning. Retained lessons: topology must be an operational reasoning graph rather than only a picture; correlation should use time + topology + protocol/service relationships; incident outputs should expose root cause, child symptoms, causal chain, evidence timeline and blast radius; anomaly/baseline context improves proactive operations; LLM is a human interaction/explanation layer, not the source of causal truth. Platform independently implements these ideas with its own canonical graph, deterministic evidence engine and optional GNN scoring. NetAI proprietary code/assets are not reused.
 
 ### 4.2 SolarWinds learning
 
-Retained lessons: horizontal collection scale, two application Core nodes for HA, separation of collection/control, future federation.
+Retained design lessons: central application/UI with horizontally scalable polling; two application nodes for customer-facing HA; separate collection scale from UI/control scale; future higher-level federation/enterprise console model for large distributed estates. Platform does not copy SolarWinds implementation or assume its database/HA mechanics.
 
 ### 4.3 ManageEngine learning
 
-Retained lessons: central Core + distributed Sensors, multiple Sensors per site, centralized policy, local continuity and asynchronous ingestion.
+Retained design lessons: Central–Probe model, probes close to monitored networks, multiple probes per site for scale, centralized configuration, remote probe deployment and local continuity. Platform intentionally avoids making every Sensor a full mini-NMS with its own long-term database, avoids WAN-sensitive synchronous central DB access, and uses local bounded spool + asynchronous secure ingestion.
 
 ### 4.4 Legacy ThoughtData/Enterprise360 learning
 
-Legacy material informed broad monitoring coverage only. Platform is clean-room and does not inherit proprietary source or claims.
+Legacy material was used as capability/reference input for broad monitoring coverage such as SNMP/Flow, infrastructure, virtualization, DB, cloud, custom MIB, dashboards, NCM/IPAM/topology/synthetics. Platform is clean-room and does not inherit legacy proprietary source or claims. Cyber-threat, full DPI and full APM scope are not carried into current Platform product scope.
 
 ## 5. Explicit TBD/P0 Engineering Spikes
 
-- exact two-Core Kafka implementation/failover;
-- exact two-Core ClickHouse replication/promotion/fencing;
-- exact PostgreSQL two-Core failover/fencing/rewind;
-- exact Core service fencing/VIP failure matrix;
-- final DR RPO/RTO/data-loss objectives;
-- final SNWP-2500-v1 workload constants/performance results;
-- Streaming Sensor certified Flow/Syslog performance;
-- exact GNN production model/runtime/labels/latency/compute threshold;
-- final compliance certification programme/scope/achievements;
-- exact product SKUs/licensing quantities beyond agreed behavior.
+The following must remain visibly unresolved until engineering evidence exists:
 
-No implementation may invent values for these.
+- exact two-Core Kafka implementation/failover while honoring no third full Core;
+- exact two-Core ClickHouse replication/promotion/fencing design;
+- exact PostgreSQL two-Core failover/fencing/rewind mechanics;
+- exact Core service fencing/VIP implementation and failure matrix;
+- final contractual DR RPO/RTO and data-loss objectives;
+- final SNWP-2500-v1 metric/interface/event mix and certified performance results;
+- Streaming Sensor certified Flow records/sec and Syslog EPS;
+- exact GNN model architecture, training labels, inference latency, CPU/GPU footprint and production enablement threshold;
+- final compliance certification program/scope and achieved certifications;
+- exact product SKUs/licensing quantities beyond the agreed behavioral rules.
 
-## 6. v3.1 development decisions
+Any implementation document that fills one of these with a guessed value is non-conformant until the decision is formally approved and this register updated.
 
-Docker-only development/testing, Docker Compose, reboot-safe named volumes, `.deb`+`.rpm` Linux packaging, signed Windows Service/MSI/BAT wrappers, auto-start, supervised recovery/logging, and isolated Windows certification remain fixed as previously recorded.
+The v3.2.2 OIV additions do not resolve any of these P0/TBD items by declaration.
 
-## 7. v3.2.1 governance decisions
-
-Canonical GitHub source-of-record, READ-MOSTLY mother-document correction governance and bootstrap OSS catalogue admissions remain fixed as previously recorded.
-
-## 8. v3.2.2 OIV decisions
+## 6. v3.1 USER-FIXED / ARCH-DELEGATED development decisions
 
 | Decision | Classification | Governing statement |
 |---|---|---|
-| OIV product scope | USER-FIXED | `PRD-OIV-001` through `PRD-OIV-014` in `Platform_19` are approved additive requirements. |
-| OIV traceability | ARCH-DELEGATED | `REQ-OIV-001` through `REQ-OIV-014` in `Platform_19` §14 are the authoritative v3.2.2 RTM supplement. |
-| Packet evidence vs DPI | USER-FIXED | Bounded incident diagnostics in scope; full always-on DPI still excluded initially. |
-| Remediation safety | USER-FIXED | No LLM-direct privileged execution; authorization, preconditions, blast radius, approval/policy, audit, validation and rollback/fail-safe are mandatory. |
-| Value claims | USER-FIXED | Evidence-backed customer-specific metrics allowed; unsupported generic MTTR/financial-savings percentages prohibited. |
-| OIV architecture reuse | ARCH-DELEGATED | Extend existing Incident/RCA/Graph/Integration/NCM/Reporting/Sensor modules and data stack before adding mandatory services/databases. |
+| Docker-only development/testing | USER-FIXED | Development and testing must be isolated from the primary laptop to avoid project conflicts. |
+| Local container runtime | ARCH-DELEGATED | Standardize on Docker Compose; Podman compatibility is not a v1 requirement. |
+| Reboot-safe local state | USER-FIXED + ARCH-DELEGATED implementation | Laptop is frequently shut down/rebooted; named volumes, daemon auto-start, restart policies and deterministic recovery are mandatory. |
+| RHEL package format | USER-FIXED | Core, Sensor and Linux Agent must ship `.rpm` in addition to `.deb`. |
+| Windows Agent packaging | ARCH-DELEGATED | Runtime is compiled code-signed Windows Service. GA package is MSI; BAT install/uninstall wrappers are also shipped for scripted deployment. |
+| Auto boot | USER-FIXED | Core, Sensor and Agents must start automatically after host reboot. |
+| Service recovery | USER-FIXED + ARCH-DELEGATED implementation | Recoverable failures should restart automatically, but repeated failure/crash loops must be visible and diagnosable. |
+| System/application logs | USER-FIXED | Every component must retain actionable logs/health evidence so engineering/support can determine what broke or is degrading. |
+| Windows release testing | ARCH-DELEGATED | Local development remains Docker-first, but Windows Service/MSI/reboot certification requires isolated Windows VM/runner because Linux Docker cannot validate SCM behavior. |
 
-These additions do not resolve §5 P0/TBD items.
+These decisions supersede any earlier wording implying `.bat` is itself the Windows Agent binary or that Podman compatibility is required.
+
+## 7. v3.2.1 USER-FIXED governance decisions
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Canonical GitHub repository | USER-FIXED | `https://github.com/gagandsm-max/platform` is authoritative; see §2. |
+| Mother-document controlled correction | USER-FIXED | READ-MOSTLY with mandatory correction triggers; see §2 and `Platform_00_Document_Index.md` §11. |
+| Bootstrap UI/build/logging OSS admissions | ARCH-DELEGATED + catalogue update | NGINX (dev UI proxy), Node.js/npm/Vite/@vitejs/plugin-react/TypeScript (UI tooling), and logstash-logback-encoder (Core JSON logging) recorded in `Platform_07_OSS_Catalog.md` at pinned bootstrap versions. Top-level licence is insufficient; lockfile/SBOM transitive review remains mandatory. NGINX is not silently promoted to mandatory customer production Core dependency solely because Docker development uses it. |
+
+v3.2.1 does not reopen fixed product/architecture decisions and does not replace §5 P0/TBD items with implementation-option lists.
+
+## 8. v3.2.2 USER-FIXED / ARCH-DELEGATED OIV decisions
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| OIV product scope | USER-FIXED | `PRD-OIV-001` through `PRD-OIV-014` in `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` are approved additive product requirements. |
+| OIV traceability | ARCH-DELEGATED | `REQ-OIV-001` through `REQ-OIV-014` in `Platform_19` §14 are the authoritative v3.2.2 RTM supplement, mapped to consolidated logical-layer sections. |
+| Triggered packet evidence vs DPI | USER-FIXED | Bounded incident diagnostic capture is in scope; full always-on DPI remains excluded initially. |
+| Remediation safety | USER-FIXED | No direct LLM privileged execution; controlled remediation must preserve authorization, preconditions, blast-radius controls, approval/policy, audit, validation and rollback/fail-safe behavior. |
+| Value claims | USER-FIXED | Platform shall calculate evidence-backed customer-specific operational metrics but shall not present unsupported generic MTTR-reduction or financial-savings percentages as fact. |
+| OIV architecture reuse | ARCH-DELEGATED | Extend existing Incident/RCA/Graph/Integration/NCM/Reporting/Sensor modules and existing data stack before introducing new mandatory services/databases. |
+
+These decisions are additive and do not reopen §5 P0/TBD items.
