@@ -2,7 +2,7 @@
 
 **Status:** NON-MOTHER engineering sequencing control  
 **Authoritative source:** `project_documentation/Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`  
-**Mother Reference:** Platform v3.2.2 after merge
+**Mother Reference:** Platform v3.2.2 after merge to canonical `main`
 
 ## Objective
 
@@ -41,5 +41,7 @@ Every work item must include:
 MTTR/value features may not publish a claimed improvement unless the UI can show the baseline period, sample size, matching/cohort dimensions and data limitations. Financial benefit requires customer-approved cost assumptions.
 
 ## Release posture
+
+Before the documentation PR is merged, this workstream is planning only. After merge, implementation may proceed against the formal `PRD-OIV-*` / `REQ-OIV-*` requirements.
 
 The workstream is not complete when feature code exists. Release requires applicable `Platform_19` §12 gates plus existing Mother Reference security, HA, upgrade, packaging, performance and GA evidence requirements.
