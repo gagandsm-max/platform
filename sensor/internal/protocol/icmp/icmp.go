@@ -288,7 +288,7 @@ func (s *realSession) Probe(ctx context.Context, target net.IP, seq, payloadByte
 			continue
 		}
 		echo, ok := parsed.Body.(*xicmp.Echo)
-		if !ok || echo.Seq != seq || !samePeer(peer, target) {
+		if !ok || !echoReplyMatches(echo, s.id, seq) || !samePeer(peer, target) {
 			continue
 		}
 		if s.version == 4 && parsed.Type != ipv4.ICMPTypeEchoReply {
@@ -310,6 +310,10 @@ func samePeer(a net.Addr, target net.IP) bool {
 		return v.IP.Equal(target)
 	}
 	return false
+}
+
+func echoReplyMatches(echo *xicmp.Echo, id, seq int) bool {
+	return echo != nil && echo.ID == id && echo.Seq == seq
 }
 
 func classify(ctx context.Context, err error) error {

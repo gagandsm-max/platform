@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	xicmp "golang.org/x/net/icmp"
+
 	"platform/sensor/internal/scheduler"
 )
 
@@ -152,5 +154,20 @@ func TestUnknownSchedulerFieldRejected(t *testing.T) {
 	_, err := e.Execute(context.Background(), scheduler.Job{Kind: JobKind, Class: scheduler.ClassNetworkPoll, Payload: []byte(`{"schemaVersion":1,"target":"192.0.2.1","unknown":1}`)})
 	if err == nil {
 		t.Fatal("unknown field accepted")
+	}
+}
+
+func TestEchoReplyRequiresMatchingIDAndSeq(t *testing.T) {
+	if !echoReplyMatches(&xicmp.Echo{ID: 7, Seq: 3}, 7, 3) {
+		t.Fatal("matching id/seq rejected")
+	}
+	if echoReplyMatches(&xicmp.Echo{ID: 8, Seq: 3}, 7, 3) {
+		t.Fatal("foreign echo id accepted")
+	}
+	if echoReplyMatches(&xicmp.Echo{ID: 7, Seq: 4}, 7, 3) {
+		t.Fatal("mismatched seq accepted")
+	}
+	if echoReplyMatches(nil, 7, 3) {
+		t.Fatal("nil echo accepted")
 	}
 }

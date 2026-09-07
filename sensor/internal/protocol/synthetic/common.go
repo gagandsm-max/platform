@@ -147,10 +147,10 @@ func rootPool(ca []byte) (*x509.CertPool, error) {
 	if len(ca) == 0 {
 		return nil, nil
 	}
-	roots, err := x509.SystemCertPool()
-	if err != nil || roots == nil {
-		roots = x509.NewCertPool()
-	}
+	// Exclusive trust: when a CA bundle is supplied it is the only accepted root
+	// set. Merging into the system pool would silently keep public CAs trusted and
+	// defeat explicit probe pinning.
+	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(ca) {
 		return nil, newError(CodeTLSUntrusted, "CA bundle contains no usable certificate", nil, false)
 	}

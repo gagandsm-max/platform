@@ -7,7 +7,8 @@ require (
 	golang.org/x/net v0.58.0
 )
 
-// x/net v0.58.0 requires x/crypto v0.55.0 in its module graph. Platform pins
-// v0.56.0 because GO-2026-6354 and GO-2026-6355 are fixed there. This also
-// prepares the already-approved SSH adapter without admitting a vulnerable graph.
+// golang.org/x/sys is the active indirect dependency of golang.org/x/net for the
+// packages Sensor currently imports. x/crypto, x/term, and x/text are not imported
+// by this module's packages, so they are not pinned here. This does not select or
+// freeze OSS-025 SSH.
 require golang.org/x/sys v0.47.0 // indirect

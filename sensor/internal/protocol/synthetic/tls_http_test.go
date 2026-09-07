@@ -3,6 +3,8 @@ package synthetic
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -77,6 +79,38 @@ func TestTLSNoInsecureBypassAndBounds(t *testing.T) {
 	tooLarge := make([]byte, c.limits.MaxCABundleBytes+1)
 	if _, err := c.TLS(context.Background(), TLSRequest{Target: "127.0.0.1", Port: port, Timeout: time.Second, CABundlePEM: tooLarge}); CodeOf(err) != CodeResourceLimit {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestTLSProvidedCAIsExclusiveTrust(t *testing.T) {
+	p := makePKI(t, false)
+	roots, err := rootPool(p.caPEM)
+	if err != nil || roots == nil {
+		t.Fatalf("rootPool err=%v roots=%v", err, roots)
+	}
+	system, sysErr := x509.SystemCertPool()
+	if sysErr != nil || system == nil {
+		t.Skip("system cert pool unavailable in this environment")
+	}
+	// A second unrelated CA must not validate the leaf even though system roots exist.
+	other := makePKI(t, false)
+	otherRoots, err := rootPool(other.caPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(p.certPEM)
+	if block == nil {
+		t.Fatal("decode leaf")
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "localhost"}); err != nil {
+		t.Fatalf("exclusive provided CA should trust leaf: %v", err)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: otherRoots, DNSName: "localhost"}); err == nil {
+		t.Fatal("foreign exclusive CA unexpectedly trusted leaf")
 	}
 }
 
