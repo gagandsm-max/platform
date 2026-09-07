@@ -9,19 +9,32 @@ public record ExternalSubject(String value) {
         if (value.isBlank()) {
             throw new IllegalArgumentException("externalSubject must not be blank");
         }
-        if (!value.equals(value.strip())) {
-            throw new IllegalArgumentException("externalSubject must not contain leading or trailing whitespace");
-        }
-        if (value.length() > IdentityLimits.EXTERNAL_SUBJECT_MAX_LENGTH) {
+        if (value.length() > IdentityLimits.EXTERNAL_SUBJECT_MAX_LENGTH * 2
+                || value.codePointCount(0, value.length()) > IdentityLimits.EXTERNAL_SUBJECT_MAX_LENGTH) {
             throw new IllegalArgumentException("externalSubject exceeds maximum length");
         }
-        if (containsControlCharacter(value)) {
-            throw new IllegalArgumentException("externalSubject contains control characters");
+        if (isUnicodeWhitespace(value.codePointAt(0))
+                || isUnicodeWhitespace(value.codePointBefore(value.length()))) {
+            throw new IllegalArgumentException("externalSubject must not contain leading or trailing whitespace");
+        }
+        if (containsUnsafeCodePoint(value)) {
+            throw new IllegalArgumentException("externalSubject contains unsafe Unicode characters");
         }
     }
 
-    private static boolean containsControlCharacter(String value) {
-        return value.codePoints().anyMatch(Character::isISOControl);
+    private static boolean isUnicodeWhitespace(int codePoint) {
+        return Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint);
+    }
+
+    private static boolean containsUnsafeCodePoint(String value) {
+        return value.codePoints().anyMatch(codePoint -> switch (Character.getType(codePoint)) {
+            case Character.CONTROL,
+                    Character.FORMAT,
+                    Character.LINE_SEPARATOR,
+                    Character.PARAGRAPH_SEPARATOR,
+                    Character.SURROGATE -> true;
+            default -> false;
+        });
     }
 
     @Override

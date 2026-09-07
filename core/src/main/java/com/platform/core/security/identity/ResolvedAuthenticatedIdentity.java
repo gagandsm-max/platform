@@ -25,6 +25,9 @@ public final class ResolvedAuthenticatedIdentity {
         Objects.requireNonNull(platformSubject, "platformSubject");
         Objects.requireNonNull(authenticationEvidence, "authenticationEvidence");
         Objects.requireNonNull(evaluatedAt, "evaluatedAt");
+        if (evaluatedAt.isBefore(authenticationEvidence.authenticatedAt())) {
+            throw new IdentityResolutionException(IdentityResolutionFailure.INVALID_IDENTITY);
+        }
         if (!authenticationEvidence.isCurrentAt(evaluatedAt)) {
             throw new IdentityResolutionException(IdentityResolutionFailure.AUTHENTICATION_EXPIRED);
         }

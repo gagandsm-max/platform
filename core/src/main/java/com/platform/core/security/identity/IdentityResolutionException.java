@@ -2,27 +2,24 @@ package com.platform.core.security.identity;
 
 import java.util.Objects;
 
-/** Resolution failure with a stable code and deliberately generic message. */
+/**
+ * Resolution failure with a stable internal reason and deliberately generic message.
+ *
+ * <p>Unauthenticated protocol boundaries must not expose {@link #failure()} directly. They must map all
+ * resolution failures to one external authentication failure while preserving the internal reason only for
+ * access-controlled audit and operations.</p>
+ */
 public final class IdentityResolutionException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 
     private final IdentityResolutionFailure failure;
 
     public IdentityResolutionException(IdentityResolutionFailure failure) {
-        super(messageFor(Objects.requireNonNull(failure, "failure")));
-        this.failure = failure;
+        super("identity resolution failed");
+        this.failure = Objects.requireNonNull(failure, "failure");
     }
 
     public IdentityResolutionFailure failure() {
         return failure;
-    }
-
-    private static String messageFor(IdentityResolutionFailure failure) {
-        return switch (failure) {
-            case IDENTITY_NOT_MAPPED -> "identity is not mapped";
-            case IDENTITY_DISABLED -> "identity is disabled";
-            case INVALID_IDENTITY -> "identity is invalid";
-            case AUTHENTICATION_EXPIRED -> "authentication evidence is expired";
-        };
     }
 }
