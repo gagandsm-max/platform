@@ -18,6 +18,9 @@ const (
 	CodeResourceLimit    ErrorCode = "SYSLOG_RESOURCE_LIMIT"
 	CodeInternal         ErrorCode = "SYSLOG_INTERNAL"
 	CodePartialUnknown   ErrorCode = "SYSLOG_PARTIAL_UNKNOWN"
+	CodeQueueFull        ErrorCode = "SYSLOG_QUEUE_FULL"
+	CodeTimeout          ErrorCode = "SYSLOG_TIMEOUT"
+	CodeCancelled        ErrorCode = "SYSLOG_CANCELLED"
 )
 
 type Error struct {
