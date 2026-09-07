@@ -16,13 +16,13 @@ echo "--> [1/3] Running Go Unit Tests (Sensor & Agent)..."
 docker run --rm \
     -v "${ROOT_DIR}/sensor:/app/sensor:ro" \
     -w /app/sensor \
-    golang:1.23-alpine \
+    golang:1.27.1-alpine3.24 \
     go test -v ./...
 
 docker run --rm \
     -v "${ROOT_DIR}/agent:/app/agent:ro" \
     -w /app/agent \
-    golang:1.23-alpine \
+    golang:1.27.1-alpine3.24 \
     go test -v ./...
 
 echo "--> [2/3] Running Java Core Unit Tests..."
