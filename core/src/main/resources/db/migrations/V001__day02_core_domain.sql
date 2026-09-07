@@ -9,9 +9,76 @@ CREATE TABLE IF NOT EXISTS platform.schema_history (
     application_version VARCHAR(64) NOT NULL
 );
 
--- Replace legacy Day-01 VARCHAR tenant bootstrap if present (UUID is normative for Day-02).
--- Safe on first application only; subsequent startups skip this migration via schema_history.
-DROP TABLE IF EXISTS platform.tenant CASCADE;
+-- Safely migrate legacy Day-01 VARCHAR tenant table if present, preserving data and mapping
+-- known bootstrap default row to canonical Day-02 UUID. If not present (fresh install), create table.
+DO $$
+DECLARE
+    legacy_count INTEGER;
+    migrated_count INTEGER;
+    col_type TEXT;
+    unsupported_count INTEGER;
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'platform' AND table_name = 'tenant'
+    ) THEN
+        SELECT data_type INTO col_type
+        FROM information_schema.columns
+        WHERE table_schema = 'platform' AND table_name = 'tenant' AND column_name = 'tenant_id';
+
+        IF col_type <> 'uuid' THEN
+            -- Fail closed on any unsupported legacy data before modifying schema
+            SELECT COUNT(*) INTO unsupported_count
+            FROM platform.tenant
+            WHERE mode NOT IN ('SINGLE', 'MSP_MASTER', 'MSP_CHILD')
+               OR status NOT IN ('ACTIVE', 'SUSPENDED', 'RETIRED')
+               OR (tenant_id <> 'tenant-default-001' AND tenant_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
+            IF unsupported_count > 0 THEN
+                RAISE EXCEPTION 'Cannot migrate legacy platform.tenant: % unsupported or corrupted row(s) detected', unsupported_count;
+            END IF;
+
+            SELECT COUNT(*) INTO legacy_count FROM platform.tenant;
+
+            -- Rename legacy table to temporary staging table
+            ALTER TABLE platform.tenant RENAME TO tenant_legacy_day01;
+
+            -- Create normative Day-02 UUID tenant table
+            CREATE TABLE platform.tenant (
+                tenant_id UUID PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                mode VARCHAR(32) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                timezone VARCHAR(64) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                CONSTRAINT chk_tenant_mode CHECK (mode IN ('SINGLE', 'MSP_MASTER', 'MSP_CHILD')),
+                CONSTRAINT chk_tenant_status CHECK (status IN ('ACTIVE', 'SUSPENDED', 'RETIRED'))
+            );
+
+            -- Migrate all legacy rows: deterministic map for default seed, cast for UUID-format seeds
+            INSERT INTO platform.tenant (
+                tenant_id, name, mode, status, timezone, created_at, updated_at
+            )
+            SELECT
+                CASE
+                    WHEN tenant_id = 'tenant-default-001' THEN '018f0e0a-0000-7000-8000-000000000001'::uuid
+                    ELSE tenant_id::uuid
+                END,
+                name, mode, status, timezone, created_at, updated_at
+            FROM platform.tenant_legacy_day01;
+
+            -- Verify migrated row count matches legacy count
+            SELECT COUNT(*) INTO migrated_count FROM platform.tenant;
+            IF migrated_count <> legacy_count THEN
+                RAISE EXCEPTION 'Legacy tenant migration row count mismatch: legacy=%, migrated=%', legacy_count, migrated_count;
+            END IF;
+
+            -- Drop intermediate staging table non-destructively (NO CASCADE)
+            DROP TABLE platform.tenant_legacy_day01;
+        END IF;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS platform.tenant (
     tenant_id UUID PRIMARY KEY,

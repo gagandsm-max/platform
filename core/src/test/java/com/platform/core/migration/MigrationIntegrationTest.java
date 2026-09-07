@@ -16,6 +16,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -73,6 +74,113 @@ class MigrationIntegrationTest {
     @Test
     void dayOneVarcharTenantBootstrapUpgradesAndRestartsCleanly() {
         JdbcTemplate jdbc = pg.jdbc();
+
+        // 1. Establish complete Day-01 bootstrap environment
+        jdbc.execute("""
+                CREATE TABLE platform.schema_migration (
+                    migration_id SERIAL PRIMARY KEY,
+                    version VARCHAR(64) NOT NULL UNIQUE,
+                    name VARCHAR(255) NOT NULL,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    checksum VARCHAR(64) NOT NULL
+                );
+                CREATE TABLE platform.deployment_metadata (
+                    deployment_id VARCHAR(64) PRIMARY KEY,
+                    platform_version VARCHAR(32) NOT NULL,
+                    cluster_mode VARCHAR(32) NOT NULL DEFAULT 'STANDALONE',
+                    active_epoch BIGINT NOT NULL DEFAULT 1,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE platform.tenant (
+                    tenant_id VARCHAR(64) PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    mode VARCHAR(32) NOT NULL DEFAULT 'SINGLE',
+                    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+                    timezone VARCHAR(64) NOT NULL DEFAULT 'UTC',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO platform.deployment_metadata (deployment_id, platform_version, cluster_mode, active_epoch)
+                VALUES ('platform-dev-deployment-001', '0.1.0-dev', 'STANDALONE', 1);
+                INSERT INTO platform.schema_migration (version, name, checksum)
+                VALUES ('001_initial_bootstrap', 'Initial bootstrap migration', 'bootstrap-hash-v0.1.0');
+                CREATE OR REPLACE VIEW platform.v_health_check AS
+                SELECT
+                    d.deployment_id,
+                    d.platform_version,
+                    d.cluster_mode,
+                    d.active_epoch,
+                    (SELECT COUNT(*) FROM platform.schema_migration) AS migrations_count,
+                    CURRENT_TIMESTAMP AS checked_at
+                FROM platform.deployment_metadata d;
+                """);
+
+        // 2. Insert default row with custom metadata/timestamps plus an existing UUID-format seed
+        jdbc.update("""
+                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                VALUES ('tenant-default-001', 'Acme Enterprise', 'SINGLE', 'ACTIVE', 'America/Chicago',
+                        '2026-01-15 10:30:00+00'::timestamptz, '2026-02-20 15:45:00+00'::timestamptz)
+                """);
+        jdbc.update("""
+                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                VALUES ('018f0e0a-0000-7000-8000-00000000beef', 'UUID Enterprise', 'MSP_CHILD', 'ACTIVE', 'UTC',
+                        '2026-03-01 08:00:00+00'::timestamptz, '2026-03-01 09:00:00+00'::timestamptz)
+                """);
+
+        // 3. Execute Day-02 migration
+        pg.migrate();
+
+        // 4. Assert schema migration to normative UUID
+        assertEquals("uuid", jdbc.queryForObject("""
+                SELECT data_type FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='tenant' AND column_name='tenant_id'
+                """, String.class));
+
+        // 5. Assert row count preserved
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
+
+        // 6. Assert mapped default row preserves all metadata and values
+        Map<String, Object> defaultTenant = jdbc.queryForMap("""
+                SELECT tenant_id::text AS id, name, mode, status, timezone, created_at, updated_at
+                  FROM platform.tenant
+                 WHERE tenant_id='018f0e0a-0000-7000-8000-000000000001'::uuid
+                """);
+        assertEquals("018f0e0a-0000-7000-8000-000000000001", defaultTenant.get("id"));
+        assertEquals("Acme Enterprise", defaultTenant.get("name"));
+        assertEquals("SINGLE", defaultTenant.get("mode"));
+        assertEquals("ACTIVE", defaultTenant.get("status"));
+        assertEquals("America/Chicago", defaultTenant.get("timezone"));
+        assertNotNull(defaultTenant.get("created_at"));
+        assertNotNull(defaultTenant.get("updated_at"));
+
+        // 7. Assert second UUID tenant row preserved
+        Map<String, Object> uuidTenant = jdbc.queryForMap("""
+                SELECT tenant_id::text AS id, name, mode, status
+                  FROM platform.tenant
+                 WHERE tenant_id='018f0e0a-0000-7000-8000-00000000beef'::uuid
+                """);
+        assertEquals("018f0e0a-0000-7000-8000-00000000beef", uuidTenant.get("id"));
+        assertEquals("UUID Enterprise", uuidTenant.get("name"));
+        assertEquals("MSP_CHILD", uuidTenant.get("mode"));
+
+        // 8. Assert unrelated Day-01 bootstrap artifacts remain intact
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_migration", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM platform.deployment_metadata", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT migrations_count FROM platform.v_health_check", Integer.class));
+
+        // 9. Assert temporary staging table was dropped without leaving duplicates
+        assertNull(jdbc.queryForObject("SELECT to_regclass('platform.tenant_legacy_day01')", String.class));
+
+        // 10. Assert restart is idempotent and does not alter data
+        pg.migrate();
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
+    }
+
+    @Test
+    void injectedFailureDuringLegacyTenantUpgradeRollsBackAndReleasesLock() {
+        JdbcTemplate jdbc = pg.jdbc();
         jdbc.execute("""
                 CREATE TABLE platform.tenant (
                     tenant_id VARCHAR(64) PRIMARY KEY,
@@ -84,20 +192,90 @@ class MigrationIntegrationTest {
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
-        jdbc.update("INSERT INTO platform.tenant(tenant_id,name) VALUES ('tenant-default-001','Default Enterprise')");
+        jdbc.update("INSERT INTO platform.tenant(tenant_id, name) VALUES ('tenant-default-001', 'Preserved Enterprise')");
 
+        // Failing migration that attempts table rename and then fails deliberately
+        MigrationCatalog failingCatalog = catalog("V910", "failing upgrade", """
+                ALTER TABLE platform.tenant RENAME TO tenant_legacy_day01;
+                CREATE TABLE platform.tenant (tenant_id UUID PRIMARY KEY, name VARCHAR(255) NOT NULL);
+                INSERT INTO platform.table_that_does_not_exist(id) VALUES (1);
+                """);
+
+        MigrationException ex = assertThrows(MigrationException.class,
+                () -> pg.runner(failingCatalog).applyPendingMigrations());
+        assertEquals("MIGRATION_SQL_FAILED", ex.getCode());
+
+        // Assert schema_history does NOT record the failed version
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V910'", Integer.class));
+
+        // Assert rollback restored platform.tenant under its original name and type
+        assertEquals("character varying", jdbc.queryForObject("""
+                SELECT data_type FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='tenant' AND column_name='tenant_id'
+                """, String.class));
+
+        // Assert original legacy data is completely intact
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
+        assertEquals("Preserved Enterprise", jdbc.queryForObject(
+                "SELECT name FROM platform.tenant WHERE tenant_id='tenant-default-001'", String.class));
+
+        // Assert temporary table does not exist
+        assertNull(jdbc.queryForObject("SELECT to_regclass('platform.tenant_legacy_day01')", String.class));
+
+        // Assert advisory lock is released (can be acquired on fresh connection)
+        Boolean lockAcquired = jdbc.queryForObject("SELECT pg_try_advisory_lock(1346982994, 1296650836)", Boolean.class);
+        assertTrue(Boolean.TRUE.equals(lockAcquired), "Advisory lock must be released after failure");
+        jdbc.execute("SELECT pg_advisory_unlock(1346982994, 1296650836)");
+
+        // Assert running the real migration now succeeds
         pg.migrate();
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V001'", Integer.class));
         assertEquals("uuid", jdbc.queryForObject("""
                 SELECT data_type FROM information_schema.columns
                  WHERE table_schema='platform' AND table_name='tenant' AND column_name='tenant_id'
                 """, String.class));
-        assertEquals(1, jdbc.queryForObject("""
-                SELECT COUNT(*) FROM platform.tenant
-                 WHERE tenant_id='018f0e0a-0000-7000-8000-000000000001'::uuid
-                """, Integer.class));
+        assertEquals("Preserved Enterprise", jdbc.queryForObject(
+                "SELECT name FROM platform.tenant WHERE tenant_id='018f0e0a-0000-7000-8000-000000000001'::uuid", String.class));
+    }
 
-        pg.migrate();
-        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+    @Test
+    void unsupportedLegacyTenantDataFailsClosedWithoutDataLoss() {
+        JdbcTemplate jdbc = pg.jdbc();
+        jdbc.execute("""
+                CREATE TABLE platform.tenant (
+                    tenant_id VARCHAR(64) PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    mode VARCHAR(32) NOT NULL DEFAULT 'SINGLE',
+                    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+                    timezone VARCHAR(64) NOT NULL DEFAULT 'UTC',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        jdbc.update("INSERT INTO platform.tenant(tenant_id, name) VALUES ('tenant-default-001', 'Default Enterprise')");
+        jdbc.update("INSERT INTO platform.tenant(tenant_id, name) VALUES ('corrupted-legacy-tenant-007', 'Corrupted Enterprise')");
+
+        MigrationException ex = assertThrows(MigrationException.class, pg::migrate);
+        assertEquals("MIGRATION_SQL_FAILED", ex.getCode());
+
+        // Assert schema_history does NOT record V001
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V001'", Integer.class));
+
+        // Assert platform.tenant is still character varying
+        assertEquals("character varying", jdbc.queryForObject("""
+                SELECT data_type FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='tenant' AND column_name='tenant_id'
+                """, String.class));
+
+        // Assert both original records are completely untouched
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
+        assertEquals("Default Enterprise", jdbc.queryForObject(
+                "SELECT name FROM platform.tenant WHERE tenant_id='tenant-default-001'", String.class));
+        assertEquals("Corrupted Enterprise", jdbc.queryForObject(
+                "SELECT name FROM platform.tenant WHERE tenant_id='corrupted-legacy-tenant-007'", String.class));
     }
 
     @Test
