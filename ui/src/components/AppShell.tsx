@@ -70,9 +70,9 @@ export const AppShell: React.FC<AppShellProps> = ({
           type="button"
           className="global-search"
           onClick={() => setPaletteOpen(true)}
-          aria-label="Open global navigation and search"
+          aria-label="Open workspace navigation"
         >
-          <span>Search Platform</span>
+          <span>Navigate workspaces</span>
           <kbd>Ctrl K</kbd>
         </button>
 
@@ -89,10 +89,22 @@ export const AppShell: React.FC<AppShellProps> = ({
               <option value="dark">Dark</option>
             </select>
           </label>
-          <button type="button" className="icon-button" aria-label="Notifications">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Notifications not yet connected"
+            disabled
+            title="Notifications contract is not wired yet"
+          >
             Notifications
           </button>
-          <button type="button" className="user-menu" aria-label="User menu">
+          <button
+            type="button"
+            className="user-menu"
+            aria-label="Account menu not yet connected"
+            disabled
+            title="Identity session UI is not wired yet"
+          >
             Account
           </button>
         </div>
