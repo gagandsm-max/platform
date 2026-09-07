@@ -128,3 +128,5 @@ export const App: React.FC = () => {
     </ErrorBoundary>
   );
 };
+
+export default App;
