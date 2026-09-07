@@ -370,7 +370,8 @@ fi
 TEST_NUM=20
 TEST_DESC="Persistence, Structured JSON Logs, and Workstation Isolation"
 # Marker row in Postgres
-docker exec platform-postgres psql -U platform_app -d platform -c "INSERT INTO platform.tenant (tenant_id, name) VALUES ('restart-test-tenant', 'Restart Test') ON CONFLICT DO NOTHING;" > /dev/null 2>&1
+# Day-02 tenant_id is UUID. Shared-file change required so persistence probe matches schema.
+docker exec platform-postgres psql -U platform_app -d platform -c "INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at) VALUES ('018f0e0a-0000-7000-8000-00000000beef'::uuid, 'Restart Test', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW()) ON CONFLICT DO NOTHING;" > /dev/null 2>&1
 # Marker key in Valkey
 docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}" set restart_persist_key "preserved_across_down" > /dev/null 2>&1
 
@@ -388,11 +389,11 @@ for i in $(seq 1 45); do
 done
 
 # Read markers
-PG_RESTART_VAL=$(docker exec platform-postgres psql -U platform_app -d platform -t -A -c "SELECT count(*) FROM platform.tenant WHERE tenant_id='restart-test-tenant';" 2>/dev/null || echo "0")
+PG_RESTART_VAL=$(docker exec platform-postgres psql -U platform_app -d platform -t -A -c "SELECT count(*) FROM platform.tenant WHERE tenant_id='018f0e0a-0000-7000-8000-00000000beef'::uuid;" 2>/dev/null || echo "0")
 VALKEY_RESTART_VAL=$(docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}" get restart_persist_key 2>/dev/null || echo "")
 
 # Clean markers
-docker exec platform-postgres psql -U platform_app -d platform -c "DELETE FROM platform.tenant WHERE tenant_id='restart-test-tenant';" > /dev/null 2>&1 || true
+docker exec platform-postgres psql -U platform_app -d platform -c "DELETE FROM platform.tenant WHERE tenant_id='018f0e0a-0000-7000-8000-00000000beef'::uuid;" > /dev/null 2>&1 || true
 docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}" del restart_persist_key > /dev/null 2>&1 || true
 
 # Structured logs

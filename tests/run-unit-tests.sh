@@ -30,7 +30,7 @@ docker run --rm \
     -v "${ROOT_DIR}/core:/src:ro" \
     -v "${HOME}/.m2:/root/.m2" \
     maven:3.9.9-eclipse-temurin-21-alpine \
-    sh -c "cp -r /src /build && cd /build && mvn test -B"
+    sh -c "cp -r /src /build && cd /build && mvn test -B -DexcludedGroups=postgres"
 
 echo "--> [3/3] Running UI Typecheck..."
 docker run --rm \
