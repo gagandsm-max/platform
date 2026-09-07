@@ -167,8 +167,8 @@ func (c *Collector) collectAttempt(ctx context.Context, req Request) (Collection
 	watcherDone := make(chan struct{})
 	c.stats.activeWatchers.Add(1)
 	go func() {
-		defer c.stats.activeWatchers.Add(-1)
 		defer close(watcherDone)
+		defer c.stats.activeWatchers.Add(-1)
 		select {
 		case <-ctx.Done():
 			closeSession()

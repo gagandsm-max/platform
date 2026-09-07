@@ -1,0 +1,148 @@
+package spool
+
+import (
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"sync"
+	"time"
+)
+
+const (
+	storageWatermarkPercent = 80
+	stateSchemaVersion      = 1
+	recordSchemaVersion     = 1
+	stateFileName           = "state.json"
+	quarantineDirName       = "quarantine"
+)
+
+type ErrorCode string
+
+const (
+	CodeInvalidConfig   ErrorCode = "SPOOL_INVALID_CONFIG"
+	CodeInvalidRecord   ErrorCode = "SPOOL_INVALID_RECORD"
+	CodeClosed          ErrorCode = "SPOOL_CLOSED"
+	CodeProtection      ErrorCode = "SPOOL_STORAGE_PROTECTION"
+	CodeCorruption      ErrorCode = "SPOOL_CORRUPTION"
+	CodeSequence        ErrorCode = "SPOOL_SEQUENCE_INVALID"
+	CodeIO              ErrorCode = "SPOOL_IO"
+	CodeUnsafePath      ErrorCode = "SPOOL_UNSAFE_PATH"
+	CodeUnsafeLegacyAPI ErrorCode = "SPOOL_UNSAFE_LEGACY_API"
+)
+
+type Error struct {
+	Code ErrorCode
+	msg  string
+	err  error
+}
+
+func (e *Error) Error() string { return string(e.Code) + ": " + e.msg }
+func (e *Error) Unwrap() error { return e.err }
+func newError(code ErrorCode, msg string, err error) error {
+	return &Error{Code: code, msg: msg, err: err}
+}
+func CodeOf(err error) ErrorCode {
+	var e *Error
+	if errors.As(err, &e) {
+		return e.Code
+	}
+	return ""
+}
+
+type RecordClass string
+
+const (
+	ClassMetric      RecordClass = "METRIC"
+	ClassEvent       RecordClass = "EVENT"
+	ClassFlow        RecordClass = "FLOW"
+	ClassSyslog      RecordClass = "SYSLOG"
+	ClassInventory   RecordClass = "INVENTORY"
+	ClassOperational RecordClass = "OPERATIONAL"
+)
+
+func validClass(c RecordClass) bool {
+	switch c {
+	case ClassMetric, ClassEvent, ClassFlow, ClassSyslog, ClassInventory, ClassOperational:
+		return true
+	}
+	return false
+}
+
+type Config struct {
+	Dir            string
+	MaxRecordBytes int
+	Logger         *slog.Logger
+}
+type AppendRequest struct {
+	Class     RecordClass
+	Type      string
+	Payload   []byte
+	CreatedAt time.Time
+}
+type Record struct {
+	SchemaVersion int         `json:"schemaVersion"`
+	Sequence      uint64      `json:"sequence"`
+	ID            string      `json:"id"`
+	Class         RecordClass `json:"class"`
+	Type          string      `json:"type"`
+	CreatedAt     time.Time   `json:"createdAt"`
+	ContentLength int         `json:"contentLength"`
+	Checksum      string      `json:"checksum"`
+	Payload       []byte      `json:"payload"`
+}
+type Batch struct {
+	FirstSequence uint64
+	LastSequence  uint64
+	Records       []Record
+	PayloadBytes  int
+}
+type ProtectionState string
+
+const (
+	ProtectionSafe      ProtectionState = "SAFE"
+	ProtectionTriggered ProtectionState = "PROTECTED"
+	ProtectionDegraded  ProtectionState = "DEGRADED"
+)
+
+type Stats struct {
+	NextSequence       uint64
+	AckedThrough       uint64
+	RecordCount        int
+	SpoolBytes         int64
+	OldestRecordAge    time.Duration
+	FilesystemUsedPct  float64
+	ProtectionState    ProtectionState
+	QuarantinedRecords uint64
+	CorruptionDetected bool
+}
+type diskState struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	NextSequence  uint64 `json:"nextSequence"`
+	AckedThrough  uint64 `json:"ackedThrough"`
+}
+type spaceStatus struct {
+	totalBytes uint64
+	usedBytes  uint64
+	usedPct    float64
+}
+type DiskSpool struct {
+	dir            string
+	quarantineDir  string
+	maxRecordBytes int
+	logger         *slog.Logger
+	mu             sync.Mutex
+	state          diskState
+	closed         bool
+	degraded       bool
+	quarantined    uint64
+	space          func(int64) (spaceStatus, error)
+}
+
+// Transitional compatibility only until production main wiring is replaced.
+type SpoolItem struct {
+	ID        string          `json:"id"`
+	SensorID  string          `json:"sensor_id"`
+	Timestamp int64           `json:"timestamp"`
+	Type      string          `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
+}
