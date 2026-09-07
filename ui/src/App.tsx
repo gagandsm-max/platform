@@ -1,89 +1,95 @@
-import React, { useState } from 'react';
-import { Navbar } from './components/Navbar';
-import { HealthStatus } from './components/HealthStatus';
+import React, { useEffect, useMemo, useState } from 'react';
+import { AppShell, ThemeMode } from './components/AppShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { PageState } from './components/PageState';
+import { WorkspacePage } from './components/WorkspacePage';
+import {
+  AccessContext,
+  ALL_WORKSPACE_PERMISSIONS,
+  WORKSPACES,
+  findWorkspaceByPath,
+} from './platform/navigation';
 import './App.css';
 
+const BOOTSTRAP_ACCESS: AccessContext = {
+  permissions: ALL_WORKSPACE_PERMISSIONS,
+  multiTenant: false,
+};
+
+const resolveInitialTheme = (): ThemeMode => {
+  const stored = window.localStorage.getItem('platform.theme');
+  if (stored === 'light' || stored === 'dark' || stored === 'system') {
+    return stored;
+  }
+  return 'system';
+};
+
+const applyTheme = (mode: ThemeMode): (() => void) => {
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const update = () => {
+    const effective = mode === 'system' ? (media.matches ? 'dark' : 'light') : mode;
+    document.documentElement.dataset.theme = effective;
+  };
+
+  update();
+  if (mode === 'system') {
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }
+  return () => undefined;
+};
+
 export const App: React.FC = () => {
-  const [activeTenant, setActiveTenant] = useState<string>('default');
-  const [activeTab, setActiveTab] = useState<'overview' | 'infrastructure' | 'network' | 'analytics'>('overview');
+  const [currentPath, setCurrentPath] = useState(window.location.pathname || '/');
+  const [theme, setTheme] = useState<ThemeMode>(resolveInitialTheme);
+
+  const activeWorkspace = useMemo(
+    () => findWorkspaceByPath(currentPath),
+    [currentPath],
+  );
+  const shellWorkspace = activeWorkspace ?? WORKSPACES[0];
+
+  useEffect(() => {
+    const onPopState = () => setCurrentPath(window.location.pathname || '/');
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => applyTheme(theme), [theme]);
+
+  const changeTheme = (nextTheme: ThemeMode) => {
+    window.localStorage.setItem('platform.theme', nextTheme);
+    setTheme(nextTheme);
+  };
+
+  const navigateTo = (path: string) => {
+    if (path !== window.location.pathname) {
+      window.history.pushState({}, '', path);
+    }
+    setCurrentPath(path);
+  };
 
   return (
     <ErrorBoundary>
-      <div className="platform-container">
-        <Navbar
-          tenant={activeTenant}
-          onTenantChange={setActiveTenant}
-          env="DEV"
-        />
-
-        <div className="platform-body">
-          <aside className="platform-sidebar">
-            <nav className="nav-menu">
-              <button
-                className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}
-                onClick={() => setActiveTab('overview')}
-              >
-                📊 Platform Overview
-              </button>
-              <button
-                className={`nav-item ${activeTab === 'network' ? 'active' : ''}`}
-                onClick={() => setActiveTab('network')}
-              >
-                🌐 Network Topology
-              </button>
-              <button
-                className={`nav-item ${activeTab === 'infrastructure' ? 'active' : ''}`}
-                onClick={() => setActiveTab('infrastructure')}
-              >
-                🖥️ Infrastructure & Agents
-              </button>
-              <button
-                className={`nav-item ${activeTab === 'analytics' ? 'active' : ''}`}
-                onClick={() => setActiveTab('analytics')}
-              >
-                📈 Telemetry & Analytics
-              </button>
-            </nav>
-          </aside>
-
-          <main className="platform-content">
-            <div className="content-banner">
-              <h2>Platform Engineering Control Plane</h2>
-              <p>
-                Authoritative, high-scale network and infrastructure observability engine.
-                Tenant context: <strong>{activeTenant}</strong>
-              </p>
-            </div>
-
-            <HealthStatus />
-
-            <div className="card architecture-card">
-              <h3>Bootstrap Architecture State</h3>
-              <div className="summary-list">
-                <div className="summary-item">
-                  <strong>Control Plane (Core):</strong> Active Spring Boot 3.3 runtime over Java 21.
-                </div>
-                <div className="summary-item">
-                  <strong>Authoritative DB:</strong> PostgreSQL 16 with schema migrations initialized.
-                </div>
-                <div className="summary-item">
-                  <strong>Telemetry Store:</strong> ClickHouse analytical database for high-volume time-series metrics.
-                </div>
-                <div className="summary-item">
-                  <strong>Streaming Backbone:</strong> Apache Kafka KRaft internal broker.
-                </div>
-                <div className="summary-item">
-                  <strong>Ephemeral Cache:</strong> Valkey 7 (Redis-compatible) cache.
-                </div>
-                <div className="summary-item">
-                  <strong>Edge Sensors:</strong> Multi-collector Go engines with bounded disk spools.
-                </div>
-              </div>
-            </div>
-          </main>
-        </div>
-      </div>
+      <AppShell
+        access={BOOTSTRAP_ACCESS}
+        activeWorkspace={shellWorkspace}
+        onNavigate={(workspace) => navigateTo(workspace.path)}
+        theme={theme}
+        onThemeChange={changeTheme}
+      >
+        {activeWorkspace ? (
+          <WorkspacePage workspace={activeWorkspace} />
+        ) : (
+          <PageState
+            kind="error"
+            title="Workspace not found"
+            message="The requested Platform route is not registered in the current UI foundation."
+            actionLabel="Return home"
+            onAction={() => navigateTo('/')}
+          />
+        )}
+      </AppShell>
     </ErrorBoundary>
   );
 };
