@@ -17,8 +17,9 @@
   "idempotencyKey": "idem.example.001",
   "requestedProtocols": [
     {
-      "family": "SNMP",
-      "transport": "UDP"
+      "family": "HTTPS",
+      "transport": "HTTPS",
+      "tlsRequired": true
     }
   ],
   "tags": [

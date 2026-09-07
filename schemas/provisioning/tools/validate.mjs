@@ -8,7 +8,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const CONTRACT_VERSION = '1.0.0';
 
-// Defensive parser/input-safety bounds only. These are not customer operational defaults.
+// Defensive parser/input-safety bounds only. They are not operational/customer defaults.
 const MAX_DOCUMENT_BYTES = 256 * 1024;
 const MAX_INPUT_FILE_BYTES = 1024 * 1024;
 const MAX_DISCOVERED_DOCUMENTS = 256;
@@ -47,30 +47,19 @@ const STAGE_SET = new Set(STAGES);
 const STATUSES = new Set(['NOT_RUN', 'RUNNING', 'PASS', 'FAIL', 'INCONCLUSIVE', 'UNKNOWN', 'SKIPPED_NOT_APPLICABLE']);
 
 const FAILURE_CODES = new Set([
-  'INPUT_INVALID',
-  'DEVICE_UNREACHABLE',
-  'DNS_FAILURE',
-  'ROUTE_UNAVAILABLE',
-  'PROTOCOL_TIMEOUT',
-  'PROTOCOL_DISABLED_SUSPECTED',
-  'AUTHENTICATION_FAILED',
-  'AUTHORIZATION_FAILED',
-  'ACL_FIREWALL_SUSPECTED',
-  'PORT_UNREACHABLE',
-  'CREDENTIAL_PROFILE_INVALID',
-  'DEVICE_ALREADY_EXISTS',
-  'MIB_REQUIRED',
-  'API_SCHEMA_INVALID',
-  'TLS_CERTIFICATE_FAILURE',
-  'SENSOR_CAPACITY_EXCEEDED',
-  'NO_ELIGIBLE_SENSOR',
-  'MONITORING_PROFILE_INCOMPATIBLE',
+  'INPUT_INVALID', 'DEVICE_UNREACHABLE', 'DNS_FAILURE', 'ROUTE_UNAVAILABLE', 'PROTOCOL_TIMEOUT',
+  'PROTOCOL_DISABLED_SUSPECTED', 'AUTHENTICATION_FAILED', 'AUTHORIZATION_FAILED',
+  'ACL_FIREWALL_SUSPECTED', 'PORT_UNREACHABLE', 'CREDENTIAL_PROFILE_INVALID',
+  'DEVICE_ALREADY_EXISTS', 'MIB_REQUIRED', 'API_SCHEMA_INVALID', 'TLS_CERTIFICATE_FAILURE',
+  'SENSOR_CAPACITY_EXCEEDED', 'NO_ELIGIBLE_SENSOR', 'MONITORING_PROFILE_INCOMPATIBLE',
   'DEVICE_IDENTITY_CONFLICT',
 ]);
 
+// Conservative stage association. DEVICE_UNREACHABLE is deliberately restricted to route/reachability;
+// a transport/protocol timeout alone must not silently become a device-down/unreachable conclusion.
 const FAILURE_STAGE_MAP = new Map([
   ['INPUT_INVALID', new Set(['INPUT_NORMALIZATION', 'DNS_ADDRESS_VALIDATION'])],
-  ['DEVICE_UNREACHABLE', new Set(['ROUTE_REACHABILITY', 'TRANSPORT_PROTOCOL_RESPONSE'])],
+  ['DEVICE_UNREACHABLE', new Set(['ROUTE_REACHABILITY'])],
   ['DNS_FAILURE', new Set(['DNS_ADDRESS_VALIDATION'])],
   ['ROUTE_UNAVAILABLE', new Set(['ROUTE_REACHABILITY'])],
   ['PROTOCOL_TIMEOUT', new Set(['TRANSPORT_PROTOCOL_RESPONSE'])],
@@ -142,6 +131,7 @@ const EVIDENCE_KEYS = new Set([
   'evidenceId', 'kind', 'source', 'summary', 'sourceRef', 'endpointRef', 'technicalCode',
   'protocol', 'transport', 'observedAt',
 ]);
+const EXECUTION_CONTEXT_KEYS = ['startedAt', 'completedAt', 'durationMs', 'sensorId', 'endpoint'];
 
 const MATRIX_KEYS = new Set(['documentType', 'schemaVersion', 'requestId', 'correlationId', 'tenantId', 'rows']);
 const MATRIX_ROW_KEYS = new Set([
@@ -298,13 +288,19 @@ function validateRequest(document, issues, source) {
     }
   }
 
-  for (const key of ['siteId', 'sensorPoolId', 'monitoringProfileRef', 'devicePackRef', 'credentialProfileRef', 'idempotencyKey']) {
-    if (key in document) ref128(document[key], issues, source, `$.${key}`);
-  }
+  for (const key of ['siteId', 'sensorPoolId', 'monitoringProfileRef', 'devicePackRef', 'credentialProfileRef', 'idempotencyKey']) if (key in document) ref128(document[key], issues, source, `$.${key}`);
   if ('devicePackVersion' in document) safeString(document.devicePackVersion, 1, 64, issues, source, '$.devicePackVersion');
 
   if ('requestedProtocols' in document && arrayValue(document.requestedProtocols, 1, 32, issues, source, '$.requestedProtocols')) {
-    document.requestedProtocols.forEach((declaration, index) => validateRequestProtocol(declaration, issues, source, `$.requestedProtocols[${index}]`));
+    const declarations = new Set();
+    document.requestedProtocols.forEach((declaration, index) => {
+      validateRequestProtocol(declaration, issues, source, `$.requestedProtocols[${index}]`);
+      if (isObject(declaration)) {
+        const key = `${declaration.family ?? ''}|${declaration.transport ?? ''}|${declaration.port ?? ''}|${declaration.tlsRequired ?? ''}|${declaration.securityMode ?? ''}`;
+        if (declarations.has(key)) add(issues, 'DUPLICATE_PROTOCOL_DECLARATION', source, `$.requestedProtocols[${index}]`, 'Equivalent requested protocol declaration is duplicated.');
+        declarations.add(key);
+      }
+    });
   }
 
   if ('tags' in document && arrayValue(document.tags, 0, 64, issues, source, '$.tags')) {
@@ -383,12 +379,10 @@ function validateReadiness(document, issues, source) {
   let runningCount = 0;
   document.stages.forEach((stage, index) => {
     const p = `$.stages[${index}]`;
-    if (!isObject(stage)) {
-      add(issues, 'INVALID_TYPE', source, p, 'Expected object.');
-      return;
-    }
+    if (!isObject(stage)) return add(issues, 'INVALID_TYPE', source, p, 'Expected object.');
     assertKeys(stage, STAGE_KEYS, issues, source, p);
     requireKeys(stage, ['stageId', 'status', 'evidence'], issues, source, p);
+
     if ('stageId' in stage) {
       if (!STAGE_SET.has(stage.stageId)) add(issues, 'UNKNOWN_STAGE', source, `${p}.stageId`, `Unknown readiness stage: ${String(stage.stageId)}.`);
       if (seenStages.has(stage.stageId)) add(issues, 'DUPLICATE_STAGE', source, `${p}.stageId`, `Duplicate readiness stage: ${String(stage.stageId)}.`);
@@ -402,6 +396,8 @@ function validateReadiness(document, issues, source) {
     if ('startedAt' in stage) isoTimestamp(stage.startedAt, issues, source, `${p}.startedAt`);
     if ('completedAt' in stage) isoTimestamp(stage.completedAt, issues, source, `${p}.completedAt`);
     if ('durationMs' in stage) safeInteger(stage.durationMs, 0, null, 'INVALID_DURATION', issues, source, `${p}.durationMs`);
+    if ('startedAt' in stage && 'completedAt' in stage && !Number.isNaN(Date.parse(stage.startedAt)) && !Number.isNaN(Date.parse(stage.completedAt)) && Date.parse(stage.completedAt) < Date.parse(stage.startedAt)) add(issues, 'STAGE_TIME_ORDER', source, `${p}.completedAt`, 'completedAt cannot precede startedAt.');
+
     if ('sensorId' in stage) {
       ref128(stage.sensorId, issues, source, `${p}.sensorId`);
       if (sensorContext.ids.size > 0 && !sensorContext.ids.has(stage.sensorId)) add(issues, 'SENSOR_REFERENCE_NOT_FOUND', source, `${p}.sensorId`, `Sensor ${stage.sensorId} is not present in sensorEligibility.candidates.`);
@@ -415,9 +411,8 @@ function validateReadiness(document, issues, source) {
     if ('diagnosticsRef' in stage) {
       if (!safeString(stage.diagnosticsRef, 1, 512, issues, source, `${p}.diagnosticsRef`) || !REF_RE.test(stage.diagnosticsRef)) add(issues, 'INVALID_DIAGNOSTICS_REFERENCE', source, `${p}.diagnosticsRef`, 'Diagnostics reference must be opaque, bounded and non-filesystem.');
     }
-    if ('nextActions' in stage && arrayValue(stage.nextActions, 0, MAX_NEXT_ACTIONS, issues, source, `${p}.nextActions`)) {
-      stage.nextActions.forEach((action, actionIndex) => safeString(action, 1, 512, issues, source, `${p}.nextActions[${actionIndex}]`));
-    }
+    if ('nextActions' in stage && arrayValue(stage.nextActions, 0, MAX_NEXT_ACTIONS, issues, source, `${p}.nextActions`)) stage.nextActions.forEach((action, actionIndex) => safeString(action, 1, 512, issues, source, `${p}.nextActions[${actionIndex}]`));
+
     validateStageStatus(stage, issues, source, p);
   });
 
@@ -473,8 +468,10 @@ function validateStageStatus(stage, issues, source, p) {
   } else if (status === 'NOT_RUN' || status === 'SKIPPED_NOT_APPLICABLE') {
     if (evidenceCount > 0) add(issues, 'NONEXECUTED_STAGE_WITH_EVIDENCE', source, `${p}.evidence`, `${status} must not contain execution evidence.`);
     if (hasFailureCode || hasAssessment) add(issues, 'STATUS_FAILURE_CONFLICT', source, p, `${status} cannot carry failure metadata.`);
+    for (const key of EXECUTION_CONTEXT_KEYS) if (key in stage) add(issues, 'NONEXECUTED_STAGE_WITH_CONTEXT', source, `${p}.${key}`, `${status} must not imply execution context.`);
   } else if (status === 'RUNNING') {
     if (hasFailureCode || hasAssessment) add(issues, 'STATUS_FAILURE_CONFLICT', source, p, 'RUNNING cannot carry terminal failure metadata.');
+    if ('completedAt' in stage) add(issues, 'RUNNING_STAGE_COMPLETED', source, `${p}.completedAt`, 'RUNNING cannot carry completedAt.');
   }
 }
 
@@ -483,9 +480,7 @@ function validateStageProgression(stages, issues, source) {
   for (let index = 0; index < stages.length; index += 1) {
     const stage = stages[index];
     if (!isObject(stage) || !STATUSES.has(stage.status)) continue;
-    if (blocked && stage.status !== 'NOT_RUN' && stage.status !== 'SKIPPED_NOT_APPLICABLE') {
-      add(issues, 'STAGE_PREREQUISITE_VIOLATION', source, `$.stages[${index}].status`, 'A later stage cannot imply execution after an earlier blocking/unresolved stage.');
-    }
+    if (blocked && stage.status !== 'NOT_RUN' && stage.status !== 'SKIPPED_NOT_APPLICABLE') add(issues, 'STAGE_PREREQUISITE_VIOLATION', source, `$.stages[${index}].status`, 'A later stage cannot imply execution after an earlier blocking/unresolved stage.');
     if (stage.status !== 'PASS' && stage.status !== 'SKIPPED_NOT_APPLICABLE') blocked = true;
   }
 }
@@ -558,9 +553,7 @@ function validateSensorStageConsistency(document, sensorContext, issues, source)
     if (typeof stage.sensorId !== 'string') add(issues, 'SELECTED_SENSOR_REFERENCE_REQUIRED', source, '$.stages[2].sensorId', 'PASS requires the selected Sensor reference.');
     else if (sensorContext.selectedId && stage.sensorId !== sensorContext.selectedId) add(issues, 'SELECTED_SENSOR_REFERENCE_MISMATCH', source, '$.stages[2].sensorId', 'Stage Sensor reference does not match selected candidate.');
   }
-  if (stage.status === 'FAIL' && (stage.failureCode === 'NO_ELIGIBLE_SENSOR' || stage.failureCode === 'SENSOR_CAPACITY_EXCEEDED') && sensorContext.selectedCount !== 0) {
-    add(issues, 'FAILED_SENSOR_STAGE_HAS_SELECTION', source, '$.sensorEligibility.candidates', `${stage.failureCode} must not mark a candidate selected.`);
-  }
+  if (stage.status === 'FAIL' && (stage.failureCode === 'NO_ELIGIBLE_SENSOR' || stage.failureCode === 'SENSOR_CAPACITY_EXCEEDED') && sensorContext.selectedCount !== 0) add(issues, 'FAILED_SENSOR_STAGE_HAS_SELECTION', source, '$.sensorEligibility.candidates', `${stage.failureCode} must not mark a candidate selected.`);
 }
 
 function validateMatrix(document, issues, source) {
@@ -626,7 +619,7 @@ function validateMatrixDestination(value, issues, source, p) {
 function validateRequirementSource(value, issues, source, p) {
   if (!isObject(value)) return add(issues, 'INVALID_TYPE', source, p, 'Expected object.');
   assertKeys(value, MATRIX_REQUIREMENT_SOURCE_KEYS, issues, source, p);
-  requireKeys(value, ['type'], issues, source, p);
+  requireKeys(value, ['type', 'reference'], issues, source, p);
   if ('type' in value) enumValue(value.type, REQUIREMENT_SOURCE_TYPES, 'UNKNOWN_REQUIREMENT_SOURCE', issues, source, `${p}.type`);
   if ('reference' in value) ref128(value.reference, issues, source, `${p}.reference`);
 }
@@ -692,13 +685,10 @@ export function validateDocumentSet(entries) {
     if (request) {
       for (const entry of group) {
         if (entry.document.documentType !== 'READINESS_RESULT') continue;
-        if (request.target?.address !== entry.document.target?.address || request.target?.targetType !== entry.document.target?.targetType) {
-          add(issues, 'TARGET_REFERENCE_MISMATCH', entry.source, '$.target', `Readiness target does not match provisioning request ${requestId}.`);
-        }
+        if (request.target?.address !== entry.document.target?.address || request.target?.targetType !== entry.document.target?.targetType) add(issues, 'TARGET_REFERENCE_MISMATCH', entry.source, '$.target', `Readiness target does not match provisioning request ${requestId}.`);
       }
     }
   }
-
   return stableIssues(issues);
 }
 
@@ -721,7 +711,7 @@ function discoverJsonFiles(inputPath) {
       const full = path.join(dir, entry.name);
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) walk(full);
-      else if (entry.isFile() && entry.name.endsWith('.json')) files.push(full);
+      else if (entry.isFile() && entry.name.endsWith('.json') && !entry.name.endsWith('.schema.json') && entry.name !== 'cases.json') files.push(full);
       if (files.length > MAX_DISCOVERED_DOCUMENTS) throw new Error(`More than ${MAX_DISCOVERED_DOCUMENTS} JSON documents discovered; validation is bounded.`);
     }
   };
@@ -735,7 +725,7 @@ function printIssues(issues) {
 
 function validateFiles(inputs) {
   const files = inputs.flatMap(discoverJsonFiles);
-  if (files.length === 0) throw new Error('No JSON documents found.');
+  if (files.length === 0) throw new Error('No provisioning contract JSON documents found.');
   const entries = [];
   const issues = [];
   for (const file of files) {
@@ -789,9 +779,7 @@ function applyMutation(document, mutation) {
     const pb = parentAt(document, mutation.otherPath);
     pa.parent[pa.key] = b;
     pb.parent[pb.key] = a;
-  } else {
-    throw new Error(`Unknown fixture mutation op: ${String(mutation.op)}`);
-  }
+  } else throw new Error(`Unknown fixture mutation op: ${String(mutation.op)}`);
 }
 
 function clearTerminalFields(stage) {
@@ -801,6 +789,14 @@ function clearTerminalFields(stage) {
   delete stage.uncertainty;
   delete stage.diagnosticsRef;
   delete stage.nextActions;
+}
+
+function clearExecutionContext(stage) {
+  delete stage.startedAt;
+  delete stage.completedAt;
+  delete stage.durationMs;
+  delete stage.sensorId;
+  delete stage.endpoint;
 }
 
 function materializeFailure(document, fixture) {
@@ -820,9 +816,12 @@ function materializeFailure(document, fixture) {
     summary: `Fictional bounded evidence for ${fixture.failureCode}.`,
   }];
 
+  if (fixture.failureCode === 'DNS_FAILURE') document.target.address = 'device.example.test';
+
   for (let i = index + 1; i < document.stages.length; i += 1) {
     const later = document.stages[i];
     clearTerminalFields(later);
+    clearExecutionContext(later);
     later.status = 'NOT_RUN';
     later.evidence = [];
   }
@@ -853,15 +852,13 @@ function loadFixtureBases(suite) {
   const bases = new Map();
   for (const [name, relative] of Object.entries(suite.examples)) {
     if (typeof relative !== 'string') throw new Error(`Fixture example path for ${name} must be a string.`);
-    const file = path.join(ROOT, relative);
-    bases.set(name, parseJsonFile(file));
+    bases.set(name, parseJsonFile(path.join(ROOT, relative)));
   }
   return bases;
 }
 
 function runFixtureSuite() {
-  const suiteFile = path.join(ROOT, 'fixtures', 'cases.json');
-  const suite = parseJsonFile(suiteFile);
+  const suite = parseJsonFile(path.join(ROOT, 'fixtures', 'cases.json'));
   const bases = loadFixtureBases(suite);
   let failures = 0;
 

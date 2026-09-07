@@ -87,7 +87,7 @@
         "requirementSource": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type"],
+          "required": ["type", "reference"],
           "properties": {
             "type": {"enum": ["MONITORING_PROFILE", "DEVICE_PACK", "PLATFORM_SERVICE", "CONNECTOR", "OTHER_GOVERNED_SOURCE"]},
             "reference": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"}
