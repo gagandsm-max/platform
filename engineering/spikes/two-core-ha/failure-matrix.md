@@ -1,7 +1,7 @@
 # Platform P0 Spike: Two-Core Combined Failure Matrix
 
 **Document ID:** SPIKE-P0-EVIDENCE-002  
-**Evidence SHA (this run):** `2bff6b2091f64e73466e3600abacc5424ce68777`  
+**Evidence SHA (this run):** `96f93345a3a21701f140e889dbd9655e0184b5b8`  
 **Mother Reference Version:** `v3.2.1`  
 **Status:** CORRECTED — evidence classifications only; no PASS without EXECUTED proof
 

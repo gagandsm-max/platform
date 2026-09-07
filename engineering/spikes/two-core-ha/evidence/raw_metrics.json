@@ -1,6 +1,6 @@
 {
   "timestamp": "2026-09-07T09:34:45Z",
-  "git_commit": "2bff6b2091f64e73466e3600abacc5424ce68777",
+  "git_commit": "96f93345a3a21701f140e889dbd9655e0184b5b8",
   "mother_version": "v3.2.1",
   "evidence_policy": {
     "pass_requires": "EXECUTED",
@@ -1004,5 +1004,6 @@
       "profile_evaluation": "INCOMPLETE \u2014 idle/lab container samples only; do NOT claim comfortably within 8 vCPU/16GB Core budget from this evidence alone",
       "missing_or_weak": []
     }
-  }
+  },
+  "evidence_note": "Corrected harness bind-mounted during Docker run; SHA stamped after evidence commit."
 }

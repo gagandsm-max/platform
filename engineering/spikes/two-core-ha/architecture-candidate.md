@@ -1,7 +1,7 @@
 # Platform Candidate Architecture: Two-Core Stateful HA (Corrected)
 
 **Document ID:** SPIKE-P0-CANDIDATE-001  
-**Evidence SHA:** `2bff6b2091f64e73466e3600abacc5424ce68777`  
+**Evidence SHA:** `96f93345a3a21701f140e889dbd9655e0184b5b8`  
 **Status:** CANDIDATE — promising patterns with honest evidence limits
 
 ---

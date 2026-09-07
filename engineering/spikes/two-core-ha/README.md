@@ -2,7 +2,7 @@
 
 Corrected evidence spike. Distinguishes **MEASURED / EXECUTED / MODELLED / INFERRED / PENDING PRODUCTION VALIDATION**.
 
-Evidence SHA for last documented run: `2bff6b2091f64e73466e3600abacc5424ce68777`
+Evidence SHA for last documented run: `96f93345a3a21701f140e889dbd9655e0184b5b8`
 
 ## Contents
 
