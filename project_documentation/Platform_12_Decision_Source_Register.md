@@ -1,7 +1,7 @@
 # Platform — Decision, Source & Assumption-Control Register
 
 **Document ID:** PLATFORM-DECISION-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2  
 **Status:** **Authoritative Mother Reference — Decision Provenance**
 
 ## 1. Purpose
@@ -21,7 +21,7 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 |---|---|---|
 | Product name | USER-FIXED | New product/project is **Platform**; do not call it Enterprise360 except when discussing legacy/reference material. |
 | Independence | USER-FIXED | Build from scratch; separate from ThoughtData and NetAI. |
-| Scope | USER-FIXED | Network + Infrastructure + DB + Cloud + Kubernetes + OTel metrics/logs + synthetics; DPI and full APM excluded initially. |
+| Scope | USER-FIXED | Network + Infrastructure + DB + Cloud + Kubernetes + OTel metrics/logs + synthetics + first-class SaaS operational monitoring + carrier/ISP operational enrichment + cross-domain operational intelligence. Full always-on DPI and full APM product positioning remain excluded initially. Bounded incident-triggered packet evidence is included. |
 | Core HA | USER-FIXED | Exactly two full Core nodes; one Active, one Standby; continuous sync; failover target <60 seconds. |
 | Core install | USER-FIXED | Separate Core build; installer chooses Standalone/HA and pairs two Cores through supplied peer/HA addressing. |
 | Sensor/Agent install | USER-FIXED | Separate Sensor and Agent builds; install against current master Core, handshake, download effective config; Core directs Agent to appropriate Sensor. |
@@ -39,8 +39,17 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 | Security posture | USER-FIXED | Design from day 1 for banks, defence and global enterprises; standards/certification readiness required, but no false certification claims. |
 | UI | USER-FIXED | Excellent/easy/fast/readable UX; SSL/TLS only; no application port 80. |
 | Master docs | USER-FIXED | Split mother-reference set is authoritative; no silent assumptions. |
-| Canonical source repository | USER-FIXED | Canonical Platform source repository is `https://github.com/gagandsm-max/platform`. GitHub is the system of record; local clones (including `~/nms`) are working copies. Code/build/test/mother-document changes become authoritative only after push and merge to GitHub. Short-lived branches and pull requests are required for material changes; do not push normal development to the protected/default branch; do not force-push shared/default branches; preserve decision provenance in Git history. Selecting GitHub does **not** freeze a CI provider (GitHub Actions remains unevaluated unless separately approved). |
+| Canonical source repository | USER-FIXED | Canonical Platform source repository is `https://github.com/gagandsm-max/platform`. GitHub is the system of record; local clones (including `~/nms`) are working copies. Code/build/test/mother-document changes become authoritative only after push and merge to GitHub. Short-lived branches and pull requests are required for material changes; do not push normal development to the protected/default branch; do not force-push shared/default branches; preserve decision provenance in Git history. Selecting GitHub does **not** freeze a CI provider. |
 | Mother-document change control | USER-FIXED | Mother documents are READ-MOSTLY. Agents must not casually modify them during feature work, but **must** update them under deliberate change control when factual errors, contradictions, approved decision changes, formally selected dependencies, resolved P0/TBD items, omitted requirements, or implementation/document conflicts are found. Implementation must not permanently diverge from mother-reference truth. |
+| SaaS monitoring | USER-FIXED | First-class SaaS monitoring through reusable/certified SaaS Packs is V1 scope. Exact provider pack list is not invented; pack support depends on customer priority, provider APIs, entitlements, security and licensing. |
+| Triggered packet evidence | USER-FIXED | Bounded, incident-triggered/on-demand packet evidence is V1 diagnostic scope with strict RBAC, duration/volume/resource/retention controls. This does not reintroduce full always-on DPI. |
+| Cloud-native dependency discovery | USER-FIXED | Platform shall enrich the temporal operational graph from approved Kubernetes/OpenTelemetry/service-mesh runtime evidence. eBPF is not silently selected and requires separate approval if proposed. |
+| External change intelligence | USER-FIXED | CI/CD, IaC, cloud, Kubernetes, DB, certificate, patch/reboot and ITSM change/deployment evidence shall normalize into cross-domain Change Intelligence and RCA. |
+| Carrier/ISP integration | USER-FIXED | Carrier/ISP outage, maintenance, circuit/ticket and SLA evidence is a first-class enrichment where provider/customer APIs permit; provider status is supporting evidence, not causal proof. |
+| Incident Flight Recorder | USER-FIXED | Platform shall preserve bounded pre/during/post-incident topology, protocol, telemetry, change, path, service and authorized packet evidence so transient incidents remain reconstructable after recovery. |
+| Similar Incident Memory | USER-FIXED | Resolved incidents and accepted outcomes shall be searchable/rankable as historical precedents; similarity is advisory and may not silently copy causality. |
+| Controlled remediation | USER-FIXED | Controlled remediation is V1 for bounded approved action classes using diagnose → recommend → precondition/blast-radius preview → policy/approval → execute → validate → rollback/escalate. Unsupervised autonomous closed-loop and direct LLM privileged execution remain prohibited. |
+| Platform Value / MTTR | USER-FIXED | Platform shall measure evidence-backed MTTD/MTTA/MTTR/time-to-RCA, matched-cohort improvement and per-incident contribution, and expose a four-layer customer value dashboard. Unsupported MTTR percentages or financial-savings claims are prohibited. |
 
 ## 3. ARCH-DELEGATED decisions
 
@@ -56,6 +65,9 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 | Optional search | OpenSearch only later if Lucene-class full-text need is proven | Optional |
 | Identity foundation | Keycloak with Platform-owned resource authorization | Selected subject to OSS scans |
 | GNN | PyTorch + PyTorch Geometric are P0 candidates; GNN is hypothesis/propagation/blast-radius scorer, not causal oracle | Candidate pending benchmark/license review |
+| Operational-intelligence modularity | Extend existing Alert/Incident/Graph/RCA/Integration/NCM/Query/Audit/Storage/Platform Operations ownership; no monolithic AI service | Fixed architecture direction |
+| Packet evidence implementation | Mechanism/library is not selected by requirement; choose only after privilege, kernel, performance, storage, OSS and security evaluation | Architecture selection pending implementation review |
+| Value methodology | Use evidence-backed timestamps and comparable cohorts; median plus P75/P90 where sample size supports; disclose baseline/sample/matching/limitations | Fixed architecture direction |
 
 ## 4. REFERENCE-LEARNING register
 
@@ -73,7 +85,7 @@ Retained design lessons: Central–Probe model, probes close to monitored networ
 
 ### 4.4 Legacy ThoughtData/Enterprise360 learning
 
-Legacy material was used as capability/reference input for broad monitoring coverage such as SNMP/Flow, infrastructure, virtualization, DB, cloud, custom MIB, dashboards, NCM/IPAM/topology/synthetics. Platform is clean-room and does not inherit legacy proprietary source or claims. Cyber-threat, DPI and full APM scope are not carried into current Platform product scope.
+Legacy material was used as capability/reference input for broad monitoring coverage such as SNMP/Flow, infrastructure, virtualization, DB, cloud, custom MIB, dashboards, NCM/IPAM/topology/synthetics. Platform is clean-room and does not inherit legacy proprietary source or claims. Cyber-threat, full always-on DPI and full APM scope are not carried into current Platform product scope.
 
 ## 5. Explicit TBD/P0 Engineering Spikes
 
@@ -91,6 +103,8 @@ The following must remain visibly unresolved until engineering evidence exists:
 - exact product SKUs/licensing quantities beyond the agreed behavioral rules.
 
 Any implementation document that fills one of these with a guessed value is non-conformant until the decision is formally approved and this register updated.
+
+The v3.2.2 scope also leaves the following implementation selections open without creating new product-level P0 claims: exact initial SaaS/carrier certification list, exact packet-capture library/engine, whether eBPF is justified, and customer-specific economic-cost assumptions.
 
 ## 6. v3.1 USER-FIXED / ARCH-DELEGATED development decisions
 
@@ -116,4 +130,10 @@ These decisions supersede any earlier wording implying `.bat` is itself the Wind
 | Mother-document controlled correction | USER-FIXED | READ-MOSTLY with mandatory correction triggers; see §2 and `Platform_00_Document_Index.md` §11. |
 | Bootstrap UI/build/logging OSS admissions | ARCH-DELEGATED + catalogue update | NGINX (dev UI proxy), Node.js/npm/Vite/@vitejs/plugin-react/TypeScript (UI tooling), and logstash-logback-encoder (Core JSON logging) recorded in `Platform_07_OSS_Catalog.md` at pinned bootstrap versions. Top-level licence is insufficient; lockfile/SBOM transitive review remains mandatory. NGINX is not silently promoted to mandatory customer production Core dependency solely because Docker development uses it. |
 
-v3.2.1 does not reopen fixed product/architecture decisions and does not replace §5 P0/TBD items with implementation-option lists.
+## 8. v3.2.2 USER-FIXED operational-intelligence/value decisions
+
+The v3.2.2 decisions are the USER-FIXED rows in §2 covering SaaS monitoring, triggered packet evidence, cloud-native dependency discovery, external change/deployment telemetry, carrier/ISP integration, Incident Flight Recorder, Similar Incident Memory, cross-domain Change Intelligence, controlled remediation and Platform Value/MTTR.
+
+`Platform_19_Operational_Intelligence_MTTR_and_Value.md` is the normative implementation contract for those decisions.
+
+v3.2.2 does not reopen fixed HA, data-stack, AI-causality, security, storage or packaging decisions and does not convert an implementation candidate into an approved OSS dependency.
