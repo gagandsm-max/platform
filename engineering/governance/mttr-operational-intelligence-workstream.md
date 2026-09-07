@@ -1,20 +1,20 @@
 # MTTR / Operational Intelligence Workstream
 
-**Status:** NON-MOTHER engineering sequencing control.  
-**Source requirement:** `project_documentation/Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`.  
-**Mother Reference:** Platform v3.2.1 remains authoritative.
+**Status:** NON-MOTHER engineering sequencing control  
+**Authoritative source:** `project_documentation/Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`  
+**Mother Reference:** Platform v3.2.2 after merge
 
 ## Objective
 
-Integrate the new MTTR/value capabilities into the existing 30-day programme without turning them into a separate monolithic AI subsystem.
+Implement the approved `PRD-OIV-*` / `REQ-OIV-*` capabilities as coherent vertical slices without creating a separate monolithic AI subsystem or weakening existing GA gates.
 
 ## Workstream sequence
 
 1. **Connector/change foundation** — normalize external deployment/change facts and extend connector contracts for SaaS/carrier integrations.
 2. **Incident Flight Recorder** — evidence-window contracts, evidence references, graph/timeline replay, quality/completeness telemetry.
-3. **Similar Incident Memory** — resolved-incident index, similarity features, accepted-outcome feedback and false-match tests.
-4. **Cloud-native graph enrichment** — runtime Kubernetes/OTel/service-mesh dependency edges with provenance/confidence/history.
-5. **Platform Value Engine** — incident milestone timestamps, comparable baseline cohorts, attribution facts and customer value dashboard.
+3. **Platform Value Engine foundation** — incident milestone timestamps, comparable baseline cohorts, contribution facts and value dashboard.
+4. **Similar Incident Memory** — resolved-incident index, similarity features, accepted-outcome feedback and false-match tests.
+5. **Cloud-native graph enrichment** — runtime Kubernetes/OTel/service-mesh dependency edges with provenance/confidence/history.
 6. **Controlled remediation** — bounded reversible action classes first; authorization/approval/blast-radius/preflight/validation/rollback mandatory.
 7. **Triggered packet evidence** — only after security, privacy, disk/resource and privilege gates pass.
 8. **Certified SaaS/carrier packs** — expand based on customer demand and provider API/commercial viability.
@@ -33,7 +33,7 @@ Every work item must include:
 - migration/upgrade behavior;
 - security/abuse tests;
 - performance impact;
-- UI error/partial/stale states;
+- UI error/partial/stale/insufficient-evidence states;
 - documentation/traceability.
 
 ## Required value methodology
@@ -42,4 +42,4 @@ MTTR/value features may not publish a claimed improvement unless the UI can show
 
 ## Release posture
 
-The workstream is not complete when the feature code exists. Release requires the applicable Mother Reference consolidation, tests, operational runbooks, failure evidence and GA quality gates.
+The workstream is not complete when feature code exists. Release requires applicable `Platform_19` §12 gates plus existing Mother Reference security, HA, upgrade, packaging, performance and GA evidence requirements.
