@@ -1,0 +1,186 @@
+# ==============================================================================
+# Platform P0 HA Spike - Isolated Two-Core Lab
+# Independent Kafka single-node KRaft clusters + Standalone ClickHouse nodes
+# ==============================================================================
+
+name: platform-ha-spike
+
+networks:
+  ha_spike_net:
+    name: ha_spike_net
+    driver: bridge
+
+volumes:
+  ha_kafka_a_data:
+  ha_kafka_b_data:
+  ha_ch_a_data:
+  ha_ch_b_data:
+  ha_pg_a_data:
+  ha_pg_b_data:
+
+services:
+  # ----------------------------------------------------------------------------
+  # Core A: Kafka Single-Node KRaft Cluster A
+  # ----------------------------------------------------------------------------
+  ha-kafka-a:
+    image: apache/kafka:3.8.0
+    container_name: ha-kafka-a
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://ha-kafka-a:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@ha-kafka-a:9093"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    volumes:
+      - ha_kafka_a_data:/var/lib/kafka/data
+    networks:
+      ha_spike_net:
+        aliases:
+          - ha-kafka-a
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ----------------------------------------------------------------------------
+  # Core B: Kafka Single-Node KRaft Cluster B
+  # ----------------------------------------------------------------------------
+  ha-kafka-b:
+    image: apache/kafka:3.8.0
+    container_name: ha-kafka-b
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://ha-kafka-b:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@ha-kafka-b:9093"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_CLUSTER_ID: "BkJhZmtCYjcwNTJENDM2Qk"
+    volumes:
+      - ha_kafka_b_data:/var/lib/kafka/data
+    networks:
+      ha_spike_net:
+        aliases:
+          - ha-kafka-b
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ----------------------------------------------------------------------------
+  # Core A: ClickHouse Standalone Server A
+  # ----------------------------------------------------------------------------
+  ha-clickhouse-a:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: ha-clickhouse-a
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: platform
+      CLICKHOUSE_USER: platform_app
+      CLICKHOUSE_PASSWORD: platform_dev_ch_password_change_in_prod
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - ha_ch_a_data:/var/lib/clickhouse
+    networks:
+      ha_spike_net:
+        aliases:
+          - ha-clickhouse-a
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
+  # Core B: ClickHouse Standalone Server B
+  # ----------------------------------------------------------------------------
+  ha-clickhouse-b:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: ha-clickhouse-b
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: platform
+      CLICKHOUSE_USER: platform_app
+      CLICKHOUSE_PASSWORD: platform_dev_ch_password_change_in_prod
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - ha_ch_b_data:/var/lib/clickhouse
+    networks:
+      ha_spike_net:
+        aliases:
+          - ha-clickhouse-b
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
+  # Core A: PostgreSQL A
+  # ----------------------------------------------------------------------------
+  ha-postgres-a:
+    image: postgres:16-alpine
+    container_name: ha-postgres-a
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: platform
+      POSTGRES_USER: platform_app
+      POSTGRES_PASSWORD: platform_dev_pg_password_change_in_prod
+    volumes:
+      - ha_pg_a_data:/var/lib/postgresql/data
+    networks:
+      ha_spike_net:
+        aliases:
+          - ha-postgres-a
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform_app -d platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
+  # Core B: PostgreSQL B
+  # ----------------------------------------------------------------------------
+  ha-postgres-b:
+    image: postgres:16-alpine
+    container_name: ha-postgres-b
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: platform
+      POSTGRES_USER: platform_app
+      POSTGRES_PASSWORD: platform_dev_pg_password_change_in_prod
+    volumes:
+      - ha_pg_b_data:/var/lib/postgresql/data
+    networks:
+      ha_spike_net:
+        aliases:
+          - ha-postgres-b
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform_app -d platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
