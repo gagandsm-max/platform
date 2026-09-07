@@ -2,7 +2,7 @@
 
 **Status:** NON-MOTHER implementation navigation  
 **Authoritative source:** `project_documentation/Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`  
-**Mother Reference:** Platform v3.2.2 after merge
+**Mother Reference:** Platform v3.2.2 after merge to canonical `main`
 
 This file does not redefine product behavior. Engineering shall implement the formal `PRD-OIV-*` / `REQ-OIV-*` requirements in `Platform_19` and the existing Mother Reference contracts they supplement.
 
@@ -45,6 +45,10 @@ This file does not redefine product behavior. Engineering shall implement the fo
 - No LLM-direct privileged remediation.
 - Similarity/provider/change evidence is advisory/supporting evidence, not causal proof.
 - Value calculations must expose cohort/sample methodology and must not fabricate customer or financial savings.
+
+## Merge gate
+
+Before the documentation PR is merged, this file is non-authoritative planning. After merge, implementation may proceed against `Platform_19` as part of Mother Reference v3.2.2.
 
 ## Definition of done
 
