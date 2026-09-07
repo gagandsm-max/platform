@@ -3,6 +3,7 @@ package syslogintegration
 import (
 	"context"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -34,13 +35,13 @@ func udpConfig(port int) protocolsyslog.UDPConfig {
 	return protocolsyslog.UDPConfig{BindAddress: "127.0.0.1", Port: port, MaxDatagramBytes: 2048, WorkerCount: 2, QueueDepth: 64, ReadTimeout: 20 * time.Millisecond, ShutdownGrace: time.Second}
 }
 
-func parsedEvent(t *testing.T, message string) protocolsyslog.Event {
+func parseEvent(t *testing.T, message string, source string) protocolsyslog.Event {
 	t.Helper()
 	p, err := protocolsyslog.NewParser(parserConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, err := p.Parse([]byte(message), time.Date(2026, 9, 7, 7, 0, 0, 0, time.UTC), protocolsyslog.SourceMetadata{Transport: protocolsyslog.TransportUDP, Address: "127.0.0.1:55123"})
+	e, err := p.Parse([]byte(message), time.Date(2026, 9, 7, 7, 0, 0, 0, time.UTC), protocolsyslog.SourceMetadata{Transport: protocolsyslog.TransportUDP, Address: source})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,21 +61,22 @@ func decodeRecord(t *testing.T, rec spool.Record) (observation.EventEnvelope, pr
 	return env, e
 }
 
-func TestDurableSinkRoundTripPreservesSyslogFields(t *testing.T) {
+func TestDurableSinkRoundTripPreservesFieldsAndRepeatedEvents(t *testing.T) {
 	dir := t.TempDir()
 	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1 << 20})
 	if err != nil {
 		t.Fatal(err)
 	}
-	durable, err := NewDurableSink(sinkConfig(), parserConfig(), s)
+	d, err := NewDurableSink(sinkConfig(), parserConfig(), s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := durable.Accept(context.Background(), parsedEvent(t, "<13>Sep  7 12:30:00 host app[123]: hello")); err != nil {
-		t.Fatal(err)
-	}
-	if err := durable.Accept(context.Background(), parsedEvent(t, `<34>1 2026-09-07T07:00:00Z host app 123 ID47 [meta a="b"][other c="d"] hello`)); err != nil {
-		t.Fatal(err)
+	e3164 := parseEvent(t, "<13>Sep  7 12:30:00 host app[123]: hello", "127.0.0.1:55123")
+	e5424 := parseEvent(t, "<34>1 2026-09-07T07:00:00Z host app 123 ID47 [meta a=\"b\"][other c=\"d\"] hello", "127.0.0.1:55124")
+	for _, e := range []protocolsyslog.Event{e3164, e5424, e5424} {
+		if err := d.Accept(context.Background(), e); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
@@ -84,106 +86,81 @@ func TestDurableSinkRoundTripPreservesSyslogFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	batch, err := reopened.ReadBatch(4, 1<<20)
+	batch, err := reopened.ReadBatch(8, 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(batch.Records) != 2 {
+	if len(batch.Records) != 3 {
 		t.Fatalf("records=%d", len(batch.Records))
 	}
-	for _, rec := range batch.Records {
+	for i, rec := range batch.Records {
 		if rec.Class != spool.ClassSyslog || rec.Type != RecordTypeSyslogEvent {
-			t.Fatalf("record class/type=%s/%s", rec.Class, rec.Type)
+			t.Fatalf("record %d class/type=%s/%s", i, rec.Class, rec.Type)
 		}
+	}
+	if batch.Records[1].Sequence == batch.Records[2].Sequence {
+		t.Fatal("identical receptions were deduplicated")
 	}
 	env3164, got3164 := decodeRecord(t, batch.Records[0])
 	if env3164.Source.SensorID != "sensor-test" || env3164.Source.TenantID != "tenant-test" || env3164.Source.Transport != "UDP" || env3164.Source.SourceAddress != "127.0.0.1:55123" {
-		t.Fatalf("RFC3164 source=%+v", env3164.Source)
+		t.Fatalf("source=%+v", env3164.Source)
 	}
 	if got3164.Facility != 1 || got3164.Severity != 5 || got3164.TimestampQuality != protocolsyslog.TimestampRFC3164Unresolved || got3164.EventTime != nil || got3164.ProcessID != "123" {
-		t.Fatalf("RFC3164 event=%+v", got3164)
+		t.Fatalf("RFC3164=%+v", got3164)
 	}
 	_, got5424 := decodeRecord(t, batch.Records[1])
-	if got5424.Facility != 4 || got5424.Severity != 2 || len(got5424.StructuredData) != 2 || got5424.StructuredData[0].ID != "meta" || got5424.StructuredData[0].Params[0].Value != "b" || got5424.StructuredData[1].ID != "other" {
-		t.Fatalf("RFC5424 event=%+v", got5424)
+	if got5424.Facility != 4 || got5424.Severity != 2 || len(got5424.StructuredData) != 2 || got5424.StructuredData[0].Params[0].Value != "b" || got5424.StructuredData[1].ID != "other" {
+		t.Fatalf("RFC5424=%+v", got5424)
 	}
 }
 
-func TestRepeatedIdenticalMessagesCreateSeparateDurableRecords(t *testing.T) {
-	dir := t.TempDir()
-	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1 << 20})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	durable, err := NewDurableSink(sinkConfig(), parserConfig(), s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := parsedEvent(t, "<13>partial")
-	if err := durable.Accept(context.Background(), e); err != nil {
-		t.Fatal(err)
-	}
-	if err := durable.Accept(context.Background(), e); err != nil {
-		t.Fatal(err)
-	}
-	batch, err := s.ReadBatch(4, 1<<20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(batch.Records) != 2 || batch.Records[0].Sequence == batch.Records[1].Sequence {
-		t.Fatalf("duplicate receptions were not preserved independently: %+v", batch.Records)
-	}
+type controlledAppender struct {
+	mu       sync.Mutex
+	err      error
+	requests []spool.AppendRequest
 }
 
-type failingAppender struct {
-	mu  sync.Mutex
-	err error
-}
-
-func (f *failingAppender) Append(spool.AppendRequest) (spool.Record, error) {
+func (f *controlledAppender) Append(req spool.AppendRequest) (spool.Record, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return spool.Record{}, f.err
 	}
-	return spool.Record{Sequence: 1}, nil
+	f.requests = append(f.requests, req)
+	return spool.Record{Sequence: uint64(len(f.requests))}, nil
 }
-func (f *failingAppender) set(err error) { f.mu.Lock(); f.err = err; f.mu.Unlock() }
+func (f *controlledAppender) set(err error) { f.mu.Lock(); f.err = err; f.mu.Unlock() }
 
-func TestStorageErrorClassificationAndRecovery(t *testing.T) {
-	cases := []struct {
-		err  error
+func TestStorageErrorsBoundsCancellationAndRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		in   error
 		want ErrorCode
 	}{
 		{&spool.Error{Code: spool.CodeProtection}, CodeStorageProtection},
 		{&spool.Error{Code: spool.CodeClosed}, CodeStorageUnavailable},
 		{&spool.Error{Code: spool.CodeCorruption}, CodeStorageCorruption},
-	}
-	for _, tc := range cases {
-		f := &failingAppender{err: tc.err}
+	} {
+		f := &controlledAppender{err: tc.in}
 		d, err := NewDurableSink(sinkConfig(), parserConfig(), f)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := CodeOf(d.Accept(context.Background(), parsedEvent(t, "<13>partial"))); got != tc.want {
-			t.Fatalf("got=%s want=%s", got, tc.want)
+		if got := CodeOf(d.Accept(context.Background(), parseEvent(t, "<13>partial", "127.0.0.1:1"))); got != tc.want {
+			t.Fatalf("code=%s want=%s", got, tc.want)
 		}
 		if !d.Snapshot().Degraded {
 			t.Fatal("storage failure did not degrade sink")
 		}
 		f.set(nil)
-		if err := d.Accept(context.Background(), parsedEvent(t, "<13>partial")); err != nil {
+		if err := d.Accept(context.Background(), parseEvent(t, "<13>partial", "127.0.0.1:1")); err != nil {
 			t.Fatal(err)
 		}
 		if d.Snapshot().Degraded {
-			t.Fatal("successful durable append did not clear storage degradation")
+			t.Fatal("successful append did not clear storage degradation")
 		}
 	}
-}
 
-func TestEnvelopeBoundAndNoSecretSerialization(t *testing.T) {
-	f := &captureAppender{}
+	f := &controlledAppender{}
 	cfg := sinkConfig()
 	cfg.MaxEventBytes = 64
 	cfg.MaxEnvelopeBytes = 128
@@ -191,58 +168,41 @@ func TestEnvelopeBoundAndNoSecretSerialization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := CodeOf(d.Accept(context.Background(), parsedEvent(t, "<13>Sep  7 12:30:00 host app: this-message-is-long-enough-to-exceed-the-small-event-bound"))); got != CodeResourceLimit {
-		t.Fatalf("got=%s", got)
+	if got := CodeOf(d.Accept(context.Background(), parseEvent(t, "<13>Sep  7 12:30:00 host app: message-exceeding-small-bound", "127.0.0.1:1"))); got != CodeResourceLimit {
+		t.Fatalf("bound code=%s", got)
 	}
 
 	cfg = sinkConfig()
 	d, _ = NewDurableSink(cfg, parserConfig(), f)
-	if err := d.Accept(context.Background(), parsedEvent(t, "<13>partial")); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := CodeOf(d.Accept(ctx, parseEvent(t, "<13>partial", "127.0.0.1:1"))); got != CodeCancelled {
+		t.Fatalf("cancel code=%s", got)
+	}
+	deadline, cancelDeadline := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelDeadline()
+	if got := CodeOf(d.Accept(deadline, parseEvent(t, "<13>partial", "127.0.0.1:1"))); got != CodeDeadlineExceeded {
+		t.Fatalf("deadline code=%s", got)
+	}
+}
+
+func TestDurableOutputContainsNoUnrelatedSecrets(t *testing.T) {
+	f := &controlledAppender{}
+	d, err := NewDurableSink(sinkConfig(), parserConfig(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Accept(context.Background(), parseEvent(t, "<13>partial", "127.0.0.1:1")); err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
-	payload := string(f.requests[len(f.requests)-1].Payload)
+	payload := string(f.requests[0].Payload)
 	f.mu.Unlock()
 	for _, forbidden := range []string{"community-secret", "auth-secret", "privacy-secret", "private-key-secret", "bearer-token-secret", "KAFKA"} {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("durable output leaked %q", forbidden)
 		}
 	}
-}
-
-func TestDurableSinkCancellationAndDeadline(t *testing.T) {
-	f := &captureAppender{}
-	d, err := NewDurableSink(sinkConfig(), parserConfig(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if got := CodeOf(d.Accept(ctx, parsedEvent(t, "<13>partial"))); got != CodeCancelled {
-		t.Fatalf("cancel code=%s", got)
-	}
-	deadline, cancelDeadline := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer cancelDeadline()
-	if got := CodeOf(d.Accept(deadline, parsedEvent(t, "<13>partial"))); got != CodeDeadlineExceeded {
-		t.Fatalf("deadline code=%s", got)
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.requests) != 0 {
-		t.Fatal("cancelled/deadline sink attempt reached durable append")
-	}
-}
-
-type captureAppender struct {
-	mu       sync.Mutex
-	requests []spool.AppendRequest
-}
-
-func (c *captureAppender) Append(req spool.AppendRequest) (spool.Record, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.requests = append(c.requests, req)
-	return spool.Record{Sequence: uint64(len(c.requests))}, nil
 }
 
 func freeUDPPort(t *testing.T) int {
@@ -294,7 +254,7 @@ func TestUDPToDurableSpoolRoundTripAndConcurrency(t *testing.T) {
 	if err := component.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	sourcePort := sendUDP(t, port, `<34>1 2026-09-07T07:00:00Z host app 123 ID47 [meta a="b"] hello`)
+	sourcePort := sendUDP(t, port, "<34>1 2026-09-07T07:00:00Z host app 123 ID47 [meta a=\"b\"] hello")
 	waitFor(t, func() bool { return component.Snapshot().Receiver.SinkSuccess == 1 })
 	const extra = 16
 	var wg sync.WaitGroup
@@ -341,24 +301,12 @@ func TestUDPToDurableSpoolRoundTripAndConcurrency(t *testing.T) {
 		t.Fatalf("records=%d", len(batch.Records))
 	}
 	env, got := decodeRecord(t, batch.Records[0])
-	if env.Source.Transport != "UDP" || !strings.HasSuffix(env.Source.SourceAddress, ":"+itoa(sourcePort)) {
+	if env.Source.Transport != "UDP" || !strings.HasSuffix(env.Source.SourceAddress, ":"+strconv.Itoa(sourcePort)) {
 		t.Fatalf("source=%+v", env.Source)
 	}
 	if got.Source.Transport != protocolsyslog.TransportUDP {
 		t.Fatalf("event source=%+v", got.Source)
 	}
-}
-func itoa(v int) string {
-	const digits = "0123456789"
-	if v == 0 {
-		return "0"
-	}
-	b := make([]byte, 0, 6)
-	for v > 0 {
-		b = append([]byte{digits[v%10]}, b...)
-		v /= 10
-	}
-	return string(b)
 }
 
 type fakeScheduler struct{}
@@ -372,7 +320,7 @@ func (fakeScheduler) Snapshot() scheduler.Snapshot   { return scheduler.Snapshot
 func TestRuntimeRegistrationLifecycleAndHealthRecovery(t *testing.T) {
 	for _, role := range []sensorruntime.Role{sensorruntime.RoleNetwork, sensorruntime.RoleStreamingEvent, sensorruntime.RoleCombined} {
 		port := freeUDPPort(t)
-		f := &failingAppender{}
+		f := &controlledAppender{}
 		rt, err := sensorruntime.New(sensorruntime.Config{Role: role, EnabledCapabilities: []sensorruntime.Capability{sensorruntime.CapabilitySyslog}}, fakeScheduler{}, sensorruntime.NewExecutorRegistry())
 		if err != nil {
 			t.Fatal(err)
@@ -420,7 +368,7 @@ func TestProhibitedRoleRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RegisterUDP(rt, AssemblyConfig{UDP: udpConfig(freeUDPPort(t)), Parser: parserConfig(), Sink: sinkConfig()}, &captureAppender{}); err == nil {
+	if _, err := RegisterUDP(rt, AssemblyConfig{UDP: udpConfig(freeUDPPort(t)), Parser: parserConfig(), Sink: sinkConfig()}, &controlledAppender{}); err == nil {
 		t.Fatal("Syslog registered in prohibited role")
 	}
 }
