@@ -1,7 +1,7 @@
 # Platform — Decision, Source & Assumption-Control Register
 
 **Document ID:** PLATFORM-DECISION-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2  
 **Status:** **Authoritative Mother Reference — Decision Provenance**
 
 ## 1. Purpose
@@ -21,7 +21,7 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 |---|---|---|
 | Product name | USER-FIXED | New product/project is **Platform**; do not call it Enterprise360 except when discussing legacy/reference material. |
 | Independence | USER-FIXED | Build from scratch; separate from ThoughtData and NetAI. |
-| Scope | USER-FIXED | Network + Infrastructure + DB + Cloud + Kubernetes + OTel metrics/logs + synthetics; DPI and full APM excluded initially. |
+| Scope | USER-FIXED | Network + Infrastructure + DB + Cloud + Kubernetes + OTel metrics/logs + synthetics; full always-on DPI and full APM excluded initially. |
 | Core HA | USER-FIXED | Exactly two full Core nodes; one Active, one Standby; continuous sync; failover target <60 seconds. |
 | Core install | USER-FIXED | Separate Core build; installer chooses Standalone/HA and pairs two Cores through supplied peer/HA addressing. |
 | Sensor/Agent install | USER-FIXED | Separate Sensor and Agent builds; install against current master Core, handshake, download effective config; Core directs Agent to appropriate Sensor. |
@@ -41,6 +41,17 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 | Master docs | USER-FIXED | Split mother-reference set is authoritative; no silent assumptions. |
 | Canonical source repository | USER-FIXED | Canonical Platform source repository is `https://github.com/gagandsm-max/platform`. GitHub is the system of record; local clones (including `~/nms`) are working copies. Code/build/test/mother-document changes become authoritative only after push and merge to GitHub. Short-lived branches and pull requests are required for material changes; do not push normal development to the protected/default branch; do not force-push shared/default branches; preserve decision provenance in Git history. Selecting GitHub does **not** freeze a CI provider (GitHub Actions remains unevaluated unless separately approved). |
 | Mother-document change control | USER-FIXED | Mother documents are READ-MOSTLY. Agents must not casually modify them during feature work, but **must** update them under deliberate change control when factual errors, contradictions, approved decision changes, formally selected dependencies, resolved P0/TBD items, omitted requirements, or implementation/document conflicts are found. Implementation must not permanently diverge from mother-reference truth. |
+| First-class SaaS monitoring | USER-FIXED | Add first-class reusable/certified SaaS monitoring packs/connectors rather than requiring every customer to build every SaaS integration from scratch. |
+| Triggered packet evidence | USER-FIXED | Add bounded, privileged incident-triggered packet evidence for diagnostics. This does **not** reopen full always-on DPI as initial scope. |
+| Cloud-native runtime dependencies | USER-FIXED | Add runtime service-dependency discovery/enrichment from Kubernetes, OpenTelemetry, service-mesh/cloud evidence where available, with provenance/confidence and no silent overwrite of customer-defined authoritative dependencies. |
+| External change/deployment telemetry | USER-FIXED | Add normalized change/deployment evidence from CI/CD, Git/release, IaC, cloud, Kubernetes, database, certificate, patch/reboot and ITSM sources for Change Intelligence/RCA. |
+| Carrier/ISP operational integration | USER-FIXED | Add carrier/ISP outage, maintenance, circuit/ticket/SLA operational evidence where provider/customer integrations permit it; provider status remains evidence rather than causal proof. |
+| Incident Flight Recorder | USER-FIXED | Add a bounded incident evidence window preserving before/during/after topology, routing, telemetry, events, changes, paths, service state and authorized packet evidence so transient failures remain diagnosable. |
+| Similar Incident Memory | USER-FIXED | Add tenant-scoped historical incident similarity and prior-outcome evidence. Similarity is advisory and must not silently copy a previous root cause. |
+| Cross-domain Change Intelligence | USER-FIXED | Expand change intelligence beyond NCM to network, firewall/LB, cloud, CI/CD, IaC, Kubernetes, DB, certificate, patch/reboot, Platform and ITSM changes. |
+| Controlled remediation | USER-FIXED | Add controlled remediation using diagnose → recommend → precondition → impact/blast-radius preview → authorization/approval → execute → validate → rollback/escalate. No direct LLM privileged execution. |
+| Platform Value / MTTR Engine | USER-FIXED | Add evidence-backed MTTD/MTTA/time-to-root-candidate/MTTR measurement, matched-cohort comparisons and per-incident Platform contribution evidence. Unsupported causal or financial claims are prohibited. |
+| Four-layer customer value dashboard | USER-FIXED | Show operational noise reduction, diagnosis effectiveness, incident/MTTR improvement and evidence-supported operational/economic benefit with assumptions, sample sizes and methodology. |
 
 ## 3. ARCH-DELEGATED decisions
 
@@ -56,6 +67,10 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 | Optional search | OpenSearch only later if Lucene-class full-text need is proven | Optional |
 | Identity foundation | Keycloak with Platform-owned resource authorization | Selected subject to OSS scans |
 | GNN | PyTorch + PyTorch Geometric are P0 candidates; GNN is hypothesis/propagation/blast-radius scorer, not causal oracle | Candidate pending benchmark/license review |
+| OIV packaging | One authoritative specialized OIV mother master (`Platform_19`) carries consolidated product/architecture/HLD/LLD/dataflow/UI/security/quality/RTM additions instead of duplicating the same text across legacy files | Fixed v3.2.2 documentation architecture |
+| OIV service shape | Extend existing modular Core/Sensor domains; do not create a monolithic AI service or new database by default | Fixed architecture direction |
+| Similar Incident storage/search | Use existing PostgreSQL/ClickHouse/analytics capabilities first; no dedicated vector database without benchmark/OSS justification | Fixed architecture direction |
+| Packet artifact storage | Use bounded encrypted artifact-storage abstraction and metadata references; do not store raw packet payload indiscriminately in PostgreSQL/ClickHouse or add an unapproved mandatory storage product | Fixed architecture direction |
 
 ## 4. REFERENCE-LEARNING register
 
@@ -73,7 +88,7 @@ Retained design lessons: Central–Probe model, probes close to monitored networ
 
 ### 4.4 Legacy ThoughtData/Enterprise360 learning
 
-Legacy material was used as capability/reference input for broad monitoring coverage such as SNMP/Flow, infrastructure, virtualization, DB, cloud, custom MIB, dashboards, NCM/IPAM/topology/synthetics. Platform is clean-room and does not inherit legacy proprietary source or claims. Cyber-threat, DPI and full APM scope are not carried into current Platform product scope.
+Legacy material was used as capability/reference input for broad monitoring coverage such as SNMP/Flow, infrastructure, virtualization, DB, cloud, custom MIB, dashboards, NCM/IPAM/topology/synthetics. Platform is clean-room and does not inherit legacy proprietary source or claims. Cyber-threat, full DPI and full APM scope are not carried into current Platform product scope.
 
 ## 5. Explicit TBD/P0 Engineering Spikes
 
@@ -91,6 +106,8 @@ The following must remain visibly unresolved until engineering evidence exists:
 - exact product SKUs/licensing quantities beyond the agreed behavioral rules.
 
 Any implementation document that fills one of these with a guessed value is non-conformant until the decision is formally approved and this register updated.
+
+The v3.2.2 OIV additions do not resolve any of these P0/TBD items by declaration.
 
 ## 6. v3.1 USER-FIXED / ARCH-DELEGATED development decisions
 
@@ -117,3 +134,16 @@ These decisions supersede any earlier wording implying `.bat` is itself the Wind
 | Bootstrap UI/build/logging OSS admissions | ARCH-DELEGATED + catalogue update | NGINX (dev UI proxy), Node.js/npm/Vite/@vitejs/plugin-react/TypeScript (UI tooling), and logstash-logback-encoder (Core JSON logging) recorded in `Platform_07_OSS_Catalog.md` at pinned bootstrap versions. Top-level licence is insufficient; lockfile/SBOM transitive review remains mandatory. NGINX is not silently promoted to mandatory customer production Core dependency solely because Docker development uses it. |
 
 v3.2.1 does not reopen fixed product/architecture decisions and does not replace §5 P0/TBD items with implementation-option lists.
+
+## 8. v3.2.2 USER-FIXED / ARCH-DELEGATED OIV decisions
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| OIV product scope | USER-FIXED | `PRD-OIV-001` through `PRD-OIV-014` in `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` are approved additive product requirements. |
+| OIV traceability | ARCH-DELEGATED | `REQ-OIV-001` through `REQ-OIV-014` in `Platform_19` §14 are the authoritative v3.2.2 RTM supplement, mapped to consolidated logical-layer sections. |
+| Triggered packet evidence vs DPI | USER-FIXED | Bounded incident diagnostic capture is in scope; full always-on DPI remains excluded initially. |
+| Remediation safety | USER-FIXED | No direct LLM privileged execution; controlled remediation must preserve authorization, preconditions, blast-radius controls, approval/policy, audit, validation and rollback/fail-safe behavior. |
+| Value claims | USER-FIXED | Platform shall calculate evidence-backed customer-specific operational metrics but shall not present unsupported generic MTTR-reduction or financial-savings percentages as fact. |
+| OIV architecture reuse | ARCH-DELEGATED | Extend existing Incident/RCA/Graph/Integration/NCM/Reporting/Sensor modules and existing data stack before introducing new mandatory services/databases. |
+
+These decisions are additive and do not reopen §5 P0/TBD items.
