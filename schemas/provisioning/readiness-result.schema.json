@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:platform:schemas:provisioning:readiness-result:1.0.0",
+  "title": "Platform Provisioning Readiness Result Contract 1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["documentType", "schemaVersion", "requestId", "correlationId", "tenantId", "target", "stages"],
+  "properties": {
+    "documentType": {"const": "READINESS_RESULT"},
+    "schemaVersion": {"const": "1.0.0"},
+    "requestId": {"$ref": "#/$defs/ref128"},
+    "correlationId": {"$ref": "#/$defs/ref128"},
+    "tenantId": {"$ref": "#/$defs/ref128"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetType", "address"],
+      "properties": {
+        "targetType": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z][A-Za-z0-9._:-]*$"},
+        "address": {"type": "string", "minLength": 1, "maxLength": 512}
+      }
+    },
+    "sensorEligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidates"],
+      "properties": {
+        "candidates": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/sensorCandidate"}
+        }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": {"$ref": "#/$defs/stage"}
+    }
+  },
+  "$defs": {
+    "ref128": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "protocol": {
+      "enum": ["ICMP", "TRACEROUTE", "TCP", "SNMP", "SNMP_TRAP", "SYSLOG", "SSH_CLI", "TELNET", "NETCONF", "REST", "RESTCONF", "GNMI", "GRPC", "FLOW", "DNS", "HTTP", "HTTPS", "TLS", "SCP", "SFTP", "TFTP", "FTP", "WINRM", "REDFISH", "CLOUD_API", "OTLP"]
+    },
+    "transport": {
+      "enum": ["IP", "TCP", "UDP", "TLS", "HTTPS", "SSH", "GRPC", "MTLS"]
+    },
+    "stageId": {
+      "enum": ["INPUT_NORMALIZATION", "DNS_ADDRESS_VALIDATION", "SENSOR_ELIGIBILITY_CAPACITY", "ROUTE_REACHABILITY", "TRANSPORT_PROTOCOL_RESPONSE", "TLS_HOST_KEY_VERIFICATION", "AUTHENTICATION", "AUTHORIZATION_CAPABILITY", "IDENTITY_DEVICE_PACK_MATCH", "MONITORING_PROFILE_DRY_RUN", "CAPACITY_IMPACT", "PROVISION"]
+    },
+    "status": {
+      "enum": ["NOT_RUN", "RUNNING", "PASS", "FAIL", "INCONCLUSIVE", "UNKNOWN", "SKIPPED_NOT_APPLICABLE"]
+    },
+    "failureCode": {
+      "enum": ["INPUT_INVALID", "DEVICE_UNREACHABLE", "DNS_FAILURE", "ROUTE_UNAVAILABLE", "PROTOCOL_TIMEOUT", "PROTOCOL_DISABLED_SUSPECTED", "AUTHENTICATION_FAILED", "AUTHORIZATION_FAILED", "ACL_FIREWALL_SUSPECTED", "PORT_UNREACHABLE", "CREDENTIAL_PROFILE_INVALID", "DEVICE_ALREADY_EXISTS", "MIB_REQUIRED", "API_SCHEMA_INVALID", "TLS_CERTIFICATE_FAILURE", "SENSOR_CAPACITY_EXCEEDED", "NO_ELIGIBLE_SENSOR", "MONITORING_PROFILE_INCOMPATIBLE", "DEVICE_IDENTITY_CONFLICT"]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidenceId", "kind", "source", "summary"],
+      "properties": {
+        "evidenceId": {"$ref": "#/$defs/ref128"},
+        "kind": {"enum": ["OBSERVED", "DERIVED", "SUSPECTED", "UNKNOWN"]},
+        "source": {"enum": ["REQUEST", "CORE", "SENSOR", "PLATFORM_POLICY", "MONITORING_PROFILE", "DEVICE_PACK", "CONNECTOR", "OTHER_GOVERNED_SOURCE"]},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 512},
+        "sourceRef": {"type": "string", "minLength": 1, "maxLength": 512},
+        "endpointRef": {"type": "string", "minLength": 1, "maxLength": 512},
+        "technicalCode": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+        "protocol": {"$ref": "#/$defs/protocol"},
+        "transport": {"$ref": "#/$defs/transport"},
+        "observedAt": {"type": "string", "format": "date-time", "maxLength": 64}
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["destination"],
+      "properties": {
+        "destination": {"type": "string", "minLength": 1, "maxLength": 512},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+      }
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stageId", "status", "evidence"],
+      "properties": {
+        "stageId": {"$ref": "#/$defs/stageId"},
+        "status": {"$ref": "#/$defs/status"},
+        "startedAt": {"type": "string", "format": "date-time", "maxLength": 64},
+        "completedAt": {"type": "string", "format": "date-time", "maxLength": 64},
+        "durationMs": {"type": "integer", "minimum": 0},
+        "sensorId": {"$ref": "#/$defs/ref128"},
+        "endpoint": {"$ref": "#/$defs/endpoint"},
+        "protocol": {"$ref": "#/$defs/protocol"},
+        "transport": {"$ref": "#/$defs/transport"},
+        "evidence": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/evidence"}},
+        "customerExplanation": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "failureCode": {"$ref": "#/$defs/failureCode"},
+        "failureAssessment": {"enum": ["OBSERVED", "SUSPECTED"]},
+        "uncertainty": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "diagnosticsRef": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[A-Za-z0-9._:-]+$"},
+        "nextActions": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 512}}
+      }
+    },
+    "sensorCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sensorId", "selected", "reason", "checks"],
+      "properties": {
+        "sensorId": {"$ref": "#/$defs/ref128"},
+        "siteId": {"$ref": "#/$defs/ref128"},
+        "poolId": {"$ref": "#/$defs/ref128"},
+        "selected": {"type": "boolean"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 512},
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["category", "status", "evidence"],
+            "properties": {
+              "category": {"enum": ["SITE_POOL_COMPATIBILITY", "CAPABILITY_PROTOCOL_SUPPORT", "REACHABILITY", "LATENCY_LOSS", "CAPACITY", "SECURITY_POLICY", "MAINTENANCE_DRAIN", "HEALTH_READINESS"]},
+              "status": {"$ref": "#/$defs/status"},
+              "evidence": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/evidence"}}
+            }
+          }
+        }
+      }
+    }
+  }
+}

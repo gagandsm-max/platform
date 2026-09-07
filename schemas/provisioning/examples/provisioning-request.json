@@ -1,0 +1,27 @@
+{
+  "documentType": "PROVISIONING_REQUEST",
+  "schemaVersion": "1.0.0",
+  "requestId": "req.example.001",
+  "correlationId": "corr.example.001",
+  "tenantId": "tenant.example",
+  "target": {
+    "targetType": "NETWORK_DEVICE",
+    "address": "192.0.2.10",
+    "displayName": "Fictional Test Device",
+    "description": "Reserved TEST-NET provisioning-contract example only."
+  },
+  "siteId": "site.example",
+  "sensorPoolId": "pool.example",
+  "monitoringProfileRef": "profile.example.readiness",
+  "credentialProfileRef": "credential-profile.example",
+  "idempotencyKey": "idem.example.001",
+  "requestedProtocols": [
+    {
+      "family": "SNMP",
+      "transport": "UDP"
+    }
+  ],
+  "tags": [
+    {"key": "environment", "value": "fictional-test"}
+  ]
+}

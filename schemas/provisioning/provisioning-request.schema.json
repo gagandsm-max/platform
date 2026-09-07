@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:platform:schemas:provisioning:request:1.0.0",
+  "title": "Platform Provisioning Request Contract 1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["documentType", "schemaVersion", "requestId", "correlationId", "tenantId", "target", "requestedProtocols"],
+  "properties": {
+    "documentType": {"const": "PROVISIONING_REQUEST"},
+    "schemaVersion": {"const": "1.0.0"},
+    "requestId": {"$ref": "#/$defs/ref128"},
+    "correlationId": {"$ref": "#/$defs/ref128"},
+    "tenantId": {"$ref": "#/$defs/ref128"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetType", "address"],
+      "properties": {
+        "targetType": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z][A-Za-z0-9._:-]*$"},
+        "address": {"type": "string", "minLength": 1, "maxLength": 512},
+        "displayName": {"type": "string", "minLength": 1, "maxLength": 255},
+        "description": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    },
+    "siteId": {"$ref": "#/$defs/ref128"},
+    "sensorPoolId": {"$ref": "#/$defs/ref128"},
+    "monitoringProfileRef": {"$ref": "#/$defs/ref128"},
+    "devicePackRef": {"$ref": "#/$defs/ref128"},
+    "devicePackVersion": {"type": "string", "minLength": 1, "maxLength": 64},
+    "credentialProfileRef": {"$ref": "#/$defs/ref128"},
+    "idempotencyKey": {"$ref": "#/$defs/ref128"},
+    "requestedProtocols": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {"$ref": "#/$defs/protocolDeclaration"}
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "value"],
+        "properties": {
+          "key": {"type": "string", "minLength": 1, "maxLength": 128},
+          "value": {"type": "string", "minLength": 1, "maxLength": 512}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ref128": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "protocol": {
+      "enum": ["ICMP", "TRACEROUTE", "TCP", "SNMP", "SNMP_TRAP", "SYSLOG", "SSH_CLI", "TELNET", "NETCONF", "REST", "RESTCONF", "GNMI", "GRPC", "FLOW", "DNS", "HTTP", "HTTPS", "TLS", "SCP", "SFTP", "TFTP", "FTP", "WINRM", "REDFISH", "CLOUD_API", "OTLP"]
+    },
+    "transport": {
+      "enum": ["IP", "TCP", "UDP", "TLS", "HTTPS", "SSH", "GRPC", "MTLS"]
+    },
+    "protocolDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family"],
+      "properties": {
+        "family": {"$ref": "#/$defs/protocol"},
+        "transport": {"$ref": "#/$defs/transport"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "tlsRequired": {"type": "boolean"},
+        "securityMode": {"type": "string", "minLength": 1, "maxLength": 64}
+      }
+    }
+  }
+}
