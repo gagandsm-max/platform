@@ -2,12 +2,14 @@
 
 ## Operating model
 
-ChatGPT remains the principal Platform architecture/technical authority. Specialist agents are temporary lenses, not competing authorities.
+ChatGPT remains the principal Platform architecture/technical authority. Specialist agents are temporary repository-defined lenses, not persistent installed ChatGPT agents and not competing authorities.
+
+Always route with the smallest useful set. Separate read-only diagnosis, bounded implementation and independent verification. A writer cannot be its own sole verifier, and parallel write specialists must not share the same checkout.
 
 ### Generic invocation
 
 ```text
-Using the connected Platform repository, first read root AGENTS.md and the relevant mother-reference files. Then read project_agents/canonical/<tier>/<agent>.md and operate under that specialist role for this task. Do not broaden scope or override Platform decisions.
+Using the connected Platform repository, first read root AGENTS.md and the relevant mother-reference files. Then read project_agents/AGENT_MATRIX.md and project_agents/USAGE_PLAYBOOK.md. Read the selected project_agents/canonical/<tier>/<agent>.md definition before adopting that specialist role. Operate under that role only for this task. Do not broaden scope, override Platform decisions, or claim production/GA readiness without the applicable evidence/reality gate.
 
 Task: <task>
 Branch/PR constraints: <constraints>
@@ -17,8 +19,17 @@ Required evidence: <evidence>
 ### Ask ChatGPT to route for you
 
 ```text
-Route this Platform engineering task using the smallest useful set of agents from project_agents/AGENT_MATRIX.md and USAGE_PLAYBOOK.md. Keep yourself as CTO/orchestrator. Separate read-only diagnosis, implementation, and independent verification. Do not let parallel write agents edit the same checkout.
+Route this Platform engineering task using the smallest useful set of agents from project_agents/AGENT_MATRIX.md and project_agents/USAGE_PLAYBOOK.md. Keep yourself as CTO/orchestrator. Read each selected canonical agent definition before using that role. Separate read-only diagnosis, implementation, and independent verification. Do not let parallel write agents edit the same checkout.
 
+Task: <task>
+```
+
+### GitHub-only specialist task
+
+```text
+Using connected GitHub only, read root AGENTS.md, project_agents/AGENT_MATRIX.md, project_agents/USAGE_PLAYBOOK.md and the requested canonical specialist definition before acting. Treat the specialist as subordinate to root AGENTS.md and the Mother Reference. Do not imply that 27 persistent agents are installed in ChatGPT.
+
+Specialist: <agent name>
 Task: <task>
 ```
 
