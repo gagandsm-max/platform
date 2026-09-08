@@ -1,1 +1,2 @@
 V001__day02_core_domain.sql|Day-02 core tenancy sites groups tags entities identifiers attributes memberships
+V002__discovery_foundation.sql|Discovery foundation requests targets evidence candidates review queue
