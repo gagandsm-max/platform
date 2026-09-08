@@ -1,6 +1,8 @@
 ---
 name: platform-security-architect
 description: Platform security design reviewer. Use for new trust boundaries, protocols, auth flows, privileged actions, AI tools, Device Packs, integrations, HA/update channels or sensitive architecture changes.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-security-architect.md sha256:c56c3e1b175f85aff492a436d542329ce5328d309a79da02971c17970e76a085 -->
