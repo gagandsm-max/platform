@@ -1,0 +1,150 @@
+{
+  "documentType": "DASHBOARD_DEFINITION",
+  "schemaVersion": "1.0.0",
+  "definitionId": "example.system.operations-overview",
+  "definitionVersion": "1",
+  "displayName": "Fictional Operations Overview",
+  "description": "Fictional metadata-only dashboard used to validate the presentation contract; it is not a shipped Platform screen.",
+  "origin": "SYSTEM",
+  "scope": "SYSTEM",
+  "systemDefinition": true,
+  "recoverableSystemDefinition": true,
+  "category": "Example",
+  "tags": ["fictional", "operations"],
+  "visibility": {
+    "roleRefs": ["role.example.operations-reader"],
+    "resourceScopeRef": "scope.example.operations",
+    "permissionRefs": ["permission.example.dashboard-view"],
+    "entitlementRefs": ["entitlement.example.dashboard"],
+    "serverAuthorizationRequired": true
+  },
+  "contextPolicy": {
+    "runtimeContextKeys": ["TIME_RANGE", "TIMEZONE", "COMPARISON_PERIOD", "AUTO_REFRESH", "TENANT_CUSTOMER", "REGION", "SITE", "GROUP_SERVICE", "ENTITY", "TAGS", "TECHNOLOGY_DOMAIN", "BUSINESS_SERVICE", "INCIDENT", "SLA"],
+    "defaultTimePolicyRef": "time-policy.example.runtime-default"
+  },
+  "queryBindings": [
+    {
+      "queryId": "query.health-summary",
+      "queryRef": "governed-query.example.health-summary",
+      "dataSourceClassRef": "data-class.example.operational-summary",
+      "parameterRefs": ["parameter.time-range", "parameter.site"]
+    },
+    {
+      "queryId": "query.incident-list",
+      "queryRef": "governed-query.example.incident-list",
+      "dataSourceClassRef": "data-class.example.incidents",
+      "parameterRefs": ["parameter.time-range", "parameter.site"]
+    }
+  ],
+  "variables": [
+    {
+      "variableId": "variable.site",
+      "label": "Site",
+      "sourceRef": "variable-source.example.site",
+      "multiSelect": true,
+      "required": false,
+      "persistInUrl": true
+    }
+  ],
+  "filters": [
+    {
+      "filterId": "filter.site",
+      "label": "Site",
+      "sourceRef": "filter-source.example.site",
+      "operatorRef": "operator.example.selection",
+      "variableRef": "variable.site"
+    }
+  ],
+  "views": [
+    {
+      "viewId": "view.overview",
+      "label": "Overview",
+      "panelRefs": ["panel.health", "panel.incidents"]
+    }
+  ],
+  "defaultViewRef": "view.overview",
+  "panels": [
+    {
+      "panelId": "panel.health",
+      "title": "Health Summary",
+      "type": "STAT",
+      "layout": {"x": 0, "y": 0, "width": 4, "height": 2},
+      "queryUses": [
+        {
+          "queryId": "query.health-summary",
+          "bindings": [
+            {"parameterRef": "parameter.time-range", "sourceKind": "CONTEXT", "sourceRef": "TIME_RANGE"},
+            {"parameterRef": "parameter.site", "sourceKind": "VARIABLE", "sourceRef": "variable.site"}
+          ]
+        }
+      ],
+      "filterRefs": ["filter.site"],
+      "variableRefs": ["variable.site"],
+      "drillDowns": [
+        {
+          "drillDownId": "drill.health-detail",
+          "destinationType": "DASHBOARD",
+          "targetRef": "dashboard.example.health-detail",
+          "preserveContext": {"tenant": true, "scope": true, "time": true, "filters": true}
+        }
+      ]
+    },
+    {
+      "panelId": "panel.incidents",
+      "title": "Current Incident Context",
+      "type": "INCIDENT_LIST",
+      "layout": {"x": 4, "y": 0, "width": 8, "height": 4},
+      "queryUses": [
+        {
+          "queryId": "query.incident-list",
+          "bindings": [
+            {"parameterRef": "parameter.time-range", "sourceKind": "CONTEXT", "sourceRef": "TIME_RANGE"},
+            {"parameterRef": "parameter.site", "sourceKind": "VARIABLE", "sourceRef": "variable.site"}
+          ]
+        }
+      ],
+      "filterRefs": ["filter.site"],
+      "variableRefs": ["variable.site"]
+    }
+  ],
+  "actionRefs": ["action.example.create-report"],
+  "drillDowns": [
+    {
+      "drillDownId": "drill.audit",
+      "destinationType": "AUDIT",
+      "targetRef": "audit.example.dashboard-context",
+      "preserveContext": {"tenant": true, "scope": true, "time": true, "filters": true}
+    }
+  ],
+  "stateHandling": {
+    "states": [
+      {"state": "LOADING", "presentationRef": "state.example.loading"},
+      {"state": "EMPTY", "presentationRef": "state.example.empty"},
+      {"state": "PARTIAL_DATA", "presentationRef": "state.example.partial"},
+      {"state": "STALE_DATA", "presentationRef": "state.example.stale"},
+      {"state": "PERMISSION_RESTRICTED", "presentationRef": "state.example.permission"},
+      {"state": "NOT_LICENSED", "presentationRef": "state.example.licensed"},
+      {"state": "QUERY_LIMITED", "presentationRef": "state.example.query-limited"},
+      {"state": "ERROR", "presentationRef": "state.example.error"},
+      {"state": "MONITORING_DEGRADED", "presentationRef": "state.example.monitoring-degraded"},
+      {"state": "NORMAL", "presentationRef": "state.example.normal"}
+    ],
+    "showFreshnessWhenSupplied": true,
+    "showProvenanceWhenSupplied": true,
+    "showAffectedSourceWhenSupplied": true,
+    "showCorrelationIdWhenSupplied": true,
+    "causalInferenceFromMissingData": "PROHIBITED"
+  },
+  "performance": {
+    "serverSidePagination": true,
+    "serverSideFiltering": true,
+    "serverSideSorting": true,
+    "virtualizationHint": true,
+    "queryPolicyRef": "query-policy.example.bounded"
+  },
+  "provenance": {
+    "sourceRef": "mother-reference.platform-09",
+    "sourceVersion": "3.2.2",
+    "notes": "Fictional contract example only; not one of the mandatory 98 screen definitions."
+  }
+}

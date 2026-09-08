@@ -1,0 +1,130 @@
+{
+  "documentType": "DASHBOARD_DEFINITION",
+  "schemaVersion": "1.0.0",
+  "definitionId": "example.clone.platform-value-shape",
+  "definitionVersion": "1",
+  "displayName": "Fictional Platform Value Shape",
+  "description": "Fictional OIV-shaped metadata demonstrating methodology and disclosure guardrails without customer savings, financial amounts or MTTR-reduction claims.",
+  "origin": "CLONE",
+  "scope": "TENANT_CUSTOMER",
+  "systemDefinition": false,
+  "recoverableSystemDefinition": false,
+  "derivedFrom": {
+    "definitionId": "example.system.operations-overview",
+    "definitionVersion": "1"
+  },
+  "category": "Example",
+  "tags": ["fictional", "oiv", "platform-value"],
+  "visibility": {
+    "roleRefs": ["role.example.value-reader"],
+    "resourceScopeRef": "scope.example.value",
+    "entitlementRefs": ["entitlement.example.value-view"],
+    "serverAuthorizationRequired": true
+  },
+  "contextPolicy": {
+    "runtimeContextKeys": ["TIME_RANGE", "TIMEZONE", "COMPARISON_PERIOD", "TENANT_CUSTOMER", "REGION", "SITE", "BUSINESS_SERVICE", "INCIDENT"],
+    "defaultTimePolicyRef": "time-policy.example.runtime-default"
+  },
+  "queryBindings": [
+    {
+      "queryId": "query.value-methodology",
+      "queryRef": "governed-query.example.value-methodology",
+      "dataSourceClassRef": "data-class.example.value-analysis",
+      "parameterRefs": ["parameter.time-range", "parameter.business-service"]
+    }
+  ],
+  "variables": [
+    {
+      "variableId": "variable.business-service",
+      "label": "Business Service",
+      "sourceRef": "variable-source.example.business-service",
+      "multiSelect": true,
+      "required": false,
+      "persistInUrl": true
+    }
+  ],
+  "filters": [
+    {
+      "filterId": "filter.business-service",
+      "label": "Business Service",
+      "sourceRef": "filter-source.example.business-service",
+      "operatorRef": "operator.example.selection",
+      "variableRef": "variable.business-service"
+    }
+  ],
+  "views": [
+    {
+      "viewId": "view.value-shape",
+      "label": "Value Shape",
+      "panelRefs": ["panel.noise-shape", "panel.methodology"]
+    }
+  ],
+  "defaultViewRef": "view.value-shape",
+  "panels": [
+    {
+      "panelId": "panel.noise-shape",
+      "title": "Noise Reduction Shape",
+      "description": "Metadata-only placeholder for future evidence-backed operational noise views; no reduction percentage is encoded.",
+      "type": "BAR",
+      "layout": {"x": 0, "y": 0, "width": 8, "height": 4},
+      "queryUses": [
+        {
+          "queryId": "query.value-methodology",
+          "bindings": [
+            {"parameterRef": "parameter.time-range", "sourceKind": "CONTEXT", "sourceRef": "TIME_RANGE"},
+            {"parameterRef": "parameter.business-service", "sourceKind": "VARIABLE", "sourceRef": "variable.business-service"}
+          ]
+        }
+      ],
+      "filterRefs": ["filter.business-service"],
+      "variableRefs": ["variable.business-service"]
+    },
+    {
+      "panelId": "panel.methodology",
+      "title": "Methodology and Assumptions",
+      "description": "Presentation placeholder for methodology, sample size, assumptions and limitations supplied by future governed value analytics.",
+      "type": "TEXT",
+      "layout": {"x": 8, "y": 0, "width": 4, "height": 4},
+      "queryUses": []
+    }
+  ],
+  "stateHandling": {
+    "states": [
+      {"state": "LOADING", "presentationRef": "state.example.loading"},
+      {"state": "EMPTY", "presentationRef": "state.example.empty"},
+      {"state": "PARTIAL_DATA", "presentationRef": "state.example.partial"},
+      {"state": "STALE_DATA", "presentationRef": "state.example.stale"},
+      {"state": "PERMISSION_RESTRICTED", "presentationRef": "state.example.permission"},
+      {"state": "NOT_LICENSED", "presentationRef": "state.example.licensed"},
+      {"state": "QUERY_LIMITED", "presentationRef": "state.example.query-limited"},
+      {"state": "ERROR", "presentationRef": "state.example.error"},
+      {"state": "MONITORING_DEGRADED", "presentationRef": "state.example.monitoring-degraded"},
+      {"state": "NORMAL", "presentationRef": "state.example.normal"}
+    ],
+    "showFreshnessWhenSupplied": true,
+    "showProvenanceWhenSupplied": true,
+    "showAffectedSourceWhenSupplied": true,
+    "showCorrelationIdWhenSupplied": true,
+    "causalInferenceFromMissingData": "PROHIBITED"
+  },
+  "performance": {
+    "serverSidePagination": true,
+    "serverSideFiltering": true,
+    "serverSideSorting": true,
+    "virtualizationHint": true,
+    "queryPolicyRef": "query-policy.example.bounded"
+  },
+  "provenance": {
+    "sourceRef": "mother-reference.platform-19",
+    "sourceVersion": "3.2.2",
+    "notes": "Fictional shape only; no customer value claim."
+  },
+  "valuePresentationPolicy": {
+    "methodologyRef": "methodology.example.value",
+    "customerAssumptionRef": "assumptions.example.customer-approved-only",
+    "requireSampleSizeDisclosure": true,
+    "requireAssumptionDisclosure": true,
+    "unsupportedCausalClaimsProhibited": true,
+    "financialEstimatesRequireCustomerApprovedAssumptions": true
+  }
+}
