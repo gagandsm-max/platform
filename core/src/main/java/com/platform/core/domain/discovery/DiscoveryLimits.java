@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -30,6 +31,9 @@ public final class DiscoveryLimits {
     private static final Pattern HOSTNAME_LABEL = Pattern.compile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$");
     private static final Pattern FORBIDDEN_SECRET_PATTERN = Pattern.compile(
             "(?i)(community\\s*=|password\\s*=|secret\\s*=|private_key|auth_pass|priv_pass|api_key|token=)"
+    );
+    private static final Pattern FORBIDDEN_SECRET_KEY = Pattern.compile(
+            "(?i).*(password|passwd|secret|community|private[-_]?key|auth[-_]?pass|priv[-_]?pass|api[-_]?key|access[-_]?token|refresh[-_]?token|bearer|cookie|credential).*"
     );
 
     private DiscoveryLimits() {
@@ -143,6 +147,10 @@ public final class DiscoveryLimits {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 if (!(entry.getKey() instanceof String key) || key.length() > 128) {
                     throw new DomainException("VALIDATION_FAILED", "Discovery evidence keys must be bounded strings");
+                }
+                if (FORBIDDEN_SECRET_KEY.matcher(key).matches()) {
+                    throw new DomainException("SECRET_MATERIAL_PROHIBITED",
+                            "Secret-bearing fields are prohibited in discovery evidence");
                 }
                 validateNoSecrets(key);
                 validateEvidenceValue(entry.getValue(), depth + 1);
