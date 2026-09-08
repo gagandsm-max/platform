@@ -3,11 +3,9 @@ import assert from 'node:assert/strict';
 import {
   ALL_PRIMARY_NAV_PRESENTATION_PERMISSIONS,
   ALL_WORKSPACE_PRESENTATION_PERMISSIONS,
-  AUTHORITATIVE_PRIMARY_SIDEBAR_LABELS,
   AUTHORITATIVE_WORKSPACE_COUNT,
   PRIMARY_NAV_DESTINATIONS,
   PRIMARY_NAV_GROUPS,
-  STUDIO_CHILD_LABELS,
   WORKSPACE_GROUPS,
   WORKSPACES,
   assertRegistryIntegrity,
@@ -28,6 +26,36 @@ import {
   workspaceTabDomId,
   workspaceTabPanelDomId,
 } from '../.test-dist/platform/navigation.js';
+
+/**
+ * Independent Platform_09 §2.1 oracles — literal Mother Reference text.
+ * Do not import these expected arrays from production modules.
+ */
+const EXPECTED_SECTION_2_1_SIDEBAR_LABELS = [
+  'Home',
+  'Dashboards',
+  'Inventory',
+  'Topology & Maps',
+  'Alerts & Incidents',
+  'RCA & Investigations',
+  'Network Configuration (NCM)',
+  'IPAM',
+  'Reports & SLA',
+  'Integrations',
+  'Studios',
+  'Administration',
+  'Audit & Governance',
+  'Platform Operations',
+];
+
+const EXPECTED_SECTION_2_1_STUDIO_CHILD_LABELS = [
+  'Dashboard Studio',
+  'Report Studio',
+  'Map Studio',
+  'MIB Studio',
+  'API Studio',
+  'Device Pack Studio',
+];
 import {
   REQUIRED_SCREEN_STATES,
   SCREEN_STATE_LABELS,
@@ -63,21 +91,30 @@ test('authoritative workspace count is exactly 98', () => {
   assert.doesNotThrow(() => assertRegistryIntegrity());
 });
 
-test('authoritative §2.1 primary sidebar inventory is preserved', () => {
+test('authoritative §2.1 primary sidebar inventory matches Mother Reference literal oracle', () => {
   const sidebar = PRIMARY_NAV_DESTINATIONS.filter((destination) => destination.sidebar);
   assert.deepEqual(
     sidebar.map((destination) => destination.label),
-    [...AUTHORITATIVE_PRIMARY_SIDEBAR_LABELS],
+    EXPECTED_SECTION_2_1_SIDEBAR_LABELS,
   );
   assert.equal(sidebar.length, 14);
 });
 
-test('Studios children match Platform_09 §2.1', () => {
+test('Studios children match Platform_09 §2.1 literal oracle', () => {
   const children = PRIMARY_NAV_DESTINATIONS.filter((destination) => destination.parentId === 'studios');
   assert.deepEqual(
     children.map((destination) => destination.label),
-    [...STUDIO_CHILD_LABELS],
+    EXPECTED_SECTION_2_1_STUDIO_CHILD_LABELS,
   );
+});
+
+test('/network-configuration primary destination uses exact Network Configuration (NCM) label', () => {
+  const destination = findPrimaryNavByPath('/network-configuration');
+  assert.ok(destination);
+  assert.equal(destination.label, 'Network Configuration (NCM)');
+  const resolved = resolveAppRoute('/network-configuration', FULL_ACCESS);
+  assert.equal(resolved.kind, 'primary');
+  assert.equal(resolved.destination.label, 'Network Configuration (NCM)');
 });
 
 test('98 workspace routes and primary routes remain separate concepts', () => {

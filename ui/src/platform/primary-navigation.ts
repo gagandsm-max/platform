@@ -142,7 +142,7 @@ export const PRIMARY_NAV_DESTINATIONS: readonly PrimaryNavDestination[] = [
   },
   {
     id: 'ncm',
-    label: 'Network Configuration',
+    label: 'Network Configuration (NCM)',
     shortLabel: 'NC',
     path: '/network-configuration',
     group: 'manage',
@@ -339,7 +339,7 @@ export const AUTHORITATIVE_PRIMARY_SIDEBAR_LABELS = [
   'Topology & Maps',
   'Alerts & Incidents',
   'RCA & Investigations',
-  'Network Configuration',
+  'Network Configuration (NCM)',
   'IPAM',
   'Reports & SLA',
   'Integrations',
