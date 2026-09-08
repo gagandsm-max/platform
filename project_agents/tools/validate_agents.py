@@ -8,16 +8,19 @@ import tomllib
 
 EXPECTED_TOTAL = 27
 EXPECTED_TIERS = {"P0": 12, "P1": 15}
+EXPECTED_MODES = {"read": 15, "write": 12}
 ALLOWED_MODES = {"read", "write"}
 ANTIGRAVITY_READ_TOOLS = ["view_file", "grep_search", "run_command"]
 ANTIGRAVITY_WRITE_TOOLS = ANTIGRAVITY_READ_TOOLS + ["replace_file_content"]
 REQUIRED_ASSETS = [
     "AGENTS.md",
     "project_agents/AGENT_MATRIX.md",
+    "project_agents/SOURCE_MAPPING.md",
     "project_agents/USAGE_PLAYBOOK.md",
     "project_agents/START_HERE.md",
     "project_agents/TASK_PROMPT_TEMPLATE.md",
     "project_agents/CHATGPT_AGENT_ROUTER.md",
+    "project_agents/OPERATIONAL_SMOKE_TEST.md",
     ".agents/rules/platform-authority.md",
 ]
 ROOT_AGENT_ANCHORS = [
@@ -145,12 +148,22 @@ mode_counts = Counter(entry.get("mode") for entry in manifest)
 unknown_modes = sorted(mode for mode in mode_counts if mode not in ALLOWED_MODES)
 if unknown_modes:
     errors.append(f"unsupported manifest modes: {', '.join(str(mode) for mode in unknown_modes)}")
+for mode, expected in EXPECTED_MODES.items():
+    if mode_counts.get(mode, 0) != expected:
+        errors.append(f"manifest {mode.upper()} count {mode_counts.get(mode, 0)} != expected {expected}")
 
 for entry in manifest:
     required = {"name", "description", "tier", "mode", "canonical_path", "sha256"}
     missing = sorted(required - set(entry))
     if missing:
         errors.append(f"manifest entry missing fields {entry.get('name', '<unnamed>')}: {', '.join(missing)}")
+        continue
+    expected_manifest_path = f"canonical/{entry['tier'].lower()}/{entry['name']}.md"
+    if entry.get("canonical_path") != expected_manifest_path:
+        errors.append(
+            f"manifest canonical_path mismatch {entry['name']}: "
+            f"{entry.get('canonical_path')} != {expected_manifest_path}"
+        )
 
 
 tier_counts = Counter(entry.get("tier") for entry in manifest)
@@ -223,8 +236,8 @@ for entry in manifest:
             cursor = parse_frontmatter(cursor_path)
             if cursor.get("name") != entry["name"]:
                 errors.append(f"Cursor name mismatch: {entry['name']}")
-            if not cursor.get("description"):
-                errors.append(f"Cursor description missing: {entry['name']}")
+            if cursor.get("description") != entry["description"]:
+                errors.append(f"Cursor description mismatch: {entry['name']}")
             if cursor.get("model") != "inherit":
                 errors.append(f"Cursor model must inherit: {entry['name']}")
             expected_readonly = entry["mode"] == "read"
@@ -239,8 +252,8 @@ for entry in manifest:
             expected_tools = ANTIGRAVITY_READ_TOOLS if entry["mode"] == "read" else ANTIGRAVITY_WRITE_TOOLS
             if antigravity.get("name") != entry["name"]:
                 errors.append(f"Antigravity name mismatch: {entry['name']}")
-            if not antigravity.get("description"):
-                errors.append(f"Antigravity description missing: {entry['name']}")
+            if antigravity.get("description") != entry["description"]:
+                errors.append(f"Antigravity description mismatch: {entry['name']}")
             if antigravity.get("tools") != expected_tools:
                 errors.append(f"Antigravity tools mismatch: {entry['name']}")
             if antigravity.get("mainAgent") is not False:
@@ -252,6 +265,8 @@ for entry in manifest:
             expected_policy = "off" if entry["mode"] == "read" else "sandbox"
             if antigravity.get("commandExecutionPolicy") != expected_policy:
                 errors.append(f"Antigravity command policy mismatch: {entry['name']}")
+            if entry["mode"] == "read" and READ_ANTIGRAVITY_WRAPPER not in antigravity_path.read_text():
+                errors.append(f"Antigravity READ boundary missing: {entry['name']}")
         except ValueError as exc:
             errors.append(f"Antigravity frontmatter invalid {entry['name']}: {exc}")
 
@@ -261,8 +276,8 @@ for entry in manifest:
             expected_sandbox = "read-only" if entry["mode"] == "read" else "workspace-write"
             if codex.get("name") != entry["name"]:
                 errors.append(f"Codex name mismatch: {entry['name']}")
-            if not codex.get("description"):
-                errors.append(f"Codex description missing: {entry['name']}")
+            if codex.get("description") != entry["description"]:
+                errors.append(f"Codex description mismatch: {entry['name']}")
             if codex.get("sandbox_mode") != expected_sandbox:
                 errors.append(f"Codex sandbox mismatch: {entry['name']}")
             instructions = codex.get("developer_instructions", "")
