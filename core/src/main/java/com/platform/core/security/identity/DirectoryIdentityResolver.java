@@ -1,7 +1,5 @@
 package com.platform.core.security.identity;
 
-import org.springframework.stereotype.Component;
-
 import java.time.Instant;
 import java.util.Objects;
 
@@ -9,7 +7,6 @@ import java.util.Objects;
  * Provider-neutral resolver backed by {@link IdentityDirectory}.
  * Does not consult JWT permission/role claims.
  */
-@Component
 public final class DirectoryIdentityResolver implements IdentityResolver {
 
     private final IdentityDirectory directory;

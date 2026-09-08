@@ -8,6 +8,8 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.platform.core.api.TenantController;
 import com.platform.core.api.error.ApiExceptionHandler;
+import com.platform.core.controller.SensorIngestionController;
+import com.platform.core.controller.VersionController;
 import com.platform.core.domain.tenant.Tenant;
 import com.platform.core.domain.tenant.TenantMode;
 import com.platform.core.domain.tenant.TenantService;
@@ -21,17 +23,22 @@ import com.platform.core.security.authorization.ResourceType;
 import com.platform.core.security.identity.DirectoryIdentityResolver;
 import com.platform.core.security.identity.IdentityDirectory;
 import com.platform.core.security.identity.IdentityProviderType;
+import com.platform.core.security.identity.IdentityResolver;
 import com.platform.core.security.identity.PlatformSubject;
-import com.platform.core.security.identity.ProviderIdentityKey;
-import com.platform.core.security.identity.ProviderInstanceId;
-import com.platform.core.security.identity.ExternalSubject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.SpringBootConfiguration;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
+import org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -56,20 +63,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = {TenantController.class, com.platform.core.controller.SensorIngestionController.class,
-        com.platform.core.controller.VersionController.class})
-@Import({
-        HttpSecurityConfiguration.class,
-        PlatformJwtAuthenticationConverter.class,
-        AuthorizationRouteMapper.class,
-        AuthorizationEnforcementFilter.class,
-        SecurityErrorResponseWriter.class,
-        SecurityAuditEmitter.class,
-        DirectoryIdentityResolver.class,
-        ApiExceptionHandler.class,
-        CorrelationIdFilter.class,
-        CoreHttpSecurityWebTest.TestSecurityBeans.class
-})
+@SpringBootTest(classes = CoreHttpSecurityWebTest.TestApplication.class)
+@AutoConfigureMockMvc
 class CoreHttpSecurityWebTest {
 
     private static final String ISSUER = "https://idp.platform.test/realms/platform";
@@ -88,10 +83,10 @@ class CoreHttpSecurityWebTest {
     private TenantService tenantService;
 
     @MockBean
-    private org.springframework.boot.actuate.health.HealthEndpoint healthEndpoint;
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     @MockBean
-    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    private org.springframework.boot.actuate.health.HealthEndpoint healthEndpoint;
 
     @BeforeEach
     void stubTenant() {
@@ -100,6 +95,7 @@ class CoreHttpSecurityWebTest {
                 Instant.parse("2026-01-01T00:00:00Z"), Instant.parse("2026-01-01T00:00:00Z")
         );
         when(tenantService.get(TENANT_A)).thenReturn(tenantA);
+        when(tenantService.get(TENANT_B)).thenThrow(new com.platform.core.domain.DomainException("TENANT_NOT_FOUND", "Tenant not found"));
     }
 
     @Test
@@ -177,8 +173,14 @@ class CoreHttpSecurityWebTest {
         for (int i = 0; i < secret.length; i++) {
             secret[i] = (byte) i;
         }
-        JWTClaimsSet claims = baseClaims(ISSUER, AUDIENCE, "user-a",
-                Instant.now().minusSeconds(60), Instant.now().plusSeconds(600));
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .issuer(ISSUER)
+                .subject("user-a")
+                .audience(AUDIENCE)
+                .issueTime(Date.from(Instant.now().minusSeconds(60)))
+                .notBeforeTime(Date.from(Instant.now().minusSeconds(60)))
+                .expirationTime(Date.from(Instant.now().plusSeconds(600)))
+                .build();
         SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
         jwt.sign(new MACSigner(secret));
         mockMvc.perform(get("/api/v1/tenants/" + TENANT_A)
@@ -292,9 +294,32 @@ class CoreHttpSecurityWebTest {
         org.junit.jupiter.api.Assertions.assertFalse(body.toLowerCase().contains("stacktrace"));
     }
 
-    @org.springframework.context.annotation.Configuration
+    @SpringBootConfiguration
+    @EnableAutoConfiguration(exclude = {
+            DataSourceAutoConfiguration.class,
+            KafkaAutoConfiguration.class
+    })
+    @Import({
+            HttpSecurityConfiguration.class,
+            PlatformJwtAuthenticationConverter.class,
+            AuthorizationRouteMapper.class,
+            AuthorizationEnforcementFilter.class,
+            SecurityErrorResponseWriter.class,
+            SecurityAuditEmitter.class,
+            ApiExceptionHandler.class,
+            CorrelationIdFilter.class,
+            TenantController.class,
+            SensorIngestionController.class,
+            VersionController.class,
+            TestSecurityBeans.class
+    })
+    static class TestApplication {
+    }
+
+    @Configuration
     static class TestSecurityBeans {
         @Bean
+        @Primary
         OidcResourceServerProperties oidcResourceServerProperties() {
             OidcResourceServerProperties props = new OidcResourceServerProperties();
             props.setIssuerUri(ISSUER);
@@ -304,6 +329,7 @@ class CoreHttpSecurityWebTest {
         }
 
         @Bean
+        @Primary
         JwtDecoder jwtDecoder(OidcResourceServerProperties properties) {
             NimbusJwtDecoder decoder = NimbusJwtDecoder.withPublicKey((RSAPublicKey) KEY_PAIR.getPublic()).build();
             decoder.setJwtValidator(token -> {
@@ -338,6 +364,11 @@ class CoreHttpSecurityWebTest {
                 }
                 return Optional.ofNullable(map.get(key.externalSubject().value()));
             };
+        }
+
+        @Bean
+        IdentityResolver identityResolver(IdentityDirectory identityDirectory) {
+            return new DirectoryIdentityResolver(identityDirectory);
         }
 
         @Bean
@@ -399,16 +430,5 @@ class CoreHttpSecurityWebTest {
         SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.RS256), builder.build());
         jwt.sign(new RSASSASigner(privateKey));
         return jwt.serialize();
-    }
-
-    private static JWTClaimsSet baseClaims(String issuer, String audience, String subject, Instant nbf, Instant exp) {
-        return new JWTClaimsSet.Builder()
-                .issuer(issuer)
-                .subject(subject)
-                .audience(audience)
-                .issueTime(Date.from(nbf))
-                .notBeforeTime(Date.from(nbf))
-                .expirationTime(Date.from(exp))
-                .build();
     }
 }

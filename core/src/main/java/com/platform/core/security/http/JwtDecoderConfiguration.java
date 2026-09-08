@@ -26,6 +26,7 @@ public class JwtDecoderConfiguration {
     private static final Logger log = LoggerFactory.getLogger(JwtDecoderConfiguration.class);
 
     @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(JwtDecoder.class)
     JwtDecoder jwtDecoder(OidcResourceServerProperties properties) {
         if (!properties.isConfigured()) {
             log.warn("event_code=PLT-CORE-SEC-0001 OIDC resource server is not configured; bearer JWTs will be rejected");
