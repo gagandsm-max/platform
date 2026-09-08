@@ -7,6 +7,8 @@ import com.platform.core.domain.tenant.Tenant;
 import com.platform.core.domain.tenant.TenantMode;
 import com.platform.core.domain.tenant.TenantService;
 import com.platform.core.domain.tenant.TenantStatus;
+import com.platform.core.security.authorization.PrincipalContext;
+import com.platform.core.security.http.PlatformSecurityContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -51,13 +54,18 @@ public class TenantController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(required = false) Integer limit
     ) {
+        PrincipalContext principal = PlatformSecurityContext.requirePrincipal();
         PageResult<Tenant> result = tenants.list(page, PageResult.normalizeLimit(limit));
+        List<TenantResponse> filtered = result.items().stream()
+                .filter(tenant -> principal.tenantScopes().contains(tenant.tenantId()))
+                .map(TenantController::toResponse)
+                .toList();
         return new PageResult<>(
-                result.items().stream().map(TenantController::toResponse).toList(),
+                filtered,
                 result.page(),
                 result.limit(),
-                result.total(),
-                result.hasMore()
+                filtered.size(),
+                false
         );
     }
 
