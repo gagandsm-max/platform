@@ -54,7 +54,12 @@ jobs:
         run: |
           set -euo pipefail
           test -f project_agents/tools/validate_agents.py
+          test -f project_agents/tools/sync_agents.py
           python3 project_agents/tools/validate_agents.py
+          python3 project_agents/tools/sync_agents.py
+          python3 project_agents/tools/validate_agents.py
+          python3 project_agents/tools/sync_agents.py
+          git diff --exit-code -- project_agents/manifest.json .cursor/agents .codex/agents .agents/agents
 
   unit:
     name: Unit tests
