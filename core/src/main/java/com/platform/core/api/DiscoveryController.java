@@ -4,6 +4,7 @@ import com.platform.core.api.dto.DiscoveryDtos.CandidateResponse;
 import com.platform.core.api.dto.DiscoveryDtos.CreateDiscoveryRequest;
 import com.platform.core.api.dto.DiscoveryDtos.DiscoveryResponse;
 import com.platform.core.api.dto.DiscoveryDtos.EvidenceResponse;
+import com.platform.core.domain.DomainException;
 import com.platform.core.domain.discovery.DiscoveryCandidate;
 import com.platform.core.domain.discovery.DiscoveryEvidence;
 import com.platform.core.domain.discovery.DiscoveryMethod;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @RestController
@@ -48,8 +50,15 @@ public class DiscoveryController {
         List<DiscoveryMethod> methods = null;
         if (request.requestedMethods() != null) {
             methods = new ArrayList<>();
-            for (String m : request.requestedMethods()) {
-                methods.add(DiscoveryMethod.valueOf(m.toUpperCase()));
+            for (String rawMethod : request.requestedMethods()) {
+                if (rawMethod == null || rawMethod.trim().isEmpty()) {
+                    throw new DomainException("VALIDATION_FAILED", "Discovery method cannot be blank");
+                }
+                try {
+                    methods.add(DiscoveryMethod.valueOf(rawMethod.trim().toUpperCase(Locale.ROOT)));
+                } catch (IllegalArgumentException ex) {
+                    throw new DomainException("VALIDATION_FAILED", "Unsupported discovery method");
+                }
             }
         }
 
@@ -73,10 +82,7 @@ public class DiscoveryController {
     }
 
     @GetMapping("/{requestId}")
-    public DiscoveryResponse get(
-            @PathVariable UUID tenantId,
-            @PathVariable UUID requestId
-    ) {
+    public DiscoveryResponse get(@PathVariable UUID tenantId, @PathVariable UUID requestId) {
         return toResponse(discoveryService.getRequest(tenantId, requestId));
     }
 
@@ -89,18 +95,12 @@ public class DiscoveryController {
         PageResult<DiscoveryRequest> result = discoveryService.listRequests(tenantId, page, PageResult.normalizeLimit(limit));
         return new PageResult<>(
                 result.items().stream().map(this::toResponse).toList(),
-                result.page(),
-                result.limit(),
-                result.total(),
-                result.hasMore()
+                result.page(), result.limit(), result.total(), result.hasMore()
         );
     }
 
     @PostMapping("/{requestId}/cancel")
-    public DiscoveryResponse cancel(
-            @PathVariable UUID tenantId,
-            @PathVariable UUID requestId
-    ) {
+    public DiscoveryResponse cancel(@PathVariable UUID tenantId, @PathVariable UUID requestId) {
         return toResponse(discoveryService.cancelRequest(tenantId, requestId));
     }
 
@@ -114,10 +114,7 @@ public class DiscoveryController {
         PageResult<DiscoveryCandidate> result = discoveryService.listCandidates(tenantId, requestId, page, PageResult.normalizeLimit(limit));
         return new PageResult<>(
                 result.items().stream().map(this::toCandidateResponse).toList(),
-                result.page(),
-                result.limit(),
-                result.total(),
-                result.hasMore()
+                result.page(), result.limit(), result.total(), result.hasMore()
         );
     }
 
@@ -131,10 +128,7 @@ public class DiscoveryController {
         PageResult<DiscoveryEvidence> result = discoveryService.listEvidence(tenantId, requestId, page, PageResult.normalizeLimit(limit));
         return new PageResult<>(
                 result.items().stream().map(this::toEvidenceResponse).toList(),
-                result.page(),
-                result.limit(),
-                result.total(),
-                result.hasMore()
+                result.page(), result.limit(), result.total(), result.hasMore()
         );
     }
 
@@ -143,26 +137,10 @@ public class DiscoveryController {
                 ? r.requestedMethods().stream().map(Enum::name).toList()
                 : List.of();
         return new DiscoveryResponse(
-                r.requestId(),
-                r.tenantId(),
-                r.name(),
-                r.status().name(),
-                r.correlationId(),
-                r.idempotencyKey(),
-                r.siteId(),
-                r.sensorPoolId(),
-                r.assignedSensorId(),
-                methods,
-                r.credentialProfileRef(),
-                r.snmpPort(),
-                r.timeoutMs(),
-                r.maxRetries(),
-                r.createdBy(),
-                r.createdAt(),
-                r.startedAt(),
-                r.completedAt(),
-                r.summary(),
-                r.failureReason()
+                r.requestId(), r.tenantId(), r.name(), r.status().name(), r.correlationId(), r.idempotencyKey(),
+                r.siteId(), r.sensorPoolId(), r.assignedSensorId(), methods, r.credentialProfileRef(),
+                r.snmpPort(), r.timeoutMs(), r.maxRetries(), r.createdBy(), r.createdAt(), r.startedAt(),
+                r.completedAt(), r.summary(), r.failureReason()
         );
     }
 
@@ -171,42 +149,16 @@ public class DiscoveryController {
                 ? c.evidencedProtocols().stream().map(Enum::name).toList()
                 : List.of();
         return new CandidateResponse(
-                c.candidateId(),
-                c.tenantId(),
-                c.requestId(),
-                c.targetAddress(),
-                c.discoveredName(),
-                c.sysObjectId(),
-                c.sysDescr(),
-                protocols,
-                c.attributes(),
-                c.confidence().name(),
-                c.reviewStatus().name(),
-                c.conflictDetected(),
-                c.conflictDetails(),
-                c.siteId(),
-                c.firstSeenAt(),
-                c.lastSeenAt(),
-                c.createdAt(),
-                c.updatedAt()
+                c.candidateId(), c.tenantId(), c.requestId(), c.targetAddress(), c.discoveredName(), c.sysObjectId(),
+                c.sysDescr(), protocols, c.attributes(), c.confidence().name(), c.reviewStatus().name(),
+                c.conflictDetected(), c.conflictDetails(), c.siteId(), c.firstSeenAt(), c.lastSeenAt(), c.createdAt(), c.updatedAt()
         );
     }
 
     private EvidenceResponse toEvidenceResponse(DiscoveryEvidence e) {
         return new EvidenceResponse(
-                e.evidenceId(),
-                e.tenantId(),
-                e.requestId(),
-                e.targetId(),
-                e.sensorId(),
-                e.protocol().name(),
-                e.method(),
-                e.status().name(),
-                e.reachabilityKind().name(),
-                e.technicalCode(),
-                e.attributes(),
-                e.durationMs(),
-                e.observedAt()
+                e.evidenceId(), e.tenantId(), e.requestId(), e.targetId(), e.sensorId(), e.protocol().name(), e.method(),
+                e.status().name(), e.reachabilityKind().name(), e.technicalCode(), e.attributes(), e.durationMs(), e.observedAt()
         );
     }
 }
