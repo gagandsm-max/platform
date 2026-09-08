@@ -1,6 +1,8 @@
 ---
 name: platform-accessibility-auditor
 description: Accessibility QA for Platform UI. Use on new/changed operational screens to verify WCAG-aligned semantics, keyboard/focus, contrast/status, zoom and assistive-technology behavior with automated plus manual evidence.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-accessibility-auditor.md sha256:616a7dbe2a3531f3aa1c5c2b5accad81d92a13ea56fe64861bfd5b6d9a57e43b -->
