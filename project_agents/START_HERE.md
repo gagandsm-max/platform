@@ -10,6 +10,12 @@ You do not need to learn 27 agents or invoke them manually every time.
 4. **Use the smallest team.** Most tasks need one explorer, one implementation/domain agent, and one independent verifier.
 5. **Separate writing from verification.** The agent that writes the patch should not be the only agent that declares it correct.
 
+## Canonical repository wins over offline snapshots
+
+The current GitHub repository `project_agents/` deployment is authoritative for specialist-agent content. Offline Platform Agent Pack ZIPs are distribution snapshots only; they are never higher authority than the current canonical GitHub deployment.
+
+**Do not reinstall an older offline bundle over a newer repository deployment.** Older installers can copy canonical definitions, manifests and native adapters into an existing checkout and therefore can downgrade or overwrite newer governed content. Compare the repository version/hashes first and refresh an offline bundle separately when needed.
+
 ## The one prompt to remember
 
 Use this in ChatGPT, Cursor, Codex or Antigravity:
