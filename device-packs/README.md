@@ -1,7 +1,7 @@
 # Platform Device Pack Contract Foundation
 
-**Scope:** contract, deterministic packaging, static validation, and fictional fixtures only.  
-**Mother Reference:** Platform v3.2.2.  
+**Scope:** contract, deterministic packaging, static validation, and fictional fixtures only.
+**Mother Reference:** Platform v3.2.2.
 **Runtime/device certification:** not included.
 
 ## 1. What a Device Pack is
