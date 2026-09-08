@@ -40,7 +40,6 @@ fi
 
 # 3. mTLS enforcement on Core ingestion
 echo "--> [3/4] Verifying mTLS enforcement and untrusted cert rejection..."
-# Missing cert -> 401
 NO_CERT=$(curl -k -s -o /dev/null -w "%{http_code}" -X POST "https://127.0.0.1:${CORE_PORT}/api/v1/sensor/heartbeat" 2>/dev/null || echo "000")
 if [ "${NO_CERT}" = "401" ]; then
     echo "[OK] Ingestion endpoint rejects missing client cert with HTTP 401."
@@ -49,7 +48,6 @@ else
     exit 1
 fi
 
-# Untrusted cert -> TLS alert
 UNTRUSTED=$(curl -k -s -o /dev/null -w "%{http_code}" \
     --cert "${CERT_DIR}/untrusted-client.crt" \
     --key "${CERT_DIR}/untrusted-client.key" \
@@ -61,9 +59,16 @@ else
     exit 1
 fi
 
-# 4. Host runtime isolation & synthetic negative test
-echo "--> [4/4] Verifying host runtime isolation and synthetic negative detector..."
-bash "${ROOT_DIR}/scripts/check-host-runtime-isolation.sh"
+# 4. Developer-host isolation policy plus synthetic detector verification.
+# GitHub-hosted CI runners intentionally contain preinstalled language runtimes.
+# Platform code/tests still run through Docker; therefore CI validates the detector
+# itself without misclassifying the runner image as a developer-policy violation.
+echo "--> [4/4] Verifying host runtime isolation policy and synthetic negative detector..."
+if [ "${PLATFORM_CI:-0}" = "1" ]; then
+    echo "[INFO] PLATFORM_CI=1: skipping ephemeral runner PATH policy enforcement; running detector regression only."
+else
+    bash "${ROOT_DIR}/scripts/check-host-runtime-isolation.sh"
+fi
 bash "${ROOT_DIR}/scripts/check-host-runtime-isolation.sh" --synthetic-test
 
 echo "========================================================================"
