@@ -1,6 +1,8 @@
 ---
 name: platform-reality-checker
 description: Final evidence gate for Platform. Use when work is claimed complete, production-ready or release-ready to verify the claim against code, tests, runtime evidence and applicable quality gates.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-reality-checker.md sha256:f74e928469307667535499b50c4f883e953d46c979cd1196c9d4fca8d5a036c9 -->
