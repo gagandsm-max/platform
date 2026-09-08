@@ -20,8 +20,13 @@ func main() {
 	)
 	slog.SetDefault(logger)
 
-	cfg := config.LoadConfig()
-	ident, err := identity.GenerateOrLoadIdentity(cfg.AgentID)
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		logger.Error("Failed to load agent configuration", "error", err)
+		os.Exit(1)
+	}
+
+	ident, err := identity.LoadOrGenerate(cfg.StateDir, cfg.AgentID, cfg.TenantID)
 	if err != nil {
 		logger.Error("Failed to initialize agent identity", "error", err)
 		os.Exit(1)
@@ -30,14 +35,24 @@ func main() {
 	logger.Info("Platform Linux Agent starting",
 		"version", "0.1.0-dev",
 		"agent_id", ident.AgentID,
+		"tenant_id", ident.TenantID,
+		"host_id", ident.HostID,
 		"core_url", cfg.CoreURL,
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc := common.NewAgentService(cfg, ident, logger)
-	svc.Start(ctx)
+	svc, err := common.NewAgentService(cfg, ident, nil, logger)
+	if err != nil {
+		logger.Error("Failed to initialize agent service", "error", err)
+		os.Exit(1)
+	}
+
+	if err := svc.Start(ctx); err != nil {
+		logger.Error("Failed to start agent service", "error", err)
+		os.Exit(1)
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -45,6 +60,6 @@ func main() {
 	sig := <-sigCh
 	logger.Info("Platform Linux Agent received signal, shutting down", "signal", sig.String())
 	cancel()
-	svc.Stop()
+	_ = svc.Stop()
 	logger.Info("Platform Linux Agent exited cleanly")
 }

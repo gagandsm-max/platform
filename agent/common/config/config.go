@@ -1,47 +1,332 @@
 package config
 
 import (
+	"crypto/tls"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
+var allowedEnvVars = map[string]bool{
+	"PLATFORM_AGENT_TENANT_ID":           true,
+	"PLATFORM_AGENT_CORE_URL":            true,
+	"PLATFORM_AGENT_CA_FILE":             true,
+	"PLATFORM_AGENT_CERT_FILE":           true,
+	"PLATFORM_AGENT_KEY_FILE":            true,
+	"PLATFORM_AGENT_ID":                  true,
+	"PLATFORM_AGENT_SITE_ID":             true,
+	"PLATFORM_AGENT_STATE_DIR":           true,
+	"PLATFORM_AGENT_COLLECTION_INTERVAL": true,
+	"PLATFORM_AGENT_COLLECTION_TIMEOUT":  true,
+	"PLATFORM_AGENT_HEALTH_ADDRESS":      true,
+	"PLATFORM_AGENT_MAX_BUFFER_RECORDS":  true,
+	"PLATFORM_AGENT_MAX_BUFFER_BYTES":    true,
+	"PLATFORM_AGENT_MAX_RECORD_BYTES":    true,
+	"PLATFORM_AGENT_MAX_BATCH_RECORDS":   true,
+	"PLATFORM_AGENT_MAX_BATCH_BYTES":     true,
+	"PLATFORM_AGENT_MAX_FILESYSTEMS":     true,
+	"PLATFORM_AGENT_RETRY_BASE":          true,
+	"PLATFORM_AGENT_RETRY_MAX":           true,
+	"PLATFORM_AGENT_DELIVERY_TIMEOUT":    true,
+	"PLATFORM_LOG_LEVEL":                 true,
+	"PLATFORM_ENV":                       true,
+}
+
 type Config struct {
-	AgentID       string
-	CoreURL       string
-	QueueDir      string
-	PollInterval  time.Duration
-	HealthPort    int
-	LogLevel      string
-	Environment   string
-	MaxQueueItems int
+	TenantID           string
+	CoreURL            string
+	CAFile             string
+	CertFile           string
+	KeyFile            string
+	AgentID            string
+	SiteID             string
+	StateDir           string
+	QueueDir           string
+	CollectionInterval time.Duration
+	CollectionTimeout  time.Duration
+	HealthAddress      string
+	MaxBufferRecords   int
+	MaxBufferBytes     int64
+	MaxRecordBytes     int
+	MaxBatchRecords    int
+	MaxBatchBytes      int64
+	MaxFilesystems     int
+	RetryBase          time.Duration
+	RetryMax           time.Duration
+	DeliveryTimeout    time.Duration
+	LogLevel           string
+	Environment        string
 }
 
-func getEnv(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return defaultVal
+func LoadConfig() (*Config, error) {
+	return LoadConfigFromEnv(os.Environ())
 }
 
-func getEnvInt(key string, defaultVal int) int {
-	if val := os.Getenv(key); val != "" {
-		if i, err := strconv.Atoi(val); err == nil {
-			return i
+func LoadConfigFromEnv(environ []string) (*Config, error) {
+	envMap := make(map[string]string)
+	for _, entry := range environ {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			k := parts[0]
+			v := parts[1]
+			// Strict fail-closed: reject any unknown PLATFORM_AGENT_* settings
+			if strings.HasPrefix(k, "PLATFORM_AGENT_") && !allowedEnvVars[k] {
+				return nil, fmt.Errorf("CONFIG_UNKNOWN_VARIABLE: unknown agent setting %q is prohibited", k)
+			}
+			envMap[k] = v
 		}
 	}
-	return defaultVal
+
+	c := &Config{}
+
+	// 1. Required Tenant ID
+	c.TenantID = strings.TrimSpace(envMap["PLATFORM_AGENT_TENANT_ID"])
+	if c.TenantID == "" {
+		return nil, errors.New("CONFIG_TENANT_ID_REQUIRED: PLATFORM_AGENT_TENANT_ID must be set")
+	}
+
+	// 2. Required Core URL (HTTPS only, no userinfo, origin only)
+	coreRaw := strings.TrimSpace(envMap["PLATFORM_AGENT_CORE_URL"])
+	if coreRaw == "" {
+		return nil, errors.New("CONFIG_CORE_URL_REQUIRED: PLATFORM_AGENT_CORE_URL must be set")
+	}
+	u, err := url.Parse(coreRaw)
+	if err != nil {
+		return nil, fmt.Errorf("CONFIG_CORE_URL_INVALID: %w", err)
+	}
+	if u.Scheme != "https" {
+		return nil, errors.New("CONFIG_CORE_URL_SCHEME_INSECURE: PLATFORM_AGENT_CORE_URL must use https")
+	}
+	if u.User != nil {
+		return nil, errors.New("CONFIG_CORE_URL_CREDENTIALS_PROHIBITED: PLATFORM_AGENT_CORE_URL must not contain credentials")
+	}
+	if u.Host == "" {
+		return nil, errors.New("CONFIG_CORE_URL_HOST_REQUIRED: PLATFORM_AGENT_CORE_URL must include valid host")
+	}
+	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("CONFIG_CORE_URL_PATH_PROHIBITED: PLATFORM_AGENT_CORE_URL must be origin-only")
+	}
+	c.CoreURL = fmt.Sprintf("https://%s", u.Host)
+
+	// 3. Required TLS file paths
+	c.CAFile = strings.TrimSpace(envMap["PLATFORM_AGENT_CA_FILE"])
+	if c.CAFile == "" {
+		return nil, errors.New("CONFIG_CA_FILE_REQUIRED: PLATFORM_AGENT_CA_FILE must be set")
+	}
+	if err := validateRegularFile(c.CAFile, false); err != nil {
+		return nil, fmt.Errorf("CONFIG_CA_FILE_INVALID: %w", err)
+	}
+
+	c.CertFile = strings.TrimSpace(envMap["PLATFORM_AGENT_CERT_FILE"])
+	if c.CertFile == "" {
+		return nil, errors.New("CONFIG_CERT_FILE_REQUIRED: PLATFORM_AGENT_CERT_FILE must be set")
+	}
+	if err := validateRegularFile(c.CertFile, false); err != nil {
+		return nil, fmt.Errorf("CONFIG_CERT_FILE_INVALID: %w", err)
+	}
+
+	c.KeyFile = strings.TrimSpace(envMap["PLATFORM_AGENT_KEY_FILE"])
+	if c.KeyFile == "" {
+		return nil, errors.New("CONFIG_KEY_FILE_REQUIRED: PLATFORM_AGENT_KEY_FILE must be set")
+	}
+	if err := validateRegularFile(c.KeyFile, true); err != nil {
+		return nil, fmt.Errorf("CONFIG_KEY_FILE_INVALID: %w", err)
+	}
+
+	// Verify keypair loads cleanly
+	if _, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile); err != nil {
+		return nil, fmt.Errorf("CONFIG_KEYPAIR_INVALID: certificate and key do not match or cannot be parsed: %w", err)
+	}
+
+	// 4. Optional IDs and directories
+	c.AgentID = strings.TrimSpace(envMap["PLATFORM_AGENT_ID"])
+	c.SiteID = strings.TrimSpace(envMap["PLATFORM_AGENT_SITE_ID"])
+
+	c.StateDir = strings.TrimSpace(envMap["PLATFORM_AGENT_STATE_DIR"])
+	if c.StateDir == "" {
+		c.StateDir = "/var/lib/platform/agent"
+	}
+	c.QueueDir = filepath.Join(c.StateDir, "queue")
+
+	// 5. Intervals & timeouts
+	c.CollectionInterval = 15 * time.Second
+	if val := envMap["PLATFORM_AGENT_COLLECTION_INTERVAL"]; val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return nil, fmt.Errorf("CONFIG_COLLECTION_INTERVAL_INVALID: %w", err)
+		}
+		if d < time.Second || d > time.Hour {
+			return nil, errors.New("CONFIG_COLLECTION_INTERVAL_OUT_OF_BOUNDS: must be between 1s and 1h")
+		}
+		c.CollectionInterval = d
+	}
+
+	c.CollectionTimeout = 5 * time.Second
+	if val := envMap["PLATFORM_AGENT_COLLECTION_TIMEOUT"]; val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return nil, fmt.Errorf("CONFIG_COLLECTION_TIMEOUT_INVALID: %w", err)
+		}
+		if d < 100*time.Millisecond || d > 30*time.Second {
+			return nil, errors.New("CONFIG_COLLECTION_TIMEOUT_OUT_OF_BOUNDS: must be between 100ms and 30s")
+		}
+		c.CollectionTimeout = d
+	}
+
+	c.DeliveryTimeout = 10 * time.Second
+	if val := envMap["PLATFORM_AGENT_DELIVERY_TIMEOUT"]; val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return nil, fmt.Errorf("CONFIG_DELIVERY_TIMEOUT_INVALID: %w", err)
+		}
+		if d < time.Second || d > 60*time.Second {
+			return nil, errors.New("CONFIG_DELIVERY_TIMEOUT_OUT_OF_BOUNDS: must be between 1s and 60s")
+		}
+		c.DeliveryTimeout = d
+	}
+
+	c.RetryBase = time.Second
+	if val := envMap["PLATFORM_AGENT_RETRY_BASE"]; val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return nil, fmt.Errorf("CONFIG_RETRY_BASE_INVALID: %w", err)
+		}
+		if d < 100*time.Millisecond || d > 30*time.Second {
+			return nil, errors.New("CONFIG_RETRY_BASE_OUT_OF_BOUNDS: must be between 100ms and 30s")
+		}
+		c.RetryBase = d
+	}
+
+	c.RetryMax = 60 * time.Second
+	if val := envMap["PLATFORM_AGENT_RETRY_MAX"]; val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return nil, fmt.Errorf("CONFIG_RETRY_MAX_INVALID: %w", err)
+		}
+		if d < time.Second || d > 10*time.Minute {
+			return nil, errors.New("CONFIG_RETRY_MAX_OUT_OF_BOUNDS: must be between 1s and 10m")
+		}
+		c.RetryMax = d
+	}
+	if c.RetryMax < c.RetryBase {
+		return nil, errors.New("CONFIG_RETRY_BOUNDS_INVALID: RETRY_MAX cannot be less than RETRY_BASE")
+	}
+
+	// 6. Health address (loopback only)
+	c.HealthAddress = strings.TrimSpace(envMap["PLATFORM_AGENT_HEALTH_ADDRESS"])
+	if c.HealthAddress == "" {
+		c.HealthAddress = "127.0.0.1:8089"
+	}
+	host, _, err := net.SplitHostPort(c.HealthAddress)
+	if err != nil {
+		return nil, fmt.Errorf("CONFIG_HEALTH_ADDRESS_INVALID: %w", err)
+	}
+	if host != "127.0.0.1" && host != "::1" && host != "localhost" {
+		return nil, errors.New("CONFIG_HEALTH_ADDRESS_INSECURE: health endpoint must bind to loopback address only")
+	}
+
+	// 7. Numeric limits
+	c.MaxBufferRecords = 1000
+	if val := envMap["PLATFORM_AGENT_MAX_BUFFER_RECORDS"]; val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 10 || n > 100000 {
+			return nil, errors.New("CONFIG_MAX_BUFFER_RECORDS_OUT_OF_BOUNDS: must be between 10 and 100000")
+		}
+		c.MaxBufferRecords = n
+	}
+
+	c.MaxBufferBytes = 50 * 1024 * 1024 // 50MB
+	if val := envMap["PLATFORM_AGENT_MAX_BUFFER_BYTES"]; val != "" {
+		n, err := strconv.ParseInt(val, 10, 64)
+		if err != nil || n < 1024*1024 || n > 1024*1024*1024 {
+			return nil, errors.New("CONFIG_MAX_BUFFER_BYTES_OUT_OF_BOUNDS: must be between 1MB and 1GB")
+		}
+		c.MaxBufferBytes = n
+	}
+
+	c.MaxRecordBytes = 64 * 1024 // 64KB
+	if val := envMap["PLATFORM_AGENT_MAX_RECORD_BYTES"]; val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 1024 || n > 1024*1024 {
+			return nil, errors.New("CONFIG_MAX_RECORD_BYTES_OUT_OF_BOUNDS: must be between 1KB and 1MB")
+		}
+		c.MaxRecordBytes = n
+	}
+
+	c.MaxBatchRecords = 100
+	if val := envMap["PLATFORM_AGENT_MAX_BATCH_RECORDS"]; val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 1 || n > 1000 {
+			return nil, errors.New("CONFIG_MAX_BATCH_RECORDS_OUT_OF_BOUNDS: must be between 1 and 1000")
+		}
+		c.MaxBatchRecords = n
+	}
+
+	c.MaxBatchBytes = 1024 * 1024 // 1MB
+	if val := envMap["PLATFORM_AGENT_MAX_BATCH_BYTES"]; val != "" {
+		n, err := strconv.ParseInt(val, 10, 64)
+		if err != nil || n < 1024 || n > 10*1024*1024 {
+			return nil, errors.New("CONFIG_MAX_BATCH_BYTES_OUT_OF_BOUNDS: must be between 1KB and 10MB")
+		}
+		c.MaxBatchBytes = n
+	}
+
+	c.MaxFilesystems = 32
+	if val := envMap["PLATFORM_AGENT_MAX_FILESYSTEMS"]; val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 1 || n > 256 {
+			return nil, errors.New("CONFIG_MAX_FILESYSTEMS_OUT_OF_BOUNDS: must be between 1 and 256")
+		}
+		c.MaxFilesystems = n
+	}
+
+	// 8. Log level
+	c.LogLevel = "INFO"
+	if val := envMap["PLATFORM_LOG_LEVEL"]; val != "" {
+		val = strings.ToUpper(strings.TrimSpace(val))
+		switch val {
+		case "DEBUG", "INFO", "WARN", "ERROR":
+			c.LogLevel = val
+		default:
+			return nil, fmt.Errorf("CONFIG_LOG_LEVEL_INVALID: unsupported log level %q", val)
+		}
+	}
+
+	c.Environment = "development"
+	if val := envMap["PLATFORM_ENV"]; val != "" {
+		c.Environment = strings.TrimSpace(val)
+	}
+
+	return c, nil
 }
 
-func LoadConfig() *Config {
-	return &Config{
-		AgentID:       getEnv("AGENT_ID", ""),
-		CoreURL:       getEnv("CORE_URL", "http://core:8443"),
-		QueueDir:      getEnv("AGENT_QUEUE_DIR", "/var/lib/platform/agent/queue"),
-		PollInterval:  time.Duration(getEnvInt("AGENT_POLL_INTERVAL_SECONDS", 15)) * time.Second,
-		HealthPort:    getEnvInt("AGENT_HEALTH_PORT", 8089),
-		LogLevel:      getEnv("PLATFORM_LOG_LEVEL", "INFO"),
-		Environment:   getEnv("PLATFORM_ENV", "development"),
-		MaxQueueItems: getEnvInt("AGENT_MAX_QUEUE_ITEMS", 1000),
+func validateRegularFile(path string, checkKeyPerms bool) error {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return err
 	}
+	fi, err := os.Lstat(absPath)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return errors.New("symlinks are prohibited for TLS security material")
+	}
+	if !fi.Mode().IsRegular() {
+		return errors.New("file is not a regular file")
+	}
+
+	if checkKeyPerms {
+		// Verify no group or world read/write/exec permissions
+		if fi.Mode().Perm()&0077 != 0 {
+			return errors.New("private key permissions are insecure; must not be group- or world-accessible (mode 0600 expected)")
+		}
+	}
+	return nil
 }
