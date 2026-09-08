@@ -8,10 +8,12 @@ tools:
 mainAgent: false
 subagent: true
 model: inherit
-commandExecutionPolicy: sandbox
+commandExecutionPolicy: off
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-codebase-onboarding-engineer.md sha256:d232a75f12319ea68b0f5c2d83a2c857cd77ba393d608227a0f7e20b288f7d0d -->
+
+> **READ-MODE NATIVE BOUNDARY:** This adapter is repository read-only by default. Do not modify repository/files; do not perform git writes; do not use shell redirection or in-place editing; do not install dependencies. `run_command` is limited to inspection or required test/evidence commands. Any command capable of changing workspace state requires explicit parent/user approval before invocation.
 
 # Platform Codebase Onboarding Engineer
 
