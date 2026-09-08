@@ -12,7 +12,8 @@ import (
 	"platform/agent/common/identity"
 )
 
-// Platform Windows Agent entrypoint / service runner harness
+// Platform Windows Agent entrypoint / compile boundary harness.
+// Production Windows Service/SCM certification is explicitly executed on dedicated Windows runners.
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -21,14 +22,19 @@ func main() {
 	)
 	slog.SetDefault(logger)
 
-	cfg := config.LoadConfig()
-	ident, err := identity.GenerateOrLoadIdentity(cfg.AgentID)
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		logger.Error("Failed to load Windows agent configuration", "error", err)
+		os.Exit(1)
+	}
+
+	ident, err := identity.LoadOrGenerate(cfg.StateDir, cfg.AgentID, cfg.TenantID)
 	if err != nil {
 		logger.Error("Failed to initialize Windows agent identity", "error", err)
 		os.Exit(1)
 	}
 
-	logger.Info("Platform Windows Agent starting",
+	logger.Info("Platform Windows Agent compile-boundary harness starting",
 		"version", "0.1.0-dev",
 		"agent_id", ident.AgentID,
 		"core_url", cfg.CoreURL,
@@ -37,8 +43,16 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc := common.NewAgentService(cfg, ident, logger)
-	svc.Start(ctx)
+	svc, err := common.NewAgentService(cfg, ident, nil, logger)
+	if err != nil {
+		logger.Error("Failed to initialize Windows agent service", "error", err)
+		os.Exit(1)
+	}
+
+	if err := svc.Start(ctx); err != nil {
+		logger.Error("Failed to start Windows agent service", "error", err)
+		os.Exit(1)
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
@@ -46,6 +60,6 @@ func main() {
 	sig := <-sigCh
 	logger.Info("Platform Windows Agent stopping on signal", "signal", sig.String())
 	cancel()
-	svc.Stop()
+	_ = svc.Stop()
 	logger.Info("Platform Windows Agent exited cleanly")
 }
