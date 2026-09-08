@@ -1,6 +1,8 @@
 ---
 name: platform-codebase-archaeologist
 description: Read-only drift investigator for Platform. Use across parallel branches/PRs or mature subsystems to find duplicated responsibilities, contract drift, stale assumptions, partial migrations and doc-vs-code divergence.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-codebase-archaeologist.md sha256:50823f7dfbf0848744b60cfeba03b946eee287759b47dc5e278cfa8c27f1eee9 -->
