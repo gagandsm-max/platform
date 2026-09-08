@@ -3,7 +3,8 @@ import {
   AccessContext,
   WorkspaceDefinition,
   WorkspaceGroup,
-  visibleWorkspaces,
+  primaryNavigationWorkspaces,
+  searchableWorkspaces,
 } from '../platform/navigation';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -44,7 +45,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [query, setQuery] = useState('');
   const paletteDialogRef = useRef<HTMLElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
-  const workspaces = useMemo(() => visibleWorkspaces(access), [access]);
+  const workspaces = useMemo(() => primaryNavigationWorkspaces(access), [access]);
 
   const openPalette = useCallback(() => {
     restoreFocusRef.current = document.activeElement instanceof HTMLElement
@@ -83,8 +84,9 @@ export const AppShell: React.FC<AppShellProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [closePalette, openPalette, paletteOpen]);
 
-  const filteredWorkspaces = workspaces.filter((workspace) =>
-    workspace.label.toLowerCase().includes(query.trim().toLowerCase()),
+  const filteredWorkspaces = useMemo(
+    () => searchableWorkspaces(access, query),
+    [access, query],
   );
 
   const trapPaletteFocus = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -192,18 +194,21 @@ export const AppShell: React.FC<AppShellProps> = ({
                   {GROUP_LABELS[group]}
                 </h2>
                 <div className="nav-group__items">
-                  {groupWorkspaces.map((workspace) => (
-                    <button
-                      type="button"
-                      key={workspace.id}
-                      className={`nav-link ${workspace.id === activeWorkspace.id ? 'nav-link--active' : ''}`}
-                      aria-current={workspace.id === activeWorkspace.id ? 'page' : undefined}
-                      onClick={() => onNavigate(workspace)}
-                    >
-                      <span className="nav-link__icon" aria-hidden="true">{workspace.shortLabel}</span>
-                      <span>{workspace.label}</span>
-                    </button>
-                  ))}
+                  {groupWorkspaces.map((workspace) => {
+                    const isActive = workspace.domain === activeWorkspace.domain;
+                    return (
+                      <button
+                        type="button"
+                        key={workspace.id}
+                        className={`nav-link ${isActive ? 'nav-link--active' : ''}`}
+                        aria-current={isActive ? 'page' : undefined}
+                        onClick={() => onNavigate(workspace)}
+                      >
+                        <span className="nav-link__icon" aria-hidden="true">{workspace.shortLabel}</span>
+                        <span>{workspace.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
             );
@@ -215,6 +220,8 @@ export const AppShell: React.FC<AppShellProps> = ({
         <div className="page-toolbar">
           <nav className="breadcrumbs" aria-label="Breadcrumb">
             <span>Platform</span>
+            <span aria-hidden="true">/</span>
+            <span>{activeWorkspace.domain}</span>
             <span aria-hidden="true">/</span>
             <strong>{activeWorkspace.label}</strong>
           </nav>
@@ -286,7 +293,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                     <span className="nav-link__icon" aria-hidden="true">{workspace.shortLabel}</span>
                     <span>
                       <strong>{workspace.label}</strong>
-                      <small>{workspace.description}</small>
+                      <small>
+                        {workspace.uiCode} · {workspace.domain}
+                      </small>
                     </span>
                   </button>
                 ))

@@ -6,7 +6,6 @@ import { WorkspacePage } from './components/WorkspacePage';
 import {
   AccessContext,
   ALL_WORKSPACE_PERMISSIONS,
-  WORKSPACES,
   firstAccessibleWorkspace,
   resolveWorkspaceRoute,
 } from './platform/navigation';
@@ -69,7 +68,7 @@ export const App: React.FC = () => {
     [],
   );
   const shellWorkspace = routeResolution.kind === 'not-found'
-    ? (fallbackWorkspace ?? WORKSPACES[0])
+    ? fallbackWorkspace
     : routeResolution.workspace;
 
   useEffect(() => {
@@ -79,6 +78,16 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => applyTheme(theme), [theme]);
+
+  useEffect(() => {
+    if (routeResolution.kind === 'workspace') {
+      document.title = `${routeResolution.workspace.label} | Platform`;
+    } else if (routeResolution.kind === 'permission-restricted') {
+      document.title = `Permission restricted | Platform`;
+    } else {
+      document.title = `Workspace not found | Platform`;
+    }
+  }, [routeResolution]);
 
   const changeTheme = (nextTheme: ThemeMode) => {
     persistThemePreference(nextTheme);
@@ -96,6 +105,18 @@ export const App: React.FC = () => {
     ? () => navigateTo(fallbackWorkspace.path)
     : undefined;
 
+  if (!shellWorkspace) {
+    return (
+      <ErrorBoundary>
+        <PageState
+          kind="permission-restricted"
+          title="No accessible workspaces"
+          message="The current UI presentation context does not include any workspace permissions. This is presentation-only filtering; Core authorization remains authoritative."
+        />
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <AppShell
@@ -106,7 +127,11 @@ export const App: React.FC = () => {
         onThemeChange={changeTheme}
       >
         {routeResolution.kind === 'workspace' ? (
-          <WorkspacePage workspace={routeResolution.workspace} />
+          <WorkspacePage
+            workspace={routeResolution.workspace}
+            access={FOUNDATION_ACCESS}
+            onNavigate={(workspace) => navigateTo(workspace.path)}
+          />
         ) : routeResolution.kind === 'permission-restricted' ? (
           <PageState
             kind="permission-restricted"
@@ -119,7 +144,7 @@ export const App: React.FC = () => {
           <PageState
             kind="not-found"
             title="Workspace not found"
-            message="The requested Platform route is not registered in the current UI foundation."
+            message="The requested Platform route is not registered in the authoritative Platform_09 workspace registry."
             actionLabel={fallbackWorkspace ? `Go to ${fallbackWorkspace.label}` : undefined}
             onAction={fallbackAction}
           />
