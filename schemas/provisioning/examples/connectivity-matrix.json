@@ -1,0 +1,56 @@
+{
+  "documentType": "CONNECTIVITY_MATRIX",
+  "schemaVersion": "1.0.0",
+  "requestId": "req.example.001",
+  "correlationId": "corr.example.001",
+  "tenantId": "tenant.example",
+  "rows": [
+    {
+      "rowId": "matrix.example.icmp",
+      "source": {
+        "role": "SENSOR",
+        "identityRef": "sensor.example.01",
+        "siteId": "site.example",
+        "poolId": "pool.example"
+      },
+      "destination": {
+        "address": "192.0.2.10",
+        "scope": "Reserved TEST-NET target"
+      },
+      "protocol": "ICMP",
+      "transport": "IP",
+      "direction": "OUTBOUND",
+      "purpose": "Fictional configuration-derived readiness requirement.",
+      "tlsRequired": false,
+      "requirementSource": {
+        "type": "MONITORING_PROFILE",
+        "reference": "profile.example.readiness"
+      },
+      "validationStatus": "NOT_RUN",
+      "evidence": []
+    },
+    {
+      "rowId": "matrix.example.https",
+      "source": {
+        "role": "SENSOR",
+        "identityRef": "sensor.example.01"
+      },
+      "destination": {
+        "address": "service.example.test",
+        "scope": "Fictional service target"
+      },
+      "protocol": "HTTPS",
+      "transport": "HTTPS",
+      "direction": "OUTBOUND",
+      "purpose": "Fictional connector requirement; the effective runtime port is intentionally not invented in this fixture.",
+      "tlsRequired": true,
+      "securityMode": "TLS",
+      "requirementSource": {
+        "type": "CONNECTOR",
+        "reference": "connector.example"
+      },
+      "validationStatus": "NOT_RUN",
+      "evidence": []
+    }
+  ]
+}

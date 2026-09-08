@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:platform:schemas:provisioning:connectivity-matrix:1.0.0",
+  "title": "Platform Provisioning Connectivity Matrix Contract 1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["documentType", "schemaVersion", "requestId", "correlationId", "tenantId", "rows"],
+  "properties": {
+    "documentType": {"const": "CONNECTIVITY_MATRIX"},
+    "schemaVersion": {"const": "1.0.0"},
+    "requestId": {"$ref": "#/$defs/ref128"},
+    "correlationId": {"$ref": "#/$defs/ref128"},
+    "tenantId": {"$ref": "#/$defs/ref128"},
+    "rows": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {"$ref": "#/$defs/row"}
+    }
+  },
+  "$defs": {
+    "ref128": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "protocol": {
+      "enum": ["ICMP", "TRACEROUTE", "TCP", "SNMP", "SNMP_TRAP", "SYSLOG", "SSH_CLI", "TELNET", "NETCONF", "REST", "RESTCONF", "GNMI", "GRPC", "FLOW", "DNS", "HTTP", "HTTPS", "TLS", "SCP", "SFTP", "TFTP", "FTP", "WINRM", "REDFISH", "CLOUD_API", "OTLP"]
+    },
+    "transport": {
+      "enum": ["IP", "TCP", "UDP", "TLS", "HTTPS", "SSH", "GRPC", "MTLS"]
+    },
+    "status": {
+      "enum": ["NOT_RUN", "RUNNING", "PASS", "FAIL", "INCONCLUSIVE", "UNKNOWN", "SKIPPED_NOT_APPLICABLE"]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidenceId", "kind", "source", "summary"],
+      "properties": {
+        "evidenceId": {"$ref": "#/$defs/ref128"},
+        "kind": {"enum": ["OBSERVED", "DERIVED", "SUSPECTED", "UNKNOWN"]},
+        "source": {"enum": ["REQUEST", "CORE", "SENSOR", "PLATFORM_POLICY", "MONITORING_PROFILE", "DEVICE_PACK", "CONNECTOR", "OTHER_GOVERNED_SOURCE"]},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 512},
+        "sourceRef": {"type": "string", "minLength": 1, "maxLength": 512},
+        "endpointRef": {"type": "string", "minLength": 1, "maxLength": 512},
+        "technicalCode": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+        "protocol": {"$ref": "#/$defs/protocol"},
+        "transport": {"$ref": "#/$defs/transport"},
+        "observedAt": {"type": "string", "format": "date-time", "maxLength": 64}
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rowId", "source", "destination", "protocol", "direction", "purpose", "tlsRequired", "requirementSource", "validationStatus", "evidence"],
+      "properties": {
+        "rowId": {"$ref": "#/$defs/ref128"},
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role"],
+          "properties": {
+            "role": {"enum": ["SENSOR", "CORE", "AGENT"]},
+            "identityRef": {"$ref": "#/$defs/ref128"},
+            "siteId": {"$ref": "#/$defs/ref128"},
+            "poolId": {"$ref": "#/$defs/ref128"},
+            "scope": {"type": "string", "minLength": 1, "maxLength": 512}
+          }
+        },
+        "destination": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["address"],
+          "properties": {
+            "address": {"type": "string", "minLength": 1, "maxLength": 512},
+            "scope": {"type": "string", "minLength": 1, "maxLength": 512}
+          }
+        },
+        "protocol": {"$ref": "#/$defs/protocol"},
+        "transport": {"$ref": "#/$defs/transport"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "direction": {"enum": ["OUTBOUND", "INBOUND", "BIDIRECTIONAL"]},
+        "purpose": {"type": "string", "minLength": 1, "maxLength": 512},
+        "tlsRequired": {"type": "boolean"},
+        "securityMode": {"type": "string", "minLength": 1, "maxLength": 64},
+        "requirementSource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "reference"],
+          "properties": {
+            "type": {"enum": ["MONITORING_PROFILE", "DEVICE_PACK", "PLATFORM_SERVICE", "CONNECTOR", "OTHER_GOVERNED_SOURCE"]},
+            "reference": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"}
+          }
+        },
+        "validationStatus": {"$ref": "#/$defs/status"},
+        "evidence": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/evidence"}},
+        "observedAt": {"type": "string", "format": "date-time", "maxLength": 64}
+      }
+    }
+  }
+}

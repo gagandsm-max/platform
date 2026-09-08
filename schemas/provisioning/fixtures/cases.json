@@ -1,0 +1,73 @@
+{
+  "examples": {
+    "request": "examples/provisioning-request.json",
+    "readiness": "examples/readiness-success.json",
+    "matrix": "examples/connectivity-matrix.json"
+  },
+  "cases": [
+    {"name": "valid-complete-successful-readiness-chain", "base": "readiness", "valid": true},
+    {"name": "valid-dns-failure", "base": "readiness", "mode": "failure", "stageId": "DNS_ADDRESS_VALIDATION", "failureCode": "DNS_FAILURE", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-route-failure", "base": "readiness", "mode": "failure", "stageId": "ROUTE_REACHABILITY", "failureCode": "ROUTE_UNAVAILABLE", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-port-unreachable", "base": "readiness", "mode": "failure", "stageId": "TRANSPORT_PROTOCOL_RESPONSE", "failureCode": "PORT_UNREACHABLE", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-protocol-timeout", "base": "readiness", "mode": "failure", "stageId": "TRANSPORT_PROTOCOL_RESPONSE", "failureCode": "PROTOCOL_TIMEOUT", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-authentication-failure", "base": "readiness", "mode": "failure", "stageId": "AUTHENTICATION", "failureCode": "AUTHENTICATION_FAILED", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-authorization-failure", "base": "readiness", "mode": "failure", "stageId": "AUTHORIZATION_CAPABILITY", "failureCode": "AUTHORIZATION_FAILED", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-tls-certificate-failure", "base": "readiness", "mode": "failure", "stageId": "TLS_HOST_KEY_VERIFICATION", "failureCode": "TLS_CERTIFICATE_FAILURE", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-no-eligible-sensor", "base": "readiness", "mode": "failure", "stageId": "SENSOR_ELIGIBILITY_CAPACITY", "failureCode": "NO_ELIGIBLE_SENSOR", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-sensor-capacity-rejection", "base": "readiness", "mode": "failure", "stageId": "SENSOR_ELIGIBILITY_CAPACITY", "failureCode": "SENSOR_CAPACITY_EXCEEDED", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-device-pack-identity-mismatch", "base": "readiness", "mode": "failure", "stageId": "IDENTITY_DEVICE_PACK_MATCH", "failureCode": "DEVICE_IDENTITY_CONFLICT", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-monitoring-profile-incompatibility", "base": "readiness", "mode": "failure", "stageId": "MONITORING_PROFILE_DRY_RUN", "failureCode": "MONITORING_PROFILE_INCOMPATIBLE", "failureAssessment": "OBSERVED", "valid": true},
+    {"name": "valid-acl-firewall-suspected", "base": "readiness", "mode": "failure", "stageId": "TRANSPORT_PROTOCOL_RESPONSE", "failureCode": "ACL_FIREWALL_SUSPECTED", "failureAssessment": "SUSPECTED", "valid": true},
+    {"name": "valid-connectivity-matrix", "base": "matrix", "valid": true},
+    {
+      "name": "valid-skipped-non-applicable-tls",
+      "base": "readiness",
+      "valid": true,
+      "mutations": [
+        {"op": "set", "path": ["stages", 4, "protocol"], "value": "SNMP"},
+        {"op": "set", "path": ["stages", 4, "transport"], "value": "UDP"},
+        {"op": "set", "path": ["stages", 5, "status"], "value": "SKIPPED_NOT_APPLICABLE"},
+        {"op": "set", "path": ["stages", 5, "evidence"], "value": []},
+        {"op": "delete", "path": ["stages", 5, "sensorId"]},
+        {"op": "delete", "path": ["stages", 5, "protocol"]},
+        {"op": "delete", "path": ["stages", 5, "transport"]}
+      ]
+    },
+
+    {"name": "invalid-embedded-password", "base": "request", "valid": false, "expectedCodes": ["FORBIDDEN_SECRET_FIELD"], "mutations": [{"op": "set", "path": ["target", "password"], "value": "fictional-secret"}]},
+    {"name": "invalid-snmp-community", "base": "request", "valid": false, "expectedCodes": ["FORBIDDEN_SECRET_FIELD"], "mutations": [{"op": "set", "path": ["requestedProtocols", 0, "family"], "value": "SNMP"}, {"op": "set", "path": ["requestedProtocols", 0, "transport"], "value": "UDP"}, {"op": "delete", "path": ["requestedProtocols", 0, "tlsRequired"]}, {"op": "set", "path": ["requestedProtocols", 0, "community"], "value": "fictional-community"}]},
+    {"name": "invalid-bearer-token", "base": "request", "valid": false, "expectedCodes": ["FORBIDDEN_SECRET_FIELD"], "mutations": [{"op": "set", "path": ["requestedProtocols", 0, "bearer"], "value": "Bearer fictional-token"}]},
+    {"name": "invalid-credential-in-url", "base": "request", "valid": false, "expectedCodes": ["EMBEDDED_URL_CREDENTIAL"], "mutations": [{"op": "set", "path": ["target", "address"], "value": "https://fixture-user:fixture-pass@service.example.test"}]},
+    {"name": "invalid-unknown-stage", "base": "readiness", "valid": false, "expectedCodes": ["UNKNOWN_STAGE"], "mutations": [{"op": "set", "path": ["stages", 3, "stageId"], "value": "UNDEFINED_STAGE"}]},
+    {"name": "invalid-stage-order", "base": "readiness", "valid": false, "expectedCodes": ["STAGE_ORDER_VIOLATION"], "mutations": [{"op": "swap", "path": ["stages", 1], "otherPath": ["stages", 2]}]},
+    {"name": "invalid-pass-with-failure-code", "base": "readiness", "valid": false, "expectedCodes": ["PASS_WITH_FAILURE"], "mutations": [{"op": "set", "path": ["stages", 0, "failureCode"], "value": "INPUT_INVALID"}]},
+    {
+      "name": "invalid-fail-without-evidence-or-reason",
+      "base": "readiness",
+      "mode": "failure",
+      "stageId": "DNS_ADDRESS_VALIDATION",
+      "failureCode": "DNS_FAILURE",
+      "failureAssessment": "OBSERVED",
+      "valid": false,
+      "expectedCodes": ["FAIL_EVIDENCE_REQUIRED", "FAIL_EXPLANATION_REQUIRED"],
+      "mutations": [
+        {"op": "set", "path": ["stages", 1, "evidence"], "value": []},
+        {"op": "delete", "path": ["stages", 1, "customerExplanation"]}
+      ]
+    },
+    {"name": "invalid-firewall-blocked-certainty", "base": "readiness", "mode": "failure", "stageId": "TRANSPORT_PROTOCOL_RESPONSE", "failureCode": "FIREWALL_BLOCKED", "failureAssessment": "OBSERVED", "valid": false, "expectedCodes": ["UNKNOWN_FAILURE_CODE"]},
+    {"name": "invalid-no-response-as-device-unreachable", "base": "readiness", "mode": "failure", "stageId": "TRANSPORT_PROTOCOL_RESPONSE", "failureCode": "DEVICE_UNREACHABLE", "failureAssessment": "OBSERVED", "valid": false, "expectedCodes": ["FAILURE_CODE_STAGE_MISMATCH"]},
+    {"name": "invalid-acl-suspected-as-observed", "base": "readiness", "mode": "failure", "stageId": "TRANSPORT_PROTOCOL_RESPONSE", "failureCode": "ACL_FIREWALL_SUSPECTED", "failureAssessment": "OBSERVED", "valid": false, "expectedCodes": ["SUSPECTED_CODE_REQUIRES_SUSPECTED_ASSESSMENT"]},
+    {"name": "invalid-oversized-evidence", "base": "readiness", "valid": false, "expectedCodes": ["STRING_BOUNDS"], "mutations": [{"op": "repeat", "path": ["stages", 0, "evidence", 0, "summary"], "value": "x", "count": 513}]},
+    {"name": "invalid-duplicate-stage", "base": "readiness", "valid": false, "expectedCodes": ["DUPLICATE_STAGE"], "mutations": [{"op": "set", "path": ["stages", 1, "stageId"], "value": "INPUT_NORMALIZATION"}]},
+    {"name": "invalid-duplicate-connectivity-row-id", "base": "matrix", "valid": false, "expectedCodes": ["DUPLICATE_MATRIX_ROW_ID"], "mutations": [{"op": "set", "path": ["rows", 1, "rowId"], "value": "matrix.example.icmp"}]},
+    {"name": "invalid-port", "base": "matrix", "valid": false, "expectedCodes": ["INVALID_PORT"], "mutations": [{"op": "set", "path": ["rows", 1, "port"], "value": 70000}]},
+    {"name": "invalid-protocol", "base": "request", "valid": false, "expectedCodes": ["UNKNOWN_PROTOCOL"], "mutations": [{"op": "set", "path": ["requestedProtocols", 0, "family"], "value": "FICTIONAL_PROTOCOL"}]},
+    {"name": "invalid-path-traversal", "base": "request", "valid": false, "expectedCodes": ["PATH_TRAVERSAL"], "mutations": [{"op": "set", "path": ["target", "address"], "value": "../fictional/path"}]},
+    {"name": "invalid-executable-field", "base": "request", "valid": false, "expectedCodes": ["FORBIDDEN_EXECUTABLE_FIELD"], "mutations": [{"op": "set", "path": ["target", "script"], "value": "fictional-script-content"}]},
+    {"name": "invalid-unknown-schema-field", "base": "request", "valid": false, "expectedCodes": ["UNKNOWN_FIELD"], "mutations": [{"op": "set", "path": ["unexpectedField"], "value": "fictional"}]},
+    {"name": "invalid-nested-secret-metadata", "base": "request", "valid": false, "expectedCodes": ["FORBIDDEN_SECRET_FIELD"], "mutations": [{"op": "set", "path": ["tags", 0, "clientSecret"], "value": "fictional-secret"}]},
+    {"name": "invalid-unknown-status-with-failure-code", "base": "readiness", "valid": false, "expectedCodes": ["STATUS_FAILURE_CONFLICT"], "mutations": [{"op": "set", "path": ["stages", 3, "status"], "value": "UNKNOWN"}, {"op": "set", "path": ["stages", 3, "failureCode"], "value": "DEVICE_UNREACHABLE"}, {"op": "set", "path": ["stages", 3, "uncertainty"], "value": "Fictional evidence is unavailable."}, {"op": "set", "path": ["stages", 4, "status"], "value": "NOT_RUN"}, {"op": "set", "path": ["stages", 4, "evidence"], "value": []}, {"op": "delete", "path": ["stages", 4, "sensorId"]}, {"op": "set", "path": ["stages", 5, "status"], "value": "NOT_RUN"}, {"op": "set", "path": ["stages", 5, "evidence"], "value": []}, {"op": "delete", "path": ["stages", 5, "sensorId"]}, {"op": "set", "path": ["stages", 6, "status"], "value": "NOT_RUN"}, {"op": "set", "path": ["stages", 6, "evidence"], "value": []}, {"op": "delete", "path": ["stages", 6, "sensorId"]}, {"op": "set", "path": ["stages", 7, "status"], "value": "NOT_RUN"}, {"op": "set", "path": ["stages", 7, "evidence"], "value": []}, {"op": "delete", "path": ["stages", 7, "sensorId"]}, {"op": "set", "path": ["stages", 8, "status"], "value": "NOT_RUN"}, {"op": "set", "path": ["stages", 8, "evidence"], "value": []}, {"op": "set", "path": ["stages", 9, "status"], "value": "NOT_RUN"}, {"op": "set", "path": ["stages", 9, "evidence"], "value": []}, {"op": "set", "path": ["stages", 10, "status"], "value": "NOT_RUN"}, {"op": "set", "path": ["stages", 10, "evidence"], "value": []}, {"op": "set", "path": ["stages", 11, "status"], "value": "NOT_RUN"}, {"op": "set", "path": ["stages", 11, "evidence"], "value": []}]},
+    {"name": "invalid-unsafe-html-evidence", "base": "readiness", "valid": false, "expectedCodes": ["UNSAFE_HTML"], "mutations": [{"op": "set", "path": ["stages", 0, "evidence", 0, "summary"], "value": "<script>fictional</script>"}]}
+  ]
+}

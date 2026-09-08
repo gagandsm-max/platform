@@ -1,0 +1,46 @@
+{
+  "documentType": "READINESS_RESULT",
+  "schemaVersion": "1.0.0",
+  "requestId": "req.example.001",
+  "correlationId": "corr.example.001",
+  "tenantId": "tenant.example",
+  "target": {
+    "targetType": "NETWORK_DEVICE",
+    "address": "192.0.2.10"
+  },
+  "sensorEligibility": {
+    "candidates": [
+      {
+        "sensorId": "sensor.example.01",
+        "siteId": "site.example",
+        "poolId": "pool.example",
+        "selected": true,
+        "reason": "Fictional fixture records this candidate as selected; no placement algorithm is implemented.",
+        "checks": [
+          {"category": "SITE_POOL_COMPATIBILITY", "status": "PASS", "evidence": [{"evidenceId": "ev.sensor.site", "kind": "OBSERVED", "source": "CORE", "summary": "Fictional site and pool compatibility evidence."}]},
+          {"category": "CAPABILITY_PROTOCOL_SUPPORT", "status": "PASS", "evidence": [{"evidenceId": "ev.sensor.protocol", "kind": "OBSERVED", "source": "CORE", "summary": "Fictional protocol-capability evidence."}]},
+          {"category": "REACHABILITY", "status": "PASS", "evidence": [{"evidenceId": "ev.sensor.reachability", "kind": "OBSERVED", "source": "SENSOR", "summary": "Fictional reachability evidence for contract testing."}]},
+          {"category": "LATENCY_LOSS", "status": "PASS", "evidence": [{"evidenceId": "ev.sensor.latency", "kind": "OBSERVED", "source": "SENSOR", "summary": "Fictional latency/loss evidence without thresholds."}]},
+          {"category": "CAPACITY", "status": "PASS", "evidence": [{"evidenceId": "ev.sensor.capacity", "kind": "OBSERVED", "source": "CORE", "summary": "Fictional capacity-eligibility evidence without scores or percentages."}]},
+          {"category": "SECURITY_POLICY", "status": "PASS", "evidence": [{"evidenceId": "ev.sensor.security", "kind": "OBSERVED", "source": "PLATFORM_POLICY", "summary": "Fictional policy-eligibility evidence; this is not an authorization grant."}]},
+          {"category": "MAINTENANCE_DRAIN", "status": "PASS", "evidence": [{"evidenceId": "ev.sensor.maintenance", "kind": "OBSERVED", "source": "CORE", "summary": "Fictional maintenance-state evidence."}]},
+          {"category": "HEALTH_READINESS", "status": "PASS", "evidence": [{"evidenceId": "ev.sensor.health", "kind": "OBSERVED", "source": "CORE", "summary": "Fictional Sensor readiness evidence."}]}
+        ]
+      }
+    ]
+  },
+  "stages": [
+    {"stageId": "INPUT_NORMALIZATION", "status": "PASS", "evidence": [{"evidenceId": "ev.stage.01", "kind": "OBSERVED", "source": "CORE", "summary": "Fictional input-normalization evidence."}]},
+    {"stageId": "DNS_ADDRESS_VALIDATION", "status": "PASS", "evidence": [{"evidenceId": "ev.stage.02", "kind": "OBSERVED", "source": "SENSOR", "summary": "Fictional address-validation evidence."}]},
+    {"stageId": "SENSOR_ELIGIBILITY_CAPACITY", "status": "PASS", "sensorId": "sensor.example.01", "evidence": [{"evidenceId": "ev.stage.03", "kind": "DERIVED", "source": "CORE", "summary": "Fictional candidate-Sensor eligibility result."}]},
+    {"stageId": "ROUTE_REACHABILITY", "status": "PASS", "sensorId": "sensor.example.01", "evidence": [{"evidenceId": "ev.stage.04", "kind": "OBSERVED", "source": "SENSOR", "summary": "Fictional route/reachability evidence."}]},
+    {"stageId": "TRANSPORT_PROTOCOL_RESPONSE", "status": "PASS", "sensorId": "sensor.example.01", "protocol": "HTTPS", "transport": "HTTPS", "evidence": [{"evidenceId": "ev.stage.05", "kind": "OBSERVED", "source": "SENSOR", "summary": "Fictional HTTPS response evidence."}]},
+    {"stageId": "TLS_HOST_KEY_VERIFICATION", "status": "PASS", "sensorId": "sensor.example.01", "protocol": "TLS", "transport": "TLS", "evidence": [{"evidenceId": "ev.stage.06", "kind": "OBSERVED", "source": "SENSOR", "summary": "Fictional TLS-verification evidence for contract testing."}]},
+    {"stageId": "AUTHENTICATION", "status": "PASS", "sensorId": "sensor.example.01", "evidence": [{"evidenceId": "ev.stage.07", "kind": "OBSERVED", "source": "SENSOR", "summary": "Fictional authentication outcome without credential material."}]},
+    {"stageId": "AUTHORIZATION_CAPABILITY", "status": "PASS", "sensorId": "sensor.example.01", "evidence": [{"evidenceId": "ev.stage.08", "kind": "OBSERVED", "source": "SENSOR", "summary": "Fictional target-side authorization/capability evidence; no Platform authorization is granted here."}]},
+    {"stageId": "IDENTITY_DEVICE_PACK_MATCH", "status": "PASS", "evidence": [{"evidenceId": "ev.stage.09", "kind": "DERIVED", "source": "CORE", "summary": "Fictional identity/match evidence using opaque governed references."}]},
+    {"stageId": "MONITORING_PROFILE_DRY_RUN", "status": "PASS", "evidence": [{"evidenceId": "ev.stage.10", "kind": "DERIVED", "source": "MONITORING_PROFILE", "summary": "Fictional Monitoring Profile dry-run evidence without polling or threshold values."}]},
+    {"stageId": "CAPACITY_IMPACT", "status": "PASS", "evidence": [{"evidenceId": "ev.stage.11", "kind": "DERIVED", "source": "CORE", "summary": "Fictional capacity-impact eligibility evidence without operational percentages."}]},
+    {"stageId": "PROVISION", "status": "PASS", "evidence": [{"evidenceId": "ev.stage.12", "kind": "OBSERVED", "source": "CORE", "summary": "Fictional terminal-stage contract evidence; no live provisioning was executed by this repository fixture."}]}
+  ]
+}
