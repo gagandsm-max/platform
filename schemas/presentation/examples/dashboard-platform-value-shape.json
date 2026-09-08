@@ -30,7 +30,10 @@
       "queryId": "query.value-methodology",
       "queryRef": "governed-query.example.value-methodology",
       "dataSourceClassRef": "data-class.example.value-analysis",
-      "parameterRefs": ["parameter.time-range", "parameter.business-service"]
+      "parameterRefs": ["parameter.time-range", "parameter.business-service"],
+      "groupingRef": "grouping.example.business-service",
+      "aggregationRef": "aggregation.example.value-disclosure",
+      "timeContextBindingRef": "time-binding.example.dashboard"
     }
   ],
   "variables": [
@@ -85,7 +88,8 @@
       "description": "Presentation placeholder for methodology, sample size, assumptions and limitations supplied by future governed value analytics.",
       "type": "TEXT",
       "layout": {"x": 8, "y": 0, "width": 4, "height": 4},
-      "queryUses": []
+      "queryUses": [],
+      "text": "Future governed value analytics must disclose methodology, sample size, assumptions, limitations and data gaps. This fictional definition contains no customer benefit claim."
     }
   ],
   "stateHandling": {
@@ -105,6 +109,8 @@
     "showProvenanceWhenSupplied": true,
     "showAffectedSourceWhenSupplied": true,
     "showCorrelationIdWhenSupplied": true,
+    "maintenancePresentationRef": "state.example.maintenance-context",
+    "suppressionPresentationRef": "state.example.suppression-context",
     "causalInferenceFromMissingData": "PROHIBITED"
   },
   "performance": {

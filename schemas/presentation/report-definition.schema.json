@@ -16,18 +16,14 @@
     "scope": {"enum": ["MY", "TEAM", "SHARED", "TENANT_CUSTOMER", "SYSTEM"]},
     "systemDefinition": {"type": "boolean"},
     "recoverableSystemDefinition": {"type": "boolean"},
-    "derivedFrom": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["definitionId", "definitionVersion"],
-      "properties": {
-        "definitionId": {"$ref": "#/$defs/ref128"},
-        "definitionVersion": {"$ref": "#/$defs/version64"}
-      }
-    },
+    "derivedFrom": {"$ref": "#/$defs/derivedFrom"},
     "category": {"$ref": "#/$defs/name128"},
     "folderRef": {"$ref": "#/$defs/ref128"},
     "tags": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/name128"}},
+    "brandingRef": {"$ref": "#/$defs/ref128"},
+    "layoutRef": {"$ref": "#/$defs/ref128"},
+    "queryPolicyRef": {"$ref": "#/$defs/ref128"},
+    "calculationRefs": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
     "visibility": {"$ref": "#/$defs/visibility"},
     "contextPolicy": {"$ref": "#/$defs/contextPolicy"},
     "queryBindings": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/queryBinding"}},
@@ -49,6 +45,13 @@
     "name255": {"type": "string", "minLength": 1, "maxLength": 255},
     "text512": {"type": "string", "minLength": 1, "maxLength": 512},
     "text2000": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "text4000": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "derivedFrom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["definitionId", "definitionVersion"],
+      "properties": {"definitionId": {"$ref": "#/$defs/ref128"}, "definitionVersion": {"$ref": "#/$defs/version64"}}
+    },
     "visibility": {
       "type": "object",
       "additionalProperties": false,
@@ -66,10 +69,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["runtimeContextKeys"],
-      "properties": {
-        "runtimeContextKeys": {"type": "array", "maxItems": 14, "uniqueItems": true, "items": {"$ref": "#/$defs/contextKey"}},
-        "timePolicyRef": {"$ref": "#/$defs/ref128"}
-      }
+      "properties": {"runtimeContextKeys": {"type": "array", "maxItems": 14, "uniqueItems": true, "items": {"$ref": "#/$defs/contextKey"}}, "timePolicyRef": {"$ref": "#/$defs/ref128"}}
     },
     "queryBinding": {
       "type": "object",
@@ -79,7 +79,10 @@
         "queryId": {"$ref": "#/$defs/ref128"},
         "queryRef": {"$ref": "#/$defs/ref128"},
         "dataSourceClassRef": {"$ref": "#/$defs/ref128"},
-        "parameterRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}}
+        "parameterRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "groupingRef": {"$ref": "#/$defs/ref128"},
+        "aggregationRef": {"$ref": "#/$defs/ref128"},
+        "timeContextBindingRef": {"$ref": "#/$defs/ref128"}
       }
     },
     "variable": {
@@ -116,20 +119,13 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["parameterRef", "sourceKind", "sourceRef"],
-      "properties": {
-        "parameterRef": {"$ref": "#/$defs/ref128"},
-        "sourceKind": {"enum": ["VARIABLE", "FILTER", "CONTEXT"]},
-        "sourceRef": {"$ref": "#/$defs/ref128"}
-      }
+      "properties": {"parameterRef": {"$ref": "#/$defs/ref128"}, "sourceKind": {"enum": ["VARIABLE", "FILTER", "CONTEXT"]}, "sourceRef": {"$ref": "#/$defs/ref128"}}
     },
     "queryUse": {
       "type": "object",
       "additionalProperties": false,
       "required": ["queryId", "bindings"],
-      "properties": {
-        "queryId": {"$ref": "#/$defs/ref128"},
-        "bindings": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/parameterBinding"}}
-      }
+      "properties": {"queryId": {"$ref": "#/$defs/ref128"}, "bindings": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/parameterBinding"}}}
     },
     "section": {
       "type": "object",
@@ -141,10 +137,12 @@
         "description": {"$ref": "#/$defs/text2000"},
         "type": {"enum": ["TEXT", "TABLE", "VISUALIZATION", "IMAGE_REFERENCE"]},
         "queryUses": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/queryUse"}},
-        "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "text": {"$ref": "#/$defs/text4000"},
         "tableDefinitionRef": {"$ref": "#/$defs/ref128"},
         "visualizationDefinitionRef": {"$ref": "#/$defs/ref128"},
         "imageRef": {"$ref": "#/$defs/ref128"},
+        "columnRefs": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "calculationRefs": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
         "statePolicyRef": {"$ref": "#/$defs/ref128"}
       }
     },
@@ -162,10 +160,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["deliveryClass"],
-      "properties": {
-        "deliveryClass": {"enum": ["DOWNLOAD", "EMAIL", "INTEGRATION"]},
-        "targetRef": {"$ref": "#/$defs/ref128"}
-      }
+      "properties": {"deliveryClass": {"enum": ["DOWNLOAD", "EMAIL", "INTEGRATION"]}, "targetRef": {"$ref": "#/$defs/ref128"}}
     },
     "stateName": {"enum": ["LOADING", "EMPTY", "PARTIAL_DATA", "STALE_DATA", "PERMISSION_RESTRICTED", "NOT_LICENSED", "QUERY_LIMITED", "ERROR", "MONITORING_DEGRADED", "NORMAL"]},
     "stateEntry": {
@@ -180,17 +175,15 @@
       "required": ["states", "causalInferenceFromMissingData"],
       "properties": {
         "states": {"type": "array", "minItems": 10, "maxItems": 10, "items": {"$ref": "#/$defs/stateEntry"}},
+        "maintenancePresentationRef": {"$ref": "#/$defs/ref128"},
+        "suppressionPresentationRef": {"$ref": "#/$defs/ref128"},
         "causalInferenceFromMissingData": {"const": "PROHIBITED"}
       }
     },
     "provenance": {
       "type": "object",
       "additionalProperties": false,
-      "properties": {
-        "sourceRef": {"$ref": "#/$defs/ref128"},
-        "sourceVersion": {"$ref": "#/$defs/version64"},
-        "notes": {"$ref": "#/$defs/text512"}
-      }
+      "properties": {"sourceRef": {"$ref": "#/$defs/ref128"}, "sourceVersion": {"$ref": "#/$defs/version64"}, "notes": {"$ref": "#/$defs/text512"}}
     },
     "valuePresentationPolicy": {
       "type": "object",

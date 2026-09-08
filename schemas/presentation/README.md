@@ -7,82 +7,97 @@
 
 ## Purpose
 
-This directory defines the Platform-owned static contract foundation for future dashboard, panel, variable/filter, saved-view and report definitions. It is intentionally execution-neutral: it describes what a presentation definition references and how it preserves context; it does not execute queries, render React, calculate SLA, schedule jobs, persist state, send email or generate PDF/CSV/XLSX/JSON output.
+This directory defines the Platform-owned static contract foundation for future dashboard, panel, variable/filter, saved-view and report definitions. It is execution-neutral: definitions describe presentation intent and governed references; they do not execute queries, render React, calculate SLA, schedule jobs, persist state, send email or generate report files.
 
-The authoritative product requirements remain the Mother Reference. These files are an implementation contract derived from those requirements, not a replacement for them.
+The Mother Reference remains authoritative. These schemas are an implementation contract derived from it, not a substitute for it.
 
 ## Files
 
 - `dashboard-definition.schema.json` — versioned dashboard definition envelope.
 - `report-definition.schema.json` — versioned report definition envelope.
-- `saved-view.schema.json` — saved view/filter-state metadata.
+- `saved-view.schema.json` — saved-view/filter-state metadata.
 - `tools/validate.mjs` — dependency-free semantic validator; zero network calls.
-- `examples/` — small fictional definitions only; these are not the mandatory 98 screens.
-- `fixtures/cases.json` — deterministic valid/invalid cases consumed by the validator.
+- `examples/` — fictional examples only; none is a mandatory shipped screen.
+- `fixtures/cases.json` — deterministic valid/invalid cases.
 
-## Dashboard definition boundary
+## Dashboard definition
 
-A dashboard definition can describe:
+A dashboard definition can represent:
 
-- stable definition identity and version;
-- display metadata, folder/category/tags;
-- `SYSTEM`, `CUSTOMER_CREATED` or `CLONE` origin;
-- Dashboard Studio scope (`MY`, `TEAM`, `SHARED`, `TENANT_CUSTOMER`, `SYSTEM`);
-- recoverable System-definition semantics and clone provenance;
+- stable definition identity/version, name and description;
+- Dashboard Studio origin/scope and recoverable System identity;
+- clone/derivation provenance;
+- folder/category/tags;
 - presentation-only role/resource/permission/entitlement references;
-- runtime context capabilities for time, timezone, comparison, auto-refresh and scope dimensions;
-- local governed-query bindings through opaque `queryRef` identifiers;
-- variables and dashboard filters without executable query text;
-- tabs/views, grid layout and panels;
-- contextual action references and drill-down metadata;
-- the ten Mother-Reference UI/data states;
-- server-side pagination/filter/sort and virtualization intent;
-- optional Platform Value presentation safeguards.
+- time/timezone/comparison/auto-refresh and operational scope context capabilities;
+- governed query references with opaque parameter/grouping/aggregation/time-binding references;
+- variables, reusable-filter references and dashboard filters;
+- tabs/views and resizable grid layout;
+- panels, table/list column references, actions and drill-downs;
+- required UI/data states plus freshness/provenance/affected-source/correlation-ID presentation intent;
+- maintenance/suppression presentation references where runtime supplies those contexts;
+- server-side pagination/filter/sort, virtualization and bounded query-policy references;
+- optional Platform Value disclosure guardrails.
 
-A definition **does not grant access**. Server-side tenant/resource authorization remains authoritative. Entitlement is separate from authorization. `permissionRefs`, `roleRefs`, `resourceScopeRef` and `entitlementRefs` are presentation references only and may never be interpreted as proof that a request is authorized.
+It does not implement Dashboard Studio or any of the 98 mandatory out-of-box screens.
 
-## System / clone semantics
+## Origin and mutability
 
-System definitions are stable and recoverable product defaults. The validator enforces:
+Origins are deliberately small:
 
-- `origin = SYSTEM` requires `scope = SYSTEM`, `systemDefinition = true`, `recoverableSystemDefinition = true`, and no derivation source;
-- customer-created definitions cannot mark themselves as System or recoverable System definitions;
-- `origin = CLONE` requires explicit `derivedFrom` identity/version and a different definition ID;
-- clones cannot overwrite or masquerade as the authoritative source definition.
+- `SYSTEM` — stable, authoritative and recoverable product default;
+- `CUSTOMER_CREATED` — customer-owned definition that cannot masquerade as System;
+- `CLONE` — derived definition requiring explicit source definition ID/version.
 
-No publishing/approval lifecycle is introduced here because the Mother Reference does not freeze one.
+`SYSTEM` requires `scope=SYSTEM`, `systemDefinition=true` and `recoverableSystemDefinition=true`. Customer-created/clone definitions cannot set those authoritative markers or overwrite source identity. No publishing/approval lifecycle is invented because the Mother Reference does not freeze one.
 
-## Panel families
+## Authorization and entitlement boundary
+
+`roleRefs`, `resourceScopeRef`, `permissionRefs` and `entitlementRefs` are **presentation references only**.
+
+They do not grant access. `serverAuthorizationRequired` is fixed to `true`. Runtime Core/Query/Reporting services must re-evaluate tenant/resource authorization and entitlement independently. Entitlement never implies authorization and authorization never implies entitlement.
+
+Saved views likewise never grant access merely because a prior authorized user stored state.
+
+## Panel contract
 
 Only Mother-Reference panel families are admitted:
 
 `STAT`, `GAUGE`, `TIME_SERIES`, `BAR`, `PIE`, `TABLE`, `HEATMAP`, `HISTOGRAM`, `STATUS_GRID`, `SANKEY`, `TOPOLOGY`, `GEO`, `TEXT`, `ALERT_LIST`, `INCIDENT_LIST`, `RCA`, `DOMAIN_SPECIFIC`.
 
-Panels carry declarative metadata and references only. Rendering is outside this checkpoint.
+Panel metadata supports ID/title/description/type, bounded grid layout, governed query uses, transformation/visualization/threshold/field-override references, filter/variable/action references, drill-downs, state-policy references and optional presentation visibility references. `columnRefs` can describe future table/list columns without embedding data.
+
+`TEXT` panels carry bounded text/Markdown-source metadata only; there is no raw-HTML escape hatch. Non-text panels require at least one governed query use so an undefined blank-data panel does not silently become a valid definition.
 
 ## Governed query/data boundary
 
-This contract does not define SQL, a query DSL, database access or arbitrary expressions.
+This contract does not define SQL, a query DSL, database access or executable formulas.
 
-A definition may register local query bindings:
+Definitions register local query bindings:
 
 ```text
-queryId -> governed opaque queryRef + declarative parameter names
+queryId
+  -> governed queryRef
+  -> dataSourceClassRef
+  -> parameterRefs
+  -> groupingRef? / aggregationRef? / timeContextBindingRef?
 ```
 
-Panels/report sections reference the local `queryId`. Parameter bindings may draw only from declared variables, filters or runtime context keys. Values do not become executable query text. The future Query Service remains responsible for typed query contracts, server-side authorization, pagination, resource limits, rollup selection and safe execution.
+Panels/report sections reference the local `queryId`. Parameter bindings may source values only from declared variables, filters or runtime context keys. Runtime values never become executable query text through this contract.
 
-Forbidden definition content includes raw SQL, shell, JavaScript, Python, executable expressions, database credentials, datasource secrets and unrestricted executable URLs.
+The future Query Service remains responsible for typed query contracts, server-side authorization, pagination, query limits, rollup selection and safe execution.
 
-The reporting LLD allows a safe expression engine such as CEL for future formulas, but this checkpoint intentionally **does not embed formula/expression text**. Formula behavior is referenced through opaque governed identifiers until its separate executable contract is defined.
+Reporting formulas are represented only by opaque `calculationRefs`. The LLD permits a future safe expression engine such as CEL, but executable expression syntax is intentionally outside this checkpoint.
+
+Forbidden content includes raw SQL, shell, JavaScript, Python, formula/expression text, database credentials, datasource secrets and unrestricted URLs.
 
 ## Variables, filters and runtime context
 
-Variables are declarative selectors with stable IDs, labels, governed source references, optional opaque default selections, multi-select/required flags, URL-state persistence intent and optional dependency on another variable.
+Variables support stable ID/label, governed allowed-value source reference, opaque default-selection references, multi-select, required/optional, URL-state persistence intent and optional dependency on another variable. Variable dependency cycles are invalid.
 
-Filters similarly use stable IDs and governed source/operator references. They may bind to a variable or a Mother-Reference runtime context key. Saved views may persist opaque selection references; persisted state never grants access to the referenced data.
+Filters support stable ID/label, governed source/operator references, variable or runtime-context binding and reusable-filter references. A filter cannot ambiguously bind both a variable and a runtime context.
 
-Supported runtime context keys are:
+Runtime context keys are:
 
 - `TIME_RANGE`
 - `TIMEZONE`
@@ -99,31 +114,19 @@ Supported runtime context keys are:
 - `INCIDENT`
 - `SLA`
 
-Definitions describe which contexts they accept. They do not hard-code customer-specific runtime values, refresh periods, SLA targets, polling intervals, thresholds or retention values.
+Definitions state which contexts they accept. They do not hard-code customer-specific values, refresh periods, SLA targets, operational thresholds, polling intervals or retention values.
 
 ## Drill-downs
 
-A drill-down is a declarative destination plus bounded target reference and explicit context-preservation intent. Supported destination classes are:
+Supported declarative destination classes are:
 
-- `ENTITY_DETAIL`
-- `DASHBOARD`
-- `TOPOLOGY`
-- `TIMELINE`
-- `RCA`
-- `INCIDENT`
-- `ALERT`
-- `NCM_CLI`
-- `IPAM`
-- `FLOW`
-- `ITSM`
-- `AUDIT`
-- `REPORT`
+`ENTITY_DETAIL`, `DASHBOARD`, `TOPOLOGY`, `TIMELINE`, `RCA`, `INCIDENT`, `ALERT`, `NCM_CLI`, `IPAM`, `FLOW`, `ITSM`, `AUDIT`, `REPORT`.
 
-No JavaScript URLs, arbitrary external URLs, credentials or routing implementation are present in this contract.
+Each drill-down carries a bounded target reference and explicit intent to preserve tenant, scope, time and filters. Routing is not implemented. Arbitrary URL fields, JavaScript URLs and embedded credentials are prohibited.
 
 ## Required UI/data states
 
-Every dashboard definition must declare presentation handling for exactly these ten Mother-Reference states:
+Dashboard state handling must contain exactly the ten Mother-Reference states:
 
 1. `LOADING`
 2. `EMPTY`
@@ -136,103 +139,117 @@ Every dashboard definition must declare presentation handling for exactly these 
 9. `MONITORING_DEGRADED`
 10. `NORMAL`
 
-Each state requires a bounded `presentationRef`; a blank panel is not an error strategy. Definitions may request freshness/provenance/affected-source/correlation-ID display when runtime supplies those values.
+Each state has a bounded `presentationRef`; a blank panel is not failure handling. Optional maintenance/suppression references describe runtime presentation context without inventing additional core states.
 
-Missing, stale or partial telemetry is presentation evidence only. A dashboard definition cannot conclude `DEVICE_DOWN` or another causal operational failure from missing data.
+Definitions may request freshness, provenance, affected source/Sensor and correlation-ID display when runtime supplies them. Missing, stale or partial telemetry never permits the definition to infer `DEVICE_DOWN` or another physical/causal conclusion; `causalInferenceFromMissingData` is fixed to `PROHIBITED`.
 
 ## Saved views
 
-Saved views contain presentation state only: target dashboard/workspace reference, owner/scope references, filter selections, time-context policy reference, sort/group/view-mode references and provenance.
+Saved views contain presentation state only:
 
-Saved views do not carry authorization grants, entitlement decisions, credentials, tokens, cookies or executable query text. Runtime authorization is re-evaluated whenever the saved view is used.
+- saved-view identity/version;
+- owner/scope references;
+- dashboard/workspace target reference;
+- opaque filter-selection references;
+- time-context policy reference;
+- sort/group/view-mode references;
+- provenance;
+- mandatory runtime server authorization.
 
-## Report definitions
+They do not contain passwords, tokens, cookies, arbitrary payloads, authorization grants or executable query text.
 
-A report definition can describe:
+## Report definition
+
+Report definitions can represent:
 
 - stable identity/version/origin/scope/provenance;
 - presentation-only role/resource/permission/entitlement references;
-- governed query bindings, variables and filters;
-- report sections for `TEXT`, `TABLE`, `VISUALIZATION` and governed `IMAGE_REFERENCE` content;
+- folder/category/tags;
+- branding/layout references;
+- bounded query-policy reference;
+- governed query, grouping, aggregation and time-binding references;
+- variables/filters;
+- opaque calculation references rather than formula text;
+- `TEXT`, `TABLE`, `VISUALIZATION` and governed `IMAGE_REFERENCE` sections;
+- column/table/visualization/image references;
 - SLA/reporting policy references;
-- allowed output formats required by the PRD: `PDF`, `CSV`, `XLSX`, `JSON`, `API`;
-- schedule intent through an opaque `scheduleRef` plus explicit timezone;
-- delivery intent through governed target references for `DOWNLOAD`, `EMAIL` or `INTEGRATION`.
+- report formats required by the PRD: `PDF`, `CSV`, `XLSX`, `JSON`, `API`;
+- schedule intent through `scheduleRef`, timezone and enabled flag;
+- delivery intent for `DOWNLOAD`, `EMAIL` or `INTEGRATION` through governed target references.
 
-The contract does not execute schedules, contain recipients, store notification credentials, render documents or send outputs.
+Definitions contain no recipient addresses, notification credentials or delivery secrets. This checkpoint does not render or send anything.
 
-## Scale/performance intent
+## Schedule/export boundary
 
-Definitions can require:
+The schema does not define scheduler syntax or cron. `scheduleRef` points at a future governed schedule contract and timezone is explicit. Script hooks/commands are invalid.
 
-- server-side pagination;
-- server-side filtering;
-- server-side sorting;
-- browser virtualization;
-- bounded-result/query-policy references.
+Export declarations only express supported/requested format metadata. They do not prove PDF/CSV/XLSX/JSON generation exists.
 
-No row limit, timeout, refresh interval or query threshold is invented here. Large-environment limits remain governed by future Query Service policy and benchmark evidence.
+## Scale/performance metadata
+
+Dashboard definitions can require server-side pagination, filtering, sorting, browser virtualization and a bounded `queryPolicyRef`. Reports can also reference a governed query policy.
+
+No row limit, timeout, refresh interval, query concurrency limit or export threshold is invented here. Large-environment values remain future Query Service policy/benchmark decisions.
 
 ## Platform Value / OIV readiness
 
 The metadata model can represent future Platform Value, MTTR, noise-reduction, diagnosis-effectiveness, incident-improvement and operational/economic-benefit views without embedding customer claims.
 
-Optional `valuePresentationPolicy` metadata can require methodology, sample-size and assumption disclosure and prohibit unsupported causal claims. Financial presentation requires customer-approved assumption references. Example definitions contain no savings, MTTR-reduction percentage or financial amount.
+`valuePresentationPolicy` can require methodology, sample-size and assumption disclosure, prohibit unsupported causal claims and require customer-approved assumptions for financial estimates. Static definitions containing unsupported MTTR/savings/benefit percentages are rejected by the validator.
 
-The contract preserves Platform_19's rule that capability participation is not proof of causal benefit.
+Capability participation is not proof of causal benefit.
 
-## Security and privacy
+## Security
 
-The schemas are strict and the semantic validator fails closed for secret-bearing or executable content, including:
+Schemas are strict and the semantic validator fails closed for:
 
-- passwords/password hashes;
-- tokens/bearer tokens/API keys;
-- cookies/session material;
-- private keys/client secrets/database credentials;
+- passwords, hashes, tokens, bearer/API keys, cookies, private keys, client secrets and database/datasource credentials;
 - credentials embedded in URLs;
 - raw SQL or SQL-like query text;
-- JavaScript/Python/shell/command/executable fields;
-- active/raw HTML and dangerous URL schemes;
+- JavaScript, Python, shell, commands, scripts and executable/formula/expression fields;
+- raw URL fields/dangerous schemes;
+- active/unsafe HTML;
 - path traversal and absolute filesystem paths;
 - unknown fields;
-- unbounded strings/collections/documents;
-- undefined/cyclic references;
-- clone/System provenance corruption;
-- authorization-grant semantics embedded in presentation metadata.
+- embedded authorization/entitlement decision semantics;
+- unbounded strings/arrays/documents;
+- duplicate IDs and broken references;
+- variable cycles;
+- System/clone identity corruption;
+- missing required states;
+- invalid report sections/schedules/delivery metadata;
+- unsupported static OIV/value percentages.
 
-Text fields are metadata/plain text only. There is no raw-HTML escape hatch. Any future Markdown renderer must sanitize independently.
+Text fields are plain text/Markdown-source metadata only. Any future renderer must sanitize independently.
 
 ## Defensive bounds
 
-The schemas and validator use conservative size/count limits solely for parser/input-safety and denial-of-service resistance. They are **not** product operational thresholds, dashboard row limits, refresh defaults, SLA targets, licensing limits or customer policy defaults.
+The schemas/validator contain conservative parser/input-safety limits for denial-of-service resistance. These are engineering security bounds only, **not** customer operational thresholds, dashboard row limits, refresh defaults, SLA targets, retention values or licensing limits.
 
-The validator also bounds directory traversal, document count and input file size and follows no symlinks.
+Directory validation is bounded, ignores symlinks and does not treat schema/fixture-definition JSON as runtime documents.
 
 ## Versioning
 
-`schemaVersion` is currently `1.0.0`. The validator rejects unsupported schema versions rather than silently reinterpreting them.
+`schemaVersion` is `1.0.0`. Unsupported versions fail closed rather than being silently reinterpreted.
 
-`definitionVersion` remains a bounded opaque version identifier owned by definition persistence/versioning; this contract does not impose SemVer on customer definitions.
-
-Breaking contract changes require a new incompatible schema version and an explicit compatibility/migration path before runtime adoption. No migration service is implemented here.
+`definitionVersion` is a bounded opaque definition revision identifier; this contract does not impose SemVer on customer definitions. Breaking schema changes require a new incompatible contract version plus an explicit compatibility/migration path before runtime adoption. No migration service is implemented here.
 
 ## What this checkpoint does not implement
 
-- Dashboard Studio or Report Studio UI;
-- the 98 mandatory screen definitions;
-- React components/panel rendering;
-- query execution or database access;
+- Dashboard Studio / Report Studio UI;
+- the 98 mandatory screen definitions or a 98/98 completeness claim;
+- React/panel rendering;
+- query/database execution;
 - SQL/query DSL/formula execution;
-- backend APIs/persistence;
-- report scheduler/workers/history;
+- APIs or backend persistence;
+- report scheduling workers/history;
 - SLA calculation;
-- PDF/CSV/XLSX/JSON generation;
+- PDF/CSV/XLSX/JSON rendering;
 - email/integration delivery;
-- role/RBAC/resource-scope authorization;
-- entitlement decisions;
-- customer-specific dashboards, values, thresholds or targets.
+- RBAC/resource authorization or entitlement decisions;
+- customer-specific thresholds, SLA values, refresh periods, retention or value claims.
 
-The later integration sequence is: independently validate/merge this contract, independently validate/merge the UI foundation, then add governed Core/Query/Reporting contracts and instantiate the mandatory screen definitions against those merged authorities.
+Future integration should consume this contract only after independent validation/merge and preserve server-side authorization/query boundaries.
 
 ## Local Docker validation (later)
 
@@ -246,4 +263,4 @@ docker run --rm \
   node schemas/presentation/tools/validate.mjs
 ```
 
-This README does not claim that command has executed in this GitHub-only checkpoint.
+This GitHub-only checkpoint does not claim that command has executed.

@@ -11,6 +11,10 @@
   "recoverableSystemDefinition": true,
   "category": "Example",
   "tags": ["fictional", "sla"],
+  "brandingRef": "branding.example.platform-default",
+  "layoutRef": "report-layout.example.summary",
+  "queryPolicyRef": "query-policy.example.bounded",
+  "calculationRefs": ["calculation.example.sla-summary"],
   "visibility": {
     "roleRefs": ["role.example.report-reader"],
     "resourceScopeRef": "scope.example.reporting",
@@ -27,7 +31,10 @@
       "queryId": "query.sla-summary",
       "queryRef": "governed-query.example.sla-summary",
       "dataSourceClassRef": "data-class.example.sla",
-      "parameterRefs": ["parameter.time-range", "parameter.business-service"]
+      "parameterRefs": ["parameter.time-range", "parameter.business-service"],
+      "groupingRef": "grouping.example.business-service",
+      "aggregationRef": "aggregation.example.sla-summary",
+      "timeContextBindingRef": "time-binding.example.report"
     }
   ],
   "variables": [
@@ -70,7 +77,9 @@
           ]
         }
       ],
-      "tableDefinitionRef": "table.example.sla-summary"
+      "tableDefinitionRef": "table.example.sla-summary",
+      "columnRefs": ["column.example.service", "column.example.sla-state", "column.example.period"],
+      "calculationRefs": ["calculation.example.sla-summary"]
     }
   ],
   "allowedFormats": ["PDF", "CSV", "XLSX", "JSON", "API"],
@@ -97,6 +106,8 @@
       {"state": "MONITORING_DEGRADED", "presentationRef": "state.example.monitoring-degraded"},
       {"state": "NORMAL", "presentationRef": "state.example.normal"}
     ],
+    "maintenancePresentationRef": "state.example.maintenance-context",
+    "suppressionPresentationRef": "state.example.suppression-context",
     "causalInferenceFromMissingData": "PROHIBITED"
   },
   "provenance": {

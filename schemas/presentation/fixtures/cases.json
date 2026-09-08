@@ -13,264 +13,46 @@
     {"name": "valid-sla-report", "base": "report", "valid": true},
     {"name": "valid-saved-view", "base": "savedView", "valid": true},
 
-    {
-      "name": "duplicate-dashboard-id",
-      "bases": ["operations", "infrastructure"],
-      "valid": false,
-      "expectedCodes": ["DUPLICATE_DEFINITION_ID"],
-      "mutations": [{"documentIndex": 1, "op": "set", "path": ["definitionId"], "value": "example.system.operations-overview"}]
-    },
-    {
-      "name": "duplicate-panel-id",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["DUPLICATE_PANEL_ID"],
-      "mutations": [{"op": "appendCopy", "path": ["panels"], "sourcePath": ["panels", 0]}]
-    },
-    {
-      "name": "duplicate-variable-id",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["DUPLICATE_VARIABLE_ID"],
-      "mutations": [{"op": "appendCopy", "path": ["variables"], "sourcePath": ["variables", 0]}]
-    },
-    {
-      "name": "invalid-panel-type",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["INVALID_PANEL_TYPE"],
-      "mutations": [{"op": "set", "path": ["panels", 0, "type"], "value": "SPARKLE"}]
-    },
-    {
-      "name": "invalid-layout",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["INVALID_LAYOUT"],
-      "mutations": [{"op": "set", "path": ["panels", 0, "layout", "width"], "value": 0}]
-    },
-    {
-      "name": "layout-overlap",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["LAYOUT_OVERLAP"],
-      "mutations": [
-        {"op": "set", "path": ["panels", 1, "layout", "x"], "value": 1},
-        {"op": "set", "path": ["panels", 1, "layout", "y"], "value": 0}
-      ]
-    },
-    {
-      "name": "undefined-query-reference",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["UNDEFINED_QUERY_REFERENCE"],
-      "mutations": [{"op": "set", "path": ["panels", 0, "queryUses", 0, "queryId"], "value": "query.missing"}]
-    },
-    {
-      "name": "undefined-variable-reference",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["UNDEFINED_VARIABLE_REFERENCE"],
-      "mutations": [{"op": "set", "path": ["panels", 0, "queryUses", 0, "bindings", 1, "sourceRef"], "value": "variable.missing"}]
-    },
-    {
-      "name": "undefined-filter-reference",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["UNDEFINED_FILTER_REFERENCE"],
-      "mutations": [{"op": "set", "path": ["panels", 0, "filterRefs", 0], "value": "filter.missing"}]
-    },
-    {
-      "name": "variable-dependency-cycle",
-      "base": "infrastructure",
-      "valid": false,
-      "expectedCodes": ["VARIABLE_DEPENDENCY_CYCLE"],
-      "mutations": [{"op": "set", "path": ["variables", 0, "dependsOnVariableRef"], "value": "variable.site"}]
-    },
-    {
-      "name": "raw-sql",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["RAW_SQL_PROHIBITED"],
-      "mutations": [{"op": "set", "path": ["description"], "value": "SELECT secret FROM inventory"}]
-    },
-    {
-      "name": "javascript-content",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["DANGEROUS_URL_SCHEME", "EXECUTABLE_CONTENT"],
-      "mutations": [{"op": "set", "path": ["description"], "value": "javascript:alert(1)"}]
-    },
-    {
-      "name": "python-field",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["FORBIDDEN_EXECUTABLE_FIELD"],
-      "mutations": [{"op": "set", "path": ["panels", 0, "python"], "value": "print('unsafe')"}]
-    },
-    {
-      "name": "shell-command-field",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["FORBIDDEN_EXECUTABLE_FIELD"],
-      "mutations": [{"op": "set", "path": ["panels", 0, "command"], "value": "sh -c unsafe"}]
-    },
-    {
-      "name": "dangerous-executable-url",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["FORBIDDEN_URL_FIELD", "DANGEROUS_URL_SCHEME"],
-      "mutations": [{"op": "set", "path": ["panels", 0, "drillDowns", 0, "url"], "value": "javascript:alert(1)"}]
-    },
-    {
-      "name": "embedded-password-field",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["FORBIDDEN_SECRET_FIELD"],
-      "mutations": [{"op": "set", "path": ["password"], "value": "fictional-secret"}]
-    },
-    {
-      "name": "embedded-token-field",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["FORBIDDEN_SECRET_FIELD"],
-      "mutations": [{"op": "set", "path": ["token"], "value": "fictional-token"}]
-    },
-    {
-      "name": "embedded-api-key-field",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["FORBIDDEN_SECRET_FIELD"],
-      "mutations": [{"op": "set", "path": ["apiKey"], "value": "fictional-key"}]
-    },
-    {
-      "name": "embedded-private-key",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["FORBIDDEN_SECRET_FIELD", "PRIVATE_KEY_MATERIAL"],
-      "mutations": [{"op": "set", "path": ["privateKey"], "value": "-----BEGIN PRIVATE KEY----- fictional -----END PRIVATE KEY-----"}]
-    },
-    {
-      "name": "unsafe-html",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["UNSAFE_HTML"],
-      "mutations": [{"op": "set", "path": ["description"], "value": "<script>alert('unsafe')</script>"}]
-    },
-    {
-      "name": "path-traversal",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["PATH_TRAVERSAL"],
-      "mutations": [{"op": "set", "path": ["provenance", "notes"], "value": "../../etc/example"}]
-    },
-    {
-      "name": "oversized-text",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["STRING_BOUNDS", "UNBOUNDED_TEXT"],
-      "mutations": [{"op": "repeat", "path": ["description"], "value": "x", "count": 5000}]
-    },
-    {
-      "name": "clone-pretends-system",
-      "base": "oiv",
-      "valid": false,
-      "expectedCodes": ["CLONE_SYSTEM_SCOPE_PROHIBITED", "CLONE_SYSTEM_MASQUERADE"],
-      "mutations": [
-        {"op": "set", "path": ["scope"], "value": "SYSTEM"},
-        {"op": "set", "path": ["systemDefinition"], "value": true},
-        {"op": "set", "path": ["recoverableSystemDefinition"], "value": true}
-      ]
-    },
-    {
-      "name": "broken-clone-provenance",
-      "base": "oiv",
-      "valid": false,
-      "expectedCodes": ["CLONE_PROVENANCE_REQUIRED"],
-      "mutations": [{"op": "delete", "path": ["derivedFrom"]}]
-    },
-    {
-      "name": "authorization-decision-embedded",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["AUTHORIZATION_SEMANTICS_PROHIBITED"],
-      "mutations": [{"op": "set", "path": ["visibility", "authorized"], "value": true}]
-    },
-    {
-      "name": "server-authorization-disabled",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["SERVER_AUTHORIZATION_REQUIRED"],
-      "mutations": [{"op": "set", "path": ["visibility", "serverAuthorizationRequired"], "value": false}]
-    },
-    {
-      "name": "unknown-required-state",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["UNKNOWN_REQUIRED_STATE", "MISSING_REQUIRED_STATE"],
-      "mutations": [{"op": "set", "path": ["stateHandling", "states", 0, "state"], "value": "DEVICE_DOWN"}]
-    },
-    {
-      "name": "invalid-report-section-reference",
-      "base": "report",
-      "valid": false,
-      "expectedCodes": ["REPORT_SECTION_REFERENCE_REQUIRED"],
-      "mutations": [{"op": "delete", "path": ["sections", 1, "tableDefinitionRef"]}]
-    },
-    {
-      "name": "invalid-report-schedule-metadata",
-      "base": "report",
-      "valid": false,
-      "expectedCodes": ["INVALID_SCHEDULE_METADATA"],
-      "mutations": [{"op": "set", "path": ["schedule", "timezone"], "value": "UTC; rm -rf"}]
-    },
-    {
-      "name": "cron-command-not-allowed",
-      "base": "report",
-      "valid": false,
-      "expectedCodes": ["UNKNOWN_FIELD"],
-      "mutations": [{"op": "set", "path": ["schedule", "cron"], "value": "0 0 * * *"}]
-    },
-    {
-      "name": "invalid-export-format",
-      "base": "report",
-      "valid": false,
-      "expectedCodes": ["INVALID_EXPORT_FORMAT"],
-      "mutations": [{"op": "set", "path": ["allowedFormats", 0], "value": "DOCX"}]
-    },
-    {
-      "name": "email-delivery-without-governed-target",
-      "base": "report",
-      "valid": false,
-      "expectedCodes": ["DELIVERY_TARGET_REFERENCE_REQUIRED"],
-      "mutations": [{"op": "delete", "path": ["deliveryTargets", 1, "targetRef"]}]
-    },
-    {
-      "name": "formula-text-not-allowed",
-      "base": "report",
-      "valid": false,
-      "expectedCodes": ["FORBIDDEN_EXECUTABLE_FIELD"],
-      "mutations": [{"op": "set", "path": ["sections", 1, "formula"], "value": "SUM(metric)"}]
-    },
-    {
-      "name": "unsupported-static-value-claim",
-      "base": "oiv",
-      "valid": false,
-      "expectedCodes": ["UNSUPPORTED_VALUE_CLAIM"],
-      "mutations": [{"op": "set", "path": ["description"], "value": "Fictional dashboard claims MTTR reduction 42%."}]
-    },
-    {
-      "name": "saved-view-cannot-disable-server-auth",
-      "base": "savedView",
-      "valid": false,
-      "expectedCodes": ["SERVER_AUTHORIZATION_REQUIRED"],
-      "mutations": [{"op": "set", "path": ["serverAuthorizationRequired"], "value": false}]
-    },
-    {
-      "name": "unknown-schema-field",
-      "base": "operations",
-      "valid": false,
-      "expectedCodes": ["UNKNOWN_FIELD"],
-      "mutations": [{"op": "set", "path": ["unexpected"], "value": "not-governed"}]
-    }
+    {"name": "duplicate-dashboard-id", "bases": ["operations", "infrastructure"], "valid": false, "expectedCodes": ["DUPLICATE_DEFINITION_ID"], "mutations": [{"documentIndex": 1, "op": "set", "path": ["definitionId"], "value": "example.system.operations-overview"}]},
+    {"name": "duplicate-panel-id", "base": "operations", "valid": false, "expectedCodes": ["DUPLICATE_PANEL_ID"], "mutations": [{"op": "appendCopy", "path": ["panels"], "sourcePath": ["panels", 0]}]},
+    {"name": "duplicate-variable-id", "base": "operations", "valid": false, "expectedCodes": ["DUPLICATE_VARIABLE_ID"], "mutations": [{"op": "appendCopy", "path": ["variables"], "sourcePath": ["variables", 0]}]},
+    {"name": "invalid-panel-type", "base": "operations", "valid": false, "expectedCodes": ["INVALID_PANEL_TYPE"], "mutations": [{"op": "set", "path": ["panels", 0, "type"], "value": "SPARKLE"}]},
+    {"name": "invalid-layout", "base": "operations", "valid": false, "expectedCodes": ["INVALID_LAYOUT"], "mutations": [{"op": "set", "path": ["panels", 0, "layout", "width"], "value": 0}]},
+    {"name": "layout-overlap", "base": "operations", "valid": false, "expectedCodes": ["LAYOUT_OVERLAP"], "mutations": [{"op": "set", "path": ["panels", 1, "layout", "x"], "value": 1}, {"op": "set", "path": ["panels", 1, "layout", "y"], "value": 0}]},
+    {"name": "empty-dashboard-views", "base": "operations", "valid": false, "expectedCodes": ["ARRAY_BOUNDS"], "mutations": [{"op": "set", "path": ["views"], "value": []}]},
+    {"name": "text-panel-requires-content", "base": "oiv", "valid": false, "expectedCodes": ["TEXT_PANEL_CONTENT_REQUIRED"], "mutations": [{"op": "delete", "path": ["panels", 1, "text"]}]},
+    {"name": "non-text-panel-requires-query", "base": "operations", "valid": false, "expectedCodes": ["PANEL_QUERY_REQUIRED"], "mutations": [{"op": "set", "path": ["panels", 0, "queryUses"], "value": []}]},
+    {"name": "undefined-query-reference", "base": "operations", "valid": false, "expectedCodes": ["UNDEFINED_QUERY_REFERENCE"], "mutations": [{"op": "set", "path": ["panels", 0, "queryUses", 0, "queryId"], "value": "query.missing"}]},
+    {"name": "undefined-variable-reference", "base": "operations", "valid": false, "expectedCodes": ["UNDEFINED_VARIABLE_REFERENCE"], "mutations": [{"op": "set", "path": ["panels", 0, "queryUses", 0, "bindings", 1, "sourceRef"], "value": "variable.missing"}]},
+    {"name": "undefined-filter-reference", "base": "operations", "valid": false, "expectedCodes": ["UNDEFINED_FILTER_REFERENCE"], "mutations": [{"op": "set", "path": ["panels", 0, "filterRefs", 0], "value": "filter.missing"}]},
+    {"name": "variable-dependency-cycle", "base": "infrastructure", "valid": false, "expectedCodes": ["VARIABLE_DEPENDENCY_CYCLE"], "mutations": [{"op": "set", "path": ["variables", 0, "dependsOnVariableRef"], "value": "variable.site"}]},
+    {"name": "raw-sql", "base": "operations", "valid": false, "expectedCodes": ["RAW_SQL_PROHIBITED"], "mutations": [{"op": "set", "path": ["description"], "value": "SELECT secret FROM inventory"}]},
+    {"name": "javascript-content", "base": "operations", "valid": false, "expectedCodes": ["DANGEROUS_URL_SCHEME", "EXECUTABLE_CONTENT"], "mutations": [{"op": "set", "path": ["description"], "value": "javascript:alert(1)"}]},
+    {"name": "python-field", "base": "operations", "valid": false, "expectedCodes": ["FORBIDDEN_EXECUTABLE_FIELD"], "mutations": [{"op": "set", "path": ["panels", 0, "python"], "value": "print('unsafe')"}]},
+    {"name": "shell-command-field", "base": "operations", "valid": false, "expectedCodes": ["FORBIDDEN_EXECUTABLE_FIELD"], "mutations": [{"op": "set", "path": ["panels", 0, "command"], "value": "sh -c unsafe"}]},
+    {"name": "dangerous-executable-url", "base": "operations", "valid": false, "expectedCodes": ["FORBIDDEN_URL_FIELD", "DANGEROUS_URL_SCHEME"], "mutations": [{"op": "set", "path": ["panels", 0, "drillDowns", 0, "url"], "value": "javascript:alert(1)"}]},
+    {"name": "embedded-password-field", "base": "operations", "valid": false, "expectedCodes": ["FORBIDDEN_SECRET_FIELD"], "mutations": [{"op": "set", "path": ["password"], "value": "fictional-secret"}]},
+    {"name": "embedded-token-field", "base": "operations", "valid": false, "expectedCodes": ["FORBIDDEN_SECRET_FIELD"], "mutations": [{"op": "set", "path": ["token"], "value": "fictional-token"}]},
+    {"name": "embedded-api-key-field", "base": "operations", "valid": false, "expectedCodes": ["FORBIDDEN_SECRET_FIELD"], "mutations": [{"op": "set", "path": ["apiKey"], "value": "fictional-key"}]},
+    {"name": "embedded-private-key", "base": "operations", "valid": false, "expectedCodes": ["FORBIDDEN_SECRET_FIELD", "PRIVATE_KEY_MATERIAL"], "mutations": [{"op": "set", "path": ["privateKey"], "value": "-----BEGIN PRIVATE KEY----- fictional -----END PRIVATE KEY-----"}]},
+    {"name": "unsafe-html", "base": "operations", "valid": false, "expectedCodes": ["UNSAFE_HTML"], "mutations": [{"op": "set", "path": ["description"], "value": "<script>alert('unsafe')</script>"}]},
+    {"name": "path-traversal", "base": "operations", "valid": false, "expectedCodes": ["PATH_TRAVERSAL"], "mutations": [{"op": "set", "path": ["provenance", "notes"], "value": "../../etc/example"}]},
+    {"name": "oversized-text", "base": "operations", "valid": false, "expectedCodes": ["STRING_BOUNDS", "UNBOUNDED_TEXT"], "mutations": [{"op": "repeat", "path": ["description"], "value": "x", "count": 5000}]},
+    {"name": "clone-pretends-system", "base": "oiv", "valid": false, "expectedCodes": ["CLONE_SYSTEM_SCOPE_PROHIBITED", "CLONE_SYSTEM_MASQUERADE"], "mutations": [{"op": "set", "path": ["scope"], "value": "SYSTEM"}, {"op": "set", "path": ["systemDefinition"], "value": true}, {"op": "set", "path": ["recoverableSystemDefinition"], "value": true}]},
+    {"name": "broken-clone-provenance", "base": "oiv", "valid": false, "expectedCodes": ["CLONE_PROVENANCE_REQUIRED"], "mutations": [{"op": "delete", "path": ["derivedFrom"]}]},
+    {"name": "authorization-decision-embedded", "base": "operations", "valid": false, "expectedCodes": ["AUTHORIZATION_SEMANTICS_PROHIBITED"], "mutations": [{"op": "set", "path": ["visibility", "authorized"], "value": true}]},
+    {"name": "server-authorization-disabled", "base": "operations", "valid": false, "expectedCodes": ["SERVER_AUTHORIZATION_REQUIRED"], "mutations": [{"op": "set", "path": ["visibility", "serverAuthorizationRequired"], "value": false}]},
+    {"name": "unknown-required-state", "base": "operations", "valid": false, "expectedCodes": ["UNKNOWN_REQUIRED_STATE", "MISSING_REQUIRED_STATE"], "mutations": [{"op": "set", "path": ["stateHandling", "states", 0, "state"], "value": "DEVICE_DOWN"}]},
+    {"name": "empty-report-sections", "base": "report", "valid": false, "expectedCodes": ["ARRAY_BOUNDS"], "mutations": [{"op": "set", "path": ["sections"], "value": []}]},
+    {"name": "invalid-report-section-reference", "base": "report", "valid": false, "expectedCodes": ["REPORT_SECTION_REFERENCE_REQUIRED"], "mutations": [{"op": "delete", "path": ["sections", 1, "tableDefinitionRef"]}]},
+    {"name": "undefined-report-calculation-reference", "base": "report", "valid": false, "expectedCodes": ["UNDEFINED_CALCULATION_REFERENCE"], "mutations": [{"op": "set", "path": ["sections", 1, "calculationRefs", 0], "value": "calculation.example.missing"}]},
+    {"name": "invalid-report-schedule-metadata", "base": "report", "valid": false, "expectedCodes": ["INVALID_SCHEDULE_METADATA"], "mutations": [{"op": "set", "path": ["schedule", "timezone"], "value": "UTC; rm -rf"}]},
+    {"name": "cron-command-not-allowed", "base": "report", "valid": false, "expectedCodes": ["UNKNOWN_FIELD"], "mutations": [{"op": "set", "path": ["schedule", "cron"], "value": "0 0 * * *"}]},
+    {"name": "invalid-export-format", "base": "report", "valid": false, "expectedCodes": ["INVALID_EXPORT_FORMAT"], "mutations": [{"op": "set", "path": ["allowedFormats", 0], "value": "DOCX"}]},
+    {"name": "email-delivery-without-governed-target", "base": "report", "valid": false, "expectedCodes": ["DELIVERY_TARGET_REFERENCE_REQUIRED"], "mutations": [{"op": "delete", "path": ["deliveryTargets", 1, "targetRef"]}]},
+    {"name": "formula-text-not-allowed", "base": "report", "valid": false, "expectedCodes": ["FORBIDDEN_EXECUTABLE_FIELD"], "mutations": [{"op": "set", "path": ["sections", 1, "formula"], "value": "SUM(metric)"}]},
+    {"name": "unsupported-static-value-claim", "base": "oiv", "valid": false, "expectedCodes": ["UNSUPPORTED_VALUE_CLAIM"], "mutations": [{"op": "set", "path": ["description"], "value": "Fictional dashboard claims MTTR reduction 42%."}]},
+    {"name": "saved-view-cannot-disable-server-auth", "base": "savedView", "valid": false, "expectedCodes": ["SERVER_AUTHORIZATION_REQUIRED"], "mutations": [{"op": "set", "path": ["serverAuthorizationRequired"], "value": false}]},
+    {"name": "unknown-schema-field", "base": "operations", "valid": false, "expectedCodes": ["UNKNOWN_FIELD"], "mutations": [{"op": "set", "path": ["unexpected"], "value": "not-governed"}]}
   ]
 }

@@ -25,7 +25,10 @@
       "queryId": "query.infrastructure-health",
       "queryRef": "governed-query.example.infrastructure-health",
       "dataSourceClassRef": "data-class.example.infrastructure",
-      "parameterRefs": ["parameter.time-range", "parameter.region", "parameter.site"]
+      "parameterRefs": ["parameter.time-range", "parameter.region", "parameter.site"],
+      "groupingRef": "grouping.example.site",
+      "aggregationRef": "aggregation.example.health-summary",
+      "timeContextBindingRef": "time-binding.example.dashboard"
     }
   ],
   "variables": [
@@ -87,6 +90,7 @@
           ]
         }
       ],
+      "columnRefs": ["column.example.entity", "column.example.state", "column.example.time", "column.example.site", "column.example.owner"],
       "filterRefs": ["filter.region", "filter.site"],
       "variableRefs": ["variable.region", "variable.site"],
       "drillDowns": [
@@ -134,6 +138,8 @@
     "showProvenanceWhenSupplied": true,
     "showAffectedSourceWhenSupplied": true,
     "showCorrelationIdWhenSupplied": true,
+    "maintenancePresentationRef": "state.example.maintenance-context",
+    "suppressionPresentationRef": "state.example.suppression-context",
     "causalInferenceFromMissingData": "PROHIBITED"
   },
   "performance": {

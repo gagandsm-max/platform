@@ -27,13 +27,17 @@
       "queryId": "query.health-summary",
       "queryRef": "governed-query.example.health-summary",
       "dataSourceClassRef": "data-class.example.operational-summary",
-      "parameterRefs": ["parameter.time-range", "parameter.site"]
+      "parameterRefs": ["parameter.time-range", "parameter.site"],
+      "groupingRef": "grouping.example.site",
+      "aggregationRef": "aggregation.example.summary",
+      "timeContextBindingRef": "time-binding.example.dashboard"
     },
     {
       "queryId": "query.incident-list",
       "queryRef": "governed-query.example.incident-list",
       "dataSourceClassRef": "data-class.example.incidents",
-      "parameterRefs": ["parameter.time-range", "parameter.site"]
+      "parameterRefs": ["parameter.time-range", "parameter.site"],
+      "timeContextBindingRef": "time-binding.example.dashboard"
     }
   ],
   "variables": [
@@ -103,6 +107,7 @@
           ]
         }
       ],
+      "columnRefs": ["column.example.incident", "column.example.state", "column.example.time", "column.example.site"],
       "filterRefs": ["filter.site"],
       "variableRefs": ["variable.site"]
     }
@@ -133,6 +138,8 @@
     "showProvenanceWhenSupplied": true,
     "showAffectedSourceWhenSupplied": true,
     "showCorrelationIdWhenSupplied": true,
+    "maintenancePresentationRef": "state.example.maintenance-context",
+    "suppressionPresentationRef": "state.example.suppression-context",
     "causalInferenceFromMissingData": "PROHIBITED"
   },
   "performance": {
