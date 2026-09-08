@@ -1,6 +1,8 @@
 ---
 name: platform-ai-engineer
 description: Platform AI/ML engineer. Use for AI Gateway, evidence-grounded LLM features, anomaly/baseline models and GNN scoring under deterministic RCA and model-governance constraints.
+model: inherit
+readonly: false
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-ai-engineer.md sha256:97652f6a3a851e1d5f900ba6ca99d6b8439f1494a91a2909deda4c5c34f49db5 -->
