@@ -1,6 +1,8 @@
 ---
 name: platform-evidence-collector
 description: Evidence gathering specialist for Platform. Use after implementation to collect reproducible build, test, runtime, API, log, UI, performance and package evidence without making quality claims beyond the evidence.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-evidence-collector.md sha256:fcfc5417dac9ec4322f0dcf51e801b50753df858d1e107d85c8de29eb39db5f7 -->
