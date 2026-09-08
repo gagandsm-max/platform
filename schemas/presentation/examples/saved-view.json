@@ -1,0 +1,25 @@
+{
+  "documentType": "SAVED_VIEW",
+  "schemaVersion": "1.0.0",
+  "savedViewId": "example.saved-view.infrastructure",
+  "definitionVersion": "1",
+  "displayName": "Fictional Infrastructure Saved View",
+  "description": "Fictional opaque filter selections for contract validation only.",
+  "ownerRef": "owner.example.user",
+  "scopeRef": "saved-view-scope.example.personal",
+  "targetType": "DASHBOARD",
+  "targetRef": "example.customer.infrastructure-health",
+  "filterState": [
+    {"filterRef": "filter.region", "selectionRefs": ["selection.example.region-a"]},
+    {"filterRef": "filter.site", "selectionRefs": ["selection.example.site-a"]}
+  ],
+  "timeContextPolicyRef": "time-policy.example.follow-runtime",
+  "sortRef": "sort.example.health",
+  "groupRef": "group.example.site",
+  "viewModeRef": "view-mode.example.table",
+  "provenance": {
+    "sourceRef": "example.customer.infrastructure-health",
+    "sourceVersion": "1"
+  },
+  "serverAuthorizationRequired": true
+}

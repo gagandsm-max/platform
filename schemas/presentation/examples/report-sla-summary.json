@@ -1,0 +1,118 @@
+{
+  "documentType": "REPORT_DEFINITION",
+  "schemaVersion": "1.0.0",
+  "definitionId": "example.system.sla-summary-report",
+  "definitionVersion": "1",
+  "displayName": "Fictional SLA Summary Report",
+  "description": "Fictional report definition used only to validate report metadata, governed query references, schedule intent and export declarations.",
+  "origin": "SYSTEM",
+  "scope": "SYSTEM",
+  "systemDefinition": true,
+  "recoverableSystemDefinition": true,
+  "category": "Example",
+  "tags": ["fictional", "sla"],
+  "brandingRef": "branding.example.platform-default",
+  "layoutRef": "report-layout.example.summary",
+  "queryPolicyRef": "query-policy.example.bounded",
+  "calculationRefs": ["calculation.example.sla-summary"],
+  "visibility": {
+    "roleRefs": ["role.example.report-reader"],
+    "resourceScopeRef": "scope.example.reporting",
+    "permissionRefs": ["permission.example.report-view"],
+    "entitlementRefs": ["entitlement.example.reporting"],
+    "serverAuthorizationRequired": true
+  },
+  "contextPolicy": {
+    "runtimeContextKeys": ["TIME_RANGE", "TIMEZONE", "TENANT_CUSTOMER", "REGION", "SITE", "GROUP_SERVICE", "BUSINESS_SERVICE", "SLA"],
+    "timePolicyRef": "time-policy.example.reporting"
+  },
+  "queryBindings": [
+    {
+      "queryId": "query.sla-summary",
+      "queryRef": "governed-query.example.sla-summary",
+      "dataSourceClassRef": "data-class.example.sla",
+      "parameterRefs": ["parameter.time-range", "parameter.business-service"],
+      "groupingRef": "grouping.example.business-service",
+      "aggregationRef": "aggregation.example.sla-summary",
+      "timeContextBindingRef": "time-binding.example.report"
+    }
+  ],
+  "variables": [
+    {
+      "variableId": "variable.business-service",
+      "label": "Business Service",
+      "sourceRef": "variable-source.example.business-service",
+      "multiSelect": true,
+      "required": false,
+      "persistInUrl": false
+    }
+  ],
+  "filters": [
+    {
+      "filterId": "filter.business-service",
+      "label": "Business Service",
+      "sourceRef": "filter-source.example.business-service",
+      "operatorRef": "operator.example.selection",
+      "variableRef": "variable.business-service"
+    }
+  ],
+  "sections": [
+    {
+      "sectionId": "section.methodology",
+      "title": "Report Context",
+      "type": "TEXT",
+      "queryUses": [],
+      "text": "Fictional metadata example. Runtime SLA targets, measurement windows, exclusions and results are supplied by governed policies and data; none are embedded here."
+    },
+    {
+      "sectionId": "section.sla-table",
+      "title": "SLA Summary",
+      "type": "TABLE",
+      "queryUses": [
+        {
+          "queryId": "query.sla-summary",
+          "bindings": [
+            {"parameterRef": "parameter.time-range", "sourceKind": "CONTEXT", "sourceRef": "TIME_RANGE"},
+            {"parameterRef": "parameter.business-service", "sourceKind": "VARIABLE", "sourceRef": "variable.business-service"}
+          ]
+        }
+      ],
+      "tableDefinitionRef": "table.example.sla-summary",
+      "columnRefs": ["column.example.service", "column.example.sla-state", "column.example.period"],
+      "calculationRefs": ["calculation.example.sla-summary"]
+    }
+  ],
+  "allowedFormats": ["PDF", "CSV", "XLSX", "JSON", "API"],
+  "slaPolicyRef": "sla-policy.example.runtime-governed",
+  "schedule": {
+    "scheduleRef": "schedule.example.reporting-intent",
+    "timezone": "UTC",
+    "enabled": false
+  },
+  "deliveryTargets": [
+    {"deliveryClass": "DOWNLOAD"},
+    {"deliveryClass": "EMAIL", "targetRef": "notification-target.example.reporting"}
+  ],
+  "stateHandling": {
+    "states": [
+      {"state": "LOADING", "presentationRef": "state.example.loading"},
+      {"state": "EMPTY", "presentationRef": "state.example.empty"},
+      {"state": "PARTIAL_DATA", "presentationRef": "state.example.partial"},
+      {"state": "STALE_DATA", "presentationRef": "state.example.stale"},
+      {"state": "PERMISSION_RESTRICTED", "presentationRef": "state.example.permission"},
+      {"state": "NOT_LICENSED", "presentationRef": "state.example.licensed"},
+      {"state": "QUERY_LIMITED", "presentationRef": "state.example.query-limited"},
+      {"state": "ERROR", "presentationRef": "state.example.error"},
+      {"state": "MONITORING_DEGRADED", "presentationRef": "state.example.monitoring-degraded"},
+      {"state": "NORMAL", "presentationRef": "state.example.normal"}
+    ],
+    "maintenancePresentationRef": "state.example.maintenance-context",
+    "suppressionPresentationRef": "state.example.suppression-context",
+    "causalInferenceFromMissingData": "PROHIBITED"
+  },
+  "provenance": {
+    "sourceRef": "mother-reference.reporting",
+    "sourceVersion": "3.2.2",
+    "notes": "Fictional contract example; no report execution or SLA result is claimed."
+  }
+}

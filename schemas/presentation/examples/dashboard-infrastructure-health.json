@@ -1,0 +1,156 @@
+{
+  "documentType": "DASHBOARD_DEFINITION",
+  "schemaVersion": "1.0.0",
+  "definitionId": "example.customer.infrastructure-health",
+  "definitionVersion": "1",
+  "displayName": "Fictional Infrastructure Health",
+  "description": "Fictional customer-created dashboard definition with dependent runtime selectors and no embedded customer data.",
+  "origin": "CUSTOMER_CREATED",
+  "scope": "TENANT_CUSTOMER",
+  "systemDefinition": false,
+  "recoverableSystemDefinition": false,
+  "category": "Example",
+  "tags": ["fictional", "infrastructure"],
+  "visibility": {
+    "roleRefs": ["role.example.infrastructure-reader"],
+    "resourceScopeRef": "scope.example.infrastructure",
+    "serverAuthorizationRequired": true
+  },
+  "contextPolicy": {
+    "runtimeContextKeys": ["TIME_RANGE", "TIMEZONE", "TENANT_CUSTOMER", "REGION", "SITE", "ENTITY", "TAGS", "TECHNOLOGY_DOMAIN"],
+    "defaultTimePolicyRef": "time-policy.example.runtime-default"
+  },
+  "queryBindings": [
+    {
+      "queryId": "query.infrastructure-health",
+      "queryRef": "governed-query.example.infrastructure-health",
+      "dataSourceClassRef": "data-class.example.infrastructure",
+      "parameterRefs": ["parameter.time-range", "parameter.region", "parameter.site"],
+      "groupingRef": "grouping.example.site",
+      "aggregationRef": "aggregation.example.health-summary",
+      "timeContextBindingRef": "time-binding.example.dashboard"
+    }
+  ],
+  "variables": [
+    {
+      "variableId": "variable.region",
+      "label": "Region",
+      "sourceRef": "variable-source.example.region",
+      "multiSelect": false,
+      "required": false,
+      "persistInUrl": true
+    },
+    {
+      "variableId": "variable.site",
+      "label": "Site",
+      "sourceRef": "variable-source.example.site-by-region",
+      "multiSelect": true,
+      "required": false,
+      "persistInUrl": true,
+      "dependsOnVariableRef": "variable.region"
+    }
+  ],
+  "filters": [
+    {
+      "filterId": "filter.region",
+      "label": "Region",
+      "sourceRef": "filter-source.example.region",
+      "operatorRef": "operator.example.selection",
+      "variableRef": "variable.region"
+    },
+    {
+      "filterId": "filter.site",
+      "label": "Site",
+      "sourceRef": "filter-source.example.site",
+      "operatorRef": "operator.example.selection",
+      "variableRef": "variable.site"
+    }
+  ],
+  "views": [
+    {
+      "viewId": "view.health",
+      "label": "Health",
+      "panelRefs": ["panel.infrastructure-table", "panel.infrastructure-trend"]
+    }
+  ],
+  "defaultViewRef": "view.health",
+  "panels": [
+    {
+      "panelId": "panel.infrastructure-table",
+      "title": "Infrastructure Health Table",
+      "type": "TABLE",
+      "layout": {"x": 0, "y": 0, "width": 8, "height": 5},
+      "queryUses": [
+        {
+          "queryId": "query.infrastructure-health",
+          "bindings": [
+            {"parameterRef": "parameter.time-range", "sourceKind": "CONTEXT", "sourceRef": "TIME_RANGE"},
+            {"parameterRef": "parameter.region", "sourceKind": "VARIABLE", "sourceRef": "variable.region"},
+            {"parameterRef": "parameter.site", "sourceKind": "VARIABLE", "sourceRef": "variable.site"}
+          ]
+        }
+      ],
+      "columnRefs": ["column.example.entity", "column.example.state", "column.example.time", "column.example.site", "column.example.owner"],
+      "filterRefs": ["filter.region", "filter.site"],
+      "variableRefs": ["variable.region", "variable.site"],
+      "drillDowns": [
+        {
+          "drillDownId": "drill.entity",
+          "destinationType": "ENTITY_DETAIL",
+          "targetRef": "entity-context.example.selected-row",
+          "preserveContext": {"tenant": true, "scope": true, "time": true, "filters": true}
+        }
+      ]
+    },
+    {
+      "panelId": "panel.infrastructure-trend",
+      "title": "Infrastructure Trend",
+      "type": "TIME_SERIES",
+      "layout": {"x": 8, "y": 0, "width": 4, "height": 5},
+      "queryUses": [
+        {
+          "queryId": "query.infrastructure-health",
+          "bindings": [
+            {"parameterRef": "parameter.time-range", "sourceKind": "CONTEXT", "sourceRef": "TIME_RANGE"},
+            {"parameterRef": "parameter.region", "sourceKind": "VARIABLE", "sourceRef": "variable.region"},
+            {"parameterRef": "parameter.site", "sourceKind": "VARIABLE", "sourceRef": "variable.site"}
+          ]
+        }
+      ],
+      "filterRefs": ["filter.region", "filter.site"],
+      "variableRefs": ["variable.region", "variable.site"]
+    }
+  ],
+  "stateHandling": {
+    "states": [
+      {"state": "LOADING", "presentationRef": "state.example.loading"},
+      {"state": "EMPTY", "presentationRef": "state.example.empty"},
+      {"state": "PARTIAL_DATA", "presentationRef": "state.example.partial"},
+      {"state": "STALE_DATA", "presentationRef": "state.example.stale"},
+      {"state": "PERMISSION_RESTRICTED", "presentationRef": "state.example.permission"},
+      {"state": "NOT_LICENSED", "presentationRef": "state.example.licensed"},
+      {"state": "QUERY_LIMITED", "presentationRef": "state.example.query-limited"},
+      {"state": "ERROR", "presentationRef": "state.example.error"},
+      {"state": "MONITORING_DEGRADED", "presentationRef": "state.example.monitoring-degraded"},
+      {"state": "NORMAL", "presentationRef": "state.example.normal"}
+    ],
+    "showFreshnessWhenSupplied": true,
+    "showProvenanceWhenSupplied": true,
+    "showAffectedSourceWhenSupplied": true,
+    "showCorrelationIdWhenSupplied": true,
+    "maintenancePresentationRef": "state.example.maintenance-context",
+    "suppressionPresentationRef": "state.example.suppression-context",
+    "causalInferenceFromMissingData": "PROHIBITED"
+  },
+  "performance": {
+    "serverSidePagination": true,
+    "serverSideFiltering": true,
+    "serverSideSorting": true,
+    "virtualizationHint": true,
+    "queryPolicyRef": "query-policy.example.bounded"
+  },
+  "provenance": {
+    "sourceRef": "example.customer-definition",
+    "sourceVersion": "1"
+  }
+}

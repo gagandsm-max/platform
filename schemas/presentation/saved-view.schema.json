@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/presentation/saved-view.schema.json",
+  "title": "Platform Saved View",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["documentType", "schemaVersion", "savedViewId", "definitionVersion", "displayName", "ownerRef", "scopeRef", "targetType", "targetRef", "filterState", "timeContextPolicyRef", "serverAuthorizationRequired"],
+  "properties": {
+    "documentType": {"const": "SAVED_VIEW"},
+    "schemaVersion": {"const": "1.0.0"},
+    "savedViewId": {"$ref": "#/$defs/ref128"},
+    "definitionVersion": {"$ref": "#/$defs/version64"},
+    "displayName": {"type": "string", "minLength": 1, "maxLength": 255},
+    "description": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "ownerRef": {"$ref": "#/$defs/ref128"},
+    "scopeRef": {"$ref": "#/$defs/ref128"},
+    "targetType": {"enum": ["DASHBOARD", "WORKSPACE"]},
+    "targetRef": {"$ref": "#/$defs/ref128"},
+    "filterState": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["filterRef", "selectionRefs"],
+        "properties": {
+          "filterRef": {"$ref": "#/$defs/ref128"},
+          "selectionRefs": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}}
+        }
+      }
+    },
+    "timeContextPolicyRef": {"$ref": "#/$defs/ref128"},
+    "sortRef": {"$ref": "#/$defs/ref128"},
+    "groupRef": {"$ref": "#/$defs/ref128"},
+    "viewModeRef": {"$ref": "#/$defs/ref128"},
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sourceRef": {"$ref": "#/$defs/ref128"},
+        "sourceVersion": {"$ref": "#/$defs/version64"}
+      }
+    },
+    "serverAuthorizationRequired": {"const": true}
+  },
+  "$defs": {
+    "ref128": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "version64": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._:-]+$"}
+  }
+}

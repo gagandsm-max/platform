@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/presentation/dashboard-definition.schema.json",
+  "title": "Platform Dashboard Definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["documentType", "schemaVersion", "definitionId", "definitionVersion", "displayName", "origin", "scope", "systemDefinition", "recoverableSystemDefinition", "visibility", "contextPolicy", "queryBindings", "variables", "filters", "views", "panels", "stateHandling", "performance"],
+  "properties": {
+    "documentType": {"const": "DASHBOARD_DEFINITION"},
+    "schemaVersion": {"const": "1.0.0"},
+    "definitionId": {"$ref": "#/$defs/ref128"},
+    "definitionVersion": {"$ref": "#/$defs/version64"},
+    "displayName": {"$ref": "#/$defs/name255"},
+    "description": {"$ref": "#/$defs/text2000"},
+    "origin": {"enum": ["SYSTEM", "CUSTOMER_CREATED", "CLONE"]},
+    "scope": {"enum": ["MY", "TEAM", "SHARED", "TENANT_CUSTOMER", "SYSTEM"]},
+    "systemDefinition": {"type": "boolean"},
+    "recoverableSystemDefinition": {"type": "boolean"},
+    "derivedFrom": {"$ref": "#/$defs/derivedFrom"},
+    "folderRef": {"$ref": "#/$defs/ref128"},
+    "category": {"$ref": "#/$defs/name128"},
+    "tags": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/name128"}},
+    "visibility": {"$ref": "#/$defs/visibility"},
+    "contextPolicy": {"$ref": "#/$defs/contextPolicy"},
+    "queryBindings": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/queryBinding"}},
+    "variables": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/variable"}},
+    "filters": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/filter"}},
+    "views": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/view"}},
+    "defaultViewRef": {"$ref": "#/$defs/ref128"},
+    "panels": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/panel"}},
+    "actionRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+    "drillDowns": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/drillDown"}},
+    "stateHandling": {"$ref": "#/$defs/stateHandling"},
+    "performance": {"$ref": "#/$defs/performance"},
+    "provenance": {"$ref": "#/$defs/provenance"},
+    "valuePresentationPolicy": {"$ref": "#/$defs/valuePresentationPolicy"}
+  },
+  "$defs": {
+    "ref128": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "version64": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "name128": {"type": "string", "minLength": 1, "maxLength": 128},
+    "name255": {"type": "string", "minLength": 1, "maxLength": 255},
+    "text512": {"type": "string", "minLength": 1, "maxLength": 512},
+    "text2000": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "text4000": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "derivedFrom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["definitionId", "definitionVersion"],
+      "properties": {"definitionId": {"$ref": "#/$defs/ref128"}, "definitionVersion": {"$ref": "#/$defs/version64"}}
+    },
+    "visibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serverAuthorizationRequired"],
+      "properties": {
+        "roleRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "resourceScopeRef": {"$ref": "#/$defs/ref128"},
+        "permissionRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "entitlementRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "serverAuthorizationRequired": {"const": true}
+      }
+    },
+    "contextKey": {"enum": ["TIME_RANGE", "TIMEZONE", "COMPARISON_PERIOD", "AUTO_REFRESH", "TENANT_CUSTOMER", "REGION", "SITE", "GROUP_SERVICE", "ENTITY", "TAGS", "TECHNOLOGY_DOMAIN", "BUSINESS_SERVICE", "INCIDENT", "SLA"]},
+    "contextPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtimeContextKeys"],
+      "properties": {
+        "runtimeContextKeys": {"type": "array", "maxItems": 14, "uniqueItems": true, "items": {"$ref": "#/$defs/contextKey"}},
+        "defaultTimePolicyRef": {"$ref": "#/$defs/ref128"}
+      }
+    },
+    "queryBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queryId", "queryRef", "dataSourceClassRef", "parameterRefs"],
+      "properties": {
+        "queryId": {"$ref": "#/$defs/ref128"},
+        "queryRef": {"$ref": "#/$defs/ref128"},
+        "dataSourceClassRef": {"$ref": "#/$defs/ref128"},
+        "parameterRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "groupingRef": {"$ref": "#/$defs/ref128"},
+        "aggregationRef": {"$ref": "#/$defs/ref128"},
+        "timeContextBindingRef": {"$ref": "#/$defs/ref128"}
+      }
+    },
+    "variable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variableId", "label", "sourceRef", "multiSelect", "required", "persistInUrl"],
+      "properties": {
+        "variableId": {"$ref": "#/$defs/ref128"},
+        "label": {"$ref": "#/$defs/name128"},
+        "sourceRef": {"$ref": "#/$defs/ref128"},
+        "defaultSelectionRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "multiSelect": {"type": "boolean"},
+        "required": {"type": "boolean"},
+        "persistInUrl": {"type": "boolean"},
+        "dependsOnVariableRef": {"$ref": "#/$defs/ref128"}
+      }
+    },
+    "filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filterId", "label", "sourceRef", "operatorRef"],
+      "properties": {
+        "filterId": {"$ref": "#/$defs/ref128"},
+        "label": {"$ref": "#/$defs/name128"},
+        "sourceRef": {"$ref": "#/$defs/ref128"},
+        "operatorRef": {"$ref": "#/$defs/ref128"},
+        "variableRef": {"$ref": "#/$defs/ref128"},
+        "runtimeContextKey": {"$ref": "#/$defs/contextKey"},
+        "reusableFilterRef": {"$ref": "#/$defs/ref128"}
+      },
+      "not": {"required": ["variableRef", "runtimeContextKey"]}
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viewId", "label", "panelRefs"],
+      "properties": {"viewId": {"$ref": "#/$defs/ref128"}, "label": {"$ref": "#/$defs/name128"}, "panelRefs": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}}}
+    },
+    "panelType": {"enum": ["STAT", "GAUGE", "TIME_SERIES", "BAR", "PIE", "TABLE", "HEATMAP", "HISTOGRAM", "STATUS_GRID", "SANKEY", "TOPOLOGY", "GEO", "TEXT", "ALERT_LIST", "INCIDENT_LIST", "RCA", "DOMAIN_SPECIFIC"]},
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "y": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "width": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "height": {"type": "integer", "minimum": 1, "maximum": 100000}
+      }
+    },
+    "parameterBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parameterRef", "sourceKind", "sourceRef"],
+      "properties": {"parameterRef": {"$ref": "#/$defs/ref128"}, "sourceKind": {"enum": ["VARIABLE", "FILTER", "CONTEXT"]}, "sourceRef": {"$ref": "#/$defs/ref128"}}
+    },
+    "queryUse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queryId", "bindings"],
+      "properties": {"queryId": {"$ref": "#/$defs/ref128"}, "bindings": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/parameterBinding"}}}
+    },
+    "panel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["panelId", "title", "type", "layout", "queryUses"],
+      "properties": {
+        "panelId": {"$ref": "#/$defs/ref128"},
+        "title": {"$ref": "#/$defs/name255"},
+        "description": {"$ref": "#/$defs/text2000"},
+        "type": {"$ref": "#/$defs/panelType"},
+        "layout": {"$ref": "#/$defs/layout"},
+        "queryUses": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/queryUse"}},
+        "text": {"$ref": "#/$defs/text4000"},
+        "columnRefs": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "transformationRefs": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "visualizationSettingsRef": {"$ref": "#/$defs/ref128"},
+        "thresholdPolicyRef": {"$ref": "#/$defs/ref128"},
+        "fieldOverrideRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "filterRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "variableRefs": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "actionRefs": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/ref128"}},
+        "drillDowns": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/drillDown"}},
+        "statePolicyRef": {"$ref": "#/$defs/ref128"},
+        "visibility": {"$ref": "#/$defs/visibility"}
+      }
+    },
+    "drillDown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["drillDownId", "destinationType", "targetRef", "preserveContext"],
+      "properties": {
+        "drillDownId": {"$ref": "#/$defs/ref128"},
+        "destinationType": {"enum": ["ENTITY_DETAIL", "DASHBOARD", "TOPOLOGY", "TIMELINE", "RCA", "INCIDENT", "ALERT", "NCM_CLI", "IPAM", "FLOW", "ITSM", "AUDIT", "REPORT"]},
+        "targetRef": {"$ref": "#/$defs/ref128"},
+        "preserveContext": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tenant", "scope", "time", "filters"],
+          "properties": {"tenant": {"type": "boolean"}, "scope": {"type": "boolean"}, "time": {"type": "boolean"}, "filters": {"type": "boolean"}}
+        }
+      }
+    },
+    "stateName": {"enum": ["LOADING", "EMPTY", "PARTIAL_DATA", "STALE_DATA", "PERMISSION_RESTRICTED", "NOT_LICENSED", "QUERY_LIMITED", "ERROR", "MONITORING_DEGRADED", "NORMAL"]},
+    "stateEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "presentationRef"],
+      "properties": {"state": {"$ref": "#/$defs/stateName"}, "presentationRef": {"$ref": "#/$defs/ref128"}}
+    },
+    "stateHandling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["states", "showFreshnessWhenSupplied", "showProvenanceWhenSupplied", "showAffectedSourceWhenSupplied", "showCorrelationIdWhenSupplied", "causalInferenceFromMissingData"],
+      "properties": {
+        "states": {"type": "array", "minItems": 10, "maxItems": 10, "items": {"$ref": "#/$defs/stateEntry"}},
+        "showFreshnessWhenSupplied": {"type": "boolean"},
+        "showProvenanceWhenSupplied": {"type": "boolean"},
+        "showAffectedSourceWhenSupplied": {"type": "boolean"},
+        "showCorrelationIdWhenSupplied": {"type": "boolean"},
+        "maintenancePresentationRef": {"$ref": "#/$defs/ref128"},
+        "suppressionPresentationRef": {"$ref": "#/$defs/ref128"},
+        "causalInferenceFromMissingData": {"const": "PROHIBITED"}
+      }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serverSidePagination", "serverSideFiltering", "serverSideSorting", "virtualizationHint"],
+      "properties": {
+        "serverSidePagination": {"type": "boolean"},
+        "serverSideFiltering": {"type": "boolean"},
+        "serverSideSorting": {"type": "boolean"},
+        "virtualizationHint": {"type": "boolean"},
+        "queryPolicyRef": {"$ref": "#/$defs/ref128"}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"sourceRef": {"$ref": "#/$defs/ref128"}, "sourceVersion": {"$ref": "#/$defs/version64"}, "notes": {"$ref": "#/$defs/text512"}}
+    },
+    "valuePresentationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["methodologyRef", "requireSampleSizeDisclosure", "requireAssumptionDisclosure", "unsupportedCausalClaimsProhibited", "financialEstimatesRequireCustomerApprovedAssumptions"],
+      "properties": {
+        "methodologyRef": {"$ref": "#/$defs/ref128"},
+        "customerAssumptionRef": {"$ref": "#/$defs/ref128"},
+        "requireSampleSizeDisclosure": {"const": true},
+        "requireAssumptionDisclosure": {"const": true},
+        "unsupportedCausalClaimsProhibited": {"const": true},
+        "financialEstimatesRequireCustomerApprovedAssumptions": {"const": true}
+      }
+    }
+  }
+}
