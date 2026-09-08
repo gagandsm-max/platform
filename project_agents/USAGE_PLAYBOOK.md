@@ -24,6 +24,20 @@ Use 2–5 agents for most tasks. Add specialists only when the subsystem/risk re
 | Parallel PR integration | git-workflow-master → codebase-archaeologist → code-reviewer → targeted tests/evidence |
 | Release gate | reality-checker coordinates evidence from code-reviewer, appsec, secrets, performance, accessibility/UI, DB/migration and model-QA only where applicable. |
 
+## Evidence routing
+
+Apply the quality gates that the changed behavior can actually affect; do not run every gate mechanically and do not omit an applicable gate merely because a specialist is absent.
+
+- **Unit/static** — changed deterministic logic, parsers, validation, generation, configuration or contracts.
+- **Integration/API/contract** — service boundaries, APIs/events, protocol/control contracts, persistence interactions or generated interface compatibility.
+- **Security/tenant isolation** — authentication, authorization, secrets, untrusted input, tenant/resource scope, privileged actions or trust-boundary changes.
+- **Migration/failure/recovery** — schemas, durable state, upgrade paths, retries, queues, leases/fencing, HA/DR or operational recovery behavior.
+- **Performance** — hot paths, polling/ingestion, storage/query cardinality, high-rate streams, dashboard/query scale or resource-sensitive changes.
+- **UI/browser/accessibility** — user-visible workflows, browser state, role-aware UX, keyboard/focus/contrast/responsiveness or large-table behavior.
+- **Packaging/release** — installers, images, CI/CD, signing/SBOM, package layout, upgrade/rollback or release-promotion changes.
+
+The evidence collector records what actually ran. The reality checker may reject a completion/production/GA claim when an applicable gate is missing, even if narrower tests are green.
+
 ## Rules for parallelism
 
 Parallelize **read-heavy independent verification**, not multiple agents writing the same checkout. Good parallel work: code review + security review + test-gap analysis. Risky parallel work: two agents editing the same files or schema.
