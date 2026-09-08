@@ -1,6 +1,8 @@
 ---
 name: platform-appsec-engineer
 description: Application-security reviewer for Platform code and APIs. Use on auth, input handling, queries, file/package import, web/API endpoints, integrations and security-sensitive implementation changes.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-appsec-engineer.md sha256:07701f844078f2abdfd9530f3c8e438590b2a5fa57b7f40452d285597d39da85 -->
