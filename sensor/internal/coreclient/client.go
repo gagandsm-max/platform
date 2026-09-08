@@ -19,9 +19,11 @@ import (
 )
 
 const (
-	heartbeatPath = "/api/v1/sensor/heartbeat"
-	statusPath    = "/api/v1/sensor/status"
-	telemetryPath = "/api/v1/telemetry"
+	heartbeatPath        = "/api/v1/sensor/heartbeat"
+	statusPath           = "/api/v1/sensor/status"
+	telemetryPath        = "/api/v1/telemetry"
+	discoveryTasksPath   = "/api/v1/sensor/discovery/tasks"
+	discoveryResultsPath = "/api/v1/sensor/discovery/results"
 )
 
 type Config struct {
@@ -88,6 +90,51 @@ type UploadAck struct {
 	Status                  string  `json:"status"`
 	AcceptedThroughSequence *uint64 `json:"accepted_through_sequence,omitempty"`
 	SensorIdentity          string  `json:"sensor_identity,omitempty"`
+}
+
+type DiscoveryTaskRequest struct {
+	SensorID string `json:"sensor_id"`
+}
+
+type DiscoveryTaskResponse struct {
+	Status           string   `json:"status"`
+	HasTask          bool     `json:"has_task"`
+	RequestID        string   `json:"request_id,omitempty"`
+	TenantID         string   `json:"tenant_id,omitempty"`
+	CorrelationID    string   `json:"correlation_id,omitempty"`
+	Targets          []string `json:"targets,omitempty"`
+	RequestedMethods []string `json:"requested_methods,omitempty"`
+	SNMPPort         int      `json:"snmp_port,omitempty"`
+	TimeoutMS        int      `json:"timeout_ms,omitempty"`
+	MaxRetries       int      `json:"max_retries,omitempty"`
+}
+
+type DiscoveryEvidencePayload struct {
+	Target           string         `json:"target"`
+	Protocol         string         `json:"protocol"`
+	Method           string         `json:"method,omitempty"`
+	Status           string         `json:"status"`
+	ReachabilityKind string         `json:"reachability_kind,omitempty"`
+	TechnicalCode    string         `json:"technical_code,omitempty"`
+	Attributes       map[string]any `json:"attributes,omitempty"`
+	RawEvidence      map[string]any `json:"raw_evidence,omitempty"`
+	DurationMS       int64          `json:"duration_ms,omitempty"`
+}
+
+type DiscoveryResultSubmission struct {
+	SensorID      string                     `json:"sensor_id"`
+	RequestID     string                     `json:"request_id"`
+	TenantID      string                     `json:"tenant_id"`
+	Status        string                     `json:"status"`
+	FailureReason string                     `json:"failure_reason,omitempty"`
+	Evidence      []DiscoveryEvidencePayload `json:"evidence"`
+}
+
+type DiscoveryResultAck struct {
+	Status         string `json:"status"`
+	RequestID      string `json:"request_id"`
+	SensorIdentity string `json:"sensor_identity"`
+	ReceivedAt     string `json:"received_at"`
 }
 
 func New(cfg Config) (*Client, error) {
@@ -179,6 +226,23 @@ func (c *Client) Upload(ctx context.Context, batch Batch) (UploadAck, error) {
 		return ack, newError(CodeProtocol, "Core acknowledgement sequence is outside the submitted batch range", nil, false)
 	}
 	return ack, nil
+}
+
+func (c *Client) FetchDiscoveryTask(ctx context.Context, sensorID string) (DiscoveryTaskResponse, error) {
+	var out DiscoveryTaskResponse
+	req := DiscoveryTaskRequest{SensorID: sensorID}
+	if err := c.doJSON(ctx, http.MethodPost, discoveryTasksPath, req, "", "", &out); err != nil {
+		return DiscoveryTaskResponse{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) SubmitDiscoveryResults(ctx context.Context, sub DiscoveryResultSubmission, correlationID string) (DiscoveryResultAck, error) {
+	var out DiscoveryResultAck
+	if err := c.doJSON(ctx, http.MethodPost, discoveryResultsPath, sub, correlationID, "", &out); err != nil {
+		return DiscoveryResultAck{}, err
+	}
+	return out, nil
 }
 
 // SendBatch is retained only for the pre-runtime demo collector to compile.

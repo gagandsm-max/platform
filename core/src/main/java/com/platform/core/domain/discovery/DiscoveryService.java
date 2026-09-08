@@ -314,12 +314,20 @@ public class DiscoveryService {
                     mergedAttrs.putAll(it.attributes());
                     if (it.attributes().containsKey("sysDescr")) {
                         sysDescr = String.valueOf(it.attributes().get("sysDescr"));
+                    } else if (it.attributes().containsKey("sys_descr")) {
+                        sysDescr = String.valueOf(it.attributes().get("sys_descr"));
                     }
                     if (it.attributes().containsKey("sysObjectID")) {
                         sysObjectId = String.valueOf(it.attributes().get("sysObjectID"));
+                    } else if (it.attributes().containsKey("sys_object_id")) {
+                        sysObjectId = String.valueOf(it.attributes().get("sys_object_id"));
+                    } else if (it.attributes().containsKey("sysObjectId")) {
+                        sysObjectId = String.valueOf(it.attributes().get("sysObjectId"));
                     }
                     if (it.attributes().containsKey("sysName")) {
                         sysName = String.valueOf(it.attributes().get("sysName"));
+                    } else if (it.attributes().containsKey("sys_name")) {
+                        sysName = String.valueOf(it.attributes().get("sys_name"));
                     }
                 }
             }
