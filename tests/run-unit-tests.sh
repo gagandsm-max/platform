@@ -36,7 +36,7 @@ echo "--> [3/3] Running UI Typecheck..."
 docker run --rm \
     -v "${ROOT_DIR}/ui:/src:ro" \
     node:20-alpine \
-    sh -c "cp -r /src /app && cd /app && npm install --silent && npx tsc --noEmit"
+    sh -c "cp -r /src /app && cd /app && npm ci --silent && npx tsc --noEmit"
 
 echo "========================================================================"
 echo "ALL CONTAINERIZED UNIT TESTS PASSED SUCCESSFULLY"
