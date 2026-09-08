@@ -1,0 +1,132 @@
+{
+  "schemaVersion": "1.0.0",
+  "packId": "example.fictional.multi-protocol",
+  "packVersion": "1.1.0",
+  "name": "Fictional Multi-Protocol Device Pack",
+  "publisher": {
+    "type": "PARTNER",
+    "name": "Fictional Example Partner"
+  },
+  "certification": "EXPERIMENTAL",
+  "metadata": {
+    "vendor": "Fictional Networks",
+    "family": "Example Family",
+    "product": "Example Device",
+    "description": "Non-production example demonstrating protocol, reference and normalization contracts only."
+  },
+  "matchRules": [
+    {
+      "ruleId": "example-model-exact",
+      "priority": 10,
+      "conditions": [
+        {
+          "field": "vendor",
+          "operator": "EXACT",
+          "value": "Fictional Networks",
+          "caseSensitive": false
+        },
+        {
+          "field": "model",
+          "operator": "EXACT",
+          "value": "Example 9000",
+          "caseSensitive": false
+        }
+      ]
+    },
+    {
+      "ruleId": "example-model-family",
+      "priority": 20,
+      "conditions": [
+        {
+          "field": "vendor",
+          "operator": "EXACT",
+          "value": "Fictional Networks",
+          "caseSensitive": false
+        },
+        {
+          "field": "model",
+          "operator": "GLOB",
+          "value": "Example-*",
+          "caseSensitive": false
+        }
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "monitoring.health",
+      "description": "Fictional multi-protocol health mapping capability.",
+      "requiresProtocols": ["SNMP", "REST", "GNMI"]
+    },
+    {
+      "id": "inventory.identity",
+      "description": "Fictional identity mapping capability.",
+      "requiresProtocols": ["REST"]
+    }
+  ],
+  "protocols": [
+    {
+      "family": "SNMP",
+      "requirement": "REQUIRED",
+      "legacy": false,
+      "suggestedPort": 161,
+      "transportModes": ["UDP"],
+      "securityModes": ["SNMPV3"],
+      "credentialProfileType": "SNMP"
+    },
+    {
+      "family": "REST",
+      "requirement": "OPTIONAL",
+      "legacy": false,
+      "suggestedPort": 443,
+      "transportModes": ["HTTPS", "TLS"],
+      "securityModes": ["TLS", "MTLS", "OAUTH2"],
+      "credentialProfileType": "REST"
+    },
+    {
+      "family": "GNMI",
+      "requirement": "OPTIONAL",
+      "legacy": false,
+      "transportModes": ["GRPC", "TLS"],
+      "securityModes": ["TLS", "MTLS"],
+      "credentialProfileType": "GNMI"
+    }
+  ],
+  "references": [
+    {
+      "id": "example-api",
+      "kind": "OPENAPI",
+      "version": "fictional-v1",
+      "sourceReference": "fictional-openapi-reference",
+      "provenanceId": "fixture-source"
+    }
+  ],
+  "normalization": [
+    {
+      "key": "device.health_state",
+      "source": {
+        "protocol": "REST",
+        "field": "fictional.healthValue",
+        "referenceId": "example-api"
+      },
+      "valueType": "STATE",
+      "target": {
+        "entityType": "network_device"
+      },
+      "qualityFallback": "UNKNOWN",
+      "provenanceId": "fixture-source",
+      "transform": {
+        "type": "IDENTITY"
+      }
+    }
+  ],
+  "dependencies": [],
+  "provenance": [
+    {
+      "id": "fixture-source",
+      "sourceType": "PARTNER_SUPPLIED",
+      "sourceReference": "fictional-contract-example",
+      "redistribution": "RESTRICTED"
+    }
+  ]
+}
