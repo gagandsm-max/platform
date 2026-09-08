@@ -8,18 +8,26 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
+# Sensor spool tests intentionally enforce the fixed 80% storage-protection guard.
+# A GitHub-hosted runner's overlay filesystem can already be above that watermark,
+# which makes otherwise deterministic unit tests depend on runner image pressure.
+# Give Go tests a clean bounded tmpfs for t.TempDir() without changing product logic.
+GO_TEST_TMPFS="/tmp:rw,size=1073741824,mode=1777"
+
 echo "========================================================================"
 echo "Running Platform Containerized Unit Tests"
 echo "========================================================================"
 
 echo "--> [1/3] Running Go Unit Tests (Sensor & Agent)..."
 docker run --rm \
+    --tmpfs "${GO_TEST_TMPFS}" \
     -v "${ROOT_DIR}/sensor:/app/sensor:ro" \
     -w /app/sensor \
     golang:1.27.1-alpine3.24 \
     go test -v ./...
 
 docker run --rm \
+    --tmpfs "${GO_TEST_TMPFS}" \
     -v "${ROOT_DIR}/agent:/app/agent:ro" \
     -w /app/agent \
     golang:1.27.1-alpine3.24 \
