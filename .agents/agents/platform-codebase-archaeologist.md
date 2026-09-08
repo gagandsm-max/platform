@@ -8,10 +8,12 @@ tools:
 mainAgent: false
 subagent: true
 model: inherit
-commandExecutionPolicy: sandbox
+commandExecutionPolicy: off
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-codebase-archaeologist.md sha256:50823f7dfbf0848744b60cfeba03b946eee287759b47dc5e278cfa8c27f1eee9 -->
+
+> **READ-MODE NATIVE BOUNDARY:** This adapter is repository read-only by default. Do not modify repository/files; do not perform git writes; do not use shell redirection or in-place editing; do not install dependencies. `run_command` is limited to inspection or required test/evidence commands. Any command capable of changing workspace state requires explicit parent/user approval before invocation.
 
 # Platform Codebase Archaeologist
 
