@@ -1,8 +1,6 @@
 package discovery
 
-import (
-	"time"
-)
+import "time"
 
 type Target struct {
 	Address string `json:"address"`
@@ -22,19 +20,20 @@ type Evidence struct {
 }
 
 type Task struct {
-	TaskID           string        `json:"task_id"`
-	RequestID        string        `json:"request_id"`
-	TenantID         string        `json:"tenant_id"`
-	CorrelationID    string        `json:"correlation_id"`
-	Targets          []Target      `json:"targets"`
-	RequestedMethods []string      `json:"requested_methods"`
-	SNMPPort         int           `json:"snmp_port"`
-	Timeout          time.Duration `json:"timeout"`
-	MaxRetries       int           `json:"max_retries"`
+	TaskID               string        `json:"task_id"`
+	RequestID            string        `json:"request_id"`
+	TenantID             string        `json:"tenant_id"`
+	CorrelationID        string        `json:"correlation_id"`
+	AssignmentVersion    uint64        `json:"assignment_version"`
+	Targets              []Target      `json:"targets"`
+	RequestedMethods     []string      `json:"requested_methods"`
+	CredentialProfileRef string        `json:"credential_profile_ref,omitempty"`
+	SNMPPort             int           `json:"snmp_port"`
+	Timeout              time.Duration `json:"timeout"`
+	MaxRetries           int           `json:"max_retries"`
 }
 
 type Result struct {
-	SensorID      string     `json:"sensor_id"`
 	RequestID     string     `json:"request_id"`
 	TenantID      string     `json:"tenant_id"`
 	CorrelationID string     `json:"correlation_id"`
