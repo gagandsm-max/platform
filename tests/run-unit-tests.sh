@@ -11,8 +11,9 @@ cd "${ROOT_DIR}"
 # Sensor spool tests intentionally enforce the fixed 80% storage-protection guard.
 # A GitHub-hosted runner's overlay filesystem can already be above that watermark,
 # which makes otherwise deterministic unit tests depend on runner image pressure.
-# Give Go tests a clean bounded tmpfs for t.TempDir() without changing product logic.
-GO_TEST_TMPFS="/tmp:rw,size=1073741824,mode=1777"
+# Give Go tests a clean bounded executable tmpfs for t.TempDir()/go-build without
+# changing product storage-protection behavior.
+GO_TEST_TMPFS="/tmp:rw,exec,size=1073741824,mode=1777"
 
 echo "========================================================================"
 echo "Running Platform Containerized Unit Tests"
