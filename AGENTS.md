@@ -2,8 +2,8 @@
 
 This file should be available at the repository root of a working clone (commonly `~/nms/AGENTS.md`). For ChatGPT Project/source management it may also be stored in `project_documentation`; the preferred repository setup is a root copy or symlink to this authoritative file. It is a navigation and enforcement file, not a replacement for the mother-reference documents.
 
-**Mother-reference version:** 3.2.2  
-**Canonical repository (USER-FIXED):** https://github.com/gagandsm-max/platform  
+**Mother-reference version:** 3.2.2
+**Canonical repository (USER-FIXED):** https://github.com/gagandsm-max/platform
 
 Local clones (including `~/nms`) are working copies. Changes become authoritative only after push and merge into the canonical GitHub repository.
 
