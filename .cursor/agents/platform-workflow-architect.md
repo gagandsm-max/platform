@@ -1,6 +1,8 @@
 ---
 name: platform-workflow-architect
 description: Read-only workflow/state-machine architect for Platform. Use before complex provisioning, alert, incident, RCA, NCM, upgrade, HA, integration or remediation flows to map actors, states, handoffs, failures and cleanup.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-workflow-architect.md sha256:32ec0cf7b6248aadc7973df960981e925d0c69a8c83af5621ad1fab15502e815 -->
