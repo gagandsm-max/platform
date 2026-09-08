@@ -1,6 +1,8 @@
 ---
 name: platform-identity-access-engineer
 description: Platform IAM specialist. Use for Keycloak integration, OIDC/SAML/LDAP/Entra, MFA, RBAC/resource scope, service identities, API tokens, mTLS enrollment and tenant isolation.
+model: inherit
+readonly: false
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-identity-access-engineer.md sha256:d1dca926b27ebe08adbb674818fbd0e783c4810776404d3961cf6151922b35f4 -->
