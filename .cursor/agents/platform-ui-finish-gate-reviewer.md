@@ -1,6 +1,8 @@
 ---
 name: platform-ui-finish-gate-reviewer
 description: Independent UI finish gate for Platform. Use after UI implementation to prevent generic AI-generated dashboards and verify hierarchy, operational specificity, states, responsiveness and evidence before acceptance.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-ui-finish-gate-reviewer.md sha256:161c2505c74791d42cc7b6a2f12cfc7868f3fcb47a03ab0b7f833cd91528c017 -->
