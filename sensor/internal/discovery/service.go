@@ -25,6 +25,7 @@ type Service struct {
 	pollInterval time.Duration
 	logger       *slog.Logger
 	stopCh       chan struct{}
+	startOnce    sync.Once
 	stopOnce     sync.Once
 	wg           sync.WaitGroup
 }
@@ -39,26 +40,28 @@ func NewService(sensorID string, client CoreDiscoveryClient, executor *Executor,
 }
 
 func (s *Service) Start(ctx context.Context) {
-	s.logger.Info("Starting sensor discovery worker loop", "sensor_id", s.sensorID, "interval", s.pollInterval)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		ticker := time.NewTicker(s.pollInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if err := s.PollOnce(ctx); err != nil {
-					s.logger.Debug("Discovery poll completed with classified failure", "error_code", safeErrorCode(err))
+	s.startOnce.Do(func() {
+		s.logger.Info("Starting sensor discovery worker loop", "sensor_id", s.sensorID, "interval", s.pollInterval)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			ticker := time.NewTicker(s.pollInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if err := s.PollOnce(ctx); err != nil {
+						s.logger.Debug("Discovery poll completed with classified failure", "error_code", safeErrorCode(err))
+					}
+				case <-s.stopCh:
+					s.logger.Info("Sensor discovery worker loop exiting")
+					return
+				case <-ctx.Done():
+					return
 				}
-			case <-s.stopCh:
-				s.logger.Info("Sensor discovery worker loop exiting")
-				return
-			case <-ctx.Done():
-				return
 			}
-		}
-	}()
+		}()
+	})
 }
 
 // PollOnce is serialized by the service loop. Core atomically claims one assigned task and
@@ -110,12 +113,8 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	}
 	ack, err := s.client.SubmitDiscoveryResults(ctx, submission, task.CorrelationID)
 	if err != nil { return err }
-	if ack.RequestID != task.RequestID {
-		return fmt.Errorf("DISCOVERY_ACK_REQUEST_MISMATCH")
-	}
-	if ack.Status != "ACCEPTED" && ack.Status != "ALREADY_ACCEPTED" {
-		return fmt.Errorf("DISCOVERY_ACK_INVALID")
-	}
+	if ack.RequestID != task.RequestID { return fmt.Errorf("DISCOVERY_ACK_REQUEST_MISMATCH") }
+	if ack.Status != "ACCEPTED" && ack.Status != "ALREADY_ACCEPTED" { return fmt.Errorf("DISCOVERY_ACK_INVALID") }
 	s.logger.Info("Discovery result acknowledged by Core", "request_id", ack.RequestID, "status", ack.Status)
 	return nil
 }
