@@ -1,0 +1,130 @@
+name: Platform CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLATFORM_CI: "1"
+
+jobs:
+  static-contracts:
+    name: Static contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify changed-file whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE_SHA:-}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git diff --check "${BASE_SHA}...HEAD"
+          else
+            git diff --check
+          fi
+
+      - name: Prepare deterministic environment
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          make certs
+          docker compose config -q
+
+      - name: Run static contract validators
+        run: make test-static-contracts
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare environment
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          mkdir -p "${HOME}/.m2"
+
+      - name: Run containerized unit tests
+        run: make test-unit
+
+  ui-build:
+    name: UI test and production build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fresh lockfile install, UI tests, and build
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/ui:/src:ro" \
+            node:20-alpine \
+            sh -lc 'cp -a /src /app && cd /app && npm ci && npm run test:unit && npm run build'
+
+      - name: Build production UI container
+        run: docker build --no-cache -t platform-ui:ci ui/
+
+  integration-security:
+    name: Integration, PostgreSQL, contract, security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare environment
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          make certs
+          docker compose config -q
+
+      - name: Run 20-test integration suite
+        run: make test-integration
+
+      - name: Run mandatory PostgreSQL suite
+        run: ./tests/run-core-day02-tests.sh
+
+      - name: Run API and data contract suite
+        run: make test-contract
+
+      - name: Run security smoke suite
+        run: make test-security-smoke
+
+      - name: Capture diagnostics on failure
+        if: failure()
+        run: |
+          docker compose ps || true
+          docker compose logs --no-color --tail=250 || true
+
+      - name: Clean CI stack
+        if: always()
+        run: docker compose down -v --remove-orphans || true

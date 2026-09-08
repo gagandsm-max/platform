@@ -14,7 +14,7 @@ endif
 include $(ENV_FILE)
 export
 
-.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-integration test-contract test-security-smoke evidence clean dev-reset certs post-reboot-verify
+.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-static-contracts test-integration test-contract test-security-smoke evidence clean dev-reset certs post-reboot-verify
 
 help: ## Show available Makefile targets
 	@echo "========================================================================"
@@ -73,6 +73,10 @@ dev-logs: ## Tail logs for all Platform services
 test-unit: ## Run unit tests inside isolated build containers
 	@echo "==> Running containerized unit tests..."
 	@bash tests/run-unit-tests.sh
+
+test-static-contracts: ## Run dependency-free Device Pack, provisioning, and presentation contract validators
+	@echo "==> Running Platform static contract validation..."
+	@bash tests/run-static-contract-validation.sh
 
 test-integration: ## Run full 20-test integration verification suite
 	@echo "==> Running Platform 20-test integration suite..."
