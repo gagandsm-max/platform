@@ -1,6 +1,8 @@
 ---
 name: platform-secrets-credential-engineer
 description: Platform secrets/credential specialist. Use for Credential Profiles, mTLS/PKI, signing keys, API tokens, connector secrets, CI credentials, support bundles and log/redaction behavior.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-secrets-credential-engineer.md sha256:1f6cdd1f93e203f3e93403e5859cf4dd51a25d835415cafdbb8c3e3e40e02283 -->
