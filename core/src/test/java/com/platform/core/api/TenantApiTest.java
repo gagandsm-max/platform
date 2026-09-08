@@ -142,10 +142,9 @@ class TenantApiTest {
 
     @Test
     void badPaginationRejected() throws Exception {
-        when(tenantService.list(anyInt(), anyInt())).thenCallRealMethod();
-        // Use real PageResult normalization through a real service would be better; assert controller path:
         TenantService realish = mock(TenantService.class);
-        when(realish.list(eq(0), anyInt())).thenThrow(new DomainException("QUERY_LIMIT_EXCEEDED", "page must be >= 1"));
+        when(realish.listScoped(any(), eq(0), anyInt()))
+                .thenThrow(new DomainException("QUERY_LIMIT_EXCEEDED", "page must be >= 1"));
         MockMvc mvc = MockMvcBuilders.standaloneSetup(new TenantController(realish))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .addFilters(new CorrelationIdFilter())

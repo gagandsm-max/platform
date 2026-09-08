@@ -176,13 +176,27 @@ public class AuthorizationRouteMapper {
         return null;
     }
 
+    private static final Pattern ENTITY_IDENTIFIER_NAMED = Pattern.compile(
+            "^/entities/[0-9a-fA-F-]{36}/identifiers/([0-9a-fA-F-]{36})$"
+    );
+    private static final Pattern NAMED_PARENT = Pattern.compile(
+            "^/(sites|groups|tags|entities)/([0-9a-fA-F-]{36})(?:/.*)?$"
+    );
+
     private static UUID extractResourceId(String remainder, ResourceType resourceType, UUID tenantId) {
         if (resourceType == ResourceType.TENANT) {
             return tenantId;
         }
-        // /sites/{uuid}, /groups/{uuid}, /tags/{uuid}, /entities/{uuid}
-        Pattern named = Pattern.compile("^/(sites|groups|tags|entities)/([0-9a-fA-F-]{36})(?:/.*)?$");
-        Matcher m = named.matcher(remainder);
+        // ENTITY_IDENTIFIER decisions must use the identifier UUID, never the parent entity UUID.
+        if (resourceType == ResourceType.ENTITY_IDENTIFIER) {
+            Matcher identifier = ENTITY_IDENTIFIER_NAMED.matcher(remainder);
+            if (identifier.matches()) {
+                return UUID.fromString(identifier.group(1));
+            }
+            return null;
+        }
+        // /sites/{uuid}, /groups/{uuid}, /tags/{uuid}, /entities/{uuid} (parent for nested ops)
+        Matcher m = NAMED_PARENT.matcher(remainder);
         if (m.matches()) {
             return UUID.fromString(m.group(2));
         }

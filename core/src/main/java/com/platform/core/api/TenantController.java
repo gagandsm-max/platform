@@ -20,7 +20,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -55,17 +54,17 @@ public class TenantController {
             @RequestParam(required = false) Integer limit
     ) {
         PrincipalContext principal = PlatformSecurityContext.requirePrincipal();
-        PageResult<Tenant> result = tenants.list(page, PageResult.normalizeLimit(limit));
-        List<TenantResponse> filtered = result.items().stream()
-                .filter(tenant -> principal.tenantScopes().contains(tenant.tenantId()))
-                .map(TenantController::toResponse)
-                .toList();
+        PageResult<Tenant> result = tenants.listScoped(
+                principal.tenantScopes(),
+                page,
+                PageResult.normalizeLimit(limit)
+        );
         return new PageResult<>(
-                filtered,
+                result.items().stream().map(TenantController::toResponse).toList(),
                 result.page(),
                 result.limit(),
-                filtered.size(),
-                false
+                result.total(),
+                result.hasMore()
         );
     }
 

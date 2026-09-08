@@ -128,13 +128,15 @@ public class HttpSecurityConfiguration {
         );
     }
 
+    /**
+     * Exact unauthenticated probe surface only. Do not widen with {@code /actuator/**}:
+     * newly enabled actuator endpoints must stay deny-by-default until deliberately classified.
+     */
     private static RequestMatcher probeMatchers() {
         return new OrRequestMatcher(
                 new AntPathRequestMatcher("/actuator/health"),
-                new AntPathRequestMatcher("/actuator/health/**"),
-                new AntPathRequestMatcher("/actuator/info"),
-                new AntPathRequestMatcher("/actuator/metrics"),
-                new AntPathRequestMatcher("/actuator/metrics/**"),
+                new AntPathRequestMatcher("/actuator/health/liveness"),
+                new AntPathRequestMatcher("/actuator/health/readiness"),
                 new AntPathRequestMatcher("/api/v1/version"),
                 new AntPathRequestMatcher("/api/v1/health/**")
         );

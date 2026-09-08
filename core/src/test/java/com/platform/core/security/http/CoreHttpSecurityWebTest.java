@@ -96,6 +96,7 @@ class CoreHttpSecurityWebTest {
         );
         when(tenantService.get(TENANT_A)).thenReturn(tenantA);
         when(tenantService.get(TENANT_B)).thenThrow(new com.platform.core.domain.DomainException("TENANT_NOT_FOUND", "Tenant not found"));
+        when(healthEndpoint.health()).thenReturn(org.springframework.boot.actuate.health.Health.up().build());
     }
 
     @Test
@@ -259,6 +260,63 @@ class CoreHttpSecurityWebTest {
         mockMvc.perform(get("/api/v1/version"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.product").value("Platform"));
+    }
+
+    @Test
+    void anonymousActuatorHealthIsAllowedWithoutComponentDetails() throws Exception {
+        // Without a live datastore in this harness health may be DOWN (503); probe chain must still allow it.
+        int status = mockMvc.perform(get("/actuator/health"))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+        org.junit.jupiter.api.Assertions.assertTrue(
+                status == 200 || status == 503,
+                "anonymous /actuator/health must be reachable, got HTTP " + status
+        );
+        String body = mockMvc.perform(get("/actuator/health"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        org.junit.jupiter.api.Assertions.assertFalse(
+                body.contains("\"components\""),
+                "anonymous health must not expose component details: " + body
+        );
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"db\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"clickHouse\""));
+    }
+
+    @Test
+    void anonymousActuatorMetricsDenied() throws Exception {
+        mockMvc.perform(get("/actuator/metrics"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/actuator/metrics/jvm.memory.used"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anonymousActuatorInfoDenied() throws Exception {
+        mockMvc.perform(get("/actuator/info"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anonymousUnknownActuatorEndpointDenied() throws Exception {
+        mockMvc.perform(get("/actuator/env"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/actuator/beans"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void businessJwtDoesNotGrantActuatorAdministration() throws Exception {
+        String token = signedJwt((RSAPrivateKey) KEY_PAIR.getPrivate(), ISSUER, AUDIENCE, "user-a",
+                Instant.now().minusSeconds(60), Instant.now().plusSeconds(600));
+        mockMvc.perform(get("/actuator/metrics")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/actuator/info")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
     }
 
     @Test

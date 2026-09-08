@@ -17,16 +17,30 @@ echo "========================================================================"
 echo "Running Platform API Contract Suite"
 echo "========================================================================"
 
-# 1. Core Health Actuator Schema Contract
-echo "--> [1/4] Verifying Actuator health contract schema..."
+# 1. Core Health Contracts (anonymous actuator vs detailed connectivity)
+echo "--> [1/4] Verifying anonymous actuator health + connectivity contracts..."
 HEALTH_JSON=$(curl -k -s "https://127.0.0.1:${CORE_PORT}/actuator/health")
-for comp in "status" "components" "db" "clickHouse" "kafka" "redis" "diskSpace"; do
-    if ! echo "${HEALTH_JSON}" | grep -q "\"${comp}\""; then
-        echo "[ERROR] Contract violation: missing '${comp}' in health response: ${HEALTH_JSON}"
+if ! echo "${HEALTH_JSON}" | grep -q '"status"'; then
+    echo "[ERROR] Contract violation: missing 'status' in anonymous health response: ${HEALTH_JSON}"
+    exit 1
+fi
+# Anonymous health must not dump internal component graphs (security boundary).
+for leak in '"components"' '"db"' '"clickHouse"' '"kafka"' '"redis"'; do
+    if echo "${HEALTH_JSON}" | grep -q "${leak}"; then
+        echo "[ERROR] Contract violation: anonymous /actuator/health must not expose ${leak}: ${HEALTH_JSON}"
         exit 1
     fi
 done
-echo "[OK] Actuator health schema conforms to quad-datastore contract."
+echo "[OK] Anonymous actuator health is status-only."
+
+CONN_JSON=$(curl -k -s "https://127.0.0.1:${CORE_PORT}/api/v1/health/connectivity")
+for field in "status" "postgres" "clickhouse" "valkey" "kafka"; do
+    if ! echo "${CONN_JSON}" | grep -q "\"${field}\""; then
+        echo "[ERROR] Contract violation: missing '${field}' in connectivity response: ${CONN_JSON}"
+        exit 1
+    fi
+done
+echo "[OK] Connectivity health schema conforms to quad-datastore contract."
 
 # 2. Version API Contract
 echo "--> [2/4] Verifying Core version contract schema..."

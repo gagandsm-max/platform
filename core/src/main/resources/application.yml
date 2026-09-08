@@ -53,10 +53,13 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        # Public probe chain permits only exact health/liveness/readiness. Keep exposure minimal.
+        include: health
   endpoint:
     health:
-      show-details: always
+      # Anonymous probes must not dump datastore/component internals. Detailed connectivity is
+      # available via /api/v1/health/connectivity (already on the public probe chain).
+      show-details: never
       probes:
         enabled: true
 
