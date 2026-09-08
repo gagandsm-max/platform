@@ -1,6 +1,8 @@
 ---
 name: platform-test-automation-engineer
 description: Platform automated-test specialist. Use to add the narrowest durable unit/component/contract/integration/UI/failure regression tests required by a change and wire them into existing Docker/CI conventions.
+model: inherit
+readonly: false
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-test-automation-engineer.md sha256:7e1c24764a722c8a87bbf23eefcfce804ec08cdf123c4cd659e12a4410de4dce -->
