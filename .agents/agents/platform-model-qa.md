@@ -8,10 +8,12 @@ tools:
 mainAgent: false
 subagent: true
 model: inherit
-commandExecutionPolicy: sandbox
+commandExecutionPolicy: off
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-model-qa.md sha256:867c7a4558fb78e751e7d7a49eedd2dd1d4f57de1204d7d515a9d1abf541b78c -->
+
+> **READ-MODE NATIVE BOUNDARY:** This adapter is repository read-only by default. Do not modify repository/files; do not perform git writes; do not use shell redirection or in-place editing; do not install dependencies. `run_command` is limited to inspection or required test/evidence commands. Any command capable of changing workspace state requires explicit parent/user approval before invocation.
 
 # Platform Model QA Specialist
 
