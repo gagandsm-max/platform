@@ -1,6 +1,8 @@
 ---
 name: platform-model-qa
 description: Independent QA for Platform anomaly/GNN/LLM behavior. Use to evaluate correctness, calibration, leakage, regression, INCONCLUSIVE behavior, explanation completeness and safe rollout before model enablement.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-model-qa.md sha256:867c7a4558fb78e751e7d7a49eedd2dd1d4f57de1204d7d515a9d1abf541b78c -->
