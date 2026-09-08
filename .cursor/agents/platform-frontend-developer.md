@@ -1,6 +1,8 @@
 ---
 name: platform-frontend-developer
 description: React/TypeScript implementation specialist for Platform UI. Use after UX/workflow contract is clear to build role-aware, server-driven, accessible, fast operational screens without generic dashboard filler.
+model: inherit
+readonly: false
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-frontend-developer.md sha256:effad04b2347d5cadc5fe7429d47751be7f0517ad552b42ff43e91529e7c662a -->
