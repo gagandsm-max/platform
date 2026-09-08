@@ -1,6 +1,8 @@
 ---
 name: platform-api-platform-engineer
 description: Platform API/event contract specialist. Use for Core APIs, Sensor/Agent control, ingestion, gRPC/HTTPS, Kafka event schemas, idempotency, compatibility and error contracts.
+model: inherit
+readonly: false
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-api-platform-engineer.md sha256:05b66f74cd2fd68fc69bdf0827d4525379b86c038ee1a4e6c50c5b1601799b4b -->
