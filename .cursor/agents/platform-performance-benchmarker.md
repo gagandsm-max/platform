@@ -1,6 +1,8 @@
 ---
 name: platform-performance-benchmarker
 description: Performance/capacity evidence specialist for Platform. Use for hot paths, Core/Sensor sizing, ingestion, polling, UI/query, storage, HA replay and release regression benchmarking.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-performance-benchmarker.md sha256:1aba7eb3ec6b3333cef565405a0be41fd668fc3d50463a942cae3ccbd8250ca5 -->
