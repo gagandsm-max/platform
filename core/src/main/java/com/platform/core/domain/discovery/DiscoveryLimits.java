@@ -107,6 +107,9 @@ public final class DiscoveryLimits {
             validateIpLiteral(normalized);
             return normalized;
         }
+        if (looksLikeIpv4Literal(target)) {
+            throw new DomainException("VALIDATION_FAILED", "Malformed IPv4 discovery target: " + target);
+        }
 
         if (target.indexOf(':') >= 0) {
             try {
@@ -232,6 +235,19 @@ public final class DiscoveryLimits {
                 v = v * 10 + (c - '0');
             }
             if (v > 255) return false;
+        }
+        return true;
+    }
+
+    private static boolean looksLikeIpv4Literal(String value) {
+        String[] parts = value.split("\\.", -1);
+        if (parts.length != 4) return false;
+        for (String part : parts) {
+            if (part.isEmpty()) return true;
+            for (int i = 0; i < part.length(); i++) {
+                char c = part.charAt(i);
+                if (c < '0' || c > '9') return false;
+            }
         }
         return true;
     }
