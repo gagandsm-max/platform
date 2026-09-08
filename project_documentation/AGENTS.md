@@ -23,6 +23,16 @@ For work involving SaaS monitoring, carrier/ISP integration, external changes/de
 
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
+## Development agent orchestration
+
+For engineering performed through Cursor, Google Antigravity, ChatGPT + GitHub, or another repository-aware coding tool, read `project_documentation/PLATFORM_DEVELOPMENT_AGENT_ORCHESTRATION_GUIDE.md` before routing work through specialist agents.
+
+- Canonical specialist definitions live under `project_agents/canonical/`.
+- `.cursor/agents/`, `.agents/agents/`, and `.codex/agents/` are generated adapters and are not independent sources of truth.
+- Use the smallest useful agent set; separate diagnosis, implementation and independent verification.
+- Read-only review agents may run in parallel. Parallel writers require isolated branches/worktrees and explicit integration ownership.
+- The orchestration guide is subordinate to this file and the Mother Reference; it cannot override Platform requirements or resolve a `TBD/P0 ENGINEERING SPIKE`.
+
 ## Canonical GitHub governance (USER-FIXED)
 
 - GitHub repository `https://github.com/gagandsm-max/platform` is the system of record.
