@@ -177,3 +177,121 @@ func TestDeliveryWorkerTemporaryErrorRetainsRecords(t *testing.T) {
 		t.Fatalf("expected FailureTemporary, got %s", stats.LastFailureClass)
 	}
 }
+
+func TestDeliveryWorkerAuthAndPermanentRetain(t *testing.T) {
+	cases := []client.FailureClass{client.FailureAuthentication, client.FailurePermanent}
+	for _, fc := range cases {
+		q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
+		tr := &mockTransport{
+			available: true,
+			err:       &client.DeliveryError{Code: string(fc), Class: fc},
+		}
+		w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.DeliverOnce(context.Background()); err == nil {
+			t.Fatalf("%s: expected error", fc)
+		}
+		if q.Len() != 1 {
+			t.Fatalf("%s: must retain queue", fc)
+		}
+		if w.Stats().Successes != 0 {
+			t.Fatalf("%s: must not count success", fc)
+		}
+	}
+}
+
+func TestDeliveryWorkerRejectsInvalidAck(t *testing.T) {
+	q := &mockQueue{
+		records: []queue.Record{
+			{Sequence: 5, ID: "rec-5", Payload: []byte("a")},
+			{Sequence: 6, ID: "rec-6", Payload: []byte("b")},
+		},
+	}
+	tr := &mockTransport{available: true, ack: client.Ack{AcceptedThrough: 99}}
+	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.DeliverOnce(context.Background()); err == nil {
+		t.Fatal("expected ACK beyond batch to fail")
+	}
+	if q.Len() != 2 || len(q.deleted) != 0 {
+		t.Fatalf("invalid ACK must not delete: len=%d deleted=%v", q.Len(), q.deleted)
+	}
+}
+
+func TestDeliveryWorkerRejectsEmptyAck(t *testing.T) {
+	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
+	tr := &mockTransport{available: true, ack: client.Ack{AcceptedThrough: 0}}
+	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.DeliverOnce(context.Background()); err == nil {
+		t.Fatal("empty ACK must fail")
+	}
+	if q.Len() != 1 {
+		t.Fatal("empty ACK must not delete")
+	}
+}
+
+func TestDeliveryWorkerPartialAck(t *testing.T) {
+	q := &mockQueue{
+		records: []queue.Record{
+			{Sequence: 1, ID: "rec-1", Payload: []byte("a")},
+			{Sequence: 2, ID: "rec-2", Payload: []byte("b")},
+		},
+	}
+	tr := &mockTransport{available: true, ack: client.Ack{AcceptedThrough: 1}}
+	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.DeliverOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if q.Len() != 1 || q.records[0].Sequence != 2 {
+		t.Fatalf("partial ACK should leave seq 2: %+v", q.records)
+	}
+}
+
+type failingDeleteQueue struct {
+	mockQueue
+}
+
+func (f *failingDeleteQueue) DeleteThrough(seq uint64) error {
+	return errors.New("QUEUE_DELETE_FAILED: injected")
+}
+
+func TestDeliveryWorkerDeleteFailureNotSuccess(t *testing.T) {
+	q := &failingDeleteQueue{mockQueue: mockQueue{
+		records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}},
+	}}
+	tr := &mockTransport{available: true, ack: client.Ack{AcceptedThrough: 1}}
+	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.DeliverOnce(context.Background()); err == nil {
+		t.Fatal("expected delete failure")
+	}
+	if w.Stats().Successes != 0 {
+		t.Fatal("delete failure must not count as success")
+	}
+}
+
+func TestDeliveryWorkerStopIdempotent(t *testing.T) {
+	q := &mockQueue{}
+	tr := &mockTransport{available: false}
+	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.Start(ctx)
+	w.Stop()
+	w.Stop() // must not panic
+}

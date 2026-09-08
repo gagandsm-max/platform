@@ -12,8 +12,8 @@ import (
 	"platform/agent/common/identity"
 )
 
-// Platform Windows Agent entrypoint / compile boundary harness.
-// Production Windows Service/SCM certification is explicitly executed on dedicated Windows runners.
+// Platform Windows Agent entrypoint / compile-boundary harness only.
+// Not a production Windows Agent: Service/SCM, Event Log, signed EXE, and MSI are not implemented here.
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,

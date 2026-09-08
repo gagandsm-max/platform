@@ -49,7 +49,11 @@ func LoadOrGenerate(stateDir, configuredID, tenantID string) (*AgentIdentity, er
 	if stateDir == "" {
 		agentID := strings.TrimSpace(configuredID)
 		if agentID == "" {
-			agentID = generateRandomID("agent")
+			var genErr error
+			agentID, genErr = generateRandomID("agent")
+			if genErr != nil {
+				return nil, genErr
+			}
 		}
 		return &AgentIdentity{
 			AgentID:  agentID,
@@ -74,6 +78,11 @@ func LoadOrGenerate(stateDir, configuredID, tenantID string) (*AgentIdentity, er
 		}
 		if !fi.IsDir() {
 			return nil, errors.New("IDENTITY_DIR_INVALID: state path is not a directory")
+		}
+		if fi.Mode().Perm()&0077 != 0 {
+			if err := os.Chmod(absDir, 0700); err != nil {
+				return nil, fmt.Errorf("IDENTITY_CHMOD_FAILED: %w", err)
+			}
 		}
 	} else if errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(absDir, 0700); err != nil {
@@ -133,7 +142,11 @@ func LoadOrGenerate(stateDir, configuredID, tenantID string) (*AgentIdentity, er
 	// File does not exist: generate fresh identity and atomically persist
 	agentID := strings.TrimSpace(configuredID)
 	if agentID == "" {
-		agentID = generateRandomID("agent")
+		var genErr error
+		agentID, genErr = generateRandomID("agent")
+		if genErr != nil {
+			return nil, genErr
+		}
 	}
 
 	newIdent := &AgentIdentity{
@@ -206,10 +219,10 @@ func detectHostID(hostname string) string {
 	return "host-" + digest[:16]
 }
 
-func generateRandomID(prefix string) string {
+func generateRandomID(prefix string) (string, error) {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%s-fallback", prefix)
+		return "", fmt.Errorf("IDENTITY_ID_GENERATION_FAILED: %w", err)
 	}
-	return fmt.Sprintf("%s-%s", prefix, hex.EncodeToString(b))
+	return fmt.Sprintf("%s-%s", prefix, hex.EncodeToString(b)), nil
 }

@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -37,6 +38,9 @@ type QueueStats struct {
 	QuarantineCount int
 	OldestAge       time.Duration
 	LastSequence    uint64
+	MaxRecords      int
+	MaxBytes        int64
+	AtCapacity      bool
 }
 
 type DurableQueue struct {
@@ -72,29 +76,17 @@ func NewDurableQueue(dir string, maxRecords int, maxBytes int64, maxRecordBytes 
 		return nil, fmt.Errorf("QUEUE_PATH_INVALID: %w", err)
 	}
 
-	// Verify or create root queue dir
-	if fi, err := os.Lstat(absDir); err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return nil, errors.New("QUEUE_SYMLINK_REJECTED: queue directory is a symlink")
-		}
-		if !fi.IsDir() {
-			return nil, ErrInvalidDirectory
-		}
-	} else if errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(absDir, 0700); err != nil {
-			return nil, fmt.Errorf("QUEUE_MKDIR_FAILED: %w", err)
-		}
-	} else {
-		return nil, fmt.Errorf("QUEUE_STAT_FAILED: %w", err)
+	if err := ensureSafeDir(absDir); err != nil {
+		return nil, err
 	}
 
 	activeDir := filepath.Join(absDir, "active")
-	if err := os.MkdirAll(activeDir, 0700); err != nil {
+	if err := ensureSafeDir(activeDir); err != nil {
 		return nil, fmt.Errorf("QUEUE_MKDIR_ACTIVE_FAILED: %w", err)
 	}
 
 	quarantineDir := filepath.Join(absDir, "quarantine")
-	if err := os.MkdirAll(quarantineDir, 0700); err != nil {
+	if err := ensureSafeDir(quarantineDir); err != nil {
 		return nil, fmt.Errorf("QUEUE_MKDIR_QUARANTINE_FAILED: %w", err)
 	}
 
@@ -114,11 +106,34 @@ func NewDurableQueue(dir string, maxRecords int, maxBytes int64, maxRecordBytes 
 	return q, nil
 }
 
+func ensureSafeDir(path string) error {
+	if fi, err := os.Lstat(path); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return errors.New("QUEUE_SYMLINK_REJECTED: queue directory is a symlink")
+		}
+		if !fi.IsDir() {
+			return ErrInvalidDirectory
+		}
+		if fi.Mode().Perm()&0077 != 0 {
+			if err := os.Chmod(path, 0700); err != nil {
+				return fmt.Errorf("QUEUE_CHMOD_FAILED: %w", err)
+			}
+		}
+		return nil
+	} else if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(path, 0700); err != nil {
+			return fmt.Errorf("QUEUE_MKDIR_FAILED: %w", err)
+		}
+		return nil
+	} else {
+		return fmt.Errorf("QUEUE_STAT_FAILED: %w", err)
+	}
+}
+
 func (q *DurableQueue) recoverState() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	// 1. Clean up stray temp files in queue dir and active dir
 	cleanTemp := func(d string) {
 		entries, _ := os.ReadDir(d)
 		for _, e := range entries {
@@ -130,8 +145,10 @@ func (q *DurableQueue) recoverState() error {
 	cleanTemp(q.dir)
 	cleanTemp(q.activeDir)
 
-	// 2. Count existing quarantine records
-	qEntries, _ := os.ReadDir(q.quarantineDir)
+	qEntries, err := os.ReadDir(q.quarantineDir)
+	if err != nil {
+		return fmt.Errorf("QUEUE_SCAN_QUARANTINE_FAILED: %w", err)
+	}
 	q.quarantineCount = 0
 	for _, e := range qEntries {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
@@ -139,7 +156,6 @@ func (q *DurableQueue) recoverState() error {
 		}
 	}
 
-	// 3. Scan active records
 	entries, err := os.ReadDir(q.activeDir)
 	if err != nil {
 		return fmt.Errorf("QUEUE_SCAN_FAILED: %w", err)
@@ -147,27 +163,33 @@ func (q *DurableQueue) recoverState() error {
 
 	q.activeCount = 0
 	q.activeBytes = 0
-	var highestSeq uint64 = 0
+	var highestSeq uint64
 
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "rec_") || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
+		filePath := filepath.Join(q.activeDir, e.Name())
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+		rec, fileSeq, parseErr := decodeRecordFile(e.Name(), data)
+		if parseErr != nil {
+			if qErr := q.quarantineRecordLocked(e.Name()); qErr != nil {
+				return qErr
+			}
+			continue
+		}
+		_ = rec
 		fi, err := e.Info()
 		if err != nil {
 			continue
 		}
 		q.activeCount++
 		q.activeBytes += fi.Size()
-
-		// Parse sequence from filename: rec_0000000000000000001_xxx.json
-		parts := strings.Split(e.Name(), "_")
-		if len(parts) >= 2 {
-			if seq, err := strconv.ParseUint(parts[1], 10, 64); err == nil {
-				if seq > highestSeq {
-					highestSeq = seq
-				}
-			}
+		if fileSeq > highestSeq {
+			highestSeq = fileSeq
 		}
 	}
 
@@ -183,11 +205,7 @@ func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	// Enforce capacity bounds
 	if q.activeCount >= q.maxRecords {
-		return nil, ErrQueueFull
-	}
-	if q.activeBytes+int64(len(payload)) > q.maxBytes {
 		return nil, ErrQueueFull
 	}
 
@@ -196,10 +214,7 @@ func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
 
 	recID := generateRecordID()
 	now := time.Now().UTC()
-
-	h := sha256.New()
-	h.Write(payload)
-	checksum := hex.EncodeToString(h.Sum(nil))
+	checksum := computeChecksum(seq, recID, now, payload)
 
 	rec := &Record{
 		Sequence:  seq,
@@ -215,10 +230,15 @@ func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
 		return nil, fmt.Errorf("QUEUE_MARSHAL_FAILED: %w", err)
 	}
 
+	// Capacity is measured by serialized on-disk size, not payload-only length.
+	if q.activeBytes+int64(len(data)) > q.maxBytes {
+		q.lastSeq--
+		return nil, ErrQueueFull
+	}
+
 	fileName := fmt.Sprintf("rec_%019d_%s.json", seq, recID)
 	targetPath := filepath.Join(q.activeDir, fileName)
 
-	// Atomic write: write to temp file then rename
 	tmpFile, err := os.CreateTemp(q.activeDir, "enqueue.*.tmp")
 	if err != nil {
 		q.lastSeq--
@@ -257,6 +277,14 @@ func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
 		return nil, fmt.Errorf("QUEUE_RENAME_FAILED: %w", err)
 	}
 
+	if err := syncDir(q.activeDir); err != nil {
+		// Record exists; surface durability warning as hard failure so callers
+		// do not assume durability that the platform could not confirm.
+		q.lastSeq--
+		_ = os.Remove(targetPath)
+		return nil, fmt.Errorf("QUEUE_DIR_SYNC_FAILED: %w", err)
+	}
+
 	q.activeCount++
 	q.activeBytes += int64(len(data))
 
@@ -279,7 +307,6 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 		return nil, fmt.Errorf("QUEUE_READ_DIR_FAILED: %w", err)
 	}
 
-	// Filter and sort by filename (which starts with zero-padded sequence)
 	var fileNames []string
 	for _, e := range entries {
 		if !e.IsDir() && strings.HasPrefix(e.Name(), "rec_") && strings.HasSuffix(e.Name(), ".json") {
@@ -306,45 +333,109 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 			break
 		}
 
-		var rec Record
-		if err := json.Unmarshal(data, &rec); err != nil {
-			// Corrupt JSON: quarantine
-			q.quarantineRecord(name)
+		rec, _, parseErr := decodeRecordFile(name, data)
+		if parseErr != nil {
+			if qErr := q.quarantineRecordLocked(name); qErr != nil {
+				return nil, qErr
+			}
 			continue
 		}
 
-		// Verify SHA-256 checksum
-		h := sha256.New()
-		h.Write(rec.Payload)
-		computedCheck := hex.EncodeToString(h.Sum(nil))
-		if computedCheck != rec.Checksum {
-			// Corrupt payload checksum: quarantine
-			q.quarantineRecord(name)
-			continue
-		}
-
-		batch = append(batch, rec)
+		batch = append(batch, *rec)
 		currentBytes += int64(len(data))
 	}
 
 	return batch, nil
 }
 
-func (q *DurableQueue) quarantineRecord(name string) {
+func decodeRecordFile(name string, data []byte) (*Record, uint64, error) {
+	fileSeq, idFromName, err := parseRecordFileName(name)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var rec Record
+	if err := dec.Decode(&rec); err != nil {
+		return nil, fileSeq, fmt.Errorf("%w: %v", ErrRecordCorrupted, err)
+	}
+	if dec.More() {
+		return nil, fileSeq, fmt.Errorf("%w: trailing JSON garbage", ErrRecordCorrupted)
+	}
+
+	if rec.Sequence != fileSeq {
+		return nil, fileSeq, fmt.Errorf("%w: sequence/filename mismatch", ErrRecordCorrupted)
+	}
+	if rec.ID != idFromName {
+		return nil, fileSeq, fmt.Errorf("%w: id/filename mismatch", ErrRecordCorrupted)
+	}
+
+	computed := computeChecksum(rec.Sequence, rec.ID, rec.CreatedAt, rec.Payload)
+	if computed != rec.Checksum {
+		return nil, fileSeq, ErrRecordCorrupted
+	}
+	return &rec, fileSeq, nil
+}
+
+func parseRecordFileName(name string) (uint64, string, error) {
+	// rec_<19-digit-seq>_<id>.json
+	if !strings.HasPrefix(name, "rec_") || !strings.HasSuffix(name, ".json") {
+		return 0, "", fmt.Errorf("%w: bad filename", ErrRecordCorrupted)
+	}
+	body := strings.TrimSuffix(strings.TrimPrefix(name, "rec_"), ".json")
+	parts := strings.SplitN(body, "_", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return 0, "", fmt.Errorf("%w: bad filename parts", ErrRecordCorrupted)
+	}
+	seq, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil {
+		return 0, "", fmt.Errorf("%w: bad sequence", ErrRecordCorrupted)
+	}
+	return seq, parts[1], nil
+}
+
+func computeChecksum(seq uint64, id string, createdAt time.Time, payload []byte) string {
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%d\n%s\n%s\n", seq, id, createdAt.UTC().Format(time.RFC3339Nano))
+	h.Write(payload)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func (q *DurableQueue) quarantineRecordLocked(name string) error {
 	oldPath := filepath.Join(q.activeDir, name)
 	newPath := filepath.Join(q.quarantineDir, name)
-	if fi, err := os.Stat(oldPath); err == nil {
-		q.activeCount--
-		q.activeBytes -= fi.Size()
-		if q.activeCount < 0 {
-			q.activeCount = 0
+
+	fi, err := os.Lstat(oldPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
 		}
-		if q.activeBytes < 0 {
-			q.activeBytes = 0
-		}
+		return fmt.Errorf("QUEUE_QUARANTINE_STAT_FAILED: %w", err)
 	}
-	_ = os.Rename(oldPath, newPath)
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return errors.New("QUEUE_QUARANTINE_SYMLINK_REJECTED: active record path is a symlink")
+	}
+
+	size := fi.Size()
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return fmt.Errorf("QUEUE_QUARANTINE_FAILED: %w", err)
+	}
+	if err := syncDir(q.activeDir); err != nil {
+		// Best-effort restore so corrupt data is not silently vanished mid-flight.
+		_ = os.Rename(newPath, oldPath)
+		return fmt.Errorf("QUEUE_QUARANTINE_DIR_SYNC_FAILED: %w", err)
+	}
+
+	q.activeCount--
+	q.activeBytes -= size
+	if q.activeCount < 0 {
+		q.activeCount = 0
+	}
+	if q.activeBytes < 0 {
+		q.activeBytes = 0
+	}
 	q.quarantineCount++
+	return nil
 }
 
 func (q *DurableQueue) DeleteThrough(seq uint64) error {
@@ -361,17 +452,24 @@ func (q *DurableQueue) DeleteThrough(seq uint64) error {
 			continue
 		}
 
-		parts := strings.Split(e.Name(), "_")
-		if len(parts) >= 2 {
-			if s, err := strconv.ParseUint(parts[1], 10, 64); err == nil && s <= seq {
-				filePath := filepath.Join(q.activeDir, e.Name())
-				if fi, err := e.Info(); err == nil {
-					q.activeCount--
-					q.activeBytes -= fi.Size()
-				}
-				_ = os.Remove(filePath)
-			}
+		fileSeq, _, err := parseRecordFileName(e.Name())
+		if err != nil || fileSeq > seq {
+			continue
 		}
+
+		filePath := filepath.Join(q.activeDir, e.Name())
+		fi, err := e.Info()
+		if err != nil {
+			return fmt.Errorf("QUEUE_DELETE_STAT_FAILED: %w", err)
+		}
+		if err := os.Remove(filePath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("QUEUE_DELETE_FAILED: %w", err)
+		}
+		q.activeCount--
+		q.activeBytes -= fi.Size()
 	}
 
 	if q.activeCount < 0 {
@@ -379,6 +477,10 @@ func (q *DurableQueue) DeleteThrough(seq uint64) error {
 	}
 	if q.activeBytes < 0 {
 		q.activeBytes = 0
+	}
+
+	if err := syncDir(q.activeDir); err != nil {
+		return fmt.Errorf("QUEUE_DELETE_DIR_SYNC_FAILED: %w", err)
 	}
 
 	return nil
@@ -406,12 +508,16 @@ func (q *DurableQueue) Stats() QueueStats {
 		}
 	}
 
+	atCapacity := q.activeCount >= q.maxRecords || q.activeBytes >= q.maxBytes
 	return QueueStats{
 		ActiveCount:     q.activeCount,
 		ActiveBytes:     q.activeBytes,
 		QuarantineCount: q.quarantineCount,
 		OldestAge:       oldestAge,
 		LastSequence:    q.lastSeq,
+		MaxRecords:      q.maxRecords,
+		MaxBytes:        q.maxBytes,
+		AtCapacity:      atCapacity,
 	}
 }
 
@@ -419,6 +525,15 @@ func (q *DurableQueue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.activeCount
+}
+
+func syncDir(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
 }
 
 func generateRecordID() string {

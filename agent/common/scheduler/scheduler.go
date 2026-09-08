@@ -27,6 +27,7 @@ type Scheduler struct {
 	logger     *slog.Logger
 	mu         sync.Mutex
 	stopCh     chan struct{}
+	stopOnce   sync.Once
 	wg         sync.WaitGroup
 	lastRun    time.Time
 	runErrors  int
@@ -149,6 +150,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 		}
 
 		if _, err := s.enqueuer.Enqueue(payload); err != nil {
+			s.runErrors++
 			s.logger.Error("Failed to enqueue collection batch", "error", err)
 			return
 		}
@@ -159,7 +161,9 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 }
 
 func (s *Scheduler) Stop() {
-	close(s.stopCh)
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+	})
 	s.wg.Wait()
 }
 

@@ -2,6 +2,7 @@ package queue
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -197,5 +198,176 @@ func TestDurableQueueRecoveryAfterRestart(t *testing.T) {
 	}
 	if rec3.Sequence != 3 {
 		t.Fatalf("expected sequence 3, got %d", rec3.Sequence)
+	}
+}
+
+func TestDurableQueueSerializedByteBound(t *testing.T) {
+	tempDir := t.TempDir()
+	probe, err := NewDurableQueue(filepath.Join(tempDir, "probe"), 100, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte("x"), 64)
+	if _, err := probe.Enqueue(payload); err != nil {
+		t.Fatal(err)
+	}
+	serialized := probe.Stats().ActiveBytes
+	if serialized <= 0 {
+		t.Fatal("expected positive serialized size")
+	}
+
+	q, err := NewDurableQueue(filepath.Join(tempDir, "bounded"), 100, serialized+10, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue(payload); err != nil {
+		t.Fatalf("first enqueue: %v", err)
+	}
+	if _, err := q.Enqueue(payload); err != ErrQueueFull {
+		t.Fatalf("expected ErrQueueFull on serialized size bound, got %v", err)
+	}
+	if q.Len() != 1 {
+		t.Fatalf("queue-full must preserve prior records, got len=%d", q.Len())
+	}
+}
+
+func TestDurableQueueTrailingJSONQuarantine(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := q.Enqueue([]byte("valid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(tempDir, "active"))
+	activeFile := filepath.Join(tempDir, "active", entries[0].Name())
+	raw, err := os.ReadFile(activeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(activeFile, append(raw, []byte(`{"extra":true}`)...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 0 {
+		t.Fatalf("trailing JSON must quarantine, got %d", len(batch))
+	}
+	if q.Stats().QuarantineCount != 1 {
+		t.Fatalf("expected quarantine, got %+v", q.Stats())
+	}
+	_ = rec
+}
+
+func TestDurableQueueMetadataTamperQuarantine(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("payload")); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(tempDir, "active"))
+	activeFile := filepath.Join(tempDir, "active", entries[0].Name())
+	raw, err := os.ReadFile(activeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec Record
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		t.Fatal(err)
+	}
+	rec.Sequence = 999
+	tampered, _ := json.Marshal(rec)
+	if err := os.WriteFile(activeFile, tampered, 0600); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 0 {
+		t.Fatal("metadata tamper must quarantine")
+	}
+}
+
+func TestDurableQueueNoHeadDropOnFull(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 1, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := q.Enqueue([]byte("keep-me"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("reject-me")); err != ErrQueueFull {
+		t.Fatalf("expected QUEUE_FULL, got %v", err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 1 || !bytes.Equal(batch[0].Payload, []byte("keep-me")) || batch[0].Sequence != first.Sequence {
+		t.Fatalf("full queue must not head-drop: %+v", batch)
+	}
+}
+
+func TestDurableQueueQuarantineFailureFailClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("valid-data")); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(tempDir, "active"))
+	activeFile := filepath.Join(tempDir, "active", entries[0].Name())
+	if err := os.WriteFile(activeFile, []byte(`{"not":"valid"`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Replace quarantine dir with a regular file so rename fails.
+	qPath := filepath.Join(tempDir, "quarantine")
+	if err := os.RemoveAll(qPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(qPath, []byte("not-a-dir"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.ReadBatch(10, 1024*1024); err == nil {
+		t.Fatal("expected quarantine failure to surface")
+	}
+	if _, err := os.Stat(activeFile); err != nil {
+		t.Fatalf("corrupt record must remain when quarantine fails: %v", err)
+	}
+}
+
+func TestDurableQueueDeleteThroughOK(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("b")); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.DeleteThrough(1); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 1 || batch[0].Sequence != 2 {
+		t.Fatalf("partial delete failed: %+v", batch)
 	}
 }

@@ -12,12 +12,29 @@ import (
 	"platform/agent/common/queue"
 )
 
+func TestHealthQueueFullDegraded(t *testing.T) {
+	prov := &mockStatsProvider{receiverAvailable: true, atCapacity: true}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqHealth := httptest.NewRequest(http.MethodGet, "/health", nil)
+	wHealth := httptest.NewRecorder()
+	s.handleHealth(wHealth, reqHealth)
+	if wHealth.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected /health 503 when queue full, got %d", wHealth.Code)
+	}
+}
+
 type mockStatsProvider struct {
 	receiverAvailable bool
+	atCapacity        bool
+	quarantine        int
+	collectorErrors   int
 }
 
 func (m *mockStatsProvider) QueueStats() queue.QueueStats {
-	return queue.QueueStats{ActiveCount: 5, ActiveBytes: 1024}
+	return queue.QueueStats{ActiveCount: 5, ActiveBytes: 1024, AtCapacity: m.atCapacity, QuarantineCount: m.quarantine}
 }
 
 func (m *mockStatsProvider) DeliveryStats() delivery.DeliveryStats {
@@ -29,7 +46,7 @@ func (m *mockStatsProvider) DeliveryStats() delivery.DeliveryStats {
 }
 
 func (m *mockStatsProvider) CollectorStats() (time.Time, int) {
-	return time.Now().UTC(), 0
+	return time.Now().UTC(), m.collectorErrors
 }
 
 func TestHealthEndpoints(t *testing.T) {

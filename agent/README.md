@@ -25,19 +25,20 @@ The Linux collectors use bounded standard-library `/proc` and `statfs` access on
 - memory total/available/used/utilization;
 - bounded mounted-filesystem total/used/free/utilization with mount and filesystem type.
 
-This checkpoint does not collect process command lines, environment variables, packet contents, arbitrary command output, application traces, or unrestricted process data. Windows is compile-boundary only and explicitly exits as not implemented; Windows Service/MSI behavior is not claimed.
+This checkpoint does not collect process command lines, environment variables, packet contents, arbitrary command output, application traces, or unrestricted process data. Windows is a compile-boundary harness only (`GOOS=windows` build of `windows/cmd`); it is not a production Windows Agent. Windows Service/SCM, Event Log, signed EXE, and MSI packaging are not implemented in this checkpoint.
 
 ## Durable local buffer
 
 Agent telemetry is persisted before delivery using:
 
 - stable sequence and record IDs;
-- SHA-256 payload integrity;
-- restart recovery;
-- strict ACK-before-delete behavior;
-- corruption quarantine/fail-closed behavior;
+- SHA-256 integrity over sequence, ID, createdAt, and payload;
+- restart recovery with content validation;
+- strict ACK-before-delete behavior (application ACK only; transport/auth/permanent errors retain records);
+- corruption quarantine with fail-closed rename handling (no silent loss on quarantine failure);
+- hard capacity bounds with explicit `QUEUE_FULL` rejection (no automatic head-drop / eviction of oldest records);
 - symlink/path protections and `0700`/`0600` state permissions;
-- configured maximum record count, total payload bytes, and record size.
+- configured maximum record count, total serialized buffer bytes, and payload record size.
 
 The fixed Sensor/Core 80% storage watermark is **not** copied to Agent because Platform v3.2.2 does not define that same mandatory Agent threshold. Agent buffer bounds are engineering safety guards, not commercial sizing claims.
 

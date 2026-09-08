@@ -157,14 +157,29 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status := "UP"
+	reasons := []string{}
 	if !dStats.ReceiverAvailable {
 		status = "DEGRADED"
+		reasons = append(reasons, "AGENT_RECEIVER_NOT_IMPLEMENTED")
+	}
+	if qStats.AtCapacity {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_FULL")
+	}
+	if qStats.QuarantineCount > 0 {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_QUARANTINE_PRESENT")
+	}
+	if collectorErrors > 0 {
+		status = "DEGRADED"
+		reasons = append(reasons, "COLLECTOR_ERRORS")
 	}
 
 	resp := map[string]any{
 		"status":     status,
 		"runtime":    "platform-agent",
 		"uptime_sec": time.Since(s.startTime).Seconds(),
+		"reasons":    reasons,
 		"collector": map[string]any{
 			"last_run":         lastRun,
 			"collector_errors": collectorErrors,
@@ -175,6 +190,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"quarantine_count": qStats.QuarantineCount,
 			"oldest_age_sec":   qStats.OldestAge.Seconds(),
 			"last_sequence":    qStats.LastSequence,
+			"at_capacity":      qStats.AtCapacity,
 		},
 		"delivery": map[string]any{
 			"attempts":           dStats.Attempts,

@@ -66,17 +66,27 @@ func (c *CPUCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) 
 			}
 
 			if fields[0] == "cpu" {
-				// cpu user nice system idle iowait irq softirq steal guest guest_nice
+				// cpu user nice system idle iowait irq softirq steal [guest guest_nice]
+				// guest/guest_nice are already included in user/nice; do not double-count.
 				var vals []uint64
-				for i := 1; i < len(fields); i++ {
-					v, _ := strconv.ParseUint(fields[i], 10, 64)
+				limit := len(fields) - 1
+				if limit > 8 {
+					limit = 8
+				}
+				for i := 1; i <= limit; i++ {
+					v, err := strconv.ParseUint(fields[i], 10, 64)
+					if err != nil {
+						vals = nil
+						curTotal = 0
+						break
+					}
 					vals = append(vals, v)
 					curTotal += v
 				}
 				if len(vals) >= 4 {
 					curIdle = vals[3] // idle
 					if len(vals) >= 5 {
-						curIdle += vals[4] // iowait
+						curIdle += vals[4] // iowait (idle for utilization purposes)
 					}
 				}
 			} else if strings.HasPrefix(fields[0], "cpu") && len(fields[0]) > 3 {
@@ -88,32 +98,34 @@ func (c *CPUCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) 
 
 		if curTotal > 0 {
 			c.mu.Lock()
-			var util float64
-			if c.prevTotal > 0 && curTotal > c.prevTotal {
-				deltaTotal := float64(curTotal - c.prevTotal)
-				deltaIdle := float64(curIdle - c.prevIdle)
-				if deltaTotal > 0 {
-					util = 100.0 * (1.0 - (deltaIdle / deltaTotal))
-				}
-			} else {
-				util = 100.0 * (1.0 - (float64(curIdle) / float64(curTotal)))
-			}
+			prevTotal := c.prevTotal
+			prevIdle := c.prevIdle
 			c.prevTotal = curTotal
 			c.prevIdle = curIdle
 			c.mu.Unlock()
 
-			if util < 0 {
-				util = 0
+			// First sample only seeds counters; since-boot ratio is not interval utilization.
+			if prevTotal > 0 && curTotal >= prevTotal {
+				deltaTotal := curTotal - prevTotal
+				var deltaIdle uint64
+				if curIdle >= prevIdle {
+					deltaIdle = curIdle - prevIdle
+				}
+				if deltaTotal > 0 {
+					util := 100.0 * (1.0 - (float64(deltaIdle) / float64(deltaTotal)))
+					if util < 0 {
+						util = 0
+					}
+					if util > 100 {
+						util = 100
+					}
+					samples = append(samples, telemetry.Sample{
+						MetricKey: "system.cpu.utilization",
+						Value:     util,
+						Unit:      "%",
+					})
+				}
 			}
-			if util > 100 {
-				util = 100
-			}
-
-			samples = append(samples, telemetry.Sample{
-				MetricKey: "system.cpu.utilization",
-				Value:     util,
-				Unit:      "%",
-			})
 		}
 
 		if cpuCount > 0 {
@@ -317,16 +329,25 @@ func (c *FilesystemCollector) Collect(ctx context.Context) ([]telemetry.Sample, 
 			break
 		}
 
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		line := scanner.Text()
 		fields := strings.Fields(line)
 		if len(fields) < 3 {
 			continue
 		}
 
-		mountPoint := fields[1]
-		fsType := fields[2]
+		mountPoint := unescapeMountField(fields[1])
+		fsType := unescapeMountField(fields[2])
 
 		if ignoredFSTypes[fsType] || seenMounts[mountPoint] {
+			continue
+		}
+		if len(mountPoint) > 128 || len(fsType) > 64 {
 			continue
 		}
 		seenMounts[mountPoint] = true
@@ -336,9 +357,11 @@ func (c *FilesystemCollector) Collect(ctx context.Context) ([]telemetry.Sample, 
 			continue
 		}
 
-		// Calculate sizes
 		blockSize := uint64(stat.Bsize)
-		if blockSize == 0 {
+		if blockSize == 0 || stat.Blocks == 0 {
+			continue
+		}
+		if stat.Blocks > ^uint64(0)/blockSize {
 			continue
 		}
 
@@ -371,4 +394,27 @@ func (c *FilesystemCollector) Collect(ctx context.Context) ([]telemetry.Sample, 
 	}
 
 	return samples, nil
+}
+
+// unescapeMountField decodes /proc/mounts octal escapes (e.g. \040 -> space).
+func unescapeMountField(in string) string {
+	if !strings.Contains(in, `\`) {
+		return in
+	}
+	var b strings.Builder
+	b.Grow(len(in))
+	for i := 0; i < len(in); i++ {
+		if in[i] == '\\' && i+3 < len(in) {
+			o1, e1 := strconv.ParseUint(in[i+1:i+2], 8, 8)
+			o2, e2 := strconv.ParseUint(in[i+2:i+3], 8, 8)
+			o3, e3 := strconv.ParseUint(in[i+3:i+4], 8, 8)
+			if e1 == nil && e2 == nil && e3 == nil {
+				b.WriteByte(byte(o1<<6 | o2<<3 | o3))
+				i += 3
+				continue
+			}
+		}
+		b.WriteByte(in[i])
+	}
+	return b.String()
 }

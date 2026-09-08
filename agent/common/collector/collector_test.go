@@ -42,7 +42,7 @@ func TestCollectorContextCancellation(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Pre-cancel
+	cancel()
 
 	cpu := NewCPUCollector()
 	_, err := cpu.Collect(ctx)
