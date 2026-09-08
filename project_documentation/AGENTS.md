@@ -2,8 +2,8 @@
 
 This file should be available at the repository root of a working clone (commonly `~/nms/AGENTS.md`). For ChatGPT Project/source management it may also be stored in `project_documentation`; the preferred repository setup is a root copy or symlink to this authoritative file. It is a navigation and enforcement file, not a replacement for the mother-reference documents.
 
-**Mother-reference version:** 3.2.2  
-**Canonical repository (USER-FIXED):** https://github.com/gagandsm-max/platform  
+**Mother-reference version:** 3.2.2
+**Canonical repository (USER-FIXED):** https://github.com/gagandsm-max/platform
 
 Local clones (including `~/nms`) are working copies. Changes become authoritative only after push and merge into the canonical GitHub repository.
 
@@ -73,6 +73,15 @@ No implementation may permanently diverge from mother-reference truth. If implem
 - External provider/change evidence is supporting evidence; provider text or temporal proximity alone is not causal proof.
 - Controlled remediation requires versioned deterministic actions, tenant/resource authorization, preconditions, blast-radius controls, approval/policy, audit, post-action validation and rollback/fail-safe behavior. LLM output may not directly execute privileged actions.
 - Platform Value/MTTR metrics must expose data quality, cohort/sample methodology and assumptions. Do not fabricate generic customer savings or causal percentages.
+
+## Platform Specialist Agent Pack
+
+- Canonical specialist role definitions live under `project_agents/canonical/`. Route tasks using `project_agents/AGENT_MATRIX.md` and `project_agents/USAGE_PLAYBOOK.md`; use the smallest useful set.
+- Native adapters under `.cursor/agents/`, `.codex/agents/` and `.agents/agents/` are generated deployment artifacts. Edit canonical definitions/manifest metadata first, run `python3 project_agents/tools/sync_agents.py`, never hand-edit generated adapters, and run `python3 project_agents/tools/validate_agents.py` before commit.
+- Specialist roles are subordinate to this root `AGENTS.md` and the Mother Reference. They are not independent architecture authorities and may not override product, security, release or change-control rules.
+- Separate diagnosis, bounded implementation and independent verification. A writing specialist cannot be its own sole completion or release authority.
+- Parallel write specialists must use separate branches/worktrees/checkouts; never let multiple writers mutate the same checkout concurrently.
+- Production/GA/readiness claims require the applicable evidence and final reality gate, not agent self-attestation.
 
 ## Definition of done
 
