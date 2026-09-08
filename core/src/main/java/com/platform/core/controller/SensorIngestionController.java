@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import javax.naming.InvalidNameException;
 import javax.naming.ldap.LdapName;
 import javax.naming.ldap.Rdn;
+import java.math.BigDecimal;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -227,7 +228,12 @@ public class SensorIngestionController {
 
     private static long parseNonNegativeLong(Object value, String field) {
         if (!(value instanceof Number number)) throw new DomainException("VALIDATION_FAILED", field + " must be numeric");
-        long result = number.longValue();
+        final long result;
+        try {
+            result = new BigDecimal(number.toString()).longValueExact();
+        } catch (NumberFormatException | ArithmeticException ex) {
+            throw new DomainException("VALIDATION_FAILED", field + " must be an exact 64-bit integer");
+        }
         if (result < 0) throw new DomainException("VALIDATION_FAILED", field + " cannot be negative");
         return result;
     }
