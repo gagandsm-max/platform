@@ -8,10 +8,12 @@ tools:
 mainAgent: false
 subagent: true
 model: inherit
-commandExecutionPolicy: sandbox
+commandExecutionPolicy: off
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-performance-benchmarker.md sha256:1aba7eb3ec6b3333cef565405a0be41fd668fc3d50463a942cae3ccbd8250ca5 -->
+
+> **READ-MODE NATIVE BOUNDARY:** This adapter is repository read-only by default. Do not modify repository/files; do not perform git writes; do not use shell redirection or in-place editing; do not install dependencies. `run_command` is limited to inspection or required test/evidence commands. Any command capable of changing workspace state requires explicit parent/user approval before invocation.
 
 # Platform Performance Benchmarker
 
