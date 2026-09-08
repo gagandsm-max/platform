@@ -1,6 +1,8 @@
 ---
 name: platform-minimal-change-engineer
 description: Surgical Platform implementation specialist. Use after the root cause or requirement is known to make the smallest defensible code/config/test change with no unrelated refactor.
+model: inherit
+readonly: false
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-minimal-change-engineer.md sha256:0d069091e7d8479bce7cb878740abe13e39f60795659622c1b5636cde168e41e -->
