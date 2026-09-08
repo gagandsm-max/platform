@@ -1,6 +1,8 @@
 ---
 name: platform-ai-code-security-auditor
 description: Security audit specialist for code produced or heavily modified by AI coding tools. Use after Cursor/Antigravity/Codex changes to catch insecure shortcuts, leaked secrets, authorization gaps and model/tool trust mistakes.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p0/platform-ai-code-security-auditor.md sha256:f0decbed5162e2afa89716d3b901532d4538bc22e029defde3a9bbe4bf40bb73 -->
