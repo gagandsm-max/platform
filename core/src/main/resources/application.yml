@@ -47,7 +47,7 @@ spring:
       group-id: platform-core-group
       auto-offset-reset: earliest
     listener:
-      auto-startup: false
+      auto-startup: ${SPRING_KAFKA_LISTENER_AUTO_STARTUP:false}
 
 management:
   endpoints:
@@ -70,3 +70,11 @@ platform:
     port: ${CLICKHOUSE_HTTP_PORT:8123}
     user: ${CLICKHOUSE_USER:platform_app}
     password: ${CLICKHOUSE_PASSWORD:platform_dev_ch_password_change_in_prod}
+  telemetry:
+    consumer:
+      enabled: ${PLATFORM_TELEMETRY_CONSUMER_ENABLED:true}
+  ingestion:
+    kafka:
+      topic: ${TELEMETRY_NUMERIC_TOPIC:telemetry.numeric.v1}
+      partitions: ${TELEMETRY_NUMERIC_PARTITIONS:3}
+      replicas: ${TELEMETRY_NUMERIC_REPLICAS:1}
