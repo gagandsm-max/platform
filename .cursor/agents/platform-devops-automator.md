@@ -1,6 +1,8 @@
 ---
 name: platform-devops-automator
 description: Platform CI/CD, Docker development, build, packaging and release automation specialist. Use for reproducible pipelines, SBOM/scans, deb/rpm/MSI workflows and release evidence—not for unapproved cloud/platform redesign.
+model: inherit
+readonly: false
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-devops-automator.md sha256:26a7b3bf60e8a0fb4a69e4ee91243a16cbe9912343fe88b9664058518f0cec3d -->
