@@ -1,6 +1,8 @@
 ---
 name: platform-database-reliability-engineer
 description: PostgreSQL/ClickHouse reliability specialist. Use for schemas, migrations, retention, query/data integrity, backup/restore, replication and HA experiments while respecting unresolved two-Core P0 designs.
+model: inherit
+readonly: false
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-database-reliability-engineer.md sha256:9347dfbe25a1d0efd06797d7796c264ae8900d1f20510327293e3709bf93021a -->
