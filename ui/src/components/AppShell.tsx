@@ -1,24 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessContext,
+  PrimaryNavDestination,
+  PrimaryNavGroup,
   WorkspaceDefinition,
-  WorkspaceGroup,
-  primaryNavigationWorkspaces,
+  primarySidebarDestinations,
+  searchablePrimaryNav,
   searchableWorkspaces,
+  visiblePrimaryNav,
 } from '../platform/navigation';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
 interface AppShellProps {
   access: AccessContext;
-  activeWorkspace: WorkspaceDefinition;
-  onNavigate: (workspace: WorkspaceDefinition) => void;
+  activePrimary?: PrimaryNavDestination;
+  activeWorkspace?: WorkspaceDefinition;
+  onNavigatePrimary: (destination: PrimaryNavDestination) => void;
+  onNavigateWorkspace: (workspace: WorkspaceDefinition) => void;
   theme: ThemeMode;
   onThemeChange: (theme: ThemeMode) => void;
   children: React.ReactNode;
 }
 
-const GROUP_LABELS: Record<WorkspaceGroup, string> = {
+const GROUP_LABELS: Record<PrimaryNavGroup, string> = {
   operate: 'Operate',
   manage: 'Manage',
   govern: 'Govern',
@@ -35,8 +40,10 @@ const FOCUSABLE_SELECTOR = [
 
 export const AppShell: React.FC<AppShellProps> = ({
   access,
+  activePrimary,
   activeWorkspace,
-  onNavigate,
+  onNavigatePrimary,
+  onNavigateWorkspace,
   theme,
   onThemeChange,
   children,
@@ -45,7 +52,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [query, setQuery] = useState('');
   const paletteDialogRef = useRef<HTMLElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
-  const workspaces = useMemo(() => primaryNavigationWorkspaces(access), [access]);
+  const sidebarItems = useMemo(() => primarySidebarDestinations(access), [access]);
 
   const openPalette = useCallback(() => {
     restoreFocusRef.current = document.activeElement instanceof HTMLElement
@@ -88,6 +95,10 @@ export const AppShell: React.FC<AppShellProps> = ({
     () => searchableWorkspaces(access, query),
     [access, query],
   );
+  const filteredPrimary = useMemo(
+    () => searchablePrimaryNav(access, query),
+    [access, query],
+  );
 
   const trapPaletteFocus = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Tab' || !paletteDialogRef.current) {
@@ -114,6 +125,14 @@ export const AppShell: React.FC<AppShellProps> = ({
       first.focus();
     }
   };
+
+  const crumbPrimary = activePrimary
+    ?? (activeWorkspace
+      ? visiblePrimaryNav(access).find((destination) =>
+        destination.relatedWorkspaceIds.includes(activeWorkspace.id),
+      )
+      : undefined);
+  const title = activeWorkspace?.label ?? activePrimary?.label ?? 'Platform';
 
   return (
     <div className="app-shell">
@@ -182,9 +201,9 @@ export const AppShell: React.FC<AppShellProps> = ({
 
       <aside className="sidebar" aria-label="Primary navigation">
         <nav>
-          {(Object.keys(GROUP_LABELS) as WorkspaceGroup[]).map((group) => {
-            const groupWorkspaces = workspaces.filter((workspace) => workspace.group === group);
-            if (groupWorkspaces.length === 0) {
+          {(Object.keys(GROUP_LABELS) as PrimaryNavGroup[]).map((group) => {
+            const groupItems = sidebarItems.filter((destination) => destination.group === group);
+            if (groupItems.length === 0) {
               return null;
             }
 
@@ -194,18 +213,24 @@ export const AppShell: React.FC<AppShellProps> = ({
                   {GROUP_LABELS[group]}
                 </h2>
                 <div className="nav-group__items">
-                  {groupWorkspaces.map((workspace) => {
-                    const isActive = workspace.domain === activeWorkspace.domain;
+                  {groupItems.map((destination) => {
+                    const isActive = activePrimary?.id === destination.id
+                      || Boolean(
+                        activeWorkspace
+                        && destination.relatedWorkspaceIds.includes(activeWorkspace.id)
+                        && !activePrimary,
+                      )
+                      || (destination.id === 'home' && !activeWorkspace && activePrimary?.id === 'home');
                     return (
                       <button
                         type="button"
-                        key={workspace.id}
+                        key={destination.id}
                         className={`nav-link ${isActive ? 'nav-link--active' : ''}`}
                         aria-current={isActive ? 'page' : undefined}
-                        onClick={() => onNavigate(workspace)}
+                        onClick={() => onNavigatePrimary(destination)}
                       >
-                        <span className="nav-link__icon" aria-hidden="true">{workspace.shortLabel}</span>
-                        <span>{workspace.label}</span>
+                        <span className="nav-link__icon" aria-hidden="true">{destination.shortLabel}</span>
+                        <span>{destination.label}</span>
                       </button>
                     );
                   })}
@@ -221,9 +246,19 @@ export const AppShell: React.FC<AppShellProps> = ({
           <nav className="breadcrumbs" aria-label="Breadcrumb">
             <span>Platform</span>
             <span aria-hidden="true">/</span>
-            <span>{activeWorkspace.domain}</span>
-            <span aria-hidden="true">/</span>
-            <strong>{activeWorkspace.label}</strong>
+            {activeWorkspace ? (
+              <>
+                {crumbPrimary ? (
+                  <>
+                    <span>{crumbPrimary.label}</span>
+                    <span aria-hidden="true">/</span>
+                  </>
+                ) : null}
+                <strong>{activeWorkspace.label}</strong>
+              </>
+            ) : (
+              <strong>{activePrimary?.label ?? title}</strong>
+            )}
           </nav>
           <div className="context-controls" role="toolbar" aria-label="Global page context controls">
             {access.multiTenant ? (
@@ -271,7 +306,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 autoFocus
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Navigate to a workspace"
+                placeholder="Search primary navigation and workspaces"
                 aria-label="Search accessible workspaces"
               />
               <button type="button" className="palette-close" onClick={closePalette}>
@@ -279,28 +314,47 @@ export const AppShell: React.FC<AppShellProps> = ({
               </button>
             </div>
             <div className="command-palette__results">
-              {filteredWorkspaces.length > 0 ? (
-                filteredWorkspaces.map((workspace) => (
-                  <button
-                    type="button"
-                    className="command-result"
-                    key={workspace.id}
-                    onClick={() => {
-                      onNavigate(workspace);
-                      closePalette();
-                    }}
-                  >
-                    <span className="nav-link__icon" aria-hidden="true">{workspace.shortLabel}</span>
-                    <span>
-                      <strong>{workspace.label}</strong>
-                      <small>
-                        {workspace.uiCode} · {workspace.domain}
-                      </small>
-                    </span>
-                  </button>
-                ))
+              {filteredPrimary.length === 0 && filteredWorkspaces.length === 0 ? (
+                <p className="command-empty">No accessible destination matches this search.</p>
               ) : (
-                <p className="command-empty">No accessible workspace matches this search.</p>
+                <>
+                  {filteredPrimary.map((destination) => (
+                    <button
+                      type="button"
+                      className="command-result"
+                      key={`primary-${destination.id}`}
+                      onClick={() => {
+                        onNavigatePrimary(destination);
+                        closePalette();
+                      }}
+                    >
+                      <span className="nav-link__icon" aria-hidden="true">{destination.shortLabel}</span>
+                      <span>
+                        <strong>{destination.label}</strong>
+                        <small>Primary · {destination.path}</small>
+                      </span>
+                    </button>
+                  ))}
+                  {filteredWorkspaces.map((workspace) => (
+                    <button
+                      type="button"
+                      className="command-result"
+                      key={`workspace-${workspace.id}`}
+                      onClick={() => {
+                        onNavigateWorkspace(workspace);
+                        closePalette();
+                      }}
+                    >
+                      <span className="nav-link__icon" aria-hidden="true">{workspace.shortLabel}</span>
+                      <span>
+                        <strong>{workspace.label}</strong>
+                        <small>
+                          {workspace.uiCode} · {workspace.domain}
+                        </small>
+                      </span>
+                    </button>
+                  ))}
+                </>
               )}
             </div>
           </section>

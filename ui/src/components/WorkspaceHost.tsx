@@ -3,32 +3,49 @@ import { PageState } from './PageState';
 import {
   AccessContext,
   WorkspaceDefinition,
+  foundationDataStateForCapability,
   secondaryWorkspacesInDomain,
+  workspaceTabDomId,
+  workspaceTabPanelDomId,
 } from '../platform/navigation';
+import type { ScreenDataState } from '../platform/screen-state';
 
 interface WorkspaceHostProps {
   workspace: WorkspaceDefinition;
   access: AccessContext;
   onNavigate: (workspace: WorkspaceDefinition) => void;
+  /**
+   * Optional live data-state from a future query layer.
+   * When omitted, foundation uses a non-Normal placeholder independent of capability status.
+   */
+  dataState?: ScreenDataState;
 }
 
 /**
- * Generic host for all Platform_09 workspaces. Backend-unimplemented capabilities use honest
- * empty/capability messaging — never fabricated Normal telemetry or value claims.
+ * Generic host for Platform_09 §5 workspaces.
+ * Capability availability is displayed separately from authoritative screen/data state.
  */
 export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
   workspace,
   access,
   onNavigate,
+  dataState,
 }) => {
-  const [activeTab, setActiveTab] = useState(workspace.tabs[0] ?? 'Overview');
+  // Tab selection is indexed (not label-keyed) and remounted via key={workspace.id} from the parent.
+  const [activeTabIndex, setActiveTabIndex] = useState(0);
+  const safeTabIndex = workspace.tabs.length === 0
+    ? 0
+    : Math.min(activeTabIndex, workspace.tabs.length - 1);
+  const activeTabLabel = workspace.tabs[safeTabIndex];
+
   const siblings = useMemo(
     () => secondaryWorkspacesInDomain(workspace.domain, access),
     [workspace.domain, access],
   );
 
   const capabilityPending = workspace.backendCapability === 'PENDING_BACKEND';
-  const dataStateKind = capabilityPending ? 'empty' : 'normal';
+  const resolvedDataState: ScreenDataState = dataState
+    ?? foundationDataStateForCapability(workspace.backendCapability);
 
   return (
     <div className="workspace-host" data-workspace-id={workspace.id} data-ui-code={workspace.uiCode}>
@@ -48,11 +65,15 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
         </div>
         <div className="workspace-header__badges">
           <span className="status-pill status-pill--foundation">{workspace.uiCode}</span>
-          {capabilityPending ? (
-            <span className="status-pill status-pill--pending">Capability pending</span>
-          ) : (
-            <span className="status-pill status-pill--ready">Capability integrated</span>
-          )}
+          <span
+            className={capabilityPending ? 'status-pill status-pill--pending' : 'status-pill status-pill--ready'}
+            data-capability={workspace.backendCapability}
+          >
+            {capabilityPending ? 'Capability pending' : 'Capability integrated'}
+          </span>
+          <span className="status-pill" data-data-state={resolvedDataState}>
+            Data state: {resolvedDataState}
+          </span>
         </div>
       </header>
 
@@ -81,19 +102,26 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
 
       {workspace.tabs.length > 0 ? (
         <div className="workspace-tabs" role="tablist" aria-label={`${workspace.label} views`}>
-          {workspace.tabs.map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              role="tab"
-              id={`tab-${workspace.id}-${tab}`}
-              aria-selected={tab === activeTab}
-              className={tab === activeTab ? 'workspace-tab workspace-tab--active' : 'workspace-tab'}
-              onClick={() => setActiveTab(tab)}
-            >
-              {tab}
-            </button>
-          ))}
+          {workspace.tabs.map((tab, index) => {
+            const tabId = workspaceTabDomId(workspace.id, index);
+            const panelId = workspaceTabPanelDomId(workspace.id, index);
+            const selected = index === safeTabIndex;
+            return (
+              <button
+                key={tabId}
+                type="button"
+                role="tab"
+                id={tabId}
+                aria-controls={panelId}
+                aria-selected={selected}
+                tabIndex={selected ? 0 : -1}
+                className={selected ? 'workspace-tab workspace-tab--active' : 'workspace-tab'}
+                onClick={() => setActiveTabIndex(index)}
+              >
+                {tab}
+              </button>
+            );
+          })}
         </div>
       ) : null}
 
@@ -117,29 +145,32 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
 
       <section
         className="workspace-state-region"
-        aria-labelledby="workspace-title"
-        data-data-state={dataStateKind}
+        role="tabpanel"
+        id={workspace.tabs.length > 0 ? workspaceTabPanelDomId(workspace.id, safeTabIndex) : undefined}
+        aria-labelledby={workspace.tabs.length > 0 ? workspaceTabDomId(workspace.id, safeTabIndex) : 'workspace-title'}
+        data-data-state={resolvedDataState}
+        data-capability={workspace.backendCapability}
       >
-        {capabilityPending ? (
-          <PageState
-            kind="empty"
-            title="Workspace capability not yet integrated"
-            message={`The ${workspace.label} route, navigation metadata and state contract are registered. Backend telemetry, mutations and production authorization for this workspace are not available yet, so Platform does not fabricate Normal operational data.`}
-            evidence={[
-              `Capability status: ${workspace.backendCapability}`,
-              `Active view metadata: ${activeTab}`,
-              workspace.valueClaimSensitive
-                ? 'Value/MTTR claims are prohibited until the Platform Value evidence engine is integrated.'
-                : 'Operational panels will bind to versioned Core APIs when this capability lands.',
-            ]}
-          />
-        ) : (
-          <PageState
-            kind="normal"
-            title={workspace.label}
-            message="Backend capability is marked integrated for this workspace."
-          />
-        )}
+        <PageState
+          kind={resolvedDataState}
+          title={
+            dataState
+              ? `${workspace.label}`
+              : 'No live data-state provider bound'
+          }
+          message={
+            dataState
+              ? `Authoritative data state for this workspace is ${resolvedDataState}.`
+              : `Capability status (${workspace.backendCapability}) is independent of screen/data state. This foundation does not fabricate Normal operational health from capability integration alone.${activeTabLabel ? ` Active view metadata: ${activeTabLabel}.` : ''}`
+          }
+          evidence={[
+            `Capability availability: ${workspace.backendCapability}`,
+            `Resolved data state: ${resolvedDataState}`,
+            workspace.valueClaimSensitive
+              ? 'Value/MTTR claims are prohibited until the Platform Value evidence engine is integrated.'
+              : 'Operational panels will bind to versioned Core APIs when a data-state provider is available.',
+          ]}
+        />
       </section>
 
       {workspace.oivRelevant ? (

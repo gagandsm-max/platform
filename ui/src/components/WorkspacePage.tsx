@@ -8,11 +8,16 @@ interface WorkspacePageProps {
   onNavigate: (workspace: WorkspaceDefinition) => void;
 }
 
-/** Thin route adapter; all workspace chrome lives in WorkspaceHost. */
+/** Thin route adapter; remount host on workspace id change to clear tab state. */
 export const WorkspacePage: React.FC<WorkspacePageProps> = ({
   workspace,
   access,
   onNavigate,
 }) => (
-  <WorkspaceHost workspace={workspace} access={access} onNavigate={onNavigate} />
+  <WorkspaceHost
+    key={workspace.id}
+    workspace={workspace}
+    access={access}
+    onNavigate={onNavigate}
+  />
 );
