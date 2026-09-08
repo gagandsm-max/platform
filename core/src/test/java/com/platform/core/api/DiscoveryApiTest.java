@@ -59,17 +59,17 @@ class DiscoveryApiTest {
     }
 
     @Test
-    void createDiscovery_ReturnsCreatedWithCorrelationId() throws Exception {
+    void createDiscovery_ReturnsPendingUntilCorePlacementAssignsSensor() throws Exception {
         DiscoveryRequest req = new DiscoveryRequest(
                 requestId,
                 tenantId,
                 "Office LAN",
-                DiscoveryStatus.ASSIGNED,
+                DiscoveryStatus.PENDING,
                 "corr-disc-1",
                 "idem-1",
                 null,
                 null,
-                "sensor-01",
+                null,
                 List.of(DiscoveryMethod.ICMP, DiscoveryMethod.SNMP),
                 "prof-cisco",
                 161,
@@ -122,14 +122,14 @@ class DiscoveryApiTest {
                 .andExpect(header().string(CorrelationIdFilter.CORRELATION_ID_HEADER, "corr-disc-1"))
                 .andExpect(jsonPath("$.requestId").value(requestId.toString()))
                 .andExpect(jsonPath("$.name").value("Office LAN"))
-                .andExpect(jsonPath("$.status").value("ASSIGNED"))
-                .andExpect(jsonPath("$.assignedSensorId").value("sensor-01"));
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.assignedSensorId").isEmpty());
     }
 
     @Test
     void createDiscovery_RejectsSecurityViolationWith400() throws Exception {
         when(discoveryService.createDiscovery(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
-                .thenThrow(new DomainException("SECURITY_VIOLATION", "Loopback addresses are strictly prohibited"));
+                .thenThrow(new DomainException("SECURITY_VIOLATION", "Loopback addresses are prohibited"));
 
         CreateDiscoveryRequest payload = new CreateDiscoveryRequest(
                 "Malicious Scan",
