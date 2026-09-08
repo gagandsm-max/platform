@@ -1,7 +1,7 @@
 # Platform Provisioning Readiness Contract Foundation
 
-**Scope:** static provisioning request, readiness/diagnostic evidence, Sensor-eligibility evidence, and connectivity-matrix contracts only.  
-**Mother Reference:** Platform v3.2.2.  
+**Scope:** static provisioning request, readiness/diagnostic evidence, Sensor-eligibility evidence, and connectivity-matrix contracts only.
+**Mother Reference:** Platform v3.2.2.
 **Runtime connectivity/provisioning:** not implemented or certified by this checkpoint.
 
 ## 1. Purpose
@@ -20,8 +20,8 @@ The foundation covers:
 
 A diagnostic classification is **not proof of the physical root cause unless the recorded evidence establishes it**.
 
-`ACL_FIREWALL_SUSPECTED` != proven firewall block.  
-`PROTOCOL_TIMEOUT` != device down.  
+`ACL_FIREWALL_SUSPECTED` != proven firewall block.
+`PROTOCOL_TIMEOUT` != device down.
 `PORT_UNREACHABLE` != firewall block.
 
 ## 2. Authority boundaries
