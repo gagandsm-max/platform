@@ -1,6 +1,8 @@
 ---
 name: platform-ux-architect
 description: Platform UX/information-architecture specialist. Use before major UI implementation to translate operational requirements into developer-ready hierarchy, workflows, state behavior and responsive/accessibility constraints.
+model: inherit
+readonly: true
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-ux-architect.md sha256:cc9a06fb8356334fe79276d36739da4be20dbc936ffbf330bf6d36975960d5fc -->
