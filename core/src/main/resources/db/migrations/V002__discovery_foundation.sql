@@ -1,5 +1,6 @@
 -- Discovery Foundation (Platform v3.2.2)
 -- Core-orchestrated, Sensor-executed, tenant-isolated discovery tables and constraints.
+-- Numeric/JSON limits below are defensive implementation guards, not commercial capacity claims.
 
 CREATE TABLE IF NOT EXISTS platform.discovery_request (
     request_id UUID NOT NULL,
@@ -11,6 +12,7 @@ CREATE TABLE IF NOT EXISTS platform.discovery_request (
     site_id UUID NULL,
     sensor_pool_id UUID NULL,
     assigned_sensor_id VARCHAR(128) NULL,
+    assignment_version BIGINT NOT NULL DEFAULT 0,
     requested_methods JSONB NOT NULL,
     credential_profile_ref VARCHAR(128) NULL,
     snmp_port INT NOT NULL DEFAULT 161,
@@ -27,6 +29,12 @@ CREATE TABLE IF NOT EXISTS platform.discovery_request (
     CONSTRAINT chk_discovery_status CHECK (
         status IN ('PENDING', 'ASSIGNED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')
     ),
+    CONSTRAINT chk_discovery_assignment_version CHECK (assignment_version >= 0),
+    CONSTRAINT chk_discovery_snmp_port CHECK (snmp_port BETWEEN 1 AND 65535),
+    CONSTRAINT chk_discovery_timeout CHECK (timeout_ms BETWEEN 100 AND 60000),
+    CONSTRAINT chk_discovery_retries CHECK (max_retries BETWEEN 0 AND 5),
+    CONSTRAINT chk_discovery_methods_size CHECK (octet_length(requested_methods::text) <= 512),
+    CONSTRAINT chk_discovery_summary_size CHECK (summary_json IS NULL OR octet_length(summary_json::text) <= 16384),
     CONSTRAINT fk_discovery_site_same_tenant
         FOREIGN KEY (tenant_id, site_id)
         REFERENCES platform.site (tenant_id, site_id)
@@ -40,7 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_discovery_request_tenant_status
     ON platform.discovery_request (tenant_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_discovery_request_sensor_status
-    ON platform.discovery_request (assigned_sensor_id, status);
+    ON platform.discovery_request (assigned_sensor_id, status, created_at);
 
 CREATE TABLE IF NOT EXISTS platform.discovery_target (
     target_id UUID NOT NULL,
@@ -86,6 +94,7 @@ CREATE TABLE IF NOT EXISTS platform.discovery_evidence (
     observed_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (evidence_id),
     UNIQUE (tenant_id, evidence_id),
+    UNIQUE (tenant_id, request_id, target_id, sensor_id, protocol, method),
     CONSTRAINT chk_evidence_protocol CHECK (
         protocol IN ('ICMP', 'SNMP')
     ),
@@ -95,6 +104,9 @@ CREATE TABLE IF NOT EXISTS platform.discovery_evidence (
     CONSTRAINT chk_evidence_reachability CHECK (
         reachability_kind IN ('OBSERVED', 'DERIVED', 'SUSPECTED', 'UNKNOWN')
     ),
+    CONSTRAINT chk_evidence_duration CHECK (duration_ms >= 0),
+    CONSTRAINT chk_evidence_attributes_size CHECK (octet_length(attributes_json::text) <= 32768),
+    CONSTRAINT chk_evidence_raw_size CHECK (octet_length(raw_evidence_json::text) <= 32768),
     CONSTRAINT fk_evidence_request_same_tenant
         FOREIGN KEY (tenant_id, request_id)
         REFERENCES platform.discovery_request (tenant_id, request_id)
@@ -139,6 +151,8 @@ CREATE TABLE IF NOT EXISTS platform.discovery_candidate (
     CONSTRAINT chk_candidate_review_status CHECK (
         review_status IN ('PENDING_REVIEW', 'APPROVED_FOR_PROVISIONING', 'LEFT_UNMANAGED', 'IGNORED', 'EXCLUDED_PERMANENTLY')
     ),
+    CONSTRAINT chk_candidate_protocols_size CHECK (octet_length(evidenced_protocols::text) <= 512),
+    CONSTRAINT chk_candidate_attributes_size CHECK (octet_length(attributes_json::text) <= 32768),
     CONSTRAINT fk_candidate_request_same_tenant
         FOREIGN KEY (tenant_id, request_id)
         REFERENCES platform.discovery_request (tenant_id, request_id)
