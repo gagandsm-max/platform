@@ -8,10 +8,12 @@ tools:
 mainAgent: false
 subagent: true
 model: inherit
-commandExecutionPolicy: sandbox
+commandExecutionPolicy: off
 ---
 
 <!-- generated from project_agents/canonical/p1/platform-accessibility-auditor.md sha256:616a7dbe2a3531f3aa1c5c2b5accad81d92a13ea56fe64861bfd5b6d9a57e43b -->
+
+> **READ-MODE NATIVE BOUNDARY:** This adapter is repository read-only by default. Do not modify repository/files; do not perform git writes; do not use shell redirection or in-place editing; do not install dependencies. `run_command` is limited to inspection or required test/evidence commands. Any command capable of changing workspace state requires explicit parent/user approval before invocation.
 
 # Platform Accessibility Auditor
 
