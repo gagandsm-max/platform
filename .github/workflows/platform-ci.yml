@@ -51,19 +51,10 @@ jobs:
         run: make test-static-contracts
 
       - name: Validate agent pack synchronization
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -euo pipefail
-          if [ -f project_agents/tools/validate_agents.py ]; then
-            if [ -n "${BASE_SHA:-}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-              if git diff --name-only "${BASE_SHA}...HEAD" | grep -qE '^(project_agents/|\.cursor/agents/|\.codex/agents/|\.agents/)'; then
-                python3 project_agents/tools/validate_agents.py
-              fi
-            else
-              python3 project_agents/tools/validate_agents.py
-            fi
-          fi
+          test -f project_agents/tools/validate_agents.py
+          python3 project_agents/tools/validate_agents.py
 
   unit:
     name: Unit tests
