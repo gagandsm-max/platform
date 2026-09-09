@@ -1,11 +1,10 @@
 module platform/sensor
 
-go 1.27.0
+go 1.26.0
 
 require (
 	github.com/gosnmp/gosnmp v1.44.0
 	golang.org/x/net v0.58.0
-	platform/agent v0.0.0
 )
 
 // golang.org/x/sys is the active indirect dependency of golang.org/x/net for the
@@ -13,5 +12,3 @@ require (
 // by this module's packages, so they are not pinned here. This does not select or
 // freeze OSS-025 SSH.
 require golang.org/x/sys v0.47.0 // indirect
-
-replace platform/agent => ../agent
