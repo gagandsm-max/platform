@@ -371,3 +371,56 @@ func TestDurableQueueDeleteThroughOK(t *testing.T) {
 		t.Fatalf("partial delete failed: %+v", batch)
 	}
 }
+
+func TestDurableQueueSequenceLineageSurvivesDrain(t *testing.T) {
+	tempDir := t.TempDir()
+
+	q1, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last uint64
+	for i := 0; i < 3; i++ {
+		rec, err := q1.Enqueue([]byte("payload"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		last = rec.Sequence
+	}
+	if err := q1.DeleteThrough(last); err != nil {
+		t.Fatal(err)
+	}
+	if q1.Len() != 0 {
+		t.Fatalf("expected drained queue, got %d", q1.Len())
+	}
+
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := q2.Enqueue([]byte("after-reopen"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Sequence <= last {
+		t.Fatalf("next sequence %d must exceed prior high watermark %d", next.Sequence, last)
+	}
+}
+
+func TestDurableQueueCorruptMetaFailsClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	metaPath := filepath.Join(tempDir, sequenceMetaFile)
+	if err := os.WriteFile(metaPath, []byte("{not-json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024); err == nil {
+		t.Fatal("corrupt sequence metadata must fail closed")
+	}
+}

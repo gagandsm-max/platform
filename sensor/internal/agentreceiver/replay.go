@@ -2,6 +2,7 @@ package agentreceiver
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -25,6 +26,31 @@ type cachedBatchEntry struct {
 	recordedAt    time.Time
 }
 
+// ReplayIdentity uniquely identifies a batch for process-local replay tracking.
+// Encoding is length-prefixed to avoid delimiter-injection between fields.
+type ReplayIdentity struct {
+	TenantID string
+	AgentID  string
+	BatchID  string
+}
+
+// Key returns a length-prefixed map key safe against embedded separators.
+func (id ReplayIdentity) Key() string {
+	var b []byte
+	b = appendLenPrefixed(b, id.TenantID)
+	b = appendLenPrefixed(b, id.AgentID)
+	b = appendLenPrefixed(b, id.BatchID)
+	return string(b)
+}
+
+func appendLenPrefixed(dst []byte, s string) []byte {
+	var lenBuf [8]byte
+	binary.BigEndian.PutUint64(lenBuf[:], uint64(len(s)))
+	dst = append(dst, lenBuf[:]...)
+	dst = append(dst, s...)
+	return dst
+}
+
 // ComputeBatchChecksum produces a deterministic SHA-256 fingerprint over the sequence,
 // ID, and checksum of all records in an envelope.
 func ComputeBatchChecksum(records []DeliveryRecord) string {
@@ -36,7 +62,12 @@ func ComputeBatchChecksum(records []DeliveryRecord) string {
 }
 
 // ReplayTracker is a thread-safe, bounded in-memory cache that prevents duplicate
-// processing and rejects conflicting batch replays.
+// processing within a single Sensor process lifetime.
+//
+// IMPORTANT: ReplayTracker is a process-local OPTIMIZATION only — not correctness
+// authority across restart or eviction. Eviction or process restart does NOT
+// authorize Agent-side queue deletion; the Agent MUST retain records until it
+// receives a valid durable batch-bound application ACK.
 type ReplayTracker struct {
 	mu         sync.RWMutex
 	maxEntries int
@@ -55,8 +86,9 @@ func NewReplayTracker(maxEntries int) *ReplayTracker {
 	}
 }
 
-// Check evaluates whether a batch key (typically "agentID:batchID") has been seen before.
-func (t *ReplayTracker) Check(key string, firstSeq, lastSeq uint64, batchChecksum string) (ReplayDecision, DeliveryAck) {
+// Check evaluates whether a ReplayIdentity has been seen before in this process.
+func (t *ReplayTracker) Check(id ReplayIdentity, firstSeq, lastSeq uint64, batchChecksum string) (ReplayDecision, DeliveryAck) {
+	key := id.Key()
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -65,24 +97,23 @@ func (t *ReplayTracker) Check(key string, firstSeq, lastSeq uint64, batchChecksu
 		return ReplayNone, DeliveryAck{}
 	}
 
-	// Exact replay: same sequences and exact matching record checksums
 	if cached.firstSequence == firstSeq &&
 		cached.lastSequence == lastSeq &&
 		cached.batchChecksum == batchChecksum {
 		return ReplayExact, cached.ack
 	}
 
-	// Conflict: same batch identifier with divergent sequence bounds or payload checksums
 	return ReplayConflict, DeliveryAck{}
 }
 
 // Record stores a successfully accepted batch and its authoritative ACK response.
-func (t *ReplayTracker) Record(key string, firstSeq, lastSeq uint64, batchChecksum string, ack DeliveryAck) {
+// Eviction of this entry never authorizes Agent deletion; Agents retain until valid ACK.
+func (t *ReplayTracker) Record(id ReplayIdentity, firstSeq, lastSeq uint64, batchChecksum string, ack DeliveryAck) {
+	key := id.Key()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if _, exists := t.entries[key]; exists {
-		// Update existing
 		t.entries[key] = cachedBatchEntry{
 			firstSequence: firstSeq,
 			lastSequence:  lastSeq,
@@ -93,7 +124,8 @@ func (t *ReplayTracker) Record(key string, firstSeq, lastSeq uint64, batchChecks
 		return
 	}
 
-	// Evict oldest if capacity reached
+	// Evict oldest if capacity reached. Eviction is local optimization only and
+	// must never be interpreted as authorization for Agent-side record deletion.
 	if len(t.keys) >= t.maxEntries {
 		oldest := t.keys[0]
 		t.keys = t.keys[1:]

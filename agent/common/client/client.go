@@ -46,6 +46,8 @@ type Batch struct {
 
 type Ack struct {
 	AcceptedThrough uint64
+	AgentID         string
+	BatchID         string
 }
 
 // Transport is the receiving-side boundary. The current repository does not yet

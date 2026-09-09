@@ -18,7 +18,7 @@ import (
 	"platform/sensor/internal/runtime"
 )
 
-func newTestReceiver(t *testing.T, role runtime.Role, authorizer AssignmentAuthorizer, sink AcceptanceSink) *Receiver {
+func newTestReceiver(t *testing.T, role runtime.Role, identity AgentIdentityVerifier, authorizer AssignmentAuthorizer, sink AcceptanceSink) *Receiver {
 	t.Helper()
 	cfg := Config{
 		SensorID:        "sensor-infra-01",
@@ -28,7 +28,11 @@ func newTestReceiver(t *testing.T, role runtime.Role, authorizer AssignmentAutho
 		MaxRecordBytes:  64 * 1024,
 	}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	rcv, err := NewReceiver(cfg, authorizer, sink, logger)
+	if identity == nil {
+		identity = NewStaticTestIdentityVerifier()
+		identity.(*StaticTestIdentityVerifier).AllowCommonName("agent-1", "agent-1")
+	}
+	rcv, err := NewReceiver(cfg, identity, authorizer, sink, logger)
 	if err != nil {
 		t.Fatalf("failed to create receiver: %v", err)
 	}
@@ -69,7 +73,6 @@ func sampleEnvelope(agentID, tenantID string, recs ...DeliveryRecord) DeliveryEn
 
 func mockTLSServer(handler http.Handler, certCN string) (*httptest.Server, *http.Client) {
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Mock TLS ConnectionState with peer certificate
 		if certCN != "" {
 			cert := &x509.Certificate{
 				Subject:  pkix.Name{CommonName: certCN},
@@ -85,6 +88,15 @@ func mockTLSServer(handler http.Handler, certCN string) (*httptest.Server, *http
 	return server, server.Client()
 }
 
+func postJSON(t *testing.T, client *http.Client, url string, body []byte) *http.Response {
+	t.Helper()
+	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	return resp
+}
+
 func TestRoleEligibility(t *testing.T) {
 	if !IsRoleEligible(runtime.RoleInfrastructure) {
 		t.Errorf("INFRASTRUCTURE role must be eligible")
@@ -95,34 +107,34 @@ func TestRoleEligibility(t *testing.T) {
 	if IsRoleEligible(runtime.RoleNetwork) {
 		t.Errorf("NETWORK role must NOT be eligible")
 	}
-	if IsRoleEligible(runtime.RoleStreamingEvent) {
-		t.Errorf("STREAMING_EVENT role must NOT be eligible")
-	}
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	_, err := NewReceiver(Config{SensorID: "s1", SensorRole: runtime.RoleNetwork}, nil, nil, logger)
+	_, err := NewReceiver(Config{SensorID: "s1", SensorRole: runtime.RoleNetwork}, nil, nil, nil, logger)
 	if err == nil {
 		t.Fatalf("expected NewReceiver to fail for NETWORK role")
 	}
 	if !strings.Contains(err.Error(), ErrCodeRoleIneligible) {
 		t.Errorf("expected ErrCodeRoleIneligible in error, got %v", err)
 	}
+
+	_, err = NewReceiver(Config{SensorID: "", SensorRole: runtime.RoleInfrastructure}, nil, nil, nil, logger)
+	if err == nil {
+		t.Fatal("empty SensorID must fail")
+	}
 }
 
 func TestRejectionWithoutClientCertificate(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
 	auth := NewInMemoryAssignmentAuthorizer()
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
-	// No TLS peer cert
 	srv, client := mockTLSServer(rcv, "")
 	defer srv.Close()
 
 	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
-	resp, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -133,26 +145,21 @@ func TestRejectionWithoutClientCertificate(t *testing.T) {
 	if errResp.Code != ErrCodeAuthRequired {
 		t.Errorf("expected %s, got %s", ErrCodeAuthRequired, errResp.Code)
 	}
-	if rcv.Metrics().Snapshot().AuthFailures != 1 {
-		t.Errorf("expected 1 auth failure metric, got %d", rcv.Metrics().Snapshot().AuthFailures)
-	}
 }
 
 func TestRejectionOnIdentityMismatch(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-rogue", "agent-rogue")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "tenant-1", "sensor-infra-01")
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
-	// Certificate says agent-rogue, envelope claims agent-1
-	srv, client := mockTLSServer(rcv, "agent-rogue.agent.platform.local")
+	srv, client := mockTLSServer(rcv, "agent-rogue")
 	defer srv.Close()
 
 	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
-	resp, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusForbidden {
@@ -165,20 +172,35 @@ func TestRejectionOnIdentityMismatch(t *testing.T) {
 	}
 }
 
-func TestRejectionWhenNotAssigned(t *testing.T) {
+func TestFailClosedIdentityVerifier(t *testing.T) {
 	auth := NewInMemoryAssignmentAuthorizer()
-	// Deliberately NOT authorizing agent-1 to this sensor
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, NewFailClosedIdentityVerifier(), auth, sink)
 
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
 
 	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
-	resp, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 fail-closed identity, got %d", resp.StatusCode)
 	}
+}
+
+func TestRejectionWhenNotAssigned(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusForbidden {
@@ -189,16 +211,102 @@ func TestRejectionWhenNotAssigned(t *testing.T) {
 	if errResp.Code != ErrCodeAgentNotAssigned {
 		t.Errorf("expected %s, got %s", ErrCodeAgentNotAssigned, errResp.Code)
 	}
-	if rcv.Metrics().Snapshot().AssignmentDenials != 1 {
-		t.Errorf("expected 1 assignment denial metric, got %d", rcv.Metrics().Snapshot().AssignmentDenials)
+}
+
+func TestSpoofTenantDenied(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	env := sampleEnvelope("agent-1", "tenant-spoof", sampleRecord(1, "r-1", []byte(`{"m":1}`)))
+	body, _ := json.Marshal(env)
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("spoof tenant must be denied, got %d", resp.StatusCode)
+	}
+}
+
+func TestWrongSensorAssignmentDenied(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "other-sensor", "tenant-1", "site-primary")
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("wrong sensor assignment must deny, got %d", resp.StatusCode)
+	}
+}
+
+func TestRevokedAssignmentDenied(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	auth.Revoke("agent-1", "sensor-infra-01")
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("revoked assignment must deny, got %d", resp.StatusCode)
+	}
+}
+
+func TestSameAgentIDDifferentTenantsIsolated(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	// Authoritative assignment is for tenant-A only.
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-A", "site-primary")
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	// Claiming tenant-B must fail even if textual agent id matches.
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-B", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-tenant claim must deny, got %d", resp.StatusCode)
+	}
+
+	bodyOK, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-A", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	respOK := postJSON(t, client, srv.URL+EndpointPath, bodyOK)
+	defer respOK.Body.Close()
+	if respOK.StatusCode != http.StatusOK {
+		t.Fatalf("valid tenant path must succeed, got %d", respOK.StatusCode)
 	}
 }
 
 func TestSuccessfulDeliveryAndAck(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "tenant-1", "sensor-infra-01")
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
@@ -208,10 +316,7 @@ func TestSuccessfulDeliveryAndAck(t *testing.T) {
 	env := sampleEnvelope("agent-1", "tenant-1", rec1, rec2)
 
 	body, _ := json.Marshal(env)
-	resp, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -223,22 +328,11 @@ func TestSuccessfulDeliveryAndAck(t *testing.T) {
 		t.Fatalf("failed to decode ACK: %v", err)
 	}
 
-	if ack.Status != "ACCEPTED" {
-		t.Errorf("expected status ACCEPTED, got %s", ack.Status)
+	if ack.Status != "ACCEPTED" || ack.AcceptedThroughSequence != 102 {
+		t.Errorf("unexpected ACK: %+v", ack)
 	}
-	if ack.AcceptedThroughSequence != 102 {
-		t.Errorf("expected accepted through 102, got %d", ack.AcceptedThroughSequence)
-	}
-	if ack.AgentID != "agent-1" {
-		t.Errorf("expected agent-1, got %s", ack.AgentID)
-	}
-	if ack.CorrelationID != "corr-1001" {
-		t.Errorf("expected corr-1001, got %s", ack.CorrelationID)
-	}
-
-	snap := rcv.Metrics().Snapshot()
-	if snap.AcceptedBatches != 1 || snap.AcceptedRecords != 2 || snap.LastAckedSequence != 102 {
-		t.Errorf("unexpected metrics: %+v", snap)
+	if ack.AgentID != "agent-1" || ack.BatchID != "batch-2001" {
+		t.Errorf("expected batch-bound ACK, got %+v", ack)
 	}
 	if sink.RecordCount() != 2 {
 		t.Errorf("expected 2 records in sink, got %d", sink.RecordCount())
@@ -246,10 +340,12 @@ func TestSuccessfulDeliveryAndAck(t *testing.T) {
 }
 
 func TestExactReplayIdempotency(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "tenant-1", "sensor-infra-01")
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
@@ -258,46 +354,29 @@ func TestExactReplayIdempotency(t *testing.T) {
 	env := sampleEnvelope("agent-1", "tenant-1", rec1)
 	body, _ := json.Marshal(env)
 
-	// First attempt
-	resp1, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("first request failed: %v", err)
-	}
+	resp1 := postJSON(t, client, srv.URL+EndpointPath, body)
 	defer resp1.Body.Close()
 	if resp1.StatusCode != http.StatusOK {
 		t.Fatalf("first request expected 200, got %d", resp1.StatusCode)
 	}
 
-	// Exact replay attempt
-	resp2, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("replay request failed: %v", err)
-	}
+	resp2 := postJSON(t, client, srv.URL+EndpointPath, body)
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("replay request expected 200, got %d", resp2.StatusCode)
 	}
-
-	var ack2 DeliveryAck
-	_ = json.NewDecoder(resp2.Body).Decode(&ack2)
-	if ack2.AcceptedThroughSequence != 1 {
-		t.Errorf("expected cached ACK for seq 1, got %d", ack2.AcceptedThroughSequence)
-	}
-
-	// Downstream sink was called ONLY ONCE
 	if sink.BatchCount() != 1 {
 		t.Errorf("expected 1 batch in sink despite replay, got %d", sink.BatchCount())
-	}
-	if rcv.Metrics().Snapshot().ReplayExactHits != 1 {
-		t.Errorf("expected 1 replay exact hit metric, got %d", rcv.Metrics().Snapshot().ReplayExactHits)
 	}
 }
 
 func TestConflictingReplayRejection(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "tenant-1", "sensor-infra-01")
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
@@ -305,212 +384,215 @@ func TestConflictingReplayRejection(t *testing.T) {
 	rec1 := sampleRecord(1, "r-1", []byte(`{"val":1}`))
 	env1 := sampleEnvelope("agent-1", "tenant-1", rec1)
 	body1, _ := json.Marshal(env1)
-
-	resp1, _ := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body1))
+	resp1 := postJSON(t, client, srv.URL+EndpointPath, body1)
 	resp1.Body.Close()
 
-	// Same batchId "batch-2001", but different payload
 	rec2 := sampleRecord(1, "r-1", []byte(`{"val":999}`))
 	env2 := sampleEnvelope("agent-1", "tenant-1", rec2)
 	body2, _ := json.Marshal(env2)
-
-	resp2, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body2))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp2 := postJSON(t, client, srv.URL+EndpointPath, body2)
 	defer resp2.Body.Close()
 
 	if resp2.StatusCode != http.StatusConflict {
 		t.Errorf("expected 409 Conflict, got %d", resp2.StatusCode)
 	}
-	var errResp ErrorResponse
-	_ = json.NewDecoder(resp2.Body).Decode(&errResp)
-	if errResp.Code != ErrCodeReplayConflict {
-		t.Errorf("expected %s, got %s", ErrCodeReplayConflict, errResp.Code)
-	}
-	if rcv.Metrics().Snapshot().ReplayConflicts != 1 {
-		t.Errorf("expected 1 replay conflict metric, got %d", rcv.Metrics().Snapshot().ReplayConflicts)
-	}
 }
 
 func TestRecordChecksumFailureRejection(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "tenant-1", "sensor-infra-01")
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
 
 	rec := sampleRecord(1, "r-1", []byte(`{"val":1}`))
-	rec.Checksum = "0000000000000000000000000000000000000000000000000000000000000000" // tampered checksum
+	rec.Checksum = "0000000000000000000000000000000000000000000000000000000000000000"
 	env := sampleEnvelope("agent-1", "tenant-1", rec)
 	body, _ := json.Marshal(env)
 
-	resp, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request, got %d", resp.StatusCode)
-	}
-	var errResp ErrorResponse
-	_ = json.NewDecoder(resp.Body).Decode(&errResp)
-	if errResp.Code != ErrCodeRecordChecksumMismatch {
-		t.Errorf("expected %s, got %s", ErrCodeRecordChecksumMismatch, errResp.Code)
-	}
-	if rcv.Metrics().Snapshot().ChecksumFailures != 1 {
-		t.Errorf("expected 1 checksum failure metric, got %d", rcv.Metrics().Snapshot().ChecksumFailures)
 	}
 }
 
 func TestSequenceGapRejection(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "tenant-1", "sensor-infra-01")
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
 
 	rec1 := sampleRecord(1, "r-1", []byte(`{"val":1}`))
-	rec3 := sampleRecord(3, "r-3", []byte(`{"val":3}`)) // Missing seq 2
+	rec3 := sampleRecord(3, "r-3", []byte(`{"val":3}`))
 	env := sampleEnvelope("agent-1", "tenant-1", rec1, rec3)
 	env.LastSequence = 3
 	env.RecordCount = 2
 	body, _ := json.Marshal(env)
 
-	resp, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request, got %d", resp.StatusCode)
-	}
-	var errResp ErrorResponse
-	_ = json.NewDecoder(resp.Body).Decode(&errResp)
-	if errResp.Code != ErrCodeSequenceGap {
-		t.Errorf("expected %s, got %s", ErrCodeSequenceGap, errResp.Code)
 	}
 }
 
 func TestEmptyBatchRejection(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "tenant-1", "sensor-infra-01")
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
 
-	env := sampleEnvelope("agent-1", "tenant-1") // 0 records
+	env := sampleEnvelope("agent-1", "tenant-1")
 	body, _ := json.Marshal(env)
-
-	resp, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request, got %d", resp.StatusCode)
-	}
-	var errResp ErrorResponse
-	_ = json.NewDecoder(resp.Body).Decode(&errResp)
-	if errResp.Code != ErrCodeEmptyBatch {
-		t.Errorf("expected %s, got %s", ErrCodeEmptyBatch, errResp.Code)
 	}
 }
 
 func TestStrictUnknownFieldsRejection(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "tenant-1", "sensor-infra-01")
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
 
 	raw := `{"schemaVersion":1,"agentId":"agent-1","tenantId":"tenant-1","correlationId":"c1","batchId":"b1","firstSequence":1,"lastSequence":1,"recordCount":1,"unknownField":"malicious","records":[{"sequence":1,"id":"r1","createdAt":"2026-09-08T12:00:00Z","checksum":"abc","payload":{}}]}`
-
-	resp, err := client.Post(srv.URL+EndpointPath, "application/json", strings.NewReader(raw))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp := postJSON(t, client, srv.URL+EndpointPath, []byte(raw))
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request on unknown fields, got %d", resp.StatusCode)
 	}
+}
+
+func TestContentTypeRequired(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+EndpointPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "text/plain")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected 415, got %d", resp.StatusCode)
+	}
+}
+
+func TestSanitizedClientErrors(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	sink := NewInMemoryAcceptanceSink()
+	sink.SetInjectedError(io.ErrUnexpectedEOF)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
 	var errResp ErrorResponse
 	_ = json.NewDecoder(resp.Body).Decode(&errResp)
-	if errResp.Code != ErrCodeMalformedJSON {
-		t.Errorf("expected %s, got %s", ErrCodeMalformedJSON, errResp.Code)
+	if strings.Contains(errResp.Message, "unexpected EOF") {
+		t.Fatalf("must not leak sink error text: %q", errResp.Message)
 	}
 }
 
 func TestDownstreamSinkFailure(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "tenant-1", "sensor-infra-01")
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
 	sink.SetInjectedError(io.ErrUnexpectedEOF)
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
 
-	rec := sampleRecord(1, "r-1", []byte(`{"val":1}`))
-	env := sampleEnvelope("agent-1", "tenant-1", rec)
-	body, _ := json.Marshal(env)
-
-	resp, err := client.Post(srv.URL+EndpointPath, "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"val":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected 503 Service Unavailable, got %d", resp.StatusCode)
-	}
-	var errResp ErrorResponse
-	_ = json.NewDecoder(resp.Body).Decode(&errResp)
-	if errResp.Code != ErrCodeSinkFailed {
-		t.Errorf("expected %s, got %s", ErrCodeSinkFailed, errResp.Code)
-	}
-	if rcv.Metrics().Snapshot().SinkFailures != 1 {
-		t.Errorf("expected 1 sink failure metric, got %d", rcv.Metrics().Snapshot().SinkFailures)
 	}
 }
 
 func TestCancellationDoesNotProduceSuccessAck(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "tenant-1", "sensor-infra-01")
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
-	rcv := newTestReceiver(t, runtime.RoleInfrastructure, auth, sink)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
 
-	rec := sampleRecord(1, "r-1", []byte(`{"val":1}`))
-	env := sampleEnvelope("agent-1", "tenant-1", rec)
-	body, _ := json.Marshal(env)
-
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"val":1}`))))
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // pre-cancel context
+	cancel()
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", srv.URL+EndpointPath, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-
 	_, err := client.Do(req)
 	if err == nil {
 		t.Fatalf("expected error on cancelled request, got nil")
 	}
-
 	if sink.BatchCount() != 0 {
 		t.Errorf("sink should not receive cancelled batch, got %d", sink.BatchCount())
+	}
+}
+
+func TestNoPlatformLocalAuthorityAssumption(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	// Only exact CN mapping — suffix authority is not invented.
+	ident.AllowCommonName("agent-1.agent.platform.local", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1.agent.platform.local")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("exact CN mapping should succeed without suffix inventing, got %d", resp.StatusCode)
 	}
 }

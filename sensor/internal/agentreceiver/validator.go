@@ -53,7 +53,7 @@ func ValidateEnvelope(env *DeliveryEnvelope, maxRecords int, maxRecordBytes int)
 	if err := validateIdentifier("correlationId", env.CorrelationID, 128); err != nil {
 		return err
 	}
-	if err := validateIdentifier("batchId", env.BatchID, 128); err != nil {
+	if err := validateIdentifier("batchId", env.BatchID, 256); err != nil {
 		return err
 	}
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -234,6 +235,12 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 func validateAck(records []queue.Record, ack client.Ack) error {
 	if ack.AcceptedThrough == 0 {
 		return errors.New("DELIVERY_ACK_EMPTY: empty ACK does not authorize deletion")
+	}
+	if strings.TrimSpace(ack.BatchID) == "" {
+		return errors.New("DELIVERY_ACK_MISSING_BATCH_ID: batch-bound ACK required before deletion")
+	}
+	if strings.TrimSpace(ack.AgentID) == "" {
+		return errors.New("DELIVERY_ACK_MISSING_AGENT_ID: agent-bound ACK required before deletion")
 	}
 	if len(records) == 0 {
 		return errors.New("DELIVERY_ACK_EMPTY_BATCH: ACK without submitted records")

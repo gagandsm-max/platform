@@ -13,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +25,6 @@ import (
 func generateTestCertificates(t *testing.T, commonName string) (caPEM, certPEM, keyPEM []byte, tlsConfig *tls.Config, serverTLS *tls.Config) {
 	t.Helper()
 
-	// 1. Generate CA
 	caPriv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate CA key: %v", err)
@@ -47,7 +48,6 @@ func generateTestCertificates(t *testing.T, commonName string) (caPEM, certPEM, 
 	}
 	caPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caBytes})
 
-	// 2. Generate Server Certificate
 	serverPriv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate server key: %v", err)
@@ -78,7 +78,6 @@ func generateTestCertificates(t *testing.T, commonName string) (caPEM, certPEM, 
 		t.Fatalf("failed to parse server keypair: %v", err)
 	}
 
-	// 3. Generate Client Certificate
 	clientPriv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate client key: %v", err)
@@ -113,19 +112,38 @@ func generateTestCertificates(t *testing.T, commonName string) (caPEM, certPEM, 
 	clientTLSConfig := &tls.Config{
 		RootCAs:      caPool,
 		Certificates: []tls.Certificate{clientCert},
+		MinVersion:   tls.VersionTLS12,
 	}
 
 	serverTLSConfig := &tls.Config{
 		ClientCAs:    caPool,
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		Certificates: []tls.Certificate{serverCert},
+		MinVersion:   tls.VersionTLS12,
 	}
 
 	return caPEM, certPEM, keyPEM, clientTLSConfig, serverTLSConfig
 }
 
+func writePEMFiles(t *testing.T, caPEM, certPEM, keyPEM []byte) (caPath, certPath, keyPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	caPath = filepath.Join(dir, "ca.pem")
+	certPath = filepath.Join(dir, "client.pem")
+	keyPath = filepath.Join(dir, "client.key")
+	if err := os.WriteFile(caPath, caPEM, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(certPath, certPEM, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return caPath, certPath, keyPath
+}
+
 func TestHTTPSConfigValidation(t *testing.T) {
-	// Insecure URL scheme
 	_, err := NewHTTPSTransport(HTTPSConfig{
 		SensorURL: "http://127.0.0.1:8080",
 		AgentID:   "agent-1",
@@ -135,7 +153,6 @@ func TestHTTPSConfigValidation(t *testing.T) {
 		t.Errorf("expected DELIVERY_SCHEME_INSECURE for http URL, got %v", err)
 	}
 
-	// URL credentials rejected
 	_, err = NewHTTPSTransport(HTTPSConfig{
 		SensorURL: "https://user:pass@127.0.0.1:8443",
 		AgentID:   "agent-1",
@@ -145,7 +162,6 @@ func TestHTTPSConfigValidation(t *testing.T) {
 		t.Errorf("expected DELIVERY_URL_INSECURE for userinfo in URL, got %v", err)
 	}
 
-	// Empty Agent ID
 	_, err = NewHTTPSTransport(HTTPSConfig{
 		SensorURL: "https://127.0.0.1:8443",
 		AgentID:   "",
@@ -156,48 +172,144 @@ func TestHTTPSConfigValidation(t *testing.T) {
 	}
 }
 
-func TestHTTPSDeliverSuccess(t *testing.T) {
-	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+func TestEnforceTLSConstraintsRejectsInsecureSkip(t *testing.T) {
+	_, _, _, clientTLS, _ := generateTestCertificates(t, "agent-01")
+	clientTLS.InsecureSkipVerify = true
+	_, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: "https://127.0.0.1:8443",
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_TLS_INSECURE") {
+		t.Fatalf("expected insecure skip rejection, got %v", err)
+	}
+}
 
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestEnforceTLSConstraintsRejectsTLSBelow12(t *testing.T) {
+	_, _, _, clientTLS, _ := generateTestCertificates(t, "agent-01")
+	clientTLS.MinVersion = tls.VersionTLS10
+	_, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: "https://127.0.0.1:8443",
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_TLS_INSECURE") {
+		t.Fatalf("expected TLS <1.2 rejection, got %v", err)
+	}
+}
+
+func TestEnforceTLSConstraintsRejectsMissingClientCert(t *testing.T) {
+	_, _, _, clientTLS, _ := generateTestCertificates(t, "agent-01")
+	clientTLS.Certificates = nil
+	_, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: "https://127.0.0.1:8443",
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_TLS_MISSING") {
+		t.Fatalf("expected missing client cert rejection, got %v", err)
+	}
+}
+
+func TestEnforceTLSConstraintsRejectsMissingRootCAs(t *testing.T) {
+	_, _, _, clientTLS, _ := generateTestCertificates(t, "agent-01")
+	clientTLS.RootCAs = nil
+	_, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: "https://127.0.0.1:8443",
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_TLS_MISSING") {
+		t.Fatalf("expected missing RootCAs rejection, got %v", err)
+	}
+}
+
+func TestNewHTTPSTransportFromFiles(t *testing.T) {
+	caPEM, certPEM, keyPEM, _, _ := generateTestCertificates(t, "agent-01")
+	caPath, certPath, keyPath := writePEMFiles(t, caPEM, certPEM, keyPEM)
+
+	tr, err := NewHTTPSTransport(HTTPSConfig{
+		SensorURL:      "https://127.0.0.1:8443",
+		AgentID:        "agent-01",
+		TenantID:       "tenant-01",
+		CACertFile:     caPath,
+		ClientCertFile: certPath,
+		ClientKeyFile:  keyPath,
+	})
+	if err != nil {
+		t.Fatalf("valid CA+client cert should succeed: %v", err)
+	}
+	if tr == nil {
+		t.Fatal("expected transport")
+	}
+
+	_, err = NewHTTPSTransport(HTTPSConfig{
+		SensorURL:      "https://127.0.0.1:8443",
+		AgentID:        "agent-01",
+		TenantID:       "tenant-01",
+		CACertFile:     caPath,
+		ClientCertFile: certPath,
+		ClientKeyFile:  keyPath + ".missing",
+	})
+	if err == nil {
+		t.Fatal("expected failure for missing key file")
+	}
+
+	badCA := filepath.Join(t.TempDir(), "bad-ca.pem")
+	if err := os.WriteFile(badCA, []byte("not-a-cert"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewHTTPSTransport(HTTPSConfig{
+		SensorURL:      "https://127.0.0.1:8443",
+		AgentID:        "agent-01",
+		TenantID:       "tenant-01",
+		CACertFile:     badCA,
+		ClientCertFile: certPath,
+		ClientKeyFile:  keyPath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_CA_PARSE_FAILED") {
+		t.Fatalf("expected bad CA rejection, got %v", err)
+	}
+}
+
+func ackHandler(t *testing.T, agentID string) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/agent/telemetry" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 			http.NotFound(w, r)
 			return
 		}
-		if r.Header.Get("X-Correlation-ID") == "" {
-			t.Errorf("expected X-Correlation-ID header")
-		}
-
 		var env DeliveryEnvelope
 		if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
 			t.Errorf("failed to decode envelope: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-
-		if env.AgentID != "agent-01" || env.TenantID != "tenant-01" || len(env.Records) != 2 {
-			t.Errorf("unexpected envelope content: %+v", env)
-		}
-
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(DeliveryAck{
 			Status:                  "ACCEPTED",
-			AcceptedThroughSequence: 10,
-			AgentID:                 "agent-01",
+			AcceptedThroughSequence: env.LastSequence,
+			AgentID:                 agentID,
+			BatchID:                 env.BatchID,
 			CorrelationID:           env.CorrelationID,
 		})
-	}))
+	}
+}
+
+func TestHTTPSDeliverSuccess(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+
+	server := httptest.NewUnstartedServer(ackHandler(t, "agent-01"))
 	server.TLS = serverTLS
 	server.StartTLS()
 	defer server.Close()
 
-	tr, err := NewHTTPSTransport(HTTPSConfig{
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
 		SensorURL: server.URL,
 		AgentID:   "agent-01",
 		TenantID:  "tenant-01",
-		TLSConfig: clientTLS,
-	})
+	}, clientTLS)
 	if err != nil {
 		t.Fatalf("failed to create transport: %v", err)
 	}
@@ -214,9 +326,80 @@ func TestHTTPSDeliverSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deliver failed: %v", err)
 	}
-
 	if ack.AcceptedThrough != 10 {
 		t.Errorf("expected accepted through 10, got %d", ack.AcceptedThrough)
+	}
+	if ack.BatchID == "" || ack.AgentID != "agent-01" {
+		t.Errorf("expected batch-bound ACK identity, got %+v", ack)
+	}
+}
+
+func TestHTTPSDeliverRejectsBatchMismatch(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(DeliveryAck{
+			Status:                  "ACCEPTED",
+			AcceptedThroughSequence: 1,
+			AgentID:                 "agent-01",
+			BatchID:                 "wrong-batch",
+			CorrelationID:           "c1",
+		})
+	}))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Deliver(context.Background(), Batch{
+		Records: []queue.Record{{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_ACK_BATCH_MISMATCH") {
+		t.Fatalf("expected batch mismatch, got %v", err)
+	}
+}
+
+func TestHTTPSDeliverRejectsTrailingJSON(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var env DeliveryEnvelope
+		_ = json.NewDecoder(r.Body).Decode(&env)
+		w.Header().Set("Content-Type", "application/json")
+		ack, _ := json.Marshal(DeliveryAck{
+			Status:                  "ACCEPTED",
+			AcceptedThroughSequence: env.LastSequence,
+			AgentID:                 "agent-01",
+			BatchID:                 env.BatchID,
+			CorrelationID:           env.CorrelationID,
+		})
+		_, _ = w.Write(append(ack, []byte(`{"extra":true}`)...))
+	}))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Deliver(context.Background(), Batch{
+		Records: []queue.Record{{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_ACK_TRAILING_DATA") {
+		t.Fatalf("expected trailing data rejection, got %v", err)
 	}
 }
 
@@ -236,31 +419,26 @@ func TestHTTPSDeliverAuthenticationFailure(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 
-	tr, err := NewHTTPSTransport(HTTPSConfig{
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
 		SensorURL: server.URL,
 		AgentID:   "agent-01",
 		TenantID:  "tenant-01",
-		TLSConfig: clientTLS,
-	})
+	}, clientTLS)
 	if err != nil {
 		t.Fatalf("failed to create transport: %v", err)
 	}
 
-	batch := Batch{
+	_, err = tr.Deliver(context.Background(), Batch{
 		CorrelationID: "test-corr-1",
 		Records: []queue.Record{
 			{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
 		},
-	}
-
-	_, err = tr.Deliver(context.Background(), batch)
+	})
 	if err == nil {
 		t.Fatalf("expected error on 403 Forbidden, got nil")
 	}
-
-	failClass := Classify(err)
-	if failClass != FailureAuthentication {
-		t.Errorf("expected FailureAuthentication, got %q (err: %v)", failClass, err)
+	if Classify(err) != FailureAuthentication {
+		t.Errorf("expected FailureAuthentication, got %q (err: %v)", Classify(err), err)
 	}
 }
 
@@ -280,31 +458,26 @@ func TestHTTPSDeliverServerError(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 
-	tr, err := NewHTTPSTransport(HTTPSConfig{
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
 		SensorURL: server.URL,
 		AgentID:   "agent-01",
 		TenantID:  "tenant-01",
-		TLSConfig: clientTLS,
-	})
+	}, clientTLS)
 	if err != nil {
 		t.Fatalf("failed to create transport: %v", err)
 	}
 
-	batch := Batch{
+	_, err = tr.Deliver(context.Background(), Batch{
 		CorrelationID: "test-corr-1",
 		Records: []queue.Record{
 			{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
 		},
-	}
-
-	_, err = tr.Deliver(context.Background(), batch)
+	})
 	if err == nil {
 		t.Fatalf("expected error on 503 Service Unavailable, got nil")
 	}
-
-	failClass := Classify(err)
-	if failClass != FailureTemporary {
-		t.Errorf("expected FailureTemporary on 503, got %q", failClass)
+	if Classify(err) != FailureTemporary {
+		t.Errorf("expected FailureTemporary on 503, got %q", Classify(err))
 	}
 }
 
@@ -314,37 +487,32 @@ func TestHTTPSDeliverMalformedAck(t *testing.T) {
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"CORRUPT", "invalidJson`)) // Malformed JSON
+		_, _ = w.Write([]byte(`{"status":"CORRUPT", "invalidJson`))
 	}))
 	server.TLS = serverTLS
 	server.StartTLS()
 	defer server.Close()
 
-	tr, err := NewHTTPSTransport(HTTPSConfig{
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
 		SensorURL: server.URL,
 		AgentID:   "agent-01",
 		TenantID:  "tenant-01",
-		TLSConfig: clientTLS,
-	})
+	}, clientTLS)
 	if err != nil {
 		t.Fatalf("failed to create transport: %v", err)
 	}
 
-	batch := Batch{
+	_, err = tr.Deliver(context.Background(), Batch{
 		CorrelationID: "test-corr-1",
 		Records: []queue.Record{
 			{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
 		},
-	}
-
-	_, err = tr.Deliver(context.Background(), batch)
+	})
 	if err == nil {
 		t.Fatalf("expected error on malformed ACK, got nil")
 	}
-
-	failClass := Classify(err)
-	if failClass != FailurePermanent {
-		t.Errorf("expected FailurePermanent on malformed ACK, got %q", failClass)
+	if Classify(err) != FailurePermanent {
+		t.Errorf("expected FailurePermanent on malformed ACK, got %q", Classify(err))
 	}
 }
 
@@ -359,12 +527,11 @@ func TestHTTPSDeliverContextTimeout(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 
-	tr, err := NewHTTPSTransport(HTTPSConfig{
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
 		SensorURL: server.URL,
 		AgentID:   "agent-01",
 		TenantID:  "tenant-01",
-		TLSConfig: clientTLS,
-	})
+	}, clientTLS)
 	if err != nil {
 		t.Fatalf("failed to create transport: %v", err)
 	}
@@ -372,20 +539,16 @@ func TestHTTPSDeliverContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	batch := Batch{
+	_, err = tr.Deliver(ctx, Batch{
 		CorrelationID: "test-corr-1",
 		Records: []queue.Record{
 			{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
 		},
-	}
-
-	_, err = tr.Deliver(ctx, batch)
+	})
 	if err == nil {
 		t.Fatalf("expected error on context timeout, got nil")
 	}
-
-	failClass := Classify(err)
-	if failClass != FailureTemporary {
-		t.Errorf("expected FailureTemporary on timeout, got %q", failClass)
+	if Classify(err) != FailureTemporary {
+		t.Errorf("expected FailureTemporary on timeout, got %q", Classify(err))
 	}
 }

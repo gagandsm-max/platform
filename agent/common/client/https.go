@@ -53,6 +53,7 @@ type DeliveryAck struct {
 	Status                  string `json:"status"`
 	AcceptedThroughSequence uint64 `json:"accepted_through_sequence"`
 	AgentID                 string `json:"agent_id"`
+	BatchID                 string `json:"batch_id"`
 	CorrelationID           string `json:"correlation_id"`
 }
 
@@ -63,6 +64,8 @@ type ErrorResponse struct {
 }
 
 // HTTPSConfig parameterizes the concrete mTLS transport for Agent-to-Sensor telemetry delivery.
+// Production TLS is built only from CA/client certificate files; caller-supplied *tls.Config
+// is not accepted on the production constructor.
 type HTTPSConfig struct {
 	SensorURL        string
 	AgentID          string
@@ -71,7 +74,6 @@ type HTTPSConfig struct {
 	CACertFile       string
 	ClientCertFile   string
 	ClientKeyFile    string
-	TLSConfig        *tls.Config // Optional pre-configured TLS config (e.g. for test harnesses)
 	Timeout          time.Duration
 	MaxResponseBytes int64
 	Logger           *slog.Logger
@@ -86,28 +88,59 @@ type HTTPSTransport struct {
 }
 
 // NewHTTPSTransport constructs a validated HTTPS mTLS transport.
+// TLS is built exclusively via buildTLSConfig (TLS ≥ 1.2, verify, CA + client cert required).
 func NewHTTPSTransport(cfg HTTPSConfig) (*HTTPSTransport, error) {
+	if err := validateHTTPSConfigBasics(cfg); err != nil {
+		return nil, err
+	}
+	tlsConfig, err := buildTLSConfig(cfg.CACertFile, cfg.ClientCertFile, cfg.ClientKeyFile)
+	if err != nil {
+		return nil, err
+	}
+	return newHTTPSTransport(cfg, tlsConfig)
+}
+
+// NewHTTPSTransportForTest is a TEST-ONLY seam that accepts an explicit *tls.Config.
+// The config is cloned and validated by enforceTLSConstraints (rejects InsecureSkipVerify,
+// MinVersion < TLS1.2 when set, missing RootCAs, missing client Certificates; forces MinVersion ≥ TLS1.2).
+func NewHTTPSTransportForTest(cfg HTTPSConfig, tlsConfig *tls.Config) (*HTTPSTransport, error) {
+	if err := validateHTTPSConfigBasics(cfg); err != nil {
+		return nil, err
+	}
+	if tlsConfig == nil {
+		return nil, errors.New("DELIVERY_TLS_MISSING: test TLS config must not be nil")
+	}
+	secured, err := enforceTLSConstraints(tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+	return newHTTPSTransport(cfg, secured)
+}
+
+func validateHTTPSConfigBasics(cfg HTTPSConfig) error {
 	if strings.TrimSpace(cfg.SensorURL) == "" {
-		return nil, errors.New("DELIVERY_CONFIG_INVALID: SensorURL must be specified")
+		return errors.New("DELIVERY_CONFIG_INVALID: SensorURL must be specified")
 	}
 	u, err := url.Parse(cfg.SensorURL)
 	if err != nil {
-		return nil, fmt.Errorf("DELIVERY_URL_INVALID: failed to parse sensor URL: %w", err)
+		return fmt.Errorf("DELIVERY_URL_INVALID: failed to parse sensor URL: %w", err)
 	}
 	if strings.ToLower(u.Scheme) != "https" {
-		return nil, fmt.Errorf("DELIVERY_SCHEME_INSECURE: SensorURL scheme must be https, got %q", u.Scheme)
+		return fmt.Errorf("DELIVERY_SCHEME_INSECURE: SensorURL scheme must be https, got %q", u.Scheme)
 	}
 	if u.User != nil {
-		return nil, errors.New("DELIVERY_URL_INSECURE: credentials in SensorURL are strictly prohibited")
+		return errors.New("DELIVERY_URL_INSECURE: credentials in SensorURL are strictly prohibited")
 	}
-
 	if strings.TrimSpace(cfg.AgentID) == "" {
-		return nil, errors.New("DELIVERY_CONFIG_INVALID: AgentID must not be empty")
+		return errors.New("DELIVERY_CONFIG_INVALID: AgentID must not be empty")
 	}
 	if strings.TrimSpace(cfg.TenantID) == "" {
-		return nil, errors.New("DELIVERY_CONFIG_INVALID: TenantID must not be empty")
+		return errors.New("DELIVERY_CONFIG_INVALID: TenantID must not be empty")
 	}
+	return nil
+}
 
+func newHTTPSTransport(cfg HTTPSConfig, tlsConfig *tls.Config) (*HTTPSTransport, error) {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 10 * time.Second
 	}
@@ -118,15 +151,6 @@ func NewHTTPSTransport(cfg HTTPSConfig) (*HTTPSTransport, error) {
 		cfg.Logger = slog.Default()
 	}
 
-	tlsConfig := cfg.TLSConfig
-	if tlsConfig == nil {
-		var loadErr error
-		tlsConfig, loadErr = buildTLSConfig(cfg.CACertFile, cfg.ClientCertFile, cfg.ClientKeyFile)
-		if loadErr != nil {
-			return nil, loadErr
-		}
-	}
-
 	transport := &http.Transport{
 		TLSClientConfig:       tlsConfig,
 		ResponseHeaderTimeout: cfg.Timeout,
@@ -135,7 +159,7 @@ func NewHTTPSTransport(cfg HTTPSConfig) (*HTTPSTransport, error) {
 		MaxIdleConnsPerHost:   5,
 	}
 
-	client := &http.Client{
+	httpClient := &http.Client{
 		Transport: transport,
 		Timeout:   cfg.Timeout + (2 * time.Second),
 	}
@@ -144,10 +168,34 @@ func NewHTTPSTransport(cfg HTTPSConfig) (*HTTPSTransport, error) {
 
 	return &HTTPSTransport{
 		cfg:        cfg,
-		httpClient: client,
+		httpClient: httpClient,
 		endpoint:   endpoint,
 		logger:     cfg.Logger.With("component", "agent-https-transport", "sensor_url", cfg.SensorURL),
 	}, nil
+}
+
+// enforceTLSConstraints clones cfg and rejects insecure or incomplete TLS material.
+// Always forces MinVersion >= tls.VersionTLS12.
+func enforceTLSConstraints(cfg *tls.Config) (*tls.Config, error) {
+	if cfg == nil {
+		return nil, errors.New("DELIVERY_TLS_INVALID: tls config is nil")
+	}
+	clone := cfg.Clone()
+	if clone.InsecureSkipVerify {
+		return nil, errors.New("DELIVERY_TLS_INSECURE: InsecureSkipVerify is prohibited")
+	}
+	if clone.MinVersion != 0 && clone.MinVersion < tls.VersionTLS12 {
+		return nil, fmt.Errorf("DELIVERY_TLS_INSECURE: MinVersion %#x is below TLS 1.2", clone.MinVersion)
+	}
+	if clone.RootCAs == nil {
+		return nil, errors.New("DELIVERY_TLS_MISSING: RootCAs must be configured")
+	}
+	if len(clone.Certificates) == 0 {
+		return nil, errors.New("DELIVERY_TLS_MISSING: client Certificates must be configured")
+	}
+	clone.MinVersion = tls.VersionTLS12
+	clone.InsecureSkipVerify = false
+	return clone, nil
 }
 
 func buildTLSConfig(caFile, certFile, keyFile string) (*tls.Config, error) {
@@ -251,11 +299,22 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 	}
 	defer resp.Body.Close()
 
-	// 4. Read Response Bounded
-	limitedReader := io.LimitReader(resp.Body, t.cfg.MaxResponseBytes)
-	respBytes, err := io.ReadAll(limitedReader)
+	// 4. Read Response Bounded; detect truncation when LimitReader hits max
+	limited := &io.LimitedReader{R: resp.Body, N: t.cfg.MaxResponseBytes}
+	respBytes, err := io.ReadAll(limited)
 	if err != nil {
 		return Ack{}, &DeliveryError{Code: "DELIVERY_RESPONSE_READ_FAILED", Class: FailureTemporary, Err: err}
+	}
+	if limited.N == 0 {
+		var one [1]byte
+		n, readErr := resp.Body.Read(one[:])
+		if n > 0 || (readErr != nil && !errors.Is(readErr, io.EOF)) {
+			return Ack{}, &DeliveryError{
+				Code:  "DELIVERY_RESPONSE_TRUNCATED",
+				Class: FailureTemporary,
+				Err:   errors.New("response exceeded MaxResponseBytes"),
+			}
+		}
 	}
 
 	// 5. Evaluate HTTP Status Codes
@@ -269,6 +328,13 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 				Code:  "DELIVERY_ACK_MALFORMED",
 				Class: FailurePermanent,
 				Err:   fmt.Errorf("failed to decode sensor ACK JSON: %w", err),
+			}
+		}
+		if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			return Ack{}, &DeliveryError{
+				Code:  "DELIVERY_ACK_TRAILING_DATA",
+				Class: FailurePermanent,
+				Err:   errors.New("extraneous data after ACK JSON object"),
 			}
 		}
 
@@ -288,7 +354,15 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 			}
 		}
 
-		if ack.AgentID != "" && !strings.EqualFold(ack.AgentID, t.cfg.AgentID) {
+		if ack.BatchID != batchID {
+			return Ack{}, &DeliveryError{
+				Code:  "DELIVERY_ACK_BATCH_MISMATCH",
+				Class: FailurePermanent,
+				Err:   fmt.Errorf("sensor ACK batch_id %q does not match submitted %q", ack.BatchID, batchID),
+			}
+		}
+
+		if !strings.EqualFold(ack.AgentID, t.cfg.AgentID) {
 			return Ack{}, &DeliveryError{
 				Code:  "DELIVERY_ACK_AGENT_MISMATCH",
 				Class: FailurePermanent,
@@ -296,7 +370,11 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 			}
 		}
 
-		return Ack{AcceptedThrough: ack.AcceptedThroughSequence}, nil
+		return Ack{
+			AcceptedThrough: ack.AcceptedThroughSequence,
+			AgentID:         ack.AgentID,
+			BatchID:         ack.BatchID,
+		}, nil
 
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		var errResp ErrorResponse

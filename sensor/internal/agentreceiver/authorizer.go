@@ -3,20 +3,27 @@ package agentreceiver
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 )
 
-// AssignmentDecision encapsulates the authorization verdict for an Agent-to-Sensor delivery.
-type AssignmentDecision struct {
+// AssignmentContext is the authoritative placement result for an authenticated
+// Agent delivering to a receiving Sensor. TenantID/SiteID/SensorID/AgentID are
+// derived from assignment authority — never from unverified payload claims.
+type AssignmentContext struct {
+	TenantID string
+	SiteID   string
+	SensorID string
+	AgentID  string
 	Assigned bool
 	Reason   string
 }
 
 // AssignmentAuthorizer defines the authoritative placement validation boundary.
-// Core owns Agent-to-Sensor assignment; an Infrastructure Sensor must verify that
-// the delivering Agent is explicitly assigned to it before accepting telemetry.
+// Lookup MUST use authenticated Agent identity + receiving Sensor identity ONLY.
+// Payload tenant/site/sensor values are claims, never authority keys.
 type AssignmentAuthorizer interface {
-	AuthorizeAssignment(ctx context.Context, agentID, tenantID, sensorID string) (AssignmentDecision, error)
+	Authorize(ctx context.Context, authAgent AuthenticatedAgentIdentity, receivingSensorID string) (AssignmentContext, error)
 }
 
 // FailClosedAuthorizer is the mandatory production default when no authoritative Core
@@ -27,60 +34,80 @@ func NewFailClosedAuthorizer() *FailClosedAuthorizer {
 	return &FailClosedAuthorizer{}
 }
 
-func (a *FailClosedAuthorizer) AuthorizeAssignment(ctx context.Context, agentID, tenantID, sensorID string) (AssignmentDecision, error) {
-	return AssignmentDecision{
+func (a *FailClosedAuthorizer) Authorize(ctx context.Context, authAgent AuthenticatedAgentIdentity, receivingSensorID string) (AssignmentContext, error) {
+	return AssignmentContext{
+		AgentID:  authAgent.AgentID,
+		SensorID: receivingSensorID,
 		Assigned: false,
 		Reason:   "AGENT_SENSOR_ASSIGNMENT_INTEGRATION_BLOCKED: authoritative Core assignment source unavailable",
 	}, nil
 }
 
-// InMemoryAssignmentAuthorizer provides deterministic assignment resolution for test harnesses.
+// InMemoryAssignmentAuthorizer is TEST-ONLY. It stores assignments keyed by
+// (agentID, sensorID) → {tenant, site}. It must not be used as production authority.
 type InMemoryAssignmentAuthorizer struct {
 	mu      sync.RWMutex
-	allowed map[string]bool
+	allowed map[string]assignmentRecord
+}
+
+type assignmentRecord struct {
+	tenantID string
+	siteID   string
 }
 
 func NewInMemoryAssignmentAuthorizer() *InMemoryAssignmentAuthorizer {
 	return &InMemoryAssignmentAuthorizer{
-		allowed: make(map[string]bool),
+		allowed: make(map[string]assignmentRecord),
 	}
 }
 
-func (a *InMemoryAssignmentAuthorizer) key(agentID, tenantID, sensorID string) string {
-	return fmt.Sprintf("%s:%s:%s", tenantID, agentID, sensorID)
+func (a *InMemoryAssignmentAuthorizer) key(agentID, sensorID string) string {
+	return strings.ToLower(strings.TrimSpace(agentID)) + "\x00" + strings.ToLower(strings.TrimSpace(sensorID))
 }
 
-func (a *InMemoryAssignmentAuthorizer) Allow(agentID, tenantID, sensorID string) {
+// Allow registers a TEST-ONLY assignment of agentID → sensorID with authoritative tenant/site.
+func (a *InMemoryAssignmentAuthorizer) Allow(agentID, sensorID, tenantID, siteID string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.allowed[a.key(agentID, tenantID, sensorID)] = true
+	a.allowed[a.key(agentID, sensorID)] = assignmentRecord{
+		tenantID: strings.TrimSpace(tenantID),
+		siteID:   strings.TrimSpace(siteID),
+	}
 }
 
-func (a *InMemoryAssignmentAuthorizer) Revoke(agentID, tenantID, sensorID string) {
+// Revoke removes a TEST-ONLY assignment for (agentID, sensorID).
+func (a *InMemoryAssignmentAuthorizer) Revoke(agentID, sensorID string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	delete(a.allowed, a.key(agentID, tenantID, sensorID))
+	delete(a.allowed, a.key(agentID, sensorID))
 }
 
 func (a *InMemoryAssignmentAuthorizer) Clear() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.allowed = make(map[string]bool)
+	a.allowed = make(map[string]assignmentRecord)
 }
 
-func (a *InMemoryAssignmentAuthorizer) AuthorizeAssignment(ctx context.Context, agentID, tenantID, sensorID string) (AssignmentDecision, error) {
+func (a *InMemoryAssignmentAuthorizer) Authorize(ctx context.Context, authAgent AuthenticatedAgentIdentity, receivingSensorID string) (AssignmentContext, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	if a.allowed[a.key(agentID, tenantID, sensorID)] {
-		return AssignmentDecision{
-			Assigned: true,
-			Reason:   "assignment authorized by in-memory registry",
+	rec, ok := a.allowed[a.key(authAgent.AgentID, receivingSensorID)]
+	if !ok {
+		return AssignmentContext{
+			AgentID:  authAgent.AgentID,
+			SensorID: receivingSensorID,
+			Assigned: false,
+			Reason:   fmt.Sprintf("agent %q is not assigned to sensor %q", authAgent.AgentID, receivingSensorID),
 		}, nil
 	}
 
-	return AssignmentDecision{
-		Assigned: false,
-		Reason:   fmt.Sprintf("agent %q is not assigned to sensor %q for tenant %q", agentID, sensorID, tenantID),
+	return AssignmentContext{
+		TenantID: rec.tenantID,
+		SiteID:   rec.siteID,
+		SensorID: receivingSensorID,
+		AgentID:  authAgent.AgentID,
+		Assigned: true,
+		Reason:   "assignment authorized by in-memory test registry",
 	}, nil
 }

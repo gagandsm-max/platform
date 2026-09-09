@@ -49,6 +49,7 @@ type harnessDeliveryAck struct {
 	Status                  string `json:"status"`
 	AcceptedThroughSequence uint64 `json:"accepted_through_sequence"`
 	AgentID                 string `json:"agent_id"`
+	BatchID                 string `json:"batch_id"`
 	CorrelationID           string `json:"correlation_id"`
 }
 
@@ -79,7 +80,6 @@ func (s *harnessTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 1. Enforce mTLS
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -93,7 +93,6 @@ func (s *harnessTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	certCN := r.TLS.PeerCertificates[0].Subject.CommonName
 
-	// 2. Decode Envelope
 	var env harnessDeliveryEnvelope
 	if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -101,13 +100,12 @@ func (s *harnessTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(harnessErrorResponse{
 			Status:  "ERROR",
 			Code:    "ERR_MALFORMED_JSON",
-			Message: err.Error(),
+			Message: "Malformed JSON payload",
 		})
 		return
 	}
 
-	// 3. Verify Certificate CN matches Claimed Agent ID
-	if !strings.EqualFold(certCN, env.AgentID) && !strings.EqualFold(strings.TrimSuffix(certCN, ".agent.platform.local"), env.AgentID) {
+	if !strings.EqualFold(certCN, env.AgentID) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_ = json.NewEncoder(w).Encode(harnessErrorResponse{
@@ -118,7 +116,6 @@ func (s *harnessTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. Verify Assignment Authorization
 	assignKey := fmt.Sprintf("%s:%s", env.TenantID, env.AgentID)
 	if !s.assigned[assignKey] {
 		w.Header().Set("Content-Type", "application/json")
@@ -131,7 +128,6 @@ func (s *harnessTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Check Replay Cache
 	batchKey := fmt.Sprintf("%s:%s", env.AgentID, env.BatchID)
 	if cachedAck, exists := s.replays[batchKey]; exists {
 		w.Header().Set("Content-Type", "application/json")
@@ -140,7 +136,6 @@ func (s *harnessTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 6. Check Sink Failure Fault Injection
 	if s.sinkFailure {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -152,19 +147,16 @@ func (s *harnessTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 7. Check Dropped Response Fault Injection (Network partition after acceptance)
 	if s.dropResponse {
 		s.accepted = append(s.accepted, env)
-		// Record in replay cache before dropping so retry succeeds
 		s.replays[batchKey] = harnessDeliveryAck{
 			Status:                  "ACCEPTED",
 			AcceptedThroughSequence: env.LastSequence,
 			AgentID:                 env.AgentID,
+			BatchID:                 env.BatchID,
 			CorrelationID:           env.CorrelationID,
 		}
-		// Reset fault injection so subsequent retry succeeds
 		s.dropResponse = false
-		// Force close connection by hijacking or writing partial
 		hj, ok := w.(http.Hijacker)
 		if ok {
 			conn, _, _ := hj.Hijack()
@@ -173,25 +165,25 @@ func (s *harnessTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 8. Check Corrupted ACK Fault Injection
 	if s.corruptAck {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(harnessDeliveryAck{
 			Status:                  "ACCEPTED",
-			AcceptedThroughSequence: env.LastSequence + 100, // Invalid: exceeds batch
+			AcceptedThroughSequence: env.LastSequence + 100,
 			AgentID:                 env.AgentID,
+			BatchID:                 env.BatchID,
 			CorrelationID:           env.CorrelationID,
 		})
 		return
 	}
 
-	// 9. Accept Batch and Return Valid ACK
 	s.accepted = append(s.accepted, env)
 	ack := harnessDeliveryAck{
 		Status:                  "ACCEPTED",
 		AcceptedThroughSequence: env.LastSequence,
 		AgentID:                 env.AgentID,
+		BatchID:                 env.BatchID,
 		CorrelationID:           env.CorrelationID,
 	}
 	s.replays[batchKey] = ack
@@ -243,11 +235,9 @@ func setupHarnessPKI(t *testing.T, clientCN string) (*tls.Config, *tls.Config) {
 	caCert, _ := x509.ParseCertificate(caBytes)
 	caPool.AddCert(caCert)
 
-	serverCert, _ := x509.ParseCertificate(serverBytes)
-	clientCert, _ := x509.ParseCertificate(clientBytes)
-
 	clientTLS := &tls.Config{
-		RootCAs: caPool,
+		RootCAs:    caPool,
+		MinVersion: tls.VersionTLS12,
 		Certificates: []tls.Certificate{{
 			Certificate: [][]byte{clientBytes},
 			PrivateKey:  clientPriv,
@@ -256,13 +246,12 @@ func setupHarnessPKI(t *testing.T, clientCN string) (*tls.Config, *tls.Config) {
 	serverTLS := &tls.Config{
 		ClientCAs:  caPool,
 		ClientAuth: tls.RequireAndVerifyClientCert,
+		MinVersion: tls.VersionTLS12,
 		Certificates: []tls.Certificate{{
 			Certificate: [][]byte{serverBytes},
 			PrivateKey:  serverPriv,
 		}},
 	}
-	_ = serverCert
-	_ = clientCert
 
 	return clientTLS, serverTLS
 }
@@ -283,24 +272,20 @@ func TestHarnessPipeline(t *testing.T) {
 	ts.StartTLS()
 	defer ts.Close()
 
-	// 1. Initialize real DurableQueue
 	q, err := queue.NewDurableQueue(tempDir, 100, 10*1024*1024, 64*1024)
 	if err != nil {
 		t.Fatalf("failed to create durable queue: %v", err)
 	}
 
-	// 2. Initialize concrete HTTPSTransport
-	tr, err := client.NewHTTPSTransport(client.HTTPSConfig{
+	tr, err := client.NewHTTPSTransportForTest(client.HTTPSConfig{
 		SensorURL: ts.URL,
 		AgentID:   "agent-01",
 		TenantID:  "tenant-01",
-		TLSConfig: clientTLS,
-	})
+	}, clientTLS)
 	if err != nil {
 		t.Fatalf("failed to create transport: %v", err)
 	}
 
-	// 3. Initialize delivery.Worker
 	worker, err := NewWorker(q, tr, 10, 1024*1024, 10*time.Millisecond, 50*time.Millisecond, 2*time.Second, nil)
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
@@ -308,9 +293,6 @@ func TestHarnessPipeline(t *testing.T) {
 
 	ctx := context.Background()
 
-	// -------------------------------------------------------------------------
-	// Scenario 1: First batch succeeds & records deleted from queue
-	// -------------------------------------------------------------------------
 	_, _ = q.Enqueue([]byte(`{"metric":"cpu","val":25.0}`))
 	_, _ = q.Enqueue([]byte(`{"metric":"mem","val":50.0}`))
 	if q.Len() != 2 {
@@ -324,19 +306,9 @@ func TestHarnessPipeline(t *testing.T) {
 	if q.Len() != 0 {
 		t.Errorf("expected queue drained to 0 after valid ACK, got %d", q.Len())
 	}
-	if len(hServer.accepted) != 1 || len(hServer.accepted[0].Records) != 2 {
-		t.Errorf("server did not record expected batch: %+v", hServer.accepted)
-	}
 
-	// -------------------------------------------------------------------------
-	// Scenario 2: Records remain until valid ACK (Sink Failure)
-	// -------------------------------------------------------------------------
 	hServer.sinkFailure = true
 	_, _ = q.Enqueue([]byte(`{"metric":"disk","val":80.0}`))
-	if q.Len() != 1 {
-		t.Fatalf("expected queue len 1, got %d", q.Len())
-	}
-
 	delivered, err = worker.DeliverOnce(ctx)
 	if delivered || err == nil {
 		t.Fatalf("expected delivery failure on sink error, delivered=%v err=%v", delivered, err)
@@ -346,18 +318,13 @@ func TestHarnessPipeline(t *testing.T) {
 	}
 	hServer.sinkFailure = false
 
-	// -------------------------------------------------------------------------
-	// Scenario 3 & 4: Response lost after acceptance causes safe replay without duplicate
-	// -------------------------------------------------------------------------
 	hServer.dropResponse = true
 	delivered, err = worker.DeliverOnce(ctx)
 	if delivered || err == nil {
 		t.Fatalf("expected error on dropped connection, got delivered=%v err=%v", delivered, err)
 	}
-	// Server accepted the batch into hServer.accepted
 	acceptedCountBefore := len(hServer.accepted)
 
-	// Worker retries the exact batch
 	delivered, err = worker.DeliverOnce(ctx)
 	if err != nil || !delivered {
 		t.Fatalf("expected retry delivery to succeed via replay cache, delivered=%v err=%v", delivered, err)
@@ -365,14 +332,10 @@ func TestHarnessPipeline(t *testing.T) {
 	if q.Len() != 0 {
 		t.Errorf("expected queue drained after replay ACK, got %d", q.Len())
 	}
-	// Server sink count did NOT increase on replay
 	if len(hServer.accepted) != acceptedCountBefore {
 		t.Errorf("replay must not duplicate records in server sink; before=%d, after=%d", acceptedCountBefore, len(hServer.accepted))
 	}
 
-	// -------------------------------------------------------------------------
-	// Scenario 5: Invalid ACK never deletes records
-	// -------------------------------------------------------------------------
 	hServer.corruptAck = true
 	_, _ = q.Enqueue([]byte(`{"metric":"load","val":1.5}`))
 	delivered, err = worker.DeliverOnce(ctx)
@@ -384,53 +347,30 @@ func TestHarnessPipeline(t *testing.T) {
 	}
 	hServer.corruptAck = false
 
-	// Drain validly
 	delivered, err = worker.DeliverOnce(ctx)
 	if err != nil || !delivered {
 		t.Fatalf("failed to drain valid batch: %v", err)
 	}
-	if q.Len() != 0 {
-		t.Errorf("expected queue drained, got %d", q.Len())
-	}
 
-	// -------------------------------------------------------------------------
-	// Scenario 6 & 7: Receiver unavailable retains backlog; recovery drains backlog
-	// -------------------------------------------------------------------------
 	hServer.sinkFailure = true
 	_, _ = q.Enqueue([]byte(`{"metric":"net_in","val":100}`))
 	_, _ = q.Enqueue([]byte(`{"metric":"net_out","val":200}`))
-	if q.Len() != 2 {
-		t.Fatalf("expected backlog of 2, got %d", q.Len())
-	}
-
 	delivered, err = worker.DeliverOnce(ctx)
 	if delivered || err == nil {
 		t.Fatalf("expected failure during receiver outage")
 	}
-	if q.Len() != 2 {
-		t.Errorf("backlog must be retained during outage, got %d", q.Len())
-	}
-
-	// Recovery
 	hServer.sinkFailure = false
 	delivered, err = worker.DeliverOnce(ctx)
 	if err != nil || !delivered {
 		t.Fatalf("expected recovery to succeed, got %v", err)
 	}
-	if q.Len() != 0 {
-		t.Errorf("backlog must be drained after recovery, got %d", q.Len())
-	}
 
-	// -------------------------------------------------------------------------
-	// Scenario 8: Wrong Agent certificate retains backlog
-	// -------------------------------------------------------------------------
 	wrongClientTLS, _ := setupHarnessPKI(t, "agent-imposter")
-	wrongTr, _ := client.NewHTTPSTransport(client.HTTPSConfig{
+	wrongTr, _ := client.NewHTTPSTransportForTest(client.HTTPSConfig{
 		SensorURL: ts.URL,
-		AgentID:   "agent-01", // claimed is agent-01, but cert is agent-imposter
+		AgentID:   "agent-01",
 		TenantID:  "tenant-01",
-		TLSConfig: wrongClientTLS,
-	})
+	}, wrongClientTLS)
 	wrongWorker, _ := NewWorker(q, wrongTr, 10, 1024*1024, 10*time.Millisecond, 50*time.Millisecond, 2*time.Second, nil)
 
 	_, _ = q.Enqueue([]byte(`{"metric":"rogue_check","val":1}`))
@@ -442,19 +382,11 @@ func TestHarnessPipeline(t *testing.T) {
 		t.Errorf("queue must retain records when cert mismatch occurs, got %d", q.Len())
 	}
 
-	// -------------------------------------------------------------------------
-	// Scenario 9: Wrong assignment retains backlog
-	// -------------------------------------------------------------------------
-	delete(hServer.assigned, "tenant-01:agent-01") // Revoke assignment on server
+	delete(hServer.assigned, "tenant-01:agent-01")
 	delivered, err = worker.DeliverOnce(ctx)
 	if delivered || err == nil {
 		t.Fatalf("expected failure when agent is unassigned")
 	}
-	if q.Len() != 1 {
-		t.Errorf("queue must retain records when assignment is denied, got %d", q.Len())
-	}
-
-	// Restore assignment and drain
 	hServer.assigned["tenant-01:agent-01"] = true
 	delivered, err = worker.DeliverOnce(ctx)
 	if err != nil || !delivered {

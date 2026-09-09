@@ -59,10 +59,12 @@ type DeliveryEnvelope struct {
 }
 
 // DeliveryAck is the explicit application acknowledgement returned by the Sensor.
+// BatchID must echo the submitted envelope batchId for batch-bound deletion safety.
 type DeliveryAck struct {
 	Status                  string `json:"status"`
 	AcceptedThroughSequence uint64 `json:"accepted_through_sequence"`
 	AgentID                 string `json:"agent_id"`
+	BatchID                 string `json:"batch_id"`
 	CorrelationID           string `json:"correlation_id"`
 }
 
