@@ -17,6 +17,7 @@ import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -27,17 +28,12 @@ public class SensorIngestionController {
     private final SensorIngestionService ingestionService;
     private final ObjectMapper objectMapper;
 
-    public SensorIngestionController() {
-        this.ingestionService = null;
-        this.objectMapper = new ObjectMapper().findAndRegisterModules();
-    }
-
     @Autowired
     public SensorIngestionController(
-            @Autowired(required = false) SensorIngestionService ingestionService,
+            SensorIngestionService ingestionService,
             ObjectMapper objectMapper
     ) {
-        this.ingestionService = ingestionService;
+        this.ingestionService = Objects.requireNonNull(ingestionService, "ingestionService must not be null");
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
     }
 
@@ -70,7 +66,7 @@ public class SensorIngestionController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
                     "status", "ERROR",
                     "code", "ERR_AUTH_CLIENT_CERT_REQUIRED",
-                    "message", "mTLS client certificate authentication required for sensor ingestion"
+                    "message", "mTLS client certificate authentication required for sensor transport"
             ));
         }
 
@@ -145,28 +141,23 @@ public class SensorIngestionController {
             ));
         }
 
-        if (ingestionService != null) {
-            try {
-                TelemetryAckResponse ack = ingestionService.ingestTelemetry(rawBody, batchRequest, idempotencyKey, clientCert);
-                return ResponseEntity.ok(ack);
-            } catch (IngestionException e) {
-                log.warn("Ingestion rejected: code={}, message={}", e.getCode(), e.getMessage());
-                return ResponseEntity.status(e.getStatus()).body(Map.of(
-                        "status", "ERROR",
-                        "code", e.getCode(),
-                        "message", e.getMessage()
-                ));
-            } catch (Exception e) {
-                log.error("Ingestion failed unexpectedly: {}", e.getMessage(), e);
-                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
-                        "status", "ERROR",
-                        "code", "ERR_INTERNAL_ERROR",
-                        "message", "Internal server error processing telemetry"
-                ));
-            }
+        try {
+            TelemetryAckResponse ack = ingestionService.ingestTelemetry(rawBody, batchRequest, idempotencyKey, clientCert);
+            return ResponseEntity.ok(ack);
+        } catch (IngestionException e) {
+            log.warn("Ingestion rejected: code={}, message={}", e.getCode(), e.getMessage());
+            return ResponseEntity.status(e.getStatus()).body(Map.of(
+                    "status", "ERROR",
+                    "code", e.getCode(),
+                    "message", e.getMessage()
+            ));
+        } catch (Exception e) {
+            log.error("Ingestion failed unexpectedly: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "status", "ERROR",
+                    "code", "ERR_INTERNAL_ERROR",
+                    "message", "Internal server error processing telemetry"
+            ));
         }
-
-        String commonName = extractCommonName(clientCert.getSubjectX500Principal().getName());
-        return ResponseEntity.ok(new TelemetryAckResponse("ACCEPTED", batchRequest.lastSequence(), commonName));
     }
 }

@@ -2,17 +2,23 @@ package com.platform.core.ingestion;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.core.ingestion.authority.SensorAuthorityResolver;
+import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.UUID;
 
 @Component
 public class IngestionValidator {
@@ -20,50 +26,78 @@ public class IngestionValidator {
     public static final int MAX_RECORDS = 1000;
     public static final int MAX_RECORD_BYTES = 512 * 1024;
 
+    // Maximum safe integer representable without precision loss in IEEE 754 64-bit float (2^53 - 1)
+    private static final BigInteger MAX_SAFE_COUNTER64 = BigInteger.valueOf((1L << 53) - 1);
+
     private final ObjectMapper objectMapper;
+    private final SensorAuthorityResolver authorityResolver;
     private final IngestionMetrics metrics;
 
-    public IngestionValidator(ObjectMapper objectMapper) {
-        this(objectMapper, new IngestionMetrics());
+    public IngestionValidator(ObjectMapper objectMapper, SensorAuthorityResolver authorityResolver) {
+        this(objectMapper, authorityResolver, new IngestionMetrics());
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
-    public IngestionValidator(ObjectMapper objectMapper, IngestionMetrics metrics) {
-        this.objectMapper = objectMapper;
+    @Autowired
+    public IngestionValidator(
+            ObjectMapper objectMapper,
+            SensorAuthorityResolver authorityResolver,
+            IngestionMetrics metrics
+    ) {
+        this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
+        this.authorityResolver = authorityResolver;
         this.metrics = metrics != null ? metrics : new IngestionMetrics();
     }
 
-    public List<CanonicalObservation> validateAndExtract(byte[] rawBody, TelemetryBatchRequest batch, java.security.cert.X509Certificate clientCert) {
-        if (clientCert == null) {
-            metrics.recordBatchRejected("ERR_AUTH_CLIENT_CERT_REQUIRED");
-            throw new IngestionException(HttpStatus.UNAUTHORIZED, "ERR_AUTH_CLIENT_CERT_REQUIRED",
-                    "mTLS client certificate authentication required for telemetry ingestion");
+    public SensorScope resolveAuthority(X509Certificate clientCert) {
+        if (authorityResolver == null) {
+            metrics.recordBatchRejected("ERR_SENSOR_AUTHORITY_UNAVAILABLE");
+            throw new IngestionException(
+                    HttpStatus.FORBIDDEN,
+                    "ERR_SENSOR_AUTHORITY_UNAVAILABLE",
+                    "No Sensor authority resolver is configured; failing closed"
+            );
         }
-        String certIdentity = extractCommonName(clientCert.getSubjectX500Principal().getName());
+        return authorityResolver.resolve(clientCert);
+    }
+
+    public List<CanonicalObservation> validateAndExtract(
+            byte[] rawBody,
+            TelemetryBatchRequest batch,
+            SensorScope scope
+    ) {
+        if (scope == null) {
+            metrics.recordBatchRejected("ERR_SENSOR_AUTHORITY_UNAVAILABLE");
+            throw new IngestionException(
+                    HttpStatus.FORBIDDEN,
+                    "ERR_SENSOR_AUTHORITY_UNAVAILABLE",
+                    "Authoritative Sensor Scope is required; telemetry ingestion is fail-closed"
+            );
+        }
+
         try {
-            validate(batch, rawBody, certIdentity);
-            return extractCanonicalObservations(batch);
+            validateBatchBounds(batch, rawBody, scope);
+            List<CanonicalObservation> observations = extractCanonicalObservations(batch, scope);
+            if (observations.isEmpty()) {
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_NO_CANONICAL_OBSERVATIONS",
+                        "Batch contains zero supported canonical numeric observations"
+                );
+            }
+            return observations;
         } catch (IngestionException e) {
             metrics.recordBatchRejected(e.getCode());
             throw e;
         }
     }
 
-    private String extractCommonName(String dn) {
-        if (dn == null) return "UNKNOWN";
-        for (String part : dn.split(",")) {
-            part = part.trim();
-            if (part.startsWith("CN=") || part.startsWith("cn=")) {
-                return part.substring(3);
-            }
-        }
-        return dn;
-    }
-
-    public void validate(TelemetryBatchRequest batch, byte[] rawBody, String trustedCertIdentity) {
+    public void validateBatchBounds(TelemetryBatchRequest batch, byte[] rawBody, SensorScope scope) {
         if (rawBody != null && rawBody.length > MAX_BATCH_BYTES) {
-            throw new IngestionException(HttpStatus.PAYLOAD_TOO_LARGE, "ERR_BATCH_TOO_LARGE",
-                    "Batch payload size exceeds maximum limit of " + MAX_BATCH_BYTES + " bytes");
+            throw new IngestionException(
+                    HttpStatus.PAYLOAD_TOO_LARGE,
+                    "ERR_BATCH_TOO_LARGE",
+                    "Batch payload size exceeds maximum limit of " + MAX_BATCH_BYTES + " bytes"
+            );
         }
 
         if (batch == null) {
@@ -71,23 +105,25 @@ public class IngestionValidator {
         }
 
         if (batch.schemaVersion() != 1) {
-            throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_UNSUPPORTED_SCHEMA_VERSION",
-                    "Unsupported schema version: " + batch.schemaVersion() + ", expected 1");
+            throw new IngestionException(
+                    HttpStatus.BAD_REQUEST,
+                    "ERR_UNSUPPORTED_SCHEMA_VERSION",
+                    "Unsupported schema version: " + batch.schemaVersion() + ", expected 1"
+            );
         }
 
         if (batch.sensorId() == null || batch.sensorId().isBlank()) {
             throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_SENSOR_ID_REQUIRED", "Sensor ID is required");
         }
 
-        // Sensor identity verification against verified client certificate
-        if (trustedCertIdentity != null && !trustedCertIdentity.isBlank()) {
-            String sid = batch.sensorId().trim();
-            String cid = trustedCertIdentity.trim();
-            boolean match = cid.equalsIgnoreCase(sid) || cid.startsWith(sid + ".") || sid.startsWith(cid + ".");
-            if (!match) {
-                throw new IngestionException(HttpStatus.FORBIDDEN, "ERR_AUTH_IDENTITY_MISMATCH",
-                        "Sensor ID '" + sid + "' does not match verified client certificate identity '" + cid + "'");
-            }
+        // Sensor identity verification against authoritative scope
+        String claimedSensorId = batch.sensorId().trim();
+        if (!claimedSensorId.equalsIgnoreCase(scope.sensorId().trim())) {
+            throw new IngestionException(
+                    HttpStatus.FORBIDDEN,
+                    "ERR_AUTH_IDENTITY_MISMATCH",
+                    "Sensor ID '" + claimedSensorId + "' does not match authoritative scope sensorId '" + scope.sensorId() + "'"
+            );
         }
 
         if (batch.bootEpoch() == null || batch.bootEpoch().isBlank()) {
@@ -111,8 +147,11 @@ public class IngestionValidator {
         }
 
         if (batch.records().size() > MAX_RECORDS) {
-            throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_RECORDS_LIMIT_EXCEEDED",
-                    "Record count exceeds maximum of " + MAX_RECORDS);
+            throw new IngestionException(
+                    HttpStatus.BAD_REQUEST,
+                    "ERR_RECORDS_LIMIT_EXCEEDED",
+                    "Record count exceeds maximum of " + MAX_RECORDS
+            );
         }
 
         validateChecksum(batch, rawBody);
@@ -133,8 +172,11 @@ public class IngestionValidator {
             return;
         }
 
-        throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_CHECKSUM_MISMATCH",
-                "Batch checksum mismatch: expected=" + batch.checksum() + ", calculated=" + (calculated != null ? calculated : nodeCalculated));
+        throw new IngestionException(
+                HttpStatus.BAD_REQUEST,
+                "ERR_CHECKSUM_MISMATCH",
+                "Batch checksum mismatch: expected=" + batch.checksum() + ", calculated=" + (calculated != null ? calculated : nodeCalculated)
+        );
     }
 
     private String calculateRawRecordsChecksum(byte[] rawBody) {
@@ -233,15 +275,23 @@ public class IngestionValidator {
         }
     }
 
-    public List<CanonicalObservation> extractCanonicalObservations(TelemetryBatchRequest batch) {
+    public List<CanonicalObservation> extractCanonicalObservations(TelemetryBatchRequest batch, SensorScope scope) {
         List<CanonicalObservation> results = new ArrayList<>();
-        String sensorId = batch.sensorId();
+        String authoritativeTenantId = scope.tenantId().toString();
+        String authoritativeSensorId = scope.sensorId();
 
         for (JsonNode recordNode : batch.records()) {
             long sequence = recordNode.path("sequence").asLong(0);
-            String recordType = recordNode.path("type").asText("");
-            JsonNode payloadNode = recordNode.path("payload");
+            if (sequence < batch.firstSequence() || sequence > batch.lastSequence()) {
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_SEQUENCE_OUT_OF_BOUNDS",
+                        "Record sequence " + sequence + " is outside batch range ["
+                                + batch.firstSequence() + ".." + batch.lastSequence() + "]"
+                );
+            }
 
+            JsonNode payloadNode = recordNode.path("payload");
             JsonNode envelopeNode = payloadNode;
             if (payloadNode.isTextual()) {
                 try {
@@ -250,66 +300,166 @@ public class IngestionValidator {
                 } catch (Exception e) {
                     try {
                         envelopeNode = objectMapper.readTree(payloadNode.asText());
-                    } catch (Exception ignored) {
+                    } catch (Exception parseEx) {
+                        throw new IngestionException(
+                                HttpStatus.BAD_REQUEST,
+                                "ERR_MALFORMED_RECORD_PAYLOAD",
+                                "Failed to parse record payload JSON: " + parseEx.getMessage()
+                        );
                     }
                 }
             }
 
-            String tenantId = envelopeNode.path("tenantId").asText("default");
-            String entityId = envelopeNode.path("entityId").asText(sensorId);
-            String envSensorId = envelopeNode.path("sensorId").asText(sensorId);
-            String protocol = envelopeNode.path("protocol").asText("UNKNOWN");
-            String collectedAtStr = envelopeNode.path("collectedAt").asText();
+            // Tenant verification: payload claim cannot override authoritative tenant
+            if (envelopeNode.hasNonNull("tenantId")) {
+                String claimedTenant = envelopeNode.path("tenantId").asText().trim();
+                if (!claimedTenant.equalsIgnoreCase(authoritativeTenantId)) {
+                    throw new IngestionException(
+                            HttpStatus.FORBIDDEN,
+                            "ERR_TENANT_SCOPE_MISMATCH",
+                            "Record claimed tenant '" + claimedTenant + "' does not match authoritative scope tenant '" + authoritativeTenantId + "'"
+                    );
+                }
+            }
+
+            // Entity authorization check
+            String claimedEntityId = envelopeNode.path("entityId").asText(null);
+            if (claimedEntityId == null || claimedEntityId.isBlank()) {
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_ENTITY_ID_REQUIRED",
+                        "Record entityId is required"
+                );
+            }
+            if (!scope.isEntityAllowed(claimedEntityId)) {
+                throw new IngestionException(
+                        HttpStatus.FORBIDDEN,
+                        "ERR_ENTITY_SCOPE_UNAUTHORIZED",
+                        "Entity '" + claimedEntityId + "' is not authorized in sensor scope"
+                );
+            }
+
+            // Timestamp verification: event time must not be fabricated
+            String collectedAtStr = envelopeNode.path("collectedAt").asText(null);
+            if (collectedAtStr == null || collectedAtStr.isBlank()) {
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_INVALID_TIMESTAMP",
+                        "Record collectedAt timestamp is required; current time fabrication is prohibited"
+                );
+            }
             Instant ts;
             try {
-                ts = (collectedAtStr != null && !collectedAtStr.isBlank())
-                        ? Instant.parse(collectedAtStr)
-                        : Instant.now();
+                ts = Instant.parse(collectedAtStr);
             } catch (Exception ex) {
-                ts = Instant.now();
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_INVALID_TIMESTAMP",
+                        "Invalid collectedAt ISO-8601 timestamp: " + collectedAtStr
+                );
             }
 
+            // Quality mapping: faithfully preserved, never fabricated
+            String qualityStr = envelopeNode.path("quality").asText("UNKNOWN").toUpperCase();
+            int qualityCode = switch (qualityStr) {
+                case "GOOD" -> 1;
+                case "DEGRADED" -> 2;
+                default -> 0;
+            };
+
+            String protocol = envelopeNode.path("protocol").asText("UNKNOWN").toLowerCase();
             JsonNode protocolPayload = envelopeNode.path("protocolPayload");
 
-            // Check if protocolPayload has observations array (SNMP style)
+            // Check SNMP style observations array
             if (protocolPayload.has("observations") && protocolPayload.get("observations").isArray()) {
-                for (JsonNode obs : protocolPayload.get("observations")) {
-                    String metricId = obs.path("oid").asText(obs.path("sourceOid").asText("snmp.metric"));
-                    double val = 0.0;
-                    JsonNode valNode = obs.path("value");
-                    if (valNode.path("integer").isNumber()) {
-                        val = valNode.path("integer").asDouble();
-                    } else if (valNode.path("unsigned").isNumber()) {
-                        val = valNode.path("unsigned").asDouble();
-                    } else if (valNode.path("counter64").isTextual()) {
-                        try {
-                            val = Double.parseDouble(valNode.path("counter64").asText());
-                        } catch (Exception ignored) {}
+                JsonNode obsArray = protocolPayload.get("observations");
+                int obsCount = obsArray.size();
+                int ordinal = 0;
+                for (JsonNode obs : obsArray) {
+                    String obsStatus = obs.path("status").asText("");
+                    if (!"VALUE".equalsIgnoreCase(obsStatus) && !obsStatus.isBlank()) {
+                        // Skip non-value / exception observations
+                        ordinal++;
+                        continue;
                     }
-                    results.add(new CanonicalObservation(
-                            tenantId, entityId, metricId, envSensorId, ts, val, 1, 0,
-                            String.valueOf(sequence), "snmp"
-                    ));
+
+                    JsonNode valNode = obs.path("value");
+                    Double numericVal = null;
+                    if (valNode.path("integer").isIntegralNumber()) {
+                        numericVal = valNode.path("integer").asDouble();
+                    } else if (valNode.path("unsigned").isIntegralNumber()) {
+                        numericVal = valNode.path("unsigned").asDouble();
+                    } else if (valNode.hasNonNull("counter64")) {
+                        String c64Str = valNode.path("counter64").asText().trim();
+                        try {
+                            BigInteger u64 = new BigInteger(c64Str);
+                            if (u64.compareTo(BigInteger.ZERO) < 0 || u64.compareTo(MAX_SAFE_COUNTER64) > 0) {
+                                throw new IngestionException(
+                                        HttpStatus.BAD_REQUEST,
+                                        "ERR_NUMERIC_PRECISION_EXCEEDED",
+                                        "Counter64 value exceeds maximum safe representable float64 bounds: " + c64Str
+                                );
+                            }
+                            numericVal = u64.doubleValue();
+                        } catch (NumberFormatException nfe) {
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_MALFORMED_NUMERIC_VALUE",
+                                    "Invalid Counter64 integer representation: " + c64Str
+                            );
+                        }
+                    }
+
+                    if (numericVal != null && Double.isFinite(numericVal)) {
+                        String metricId = obs.path("oid").asText(obs.path("sourceOid").asText(""));
+                        if (metricId.isBlank()) {
+                            metricId = "snmp.metric";
+                        }
+                        String stableSeqId = (obsCount > 1)
+                                ? sequence + ":" + ordinal
+                                : String.valueOf(sequence);
+
+                        results.add(new CanonicalObservation(
+                                authoritativeTenantId,
+                                claimedEntityId,
+                                metricId,
+                                authoritativeSensorId,
+                                ts,
+                                numericVal,
+                                qualityCode,
+                                0,
+                                stableSeqId,
+                                "snmp"
+                        ));
+                    }
+                    ordinal++;
                 }
             } else if (protocolPayload.has("metric_id") && protocolPayload.has("value")) {
-                String metricId = protocolPayload.path("metric_id").asText("metric.generic");
-                double val = protocolPayload.path("value").asDouble(0.0);
-                results.add(new CanonicalObservation(
-                        tenantId, entityId, metricId, envSensorId, ts, val, 1, 0,
-                        String.valueOf(sequence), protocol.toLowerCase()
-                ));
-            } else if (protocolPayload.has("status")) {
-                results.add(new CanonicalObservation(
-                        tenantId, entityId, "sensor.heartbeat", envSensorId, ts, 1.0, 1, 0,
-                        String.valueOf(sequence), "sensor"
-                ));
-            } else {
-                results.add(new CanonicalObservation(
-                        tenantId, entityId, recordType.toLowerCase().replace('_', '.'), envSensorId, ts, 1.0, 1, 0,
-                        String.valueOf(sequence), protocol.toLowerCase()
-                ));
+                // Generic numeric metric with explicit metric_id and numeric value
+                JsonNode valNode = protocolPayload.path("value");
+                if (valNode.isNumber()) {
+                    double val = valNode.asDouble();
+                    if (Double.isFinite(val)) {
+                        String metricId = protocolPayload.path("metric_id").asText();
+                        results.add(new CanonicalObservation(
+                                authoritativeTenantId,
+                                claimedEntityId,
+                                metricId,
+                                authoritativeSensorId,
+                                ts,
+                                val,
+                                qualityCode,
+                                0,
+                                String.valueOf(sequence),
+                                protocol
+                        ));
+                    }
+                }
             }
+            // State, syslog, trap, event and flow records are NOT numeric telemetry;
+            // they are not converted to 1.0.
         }
+
         return results;
     }
 }

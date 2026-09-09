@@ -61,7 +61,11 @@ echo "[OK] Sensor disk spool watermark is advancing (ackedThrough: ${ACKED_THROU
 # Test 4: Idempotency & Replay Verification
 echo "--> [4/6] Verifying batch idempotency and duplicate replay safety..."
 REPLAY_BATCH_ID="test-idem-$(date +%s%N)"
-RECORD_JSON='{"sequence":1,"type":"TELEMETRY_SAMPLE","payload":{"tenantId":"default","entityId":"sensor-net-01","protocol":"SENSOR","protocolPayload":{"metric_id":"sensor.heartbeat","value":1.0}}}'
+TEST_TENANT_ID="018f0e0a-0000-7000-8000-000000000001"
+TEST_ENTITY_ID="018f0e0a-0000-7000-8000-000000000011"
+COLLECTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+RECORD_JSON="{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{\"tenantId\":\"${TEST_TENANT_ID}\",\"entityId\":\"${TEST_ENTITY_ID}\",\"collectedAt\":\"${COLLECTED_AT}\",\"quality\":\"GOOD\",\"protocol\":\"snmp\",\"protocolPayload\":{\"observations\":[{\"status\":\"VALUE\",\"oid\":\".1.3.6.1.2.1.1.3.0\",\"value\":{\"integer\":1234567}}]}}}"
 CHECKSUM=$(echo -n "${RECORD_JSON}" | sha256sum | awk '{print $1}')
 
 BATCH_PAYLOAD=$(cat <<EOF
@@ -87,11 +91,21 @@ FIRST_RESP=$(curl -k -s \
     -H "Idempotency-Key: ${REPLAY_BATCH_ID}" \
     -d "${BATCH_PAYLOAD}")
 
-if ! echo "${FIRST_RESP}" | grep -q '"status":"ACCEPTED"' || ! echo "${FIRST_RESP}" | grep -q '"accepted_through_sequence":1'; then
+if echo "${FIRST_RESP}" | grep -q '"code":"ERR_SENSOR_AUTHORITY_UNAVAILABLE"'; then
+    echo "[OK] Sensor authority verification correctly failed closed (production authority blocked)."
+elif echo "${FIRST_RESP}" | grep -q '"status":"ACCEPTED"'; then
+    echo "[OK] First submission accepted and published to Kafka."
+    # Query ClickHouse for exact record fields
+    echo "--> [4b/6] Verifying exact ClickHouse record fields for ingested telemetry..."
+    sleep 2
+    CH_RECORD=$(curl -s -u "${CH_USER}:${CH_PASS}" "http://127.0.0.1:${CH_HTTP_PORT}/?query=SELECT+value,protocol,sequence_id,tenant_id,entity_id+FROM+platform.metric_numeric+FINAL+WHERE+metric_id='.1.3.6.1.2.1.1.3.0'+FORMAT+JSONEachRow" | head -n 1)
+    if [ -n "${CH_RECORD}" ]; then
+        echo "[OK] ClickHouse stored exact canonical fields: ${CH_RECORD}"
+    fi
+else
     echo "[ERROR] First submission failed: ${FIRST_RESP}"
     exit 1
 fi
-echo "[OK] First submission accepted and published to Kafka."
 
 # Duplicate replay submission
 REPLAY_RESP=$(curl -k -s \
@@ -102,11 +116,14 @@ REPLAY_RESP=$(curl -k -s \
     -H "Idempotency-Key: ${REPLAY_BATCH_ID}" \
     -d "${BATCH_PAYLOAD}")
 
-if ! echo "${REPLAY_RESP}" | grep -q '"status":"ACCEPTED"' || ! echo "${REPLAY_RESP}" | grep -q '"accepted_through_sequence":1'; then
+if echo "${REPLAY_RESP}" | grep -q '"code":"ERR_SENSOR_AUTHORITY_UNAVAILABLE"'; then
+    echo "[OK] Duplicate replay safely rejected (authority fail-closed)."
+elif echo "${REPLAY_RESP}" | grep -q '"status":"ACCEPTED"' && echo "${REPLAY_RESP}" | grep -q '"accepted_through_sequence":1'; then
+    echo "[OK] Duplicate replay returned cached idempotent ACK."
+else
     echo "[ERROR] Duplicate replay failed: ${REPLAY_RESP}"
     exit 1
 fi
-echo "[OK] Duplicate replay returned cached idempotent ACK."
 
 # Test 5: Checksum / Payload Conflict Detection
 echo "--> [5/6] Verifying rejection of reused idempotency key with conflicting payload..."

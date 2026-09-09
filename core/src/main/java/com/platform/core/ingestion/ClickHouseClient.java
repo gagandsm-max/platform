@@ -18,6 +18,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Component
 public class ClickHouseClient {
@@ -54,19 +55,28 @@ public class ClickHouseClient {
             return;
         }
 
+        long startTime = System.currentTimeMillis();
         StringBuilder body = new StringBuilder();
         for (CanonicalObservation obs : observations) {
+            Objects.requireNonNull(obs.tenantId(), "Canonical observation tenantId must not be null");
+            Objects.requireNonNull(obs.entityId(), "Canonical observation entityId must not be null");
+            Objects.requireNonNull(obs.metricId(), "Canonical observation metricId must not be null");
+            Objects.requireNonNull(obs.sensorId(), "Canonical observation sensorId must not be null");
+            Objects.requireNonNull(obs.timestamp(), "Canonical observation timestamp must not be null");
+            Objects.requireNonNull(obs.sequenceId(), "Canonical observation sequenceId must not be null");
+            Objects.requireNonNull(obs.sourceProtocol(), "Canonical observation sourceProtocol must not be null");
+
             Map<String, Object> row = new LinkedHashMap<>();
-            row.put("tenant_id", obs.tenantId() != null ? obs.tenantId() : "default");
-            row.put("entity_id", obs.entityId() != null ? obs.entityId() : "unknown");
-            row.put("metric_id", obs.metricId() != null ? obs.metricId() : "unknown");
-            row.put("sensor_id", obs.sensorId() != null ? obs.sensorId() : "unknown");
+            row.put("tenant_id", obs.tenantId());
+            row.put("entity_id", obs.entityId());
+            row.put("metric_id", obs.metricId());
+            row.put("sensor_id", obs.sensorId());
             row.put("ts", CH_TIMESTAMP_FORMAT.format(obs.timestamp()));
             row.put("value", obs.value());
             row.put("quality", obs.quality());
             row.put("flags", obs.flags());
-            row.put("sequence_id", obs.sequenceId() != null ? obs.sequenceId() : "0");
-            row.put("source_protocol", obs.sourceProtocol() != null ? obs.sourceProtocol() : "unknown");
+            row.put("sequence_id", obs.sequenceId());
+            row.put("source_protocol", obs.sourceProtocol());
 
             body.append(objectMapper.writeValueAsString(row)).append("\n");
         }
@@ -87,7 +97,9 @@ public class ClickHouseClient {
             throw new RuntimeException(errorMsg);
         }
 
-        metrics.recordClickHouseInsert(observations.size());
-        log.debug("Successfully inserted {} observations into ClickHouse platform.metric_numeric", observations.size());
+        long durationMs = System.currentTimeMillis() - startTime;
+        metrics.recordClickHouseInsert(observations.size(), durationMs);
+        log.debug("Successfully inserted {} observations into ClickHouse platform.metric_numeric ({}ms)",
+                observations.size(), durationMs);
     }
 }

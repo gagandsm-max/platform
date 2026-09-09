@@ -7,7 +7,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -23,6 +22,7 @@ public class KafkaTelemetryProducer {
     private final ObjectMapper objectMapper;
     private final IngestionMetrics metrics;
     private final long timeoutSeconds;
+    private final String topic;
 
     public KafkaTelemetryProducer(
             KafkaTemplate<String, String> kafkaTemplate,
@@ -30,29 +30,75 @@ public class KafkaTelemetryProducer {
             IngestionMetrics metrics,
             @Value("${platform.kafka.publish-timeout-seconds:5}") long timeoutSeconds
     ) {
+        this(kafkaTemplate, objectMapper, metrics, timeoutSeconds, TOPIC_TELEMETRY_NUMERIC);
+    }
+
+    public KafkaTelemetryProducer(
+            KafkaTemplate<String, String> kafkaTemplate,
+            ObjectMapper objectMapper,
+            IngestionMetrics metrics,
+            long timeoutSeconds,
+            String topic
+    ) {
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.metrics = metrics;
         this.timeoutSeconds = timeoutSeconds;
+        this.topic = topic != null && !topic.isBlank() ? topic : TOPIC_TELEMETRY_NUMERIC;
     }
 
-    public void publishSynchronously(List<CanonicalObservation> observations) {
+    public boolean isTransactionCapable() {
+        return kafkaTemplate != null && kafkaTemplate.isTransactional();
+    }
+
+    /**
+     * Publishes all canonical observations of a batch in a single atomic Kafka transaction.
+     * All observations must commit together or the transaction is aborted.
+     *
+     * @param observations canonical observations belonging to one Sensor upload batch
+     * @throws IngestionException if transactions are not available or publication fails
+     */
+    public void publishBatchTransactionally(List<CanonicalObservation> observations) {
         if (observations == null || observations.isEmpty()) {
             return;
         }
 
-        for (CanonicalObservation obs : observations) {
-            String key = obs.tenantId() + ":" + obs.entityId();
-            try {
-                String payload = objectMapper.writeValueAsString(obs);
-                CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(TOPIC_TELEMETRY_NUMERIC, key, payload);
-                future.get(timeoutSeconds, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                log.error("Kafka publication failed for topic={} key={}: {}", TOPIC_TELEMETRY_NUMERIC, key, e.getMessage());
-                metrics.recordKafkaFailure(e.getMessage());
-                throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE, "ERR_KAFKA_PUBLICATION_FAILED",
-                        "Failed to publish telemetry to Kafka cluster: " + e.getMessage(), e);
-            }
+        if (!isTransactionCapable()) {
+            metrics.recordKafkaFailure("Kafka producer is not transaction-capable");
+            throw new IngestionException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "ERR_KAFKA_TRANSACTIONS_UNAVAILABLE",
+                    "Kafka producer is not configured for transactions; atomic batch publication is required"
+            );
+        }
+
+        long startTime = System.currentTimeMillis();
+        try {
+            kafkaTemplate.executeInTransaction(operations -> {
+                for (CanonicalObservation obs : observations) {
+                    String key = obs.sensorId() + ":" + obs.sequenceId();
+                    try {
+                        String payload = objectMapper.writeValueAsString(obs);
+                        CompletableFuture<?> future = operations.send(topic, key, payload);
+                        future.get(timeoutSeconds, TimeUnit.SECONDS);
+                    } catch (Exception e) {
+                        throw new RuntimeException("Failed to send observation to Kafka topic=" + topic + " key=" + key + ": " + e.getMessage(), e);
+                    }
+                }
+                return true;
+            });
+            metrics.recordKafkaPublish(observations.size(), System.currentTimeMillis() - startTime);
+        } catch (Exception e) {
+            long duration = System.currentTimeMillis() - startTime;
+            log.error("Kafka atomic batch publication failed after {}ms for topic={} count={}: {}",
+                    duration, topic, observations.size(), e.getMessage());
+            metrics.recordKafkaFailure(e.getMessage());
+            throw new IngestionException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "ERR_KAFKA_PUBLICATION_FAILED",
+                    "Failed to atomically publish telemetry batch to Kafka cluster: " + e.getMessage(),
+                    e
+            );
         }
     }
 }
