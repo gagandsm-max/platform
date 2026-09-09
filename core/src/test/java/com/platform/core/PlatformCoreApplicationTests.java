@@ -34,7 +34,10 @@ class PlatformCoreApplicationTests {
 
     @Test
     void testSensorIngestionRequiresClientCertificate() {
-        SensorIngestionController controller = new SensorIngestionController();
+        SensorIngestionController controller = new SensorIngestionController(
+                mock(com.platform.core.ingestion.SensorIngestionService.class),
+                new com.fasterxml.jackson.databind.ObjectMapper()
+        );
         MockHttpServletRequest request = new MockHttpServletRequest();
 
         // No client certificate attached to request
@@ -46,7 +49,10 @@ class PlatformCoreApplicationTests {
 
     @Test
     void testSensorIngestionAcceptsValidClientCertificate() {
-        SensorIngestionController controller = new SensorIngestionController();
+        SensorIngestionController controller = new SensorIngestionController(
+                mock(com.platform.core.ingestion.SensorIngestionService.class),
+                new com.fasterxml.jackson.databind.ObjectMapper()
+        );
         MockHttpServletRequest request = new MockHttpServletRequest();
 
         X509Certificate mockCert = mock(X509Certificate.class);
