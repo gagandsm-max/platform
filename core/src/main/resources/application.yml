@@ -43,6 +43,9 @@ spring:
     producer:
       acks: all
       retries: 3
+      # Standalone transactional publication prefix for atomic batch publication.
+      # Note: Two-Core HA transaction prefix coordination is an unresolved P0 design spike.
+      transaction-id-prefix: ${SPRING_KAFKA_PRODUCER_TRANSACTION_ID_PREFIX:tx-telemetry-}
     consumer:
       group-id: platform-core-group
       auto-offset-reset: earliest
@@ -53,10 +56,13 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        # Public probe chain permits only exact health/liveness/readiness. Keep exposure minimal.
+        include: health
   endpoint:
     health:
-      show-details: always
+      # Anonymous probes must not dump datastore/component internals. /api/v1/health/connectivity
+      # is not a public probe; it requires authentication and Platform authorization (default-deny).
+      show-details: never
       probes:
         enabled: true
 
@@ -76,5 +82,10 @@ platform:
   ingestion:
     kafka:
       topic: ${TELEMETRY_NUMERIC_TOPIC:telemetry.numeric.v1}
-      partitions: ${TELEMETRY_NUMERIC_PARTITIONS:3}
-      replicas: ${TELEMETRY_NUMERIC_REPLICAS:1}
+  security:
+    oidc:
+      # Fail-closed resource-server boundary. Leave blank until the deployment IdP issuer is configured.
+      # When blank, all bearer JWTs are rejected; Sensor mTLS and health/version routes remain classified separately.
+      issuer-uri: ${PLATFORM_OIDC_ISSUER_URI:}
+      audience: ${PLATFORM_OIDC_AUDIENCE:}
+      provider-instance-id: ${PLATFORM_OIDC_PROVIDER_INSTANCE_ID:platform-oidc}

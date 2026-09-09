@@ -210,19 +210,20 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# Test 13: Core Quad-Datastore Connectivity (Postgres, ClickHouse, Valkey, Kafka)
+# Test 13: Connectivity endpoint is not an anonymous probe (auth required / default-deny)
 # ------------------------------------------------------------------------------
 TEST_NUM=13
-TEST_DESC="Core Quad-Datastore Connectivity (Postgres, ClickHouse, Valkey, Kafka)"
-CORE_CONN=$(curl -k -s "https://127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}/api/v1/health/connectivity" 2>/dev/null || echo "")
-if echo "${CORE_CONN}" | grep -q '"postgres"' && \
-   echo "${CORE_CONN}" | grep -q '"clickhouse"' && \
-   echo "${CORE_CONN}" | grep -q '"valkey"' && \
-   echo "${CORE_CONN}" | grep -q '"kafka"' && \
-   echo "${CORE_CONN}" | grep -q '"overall_status":"UP"'; then
-    pass ${TEST_NUM} "${TEST_DESC}"
+TEST_DESC="Core Connectivity Auth Boundary (/api/v1/health/connectivity denied anonymously)"
+CORE_CONN_CODE=$(curl -k -s -o /tmp/platform-core-conn.json -w "%{http_code}" \
+    "https://127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}/api/v1/health/connectivity" 2>/dev/null || echo "000")
+CORE_CONN=$(cat /tmp/platform-core-conn.json 2>/dev/null || echo "")
+if { [ "${CORE_CONN_CODE}" = "401" ] || [ "${CORE_CONN_CODE}" = "403" ] || [ "${CORE_CONN_CODE}" = "404" ]; } && \
+   ! echo "${CORE_CONN}" | grep -qi 'jdbc:postgresql' && \
+   ! echo "${CORE_CONN}" | grep -qi 'stackTrace' && \
+   ! echo "${CORE_CONN}" | grep -q '"details"'; then
+    pass ${TEST_NUM} "${TEST_DESC} (HTTP ${CORE_CONN_CODE})"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "Connectivity response: ${CORE_CONN}"
+    fail ${TEST_NUM} "${TEST_DESC}" "HTTP ${CORE_CONN_CODE}, body: ${CORE_CONN}"
 fi
 
 # ------------------------------------------------------------------------------

@@ -9,6 +9,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -46,6 +49,27 @@ public class TenantService {
         int l = PageResult.normalizeLimit(limit);
         long total = tenants.count();
         return new PageResult<>(tenants.list(l, PageResult.offset(p, l)), p, l, total, (long) p * l < total);
+    }
+
+    /**
+     * Lists tenants visible to the given scope. Scope is applied in persistence before pagination.
+     * Empty scope fails closed to an empty page.
+     */
+    public PageResult<Tenant> listScoped(Collection<UUID> tenantScopes, int page, int limit) {
+        int p = PageResult.normalizePage(page);
+        int l = PageResult.normalizeLimit(limit);
+        if (tenantScopes == null || tenantScopes.isEmpty()) {
+            return new PageResult<>(List.of(), p, l, 0L, false);
+        }
+        Set<UUID> scope = Set.copyOf(tenantScopes);
+        long total = tenants.countByIds(scope);
+        return new PageResult<>(
+                tenants.listByIds(scope, l, PageResult.offset(p, l)),
+                p,
+                l,
+                total,
+                (long) p * l < total
+        );
     }
 
     @Transactional
