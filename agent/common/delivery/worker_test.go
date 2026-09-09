@@ -313,6 +313,41 @@ func TestDeliveryWorkerBatchBoundAckMatrix(t *testing.T) {
 	}
 }
 
+func TestDeliveryWorkerCaseOnlyAckAgentIDMismatchRetainsRecords(t *testing.T) {
+	records := []queue.Record{
+		{Sequence: 5, ID: "rec-5", Checksum: "c5", Payload: []byte("a")},
+		{Sequence: 6, ID: "rec-6", Checksum: "c6", Payload: []byte("b")},
+	}
+	expectedBatchID := client.BuildBatchID("agent-A", records)
+	q := &mockQueue{records: append([]queue.Record(nil), records...)}
+	tr := &mockTransport{
+		available: true,
+		ack: client.Ack{
+			AcceptedThrough: 6,
+			AgentID:         "AGENT-a",
+			BatchID:         expectedBatchID,
+		},
+	}
+	w, err := NewWorker(q, tr, "agent-A", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	delivered, err := w.DeliverOnce(context.Background())
+	if err == nil || delivered {
+		t.Fatalf("case-only ACK agent mismatch must reject, delivered=%v err=%v", delivered, err)
+	}
+	if tr.calls != 1 {
+		t.Fatalf("expected one generic transport call, got %d", tr.calls)
+	}
+	if q.Len() != len(records) {
+		t.Fatalf("queue records must remain, len=%d", q.Len())
+	}
+	if len(q.deleted) != 0 {
+		t.Fatalf("DeleteThrough must not be called, deleted=%v", q.deleted)
+	}
+}
+
 func TestDeliveryWorkerPartialAck(t *testing.T) {
 	q := &mockQueue{
 		records: []queue.Record{

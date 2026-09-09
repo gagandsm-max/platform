@@ -260,7 +260,7 @@ func validateAck(records []queue.Record, expectedAgentID, expectedBatchID string
 	if ack.BatchID != expectedBatchID {
 		return fmt.Errorf("DELIVERY_ACK_BATCH_MISMATCH: ack batch_id %q does not match submitted %q", ack.BatchID, expectedBatchID)
 	}
-	if !strings.EqualFold(ack.AgentID, expectedAgentID) {
+	if strings.TrimSpace(ack.AgentID) != expectedAgentID {
 		return fmt.Errorf("DELIVERY_ACK_AGENT_MISMATCH: ack agent_id %q does not match submitted %q", ack.AgentID, expectedAgentID)
 	}
 	if len(records) == 0 {

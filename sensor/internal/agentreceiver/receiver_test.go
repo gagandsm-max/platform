@@ -766,3 +766,123 @@ func TestInconsistentAssignmentAgentRejected(t *testing.T) {
 		t.Fatalf("wrong assignment agent must reject, got %d", resp.StatusCode)
 	}
 }
+
+func TestAssignmentContextEmptyAgentIDRejected(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := &inconsistentAuthorizer{ctx: AssignmentContext{
+		TenantID: "tenant-1",
+		SiteID:   "site-primary",
+		SensorID: "sensor-infra-01",
+		AgentID:  "",
+		Assigned: true,
+	}}
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("empty authoritative agent ID must reject, got %d", resp.StatusCode)
+	}
+	var errResp ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if errResp.Code != ErrCodeAgentNotAssigned {
+		t.Fatalf("expected %s, got %s", ErrCodeAgentNotAssigned, errResp.Code)
+	}
+	if sink.BatchCount() != 0 {
+		t.Fatalf("sink must not be called, got %d batches", sink.BatchCount())
+	}
+	if rcv.ReplayTracker().Size() != 0 {
+		t.Fatalf("replay must not record rejected assignment, size=%d", rcv.ReplayTracker().Size())
+	}
+	if rcv.Metrics().Snapshot().AcceptedBatches != 0 {
+		t.Fatal("rejected assignment must not produce a successful acceptance")
+	}
+}
+
+func TestAssignmentContextCaseOnlyAgentIDMismatchRejected(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := &inconsistentAuthorizer{ctx: AssignmentContext{
+		TenantID: "tenant-1",
+		SiteID:   "site-primary",
+		SensorID: "sensor-infra-01",
+		AgentID:  "AGENT-1",
+		Assigned: true,
+	}}
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("case-only authoritative agent mismatch must reject, got %d", resp.StatusCode)
+	}
+	var errResp ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if errResp.Code != ErrCodeAgentNotAssigned {
+		t.Fatalf("expected %s, got %s", ErrCodeAgentNotAssigned, errResp.Code)
+	}
+	if sink.BatchCount() != 0 {
+		t.Fatalf("sink must not be called, got %d batches", sink.BatchCount())
+	}
+	if rcv.ReplayTracker().Size() != 0 {
+		t.Fatalf("replay must not record rejected assignment, size=%d", rcv.ReplayTracker().Size())
+	}
+	if rcv.Metrics().Snapshot().AcceptedBatches != 0 {
+		t.Fatal("rejected assignment must not produce a successful acceptance")
+	}
+}
+
+func TestAssignmentContextExactAgentIDMatchAccepted(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := &inconsistentAuthorizer{ctx: AssignmentContext{
+		TenantID: "tenant-1",
+		SiteID:   "site-primary",
+		SensorID: "sensor-infra-01",
+		AgentID:  "agent-1",
+		Assigned: true,
+	}}
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("exact authoritative agent ID must pass, got %d", resp.StatusCode)
+	}
+	var ack DeliveryAck
+	if err := json.NewDecoder(resp.Body).Decode(&ack); err != nil {
+		t.Fatalf("failed to decode ACK: %v", err)
+	}
+	if ack.Status != "ACCEPTED" || ack.AgentID != "agent-1" {
+		t.Fatalf("unexpected successful ACK: %+v", ack)
+	}
+	if sink.BatchCount() != 1 {
+		t.Fatalf("exact authoritative match must reach sink once, got %d", sink.BatchCount())
+	}
+	if rcv.ReplayTracker().Size() != 1 {
+		t.Fatalf("successful delivery must record replay state, size=%d", rcv.ReplayTracker().Size())
+	}
+}

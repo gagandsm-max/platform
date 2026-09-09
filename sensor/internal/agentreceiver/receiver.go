@@ -370,7 +370,11 @@ func validateAssignmentContext(assignCtx AssignmentContext, authAgent Authentica
 	if strings.TrimSpace(assignCtx.TenantID) == "" {
 		return errors.New("assignment tenant is empty")
 	}
-	if agent := strings.TrimSpace(assignCtx.AgentID); agent != "" && !strings.EqualFold(agent, authAgent.AgentID) {
+	authoritativeAgentID := strings.TrimSpace(assignCtx.AgentID)
+	if authoritativeAgentID == "" {
+		return errors.New("assignment agent is empty")
+	}
+	if authoritativeAgentID != authAgent.AgentID {
 		return errors.New("assignment agent does not match authenticated agent")
 	}
 	if !strings.EqualFold(strings.TrimSpace(assignCtx.SensorID), strings.TrimSpace(receivingSensorID)) {
