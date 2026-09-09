@@ -21,6 +21,8 @@ REQUIRED_ASSETS = [
     "project_agents/TASK_PROMPT_TEMPLATE.md",
     "project_agents/CHATGPT_AGENT_ROUTER.md",
     "project_agents/OPERATIONAL_SMOKE_TEST.md",
+    "project_agents/tools/run_codex_agent.py",
+    "project_agents/tools/test_codex_launcher.py",
     ".agents/rules/platform-authority.md",
 ]
 ROOT_AGENT_ANCHORS = [
@@ -87,11 +89,9 @@ def render_antigravity(entry: dict, body: str, sha: str, canonical: Path) -> str
 
 def render_codex(entry: dict, body: str, sha: str, canonical: Path) -> str:
     escaped_body = body.replace('"""', '\\\"\\\"\\\"')
-    sandbox = "read-only" if entry["mode"] == "read" else "workspace-write"
     return (
         f"name = {json.dumps(entry['name'])}\n"
         f"description = {json.dumps(entry['description'])}\n"
-        f"sandbox_mode = {json.dumps(sandbox)}\n"
         f"developer_instructions = \"\"\"\n"
         f"Generated from project_agents/{source_ref(canonical)} sha256:{sha}\n\n"
         f"{escaped_body}\n"
@@ -273,19 +273,68 @@ for entry in manifest:
     if codex_path.exists():
         try:
             codex = tomllib.loads(codex_path.read_text())
-            expected_sandbox = "read-only" if entry["mode"] == "read" else "workspace-write"
             if codex.get("name") != entry["name"]:
                 errors.append(f"Codex name mismatch: {entry['name']}")
             if codex.get("description") != entry["description"]:
                 errors.append(f"Codex description mismatch: {entry['name']}")
-            if codex.get("sandbox_mode") != expected_sandbox:
-                errors.append(f"Codex sandbox mismatch: {entry['name']}")
+            if "sandbox_mode" in codex:
+                errors.append(f"Codex role TOML must not declare role-level sandbox_mode: {entry['name']}")
+            if "default_permissions" in codex:
+                errors.append(f"Codex role TOML must not declare default_permissions: {entry['name']}")
+            if "permissions" in codex or "permission_profile" in codex:
+                errors.append(f"Codex role TOML must not declare permissions: {entry['name']}")
             instructions = codex.get("developer_instructions", "")
             expected_marker = f"Generated from project_agents/{source_ref(canonical)} sha256:{sha}"
             if expected_marker not in instructions:
                 errors.append(f"Codex canonical SHA marker mismatch: {entry['name']}")
         except tomllib.TOMLDecodeError as exc:
             errors.append(f"Codex TOML invalid {entry['name']}: {exc}")
+
+launcher_path = pa / "tools" / "run_codex_agent.py"
+if not launcher_path.is_file():
+    errors.append("controlled Codex launcher missing: project_agents/tools/run_codex_agent.py")
+else:
+    launcher_text = launcher_path.read_text()
+    if "danger-full-access" in launcher_text:
+        errors.append("controlled Codex launcher must not contain danger-full-access")
+    if "shell=True" in launcher_text:
+        errors.append("controlled Codex launcher must not use shell=True")
+
+    import subprocess
+
+    for entry in manifest:
+        proc = subprocess.run(
+            [sys.executable, str(launcher_path), "--dry-run", "--json", entry["name"]],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            errors.append(f"launcher dry-run failed for {entry['name']}: {proc.stderr.strip()}")
+            continue
+        try:
+            plan = json.loads(proc.stdout)
+            expected_sandbox = "read-only" if entry["mode"] == "read" else "workspace-write"
+            if plan.get("manifest_mode") != entry["mode"]:
+                errors.append(f"launcher dry-run manifest_mode mismatch for {entry['name']}")
+            if plan.get("effective_sandbox") != expected_sandbox:
+                errors.append(
+                    f"launcher dry-run effective_sandbox mismatch for {entry['name']}: "
+                    f"{plan.get('effective_sandbox')} != {expected_sandbox}"
+                )
+            if plan.get("role_source") != f".codex/agents/{entry['name']}.toml":
+                errors.append(f"launcher dry-run role_source mismatch for {entry['name']}")
+            if plan.get("provenance_sha") != entry["sha256"]:
+                errors.append(f"launcher dry-run provenance SHA mismatch for {entry['name']}")
+        except json.JSONDecodeError:
+            errors.append(f"launcher dry-run returned invalid JSON for {entry['name']}")
+
+    proc_unknown = subprocess.run(
+        [sys.executable, str(launcher_path), "--dry-run", "platform-nonexistent-agent"],
+        capture_output=True,
+        text=True,
+    )
+    if proc_unknown.returncode == 0:
+        errors.append("launcher dry-run must fail for unknown/unmanifested agent name")
 
 if errors:
     print("FAIL")
@@ -295,5 +344,6 @@ if errors:
 
 print(
     f"PASS: {len(manifest)} Platform agents exactly synchronized "
-    f"({mode_counts.get('read', 0)} read / {mode_counts.get('write', 0)} write)."
+    f"({mode_counts.get('read', 0)} read / {mode_counts.get('write', 0)} write) "
+    f"[CONFIGURATION / PROJECTION VALID]."
 )

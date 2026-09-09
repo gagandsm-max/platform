@@ -20,7 +20,8 @@ Expected evidence:
 - exactly 27 canonical agents and exactly 27 adapters for Cursor, Codex and Antigravity;
 - Cursor frontmatter parses and enforces manifest-driven `readonly` plus `model: inherit`;
 - Antigravity frontmatter contains only the governed tool names, correct command policy, `mainAgent: false`, `subagent: true`, `model: inherit` and canonical SHA;
-- Codex TOML parses with Python stdlib `tomllib` and preserves manifest-driven sandbox mode and canonical SHA;
+- Codex TOML parses with Python stdlib `tomllib`, contains no deceptive role-level sandbox claims, and preserves canonical SHA marker and developer instructions;
+- controlled Codex session launcher (`project_agents/tools/run_codex_agent.py`) projects manifest mode to native session sandbox;
 - root authority/routing assets exist;
 - second synchronization produces no diff.
 
@@ -56,7 +57,37 @@ Do not use Core, Sensor, Agent runtime, UI, analytics, schemas, device packs or 
 
 Terminal sandboxing alone is not accepted as repository read-only evidence because sandboxed commands may still write the mounted workspace.
 
-## 4. ChatGPT + GitHub runtime validation
+## 4. Codex runtime validation
+
+Codex 0.153.4:
+- discovers `.codex/agents/*.toml` standalone role files;
+- applies role `developer_instructions` faithfully to the agent session;
+- does **not** apply role-level sandbox permissions (subagents inherit parent/session permissions);
+- cannot provide security enforcement through role TOML fields alone.
+
+Therefore governed Platform Codex execution must use the controlled session launcher:
+
+```bash
+python3 project_agents/tools/run_codex_agent.py <agent-name> [prompt]
+```
+
+Runtime certification requirements:
+
+1. **READ role (`platform-code-reviewer`):**
+   - Launcher selects native `read-only` session (`-s read-only`).
+   - Repository reading succeeds (e.g. `head -n 5 AGENTS.md`).
+   - File write attempts (`apply_patch`) are blocked by the native session sandbox.
+   - Shell write redirection (e.g. `echo PROBE > ...`) is blocked by the native sandbox.
+2. **WRITE role (`platform-minimal-change-engineer`):**
+   - Launcher selects native `workspace-write` session (`-s workspace-write`).
+   - Bounded disposable workspace write succeeds when host sandbox allows.
+   - Delete probe file immediately; zero commits.
+3. **Safety rules:**
+   - Never certify via `danger-full-access`.
+   - Never claim a role TOML itself provides permission enforcement.
+   - If native `workspace-write` fails because of Codex/host sandbox startup (e.g. unprivileged user namespace or bubblewrap loopback `RTM_NEWADDR` restrictions), report **`CODEX WRITE RUNTIME BLOCKED`**, not Agent Pack PASS.
+
+## 5. ChatGPT + GitHub runtime validation
 
 Using connected GitHub only:
 
@@ -68,7 +99,7 @@ Using connected GitHub only:
 6. Confirm the response does not claim that 27 persistent specialist agents are installed in ChatGPT; these are repository-defined roles/adapters.
 7. For completion/release claims, confirm independent evidence/reality-gate requirements are applied.
 
-## 5. GitHub / CI validation
+## 6. GitHub / CI validation
 
 Run locally where the repository-supported environment exists:
 
@@ -79,10 +110,10 @@ make test-static-contracts
 
 Then push the branch and inspect **current-head** Platform CI. Static Contracts must execute `python3 project_agents/tools/validate_agents.py` unconditionally and fail if the validator is missing or invalid. Record the workflow run ID, exact head SHA and every job conclusion.
 
-Do not automate Cursor or Antigravity installation/discovery through GitHub Actions. Vendor runtime smoke remains an explicit tool-runtime check outside CI.
+Do not automate Cursor, Antigravity or Codex installation/discovery through GitHub Actions. Vendor runtime smoke remains an explicit tool-runtime check outside CI.
 
-## 6. Pass criteria
+## 7. Pass criteria
 
 **STATIC DEPLOYMENT VALIDATION PASS** requires deterministic synchronization, validator PASS, zero second-sync diff, clean `git diff --check`, expected adapter counts and applicable static CI evidence.
 
-**TOOL RUNTIME VALIDATION PASS** requires the relevant vendor/runtime checks above. Until Cursor/Antigravity discovery and permission behavior are observed in their actual runtimes, report them as **NOT VERIFIED**, not inferred from static files.
+**TOOL RUNTIME VALIDATION PASS** requires the relevant vendor/runtime checks above. Until Cursor, Antigravity and Codex discovery and permission behavior are observed in their actual runtimes, report them as **NOT VERIFIED**, not inferred from static files.

@@ -1,6 +1,5 @@
 name = "platform-codebase-onboarding-engineer"
 description = "Read-only Platform repository explorer. Use first on unfamiliar subsystems to map real entry points, ownership, execution paths, data flow, tests and governing docs before changes."
-sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p0/platform-codebase-onboarding-engineer.md sha256:d232a75f12319ea68b0f5c2d83a2c857cd77ba393d608227a0f7e20b288f7d0d
 

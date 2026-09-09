@@ -1,6 +1,5 @@
 name = "platform-git-workflow-master"
 description = "Git/PR coordination specialist for Platform parallel engineering lanes. Use for branch/worktree strategy, stacked PRs, rebases, clean diffs and conflict-safe integration; never merge or rewrite history unless explicitly authorized."
-sandbox_mode = "workspace-write"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-git-workflow-master.md sha256:61e99124d0748dae1a1514e5fd36c9d096e0793a7f6a4ade5fbc512ce36244be
 

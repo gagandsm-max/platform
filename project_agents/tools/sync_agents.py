@@ -59,11 +59,9 @@ def render_antigravity(entry: dict, body: str, sha: str, canonical: Path) -> str
 
 def render_codex(entry: dict, body: str, sha: str, canonical: Path) -> str:
     escaped_body = body.replace('"""', '\\\"\\\"\\\"')
-    sandbox = "read-only" if entry["mode"] == "read" else "workspace-write"
     return (
         f"name = {json.dumps(entry['name'])}\n"
         f"description = {json.dumps(entry['description'])}\n"
-        f"sandbox_mode = {json.dumps(sandbox)}\n"
         f"developer_instructions = \"\"\"\n"
         f"Generated from project_agents/{source_ref(canonical)} sha256:{sha}\n\n"
         f"{escaped_body}\n"

@@ -38,6 +38,15 @@ Apply the quality gates that the changed behavior can actually affect; do not ru
 
 The evidence collector records what actually ran. The reality checker may reject a completion/production/GA claim when an applicable gate is missing, even if narrower tests are green.
 
+## Tool runtime boundaries
+
+- **Cursor:** native `@agent` picker discovers `.cursor/agents/` and enforces `readonly: true` frontmatter.
+- **Antigravity:** native `/agents` workspace discovery uses `.agents/agents/` and enforces `commandExecutionPolicy: off` (read) / `sandbox` (write).
+- **Codex:** native named-role discovery from `.codex/agents/` applies role identity and developer instructions, but child role TOML files do not enforce sandbox boundaries (subagents inherit parent session permissions in Codex 0.153.4). Governed Platform Codex execution must use the session-mode launcher:
+  ```bash
+  python3 project_agents/tools/run_codex_agent.py <agent-name> [prompt]
+  ```
+
 ## Rules for parallelism
 
 Parallelize **read-heavy independent verification**, not multiple agents writing the same checkout. Good parallel work: code review + security review + test-gap analysis. Risky parallel work: two agents editing the same files or schema.

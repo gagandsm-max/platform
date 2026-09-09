@@ -1,6 +1,5 @@
 name = "platform-knowledge-graph-engineer"
 description = "Temporal operational graph specialist. Use for canonical entity relationships, topology history, provenance/confidence, graph queries, service dependencies, RCA subgraphs and GNN features\u2014not for selecting a new graph database by default."
-sandbox_mode = "workspace-write"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-knowledge-graph-engineer.md sha256:40df0b0c3ebff34c1bcaa7d74a254b2ac4a372b9725915b6a504d88a8e397372
 

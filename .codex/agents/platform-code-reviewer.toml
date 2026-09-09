@@ -1,6 +1,5 @@
 name = "platform-code-reviewer"
 description = "Independent read-only PR/diff reviewer for Platform. Use after implementation to find correctness, security, contract, data integrity, performance and missing-test issues; ignore style-only noise."
-sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p0/platform-code-reviewer.md sha256:487600f3daa0509ce567c2a2402952111d24fe5701163898672dba846884ec32
 

@@ -6,7 +6,7 @@ You do not need to learn 27 agents or invoke them manually every time.
 
 1. **ChatGPT remains CTO/orchestrator.** Use it for architecture, task decomposition, PR review and deciding which specialist is needed.
 2. **Root `AGENTS.md` remains law.** Agent files never override the Platform mother reference.
-3. **Coding tools execute.** Cursor, Codex and Antigravity discover their native agent adapters automatically after the files are in the repository.
+3. **Coding tools execute.** Cursor, Codex and Antigravity discover their native agent adapters automatically. When strict Codex permission enforcement is required, launch via `python3 project_agents/tools/run_codex_agent.py <agent-name>` (in Codex 0.153.4, subagents inherit parent session permissions; role TOML files do not enforce child sandboxes).
 4. **Use the smallest team.** Most tasks need one explorer, one implementation/domain agent, and one independent verifier.
 5. **Separate writing from verification.** The agent that writes the patch should not be the only agent that declares it correct.
 
