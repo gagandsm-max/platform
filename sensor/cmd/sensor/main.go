@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,7 +13,9 @@ import (
 	"platform/sensor/internal/config"
 	"platform/sensor/internal/coreclient"
 	"platform/sensor/internal/health"
+	"platform/sensor/internal/observation"
 	"platform/sensor/internal/spool"
+	"platform/sensor/internal/uploader"
 )
 
 func main() {
@@ -34,15 +37,56 @@ func main() {
 		"watermark_percent", cfg.StorageWatermarkPercent,
 	)
 
-	// Initialize disk spool
-	diskSpool, err := spool.NewDiskSpool(cfg.SpoolDir, cfg.StorageWatermarkPercent, logger)
+	// Initialize disk spool with checked Open
+	diskSpool, err := spool.Open(spool.Config{
+		Dir:            cfg.SpoolDir,
+		MaxRecordBytes: 1024 * 1024,
+		Logger:         logger,
+	})
 	if err != nil {
 		logger.Error("Failed to initialize disk spool", "error", err)
 		os.Exit(1)
 	}
 
+	// Initialize observation sink
+	sink, err := observation.NewDiskSink(diskSpool, 1024*1024)
+	if err != nil {
+		logger.Error("Failed to initialize observation sink", "error", err)
+		os.Exit(1)
+	}
+
 	// Initialize Core client with mTLS credentials
-	client := coreclient.NewCoreClient(cfg.CoreURL, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.CACertFile, logger)
+	client, err := coreclient.New(coreclient.Config{
+		BaseURL:          cfg.CoreURL,
+		CertificateFile:  cfg.TLSCertFile,
+		PrivateKeyFile:   cfg.TLSKeyFile,
+		CAFile:           cfg.CACertFile,
+		RequestTimeout:   10 * time.Second,
+		MaxResponseBytes: 1024 * 1024,
+		Logger:           logger,
+	})
+	if err != nil {
+		logger.Error("Failed to initialize Core client", "error", err)
+		os.Exit(1)
+	}
+
+	// Initialize uploader
+	up, err := uploader.New(uploader.Config{
+		SensorID:             cfg.SensorID,
+		BootEpoch:            fmt.Sprintf("epoch-%d", time.Now().Unix()),
+		MaxBatchRecords:      100,
+		MaxBatchPayloadBytes: 1024 * 1024,
+		MaxRequestBytes:      2 * 1024 * 1024,
+		MaxAttempts:          5,
+		InitialBackoff:       500 * time.Millisecond,
+		MaxBackoff:           5 * time.Second,
+		JitterFraction:       0.1,
+		IdleInterval:         1 * time.Second,
+	}, diskSpool, client)
+	if err != nil {
+		logger.Error("Failed to initialize uploader", "error", err)
+		os.Exit(1)
+	}
 
 	// Initialize health server
 	healthServer := health.NewHealthServer(cfg.HealthPort, diskSpool, logger)
@@ -52,9 +96,14 @@ func main() {
 		}
 	}()
 
-	// Initialize and start collector engine
+	// Initialize and start collector engine and uploader
 	ctx, cancel := context.WithCancel(context.Background())
-	engine := collector.NewCollectorEngine(cfg.SensorID, cfg.SensorType, diskSpool, client, cfg.PollInterval, logger)
+	if err := up.Start(ctx); err != nil {
+		logger.Error("Failed to start uploader", "error", err)
+		os.Exit(1)
+	}
+
+	engine := collector.NewCollectorEngine(cfg.SensorID, cfg.SensorType, sink, cfg.PollInterval, logger)
 	engine.Start(ctx)
 
 	// Setup signal catching for graceful shutdown
@@ -70,6 +119,9 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
+	if err := up.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("Uploader shutdown error", "error", err)
+	}
 	if err := healthServer.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("Health server shutdown error", "error", err)
 	}

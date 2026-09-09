@@ -1,8 +1,15 @@
 package com.platform.core.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.core.ingestion.IngestionException;
+import com.platform.core.ingestion.IngestionValidator;
+import com.platform.core.ingestion.SensorIngestionService;
+import com.platform.core.ingestion.dto.TelemetryAckResponse;
+import com.platform.core.ingestion.dto.TelemetryBatchRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -11,12 +18,25 @@ import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/v1")
 public class SensorIngestionController {
 
     private static final Logger log = LoggerFactory.getLogger(SensorIngestionController.class);
+
+    private final SensorIngestionService ingestionService;
+    private final ObjectMapper objectMapper;
+
+    @Autowired
+    public SensorIngestionController(
+            SensorIngestionService ingestionService,
+            ObjectMapper objectMapper
+    ) {
+        this.ingestionService = Objects.requireNonNull(ingestionService, "ingestionService must not be null");
+        this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
+    }
 
     private X509Certificate extractClientCertificate(HttpServletRequest request) {
         Object certAttr = request.getAttribute("jakarta.servlet.request.X509Certificate");
@@ -47,7 +67,7 @@ public class SensorIngestionController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
                     "status", "ERROR",
                     "code", "ERR_AUTH_CLIENT_CERT_REQUIRED",
-                    "message", "mTLS client certificate authentication required for sensor ingestion"
+                    "message", "mTLS client certificate authentication required for sensor transport"
             ));
         }
 
@@ -86,9 +106,11 @@ public class SensorIngestionController {
         ));
     }
 
-    @PostMapping("/telemetry")
-    public ResponseEntity<Map<String, Object>> ingestTelemetry(
-            @RequestBody(required = false) Map<String, Object> payload,
+    @PostMapping(value = "/telemetry", consumes = "application/json", produces = "application/json")
+    public ResponseEntity<?> ingestTelemetry(
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId,
+            @RequestBody(required = false) byte[] rawBody,
             HttpServletRequest request) {
         X509Certificate clientCert = extractClientCertificate(request);
         if (clientCert == null) {
@@ -100,13 +122,52 @@ public class SensorIngestionController {
             ));
         }
 
-        String commonName = extractCommonName(clientCert.getSubjectX500Principal().getName());
-        log.info("Ingesting telemetry batch from sensor: cn={}, remote={}", commonName, request.getRemoteAddr());
+        if (rawBody == null || rawBody.length == 0) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "ERROR",
+                    "code", "ERR_EMPTY_BODY",
+                    "message", "Telemetry request body must not be empty"
+            ));
+        }
 
-        return ResponseEntity.ok(Map.of(
-                "status", "ACCEPTED",
-                "sensor_identity", commonName,
-                "timestamp", Instant.now().toString()
-        ));
+        if (rawBody.length > IngestionValidator.MAX_BATCH_BYTES) {
+            log.warn("Telemetry batch body exceeds max size: {} > {}", rawBody.length, IngestionValidator.MAX_BATCH_BYTES);
+            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(Map.of(
+                    "status", "ERROR",
+                    "code", "ERR_BATCH_TOO_LARGE",
+                    "message", "Telemetry batch body exceeds maximum allowed size"
+            ));
+        }
+
+        TelemetryBatchRequest batchRequest;
+        try {
+            batchRequest = objectMapper.readValue(rawBody, TelemetryBatchRequest.class);
+        } catch (Exception e) {
+            log.warn("Malformed telemetry batch JSON from remote={}: {}", request.getRemoteAddr(), e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "ERROR",
+                    "code", "ERR_MALFORMED_JSON",
+                    "message", "Failed to parse telemetry batch JSON"
+            ));
+        }
+
+        try {
+            TelemetryAckResponse ack = ingestionService.ingestTelemetry(rawBody, batchRequest, idempotencyKey, clientCert);
+            return ResponseEntity.ok(ack);
+        } catch (IngestionException e) {
+            log.warn("Ingestion rejected: code={}, message={}", e.getCode(), e.getMessage());
+            return ResponseEntity.status(e.getStatus()).body(Map.of(
+                    "status", "ERROR",
+                    "code", e.getCode(),
+                    "message", e.getMessage()
+            ));
+        } catch (Exception e) {
+            log.error("Ingestion failed unexpectedly: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "status", "ERROR",
+                    "code", "ERR_INTERNAL_ERROR",
+                    "message", "Internal server error processing telemetry"
+            ));
+        }
     }
 }

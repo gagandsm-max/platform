@@ -66,10 +66,29 @@
             <version>${logstash.version}</version>
         </dependency>
 
+        <!--
+          HTTP authentication/authorization enforcement (OSS-001 Spring Boot security integration).
+          Identity federation remains Keycloak/OIDC (OSS-010); Platform owns resource authorization.
+          Versions are governed by spring-boot-starter-parent; no standalone JWT crypto libraries.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
