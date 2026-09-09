@@ -286,7 +286,7 @@ func TestHarnessPipeline(t *testing.T) {
 		t.Fatalf("failed to create transport: %v", err)
 	}
 
-	worker, err := NewWorker(q, tr, 10, 1024*1024, 10*time.Millisecond, 50*time.Millisecond, 2*time.Second, nil)
+	worker, err := NewWorker(q, tr, "agent-01", 10, 1024*1024, 10*time.Millisecond, 50*time.Millisecond, 2*time.Second, nil)
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestHarnessPipeline(t *testing.T) {
 		AgentID:   "agent-01",
 		TenantID:  "tenant-01",
 	}, wrongClientTLS)
-	wrongWorker, _ := NewWorker(q, wrongTr, 10, 1024*1024, 10*time.Millisecond, 50*time.Millisecond, 2*time.Second, nil)
+	wrongWorker, _ := NewWorker(q, wrongTr, "agent-01", 10, 1024*1024, 10*time.Millisecond, 50*time.Millisecond, 2*time.Second, nil)
 
 	_, _ = q.Enqueue([]byte(`{"metric":"rogue_check","val":1}`))
 	delivered, err = wrongWorker.DeliverOnce(ctx)

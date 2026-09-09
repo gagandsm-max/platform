@@ -41,6 +41,8 @@ func (e *DeliveryError) Unwrap() error { return e.Err }
 
 type Batch struct {
 	CorrelationID string
+	AgentID       string
+	BatchID       string
 	Records       []queue.Record
 }
 

@@ -80,6 +80,7 @@ func mockTLSServer(handler http.Handler, certCN string) (*httptest.Server, *http
 			}
 			r.TLS = &tls.ConnectionState{
 				PeerCertificates: []*x509.Certificate{cert},
+				VerifiedChains:   [][]*x509.Certificate{{cert}},
 			}
 		}
 		handler.ServeHTTP(w, r)
@@ -596,3 +597,173 @@ func TestNoPlatformLocalAuthorityAssumption(t *testing.T) {
 		t.Fatalf("exact CN mapping should succeed without suffix inventing, got %d", resp.StatusCode)
 	}
 }
+
+func TestRejectUnverifiedPeerCertificatesAlone(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	fake := &x509.Certificate{Subject: pkix.Name{CommonName: "agent-1"}}
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	req := httptest.NewRequest(http.MethodPost, EndpointPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.TLS = &tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{fake},
+		VerifiedChains:   nil,
+	}
+	rr := httptest.NewRecorder()
+	rcv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without VerifiedChains, got %d", rr.Code)
+	}
+	var errResp ErrorResponse
+	_ = json.NewDecoder(rr.Body).Decode(&errResp)
+	if errResp.Code != ErrCodeAuthInvalid && errResp.Code != ErrCodeAuthRequired {
+		t.Fatalf("expected auth error code, got %s", errResp.Code)
+	}
+}
+
+func TestPayloadSiteRejectedWhenAuthoritativeSiteEmpty(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "") // site-less assignment
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	env := sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`)))
+	env.SiteID = "attacker-site"
+	body, _ := json.Marshal(env)
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("payload site with empty auth site must reject, got %d", resp.StatusCode)
+	}
+}
+
+func TestMismatchedSiteRejected(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	env := sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`)))
+	env.SiteID = "site-other"
+	body, _ := json.Marshal(env)
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("mismatched site must reject, got %d", resp.StatusCode)
+	}
+}
+
+func TestOmittedPayloadSiteUsesAuthoritativeSite(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	env := sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`)))
+	env.SiteID = ""
+	body, _ := json.Marshal(env)
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("omitted payload site must succeed, got %d", resp.StatusCode)
+	}
+	batches := sink.Batches()
+	if len(batches) != 1 || batches[0].SiteID != "site-primary" {
+		t.Fatalf("sink must receive authoritative site, got %+v", batches)
+	}
+}
+
+func TestPayloadCannotAlterNormalizedSinkEnvelope(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-auth", "site-auth")
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	// Matching claims (case-insensitive tenant) still normalize to authoritative values.
+	env := sampleEnvelope("Agent-1", "TENANT-AUTH", sampleRecord(1, "r-1", []byte(`{"m":1}`)))
+	env.SiteID = "SITE-AUTH"
+	body, _ := json.Marshal(env)
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected success, got %d", resp.StatusCode)
+	}
+	got := sink.Batches()[0]
+	if got.AgentID != "agent-1" || got.TenantID != "tenant-auth" || got.SiteID != "site-auth" {
+		t.Fatalf("sink envelope must be normalized, got agent=%q tenant=%q site=%q", got.AgentID, got.TenantID, got.SiteID)
+	}
+}
+
+func TestInconsistentAssignmentSensorRejected(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := &inconsistentAuthorizer{ctx: AssignmentContext{
+		TenantID: "tenant-1",
+		SiteID:   "site-primary",
+		SensorID: "wrong-sensor",
+		AgentID:  "agent-1",
+		Assigned: true,
+	}}
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("wrong assignment sensor must reject, got %d", resp.StatusCode)
+	}
+}
+
+func TestInconsistentAssignmentAgentRejected(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := &inconsistentAuthorizer{ctx: AssignmentContext{
+		TenantID: "tenant-1",
+		SiteID:   "site-primary",
+		SensorID: "sensor-infra-01",
+		AgentID:  "other-agent",
+		Assigned: true,
+	}}
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"m":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("wrong assignment agent must reject, got %d", resp.StatusCode)
+	}
+}
+

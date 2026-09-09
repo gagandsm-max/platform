@@ -297,6 +297,16 @@ func ackHandler(t *testing.T, agentID string) http.HandlerFunc {
 	}
 }
 
+
+func testBatch(agentID string, recs ...queue.Record) Batch {
+	return Batch{
+		CorrelationID: "test-corr-1",
+		AgentID:       agentID,
+		BatchID:       BuildBatchID(agentID, recs),
+		Records:       recs,
+	}
+}
+
 func TestHTTPSDeliverSuccess(t *testing.T) {
 	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
 
@@ -314,12 +324,15 @@ func TestHTTPSDeliverSuccess(t *testing.T) {
 		t.Fatalf("failed to create transport: %v", err)
 	}
 
+	recs := []queue.Record{
+		{Sequence: 9, ID: "r-9", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
+		{Sequence: 10, ID: "r-10", CreatedAt: time.Now().UTC(), Checksum: "def", Payload: []byte(`{"x":2}`)},
+	}
 	batch := Batch{
 		CorrelationID: "test-corr-1",
-		Records: []queue.Record{
-			{Sequence: 9, ID: "r-9", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
-			{Sequence: 10, ID: "r-10", CreatedAt: time.Now().UTC(), Checksum: "def", Payload: []byte(`{"x":2}`)},
-		},
+		AgentID:       "agent-01",
+		BatchID:       BuildBatchID("agent-01", recs),
+		Records:       recs,
 	}
 
 	ack, err := tr.Deliver(context.Background(), batch)
@@ -359,9 +372,7 @@ func TestHTTPSDeliverRejectsBatchMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tr.Deliver(context.Background(), Batch{
-		Records: []queue.Record{{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}},
-	})
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}))
 	if err == nil || !strings.Contains(err.Error(), "DELIVERY_ACK_BATCH_MISMATCH") {
 		t.Fatalf("expected batch mismatch, got %v", err)
 	}
@@ -395,9 +406,7 @@ func TestHTTPSDeliverRejectsTrailingJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tr.Deliver(context.Background(), Batch{
-		Records: []queue.Record{{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}},
-	})
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}))
 	if err == nil || !strings.Contains(err.Error(), "DELIVERY_ACK_TRAILING_DATA") {
 		t.Fatalf("expected trailing data rejection, got %v", err)
 	}
@@ -428,12 +437,7 @@ func TestHTTPSDeliverAuthenticationFailure(t *testing.T) {
 		t.Fatalf("failed to create transport: %v", err)
 	}
 
-	_, err = tr.Deliver(context.Background(), Batch{
-		CorrelationID: "test-corr-1",
-		Records: []queue.Record{
-			{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
-		},
-	})
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)}))
 	if err == nil {
 		t.Fatalf("expected error on 403 Forbidden, got nil")
 	}
@@ -467,12 +471,7 @@ func TestHTTPSDeliverServerError(t *testing.T) {
 		t.Fatalf("failed to create transport: %v", err)
 	}
 
-	_, err = tr.Deliver(context.Background(), Batch{
-		CorrelationID: "test-corr-1",
-		Records: []queue.Record{
-			{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
-		},
-	})
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)}))
 	if err == nil {
 		t.Fatalf("expected error on 503 Service Unavailable, got nil")
 	}
@@ -502,12 +501,7 @@ func TestHTTPSDeliverMalformedAck(t *testing.T) {
 		t.Fatalf("failed to create transport: %v", err)
 	}
 
-	_, err = tr.Deliver(context.Background(), Batch{
-		CorrelationID: "test-corr-1",
-		Records: []queue.Record{
-			{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
-		},
-	})
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)}))
 	if err == nil {
 		t.Fatalf("expected error on malformed ACK, got nil")
 	}
@@ -539,12 +533,7 @@ func TestHTTPSDeliverContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	_, err = tr.Deliver(ctx, Batch{
-		CorrelationID: "test-corr-1",
-		Records: []queue.Record{
-			{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
-		},
-	})
+	_, err = tr.Deliver(ctx, testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)}))
 	if err == nil {
 		t.Fatalf("expected error on context timeout, got nil")
 	}

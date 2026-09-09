@@ -57,6 +57,7 @@ type mockTransport struct {
 	err       error
 	calls     int
 	batches   []client.Batch
+	echoID    bool
 }
 
 func (m *mockTransport) Available() bool { return m.available }
@@ -66,7 +67,12 @@ func (m *mockTransport) Deliver(ctx context.Context, b client.Batch) (client.Ack
 	if m.err != nil {
 		return client.Ack{}, m.err
 	}
-	return m.ack, nil
+	ack := m.ack
+	if m.echoID {
+		ack.AgentID = b.AgentID
+		ack.BatchID = b.BatchID
+	}
+	return ack, nil
 }
 
 func TestDeliveryWorkerSuccess(t *testing.T) {
@@ -78,10 +84,11 @@ func TestDeliveryWorkerSuccess(t *testing.T) {
 	}
 	tr := &mockTransport{
 		available: true,
-		ack:       client.Ack{AcceptedThrough: 2, AgentID: "agent-1", BatchID: "batch-1"},
+		echoID:    true,
+		ack:       client.Ack{AcceptedThrough: 2},
 	}
 
-	w, err := NewWorker(q, tr, 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +107,9 @@ func TestDeliveryWorkerSuccess(t *testing.T) {
 	if q.Len() != 0 {
 		t.Fatalf("expected 0 remaining records after ACK, got %d", q.Len())
 	}
+	if tr.batches[0].AgentID != "agent-1" || tr.batches[0].BatchID == "" {
+		t.Fatalf("worker must submit AgentID+BatchID before Deliver: %+v", tr.batches[0])
+	}
 
 	stats := w.Stats()
 	if stats.Successes != 1 || stats.Attempts != 1 {
@@ -115,7 +125,7 @@ func TestDeliveryWorkerUnavailableRetainsRecords(t *testing.T) {
 	}
 	tr := client.NewUnavailableTransport("AGENT_RECEIVER_NOT_IMPLEMENTED")
 
-	w, err := NewWorker(q, tr, 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +138,6 @@ func TestDeliveryWorkerUnavailableRetainsRecords(t *testing.T) {
 		t.Fatal("expected delivered to be false")
 	}
 
-	// Record MUST remain in queue!
 	if q.Len() != 1 {
 		t.Fatalf("record was prematurely deleted! Expected 1, got %d", q.Len())
 	}
@@ -156,7 +165,7 @@ func TestDeliveryWorkerTemporaryErrorRetainsRecords(t *testing.T) {
 		err:       &client.DeliveryError{Code: "TEMP_IO", Class: client.FailureTemporary, Err: errors.New("io error")},
 	}
 
-	w, err := NewWorker(q, tr, 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +195,7 @@ func TestDeliveryWorkerAuthAndPermanentRetain(t *testing.T) {
 			available: true,
 			err:       &client.DeliveryError{Code: string(fc), Class: fc},
 		}
-		w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+		w, err := NewWorker(q, tr, "agent-1", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -202,38 +211,105 @@ func TestDeliveryWorkerAuthAndPermanentRetain(t *testing.T) {
 	}
 }
 
-func TestDeliveryWorkerRejectsInvalidAck(t *testing.T) {
-	q := &mockQueue{
-		records: []queue.Record{
-			{Sequence: 5, ID: "rec-5", Payload: []byte("a")},
-			{Sequence: 6, ID: "rec-6", Payload: []byte("b")},
+func TestDeliveryWorkerBatchBoundAckMatrix(t *testing.T) {
+	records := []queue.Record{
+		{Sequence: 5, ID: "rec-5", Checksum: "c5", Payload: []byte("a")},
+		{Sequence: 6, ID: "rec-6", Checksum: "c6", Payload: []byte("b")},
+	}
+	expectedBatchID := client.BuildBatchID("agent-1", records)
+	gapRecords := []queue.Record{
+		{Sequence: 5, ID: "rec-5", Checksum: "c5", Payload: []byte("a")},
+		{Sequence: 7, ID: "rec-7", Checksum: "c7", Payload: []byte("c")},
+	}
+	gapBatchID := client.BuildBatchID("agent-1", gapRecords)
+
+	cases := []struct {
+		name    string
+		records []queue.Record
+		ack     client.Ack
+		want    bool
+	}{
+		{
+			name:    "exact_identity_allows_delete",
+			records: records,
+			ack:     client.Ack{AcceptedThrough: 6, AgentID: "agent-1", BatchID: expectedBatchID},
+			want:    true,
+		},
+		{
+			name:    "wrong_nonempty_batch_id",
+			records: records,
+			ack:     client.Ack{AcceptedThrough: 6, AgentID: "agent-1", BatchID: "batch-wrong"},
+			want:    false,
+		},
+		{
+			name:    "stale_prior_batch_id",
+			records: records,
+			ack:     client.Ack{AcceptedThrough: 6, AgentID: "agent-1", BatchID: "batch-agent-1-00000000000000000001-00000000000000000001-deadbeefdeadbeef"},
+			want:    false,
+		},
+		{
+			name:    "missing_batch_id",
+			records: records,
+			ack:     client.Ack{AcceptedThrough: 6, AgentID: "agent-1", BatchID: ""},
+			want:    false,
+		},
+		{
+			name:    "wrong_nonempty_agent_id",
+			records: records,
+			ack:     client.Ack{AcceptedThrough: 6, AgentID: "agent-other", BatchID: expectedBatchID},
+			want:    false,
+		},
+		{
+			name:    "missing_agent_id",
+			records: records,
+			ack:     client.Ack{AcceptedThrough: 6, AgentID: "", BatchID: expectedBatchID},
+			want:    false,
+		},
+		{
+			name:    "watermark_before_batch",
+			records: records,
+			ack:     client.Ack{AcceptedThrough: 4, AgentID: "agent-1", BatchID: expectedBatchID},
+			want:    false,
+		},
+		{
+			name:    "watermark_after_batch",
+			records: records,
+			ack:     client.Ack{AcceptedThrough: 99, AgentID: "agent-1", BatchID: expectedBatchID},
+			want:    false,
+		},
+		{
+			name:    "watermark_not_in_submitted_records",
+			records: gapRecords,
+			ack:     client.Ack{AcceptedThrough: 6, AgentID: "agent-1", BatchID: gapBatchID},
+			want:    false,
 		},
 	}
-	tr := &mockTransport{available: true, ack: client.Ack{AcceptedThrough: 99, AgentID: "agent-1", BatchID: "batch-1"}}
-	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.DeliverOnce(context.Background()); err == nil {
-		t.Fatal("expected ACK beyond batch to fail")
-	}
-	if q.Len() != 2 || len(q.deleted) != 0 {
-		t.Fatalf("invalid ACK must not delete: len=%d deleted=%v", q.Len(), q.deleted)
-	}
-}
 
-func TestDeliveryWorkerRejectsEmptyAck(t *testing.T) {
-	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
-	tr := &mockTransport{available: true, ack: client.Ack{AcceptedThrough: 0, AgentID: "agent-1", BatchID: "batch-1"}}
-	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.DeliverOnce(context.Background()); err == nil {
-		t.Fatal("empty ACK must fail")
-	}
-	if q.Len() != 1 {
-		t.Fatal("empty ACK must not delete")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &mockQueue{records: append([]queue.Record(nil), tc.records...)}
+			tr := &mockTransport{available: true, ack: tc.ack}
+			w, err := NewWorker(q, tr, "agent-1", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			delivered, err := w.DeliverOnce(context.Background())
+			if tc.want {
+				if err != nil || !delivered {
+					t.Fatalf("expected success, delivered=%v err=%v", delivered, err)
+				}
+				if q.Len() != 0 || len(q.deleted) != 1 {
+					t.Fatalf("expected deletion, len=%d deleted=%v", q.Len(), q.deleted)
+				}
+				return
+			}
+			if err == nil || delivered {
+				t.Fatalf("expected rejection, delivered=%v err=%v", delivered, err)
+			}
+			if q.Len() != len(tc.records) || len(q.deleted) != 0 {
+				t.Fatalf("must not delete: len=%d deleted=%v", q.Len(), q.deleted)
+			}
+		})
 	}
 }
 
@@ -244,8 +320,8 @@ func TestDeliveryWorkerPartialAck(t *testing.T) {
 			{Sequence: 2, ID: "rec-2", Payload: []byte("b")},
 		},
 	}
-	tr := &mockTransport{available: true, ack: client.Ack{AcceptedThrough: 1, AgentID: "agent-1", BatchID: "batch-1"}}
-	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	tr := &mockTransport{available: true, echoID: true, ack: client.Ack{AcceptedThrough: 1}}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,36 +330,6 @@ func TestDeliveryWorkerPartialAck(t *testing.T) {
 	}
 	if q.Len() != 1 || q.records[0].Sequence != 2 {
 		t.Fatalf("partial ACK should leave seq 2: %+v", q.records)
-	}
-}
-
-func TestDeliveryWorkerRejectsMissingBatchID(t *testing.T) {
-	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
-	tr := &mockTransport{available: true, ack: client.Ack{AcceptedThrough: 1, AgentID: "agent-1", BatchID: ""}}
-	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.DeliverOnce(context.Background()); err == nil {
-		t.Fatal("missing batch ID must fail")
-	}
-	if q.Len() != 1 {
-		t.Fatal("missing batch ID must not delete")
-	}
-}
-
-func TestDeliveryWorkerRejectsMissingAgentID(t *testing.T) {
-	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
-	tr := &mockTransport{available: true, ack: client.Ack{AcceptedThrough: 1, AgentID: "", BatchID: "batch-1"}}
-	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.DeliverOnce(context.Background()); err == nil {
-		t.Fatal("missing agent ID must fail")
-	}
-	if q.Len() != 1 {
-		t.Fatal("missing agent ID must not delete")
 	}
 }
 
@@ -299,8 +345,8 @@ func TestDeliveryWorkerDeleteFailureNotSuccess(t *testing.T) {
 	q := &failingDeleteQueue{mockQueue: mockQueue{
 		records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}},
 	}}
-	tr := &mockTransport{available: true, ack: client.Ack{AcceptedThrough: 1, AgentID: "agent-1", BatchID: "batch-1"}}
-	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	tr := &mockTransport{available: true, echoID: true, ack: client.Ack{AcceptedThrough: 1}}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,10 +358,17 @@ func TestDeliveryWorkerDeleteFailureNotSuccess(t *testing.T) {
 	}
 }
 
+func TestDeliveryWorkerRequiresAgentID(t *testing.T) {
+	_, err := NewWorker(&mockQueue{}, &mockTransport{}, "", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	if err == nil {
+		t.Fatal("empty agent ID must fail NewWorker")
+	}
+}
+
 func TestDeliveryWorkerStopIdempotent(t *testing.T) {
 	q := &mockQueue{}
 	tr := &mockTransport{available: false}
-	w, err := NewWorker(q, tr, 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

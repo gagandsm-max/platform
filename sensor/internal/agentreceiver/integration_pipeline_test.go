@@ -1,6 +1,6 @@
 //go:build pipeline
 
-package agentreceiver_test
+package agentreceiver
 
 import (
 	"context"
@@ -22,12 +22,11 @@ import (
 	"platform/agent/common/client"
 	"platform/agent/common/delivery"
 	"platform/agent/common/queue"
-	"platform/sensor/internal/agentreceiver"
 	"platform/sensor/internal/runtime"
 )
 
 // Integration test (not production E2E): DurableQueue → Worker → NewHTTPSTransportForTest
-// → real TLS → httptest mounting agentreceiver.Receiver → StaticTestIdentityVerifier →
+// → real TLS → httptest mounting Receiver → StaticTestIdentityVerifier →
 // InMemoryAssignmentAuthorizer → DurableTestAcceptanceSink → batch-bound ACK → queue deletion.
 func TestRealReceiverPipelineIntegration(t *testing.T) {
 	clientTLS, serverTLS, clientCN := buildIntegrationPKI(t)
@@ -35,20 +34,20 @@ func TestRealReceiverPipelineIntegration(t *testing.T) {
 	queueDir := t.TempDir()
 	sinkDir := t.TempDir()
 
-	ident := agentreceiver.NewStaticTestIdentityVerifier()
+	ident := NewStaticTestIdentityVerifier()
 	ident.AllowCommonName(clientCN, "agent-01")
 
-	auth := agentreceiver.NewInMemoryAssignmentAuthorizer()
+	auth := NewInMemoryAssignmentAuthorizer()
 	auth.Allow("agent-01", "sensor-infra-01", "tenant-01", "site-primary")
 
-	sink, err := agentreceiver.NewDurableTestAcceptanceSink(sinkDir)
+	sink, err := NewDurableTestAcceptanceSink(sinkDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	rcv, err := agentreceiver.NewReceiver(
-		agentreceiver.Config{
+	rcv, err := NewReceiver(
+		Config{
 			SensorID:   "sensor-infra-01",
 			SensorRole: runtime.RoleInfrastructure,
 		},
@@ -62,7 +61,7 @@ func TestRealReceiverPipelineIntegration(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle(agentreceiver.EndpointPath, rcv)
+	mux.Handle(EndpointPath, rcv)
 
 	dropOnce := &dropOnceHandler{inner: mux}
 	ts := httptest.NewUnstartedServer(dropOnce)
@@ -85,7 +84,7 @@ func TestRealReceiverPipelineIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	worker, err := delivery.NewWorker(q, tr, 10, 1024*1024, 10*time.Millisecond, 50*time.Millisecond, 3*time.Second, logger)
+	worker, err := delivery.NewWorker(q, tr, "agent-01", 10, 1024*1024, 10*time.Millisecond, 50*time.Millisecond, 3*time.Second, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,6 +80,7 @@ func NewAgentService(
 	worker, err := delivery.NewWorker(
 		q,
 		tr,
+		ident.AgentID,
 		cfg.MaxBatchRecords,
 		cfg.MaxBatchBytes,
 		cfg.RetryBase,

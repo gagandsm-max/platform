@@ -1,6 +1,8 @@
 package agentreceiver
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,14 +136,20 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. mTLS Client Certificate Authentication + identity verification
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+	// 4. mTLS Client Certificate Authentication + identity verification.
+	// Require verified chain material — PeerCertificates alone is insufficient.
+	_, verifiedChain, err := requireVerifiedClientLeaf(r.TLS)
+	if err != nil {
 		rcv.metrics.AuthFailures.Add(1)
-		rcv.writeJSONError(w, http.StatusUnauthorized, ErrCodeAuthRequired, "Client certificate is required for mutual TLS authentication")
+		code := ErrCodeAuthRequired
+		if strings.Contains(err.Error(), ErrCodeAuthInvalid) {
+			code = ErrCodeAuthInvalid
+		}
+		rcv.writeJSONError(w, http.StatusUnauthorized, code, "Client certificate is required for mutual TLS authentication")
 		return
 	}
 
-	authAgent, err := rcv.identity.VerifyPeerIdentity(r.TLS.PeerCertificates)
+	authAgent, err := rcv.identity.VerifyPeerIdentity(verifiedChain)
 	if err != nil || strings.TrimSpace(authAgent.AgentID) == "" {
 		rcv.metrics.AuthFailures.Add(1)
 		rcv.logger.Warn("Peer identity verification failed",
@@ -212,13 +220,26 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateAssignmentContext(assignCtx, authAgent, rcv.cfg.SensorID); err != nil {
+		rcv.metrics.AssignmentDenials.Add(1)
+		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAgentNotAssigned, "Assignment context is inconsistent with authenticated delivery")
+		return
+	}
+
 	// Payload tenant/site are claims; when present they must match authoritative assignment.
 	if claim := strings.TrimSpace(env.TenantID); claim != "" && !strings.EqualFold(claim, assignCtx.TenantID) {
 		rcv.metrics.AssignmentDenials.Add(1)
 		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAgentNotAssigned, "Payload tenant claim does not match authoritative assignment")
 		return
 	}
-	if claim := strings.TrimSpace(env.SiteID); claim != "" && assignCtx.SiteID != "" && !strings.EqualFold(claim, assignCtx.SiteID) {
+	payloadSite := strings.TrimSpace(env.SiteID)
+	authSite := strings.TrimSpace(assignCtx.SiteID)
+	if payloadSite != "" && authSite == "" {
+		rcv.metrics.AssignmentDenials.Add(1)
+		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAgentNotAssigned, "Payload site claim is not authorized by assignment")
+		return
+	}
+	if payloadSite != "" && authSite != "" && !strings.EqualFold(payloadSite, authSite) {
 		rcv.metrics.AssignmentDenials.Add(1)
 		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAgentNotAssigned, "Payload site claim does not match authoritative assignment")
 		return
@@ -234,6 +255,11 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rcv.writeJSONError(w, http.StatusBadRequest, valErr.Code, valErr.Message)
 		return
 	}
+
+	// Normalize envelope to authoritative identity/assignment before durable sink.
+	env.AgentID = authAgent.AgentID
+	env.TenantID = assignCtx.TenantID
+	env.SiteID = assignCtx.SiteID
 
 	// 9. Check Replay Tracker (Exact Replay vs Conflicting Replay)
 	// Use authoritative tenant from AssignmentContext + authenticated agent + batchID.
@@ -319,6 +345,38 @@ func isApplicationJSON(ct string) bool {
 	}
 	mediaType, _, _ := strings.Cut(ct, ";")
 	return strings.TrimSpace(mediaType) == "application/json"
+}
+
+// requireVerifiedClientLeaf extracts the leaf and verified chain from TLS state.
+// PeerCertificates alone are insufficient; VerifiedChains must be present and non-empty.
+func requireVerifiedClientLeaf(tlsState *tls.ConnectionState) (*x509.Certificate, []*x509.Certificate, error) {
+	if tlsState == nil {
+		return nil, nil, errors.New(ErrCodeAuthRequired + ": TLS connection state is missing")
+	}
+	if len(tlsState.PeerCertificates) == 0 || tlsState.PeerCertificates[0] == nil {
+		return nil, nil, errors.New(ErrCodeAuthRequired + ": peer certificate is missing")
+	}
+	if len(tlsState.VerifiedChains) == 0 || len(tlsState.VerifiedChains[0]) == 0 || tlsState.VerifiedChains[0][0] == nil {
+		return nil, nil, errors.New(ErrCodeAuthInvalid + ": verified client certificate chain is required")
+	}
+	chain := tlsState.VerifiedChains[0]
+	return chain[0], chain, nil
+}
+
+func validateAssignmentContext(assignCtx AssignmentContext, authAgent AuthenticatedAgentIdentity, receivingSensorID string) error {
+	if !assignCtx.Assigned {
+		return errors.New("assignment not authorized")
+	}
+	if strings.TrimSpace(assignCtx.TenantID) == "" {
+		return errors.New("assignment tenant is empty")
+	}
+	if agent := strings.TrimSpace(assignCtx.AgentID); agent != "" && !strings.EqualFold(agent, authAgent.AgentID) {
+		return errors.New("assignment agent does not match authenticated agent")
+	}
+	if !strings.EqualFold(strings.TrimSpace(assignCtx.SensorID), strings.TrimSpace(receivingSensorID)) {
+		return errors.New("assignment sensor does not match receiving sensor")
+	}
+	return nil
 }
 
 func (rcv *Receiver) writeJSONError(w http.ResponseWriter, status int, code, message string) {

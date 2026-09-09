@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -230,7 +231,7 @@ func (q *DurableQueue) readSequenceWatermarkLocked() (uint64, error) {
 	if err := dec.Decode(&meta); err != nil {
 		return 0, fmt.Errorf("QUEUE_META_CORRUPT: %w", err)
 	}
-	if dec.More() {
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return 0, errors.New("QUEUE_META_CORRUPT: trailing data in sequence metadata")
 	}
 	return meta.HighestSequence, nil
@@ -441,7 +442,7 @@ func decodeRecordFile(name string, data []byte) (*Record, uint64, error) {
 	if err := dec.Decode(&rec); err != nil {
 		return nil, fileSeq, fmt.Errorf("%w: %v", ErrRecordCorrupted, err)
 	}
-	if dec.More() {
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, fileSeq, fmt.Errorf("%w: trailing JSON garbage", ErrRecordCorrupted)
 	}
 

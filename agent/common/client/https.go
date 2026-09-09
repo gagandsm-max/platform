@@ -17,6 +17,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"platform/agent/common/queue"
 )
 
 // Wire models matching the authoritative Sensor Agent receiver contract
@@ -34,6 +36,28 @@ func computeBatchChecksum(records []DeliveryRecord) string {
 		_, _ = fmt.Fprintf(h, "%d\n%s\n%s\n", r.Sequence, r.ID, r.Checksum)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// BuildBatchID returns the deterministic batch identity used on the wire.
+// Algorithm matches historical HTTPSTransport batch ID construction for wire compatibility.
+func BuildBatchID(agentID string, records []queue.Record) string {
+	if len(records) == 0 {
+		return ""
+	}
+	recs := make([]DeliveryRecord, len(records))
+	for i, r := range records {
+		recs[i] = DeliveryRecord{
+			Sequence:  r.Sequence,
+			ID:        r.ID,
+			CreatedAt: r.CreatedAt,
+			Checksum:  r.Checksum,
+			Payload:   json.RawMessage(r.Payload),
+		}
+	}
+	firstSeq := records[0].Sequence
+	lastSeq := records[len(records)-1].Sequence
+	batchChecksum := computeBatchChecksum(recs)
+	return fmt.Sprintf("batch-%s-%020d-%020d-%s", agentID, firstSeq, lastSeq, batchChecksum[:16])
 }
 
 type DeliveryEnvelope struct {
@@ -235,6 +259,19 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 	if len(batch.Records) == 0 {
 		return Ack{}, nil
 	}
+	if strings.TrimSpace(batch.AgentID) == "" {
+		return Ack{}, &DeliveryError{Code: "DELIVERY_BATCH_AGENT_REQUIRED", Class: FailurePermanent, Err: errors.New("batch AgentID must be set before delivery")}
+	}
+	if strings.TrimSpace(batch.BatchID) == "" {
+		return Ack{}, &DeliveryError{Code: "DELIVERY_BATCH_ID_REQUIRED", Class: FailurePermanent, Err: errors.New("batch BatchID must be set before delivery")}
+	}
+	if !strings.EqualFold(batch.AgentID, t.cfg.AgentID) {
+		return Ack{}, &DeliveryError{
+			Code:  "DELIVERY_BATCH_AGENT_MISMATCH",
+			Class: FailurePermanent,
+			Err:   fmt.Errorf("batch AgentID %q does not match transport configured AgentID %q", batch.AgentID, t.cfg.AgentID),
+		}
+	}
 
 	// 1. Build Versioned Delivery Envelope
 	recs := make([]DeliveryRecord, len(batch.Records))
@@ -259,12 +296,11 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 
 	firstSeq := batch.Records[0].Sequence
 	lastSeq := batch.Records[len(batch.Records)-1].Sequence
-	batchChecksum := computeBatchChecksum(recs)
-	batchID := fmt.Sprintf("batch-%s-%020d-%020d-%s", t.cfg.AgentID, firstSeq, lastSeq, batchChecksum[:16])
+	batchID := batch.BatchID
 
 	env := DeliveryEnvelope{
 		SchemaVersion: 1,
-		AgentID:       t.cfg.AgentID,
+		AgentID:       batch.AgentID,
 		TenantID:      t.cfg.TenantID,
 		SiteID:        t.cfg.SiteID,
 		CorrelationID: corrID,
@@ -362,11 +398,11 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 			}
 		}
 
-		if !strings.EqualFold(ack.AgentID, t.cfg.AgentID) {
+		if !strings.EqualFold(ack.AgentID, batch.AgentID) {
 			return Ack{}, &DeliveryError{
 				Code:  "DELIVERY_ACK_AGENT_MISMATCH",
 				Class: FailurePermanent,
-				Err:   fmt.Errorf("sensor ACK agent_id %q does not match configured %q", ack.AgentID, t.cfg.AgentID),
+				Err:   fmt.Errorf("sensor ACK agent_id %q does not match submitted %q", ack.AgentID, batch.AgentID),
 			}
 		}
 
