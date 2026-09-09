@@ -17,16 +17,57 @@ echo "========================================================================"
 echo "Running Platform API Contract Suite"
 echo "========================================================================"
 
-# 1. Core Health Actuator Schema Contract
-echo "--> [1/4] Verifying Actuator health contract schema..."
+# 1. Core Health Contracts (exact public probe boundary; connectivity is not anonymous)
+echo "--> [1/4] Verifying anonymous actuator health + connectivity auth boundary..."
 HEALTH_JSON=$(curl -k -s "https://127.0.0.1:${CORE_PORT}/actuator/health")
-for comp in "status" "components" "db" "clickHouse" "kafka" "redis" "diskSpace"; do
-    if ! echo "${HEALTH_JSON}" | grep -q "\"${comp}\""; then
-        echo "[ERROR] Contract violation: missing '${comp}' in health response: ${HEALTH_JSON}"
+if ! echo "${HEALTH_JSON}" | grep -q '"status"'; then
+    echo "[ERROR] Contract violation: missing 'status' in anonymous health response: ${HEALTH_JSON}"
+    exit 1
+fi
+# Anonymous health must not dump internal component graphs (security boundary).
+for leak in '"components"' '"db"' '"clickHouse"' '"kafka"' '"redis"'; do
+    if echo "${HEALTH_JSON}" | grep -q "${leak}"; then
+        echo "[ERROR] Contract violation: anonymous /actuator/health must not expose ${leak}: ${HEALTH_JSON}"
         exit 1
     fi
 done
-echo "[OK] Actuator health schema conforms to quad-datastore contract."
+echo "[OK] Anonymous actuator health is status-only."
+
+for probe in "/actuator/health/liveness" "/actuator/health/readiness"; do
+    PROBE_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://127.0.0.1:${CORE_PORT}${probe}")
+    if [ "${PROBE_CODE}" != "200" ] && [ "${PROBE_CODE}" != "503" ]; then
+        echo "[ERROR] Contract violation: anonymous ${probe} must be reachable, got HTTP ${PROBE_CODE}"
+        exit 1
+    fi
+done
+echo "[OK] Anonymous actuator liveness/readiness probes are reachable."
+
+CONN_CODE=$(curl -k -s -o /tmp/platform-conn-body.json -w "%{http_code}" \
+    "https://127.0.0.1:${CORE_PORT}/api/v1/health/connectivity")
+CONN_JSON=$(cat /tmp/platform-conn-body.json 2>/dev/null || true)
+if [ "${CONN_CODE}" = "200" ] || [ "${CONN_CODE}" = "503" ]; then
+    echo "[ERROR] Contract violation: anonymous /api/v1/health/connectivity must be denied, got HTTP ${CONN_CODE}: ${CONN_JSON}"
+    exit 1
+fi
+if [ "${CONN_CODE}" != "401" ] && [ "${CONN_CODE}" != "403" ] && [ "${CONN_CODE}" != "404" ]; then
+    echo "[ERROR] Contract violation: unexpected connectivity status HTTP ${CONN_CODE}: ${CONN_JSON}"
+    exit 1
+fi
+for leak in 'jdbc:postgresql' 'password' 'stackTrace' '"details"' 'Exception'; do
+    if echo "${CONN_JSON}" | grep -qi "${leak}"; then
+        echo "[ERROR] Contract violation: connectivity denial body leaked '${leak}': ${CONN_JSON}"
+        exit 1
+    fi
+done
+echo "[OK] Anonymous connectivity is denied without backend leak material."
+
+UNKNOWN_HEALTH_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" \
+    "https://127.0.0.1:${CORE_PORT}/api/v1/health/unknown-bypass")
+if [ "${UNKNOWN_HEALTH_CODE}" = "200" ] || [ "${UNKNOWN_HEALTH_CODE}" = "503" ]; then
+    echo "[ERROR] Contract violation: unknown /api/v1/health/* must not bypass auth (HTTP ${UNKNOWN_HEALTH_CODE})"
+    exit 1
+fi
+echo "[OK] Unknown /api/v1/health/* cannot bypass authentication."
 
 # 2. Version API Contract
 echo "--> [2/4] Verifying Core version contract schema..."

@@ -91,6 +91,14 @@ public class ApiExceptionHandler {
                 .body(errorBody(ex.getCode(), ex.getMessage(), Map.of()));
     }
 
+    @ExceptionHandler(com.platform.core.security.http.UnauthorizedAccessException.class)
+    public ResponseEntity<Map<String, Object>> handleUnauthorized(
+            com.platform.core.security.http.UnauthorizedAccessException ex
+    ) {
+        HttpStatus status = ex.httpStatus() == 404 ? HttpStatus.NOT_FOUND : HttpStatus.UNAUTHORIZED;
+        return ResponseEntity.status(status).body(errorBody(ex.code(), ex.getMessage(), Map.of()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
         log.error("Unhandled API failure", ex);

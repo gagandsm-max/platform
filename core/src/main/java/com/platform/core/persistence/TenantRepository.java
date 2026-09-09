@@ -9,6 +9,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -73,8 +74,42 @@ public class TenantRepository {
                 MAPPER);
     }
 
+    /**
+     * Tenant-scoped page: {@code tenantIds} are bound as a JDBC collection parameter (safe IN expansion).
+     * Empty scope returns no rows (fail-closed).
+     */
+    public List<Tenant> listByIds(Collection<UUID> tenantIds, int limit, long offset) {
+        if (tenantIds == null || tenantIds.isEmpty()) {
+            return List.of();
+        }
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantIds", List.copyOf(tenantIds))
+                .addValue("limit", limit)
+                .addValue("offset", offset);
+        return jdbc.query("""
+                SELECT * FROM platform.tenant
+                 WHERE tenant_id IN (:tenantIds)
+                 ORDER BY created_at ASC, tenant_id ASC
+                 LIMIT :limit OFFSET :offset
+                """,
+                params,
+                MAPPER);
+    }
+
     public long count() {
         Long count = jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Map.of(), Long.class);
+        return count == null ? 0L : count;
+    }
+
+    public long countByIds(Collection<UUID> tenantIds) {
+        if (tenantIds == null || tenantIds.isEmpty()) {
+            return 0L;
+        }
+        Long count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.tenant WHERE tenant_id IN (:tenantIds)",
+                new MapSqlParameterSource("tenantIds", List.copyOf(tenantIds)),
+                Long.class
+        );
         return count == null ? 0L : count;
     }
 
