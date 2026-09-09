@@ -14,6 +14,7 @@ import com.platform.core.domain.tenant.Tenant;
 import com.platform.core.domain.tenant.TenantMode;
 import com.platform.core.domain.tenant.TenantService;
 import com.platform.core.domain.tenant.TenantStatus;
+import com.platform.core.ingestion.SensorIngestionService;
 import com.platform.core.logging.CorrelationIdFilter;
 import com.platform.core.security.authorization.PermissionGrant;
 import com.platform.core.security.authorization.PermissionGrantDirectory;
@@ -81,6 +82,9 @@ class CoreHttpSecurityWebTest {
 
     @MockBean
     private TenantService tenantService;
+
+    @MockBean
+    private SensorIngestionService sensorIngestionService;
 
     @MockBean
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
