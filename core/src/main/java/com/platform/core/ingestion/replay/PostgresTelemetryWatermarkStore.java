@@ -3,6 +3,7 @@ package com.platform.core.ingestion.replay;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -21,10 +22,13 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
     public WatermarkState getWatermarkForUpdate(String sensorId) {
         // Advisory transaction lock guarantees serialize access for this sensor
         // even when the row has not yet been inserted.
-        jdbcTemplate.queryForObject(
+        jdbcTemplate.execute(
                 "SELECT pg_advisory_xact_lock(hashtext(?))",
-                Void.class,
-                "sensor_telemetry_watermark:" + sensorId
+                (PreparedStatement ps) -> {
+                    ps.setString(1, "sensor_telemetry_watermark:" + sensorId);
+                    ps.execute();
+                    return null;
+                }
         );
 
         List<WatermarkState> list = jdbcTemplate.query(

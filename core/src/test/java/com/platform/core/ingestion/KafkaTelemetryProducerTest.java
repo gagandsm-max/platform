@@ -107,6 +107,20 @@ class KafkaTelemetryProducerTest {
                 producer.publishBatchTransactionally(List.of(obs1, obs2)));
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, ex.getStatus());
         assertEquals("ERR_KAFKA_PUBLICATION_FAILED", ex.getCode());
+        assertEquals("Failed to atomically publish telemetry batch to Kafka cluster", ex.getMessage());
         assertEquals(1, metrics.getKafkaFailures());
+    }
+
+    @Test
+    void testSpringContextBeanInstantiation() {
+        org.springframework.context.annotation.AnnotationConfigApplicationContext context =
+                new org.springframework.context.annotation.AnnotationConfigApplicationContext();
+        context.getDefaultListableBeanFactory().registerSingleton("kafkaTemplate", kafkaTemplate);
+        context.getDefaultListableBeanFactory().registerSingleton("objectMapper", objectMapper);
+        context.getDefaultListableBeanFactory().registerSingleton("ingestionMetrics", metrics);
+        context.register(KafkaTelemetryProducer.class);
+        assertDoesNotThrow(context::refresh);
+        assertNotNull(context.getBean(KafkaTelemetryProducer.class));
+        context.close();
     }
 }

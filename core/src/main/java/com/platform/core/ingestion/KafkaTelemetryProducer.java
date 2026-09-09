@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -24,27 +25,18 @@ public class KafkaTelemetryProducer {
     private final long timeoutSeconds;
     private final String topic;
 
+    @Autowired
     public KafkaTelemetryProducer(
             KafkaTemplate<String, String> kafkaTemplate,
             ObjectMapper objectMapper,
             IngestionMetrics metrics,
             @Value("${platform.kafka.publish-timeout-seconds:5}") long timeoutSeconds
     ) {
-        this(kafkaTemplate, objectMapper, metrics, timeoutSeconds, TOPIC_TELEMETRY_NUMERIC);
-    }
-
-    public KafkaTelemetryProducer(
-            KafkaTemplate<String, String> kafkaTemplate,
-            ObjectMapper objectMapper,
-            IngestionMetrics metrics,
-            long timeoutSeconds,
-            String topic
-    ) {
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.metrics = metrics;
         this.timeoutSeconds = timeoutSeconds;
-        this.topic = topic != null && !topic.isBlank() ? topic : TOPIC_TELEMETRY_NUMERIC;
+        this.topic = TOPIC_TELEMETRY_NUMERIC;
     }
 
     public boolean isTransactionCapable() {
@@ -96,7 +88,7 @@ public class KafkaTelemetryProducer {
             throw new IngestionException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "ERR_KAFKA_PUBLICATION_FAILED",
-                    "Failed to atomically publish telemetry batch to Kafka cluster: " + e.getMessage(),
+                    "Failed to atomically publish telemetry batch to Kafka cluster",
                     e
             );
         }
