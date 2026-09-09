@@ -184,7 +184,7 @@ public class TelemetryPipelineIntegrationTest {
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
 
             WatermarkState existing = new WatermarkState(sensorId, tenantId, 10L, 10L, 10L, "chk-10", "b-10", Instant.now());
-            when(watermarkStore.getWatermarkForUpdate(sensorId)).thenReturn(existing);
+            when(watermarkStore.getWatermarkForUpdate(tenantId, sensorId)).thenReturn(existing);
 
             TelemetryAckResponse ack = service.ingestTelemetry("{}".getBytes(), req, "b-10", cert);
 
@@ -208,7 +208,7 @@ public class TelemetryPipelineIntegrationTest {
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
 
             WatermarkState existing = new WatermarkState(sensorId, tenantId, 10L, 10L, 10L, "chk-ORIGINAL", "b-10", Instant.now());
-            when(watermarkStore.getWatermarkForUpdate(sensorId)).thenReturn(existing);
+            when(watermarkStore.getWatermarkForUpdate(tenantId, sensorId)).thenReturn(existing);
 
             IngestionException ex = assertThrows(IngestionException.class, () ->
                     service.ingestTelemetry("{}".getBytes(), req, "b-10-tampered", cert)
@@ -233,7 +233,7 @@ public class TelemetryPipelineIntegrationTest {
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
 
             WatermarkState existing = new WatermarkState(sensorId, tenantId, 10L, 10L, 10L, "chk-10", "b-10", Instant.now());
-            when(watermarkStore.getWatermarkForUpdate(sensorId)).thenReturn(existing);
+            when(watermarkStore.getWatermarkForUpdate(tenantId, sensorId)).thenReturn(existing);
 
             IngestionException ex = assertThrows(IngestionException.class, () ->
                     service.ingestTelemetry("{}".getBytes(), req, "b-5", cert)
@@ -257,7 +257,7 @@ public class TelemetryPipelineIntegrationTest {
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
 
             WatermarkState existing = new WatermarkState(sensorId, tenantId, 10L, 10L, 10L, "chk-10", "b-10", Instant.now());
-            when(watermarkStore.getWatermarkForUpdate(sensorId)).thenReturn(existing);
+            when(watermarkStore.getWatermarkForUpdate(tenantId, sensorId)).thenReturn(existing);
 
             IngestionException ex = assertThrows(IngestionException.class, () ->
                     service.ingestTelemetry("{}".getBytes(), req, "b-12", cert)
@@ -283,6 +283,7 @@ public class TelemetryPipelineIntegrationTest {
             SensorIngestionService service = new SensorIngestionService(validator, resolver, watermarkStore, kafkaProducer, new IngestionMetrics());
 
             X509Certificate cert = mock(X509Certificate.class);
+            when(cert.getSubjectX500Principal()).thenReturn(new javax.security.auth.x500.X500Principal("CN=" + sensorId));
             TelemetryBatchRequest req = new TelemetryBatchRequest(1, sensorId, "ep-1", "b-1", 1, 1, "chk-1", List.of());
             List<CanonicalObservation> obsList = List.of(
                     new CanonicalObservation(tenantId.toString(), entityId.toString(), "metric", sensorId, Instant.now(), 1.0, 1, 0, "1", "snmp")
@@ -290,7 +291,7 @@ public class TelemetryPipelineIntegrationTest {
 
             when(validator.resolveAuthority(cert)).thenReturn(scope);
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
-            when(watermarkStore.getWatermarkForUpdate(sensorId)).thenReturn(null);
+            when(watermarkStore.getWatermarkForUpdate(tenantId, sensorId)).thenReturn(null);
             doThrow(new IngestionException(HttpStatus.SERVICE_UNAVAILABLE, "ERR_KAFKA_PUBLISH_FAILED", "Broker connection failed"))
                     .when(kafkaProducer).publishBatchTransactionally(anyList());
 

@@ -200,7 +200,7 @@ class IngestionValidatorTest {
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
-        assertEquals("ERR_NO_CANONICAL_OBSERVATIONS", ex.getCode());
+        assertEquals("ERR_NON_NUMERIC_RECORD", ex.getCode());
     }
 
     @Test
@@ -233,8 +233,204 @@ class IngestionValidatorTest {
         assertEquals("sensor-net-01", first.sensorId());
         assertEquals(1234567.0, first.value());
         assertEquals(1, first.quality());
-        assertEquals("105", first.sequenceId());
+        String expectedSequenceId = tenantId + ":sensor-net-01:epoch-1:105:0:.1.3.6.1.2.1.1.3.0";
+        assertEquals(expectedSequenceId, first.sequenceId());
         assertEquals("snmp", first.sourceProtocol());
+    }
+
+    @Test
+    void testSequenceContinuityDiscontinuityRejected() throws Exception {
+        // Range 1..3, but only sequences 1 and 3 are present (count = 2 != 3)
+        String rec1 = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":1}}]}}}";
+        String rec3 = "{\"sequence\":3,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":3}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(rec1.getBytes(StandardCharsets.UTF_8));
+        digest.update(rec3.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : digest.digest()) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":3,\"checksum\":\""
+                + sb + "\",\"records\":[" + rec1 + "," + rec3 + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_SEQUENCE_DISCONTINUITY", ex.getCode());
+    }
+
+    @Test
+    void testSequenceContinuityDuplicateRejected() throws Exception {
+        // Range 1..2, but sequences are [1, 1]
+        String rec1 = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":1}}]}}}";
+        String rec1dup = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":2}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(rec1.getBytes(StandardCharsets.UTF_8));
+        digest.update(rec1dup.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : digest.digest()) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":2,\"checksum\":\""
+                + sb + "\",\"records\":[" + rec1 + "," + rec1dup + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_DUPLICATE_SEQUENCE", ex.getCode());
+    }
+
+    @Test
+    void testSequenceContinuityOutOfBoundsRejected() throws Exception {
+        // Range 1..2, but sequences are [1, 99]
+        String rec1 = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":1}}]}}}";
+        String rec99 = "{\"sequence\":99,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":99}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(rec1.getBytes(StandardCharsets.UTF_8));
+        digest.update(rec99.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : digest.digest()) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":2,\"checksum\":\""
+                + sb + "\",\"records\":[" + rec1 + "," + rec99 + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_SEQUENCE_OUT_OF_BOUNDS", ex.getCode());
+    }
+
+    @Test
+    void testOutOfOrderRecordsSortedAscendingDeterministically() throws Exception {
+        // Range 1..2, records provided in reverse order [2, 1]
+        String rec1 = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":10}}]}}}";
+        String rec2 = "{\"sequence\":2,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:01Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":20}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(rec2.getBytes(StandardCharsets.UTF_8));
+        digest.update(rec1.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : digest.digest()) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":2,\"checksum\":\""
+                + sb + "\",\"records\":[" + rec2 + "," + rec1 + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        List<CanonicalObservation> obs = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
+        assertEquals(2, obs.size());
+        assertEquals(10.0, obs.get(0).value());
+        assertEquals(20.0, obs.get(1).value());
+    }
+
+    @Test
+    void testUnsupportedRecordTypeRejectedWithoutAck() throws Exception {
+        // Non-numeric record type (e.g. STATE)
+        String recordJson = "{\"sequence\":1,\"type\":\"STATE\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"status\":\"UP\"}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode());
+    }
+
+    @Test
+    void testUnsupportedProtocolRejected() throws Exception {
+        // Non-SNMP protocol (e.g. GNMI)
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"GNMI\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":1}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_UNSUPPORTED_PROTOCOL", ex.getCode());
+    }
+
+    @Test
+    void testMissingOidRejectedWithoutFallback() throws Exception {
+        // Missing OID (empty/blank)
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\"\",\"status\":\"VALUE\",\"value\":{\"unsigned\":1}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_MISSING_METRIC_ID", ex.getCode());
+    }
+
+    @Test
+    void testRecordExceedingMaxRecordBytesRejected() throws Exception {
+        // Create an oversized record payload (> 512 KB)
+        StringBuilder hugePad = new StringBuilder();
+        for (int i = 0; i < 600 * 1024; i++) hugePad.append("A");
+
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"padding\":\"" + hugePad + "\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":1}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, ex.getStatus());
+        assertEquals("ERR_RECORD_TOO_LARGE", ex.getCode());
     }
 
     @Test
@@ -243,7 +439,7 @@ class IngestionValidatorTest {
                 new org.springframework.context.annotation.AnnotationConfigApplicationContext();
         context.getDefaultListableBeanFactory().registerSingleton("objectMapper", objectMapper);
         context.getDefaultListableBeanFactory().registerSingleton("ingestionMetrics", metrics);
-        context.register(FailClosedSensorAuthorityResolver.class);
+        context.register(com.platform.core.ingestion.authority.SensorAuthorityConfiguration.class);
         context.register(IngestionValidator.class);
         assertDoesNotThrow(context::refresh);
         assertNotNull(context.getBean(IngestionValidator.class));

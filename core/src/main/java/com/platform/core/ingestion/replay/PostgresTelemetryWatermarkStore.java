@@ -19,13 +19,13 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
     }
 
     @Override
-    public WatermarkState getWatermarkForUpdate(String sensorId) {
-        // Advisory transaction lock guarantees serialize access for this sensor
+    public WatermarkState getWatermarkForUpdate(UUID tenantId, String sensorId) {
+        // Advisory transaction lock guarantees serialize access for this (tenant, sensor)
         // even when the row has not yet been inserted.
         jdbcTemplate.execute(
                 "SELECT pg_advisory_xact_lock(hashtext(?))",
                 (PreparedStatement ps) -> {
-                    ps.setString(1, "sensor_telemetry_watermark:" + sensorId);
+                    ps.setString(1, "sensor_telemetry_watermark:" + tenantId + ":" + sensorId);
                     ps.execute();
                     return null;
                 }
@@ -36,10 +36,11 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
                 SELECT sensor_id, tenant_id, acked_through_sequence, last_first_sequence,
                        last_last_sequence, last_checksum, last_batch_id, updated_at
                   FROM platform.sensor_telemetry_watermark
-                 WHERE sensor_id = ?
+                 WHERE tenant_id = ? AND sensor_id = ?
                  FOR UPDATE
                 """,
                 (rs, rowNum) -> mapRow(rs),
+                tenantId,
                 sensorId
         );
         return list.isEmpty() ? null : list.get(0);
@@ -47,8 +48,8 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
 
     @Override
     public void updateWatermark(
-            String sensorId,
             UUID tenantId,
+            String sensorId,
             long ackedThrough,
             long firstSeq,
             long lastSeq,
@@ -58,11 +59,10 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
         jdbcTemplate.update(
                 """
                 INSERT INTO platform.sensor_telemetry_watermark (
-                    sensor_id, tenant_id, acked_through_sequence, last_first_sequence,
+                    tenant_id, sensor_id, acked_through_sequence, last_first_sequence,
                     last_last_sequence, last_checksum, last_batch_id, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT (sensor_id) DO UPDATE SET
-                    tenant_id = EXCLUDED.tenant_id,
+                ON CONFLICT (tenant_id, sensor_id) DO UPDATE SET
                     acked_through_sequence = EXCLUDED.acked_through_sequence,
                     last_first_sequence = EXCLUDED.last_first_sequence,
                     last_last_sequence = EXCLUDED.last_last_sequence,
@@ -70,7 +70,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
                     last_batch_id = EXCLUDED.last_batch_id,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                sensorId, tenantId, ackedThrough, firstSeq, lastSeq, checksum, batchId
+                tenantId, sensorId, ackedThrough, firstSeq, lastSeq, checksum, batchId
         );
     }
 

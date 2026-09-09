@@ -2,6 +2,7 @@ package com.platform.core.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.IngestionException;
+import com.platform.core.ingestion.IngestionValidator;
 import com.platform.core.ingestion.SensorIngestionService;
 import com.platform.core.ingestion.dto.TelemetryAckResponse;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
@@ -129,6 +130,15 @@ public class SensorIngestionController {
             ));
         }
 
+        if (rawBody.length > IngestionValidator.MAX_BATCH_BYTES) {
+            log.warn("Telemetry batch body exceeds max size: {} > {}", rawBody.length, IngestionValidator.MAX_BATCH_BYTES);
+            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(Map.of(
+                    "status", "ERROR",
+                    "code", "ERR_BATCH_TOO_LARGE",
+                    "message", "Telemetry batch body exceeds maximum allowed size"
+            ));
+        }
+
         TelemetryBatchRequest batchRequest;
         try {
             batchRequest = objectMapper.readValue(rawBody, TelemetryBatchRequest.class);
@@ -137,7 +147,7 @@ public class SensorIngestionController {
             return ResponseEntity.badRequest().body(Map.of(
                     "status", "ERROR",
                     "code", "ERR_MALFORMED_JSON",
-                    "message", "Failed to parse telemetry batch JSON: " + e.getMessage()
+                    "message", "Failed to parse telemetry batch JSON"
             ));
         }
 

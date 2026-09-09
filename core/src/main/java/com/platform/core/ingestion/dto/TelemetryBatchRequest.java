@@ -5,7 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
 
-@JsonIgnoreProperties(ignoreUnknown = true)
+@JsonIgnoreProperties(ignoreUnknown = false)
 public record TelemetryBatchRequest(
         @JsonProperty("schemaVersion") int schemaVersion,
         @JsonProperty("sensorId") String sensorId,

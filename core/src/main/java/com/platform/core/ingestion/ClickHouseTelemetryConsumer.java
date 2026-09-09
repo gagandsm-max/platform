@@ -49,7 +49,7 @@ public class ClickHouseTelemetryConsumer {
     @KafkaListener(
             topics = "${platform.ingestion.kafka.topic:telemetry.numeric.v1}",
             groupId = "${spring.kafka.consumer.group-id:platform-core-group}",
-            autoStartup = "${platform.telemetry.consumer.enabled:true}",
+            autoStartup = "${platform.telemetry.consumer.enabled:false}",
             containerFactory = "telemetryKafkaListenerContainerFactory"
     )
     public void consume(ConsumerRecord<String, String> record, Acknowledgment acknowledgment) {

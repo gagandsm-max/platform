@@ -40,7 +40,7 @@ public class SensorIngestionService {
         this.metrics = metrics;
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public TelemetryAckResponse ingestTelemetry(
             byte[] rawBody,
             TelemetryBatchRequest request,
@@ -48,6 +48,22 @@ public class SensorIngestionService {
             X509Certificate clientCert
     ) {
         metrics.recordBatchReceived();
+
+        // 0. Verify claimed sensor identity matches client certificate CN
+        if (clientCert != null && clientCert.getSubjectX500Principal() != null && request.sensorId() != null && !request.sensorId().isBlank()) {
+            String dn = clientCert.getSubjectX500Principal().getName();
+            String cn = extractCommonName(dn);
+            String claimed = request.sensorId().trim();
+            String cleanCn = cn.split("\\.")[0].trim();
+            if (!claimed.equalsIgnoreCase(cleanCn) && !claimed.equalsIgnoreCase(cn.trim())) {
+                metrics.recordBatchRejected("ERR_AUTH_IDENTITY_MISMATCH");
+                throw new IngestionException(
+                        HttpStatus.FORBIDDEN,
+                        "ERR_AUTH_IDENTITY_MISMATCH",
+                        "Claimed sensorId '" + claimed + "' does not match client certificate CN '" + cn + "'"
+                );
+            }
+        }
 
         // 1. Resolve Sensor Authority (fails closed if authority unavailable)
         SensorScope scope = validator.resolveAuthority(clientCert);
@@ -64,15 +80,15 @@ public class SensorIngestionService {
         List<CanonicalObservation> observations = validator.validateAndExtract(rawBody, request, scope);
 
         // 3. Concurrency-safe Watermark Check from durable PostgreSQL store
-        WatermarkState watermark = watermarkStore.getWatermarkForUpdate(scope.sensorId());
+        WatermarkState watermark = watermarkStore.getWatermarkForUpdate(scope.tenantId(), scope.sensorId());
         if (watermark != null) {
             // Case A: Exact retry of last accepted batch range and checksum
             if (request.firstSequence() == watermark.lastFirstSequence()
                     && request.lastSequence() == watermark.lastLastSequence()) {
                 if (request.checksum().equalsIgnoreCase(watermark.lastChecksum())) {
                     metrics.recordDuplicateReplay();
-                    log.info("Idempotent replay detected for sensor={} range=[{}..{}] watermark={}",
-                            scope.sensorId(), request.firstSequence(), request.lastSequence(), watermark.ackedThroughSequence());
+                    log.info("Idempotent replay detected for tenant={} sensor={} range=[{}..{}] watermark={}",
+                            scope.tenantId(), scope.sensorId(), request.firstSequence(), request.lastSequence(), watermark.ackedThroughSequence());
                     return new TelemetryAckResponse("ACCEPTED", watermark.ackedThroughSequence(), scope.sensorId());
                 } else {
                     // Conflicting checksum for same accepted sequence range
@@ -110,12 +126,17 @@ public class SensorIngestionService {
         }
 
         // 4. Publish atomically in a single Kafka transaction
+        // NOTE ON CROSS-SYSTEM ATOMICITY:
+        // Kafka publication and PostgreSQL watermark updates are NOT bound by a distributed 2PC/XA transaction.
+        // If Core crashes or PostgreSQL rolls back after Kafka commit, the Sensor receives no ACK and retries.
+        // Transport across this crash window is AT-LEAST-ONCE. Idempotency and duplicate safety are guaranteed
+        // by deterministic observation identities (sequenceId) matching across retries.
         kafkaProducer.publishBatchTransactionally(observations);
 
         // 5. Update durable watermark state in PostgreSQL
         watermarkStore.updateWatermark(
-                scope.sensorId(),
                 scope.tenantId(),
+                scope.sensorId(),
                 request.lastSequence(),
                 request.firstSequence(),
                 request.lastSequence(),
@@ -125,5 +146,16 @@ public class SensorIngestionService {
 
         // 6. Return durable ACK indicating accepted-through watermark
         return new TelemetryAckResponse("ACCEPTED", request.lastSequence(), scope.sensorId());
+    }
+
+    private String extractCommonName(String dn) {
+        if (dn == null) return "UNKNOWN";
+        for (String part : dn.split(",")) {
+            part = part.trim();
+            if (part.startsWith("CN=") || part.startsWith("cn=")) {
+                return part.substring(3);
+            }
+        }
+        return dn;
     }
 }

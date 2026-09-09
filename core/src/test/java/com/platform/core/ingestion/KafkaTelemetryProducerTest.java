@@ -97,8 +97,8 @@ class KafkaTelemetryProducerTest {
             CompletableFuture<SendResult<String, String>> failFuture = new CompletableFuture<>();
             failFuture.completeExceptionally(new RuntimeException("Broker network timeout on record 2"));
 
-            when(ops.send(eq("telemetry.numeric.v1"), eq("sensor-net-01:100"), anyString())).thenReturn(successFuture);
-            when(ops.send(eq("telemetry.numeric.v1"), eq("sensor-net-01:101"), anyString())).thenReturn(failFuture);
+            when(ops.send(eq("telemetry.numeric.v1"), eq("100"), anyString())).thenReturn(successFuture);
+            when(ops.send(eq("telemetry.numeric.v1"), eq("101"), anyString())).thenReturn(failFuture);
 
             return callback.doInOperations(ops);
         });

@@ -53,8 +53,17 @@ public class IngestionKafkaConfiguration {
         factory.setConsumerFactory(consumerFactory);
         // Manual immediate acknowledgement ensures offsets ONLY commit after ClickHouse persistence succeeds
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
-        // Default error handler with no skip: stops container progression on unhandled failure
-        DefaultErrorHandler errorHandler = new DefaultErrorHandler(new FixedBackOff(500L, 3L));
+        // Default error handler with fail-closed recoverer: halts offset progression without skipping failed records
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler((record, exception) -> {
+            throw new org.springframework.kafka.KafkaException(
+                    "Exhausted retries for record at topic=" + record.topic()
+                            + " partition=" + record.partition()
+                            + " offset=" + record.offset()
+                            + "; halting partition progression",
+                    exception
+            );
+        }, new FixedBackOff(500L, 3L));
+        errorHandler.setAckAfterHandle(false);
         factory.setCommonErrorHandler(errorHandler);
         return factory;
     }

@@ -68,7 +68,8 @@ public class KafkaTelemetryProducer {
         try {
             kafkaTemplate.executeInTransaction(operations -> {
                 for (CanonicalObservation obs : observations) {
-                    String key = obs.sensorId() + ":" + obs.sequenceId();
+                    // P0-5: Consistently use deterministic logical observation identity as Kafka key
+                    String key = obs.sequenceId();
                     try {
                         String payload = objectMapper.writeValueAsString(obs);
                         CompletableFuture<?> future = operations.send(topic, key, payload);

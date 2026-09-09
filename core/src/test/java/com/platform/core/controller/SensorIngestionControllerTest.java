@@ -67,13 +67,26 @@ class SensorIngestionControllerTest {
     }
 
     @Test
-    void testMalformedJsonReturns400() {
+    void testBodyExceedingMaxBatchBytesReturns413() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute("jakarta.servlet.request.X509Certificate", new X509Certificate[]{createMockCert("sensor-net-01")});
 
-        ResponseEntity<?> resp = controller.ingestTelemetry(null, null, "{not-json}".getBytes(StandardCharsets.UTF_8), request);
+        byte[] largeBody = new byte[com.platform.core.ingestion.IngestionValidator.MAX_BATCH_BYTES + 1];
+        ResponseEntity<?> resp = controller.ingestTelemetry(null, null, largeBody, request);
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, resp.getStatusCode());
+        assertEquals("ERR_BATCH_TOO_LARGE", ((Map<?, ?>) resp.getBody()).get("code"));
+    }
+
+    @Test
+    void testMalformedJsonReturns400WithSanitizedMessage() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute("jakarta.servlet.request.X509Certificate", new X509Certificate[]{createMockCert("sensor-net-01")});
+
+        ResponseEntity<?> resp = controller.ingestTelemetry(null, null, "{not-json: broken}".getBytes(StandardCharsets.UTF_8), request);
         assertEquals(HttpStatus.BAD_REQUEST, resp.getStatusCode());
-        assertEquals("ERR_MALFORMED_JSON", ((Map<?, ?>) resp.getBody()).get("code"));
+        Map<?, ?> body = (Map<?, ?>) resp.getBody();
+        assertEquals("ERR_MALFORMED_JSON", body.get("code"));
+        assertEquals("Failed to parse telemetry batch JSON", body.get("message"));
     }
 
     @Test

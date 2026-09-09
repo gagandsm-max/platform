@@ -17,7 +17,10 @@ import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -154,6 +157,63 @@ public class IngestionValidator {
             );
         }
 
+        long expectedCount = batch.lastSequence() - batch.firstSequence() + 1;
+        if (batch.records().size() != expectedCount) {
+            throw new IngestionException(
+                    HttpStatus.BAD_REQUEST,
+                    "ERR_SEQUENCE_DISCONTINUITY",
+                    "Batch record count (" + batch.records().size() + ") does not match sequence range ["
+                            + batch.firstSequence() + ".." + batch.lastSequence() + "] (expected " + expectedCount + ")"
+            );
+        }
+
+        Set<Long> seenSequences = new HashSet<>();
+        for (JsonNode recordNode : batch.records()) {
+            if (!recordNode.hasNonNull("sequence") || !recordNode.path("sequence").isIntegralNumber()) {
+                throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_INVALID_SEQUENCE", "Record missing valid integer sequence");
+            }
+            long seq = recordNode.path("sequence").asLong();
+            if (seq < batch.firstSequence() || seq > batch.lastSequence()) {
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_SEQUENCE_OUT_OF_BOUNDS",
+                        "Record sequence " + seq + " is outside batch bounds [" + batch.firstSequence() + ".." + batch.lastSequence() + "]"
+                );
+            }
+            if (!seenSequences.add(seq)) {
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_DUPLICATE_SEQUENCE",
+                        "Duplicate sequence " + seq + " detected in batch"
+                );
+            }
+
+            try {
+                byte[] recordBytes = objectMapper.writeValueAsBytes(recordNode);
+                if (recordBytes.length > MAX_RECORD_BYTES) {
+                    throw new IngestionException(
+                            HttpStatus.PAYLOAD_TOO_LARGE,
+                            "ERR_RECORD_TOO_LARGE",
+                            "Record sequence " + seq + " size (" + recordBytes.length + " bytes) exceeds maximum limit of " + MAX_RECORD_BYTES + " bytes"
+                    );
+                }
+            } catch (IngestionException ie) {
+                throw ie;
+            } catch (Exception e) {
+                throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_MALFORMED_RECORD", "Failed to inspect record bounds");
+            }
+        }
+
+        for (long s = batch.firstSequence(); s <= batch.lastSequence(); s++) {
+            if (!seenSequences.contains(s)) {
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_MISSING_SEQUENCE",
+                        "Missing sequence " + s + " in batch range [" + batch.firstSequence() + ".." + batch.lastSequence() + "]"
+                );
+            }
+        }
+
         validateChecksum(batch, rawBody);
     }
 
@@ -280,14 +340,22 @@ public class IngestionValidator {
         String authoritativeTenantId = scope.tenantId().toString();
         String authoritativeSensorId = scope.sensorId();
 
-        for (JsonNode recordNode : batch.records()) {
+        // Process records deterministically in ascending sequence order
+        List<JsonNode> sortedRecords = new ArrayList<>(batch.records());
+        sortedRecords.sort(Comparator.comparingLong(r -> r.path("sequence").asLong(0)));
+
+        for (JsonNode recordNode : sortedRecords) {
+            int initialCount = results.size();
             long sequence = recordNode.path("sequence").asLong(0);
-            if (sequence < batch.firstSequence() || sequence > batch.lastSequence()) {
+
+            // P0-3: Fail closed on non-numeric telemetry / unsupported record types
+            String recordType = recordNode.path("type").asText("").trim().toUpperCase();
+            if ("STATE".equals(recordType) || "EVENT".equals(recordType) || "TRAP".equals(recordType)
+                    || "SYSLOG".equals(recordType) || "FLOW".equals(recordType)) {
                 throw new IngestionException(
                         HttpStatus.BAD_REQUEST,
-                        "ERR_SEQUENCE_OUT_OF_BOUNDS",
-                        "Record sequence " + sequence + " is outside batch range ["
-                                + batch.firstSequence() + ".." + batch.lastSequence() + "]"
+                        "ERR_UNSUPPORTED_RECORD_TYPE",
+                        "Record sequence " + sequence + " contains unsupported record type: " + recordType
                 );
             }
 
@@ -304,7 +372,7 @@ public class IngestionValidator {
                         throw new IngestionException(
                                 HttpStatus.BAD_REQUEST,
                                 "ERR_MALFORMED_RECORD_PAYLOAD",
-                                "Failed to parse record payload JSON: " + parseEx.getMessage()
+                                "Record sequence " + sequence + " has malformed payload JSON"
                         );
                     }
                 }
@@ -367,18 +435,33 @@ public class IngestionValidator {
                 default -> 0;
             };
 
-            String protocol = envelopeNode.path("protocol").asText("UNKNOWN").toLowerCase();
+            String protocol = envelopeNode.path("protocol").asText("").trim().toLowerCase();
+            if (protocol.isBlank()) {
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_MISSING_PROTOCOL",
+                        "Record sequence " + sequence + " is missing required source protocol"
+                );
+            }
+
             JsonNode protocolPayload = envelopeNode.path("protocolPayload");
 
             // Check SNMP style observations array
             if (protocolPayload.has("observations") && protocolPayload.get("observations").isArray()) {
+                if (!"snmp".equals(protocol)) {
+                    throw new IngestionException(
+                            HttpStatus.BAD_REQUEST,
+                            "ERR_UNSUPPORTED_PROTOCOL",
+                            "Protocol '" + protocol + "' at sequence " + sequence + " does not match SNMP observation schema"
+                    );
+                }
+
                 JsonNode obsArray = protocolPayload.get("observations");
-                int obsCount = obsArray.size();
                 int ordinal = 0;
                 for (JsonNode obs : obsArray) {
-                    String obsStatus = obs.path("status").asText("");
-                    if (!"VALUE".equalsIgnoreCase(obsStatus) && !obsStatus.isBlank()) {
-                        // Skip non-value / exception observations
+                    String obsStatus = obs.path("status").asText("").trim();
+                    if (!obsStatus.isEmpty() && !"VALUE".equalsIgnoreCase(obsStatus)) {
+                        // Skip non-value / exception observations within a record
                         ordinal++;
                         continue;
                     }
@@ -411,13 +494,23 @@ public class IngestionValidator {
                     }
 
                     if (numericVal != null && Double.isFinite(numericVal)) {
-                        String metricId = obs.path("oid").asText(obs.path("sourceOid").asText(""));
+                        String metricId = obs.path("oid").asText(obs.path("sourceOid").asText("")).trim();
                         if (metricId.isBlank()) {
-                            metricId = "snmp.metric";
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_MISSING_METRIC_ID",
+                                    "SNMP observation at sequence " + sequence + " ordinal " + ordinal + " is missing required OID"
+                            );
                         }
-                        String stableSeqId = (obsCount > 1)
-                                ? sequence + ":" + ordinal
-                                : String.valueOf(sequence);
+
+                        // P0-5: Stable logical observation identity:
+                        // <tenantId>:<sensorId>:<bootEpoch>:<sequence>:<ordinal>:<metricId>
+                        String stableSeqId = authoritativeTenantId + ":"
+                                + authoritativeSensorId + ":"
+                                + batch.bootEpoch() + ":"
+                                + sequence + ":"
+                                + ordinal + ":"
+                                + metricId;
 
                         results.add(new CanonicalObservation(
                                 authoritativeTenantId,
@@ -436,11 +529,25 @@ public class IngestionValidator {
                 }
             } else if (protocolPayload.has("metric_id") && protocolPayload.has("value")) {
                 // Generic numeric metric with explicit metric_id and numeric value
+                String metricId = protocolPayload.path("metric_id").asText("").trim();
+                if (metricId.isBlank()) {
+                    throw new IngestionException(
+                            HttpStatus.BAD_REQUEST,
+                            "ERR_MISSING_METRIC_ID",
+                            "Record sequence " + sequence + " is missing required metric_id"
+                    );
+                }
+
                 JsonNode valNode = protocolPayload.path("value");
                 if (valNode.isNumber()) {
                     double val = valNode.asDouble();
                     if (Double.isFinite(val)) {
-                        String metricId = protocolPayload.path("metric_id").asText();
+                        String stableSeqId = authoritativeTenantId + ":"
+                                + authoritativeSensorId + ":"
+                                + batch.bootEpoch() + ":"
+                                + sequence + ":0:"
+                                + metricId;
+
                         results.add(new CanonicalObservation(
                                 authoritativeTenantId,
                                 claimedEntityId,
@@ -450,14 +557,23 @@ public class IngestionValidator {
                                 val,
                                 qualityCode,
                                 0,
-                                String.valueOf(sequence),
+                                stableSeqId,
                                 protocol
                         ));
                     }
                 }
             }
-            // State, syslog, trap, event and flow records are NOT numeric telemetry;
-            // they are not converted to 1.0.
+
+            // P0-3: Every source spool record in an accepted batch must be completely accounted for.
+            // If any source record contains unsupported telemetry or yields zero numeric observations,
+            // reject the entire batch (fail closed at Sensor spool).
+            if (results.size() == initialCount) {
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_NON_NUMERIC_RECORD",
+                        "Record sequence " + sequence + " contains no valid numeric facts; partial source record ACK is prohibited"
+                );
+            }
         }
 
         return results;

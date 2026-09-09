@@ -78,7 +78,7 @@ platform:
     password: ${CLICKHOUSE_PASSWORD:platform_dev_ch_password_change_in_prod}
   telemetry:
     consumer:
-      enabled: ${PLATFORM_TELEMETRY_CONSUMER_ENABLED:true}
+      enabled: ${PLATFORM_TELEMETRY_CONSUMER_ENABLED:false}
   ingestion:
     kafka:
       topic: ${TELEMETRY_NUMERIC_TOPIC:telemetry.numeric.v1}
