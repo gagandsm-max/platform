@@ -37,11 +37,11 @@ public class AuthorizationRouteMapper {
                 return Optional.of(evaluateTenantCollection(principal, method));
             }
             // Unknown / unclassified authenticated business path: deny by default.
+            // /api/v1/health/* has no canonical permission today — default-deny (no probe bypass).
             if (normalized.startsWith("/api/v1/")
                     && !normalized.startsWith("/api/v1/sensor/")
                     && !normalized.equals("/api/v1/telemetry")
-                    && !normalized.equals("/api/v1/version")
-                    && !normalized.startsWith("/api/v1/health/")) {
+                    && !normalized.equals("/api/v1/version")) {
                 return Optional.of(AuthorizationDecision.deny(AuthorizationDecision.DenyReason.PERMISSION_DENIED));
             }
             return Optional.empty();

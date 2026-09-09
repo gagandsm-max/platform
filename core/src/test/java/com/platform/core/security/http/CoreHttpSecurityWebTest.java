@@ -286,6 +286,30 @@ class CoreHttpSecurityWebTest {
     }
 
     @Test
+    void anonymousActuatorLivenessIsAllowed() throws Exception {
+        int status = mockMvc.perform(get("/actuator/health/liveness"))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+        org.junit.jupiter.api.Assertions.assertTrue(
+                status == 200 || status == 503,
+                "anonymous /actuator/health/liveness must be reachable, got HTTP " + status
+        );
+    }
+
+    @Test
+    void anonymousActuatorReadinessIsAllowed() throws Exception {
+        int status = mockMvc.perform(get("/actuator/health/readiness"))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+        org.junit.jupiter.api.Assertions.assertTrue(
+                status == 200 || status == 503,
+                "anonymous /actuator/health/readiness must be reachable, got HTTP " + status
+        );
+    }
+
+    @Test
     void anonymousActuatorMetricsDenied() throws Exception {
         mockMvc.perform(get("/actuator/metrics"))
                 .andExpect(status().isForbidden());
@@ -305,6 +329,31 @@ class CoreHttpSecurityWebTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/actuator/beans"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anonymousConnectivityHealthDenied() throws Exception {
+        mockMvc.perform(get("/api/v1/health/connectivity"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(containsString("AUTH")));
+    }
+
+    @Test
+    void anonymousUnknownHealthPathCannotBypassAuth() throws Exception {
+        mockMvc.perform(get("/api/v1/health/secret-probe"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/health/components"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void authenticatedPrincipalDoesNotImplicitlyReceiveConnectivity() throws Exception {
+        String token = signedJwt((RSAPrivateKey) KEY_PAIR.getPrivate(), ISSUER, AUDIENCE, "user-a",
+                Instant.now().minusSeconds(60), Instant.now().plusSeconds(600));
+        mockMvc.perform(get("/api/v1/health/connectivity")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }
 
     @Test
@@ -329,10 +378,25 @@ class CoreHttpSecurityWebTest {
     }
 
     @Test
+    void telemetryWithoutClientCertificateRemainsUnauthorized() throws Exception {
+        mockMvc.perform(post("/api/v1/telemetry")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sensor_id\":\"x\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ERR_AUTH_CLIENT_CERT_REQUIRED"));
+    }
+
+    @Test
     void bearerTokenCannotImpersonateSensorWithoutCertificate() throws Exception {
         String token = signedJwt((RSAPrivateKey) KEY_PAIR.getPrivate(), ISSUER, AUDIENCE, "user-a",
                 Instant.now().minusSeconds(60), Instant.now().plusSeconds(600));
         mockMvc.perform(post("/api/v1/sensor/heartbeat")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sensor_id\":\"x\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ERR_AUTH_CLIENT_CERT_REQUIRED"));
+        mockMvc.perform(post("/api/v1/telemetry")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sensor_id\":\"x\"}"))

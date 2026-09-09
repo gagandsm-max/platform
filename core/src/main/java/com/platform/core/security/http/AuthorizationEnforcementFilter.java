@@ -47,7 +47,6 @@ public class AuthorizationEnforcementFilter extends OncePerRequestFilter {
         }
         return path.startsWith("/actuator/")
                 || path.equals("/api/v1/version")
-                || path.startsWith("/api/v1/health/")
                 || path.startsWith("/api/v1/sensor/")
                 || path.equals("/api/v1/telemetry");
     }
