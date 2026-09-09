@@ -447,7 +447,14 @@ public class IngestionValidator {
             JsonNode protocolPayload = envelopeNode.path("protocolPayload");
 
             // Check SNMP style observations array
-            if (protocolPayload.has("observations") && protocolPayload.get("observations").isArray()) {
+            if (protocolPayload.has("observations")) {
+                if (!protocolPayload.get("observations").isArray()) {
+                    throw new IngestionException(
+                            HttpStatus.BAD_REQUEST,
+                            "ERR_MALFORMED_RECORD_PAYLOAD",
+                            "Record sequence " + sequence + " observations field must be a JSON array"
+                    );
+                }
                 if (!"snmp".equals(protocol)) {
                     throw new IngestionException(
                             HttpStatus.BAD_REQUEST,
@@ -457,21 +464,95 @@ public class IngestionValidator {
                 }
 
                 JsonNode obsArray = protocolPayload.get("observations");
+                if (obsArray.isEmpty()) {
+                    throw new IngestionException(
+                            HttpStatus.BAD_REQUEST,
+                            "ERR_NON_NUMERIC_RECORD",
+                            "Record sequence " + sequence + " contains empty observations array"
+                    );
+                }
+
                 int ordinal = 0;
                 for (JsonNode obs : obsArray) {
+                    if (!obs.isObject()) {
+                        throw new IngestionException(
+                                HttpStatus.BAD_REQUEST,
+                                "ERR_UNSUPPORTED_RECORD_TYPE",
+                                "Observation at sequence " + sequence + " ordinal " + ordinal + " is not an object"
+                        );
+                    }
+
                     String obsStatus = obs.path("status").asText("").trim();
-                    if (!obsStatus.isEmpty() && !"VALUE".equalsIgnoreCase(obsStatus)) {
-                        // Skip non-value / exception observations within a record
-                        ordinal++;
-                        continue;
+                    if (!"VALUE".equalsIgnoreCase(obsStatus)) {
+                        throw new IngestionException(
+                                HttpStatus.BAD_REQUEST,
+                                "ERR_UNSUPPORTED_RECORD_TYPE",
+                                "Observation at sequence " + sequence + " ordinal " + ordinal + " has non-VALUE status: " + (obsStatus.isEmpty() ? "MISSING" : obsStatus)
+                        );
+                    }
+
+                    String metricId = obs.path("oid").asText(obs.path("sourceOid").asText("")).trim();
+                    if (metricId.isBlank()) {
+                        throw new IngestionException(
+                                HttpStatus.BAD_REQUEST,
+                                "ERR_MISSING_METRIC_ID",
+                                "SNMP observation at sequence " + sequence + " ordinal " + ordinal + " is missing required OID"
+                        );
                     }
 
                     JsonNode valNode = obs.path("value");
+                    if (valNode.isMissingNode() || valNode.isNull() || !valNode.isObject()) {
+                        throw new IngestionException(
+                                HttpStatus.BAD_REQUEST,
+                                "ERR_NON_NUMERIC_RECORD",
+                                "Observation at sequence " + sequence + " ordinal " + ordinal + " missing value object"
+                        );
+                    }
+
+                    // Check explicit value kind if present
+                    if (valNode.hasNonNull("kind")) {
+                        String kind = valNode.path("kind").asText("").trim().toUpperCase();
+                        if (!"INTEGER".equals(kind) && !"UNSIGNED".equals(kind) && !"COUNTER64".equals(kind)) {
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_UNSUPPORTED_RECORD_TYPE",
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal + " contains unsupported value kind: " + kind
+                            );
+                        }
+                    }
+
+                    // Reject text/string/bytes/opaque/ip/bits payload types
+                    if (valNode.hasNonNull("text") || valNode.hasNonNull("string") || valNode.hasNonNull("bytes")
+                            || valNode.hasNonNull("opaque") || valNode.hasNonNull("ip") || valNode.hasNonNull("ipAddress")
+                            || valNode.hasNonNull("bits") || valNode.hasNonNull("bitLength") || valNode.hasNonNull("oid")) {
+                        throw new IngestionException(
+                                HttpStatus.BAD_REQUEST,
+                                "ERR_NON_NUMERIC_RECORD",
+                                "Observation at sequence " + sequence + " ordinal " + ordinal + " contains non-numeric payload; fail closed"
+                        );
+                    }
+
                     Double numericVal = null;
-                    if (valNode.path("integer").isIntegralNumber()) {
-                        numericVal = valNode.path("integer").asDouble();
-                    } else if (valNode.path("unsigned").isIntegralNumber()) {
-                        numericVal = valNode.path("unsigned").asDouble();
+                    if (valNode.hasNonNull("integer")) {
+                        if (valNode.path("integer").isIntegralNumber()) {
+                            numericVal = valNode.path("integer").asDouble();
+                        } else {
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_MALFORMED_NUMERIC_VALUE",
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal + " has malformed integer value"
+                            );
+                        }
+                    } else if (valNode.hasNonNull("unsigned")) {
+                        if (valNode.path("unsigned").isIntegralNumber()) {
+                            numericVal = valNode.path("unsigned").asDouble();
+                        } else {
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_MALFORMED_NUMERIC_VALUE",
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal + " has malformed unsigned value"
+                            );
+                        }
                     } else if (valNode.hasNonNull("counter64")) {
                         String c64Str = valNode.path("counter64").asText().trim();
                         try {
@@ -491,40 +572,43 @@ public class IngestionValidator {
                                     "Invalid Counter64 integer representation: " + c64Str
                             );
                         }
+                    } else {
+                        throw new IngestionException(
+                                HttpStatus.BAD_REQUEST,
+                                "ERR_NON_NUMERIC_RECORD",
+                                "Observation at sequence " + sequence + " ordinal " + ordinal + " does not contain supported numeric field; fail closed"
+                        );
                     }
 
-                    if (numericVal != null && Double.isFinite(numericVal)) {
-                        String metricId = obs.path("oid").asText(obs.path("sourceOid").asText("")).trim();
-                        if (metricId.isBlank()) {
-                            throw new IngestionException(
-                                    HttpStatus.BAD_REQUEST,
-                                    "ERR_MISSING_METRIC_ID",
-                                    "SNMP observation at sequence " + sequence + " ordinal " + ordinal + " is missing required OID"
-                            );
-                        }
-
-                        // P0-5: Stable logical observation identity:
-                        // <tenantId>:<sensorId>:<bootEpoch>:<sequence>:<ordinal>:<metricId>
-                        String stableSeqId = authoritativeTenantId + ":"
-                                + authoritativeSensorId + ":"
-                                + batch.bootEpoch() + ":"
-                                + sequence + ":"
-                                + ordinal + ":"
-                                + metricId;
-
-                        results.add(new CanonicalObservation(
-                                authoritativeTenantId,
-                                claimedEntityId,
-                                metricId,
-                                authoritativeSensorId,
-                                ts,
-                                numericVal,
-                                qualityCode,
-                                0,
-                                stableSeqId,
-                                "snmp"
-                        ));
+                    if (numericVal == null || !Double.isFinite(numericVal)) {
+                        throw new IngestionException(
+                                HttpStatus.BAD_REQUEST,
+                                "ERR_MALFORMED_NUMERIC_VALUE",
+                                "Observation at sequence " + sequence + " ordinal " + ordinal + " is not a finite numeric value"
+                        );
                     }
+
+                    // P0-5: Stable logical observation identity:
+                    // <tenantId>:<sensorId>:<bootEpoch>:<sequence>:<ordinal>:<metricId>
+                    String stableSeqId = authoritativeTenantId + ":"
+                            + authoritativeSensorId + ":"
+                            + batch.bootEpoch() + ":"
+                            + sequence + ":"
+                            + ordinal + ":"
+                            + metricId;
+
+                    results.add(new CanonicalObservation(
+                            authoritativeTenantId,
+                            claimedEntityId,
+                            metricId,
+                            authoritativeSensorId,
+                            ts,
+                            numericVal,
+                            qualityCode,
+                            0,
+                            stableSeqId,
+                            "snmp"
+                    ));
                     ordinal++;
                 }
             } else if (protocolPayload.has("metric_id") && protocolPayload.has("value")) {
@@ -560,11 +644,29 @@ public class IngestionValidator {
                                 stableSeqId,
                                 protocol
                         ));
+                    } else {
+                        throw new IngestionException(
+                                HttpStatus.BAD_REQUEST,
+                                "ERR_MALFORMED_NUMERIC_VALUE",
+                                "Record sequence " + sequence + " metric value is not finite"
+                        );
                     }
+                } else {
+                    throw new IngestionException(
+                            HttpStatus.BAD_REQUEST,
+                            "ERR_NON_NUMERIC_RECORD",
+                            "Record sequence " + sequence + " value is non-numeric; partial source record ACK is prohibited"
+                    );
                 }
+            } else {
+                throw new IngestionException(
+                        HttpStatus.BAD_REQUEST,
+                        "ERR_UNSUPPORTED_RECORD_TYPE",
+                        "Record sequence " + sequence + " contains unsupported telemetry payload shape; fail closed"
+                );
             }
 
-            // P0-3: Every source spool record in an accepted batch must be completely accounted for.
+            // Every source spool record in an accepted batch must be completely accounted for.
             // If any source record contains unsupported telemetry or yields zero numeric observations,
             // reject the entire batch (fail closed at Sensor spool).
             if (results.size() == initialCount) {

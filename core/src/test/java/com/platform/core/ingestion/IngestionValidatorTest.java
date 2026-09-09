@@ -446,4 +446,206 @@ class IngestionValidatorTest {
         assertNotNull(context.getBean(com.platform.core.ingestion.authority.SensorAuthorityResolver.class));
         context.close();
     }
+
+    // =========================================================================
+    // MANDATORY P0 OBSERVATION ACCOUNTING TESTS
+    // =========================================================================
+
+    @Test
+    void test1_UnsupportedOnlySnmpSourceRecordRejected() throws Exception {
+        // 1. unsupported-only SNMP source record -> REJECT
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.1.0\",\"status\":\"VALUE\",\"value\":{\"text\":\"Unsupported Router\"}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_NON_NUMERIC_RECORD", ex.getCode());
+    }
+
+    @Test
+    void test2_BatchWithValidNumericAndUnsupportedOnlySourceRecordsRejected() throws Exception {
+        // 2. batch with:
+        //    source record A = valid numeric
+        //    source record B = unsupported-only
+        //    -> ENTIRE BATCH REJECT
+        String recA = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":12345}}]}}}";
+        String recB = "{\"sequence\":2,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.1.0\",\"status\":\"VALUE\",\"value\":{\"text\":\"String Only\"}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(recA.getBytes(StandardCharsets.UTF_8));
+        digest.update(recB.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : digest.digest()) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":2,\"checksum\":\""
+                + sb + "\",\"records\":[" + recA + "," + recB + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_NON_NUMERIC_RECORD", ex.getCode());
+    }
+
+    @Test
+    void test3_SingleSourceRecordWithMixedValidNumericAndTextUnsupportedRejected() throws Exception {
+        // 3. ONE source record containing:
+        //    observation A = valid numeric VALUE
+        //    observation B = text/string unsupported value
+        //    -> REJECT
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[" +
+                "{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":12345}}," +
+                "{\"oid\":\".1.3.6.1.2.1.1.1.0\",\"status\":\"VALUE\",\"value\":{\"text\":\"Linux Router\"}}" +
+                "]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_NON_NUMERIC_RECORD", ex.getCode());
+    }
+
+    @Test
+    void test4_SingleSourceRecordWithMixedValidNumericAndSnmpExceptionRejected() throws Exception {
+        // 4. ONE source record containing:
+        //    observation A = valid numeric VALUE
+        //    observation B = SNMP exception / non-VALUE
+        //    -> REJECT
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[" +
+                "{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":12345}}," +
+                "{\"oid\":\".1.3.6.1.2.1.1.5.0\",\"status\":\"EXCEPTION\",\"value\":{\"kind\":\"EXCEPTION\"}}" +
+                "]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode());
+    }
+
+    @Test
+    void test5_SingleSourceRecordWithMixedValidNumericAndUnsupportedValueKindRejected() throws Exception {
+        // 5. ONE source record containing:
+        //    observation A = valid numeric VALUE
+        //    observation B = unsupported value kind (e.g. IP_ADDRESS / OPAQUE)
+        //    -> REJECT
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"protocolPayload\":{\"observations\":[" +
+                "{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":12345}}," +
+                "{\"oid\":\".1.3.6.1.2.1.1.4.0\",\"status\":\"VALUE\",\"value\":{\"kind\":\"IP_ADDRESS\",\"ip\":\"192.168.1.1\"}}" +
+                "]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode());
+    }
+
+    @Test
+    void test6_SingleSourceRecordWithOnlyFullySupportedNumericObservationAccepted() throws Exception {
+        // 6. source record containing only fully supported numeric SNMP observations -> ACCEPT
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"quality\":\"GOOD\"," +
+                "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":12345}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        List<CanonicalObservation> obs = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
+        assertNotNull(obs);
+        assertEquals(1, obs.size());
+        assertEquals(12345.0, obs.get(0).value());
+        assertEquals(".1.3.6.1.2.1.1.3.0", obs.get(0).metricId());
+    }
+
+    @Test
+    void test7_MultipleSupportedNumericObservationsInOneSourceRecordAccepted() throws Exception {
+        // 7. multiple supported numeric observations inside one source record
+        //    -> ACCEPT and produce all expected canonical observations
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\",\"entityId\":\"" + entityId + "\",\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\",\"quality\":\"GOOD\"," +
+                "\"protocolPayload\":{\"observations\":[" +
+                "{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":12345}}," +
+                "{\"oid\":\".1.3.6.1.2.1.2.2.1.10.1\",\"status\":\"VALUE\",\"value\":{\"integer\":42}}," +
+                "{\"oid\":\".1.3.6.1.2.1.31.1.1.1.10.1\",\"status\":\"VALUE\",\"value\":{\"counter64\":\"99999999\"}}" +
+                "]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-1\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        List<CanonicalObservation> obs = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
+        assertNotNull(obs);
+        assertEquals(3, obs.size());
+
+        assertEquals(".1.3.6.1.2.1.1.3.0", obs.get(0).metricId());
+        assertEquals(12345.0, obs.get(0).value());
+        assertTrue(obs.get(0).sequenceId().endsWith(":0:.1.3.6.1.2.1.1.3.0"));
+
+        assertEquals(".1.3.6.1.2.1.2.2.1.10.1", obs.get(1).metricId());
+        assertEquals(42.0, obs.get(1).value());
+        assertTrue(obs.get(1).sequenceId().endsWith(":1:.1.3.6.1.2.1.2.2.1.10.1"));
+
+        assertEquals(".1.3.6.1.2.1.31.1.1.1.10.1", obs.get(2).metricId());
+        assertEquals(99999999.0, obs.get(2).value());
+        assertTrue(obs.get(2).sequenceId().endsWith(":2:.1.3.6.1.2.1.31.1.1.1.10.1"));
+    }
 }

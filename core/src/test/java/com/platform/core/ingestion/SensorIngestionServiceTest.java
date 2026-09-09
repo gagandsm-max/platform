@@ -1,7 +1,9 @@
 package com.platform.core.ingestion;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.authority.SensorAuthorityResolver;
 import com.platform.core.ingestion.authority.SensorScope;
+import com.platform.core.ingestion.authority.TestSensorAuthorityResolver;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import com.platform.core.ingestion.dto.TelemetryAckResponse;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
@@ -11,6 +13,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.List;
@@ -258,5 +262,52 @@ class SensorIngestionServiceTest {
         verify(watermarkStore, times(2)).updateWatermark(
                 eq(tenantId), eq("sensor-net-01"), eq(105L), eq(100L), eq(105L), eq("sum-fault"), eq("b-fault")
         );
+    }
+
+    @Test
+    void testRejectedMixedContentBatchNoKafkaPublicationAndNoWatermarkUpdate() throws Exception {
+        // MANDATORY P0 TEST 8 & 9:
+        // Use a REAL IngestionValidator with real authority resolver to prove that a rejected
+        // mixed-content batch causes ZERO Kafka publication and ZERO PostgreSQL watermark update.
+        // Do not mock away the validator result.
+        TestSensorAuthorityResolver realResolver = new TestSensorAuthorityResolver();
+        realResolver.registerScope("sensor-net-01", testScope);
+        IngestionValidator realValidator = new IngestionValidator(new ObjectMapper().findAndRegisterModules(), realResolver, metrics);
+        SensorIngestionService serviceWithRealValidator = new SensorIngestionService(
+                realValidator, realResolver, watermarkStore, kafkaProducer, metrics
+        );
+
+        X509Certificate cert = createMockCert("sensor-net-01");
+
+        // Mixed observation record: 1 valid numeric observation, 1 non-numeric text observation
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\"," +
+                "\"entityId\":\"" + entityId + "\"," +
+                "\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\"," +
+                "\"protocolPayload\":{\"observations\":[" +
+                "{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":12345}}," +
+                "{\"oid\":\".1.3.6.1.2.1.1.1.0\",\"status\":\"VALUE\",\"value\":{\"text\":\"Linux Router\"}}" +
+                "]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-mixed\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = new ObjectMapper().readValue(json, TelemetryBatchRequest.class);
+        byte[] rawBody = json.getBytes(StandardCharsets.UTF_8);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                serviceWithRealValidator.ingestTelemetry(rawBody, req, "b-mixed", cert));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_NON_NUMERIC_RECORD", ex.getCode());
+
+        // Prove 8: No Kafka publication
+        verify(kafkaProducer, never()).publishBatchTransactionally(any());
+        // Prove 9: No PostgreSQL watermark update
+        verify(watermarkStore, never()).updateWatermark(any(), any(), anyLong(), anyLong(), anyLong(), any(), any());
     }
 }
