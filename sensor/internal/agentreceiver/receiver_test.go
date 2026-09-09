@@ -766,4 +766,3 @@ func TestInconsistentAssignmentAgentRejected(t *testing.T) {
 		t.Fatalf("wrong assignment agent must reject, got %d", resp.StatusCode)
 	}
 }
-

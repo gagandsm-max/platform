@@ -519,4 +519,3 @@ func TestDurableQueueCorruptMetaNeverResetsSequence(t *testing.T) {
 		t.Fatalf("corrupt meta must never reset sequence; next=%d last=%d", next.Sequence, last)
 	}
 }
-
