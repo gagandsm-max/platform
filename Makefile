@@ -92,6 +92,10 @@ test-security-smoke: ## Run mTLS, port isolation, and host runtime security smok
 	@echo "==> Running Platform security smoke tests..."
 	@bash tests/run-security-smoke.sh
 
+test-telemetry-pipeline: ## Run end-to-end Sensor->Spool->Core->Kafka->ClickHouse pipeline verification
+	@echo "==> Running Platform telemetry pipeline verification..."
+	@bash tests/run-telemetry-pipeline-test.sh
+
 evidence: test test-contract test-security-smoke ## Run full regression and generate engineering evidence
 	@echo "==> Capturing complete GA engineering evidence..."
 	@bash scripts/post-reboot-verify.sh
