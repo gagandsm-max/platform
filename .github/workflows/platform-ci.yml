@@ -55,6 +55,8 @@ jobs:
           set -euo pipefail
           test -f project_agents/tools/validate_agents.py
           test -f project_agents/tools/sync_agents.py
+          test -f project_agents/tools/test_codex_launcher.py
+          python3 project_agents/tools/test_codex_launcher.py
           python3 project_agents/tools/validate_agents.py
           python3 project_agents/tools/sync_agents.py
           python3 project_agents/tools/validate_agents.py
