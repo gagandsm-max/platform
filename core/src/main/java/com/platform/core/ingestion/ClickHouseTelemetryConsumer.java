@@ -5,6 +5,8 @@ import com.platform.core.ingestion.dto.CanonicalObservation;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
@@ -29,12 +31,13 @@ public class ClickHouseTelemetryConsumer {
         this(clickHouseClient, objectMapper, metrics, 5, 200);
     }
 
+    @Autowired
     public ClickHouseTelemetryConsumer(
             ClickHouseClient clickHouseClient,
             ObjectMapper objectMapper,
             IngestionMetrics metrics,
-            int maxRetries,
-            long backoffMs
+            @Value("${platform.telemetry.consumer.max-retries:5}") int maxRetries,
+            @Value("${platform.telemetry.consumer.backoff-ms:200}") long backoffMs
     ) {
         this.clickHouseClient = clickHouseClient;
         this.objectMapper = objectMapper;

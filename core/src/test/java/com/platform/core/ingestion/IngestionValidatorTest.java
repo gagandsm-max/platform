@@ -236,4 +236,18 @@ class IngestionValidatorTest {
         assertEquals("105", first.sequenceId());
         assertEquals("snmp", first.sourceProtocol());
     }
+
+    @Test
+    void testSpringContextBeanInstantiationWithFailClosedResolver() {
+        org.springframework.context.annotation.AnnotationConfigApplicationContext context =
+                new org.springframework.context.annotation.AnnotationConfigApplicationContext();
+        context.getDefaultListableBeanFactory().registerSingleton("objectMapper", objectMapper);
+        context.getDefaultListableBeanFactory().registerSingleton("ingestionMetrics", metrics);
+        context.register(FailClosedSensorAuthorityResolver.class);
+        context.register(IngestionValidator.class);
+        assertDoesNotThrow(context::refresh);
+        assertNotNull(context.getBean(IngestionValidator.class));
+        assertNotNull(context.getBean(com.platform.core.ingestion.authority.SensorAuthorityResolver.class));
+        context.close();
+    }
 }

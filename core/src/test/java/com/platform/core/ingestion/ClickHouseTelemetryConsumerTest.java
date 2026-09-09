@@ -111,4 +111,17 @@ class ClickHouseTelemetryConsumerTest {
         verify(ack, never()).acknowledge();
         assertTrue(metrics.isConsumerDegraded());
     }
+
+    @Test
+    void testSpringContextBeanInstantiation() {
+        org.springframework.context.annotation.AnnotationConfigApplicationContext context =
+                new org.springframework.context.annotation.AnnotationConfigApplicationContext();
+        context.getDefaultListableBeanFactory().registerSingleton("clickHouseClient", clickHouseClient);
+        context.getDefaultListableBeanFactory().registerSingleton("objectMapper", objectMapper);
+        context.getDefaultListableBeanFactory().registerSingleton("ingestionMetrics", metrics);
+        context.register(ClickHouseTelemetryConsumer.class);
+        assertDoesNotThrow(context::refresh);
+        assertNotNull(context.getBean(ClickHouseTelemetryConsumer.class));
+        context.close();
+    }
 }

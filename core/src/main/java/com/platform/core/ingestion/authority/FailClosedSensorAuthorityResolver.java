@@ -3,7 +3,6 @@ package com.platform.core.ingestion.authority;
 import com.platform.core.ingestion.IngestionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -19,7 +18,6 @@ import java.security.cert.X509Certificate;
  * Until actual Sensor Control/enrollment exists, this resolver unconditionally fails closed.
  */
 @Component
-@ConditionalOnMissingBean(SensorAuthorityResolver.class)
 public class FailClosedSensorAuthorityResolver implements SensorAuthorityResolver {
 
     private static final Logger log = LoggerFactory.getLogger(FailClosedSensorAuthorityResolver.class);
