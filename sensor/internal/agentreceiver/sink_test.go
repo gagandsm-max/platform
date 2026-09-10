@@ -11,7 +11,10 @@ import (
 )
 
 // InMemoryAcceptanceSink is TEST-ONLY and is NOT durable correctness authority.
-// It retains batches in process memory for unit tests and harnesses only.
+// It retains logically accepted batches in process memory for unit tests and
+// harnesses only. Exact source-range/content replays are idempotent so tests can
+// observe logical acceptance while the Receiver still re-enters the sink to
+// re-verify its acceptance authority.
 type InMemoryAcceptanceSink struct {
 	mu            sync.Mutex
 	batches       []DeliveryEnvelope
@@ -35,6 +38,17 @@ func (s *InMemoryAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEn
 
 	if s.injectedError != nil {
 		return AcceptanceResult{}, s.injectedError
+	}
+
+	checksum := ComputeBatchChecksum(env.Records)
+	for _, existing := range s.batches {
+		if existing.TenantID == env.TenantID &&
+			existing.AgentID == env.AgentID &&
+			existing.FirstSequence == env.FirstSequence &&
+			existing.LastSequence == env.LastSequence &&
+			ComputeBatchChecksum(existing.Records) == checksum {
+			return AcceptanceResult{AcceptedThrough: existing.LastSequence}, nil
+		}
 	}
 
 	s.batches = append(s.batches, env)
