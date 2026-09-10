@@ -90,9 +90,10 @@ INGEST_RESP=$(curl -k -s \
     -X POST "https://127.0.0.1:${CORE_PORT}/api/v1/sensor/heartbeat" \
     -H "Content-Type: application/json" \
     -d '{"sensor_id":"sensor-net-01"}')
+# Authoritative sensor_identity is the enrolled Sensor principal ID (not certificate CN).
 if echo "${INGEST_RESP}" | grep -q '"status":"ACCEPTED"' && \
    echo "${INGEST_RESP}" | grep -q '"authenticated":true' && \
-   echo "${INGEST_RESP}" | grep -q '"sensor_identity":"sensor-net-01.sensor.platform.local"'; then
+   echo "${INGEST_RESP}" | grep -q '"sensor_identity":"sensor-net-01"'; then
     echo "[OK] Sensor ingestion response contract verified."
 else
     echo "[ERROR] Contract violation in sensor ingestion response: ${INGEST_RESP}"

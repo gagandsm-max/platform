@@ -54,15 +54,23 @@ class SensorIngestionServiceTest {
     }
 
     @Test
-    void testClaimedSensorIdMismatchingCertCnThrowsIdentityMismatch() {
-        X509Certificate cert = createMockCert("sensor-net-01");
-        TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-02", "epoch-1", "b-1", 100, 105, "sum-123", List.of());
+    void testClaimedSensorIdMismatchingCertCnDoesNotRejectInService() {
+        // CN is not authority: mismatched CN must not produce ERR_AUTH_IDENTITY_MISMATCH in the service.
+        X509Certificate cert = createMockCert("totally-different-cn");
+        TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-1", 100, 105, "sum-123", List.of());
         byte[] rawBody = "{}".getBytes();
 
-        IngestionException ex = assertThrows(IngestionException.class, () ->
-                service.ingestTelemetry(rawBody, req, "b-1", cert));
-        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
-        assertEquals("ERR_AUTH_IDENTITY_MISMATCH", ex.getCode());
+        List<CanonicalObservation> observations = List.of(
+                new CanonicalObservation(tenantId.toString(), entityId.toString(), "cpu.util", "sensor-net-01", Instant.now(), 42.0, 1, 0, "105", "snmp")
+        );
+        when(validator.resolveAuthority(cert)).thenReturn(testScope);
+        when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
+        when(watermarkStore.getWatermarkForUpdate(tenantId, "sensor-net-01")).thenReturn(null);
+
+        TelemetryAckResponse ack = service.ingestTelemetry(rawBody, req, "b-1", cert);
+        assertEquals("ACCEPTED", ack.status());
+        assertEquals("sensor-net-01", ack.sensorIdentity());
+        verify(validator).resolveAuthority(cert);
     }
 
     @Test

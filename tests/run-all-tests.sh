@@ -315,8 +315,9 @@ UNTRUSTED_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" \
     -H "Content-Type: application/json" \
     -d '{"sensor_id":"sensor-rogue"}' 2>/dev/null || true)
 
-NET_OK=$(echo "${NET_RESP}" | grep -q '"sensor_identity":"sensor-net-01.sensor.platform.local"' && echo "true" || echo "false")
-INFRA_OK=$(echo "${INFRA_RESP}" | grep -q '"sensor_identity":"sensor-infra-01.sensor.platform.local"' && echo "true" || echo "false")
+# Authoritative identity is enrolled Sensor principal ID (not certificate CN).
+NET_OK=$(echo "${NET_RESP}" | grep -q '"sensor_identity":"sensor-net-01"' && echo "true" || echo "false")
+INFRA_OK=$(echo "${INFRA_RESP}" | grep -q '"sensor_identity":"sensor-infra-01"' && echo "true" || echo "false")
 NO_CERT_OK=$([ "${NO_CERT_STATUS}" = "401" ] && echo "true" || echo "false")
 UNTRUSTED_OK=false
 if [ "${UNTRUSTED_STATUS}" = "000" ] || [ "${UNTRUSTED_STATUS}" = "403" ] || [ -z "${UNTRUSTED_STATUS}" ]; then

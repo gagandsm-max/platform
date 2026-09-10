@@ -71,17 +71,6 @@ public class SensorIngestionController {
         return null;
     }
 
-    private String extractCommonName(String dn) {
-        if (dn == null) return "UNKNOWN";
-        for (String part : dn.split(",")) {
-            part = part.trim();
-            if (part.startsWith("CN=") || part.startsWith("cn=")) {
-                return part.substring(3);
-            }
-        }
-        return dn;
-    }
-
     private ResponseEntity<Map<String, Object>> clientCertRequired(String message) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
                 "status", "ERROR",
@@ -131,17 +120,22 @@ public class SensorIngestionController {
             ));
         }
 
-        String subjectDn = clientCert.getSubjectX500Principal().getName();
-        String commonName = extractCommonName(subjectDn);
-        String serialNumber = clientCert.getSerialNumber().toString(16);
+        final SensorScope scope;
+        try {
+            scope = resolveDiscoverySensorAuthority(clientCert, "heartbeat");
+        } catch (IngestionException e) {
+            log.warn("Sensor heartbeat rejected: code={}, message={}", e.getCode(), e.getMessage());
+            return ingestionError(e);
+        }
 
-        log.info("Authenticated sensor heartbeat: cn={}, serial={}, remote={}", commonName, serialNumber, request.getRemoteAddr());
+        log.info("Authenticated sensor heartbeat: sensorId={}, tenantId={}, remote={}",
+                scope.sensorId(), scope.tenantId(), request.getRemoteAddr());
 
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("status", "ACCEPTED");
         resp.put("authenticated", true);
-        resp.put("sensor_identity", commonName);
-        resp.put("subject_dn", subjectDn);
+        resp.put("sensor_identity", scope.sensorId());
+        resp.put("tenant_id", scope.tenantId().toString());
         resp.put("received_at", Instant.now().toString());
         return ResponseEntity.ok(resp);
     }
@@ -158,11 +152,19 @@ public class SensorIngestionController {
             ));
         }
 
-        String commonName = extractCommonName(clientCert.getSubjectX500Principal().getName());
+        final SensorScope scope;
+        try {
+            scope = resolveDiscoverySensorAuthority(clientCert, "status");
+        } catch (IngestionException e) {
+            log.warn("Sensor status rejected: code={}, message={}", e.getCode(), e.getMessage());
+            return ingestionError(e);
+        }
+
         return ResponseEntity.ok(Map.of(
                 "status", "UP",
                 "authenticated", true,
-                "sensor_identity", commonName
+                "sensor_identity", scope.sensorId(),
+                "tenant_id", scope.tenantId().toString()
         ));
     }
 

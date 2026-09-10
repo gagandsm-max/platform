@@ -1,3 +1,4 @@
 V001__day02_core_domain.sql|Day-02 core tenancy sites groups tags entities identifiers attributes memberships
 V002__telemetry_replay_watermark.sql|Telemetry ingestion replay watermark state
 V003__discovery_foundation.sql|Discovery foundation requests targets evidence candidates review queue
+V004__sensor_control_authority.sql|Sensor control authority principal certificate bindings entity allowlist

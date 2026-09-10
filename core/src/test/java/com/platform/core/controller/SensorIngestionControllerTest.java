@@ -87,6 +87,37 @@ class SensorIngestionControllerTest {
         return certificate;
     }
 
+    @Test
+    void heartbeatUsesAuthoritativeSensorIdNotCn() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(CERT_ATTR, new X509Certificate[]{sensorACertificate});
+
+        ResponseEntity<Map<String, Object>> resp = controller.sensorHeartbeat(Map.of(), request);
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
+        assertEquals("sensor-a", resp.getBody().get("sensor_identity"));
+        assertEquals(tenantId.toString(), resp.getBody().get("tenant_id"));
+    }
+
+    @Test
+    void heartbeatFailsClosedWithoutEnrollment() {
+        authorityResolver.clear();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(CERT_ATTR, new X509Certificate[]{sensorACertificate});
+
+        ResponseEntity<Map<String, Object>> resp = controller.sensorHeartbeat(Map.of(), request);
+        assertEquals(HttpStatus.FORBIDDEN, resp.getStatusCode());
+        assertEquals("ERR_SENSOR_AUTHORITY_UNAVAILABLE", resp.getBody().get("code"));
+    }
+
+    @Test
+    void statusUsesAuthoritativeSensorId() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(CERT_ATTR, new X509Certificate[]{sensorACertificate});
+        ResponseEntity<Map<String, Object>> resp = controller.sensorStatus(request);
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
+        assertEquals("sensor-a", resp.getBody().get("sensor_identity"));
+    }
+
     // --- Main telemetry controller tests ---
 
     @Test
