@@ -41,11 +41,15 @@ func (e *DeliveryError) Unwrap() error { return e.Err }
 
 type Batch struct {
 	CorrelationID string
+	AgentID       string
+	BatchID       string
 	Records       []queue.Record
 }
 
 type Ack struct {
 	AcceptedThrough uint64
+	AgentID         string
+	BatchID         string
 }
 
 // Transport is the receiving-side boundary. The current repository does not yet

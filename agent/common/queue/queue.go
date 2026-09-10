@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -47,6 +48,7 @@ type DurableQueue struct {
 	dir             string
 	activeDir       string
 	quarantineDir   string
+	metaPath        string
 	maxRecords      int
 	maxBytes        int64
 	maxRecordBytes  int
@@ -56,6 +58,8 @@ type DurableQueue struct {
 	activeBytes     int64
 	quarantineCount int
 }
+
+const sequenceMetaFile = "sequence.meta"
 
 func NewDurableQueue(dir string, maxRecords int, maxBytes int64, maxRecordBytes int) (*DurableQueue, error) {
 	if dir == "" {
@@ -94,6 +98,7 @@ func NewDurableQueue(dir string, maxRecords int, maxBytes int64, maxRecordBytes 
 		dir:            absDir,
 		activeDir:      activeDir,
 		quarantineDir:  quarantineDir,
+		metaPath:       filepath.Join(absDir, sequenceMetaFile),
 		maxRecords:     maxRecords,
 		maxBytes:       maxBytes,
 		maxRecordBytes: maxRecordBytes,
@@ -193,7 +198,79 @@ func (q *DurableQueue) recoverState() error {
 		}
 	}
 
+	durableWM, err := q.readSequenceWatermarkLocked()
+	if err != nil {
+		return err
+	}
+
+	// lastSeq = max(file highest, durable watermark) so drained queues retain lineage.
 	q.lastSeq = highestSeq
+	if durableWM > q.lastSeq {
+		q.lastSeq = durableWM
+	}
+	return nil
+}
+
+type sequenceMeta struct {
+	HighestSequence uint64 `json:"highestSequence"`
+}
+
+func (q *DurableQueue) readSequenceWatermarkLocked() (uint64, error) {
+	data, err := os.ReadFile(q.metaPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("QUEUE_META_READ_FAILED: %w", err)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return 0, errors.New("QUEUE_META_CORRUPT: sequence metadata is empty")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var meta sequenceMeta
+	if err := dec.Decode(&meta); err != nil {
+		return 0, fmt.Errorf("QUEUE_META_CORRUPT: %w", err)
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return 0, errors.New("QUEUE_META_CORRUPT: trailing data in sequence metadata")
+	}
+	return meta.HighestSequence, nil
+}
+
+func (q *DurableQueue) persistSequenceWatermarkLocked(seq uint64) error {
+	meta := sequenceMeta{HighestSequence: seq}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("QUEUE_META_MARSHAL_FAILED: %w", err)
+	}
+	tmp, err := os.CreateTemp(q.dir, "sequence.*.tmp")
+	if err != nil {
+		return fmt.Errorf("QUEUE_META_TMP_FAILED: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("QUEUE_META_CHMOD_FAILED: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("QUEUE_META_WRITE_FAILED: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("QUEUE_META_SYNC_FAILED: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("QUEUE_META_CLOSE_FAILED: %w", err)
+	}
+	if err := os.Rename(tmpName, q.metaPath); err != nil {
+		return fmt.Errorf("QUEUE_META_RENAME_FAILED: %w", err)
+	}
+	if err := syncDir(q.dir); err != nil {
+		return fmt.Errorf("QUEUE_META_DIR_SYNC_FAILED: %w", err)
+	}
 	return nil
 }
 
@@ -285,6 +362,12 @@ func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
 		return nil, fmt.Errorf("QUEUE_DIR_SYNC_FAILED: %w", err)
 	}
 
+	if err := q.persistSequenceWatermarkLocked(seq); err != nil {
+		q.lastSeq--
+		_ = os.Remove(targetPath)
+		return nil, err
+	}
+
 	q.activeCount++
 	q.activeBytes += int64(len(data))
 
@@ -359,7 +442,7 @@ func decodeRecordFile(name string, data []byte) (*Record, uint64, error) {
 	if err := dec.Decode(&rec); err != nil {
 		return nil, fileSeq, fmt.Errorf("%w: %v", ErrRecordCorrupted, err)
 	}
-	if dec.More() {
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, fileSeq, fmt.Errorf("%w: trailing JSON garbage", ErrRecordCorrupted)
 	}
 
