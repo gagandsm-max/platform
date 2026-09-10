@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "engineering_orchestrator/required_gate.schema.json",
+  "title": "EngineeringOrchestratorRequiredGate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "gate_id",
+    "claim_scope",
+    "required_evidence_type",
+    "readiness_target",
+    "applicability"
+  ],
+  "properties": {
+    "gate_id": { "type": "string", "minLength": 1 },
+    "claim_scope": { "type": "string" },
+    "required_evidence_type": { "type": "string" },
+    "readiness_target": { "type": "string" },
+    "applicability": {
+      "type": "string",
+      "enum": ["REQUIRED", "NOT_APPLICABLE"]
+    },
+    "not_applicable_reason": { "type": "string" }
+  }
+}

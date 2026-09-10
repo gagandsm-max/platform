@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "engineering_orchestrator/task.schema.json",
+  "title": "EngineeringOrchestratorTask",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "title", "state"],
+  "properties": {
+    "task_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "state": {
+      "type": "string",
+      "enum": [
+        "TASK_ACCEPTED",
+        "SOURCE_INSPECTION",
+        "AGENT_ROUTING",
+        "RCA_COMPLETE",
+        "IMPLEMENTATION",
+        "FOCUSED_VALIDATION",
+        "FULL_VALIDATION",
+        "BASE_RECONCILIATION",
+        "INDEPENDENT_REVIEW",
+        "EXACT_HEAD_CI",
+        "REALITY_GATE",
+        "REWORK",
+        "READY_FOR_MERGE_GATE",
+        "BLOCKED",
+        "FAILED",
+        "CANCELLED",
+        "NOT_MERGED",
+        "MERGED"
+      ]
+    },
+    "head_sha": { "type": "string" },
+    "base_sha": { "type": "string" },
+    "repository": { "type": "string" },
+    "branch": { "type": "string" },
+    "actor_last": { "type": ["string", "null"] },
+    "rca_status": {
+      "type": "string",
+      "enum": ["KNOWN", "UNKNOWN", "INCONCLUSIVE"]
+    },
+    "failure_class": { "type": ["string", "null"] },
+    "resume_state": { "type": ["string", "null"] },
+    "rework_target": { "type": ["string", "null"] },
+    "readiness": { "type": "boolean" },
+    "readiness_target": {
+      "type": "string",
+      "enum": [
+        "IMPLEMENTED",
+        "COMPONENT_TESTED",
+        "FOUNDATION_SAFE_TO_LAND",
+        "PILOT_READY",
+        "PRODUCTION_READY",
+        "ENTERPRISE_GA_READY"
+      ]
+    },
+    "evidence_ids": { "type": "array", "items": { "type": "string" } },
+    "required_gates": { "type": "array" },
+    "lane_id": { "type": "string" },
+    "path_prefixes": { "type": "array", "items": { "type": "string" } },
+    "notes": { "type": "string" },
+    "retry_counts": { "type": "object" },
+    "required_scopes": { "type": "array", "items": { "type": "string" } },
+    "migration_reservation_allowed": { "type": "boolean" }
+  }
+}
