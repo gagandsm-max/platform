@@ -23,8 +23,10 @@ public final class PermissionResourceBindings {
             Map.entry(PlatformPermissions.ENTITY_READ, ResourceType.ENTITY),
             Map.entry(PlatformPermissions.ENTITY_CREATE, ResourceType.ENTITY),
             Map.entry(PlatformPermissions.ENTITY_UPDATE, ResourceType.ENTITY),
-            Map.entry(PlatformPermissions.ENTITY_IDENTIFIER_READ, ResourceType.ENTITY_IDENTIFIER),
-            Map.entry(PlatformPermissions.ENTITY_IDENTIFIER_CREATE, ResourceType.ENTITY_IDENTIFIER),
+            // Collection/create under an entity authorize the parent ENTITY (same pattern as
+            // entity.group.* / entity.tag.*). REMOVE targets a specific identifier identity.
+            Map.entry(PlatformPermissions.ENTITY_IDENTIFIER_READ, ResourceType.ENTITY),
+            Map.entry(PlatformPermissions.ENTITY_IDENTIFIER_CREATE, ResourceType.ENTITY),
             Map.entry(PlatformPermissions.ENTITY_IDENTIFIER_REMOVE, ResourceType.ENTITY_IDENTIFIER),
             Map.entry(PlatformPermissions.ENTITY_GROUP_READ, ResourceType.ENTITY),
             Map.entry(PlatformPermissions.ENTITY_GROUP_ASSIGN, ResourceType.ENTITY),

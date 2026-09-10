@@ -34,6 +34,17 @@ docker run --rm \
     golang:1.27.1-alpine3.24 \
     go test -v ./...
 
+# Cross-module Agent↔Sensor receiver contract (build tag pipeline).
+# Keep production sensor/go.mod free of platform/agent replace (Docker build isolation).
+echo "--> [1b/3] Running Agent receiver pipeline contract tests (-tags pipeline)..."
+docker run --rm \
+    --tmpfs "${GO_TEST_TMPFS}" \
+    -v "${ROOT_DIR}/sensor:/src/sensor:ro" \
+    -v "${ROOT_DIR}/agent:/src/agent:ro" \
+    -w /build \
+    golang:1.27.1-alpine3.24 \
+    sh -c 'cp -a /src/sensor /build/sensor && cd /build/sensor && go mod edit -require=platform/agent@v0.0.0 -replace=platform/agent=/src/agent && go mod tidy && go test -tags=pipeline -v -count=1 ./internal/agentreceiver/'
+
 echo "--> [2/3] Running Java Core Unit Tests..."
 docker run --rm \
     -v "${ROOT_DIR}/core:/src:ro" \

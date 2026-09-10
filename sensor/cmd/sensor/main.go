@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -13,7 +14,9 @@ import (
 	"platform/sensor/internal/coreclient"
 	"platform/sensor/internal/discovery"
 	"platform/sensor/internal/health"
+	"platform/sensor/internal/observation"
 	"platform/sensor/internal/spool"
+	"platform/sensor/internal/uploader"
 )
 
 func main() {
@@ -28,25 +31,51 @@ func main() {
 		"version", "0.1.0-dev", "environment", cfg.Environment, "core_url", cfg.CoreURL,
 		"spool_dir", cfg.SpoolDir, "watermark_percent", cfg.StorageWatermarkPercent)
 
-	diskSpool, err := spool.NewDiskSpool(cfg.SpoolDir, cfg.StorageWatermarkPercent, logger)
+	// Preserve current main telemetry pipeline: checked spool → DiskSink → Core client → uploader.
+	diskSpool, err := spool.Open(spool.Config{
+		Dir:            cfg.SpoolDir,
+		MaxRecordBytes: 1024 * 1024,
+		Logger:         logger,
+	})
 	if err != nil {
 		logger.Error("Failed to initialize disk spool", "error_code", "SENSOR_SPOOL_INIT_FAILED")
 		os.Exit(1)
 	}
 
-	// Existing pre-runtime telemetry path is retained unchanged. Discovery uses the checked mTLS client
-	// because task/result authority depends on authenticated Sensor identity.
-	collectorClient := coreclient.NewCoreClient(cfg.CoreURL, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.CACertFile, logger)
-	requestTimeout := cfg.PollInterval
-	if requestTimeout <= 0 { requestTimeout = 10 * time.Second }
-	discoveryClient, err := coreclient.New(coreclient.Config{
-		BaseURL: cfg.CoreURL, CertificateFile: cfg.TLSCertFile, PrivateKeyFile: cfg.TLSKeyFile,
-		CAFile: cfg.CACertFile, RequestTimeout: requestTimeout,
-		MaxResponseBytes: 1 << 20, // defensive response guard; not a product capacity claim
-		Logger: logger,
+	sink, err := observation.NewDiskSink(diskSpool, 1024*1024)
+	if err != nil {
+		logger.Error("Failed to initialize observation sink", "error", err)
+		os.Exit(1)
+	}
+
+	client, err := coreclient.New(coreclient.Config{
+		BaseURL:          cfg.CoreURL,
+		CertificateFile:  cfg.TLSCertFile,
+		PrivateKeyFile:   cfg.TLSKeyFile,
+		CAFile:           cfg.CACertFile,
+		RequestTimeout:   10 * time.Second,
+		MaxResponseBytes: 1024 * 1024,
+		Logger:           logger,
 	})
 	if err != nil {
-		logger.Error("Failed to initialize authenticated discovery Core client", "error_code", "DISCOVERY_CORECLIENT_INIT_FAILED")
+		logger.Error("Failed to initialize Core client", "error_code", "SENSOR_CORECLIENT_INIT_FAILED")
+		os.Exit(1)
+	}
+
+	up, err := uploader.New(uploader.Config{
+		SensorID:             cfg.SensorID,
+		BootEpoch:            fmt.Sprintf("epoch-%d", time.Now().Unix()),
+		MaxBatchRecords:      100,
+		MaxBatchPayloadBytes: 1024 * 1024,
+		MaxRequestBytes:      2 * 1024 * 1024,
+		MaxAttempts:          5,
+		InitialBackoff:       500 * time.Millisecond,
+		MaxBackoff:           5 * time.Second,
+		JitterFraction:       0.1,
+		IdleInterval:         1 * time.Second,
+	}, diskSpool, client)
+	if err != nil {
+		logger.Error("Failed to initialize uploader", "error", err)
 		os.Exit(1)
 	}
 
@@ -58,11 +87,17 @@ func main() {
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	engine := collector.NewCollectorEngine(cfg.SensorID, cfg.SensorType, diskSpool, collectorClient, cfg.PollInterval, logger)
+	if err := up.Start(ctx); err != nil {
+		logger.Error("Failed to start uploader", "error", err)
+		os.Exit(1)
+	}
+
+	engine := collector.NewCollectorEngine(cfg.SensorID, cfg.SensorType, sink, cfg.PollInterval, logger)
 	engine.Start(ctx)
 
+	// Discovery executor/service only — Agent Receiver remains unwired.
 	discoveryExecutor := discovery.NewExecutor(cfg.SensorID, discovery.DefaultMaxConcurrent, logger)
-	discoveryService := discovery.NewService(cfg.SensorID, discoveryClient, discoveryExecutor, cfg.PollInterval, logger)
+	discoveryService := discovery.NewService(cfg.SensorID, client, discoveryExecutor, cfg.PollInterval, logger)
 	discoveryService.Start(ctx)
 
 	sigCh := make(chan os.Signal, 1)
@@ -76,6 +111,9 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
+	if err := up.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("Uploader shutdown error", "error", err)
+	}
 	if err := healthServer.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("Health server shutdown error", "error_code", "SENSOR_HEALTH_SHUTDOWN_FAILED")
 	}

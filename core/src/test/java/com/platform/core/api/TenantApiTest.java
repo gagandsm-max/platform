@@ -9,13 +9,29 @@ import com.platform.core.domain.tenant.TenantMode;
 import com.platform.core.domain.tenant.TenantService;
 import com.platform.core.domain.tenant.TenantStatus;
 import com.platform.core.logging.CorrelationIdFilter;
+import com.platform.core.security.authorization.AuthenticationState;
+import com.platform.core.security.authorization.PermissionGrant;
+import com.platform.core.security.authorization.PlatformPermissions;
+import com.platform.core.security.authorization.PrincipalContext;
+import com.platform.core.security.authorization.ResourceScope;
+import com.platform.core.security.authorization.ResourceType;
+import com.platform.core.security.http.PlatformAuthenticationToken;
+import com.platform.core.security.identity.AuthenticatedExternalIdentity;
+import com.platform.core.security.identity.AuthenticationAssurance;
+import com.platform.core.security.identity.ExternalSubject;
+import com.platform.core.security.identity.IdentityProviderType;
+import com.platform.core.security.identity.PlatformSubject;
+import com.platform.core.security.identity.ProviderInstanceId;
+import com.platform.core.security.identity.ResolvedAuthenticatedIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.notNullValue;
@@ -44,6 +60,41 @@ class TenantApiTest {
                 .addFilters(new CorrelationIdFilter())
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
+
+        // Controller list path now requires an authenticated Platform principal.
+        UUID tenantScope = UUID.fromString("018f0e0a-0000-7000-8000-000000000099");
+        PrincipalContext principal = new PrincipalContext(
+                "subject-test",
+                AuthenticationState.AUTHENTICATED,
+                Set.of(tenantScope),
+                Set.of(new PermissionGrant(
+                        tenantScope,
+                        PlatformPermissions.TENANT_READ,
+                        ResourceScope.tenantWide(ResourceType.TENANT)
+                ))
+        );
+        SecurityContextHolder.getContext().setAuthentication(
+                new PlatformAuthenticationToken(
+                        ResolvedAuthenticatedIdentity.current(
+                                new PlatformSubject(tenantScope),
+                                new AuthenticatedExternalIdentity(
+                                        IdentityProviderType.OIDC,
+                                        new ProviderInstanceId("platform-oidc"),
+                                        new ExternalSubject("user-1"),
+                                        Instant.parse("2026-01-01T00:00:00Z"),
+                                        AuthenticationAssurance.withoutVerifiedMfa(),
+                                        Instant.parse("2099-01-01T00:00:00Z")
+                                ),
+                                Instant.parse("2026-06-01T00:00:00Z")
+                        ),
+                        principal
+                )
+        );
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearSecurity() {
+        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -91,10 +142,9 @@ class TenantApiTest {
 
     @Test
     void badPaginationRejected() throws Exception {
-        when(tenantService.list(anyInt(), anyInt())).thenCallRealMethod();
-        // Use real PageResult normalization through a real service would be better; assert controller path:
         TenantService realish = mock(TenantService.class);
-        when(realish.list(eq(0), anyInt())).thenThrow(new DomainException("QUERY_LIMIT_EXCEEDED", "page must be >= 1"));
+        when(realish.listScoped(any(), eq(0), anyInt()))
+                .thenThrow(new DomainException("QUERY_LIMIT_EXCEEDED", "page must be >= 1"));
         MockMvc mvc = MockMvcBuilders.standaloneSetup(new TenantController(realish))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .addFilters(new CorrelationIdFilter())

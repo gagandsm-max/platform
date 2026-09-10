@@ -1,0 +1,272 @@
+[
+  {
+    "name": "platform-minimal-change-engineer",
+    "title": "Platform Minimal Change Engineer",
+    "tier": "P0",
+    "mode": "write",
+    "source": "engineering/engineering-minimal-change-engineer.md",
+    "description": "Surgical Platform implementation specialist. Use after the root cause or requirement is known to make the smallest defensible code/config/test change with no unrelated refactor.",
+    "canonical_path": "canonical/p0/platform-minimal-change-engineer.md",
+    "sha256": "0d069091e7d8479bce7cb878740abe13e39f60795659622c1b5636cde168e41e"
+  },
+  {
+    "name": "platform-codebase-onboarding-engineer",
+    "title": "Platform Codebase Onboarding Engineer",
+    "tier": "P0",
+    "mode": "read",
+    "source": "engineering/engineering-codebase-onboarding-engineer.md",
+    "description": "Read-only Platform repository explorer. Use first on unfamiliar subsystems to map real entry points, ownership, execution paths, data flow, tests and governing docs before changes.",
+    "canonical_path": "canonical/p0/platform-codebase-onboarding-engineer.md",
+    "sha256": "d232a75f12319ea68b0f5c2d83a2c857cd77ba393d608227a0f7e20b288f7d0d"
+  },
+  {
+    "name": "platform-codebase-archaeologist",
+    "title": "Platform Codebase Archaeologist",
+    "tier": "P0",
+    "mode": "read",
+    "source": "specialized/specialized-codebase-archaeologist.md",
+    "description": "Read-only drift investigator for Platform. Use across parallel branches/PRs or mature subsystems to find duplicated responsibilities, contract drift, stale assumptions, partial migrations and doc-vs-code divergence.",
+    "canonical_path": "canonical/p0/platform-codebase-archaeologist.md",
+    "sha256": "50823f7dfbf0848744b60cfeba03b946eee287759b47dc5e278cfa8c27f1eee9"
+  },
+  {
+    "name": "platform-code-reviewer",
+    "title": "Platform Code Reviewer",
+    "tier": "P0",
+    "mode": "read",
+    "source": "engineering/engineering-code-reviewer.md",
+    "description": "Independent read-only PR/diff reviewer for Platform. Use after implementation to find correctness, security, contract, data integrity, performance and missing-test issues; ignore style-only noise.",
+    "canonical_path": "canonical/p0/platform-code-reviewer.md",
+    "sha256": "487600f3daa0509ce567c2a2402952111d24fe5701163898672dba846884ec32"
+  },
+  {
+    "name": "platform-reality-checker",
+    "title": "Platform Reality Checker",
+    "tier": "P0",
+    "mode": "read",
+    "source": "testing/testing-reality-checker.md",
+    "description": "Final evidence gate for Platform. Use when work is claimed complete, production-ready or release-ready to verify the claim against code, tests, runtime evidence and applicable quality gates.",
+    "canonical_path": "canonical/p0/platform-reality-checker.md",
+    "sha256": "f74e928469307667535499b50c4f883e953d46c979cd1196c9d4fca8d5a036c9"
+  },
+  {
+    "name": "platform-evidence-collector",
+    "title": "Platform Evidence Collector",
+    "tier": "P0",
+    "mode": "read",
+    "source": "testing/testing-evidence-collector.md",
+    "description": "Evidence gathering specialist for Platform. Use after implementation to collect reproducible build, test, runtime, API, log, UI, performance and package evidence without making quality claims beyond the evidence.",
+    "canonical_path": "canonical/p0/platform-evidence-collector.md",
+    "sha256": "fcfc5417dac9ec4322f0dcf51e801b50753df858d1e107d85c8de29eb39db5f7"
+  },
+  {
+    "name": "platform-security-architect",
+    "title": "Platform Security Architect",
+    "tier": "P0",
+    "mode": "read",
+    "source": "security/security-architect.md",
+    "description": "Platform security design reviewer. Use for new trust boundaries, protocols, auth flows, privileged actions, AI tools, Device Packs, integrations, HA/update channels or sensitive architecture changes.",
+    "canonical_path": "canonical/p0/platform-security-architect.md",
+    "sha256": "c56c3e1b175f85aff492a436d542329ce5328d309a79da02971c17970e76a085"
+  },
+  {
+    "name": "platform-appsec-engineer",
+    "title": "Platform Application Security Engineer",
+    "tier": "P0",
+    "mode": "read",
+    "source": "security/security-appsec-engineer.md",
+    "description": "Application-security reviewer for Platform code and APIs. Use on auth, input handling, queries, file/package import, web/API endpoints, integrations and security-sensitive implementation changes.",
+    "canonical_path": "canonical/p0/platform-appsec-engineer.md",
+    "sha256": "07701f844078f2abdfd9530f3c8e438590b2a5fa57b7f40452d285597d39da85"
+  },
+  {
+    "name": "platform-ai-code-security-auditor",
+    "title": "Platform AI-Generated Code Security Auditor",
+    "tier": "P0",
+    "mode": "read",
+    "source": "security/security-ai-generated-code-auditor.md",
+    "description": "Security audit specialist for code produced or heavily modified by AI coding tools. Use after Cursor/Antigravity/Codex changes to catch insecure shortcuts, leaked secrets, authorization gaps and model/tool trust mistakes.",
+    "canonical_path": "canonical/p0/platform-ai-code-security-auditor.md",
+    "sha256": "f0decbed5162e2afa89716d3b901532d4538bc22e029defde3a9bbe4bf40bb73"
+  },
+  {
+    "name": "platform-secrets-credential-engineer",
+    "title": "Platform Secrets & Credential Engineer",
+    "tier": "P0",
+    "mode": "read",
+    "source": "security/security-secrets-credential-engineer.md",
+    "description": "Platform secrets/credential specialist. Use for Credential Profiles, mTLS/PKI, signing keys, API tokens, connector secrets, CI credentials, support bundles and log/redaction behavior.",
+    "canonical_path": "canonical/p0/platform-secrets-credential-engineer.md",
+    "sha256": "1f6cdd1f93e203f3e93403e5859cf4dd51a25d835415cafdbb8c3e3e40e02283"
+  },
+  {
+    "name": "platform-test-automation-engineer",
+    "title": "Platform Test Automation Engineer",
+    "tier": "P0",
+    "mode": "write",
+    "source": "testing/testing-test-automation-engineer.md",
+    "description": "Platform automated-test specialist. Use to add the narrowest durable unit/component/contract/integration/UI/failure regression tests required by a change and wire them into existing Docker/CI conventions.",
+    "canonical_path": "canonical/p0/platform-test-automation-engineer.md",
+    "sha256": "7e1c24764a722c8a87bbf23eefcfce804ec08cdf123c4cd659e12a4410de4dce"
+  },
+  {
+    "name": "platform-performance-benchmarker",
+    "title": "Platform Performance Benchmarker",
+    "tier": "P0",
+    "mode": "read",
+    "source": "testing/testing-performance-benchmarker.md",
+    "description": "Performance/capacity evidence specialist for Platform. Use for hot paths, Core/Sensor sizing, ingestion, polling, UI/query, storage, HA replay and release regression benchmarking.",
+    "canonical_path": "canonical/p0/platform-performance-benchmarker.md",
+    "sha256": "1aba7eb3ec6b3333cef565405a0be41fd668fc3d50463a942cae3ccbd8250ca5"
+  },
+  {
+    "name": "platform-api-platform-engineer",
+    "title": "Platform API Platform Engineer",
+    "tier": "P1",
+    "mode": "write",
+    "source": "engineering/engineering-api-platform-engineer.md",
+    "description": "Platform API/event contract specialist. Use for Core APIs, Sensor/Agent control, ingestion, gRPC/HTTPS, Kafka event schemas, idempotency, compatibility and error contracts.",
+    "canonical_path": "canonical/p1/platform-api-platform-engineer.md",
+    "sha256": "05b66f74cd2fd68fc69bdf0827d4525379b86c038ee1a4e6c50c5b1601799b4b"
+  },
+  {
+    "name": "platform-network-engineer",
+    "title": "Platform Network & Sensor Engineer",
+    "tier": "P1",
+    "mode": "write",
+    "source": "engineering/engineering-network-engineer.md",
+    "description": "Network monitoring and Sensor specialist. Use for SNMP, ICMP, flow, syslog, gNMI, NETCONF, SSH, routing/topology, discovery, Device Pack collection and Sensor worker behavior.",
+    "canonical_path": "canonical/p1/platform-network-engineer.md",
+    "sha256": "0bb589a7685e1d51490c734cd7aafe6909932ac22085335443ef3ea8cf04d827"
+  },
+  {
+    "name": "platform-database-reliability-engineer",
+    "title": "Platform Database Reliability Engineer",
+    "tier": "P1",
+    "mode": "write",
+    "source": "engineering/engineering-database-reliability-engineer.md",
+    "description": "PostgreSQL/ClickHouse reliability specialist. Use for schemas, migrations, retention, query/data integrity, backup/restore, replication and HA experiments while respecting unresolved two-Core P0 designs.",
+    "canonical_path": "canonical/p1/platform-database-reliability-engineer.md",
+    "sha256": "9347dfbe25a1d0efd06797d7796c264ae8900d1f20510327293e3709bf93021a"
+  },
+  {
+    "name": "platform-sre",
+    "title": "Platform SRE",
+    "tier": "P1",
+    "mode": "write",
+    "source": "engineering/engineering-sre.md",
+    "description": "Platform reliability/operability specialist. Use for service health, self-monitoring, SLO evidence, failure recovery, queues/backlogs, HA/DR observability, runbooks and operational diagnostics.",
+    "canonical_path": "canonical/p1/platform-sre.md",
+    "sha256": "10c5885026647fe8fb10d9abeefd991a2938694575eeeae4ac1e06801fc112cc"
+  },
+  {
+    "name": "platform-identity-access-engineer",
+    "title": "Platform Identity & Access Engineer",
+    "tier": "P1",
+    "mode": "write",
+    "source": "engineering/engineering-identity-access-engineer.md",
+    "description": "Platform IAM specialist. Use for Keycloak integration, OIDC/SAML/LDAP/Entra, MFA, RBAC/resource scope, service identities, API tokens, mTLS enrollment and tenant isolation.",
+    "canonical_path": "canonical/p1/platform-identity-access-engineer.md",
+    "sha256": "d1dca926b27ebe08adbb674818fbd0e783c4810776404d3961cf6151922b35f4"
+  },
+  {
+    "name": "platform-knowledge-graph-engineer",
+    "title": "Platform Knowledge Graph Engineer",
+    "tier": "P1",
+    "mode": "write",
+    "source": "engineering/engineering-knowledge-graph-engineer.md",
+    "description": "Temporal operational graph specialist. Use for canonical entity relationships, topology history, provenance/confidence, graph queries, service dependencies, RCA subgraphs and GNN features\u2014not for selecting a new graph database by default.",
+    "canonical_path": "canonical/p1/platform-knowledge-graph-engineer.md",
+    "sha256": "40df0b0c3ebff34c1bcaa7d74a254b2ac4a372b9725915b6a504d88a8e397372"
+  },
+  {
+    "name": "platform-ai-engineer",
+    "title": "Platform AI Engineer",
+    "tier": "P1",
+    "mode": "write",
+    "source": "engineering/engineering-ai-engineer.md",
+    "description": "Platform AI/ML engineer. Use for AI Gateway, evidence-grounded LLM features, anomaly/baseline models and GNN scoring under deterministic RCA and model-governance constraints.",
+    "canonical_path": "canonical/p1/platform-ai-engineer.md",
+    "sha256": "97652f6a3a851e1d5f900ba6ca99d6b8439f1494a91a2909deda4c5c34f49db5"
+  },
+  {
+    "name": "platform-model-qa",
+    "title": "Platform Model QA Specialist",
+    "tier": "P1",
+    "mode": "read",
+    "source": "specialized/specialized-model-qa.md",
+    "description": "Independent QA for Platform anomaly/GNN/LLM behavior. Use to evaluate correctness, calibration, leakage, regression, INCONCLUSIVE behavior, explanation completeness and safe rollout before model enablement.",
+    "canonical_path": "canonical/p1/platform-model-qa.md",
+    "sha256": "867c7a4558fb78e751e7d7a49eedd2dd1d4f57de1204d7d515a9d1abf541b78c"
+  },
+  {
+    "name": "platform-devops-automator",
+    "title": "Platform DevOps & Release Automation Engineer",
+    "tier": "P1",
+    "mode": "write",
+    "source": "engineering/engineering-devops-automator.md",
+    "description": "Platform CI/CD, Docker development, build, packaging and release automation specialist. Use for reproducible pipelines, SBOM/scans, deb/rpm/MSI workflows and release evidence\u2014not for unapproved cloud/platform redesign.",
+    "canonical_path": "canonical/p1/platform-devops-automator.md",
+    "sha256": "26a7b3bf60e8a0fb4a69e4ee91243a16cbe9912343fe88b9664058518f0cec3d"
+  },
+  {
+    "name": "platform-git-workflow-master",
+    "title": "Platform Git Workflow Master",
+    "tier": "P1",
+    "mode": "write",
+    "source": "engineering/engineering-git-workflow-master.md",
+    "description": "Git/PR coordination specialist for Platform parallel engineering lanes. Use for branch/worktree strategy, stacked PRs, rebases, clean diffs and conflict-safe integration; never merge or rewrite history unless explicitly authorized.",
+    "canonical_path": "canonical/p1/platform-git-workflow-master.md",
+    "sha256": "61e99124d0748dae1a1514e5fd36c9d096e0793a7f6a4ade5fbc512ce36244be"
+  },
+  {
+    "name": "platform-workflow-architect",
+    "title": "Platform Workflow Architect",
+    "tier": "P1",
+    "mode": "read",
+    "source": "specialized/specialized-workflow-architect.md",
+    "description": "Read-only workflow/state-machine architect for Platform. Use before complex provisioning, alert, incident, RCA, NCM, upgrade, HA, integration or remediation flows to map actors, states, handoffs, failures and cleanup.",
+    "canonical_path": "canonical/p1/platform-workflow-architect.md",
+    "sha256": "32ec0cf7b6248aadc7973df960981e925d0c69a8c83af5621ad1fab15502e815"
+  },
+  {
+    "name": "platform-frontend-developer",
+    "title": "Platform Frontend Developer",
+    "tier": "P1",
+    "mode": "write",
+    "source": "engineering/engineering-frontend-developer.md",
+    "description": "React/TypeScript implementation specialist for Platform UI. Use after UX/workflow contract is clear to build role-aware, server-driven, accessible, fast operational screens without generic dashboard filler.",
+    "canonical_path": "canonical/p1/platform-frontend-developer.md",
+    "sha256": "effad04b2347d5cadc5fe7429d47751be7f0517ad552b42ff43e91529e7c662a"
+  },
+  {
+    "name": "platform-ux-architect",
+    "title": "Platform UX Architect",
+    "tier": "P1",
+    "mode": "read",
+    "source": "design/design-ux-architect.md",
+    "description": "Platform UX/information-architecture specialist. Use before major UI implementation to translate operational requirements into developer-ready hierarchy, workflows, state behavior and responsive/accessibility constraints.",
+    "canonical_path": "canonical/p1/platform-ux-architect.md",
+    "sha256": "cc9a06fb8356334fe79276d36739da4be20dbc936ffbf330bf6d36975960d5fc"
+  },
+  {
+    "name": "platform-ui-finish-gate-reviewer",
+    "title": "Platform UI Finish-Gate Reviewer",
+    "tier": "P1",
+    "mode": "read",
+    "source": "design/design-ui-finish-gate-reviewer.md",
+    "description": "Independent UI finish gate for Platform. Use after UI implementation to prevent generic AI-generated dashboards and verify hierarchy, operational specificity, states, responsiveness and evidence before acceptance.",
+    "canonical_path": "canonical/p1/platform-ui-finish-gate-reviewer.md",
+    "sha256": "161c2505c74791d42cc7b6a2f12cfc7868f3fcb47a03ab0b7f833cd91528c017"
+  },
+  {
+    "name": "platform-accessibility-auditor",
+    "title": "Platform Accessibility Auditor",
+    "tier": "P1",
+    "mode": "read",
+    "source": "testing/testing-accessibility-auditor.md",
+    "description": "Accessibility QA for Platform UI. Use on new/changed operational screens to verify WCAG-aligned semantics, keyboard/focus, contrast/status, zoom and assistive-technology behavior with automated plus manual evidence.",
+    "canonical_path": "canonical/p1/platform-accessibility-auditor.md",
+    "sha256": "616a7dbe2a3531f3aa1c5c2b5accad81d92a13ea56fe64861bfd5b6d9a57e43b"
+  }
+]

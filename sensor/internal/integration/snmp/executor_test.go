@@ -277,6 +277,7 @@ func TestComponentMetricsLowCardinalityAndRecovery(t *testing.T) {
 	sink := &fakeSink{max: 128 * 1024, err: &spool.Error{Code: spool.CodeProtection}}
 	base := &fakeBase{result: scheduler.ExecutionResult{Payload: sampleResult(t, valueObs("1.3", "1.3", 2, "Integer", protocolsnmp.Value{Kind: protocolsnmp.ValueInteger}))}}
 	e := newTestExecutor(t, base, sink)
+	e.Component().now = func() time.Time { return time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC) }
 	_, _ = e.Execute(context.Background(), jobWithPayload(`{}`))
 	snap := e.Component().Snapshot()
 	if snap.Executions != 1 || snap.Failed != 1 || !snap.Degraded || snap.LastErrorCode == "" { t.Fatalf("bad failure snapshot: %+v", snap) }

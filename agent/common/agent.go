@@ -2,77 +2,168 @@ package common
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"platform/agent/common/client"
+	"platform/agent/common/collector"
 	"platform/agent/common/config"
+	"platform/agent/common/delivery"
+	"platform/agent/common/health"
 	"platform/agent/common/identity"
 	"platform/agent/common/queue"
+	"platform/agent/common/scheduler"
 )
 
 type AgentService struct {
-	cfg      *config.Config
-	identity *identity.AgentIdentity
-	queue    *queue.MemoryQueue
-	client   *client.CoreClient
-	logger   *slog.Logger
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
+	cfg       *config.Config
+	identity  *identity.AgentIdentity
+	queue     *queue.DurableQueue
+	transport client.Transport
+	scheduler *scheduler.Scheduler
+	worker    *delivery.Worker
+	healthSrv *health.Server
+	logger    *slog.Logger
 }
 
-func NewAgentService(cfg *config.Config, ident *identity.AgentIdentity, logger *slog.Logger) *AgentService {
-	q := queue.NewMemoryQueue(cfg.MaxQueueItems)
-	cl := client.NewCoreClient(cfg.CoreURL, ident, logger)
-	return &AgentService{
-		cfg:      cfg,
-		identity: ident,
-		queue:    q,
-		client:   cl,
-		logger:   logger,
-		stopCh:   make(chan struct{}),
+func NewAgentService(
+	cfg *config.Config,
+	ident *identity.AgentIdentity,
+	tr client.Transport,
+	logger *slog.Logger,
+) (*AgentService, error) {
+	if cfg == nil {
+		return nil, errors.New("AGENT_CONFIG_REQUIRED: config must be provided")
 	}
+	if ident == nil {
+		return nil, errors.New("AGENT_IDENTITY_REQUIRED: identity must be provided")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	// If no transport injected, wire to authoritative unavailable transport
+	if tr == nil {
+		tr = client.NewUnavailableTransport("AGENT_RECEIVER_NOT_IMPLEMENTED")
+	}
+
+	// 1. Initialize durable queue
+	q, err := queue.NewDurableQueue(
+		cfg.QueueDir,
+		cfg.MaxBufferRecords,
+		cfg.MaxBufferBytes,
+		cfg.MaxRecordBytes,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("AGENT_QUEUE_INIT_FAILED: %w", err)
+	}
+
+	// 2. Initialize host collectors
+	collectors := collector.NewDefaultCollectors(cfg.MaxFilesystems)
+
+	// 3. Initialize scheduler
+	sched, err := scheduler.NewScheduler(
+		ident,
+		collectors,
+		q,
+		cfg.CollectionInterval,
+		cfg.CollectionTimeout,
+		logger,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("AGENT_SCHEDULER_INIT_FAILED: %w", err)
+	}
+
+	// 4. Initialize delivery worker
+	worker, err := delivery.NewWorker(
+		q,
+		tr,
+		ident.AgentID,
+		cfg.MaxBatchRecords,
+		cfg.MaxBatchBytes,
+		cfg.RetryBase,
+		cfg.RetryMax,
+		cfg.DeliveryTimeout,
+		logger,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("AGENT_DELIVERY_INIT_FAILED: %w", err)
+	}
+
+	svc := &AgentService{
+		cfg:       cfg,
+		identity:  ident,
+		queue:     q,
+		transport: tr,
+		scheduler: sched,
+		worker:    worker,
+		logger:    logger,
+	}
+
+	// 5. Initialize health server
+	healthSrv, err := health.NewServer(cfg.HealthAddress, svc, logger)
+	if err != nil {
+		return nil, fmt.Errorf("AGENT_HEALTH_INIT_FAILED: %w", err)
+	}
+	svc.healthSrv = healthSrv
+
+	return svc, nil
 }
 
-func (s *AgentService) Start(ctx context.Context) {
+func (s *AgentService) Start(ctx context.Context) error {
 	s.logger.Info("Starting Platform Agent service workers",
 		"agent_id", s.identity.AgentID,
+		"tenant_id", s.identity.TenantID,
+		"host_id", s.identity.HostID,
 		"os", s.identity.OS,
 		"arch", s.identity.Arch,
+		"receiver_available", s.transport.Available(),
 	)
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		ticker := time.NewTicker(s.cfg.PollInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				s.sendHeartbeat(ctx)
-			case <-s.stopCh:
-				s.logger.Info("Agent worker loop shutting down")
-				return
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-}
-
-func (s *AgentService) sendHeartbeat(ctx context.Context) {
-	if err := s.client.Heartbeat(ctx); err != nil {
-		s.logger.Debug("Agent heartbeat attempt", "status", "core_unreachable_or_waiting", "error", err)
-	} else {
-		s.logger.Info("Agent heartbeat sent successfully")
+	// Start health server
+	if err := s.healthSrv.Start(); err != nil {
+		return fmt.Errorf("AGENT_HEALTH_START_FAILED: %w", err)
 	}
+
+	// Start delivery loop
+	s.worker.Start(ctx)
+
+	// Start collection scheduler
+	s.scheduler.Start(ctx)
+
+	return nil
 }
 
-func (s *AgentService) Stop() {
+func (s *AgentService) Stop() error {
 	s.logger.Info("Stopping Platform Agent service")
-	close(s.stopCh)
-	s.wg.Wait()
-	s.logger.Info("Platform Agent service stopped")
+
+	// 1. Stop scheduler
+	s.scheduler.Stop()
+
+	// 2. Stop delivery worker
+	s.worker.Stop()
+
+	// 3. Stop health server
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := s.healthSrv.Stop(shutdownCtx); err != nil {
+		s.logger.Warn("Health server shutdown error", "error", err)
+	}
+
+	s.logger.Info("Platform Agent service stopped cleanly")
+	return nil
+}
+
+func (s *AgentService) QueueStats() queue.QueueStats {
+	return s.queue.Stats()
+}
+
+func (s *AgentService) DeliveryStats() delivery.DeliveryStats {
+	return s.worker.Stats()
+}
+
+func (s *AgentService) CollectorStats() (time.Time, int) {
+	return s.scheduler.Stats()
 }

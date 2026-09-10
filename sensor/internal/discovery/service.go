@@ -18,6 +18,14 @@ type CoreDiscoveryClient interface {
 	SubmitDiscoveryResults(ctx context.Context, results coreclient.DiscoveryResultSubmission, correlationID string) (coreclient.DiscoveryResultAck, error)
 }
 
+type lifecycleState int
+
+const (
+	lifecycleIdle lifecycleState = iota
+	lifecycleRunning
+	lifecycleStopped
+)
+
 type Service struct {
 	sensorID     string
 	client       CoreDiscoveryClient
@@ -25,8 +33,8 @@ type Service struct {
 	pollInterval time.Duration
 	logger       *slog.Logger
 	stopCh       chan struct{}
-	startOnce    sync.Once
-	stopOnce     sync.Once
+	mu           sync.Mutex
+	state        lifecycleState
 	wg           sync.WaitGroup
 }
 
@@ -39,29 +47,35 @@ func NewService(sensorID string, client CoreDiscoveryClient, executor *Executor,
 	}
 }
 
+// Start launches the discovery poll worker at most once. Concurrent Start is safe; Start after
+// Stop is a no-op under the single-start contract.
 func (s *Service) Start(ctx context.Context) {
-	s.startOnce.Do(func() {
-		s.logger.Info("Starting sensor discovery worker loop", "sensor_id", s.sensorID, "interval", s.pollInterval)
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			ticker := time.NewTicker(s.pollInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					if err := s.PollOnce(ctx); err != nil {
-						s.logger.Debug("Discovery poll completed with classified failure", "error_code", safeErrorCode(err))
-					}
-				case <-s.stopCh:
-					s.logger.Info("Sensor discovery worker loop exiting")
-					return
-				case <-ctx.Done():
-					return
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != lifecycleIdle {
+		return
+	}
+	s.state = lifecycleRunning
+	s.logger.Info("Starting sensor discovery worker loop", "sensor_id", s.sensorID, "interval", s.pollInterval)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(s.pollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := s.PollOnce(ctx); err != nil {
+					s.logger.Debug("Discovery poll completed with classified failure", "error_code", safeErrorCode(err))
 				}
+			case <-s.stopCh:
+				s.logger.Info("Sensor discovery worker loop exiting")
+				return
+			case <-ctx.Done():
+				return
 			}
-		}()
-	})
+		}
+	}()
 }
 
 // PollOnce is serialized by the service loop. Core atomically claims one assigned task and
@@ -136,7 +150,27 @@ func safeErrorCode(err error) string {
 	return "DISCOVERY_OPERATION_FAILED"
 }
 
+// Stop is idempotent and synchronized with Start so Wait cannot race a late wg.Add.
+// After Stop returns, no discovery worker remains. Stop-before-Start leaves the service
+// permanently stopped under the single-start contract.
 func (s *Service) Stop() {
-	s.stopOnce.Do(func() { close(s.stopCh) })
-	s.wg.Wait()
+	s.mu.Lock()
+	switch s.state {
+	case lifecycleStopped:
+		s.mu.Unlock()
+		return
+	case lifecycleIdle:
+		s.state = lifecycleStopped
+		s.mu.Unlock()
+		return
+	case lifecycleRunning:
+		close(s.stopCh)
+		s.state = lifecycleStopped
+		s.mu.Unlock()
+		s.wg.Wait()
+		return
+	default:
+		s.mu.Unlock()
+		return
+	}
 }

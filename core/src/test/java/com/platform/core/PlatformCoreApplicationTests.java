@@ -3,6 +3,8 @@ package com.platform.core;
 import com.platform.core.controller.SensorIngestionController;
 import com.platform.core.controller.VersionController;
 import com.platform.core.domain.discovery.DiscoveryService;
+import com.platform.core.ingestion.SensorIngestionService;
+import com.platform.core.ingestion.authority.SensorAuthorityResolver;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +22,15 @@ import static org.mockito.Mockito.when;
 
 class PlatformCoreApplicationTests {
 
+    private static SensorIngestionController newController() {
+        return new SensorIngestionController(
+                mock(SensorIngestionService.class),
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                mock(DiscoveryService.class),
+                mock(SensorAuthorityResolver.class)
+        );
+    }
+
     @Test
     void testVersionEndpointUnit() {
         VersionController controller = new VersionController();
@@ -35,7 +46,7 @@ class PlatformCoreApplicationTests {
 
     @Test
     void testSensorIngestionRequiresClientCertificate() {
-        SensorIngestionController controller = new SensorIngestionController(mock(DiscoveryService.class));
+        SensorIngestionController controller = newController();
         MockHttpServletRequest request = new MockHttpServletRequest();
 
         // No client certificate attached to request
@@ -47,7 +58,7 @@ class PlatformCoreApplicationTests {
 
     @Test
     void testSensorIngestionAcceptsValidClientCertificate() {
-        SensorIngestionController controller = new SensorIngestionController(mock(DiscoveryService.class));
+        SensorIngestionController controller = newController();
         MockHttpServletRequest request = new MockHttpServletRequest();
 
         X509Certificate mockCert = mock(X509Certificate.class);

@@ -61,7 +61,7 @@ class DiscoveryIntegrationTest {
     }
 
     @Test
-    void schemaMigration_V002AppliedSuccessfullyWithFencingAndTenantScopedIdempotency() {
+    void schemaMigration_V003AppliedSuccessfullyWithFencingAndTenantScopedIdempotency() {
         Integer tableCount = pg.jdbc().queryForObject(
                 "SELECT count(*) FROM information_schema.tables " +
                         "WHERE table_schema = 'platform' AND table_name IN (" +
@@ -70,9 +70,13 @@ class DiscoveryIntegrationTest {
         );
         assertEquals(4, tableCount, "All 4 discovery tables must exist in platform schema");
 
-        Integer migrationCount = pg.jdbc().queryForObject(
+        Integer telemetryMigrationCount = pg.jdbc().queryForObject(
                 "SELECT count(*) FROM platform.schema_history WHERE version = 'V002'", Integer.class);
-        assertEquals(1, migrationCount, "Migration V002 must be recorded in platform.schema_history");
+        assertEquals(1, telemetryMigrationCount, "Migration V002 (telemetry watermark) must precede discovery");
+
+        Integer migrationCount = pg.jdbc().queryForObject(
+                "SELECT count(*) FROM platform.schema_history WHERE version = 'V003'", Integer.class);
+        assertEquals(1, migrationCount, "Migration V003 must be recorded in platform.schema_history");
 
         Integer assignmentVersionColumns = pg.jdbc().queryForObject(
                 "SELECT count(*) FROM information_schema.columns WHERE table_schema='platform' " +

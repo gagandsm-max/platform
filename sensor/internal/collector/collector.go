@@ -9,15 +9,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"platform/sensor/internal/coreclient"
-	"platform/sensor/internal/spool"
+	"platform/sensor/internal/observation"
 )
 
 type CollectorEngine struct {
 	sensorID    string
 	sensorType  string
-	spool       *spool.DiskSpool
-	client      *coreclient.CoreClient
+	sink        observation.Sink
 	interval    time.Duration
 	logger      *slog.Logger
 	stopCh      chan struct{}
@@ -27,16 +25,14 @@ type CollectorEngine struct {
 
 func NewCollectorEngine(
 	sensorID, sensorType string,
-	diskSpool *spool.DiskSpool,
-	client *coreclient.CoreClient,
+	sink observation.Sink,
 	interval time.Duration,
 	logger *slog.Logger,
 ) *CollectorEngine {
 	return &CollectorEngine{
 		sensorID:   sensorID,
 		sensorType: sensorType,
-		spool:      diskSpool,
-		client:     client,
+		sink:       sink,
 		interval:   interval,
 		logger:     logger,
 		stopCh:     make(chan struct{}),
@@ -44,9 +40,8 @@ func NewCollectorEngine(
 }
 
 func (e *CollectorEngine) Start(ctx context.Context) {
-	e.logger.Info("Starting collector engine loops", "sensor_id", e.sensorID, "type", e.sensorType)
+	e.logger.Info("Starting collector engine loop", "sensor_id", e.sensorID, "type", e.sensorType)
 
-	// Loop 1: Telemetry Generator & Spooler
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
@@ -56,7 +51,7 @@ func (e *CollectorEngine) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				e.collectAndSpool()
+				e.collectAndSpool(ctx)
 			case <-e.stopCh:
 				e.logger.Info("Collector harvest loop exiting")
 				return
@@ -65,75 +60,52 @@ func (e *CollectorEngine) Start(ctx context.Context) {
 			}
 		}
 	}()
-
-	// Loop 2: Spool Forwarder / Drainer
-	e.wg.Add(1)
-	go func() {
-		defer e.wg.Done()
-		drainTicker := time.NewTicker(5 * time.Second)
-		defer drainTicker.Stop()
-
-		for {
-			select {
-			case <-drainTicker.C:
-				e.drainSpool(ctx)
-			case <-e.stopCh:
-				e.logger.Info("Collector spool drainer exiting")
-				return
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
 }
 
-func (e *CollectorEngine) collectAndSpool() {
+func (e *CollectorEngine) collectAndSpool(ctx context.Context) {
 	seq := e.itemCounter.Add(1)
 	correlationID := fmt.Sprintf("%s-%d", e.sensorID, time.Now().UnixNano())
 
 	payloadData := map[string]any{
-		"sequence":    seq,
-		"sensor_type": e.sensorType,
-		"timestamp":   time.Now().UTC().Format(time.RFC3339Nano),
-		"status":      "HEALTHY",
+		"metric_id": "sensor.heartbeat",
+		"value":     1.0,
+		"status":    "HEALTHY",
+		"sequence":  seq,
 	}
-	payloadBytes, _ := json.Marshal(payloadData)
-
-	item := &spool.SpoolItem{
-		ID:        fmt.Sprintf("item-%d", seq),
-		SensorID:  e.sensorID,
-		Timestamp: time.Now().Unix(),
-		Type:      e.sensorType,
-		Payload:   payloadBytes,
-	}
-
-	if err := e.spool.Write(item); err != nil {
-		e.logger.Error("Failed to spool item", "correlation_id", correlationID, "error", err)
-	} else {
-		e.logger.Debug("Item successfully spooled", "correlation_id", correlationID, "item_id", item.ID)
-	}
-}
-
-func (e *CollectorEngine) drainSpool(ctx context.Context) {
-	files, err := e.spool.ListPendingFiles(5)
+	payloadBytes, err := json.Marshal(payloadData)
 	if err != nil {
-		e.logger.Warn("Failed to list spool files", "error", err)
+		e.logger.Error("Failed to marshal collector payload", "error", err)
 		return
 	}
 
-	for _, file := range files {
-		// In dev skeleton, verify Core connectivity before unlinking or draining
-		connected, err := e.client.CheckConnectivity(ctx)
-		if err != nil || !connected {
-			e.logger.Debug("Core not connected; retaining spooled telemetry", "pending_file", file)
-			return
-		}
-		// Core is reachable; remove drained file
-		if err := e.spool.Remove(file); err != nil {
-			e.logger.Warn("Failed to remove drained spool file", "file", file, "error", err)
-		} else {
-			e.logger.Debug("Successfully drained spool file", "file", file)
-		}
+	env := observation.Envelope{
+		SchemaVersion:   observation.SchemaVersion,
+		BatchID:         fmt.Sprintf("batch-%s-%d", e.sensorID, time.Now().UnixNano()),
+		RecordType:      "TELEMETRY_SAMPLE",
+		CollectedAt:     time.Now().UTC(),
+		SensorID:        e.sensorID,
+		TenantID:        "default",
+		EntityID:        e.sensorID,
+		Job: observation.JobCorrelation{
+			JobID:             fmt.Sprintf("job-%s-heartbeat", e.sensorID),
+			AssignmentKey:     "assignment-collector",
+			AssignmentVersion: 1,
+			Attempt:           1,
+		},
+		Protocol:              "SENSOR",
+		ProtocolVersion:       "1.0",
+		Operation:             "COLLECT",
+		Status:                "SUCCESS",
+		Quality:               "GOOD",
+		ProtocolSchemaVersion: 1,
+		ProtocolPayload:       payloadBytes,
+	}
+
+	receipt, err := e.sink.Write(ctx, env)
+	if err != nil {
+		e.logger.Error("Failed to write observation to sink", "correlation_id", correlationID, "error", err)
+	} else {
+		e.logger.Debug("Observation written to durable sink", "correlation_id", correlationID, "sequence", receipt.Sequence, "record_id", receipt.RecordID)
 	}
 }
 
