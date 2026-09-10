@@ -33,6 +33,7 @@ func TestReceiverReplayCacheCannotAcknowledgeMissingDurableRecord(t *testing.T) 
 	defer srv.Close()
 
 	env := sampleEnvelope("agent-a", "tenant-1", sampleRecord(1, "r-1", []byte(`{"v":1}`)))
+	env.SiteID = "site-1"
 	env.BatchID = "batch-durable-replay"
 	body, err := json.Marshal(env)
 	if err != nil {
