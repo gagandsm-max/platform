@@ -103,6 +103,69 @@ func TestDurableReplayIdentityIgnoresBatchIDButProtectsSequenceContents(t *testi
 	}
 }
 
+func TestDurableReplayRejectsOverlappingSourceSequenceRanges(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent-spool")
+	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sink, err := NewSpoolAcceptanceSink(s, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := sampleEnvelope(
+		"agent-a",
+		"tenant-1",
+		sampleRecord(100, "r-100", []byte(`{"v":100}`)),
+		sampleRecord(101, "r-101", []byte(`{"v":101}`)),
+	)
+	first.BatchID = "batch-100-101"
+	first.ReceivingSensorID = "sensor-infra-01"
+	first.AssignmentGeneration = 1
+	if _, err := sink.AcceptBatch(context.Background(), first); err != nil {
+		t.Fatalf("initial range accept failed: %v", err)
+	}
+
+	overlap := sampleEnvelope(
+		"agent-a",
+		"tenant-1",
+		sampleRecord(101, "r-101", []byte(`{"v":101}`)),
+		sampleRecord(102, "r-102", []byte(`{"v":102}`)),
+	)
+	overlap.BatchID = "batch-101-102"
+	overlap.ReceivingSensorID = "sensor-infra-01"
+	overlap.AssignmentGeneration = 1
+	if _, err := sink.AcceptBatch(context.Background(), overlap); !IsDurableReplayConflict(err) {
+		t.Fatalf("overlapping source sequence range must conflict, got %v", err)
+	}
+
+	contained := sampleEnvelope("agent-a", "tenant-1", sampleRecord(100, "r-100", []byte(`{"v":100}`)))
+	contained.BatchID = "batch-100"
+	contained.ReceivingSensorID = "sensor-infra-01"
+	contained.AssignmentGeneration = 1
+	if _, err := sink.AcceptBatch(context.Background(), contained); !IsDurableReplayConflict(err) {
+		t.Fatalf("contained source sequence range must conflict, got %v", err)
+	}
+
+	disjoint := sampleEnvelope("agent-a", "tenant-1", sampleRecord(102, "r-102", []byte(`{"v":102}`)))
+	disjoint.BatchID = "batch-102"
+	disjoint.ReceivingSensorID = "sensor-infra-01"
+	disjoint.AssignmentGeneration = 1
+	if res, err := sink.AcceptBatch(context.Background(), disjoint); err != nil || res.AcceptedThrough != 102 {
+		t.Fatalf("disjoint next source range should be accepted: res=%+v err=%v", res, err)
+	}
+
+	stats, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.RecordCount != 2 {
+		t.Fatalf("overlap attempts must not append, recordCount=%d", stats.RecordCount)
+	}
+}
+
 func TestIndexPublicationFailureBlocksFurtherAppendUntilReconciled(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agent-spool")
 	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
