@@ -71,10 +71,13 @@ type durableBatchPayload struct {
 // directory. The spool is the durable source of truth; the batch index is only
 // a derived lookup accelerator and is rebuilt from the complete pending spool.
 type SpoolAcceptanceSink struct {
-	spool              *spool.DiskSpool
-	indexDir           string
-	mu                 sync.Mutex
-	reconcileRequired  bool
+	spool             *spool.DiskSpool
+	indexDir          string
+	mu                sync.Mutex
+	reconcileRequired bool
+	// indexPublisher is an unexported test seam for exercising the critical
+	// append-succeeds/index-publication-fails boundary. Production leaves it nil.
+	indexPublisher func(string, batchIndexEntry) error
 }
 
 func NewSpoolAcceptanceSink(agentSpool *spool.DiskSpool, agentSpoolDir string) (*SpoolAcceptanceSink, error) {
@@ -172,7 +175,7 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 		AssignmentGen:   env.AssignmentGeneration,
 		ReceivingSensor: env.ReceivingSensorID,
 	}
-	if err := s.writeIndexLocked(key, entry); err != nil {
+	if err := s.publishIndexLocked(key, entry); err != nil {
 		// The payload is already durable. Block subsequent acceptance until the
 		// complete spool has been reconciled so retries cannot accumulate orphans.
 		s.reconcileRequired = true
@@ -239,6 +242,13 @@ func (s *SpoolAcceptanceSink) readVerifiedIndexLocked(key string) (batchIndexEnt
 		return batchIndexEntry{}, false, fmt.Errorf("%s: batch index does not match durable spool payload", ErrCodeSinkFailed)
 	}
 	return entry, true, nil
+}
+
+func (s *SpoolAcceptanceSink) publishIndexLocked(key string, entry batchIndexEntry) error {
+	if s.indexPublisher != nil {
+		return s.indexPublisher(key, entry)
+	}
+	return s.writeIndexLocked(key, entry)
 }
 
 func (s *SpoolAcceptanceSink) writeIndexLocked(key string, entry batchIndexEntry) error {
@@ -366,7 +376,7 @@ func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
 			ReceivingSensor: payload.SensorID,
 		}
 		seen[key] = entry
-		if err := s.writeIndexLocked(key, entry); err != nil {
+		if err := s.publishIndexLocked(key, entry); err != nil {
 			return err
 		}
 		return nil
