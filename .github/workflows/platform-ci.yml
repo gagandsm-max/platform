@@ -84,6 +84,9 @@ jobs:
       - name: Run containerized unit tests
         run: make test-unit
 
+      - name: Run Engineering Orchestrator Phase 1 tests
+        run: python3 tests/engineering_orchestrator/run_tests.py
+
   ui-build:
     name: UI test and production build
     runs-on: ubuntu-24.04

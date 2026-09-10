@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "engineering_orchestrator/event.schema.json",
+  "title": "EngineeringOrchestratorJournalEvent",
+  "description": "Append-only journal event. event_hash is SHA-256 tamper detection only — not a signature and not non-repudiation. HEAD/base may change only on reconcile events.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sequence",
+    "event_id",
+    "task_id",
+    "from_state",
+    "to_state",
+    "head_sha",
+    "base_sha",
+    "evidence_ids",
+    "actor",
+    "timestamp",
+    "previous_event_hash",
+    "event_hash"
+  ],
+  "properties": {
+    "sequence": { "type": "integer", "minimum": 1 },
+    "event_id": { "type": "string", "minLength": 1 },
+    "task_id": { "type": "string", "minLength": 1 },
+    "from_state": { "type": "string" },
+    "to_state": { "type": "string" },
+    "head_sha": { "type": "string" },
+    "base_sha": { "type": "string" },
+    "evidence_ids": { "type": "array", "items": { "type": "string" } },
+    "actor": {
+      "type": "string",
+      "enum": [
+        "WRITER",
+        "INDEPENDENT_REVIEWER",
+        "REALITY_CHECKER",
+        "MERGE_AUTHORITY",
+        "FOUNDER_CTO",
+        "SYSTEM"
+      ]
+    },
+    "timestamp": { "type": "string" },
+    "previous_event_hash": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "event_hash": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "resume_state": { "type": ["string", "null"] },
+    "notes": { "type": "string" },
+    "expected_head_sha": { "type": "string" },
+    "expected_base_sha": { "type": "string" },
+    "changed_paths": { "type": "array", "items": { "type": "string" } }
+  }
+}
