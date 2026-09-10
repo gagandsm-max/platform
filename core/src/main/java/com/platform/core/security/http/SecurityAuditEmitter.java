@@ -41,6 +41,22 @@ public class SecurityAuditEmitter {
                 ActorType.USER, actorSubjectId, tenantId, reasonCode);
     }
 
+    /**
+     * Emits a control-plane Sensor Control / security-administration audit fact.
+     * Metadata must never contain secrets, private keys, or raw certificate material.
+     */
+    public void emitControlEvent(
+            AuditCategory category,
+            com.platform.core.security.audit.AuditAction action,
+            AuditOutcome outcome,
+            UUID tenantId,
+            String reasonCode,
+            Map<String, String> metadata
+    ) {
+        emit(category, action, outcome, ActorType.SYSTEM, null, tenantId, reasonCode,
+                metadata == null ? Map.of() : metadata);
+    }
+
     private void emit(
             AuditCategory category,
             com.platform.core.security.audit.AuditAction action,
@@ -49,6 +65,19 @@ public class SecurityAuditEmitter {
             UUID actorSubjectId,
             UUID tenantId,
             String reasonCode
+    ) {
+        emit(category, action, outcome, actorType, actorSubjectId, tenantId, reasonCode, Map.of());
+    }
+
+    private void emit(
+            AuditCategory category,
+            com.platform.core.security.audit.AuditAction action,
+            AuditOutcome outcome,
+            ActorType actorType,
+            UUID actorSubjectId,
+            UUID tenantId,
+            String reasonCode,
+            Map<String, String> metadata
     ) {
         try {
             String corr = MDC.get(CorrelationIdFilter.MDC_CORRELATION_ID_KEY);
@@ -68,7 +97,7 @@ public class SecurityAuditEmitter {
                     null,
                     null,
                     reasonCode == null ? null : new AuditReasonCode(reasonCode),
-                    Map.of()
+                    metadata
             );
             log.info("security_audit event_id={} category={} action={} outcome={} reason={}",
                     event.eventId(), category, action.value(), outcome, reasonCode == null ? "" : reasonCode);

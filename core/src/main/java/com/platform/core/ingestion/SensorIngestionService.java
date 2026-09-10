@@ -49,23 +49,7 @@ public class SensorIngestionService {
     ) {
         metrics.recordBatchReceived();
 
-        // 0. Verify claimed sensor identity matches client certificate CN
-        if (clientCert != null && clientCert.getSubjectX500Principal() != null && request.sensorId() != null && !request.sensorId().isBlank()) {
-            String dn = clientCert.getSubjectX500Principal().getName();
-            String cn = extractCommonName(dn);
-            String claimed = request.sensorId().trim();
-            String cleanCn = cn.split("\\.")[0].trim();
-            if (!claimed.equalsIgnoreCase(cleanCn) && !claimed.equalsIgnoreCase(cn.trim())) {
-                metrics.recordBatchRejected("ERR_AUTH_IDENTITY_MISMATCH");
-                throw new IngestionException(
-                        HttpStatus.FORBIDDEN,
-                        "ERR_AUTH_IDENTITY_MISMATCH",
-                        "Claimed sensorId '" + claimed + "' does not match client certificate CN '" + cn + "'"
-                );
-            }
-        }
-
-        // 1. Resolve Sensor Authority (fails closed if authority unavailable)
+        // 1. Resolve Sensor Authority (fingerprint → enrollment; never CN/SAN). Payload claims cannot grant authority.
         SensorScope scope = validator.resolveAuthority(clientCert);
         if (scope == null) {
             metrics.recordBatchRejected("ERR_SENSOR_AUTHORITY_UNAVAILABLE");
@@ -146,16 +130,5 @@ public class SensorIngestionService {
 
         // 6. Return durable ACK indicating accepted-through watermark
         return new TelemetryAckResponse("ACCEPTED", request.lastSequence(), scope.sensorId());
-    }
-
-    private String extractCommonName(String dn) {
-        if (dn == null) return "UNKNOWN";
-        for (String part : dn.split(",")) {
-            part = part.trim();
-            if (part.startsWith("CN=") || part.startsWith("cn=")) {
-                return part.substring(3);
-            }
-        }
-        return dn;
     }
 }

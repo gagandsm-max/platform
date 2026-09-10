@@ -210,6 +210,8 @@ services:
       VALKEY_PASSWORD: ${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SPRING_KAFKA_LISTENER_AUTO_STARTUP: "true"
+      PLATFORM_SENSOR_CONTROL_DEV_BOOTSTRAP_ENROLLMENT: "true"
+      PLATFORM_SENSOR_CONTROL_DEV_CERT_DIR: /certs
     ports:
       - "127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}:8443"
     volumes:

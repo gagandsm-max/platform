@@ -81,6 +81,16 @@ class IngestionValidatorTest {
     }
 
     @Test
+    void testSensorIdentityCaseMismatchRejected() {
+        SensorScope caseScope = new SensorScope("sensor-a", tenantId, null, Set.of(entityId), false);
+        TelemetryBatchRequest req = new TelemetryBatchRequest(1, "SENSOR-A", "epoch-1", "batch-1", 1, 1, "sum", List.of());
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract("{}".getBytes(StandardCharsets.UTF_8), req, caseScope));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+        assertEquals("ERR_AUTH_IDENTITY_MISMATCH", ex.getCode());
+    }
+
+    @Test
     void testPayloadTenantCannotOverrideResolvedTenant() throws Exception {
         UUID otherTenant = UUID.fromString("018f0e0a-0000-7000-8000-000000000099");
         String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +

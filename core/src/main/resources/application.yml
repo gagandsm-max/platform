@@ -79,6 +79,10 @@ platform:
   telemetry:
     consumer:
       enabled: ${PLATFORM_TELEMETRY_CONSUMER_ENABLED:false}
+  sensor-control:
+    # Development-only enrollment of docker Sensor certs. Must remain false outside local compose.
+    dev-bootstrap-enrollment: ${PLATFORM_SENSOR_CONTROL_DEV_BOOTSTRAP_ENROLLMENT:false}
+    dev-cert-dir: ${PLATFORM_SENSOR_CONTROL_DEV_CERT_DIR:/certs}
   ingestion:
     kafka:
       topic: ${TELEMETRY_NUMERIC_TOPIC:telemetry.numeric.v1}
