@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -114,30 +115,44 @@ func TestIndexPublicationFailureBlocksFurtherAppendUntilReconciled(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if err := os.RemoveAll(sink.indexDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(sink.indexDir, []byte("not-a-directory"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	publishErr := errors.New("injected index publication failure")
+	sink.indexPublisher = func(string, batchIndexEntry) error { return publishErr }
 
 	env := sampleEnvelope("agent-a", "tenant-1", sampleRecord(1, "r-1", []byte(`{"v":1}`)))
 	env.BatchID = "batch-index-fail"
 	env.ReceivingSensorID = "sensor-infra-01"
 	env.AssignmentGeneration = 1
-	if _, err := sink.AcceptBatch(context.Background(), env); err == nil {
-		t.Fatal("expected index publication failure")
+	if _, err := sink.AcceptBatch(context.Background(), env); !errors.Is(err, publishErr) {
+		t.Fatalf("expected injected index publication failure, got %v", err)
 	}
-	stats, _ := s.Stats()
+	stats, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if stats.RecordCount != 1 {
 		t.Fatalf("first attempt should leave exactly one durable orphan, got %d", stats.RecordCount)
 	}
-	if _, err := sink.AcceptBatch(context.Background(), env); err == nil {
-		t.Fatal("reconciliation must fail closed while index storage remains unavailable")
+
+	// The second attempt must reconcile first. Because publication remains
+	// unavailable, reconciliation fails and no second durable payload is appended.
+	if _, err := sink.AcceptBatch(context.Background(), env); !errors.Is(err, publishErr) {
+		t.Fatalf("expected reconciliation to remain fail-closed, got %v", err)
 	}
 	stats, _ = s.Stats()
 	if stats.RecordCount != 1 {
 		t.Fatalf("retry after index failure must not append another orphan, got %d", stats.RecordCount)
+	}
+
+	// Restore index publication. The next attempt must rebuild from spool truth,
+	// deduplicate the already-durable payload, and return the durable watermark.
+	sink.indexPublisher = nil
+	res, err := sink.AcceptBatch(context.Background(), env)
+	if err != nil || res.AcceptedThrough != 1 {
+		t.Fatalf("reconciliation after index recovery failed: res=%+v err=%v", res, err)
+	}
+	stats, _ = s.Stats()
+	if stats.RecordCount != 1 {
+		t.Fatalf("successful reconciliation must not append another durable payload, got %d", stats.RecordCount)
 	}
 }
 
