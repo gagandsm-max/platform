@@ -58,6 +58,23 @@ def resolve_role_config(agent_name: str) -> dict:
     }
 
 
+def build_codex_command(config: dict, prompt: str | None = None, repo_root: Path = REPO_ROOT) -> list[str]:
+    instructions_json = json.dumps(config["developer_instructions"])
+    cmd = [
+        "codex",
+        "exec",
+        "-C",
+        str(repo_root),
+        "-s",
+        config["effective_sandbox"],
+        "-c",
+        f"developer_instructions={instructions_json}",
+    ]
+    if prompt is not None:
+        cmd.extend(["--", prompt])
+    return cmd
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Launch a Platform specialist agent in an authoritative Codex CLI session."
@@ -101,29 +118,13 @@ def main() -> None:
             print(f"Provenance SHA:    {plan['provenance_sha']}")
         sys.exit(0)
 
-    # Build codex exec command
-    # Authoritative session sandbox is mapped strictly from manifest mode
-    # Developer instructions are injected via -c developer_instructions="..."
-    instructions_json = json.dumps(config["developer_instructions"])
-    cmd = [
-        "codex",
-        "exec",
-        "-C",
-        str(REPO_ROOT),
-        "-s",
-        config["effective_sandbox"],
-        "-c",
-        f"developer_instructions={instructions_json}",
-    ]
-
     prompt = args.prompt
     if prompt is None and not sys.stdin.isatty():
         stdin_content = sys.stdin.read().strip()
         if stdin_content:
             prompt = stdin_content
 
-    if prompt is not None:
-        cmd.append(prompt)
+    cmd = build_codex_command(config, prompt)
 
     try:
         proc = subprocess.run(cmd)
