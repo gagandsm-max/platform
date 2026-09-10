@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "engineering_orchestrator/evidence.schema.json",
+  "title": "EngineeringOrchestratorEvidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evidence_id",
+    "type",
+    "head_sha",
+    "claim_scope",
+    "result",
+    "collected_at"
+  ],
+  "properties": {
+    "evidence_id": { "type": "string", "minLength": 1 },
+    "type": {
+      "type": "string",
+      "enum": [
+        "SOURCE",
+        "LOCAL_TEST",
+        "LOCAL_RUNTIME",
+        "DATABASE",
+        "SECURITY",
+        "CI",
+        "INFERENCE",
+        "RECOMMENDATION"
+      ]
+    },
+    "head_sha": { "type": "string" },
+    "claim_scope": { "type": "string" },
+    "result": { "type": "string", "enum": ["PASS", "FAIL", "NOT_RUN"] },
+    "collected_at": { "type": "string" },
+    "payload_ref": { "type": "string" },
+    "impact_known": { "type": "boolean" },
+    "invalidated": { "type": "boolean" },
+    "invalidation_reason": { "type": "string" }
+  }
+}

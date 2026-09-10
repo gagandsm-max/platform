@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "engineering_orchestrator/handoff.schema.json",
+  "title": "EngineeringOrchestratorHandoff",
+  "description": "Structured manual handoff. codex_enabled defaults to false; Phase 1 does not invoke AI or subprocesses.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "handoff_id",
+    "task_id",
+    "from_state",
+    "expected_return_state",
+    "actor_role",
+    "codex_enabled",
+    "status"
+  ],
+  "properties": {
+    "handoff_id": { "type": "string", "minLength": 1 },
+    "task_id": { "type": "string", "minLength": 1 },
+    "from_state": { "type": "string" },
+    "expected_return_state": { "type": "string" },
+    "actor_role": { "type": "string" },
+    "instructions_ref": { "type": "string" },
+    "inputs": { "type": "object" },
+    "outputs": { "type": "object" },
+    "codex_enabled": { "type": "boolean", "default": false },
+    "status": {
+      "type": "string",
+      "enum": ["PENDING", "RETURNED", "REJECTED", "EXPIRED"]
+    }
+  }
+}
