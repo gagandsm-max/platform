@@ -22,7 +22,7 @@ const (
 )
 
 // DurableReplayConflictError is returned when durable Agent sequence identity
-// is reused with different immutable batch contents.
+// is reused with different immutable batch contents or overlaps an accepted range.
 type DurableReplayConflictError struct {
 	TenantID      string
 	AgentID       string
@@ -75,6 +75,7 @@ type SpoolAcceptanceSink struct {
 	indexDir          string
 	mu                sync.Mutex
 	reconcileRequired bool
+	ranges            map[string][]batchIndexEntry
 	// indexPublisher is an unexported test seam for exercising the critical
 	// append-succeeds/index-publication-fails boundary. Production leaves it nil.
 	indexPublisher func(string, batchIndexEntry) error
@@ -92,7 +93,11 @@ func NewSpoolAcceptanceSink(agentSpool *spool.DiskSpool, agentSpoolDir string) (
 	if err := os.MkdirAll(indexDir, 0750); err != nil {
 		return nil, fmt.Errorf("ERR_ACCEPTANCE_SINK_UNAVAILABLE: failed to create batch index directory: %w", err)
 	}
-	sink := &SpoolAcceptanceSink{spool: agentSpool, indexDir: indexDir}
+	sink := &SpoolAcceptanceSink{
+		spool: agentSpool,
+		indexDir: indexDir,
+		ranges: make(map[string][]batchIndexEntry),
+	}
 	if err := sink.rebuildIndexFromSpool(); err != nil {
 		return nil, err
 	}
@@ -122,12 +127,11 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 		if existing.BatchChecksum == checksum {
 			return AcceptanceResult{AcceptedThrough: existing.AcceptedThrough}, nil
 		}
-		return AcceptanceResult{}, &DurableReplayConflictError{
-			TenantID:      env.TenantID,
-			AgentID:       env.AgentID,
-			FirstSequence: env.FirstSequence,
-			LastSequence:  env.LastSequence,
-		}
+		return AcceptanceResult{}, durableSequenceConflict(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence)
+	}
+
+	if s.overlapsAcceptedRangeLocked(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence) {
+		return AcceptanceResult{}, durableSequenceConflict(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence)
 	}
 
 	recordIDs := make([]string, 0, len(env.Records))
@@ -181,7 +185,43 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 		s.reconcileRequired = true
 		return AcceptanceResult{}, err
 	}
+	s.addRangeLocked(entry)
 	return AcceptanceResult{AcceptedThrough: env.LastSequence}, nil
+}
+
+func durableSequenceConflict(tenantID, agentID string, firstSequence, lastSequence uint64) error {
+	return &DurableReplayConflictError{
+		TenantID: tenantID,
+		AgentID: agentID,
+		FirstSequence: firstSequence,
+		LastSequence: lastSequence,
+	}
+}
+
+func sourceRangeStreamKey(tenantID, agentID string) string {
+	var b []byte
+	b = appendLenPrefixed(b, tenantID)
+	b = appendLenPrefixed(b, agentID)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func rangesOverlap(firstA, lastA, firstB, lastB uint64) bool {
+	return firstA <= lastB && firstB <= lastA
+}
+
+func (s *SpoolAcceptanceSink) overlapsAcceptedRangeLocked(tenantID, agentID string, firstSequence, lastSequence uint64) bool {
+	for _, existing := range s.ranges[sourceRangeStreamKey(tenantID, agentID)] {
+		if rangesOverlap(firstSequence, lastSequence, existing.FirstSequence, existing.LastSequence) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *SpoolAcceptanceSink) addRangeLocked(entry batchIndexEntry) {
+	stream := sourceRangeStreamKey(entry.TenantID, entry.AgentID)
+	s.ranges[stream] = append(s.ranges[stream], entry)
 }
 
 // batchIndexKey intentionally excludes BatchID. Agent sequence/range is the
@@ -336,6 +376,7 @@ func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
 	}
 
 	seen := make(map[string]batchIndexEntry)
+	ranges := make(map[string][]batchIndexEntry)
 	err = s.spool.VisitPending(func(rec spool.Record) error {
 		if rec.Type != agentBatchRecordType {
 			return nil
@@ -352,17 +393,20 @@ func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
 		key := batchIndexKey(payload.TenantID, payload.AgentID, payload.FirstSequence, payload.LastSequence)
 		if existing, ok := seen[key]; ok {
 			if existing.BatchChecksum != payload.BatchChecksum {
-				return &DurableReplayConflictError{
-					TenantID:      payload.TenantID,
-					AgentID:       payload.AgentID,
-					FirstSequence: payload.FirstSequence,
-					LastSequence:  payload.LastSequence,
-				}
+				return durableSequenceConflict(payload.TenantID, payload.AgentID, payload.FirstSequence, payload.LastSequence)
 			}
 			// Exact duplicate already exists durably. Keep the earliest spool
 			// record as canonical and do not create another index entry.
 			return nil
 		}
+
+		stream := sourceRangeStreamKey(payload.TenantID, payload.AgentID)
+		for _, existing := range ranges[stream] {
+			if rangesOverlap(payload.FirstSequence, payload.LastSequence, existing.FirstSequence, existing.LastSequence) {
+				return durableSequenceConflict(payload.TenantID, payload.AgentID, payload.FirstSequence, payload.LastSequence)
+			}
+		}
+
 		entry := batchIndexEntry{
 			TenantID:        payload.TenantID,
 			AgentID:         payload.AgentID,
@@ -376,6 +420,7 @@ func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
 			ReceivingSensor: payload.SensorID,
 		}
 		seen[key] = entry
+		ranges[stream] = append(ranges[stream], entry)
 		if err := s.publishIndexLocked(key, entry); err != nil {
 			return err
 		}
@@ -385,6 +430,7 @@ func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
 		s.reconcileRequired = true
 		return err
 	}
+	s.ranges = ranges
 	s.reconcileRequired = false
 	return nil
 }
