@@ -705,8 +705,8 @@ func TestPayloadCannotAlterNormalizedSinkEnvelope(t *testing.T) {
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
 
-	// Matching claims (case-insensitive tenant) still normalize to authoritative values.
-	env := sampleEnvelope("Agent-1", "TENANT-AUTH", sampleRecord(1, "r-1", []byte(`{"m":1}`)))
+	// Agent ID is exact-case; tenant/site claims remain normalized to authoritative values.
+	env := sampleEnvelope("agent-1", "TENANT-AUTH", sampleRecord(1, "r-1", []byte(`{"m":1}`)))
 	env.SiteID = "SITE-AUTH"
 	body, _ := json.Marshal(env)
 	resp := postJSON(t, client, srv.URL+EndpointPath, body)
