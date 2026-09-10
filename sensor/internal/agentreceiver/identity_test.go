@@ -47,17 +47,25 @@ func (v *StaticTestIdentityVerifier) VerifyPeerIdentity(verifiedChain []*x509.Ce
 	defer v.mu.RUnlock()
 
 	if agentID, ok := v.byKey[fp]; ok && agentID != "" {
-		return AuthenticatedAgentIdentity{AgentID: agentID}, nil
+		return AuthenticatedAgentIdentity{AgentID: agentID, FingerprintSHA256: fp}, nil
 	}
 	if cn != "" {
 		if agentID, ok := v.byKey["cn:"+strings.ToLower(cn)]; ok && agentID != "" {
-			return AuthenticatedAgentIdentity{AgentID: agentID}, nil
+			return AuthenticatedAgentIdentity{AgentID: agentID, FingerprintSHA256: fp}, nil
 		}
 	}
 	return AuthenticatedAgentIdentity{}, fmt.Errorf("%s: leaf certificate is not mapped to an agent identity", ErrCodeAuthInvalid)
 }
 
 func leafFingerprintSHA256(cert *x509.Certificate) string {
-	sum := sha256.Sum256(cert.Raw)
+	if fp := LeafFingerprintSHA256(cert); fp != "" {
+		return fp
+	}
+	// httptest mock certificates often omit Raw DER; synthesize a stable test fingerprint.
+	cn := ""
+	if cert != nil {
+		cn = strings.TrimSpace(cert.Subject.CommonName)
+	}
+	sum := sha256.Sum256([]byte("agentreceiver-test-leaf:" + cn))
 	return hex.EncodeToString(sum[:])
 }

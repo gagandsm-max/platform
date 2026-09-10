@@ -35,6 +35,28 @@ func IsRoleEligible(role runtime.Role) bool {
 	return role == runtime.RoleInfrastructure || role == runtime.RoleCombined
 }
 
+// RoleFromSensorType maps legacy SENSOR_TYPE values to runtime.Role.
+// "infrastructure" → INFRASTRUCTURE, "combined" → COMBINED; others map when they
+// already equal a known role string (case-insensitive).
+func RoleFromSensorType(sensorType string) runtime.Role {
+	switch strings.ToUpper(strings.TrimSpace(sensorType)) {
+	case "INFRASTRUCTURE", "INFRA":
+		return runtime.RoleInfrastructure
+	case "COMBINED":
+		return runtime.RoleCombined
+	case "NETWORK":
+		return runtime.RoleNetwork
+	case "STREAMING_EVENT", "STREAMING":
+		return runtime.RoleStreamingEvent
+	case "SYNTHETIC":
+		return runtime.RoleSynthetic
+	case "CLOUD_API", "CLOUD":
+		return runtime.RoleCloudAPI
+	default:
+		return runtime.Role(strings.ToUpper(strings.TrimSpace(sensorType)))
+	}
+}
+
 // Receiver handles Agent telemetry ingestion requests over mTLS.
 type Receiver struct {
 	cfg        Config
@@ -136,8 +158,7 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. mTLS Client Certificate Authentication + identity verification.
-	// Require verified chain material — PeerCertificates alone is insufficient.
+	// 4. mTLS + fingerprint identity FIRST (before envelope decode).
 	_, verifiedChain, err := requireVerifiedClientLeaf(r.TLS)
 	if err != nil {
 		rcv.metrics.AuthFailures.Add(1)
@@ -150,7 +171,7 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	authAgent, err := rcv.identity.VerifyPeerIdentity(verifiedChain)
-	if err != nil || strings.TrimSpace(authAgent.AgentID) == "" {
+	if err != nil || strings.TrimSpace(authAgent.FingerprintSHA256) == "" {
 		rcv.metrics.AuthFailures.Add(1)
 		rcv.logger.Warn("Peer identity verification failed",
 			"remote_addr", r.RemoteAddr,
@@ -163,7 +184,7 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Bounded Body & Strict JSON Decoding
+	// 5. Bounded Body & Strict JSON Decoding + structural validation
 	limitedBody := http.MaxBytesReader(w, r.Body, rcv.cfg.MaxBodyBytes)
 	dec := json.NewDecoder(limitedBody)
 	dec.DisallowUnknownFields()
@@ -187,46 +208,82 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reject trailing garbage after the JSON object
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		rcv.metrics.MalformedBatches.Add(1)
 		rcv.writeJSONError(w, http.StatusBadRequest, ErrCodeMalformedJSON, "Extraneous data after JSON body")
 		return
 	}
 
-	// 6. Body AgentID is a claim: must EqualFold match authenticated identity.
-	// Never select identity from arbitrary SAN matching.
-	if !strings.EqualFold(strings.TrimSpace(env.AgentID), authAgent.AgentID) {
-		rcv.metrics.AuthFailures.Add(1)
-		rcv.logger.Warn("Agent identity spoofing attempt detected",
-			"authenticated_agent_id", authAgent.AgentID,
-			"claimed_agent_id", env.AgentID,
-			"remote_addr", r.RemoteAddr,
-		)
-		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAuthIdentityMismatch,
-			"Claimed agentId does not match authenticated client identity")
+	if valErr := ValidateEnvelope(&env, rcv.cfg.MaxBatchRecords, rcv.cfg.MaxRecordBytes); valErr != nil {
+		if valErr.Code == ErrCodeRecordChecksumMismatch {
+			rcv.metrics.ChecksumFailures.Add(1)
+		} else {
+			rcv.metrics.MalformedBatches.Add(1)
+		}
+		rcv.writeJSONError(w, http.StatusBadRequest, valErr.Code, valErr.Message)
 		return
 	}
 
-	// 7. Authorize Agent -> Sensor Assignment using authenticated identity + receiving sensor ONLY
+	// 6. Authorize via Core (fingerprint authority); AgentID may still be empty.
 	assignCtx, err := rcv.authorizer.Authorize(r.Context(), authAgent, rcv.cfg.SensorID)
-	if err != nil || !assignCtx.Assigned {
+	if err != nil {
+		if authErr, ok := AsAuthorizerError(err); ok && authErr.IsTransient() {
+			rcv.metrics.AuthorityTransientErrors.Add(1)
+			rcv.logger.Warn("Agent authority temporarily unavailable",
+				"sensor_id", rcv.cfg.SensorID,
+				"reason_class", "authority_transient",
+			)
+			rcv.writeJSONError(w, http.StatusServiceUnavailable, ErrCodeAgentAuthorityUnavailable, "Agent authority temporarily unavailable")
+			return
+		}
+		rcv.metrics.AuthorityDefinitiveDenials.Add(1)
+		code := ErrCodeAgentNotAssigned
+		if authErr, ok := AsAuthorizerError(err); ok && strings.TrimSpace(authErr.Code) != "" {
+			code = authErr.Code
+		}
+		rcv.logger.Warn("Agent delivery denied by assignment authorizer",
+			"sensor_id", rcv.cfg.SensorID,
+			"reason_class", "authority_definitive",
+			"code", code,
+		)
+		rcv.writeJSONError(w, http.StatusForbidden, code, "Agent is not assigned to this Infrastructure Sensor")
+		return
+	}
+	if !assignCtx.Assigned {
+		rcv.metrics.AuthorityDefinitiveDenials.Add(1)
 		rcv.metrics.AssignmentDenials.Add(1)
 		rcv.logger.Warn("Agent delivery denied by assignment authorizer",
 			"agent_id", authAgent.AgentID,
 			"sensor_id", rcv.cfg.SensorID,
+			"reason_class", "authority_definitive",
 		)
 		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAgentNotAssigned, "Agent is not assigned to this Infrastructure Sensor")
 		return
 	}
 
 	if err := validateAssignmentContext(assignCtx, authAgent, rcv.cfg.SensorID); err != nil {
+		rcv.metrics.AuthorityDefinitiveDenials.Add(1)
 		rcv.metrics.AssignmentDenials.Add(1)
 		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAgentNotAssigned, "Assignment context is inconsistent with authenticated delivery")
 		return
 	}
 
-	// Payload tenant/site are claims; when present they must match authoritative assignment.
+	// Fill AgentID from Core assignment for downstream ACK/logs (after validation).
+	authAgent.AgentID = assignCtx.AgentID
+
+	// 7. Payload agentId/tenant/site are CLAIMS vs authoritative assignment.
+	if !strings.EqualFold(strings.TrimSpace(env.AgentID), assignCtx.AgentID) {
+		rcv.metrics.AuthFailures.Add(1)
+		rcv.logger.Warn("Agent identity spoofing attempt detected",
+			"assigned_agent_id", assignCtx.AgentID,
+			"claimed_agent_id", env.AgentID,
+			"remote_addr", r.RemoteAddr,
+			"reason_class", "claim_mismatch",
+		)
+		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAuthIdentityMismatch,
+			"Claimed agentId does not match authenticated assignment")
+		return
+	}
 	if claim := strings.TrimSpace(env.TenantID); claim != "" && !strings.EqualFold(claim, assignCtx.TenantID) {
 		rcv.metrics.AssignmentDenials.Add(1)
 		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAgentNotAssigned, "Payload tenant claim does not match authoritative assignment")
@@ -245,27 +302,17 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 8. Validate Envelope Structure & Record Checksums
-	if valErr := ValidateEnvelope(&env, rcv.cfg.MaxBatchRecords, rcv.cfg.MaxRecordBytes); valErr != nil {
-		if valErr.Code == ErrCodeRecordChecksumMismatch {
-			rcv.metrics.ChecksumFailures.Add(1)
-		} else {
-			rcv.metrics.MalformedBatches.Add(1)
-		}
-		rcv.writeJSONError(w, http.StatusBadRequest, valErr.Code, valErr.Message)
-		return
-	}
-
 	// Normalize envelope to authoritative identity/assignment before durable sink.
-	env.AgentID = authAgent.AgentID
+	env.AgentID = assignCtx.AgentID
 	env.TenantID = assignCtx.TenantID
 	env.SiteID = assignCtx.SiteID
+	env.ReceivingSensorID = assignCtx.SensorID
+	env.AssignmentGeneration = assignCtx.Generation
 
-	// 9. Check Replay Tracker (Exact Replay vs Conflicting Replay)
-	// Use authoritative tenant from AssignmentContext + authenticated agent + batchID.
+	// 8. Process-local ReplayTracker (subordinate optimization)
 	replayID := ReplayIdentity{
 		TenantID: assignCtx.TenantID,
-		AgentID:  authAgent.AgentID,
+		AgentID:  assignCtx.AgentID,
 		BatchID:  env.BatchID,
 	}
 	batchChecksum := ComputeBatchChecksum(env.Records)
@@ -274,7 +321,7 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if repDecision == ReplayExact {
 		rcv.metrics.ReplayExactHits.Add(1)
 		rcv.logger.Info("Exact duplicate replay acknowledged from cache",
-			"agent_id", authAgent.AgentID,
+			"agent_id", assignCtx.AgentID,
 			"batch_id", env.BatchID,
 			"accepted_through", cachedAck.AcceptedThroughSequence,
 		)
@@ -284,31 +331,38 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if repDecision == ReplayConflict {
 		rcv.metrics.ReplayConflicts.Add(1)
 		rcv.logger.Warn("Conflicting batch replay detected and rejected",
-			"agent_id", authAgent.AgentID,
+			"agent_id", assignCtx.AgentID,
 			"batch_id", env.BatchID,
 			"first_sequence", env.FirstSequence,
 			"last_sequence", env.LastSequence,
+			"reason_class", "replay_conflict",
 		)
 		rcv.writeJSONError(w, http.StatusConflict, ErrCodeReplayConflict,
 			"Batch ID was previously processed with conflicting contents or sequence range")
 		return
 	}
 
-	// 10. Downstream Sensor Acceptance Sink
+	// 9. Downstream durable acceptance sink
 	result, err := rcv.sink.AcceptBatch(r.Context(), env)
 	if err != nil {
+		if IsDurableReplayConflict(err) {
+			rcv.metrics.ReplayConflicts.Add(1)
+			rcv.writeJSONError(w, http.StatusConflict, ErrCodeReplayConflict,
+				"Batch ID was previously processed with conflicting contents or sequence range")
+			return
+		}
 		rcv.metrics.SinkFailures.Add(1)
 		rcv.logger.Error("Acceptance sink refused or failed to process batch",
-			"agent_id", authAgent.AgentID,
+			"agent_id", assignCtx.AgentID,
 			"batch_id", env.BatchID,
 			"error", err,
+			"reason_class", "sink_failure",
 		)
 		rcv.writeJSONError(w, http.StatusServiceUnavailable, ErrCodeSinkFailed,
 			"Sensor acceptance sink unavailable")
 		return
 	}
 
-	// Sanity-check watermark from sink
 	if result.AcceptedThrough < env.FirstSequence || result.AcceptedThrough > env.LastSequence {
 		rcv.metrics.SinkFailures.Add(1)
 		rcv.logger.Error("Acceptance sink returned corrupt watermark",
@@ -321,11 +375,10 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 11. Formulate and Cache Authoritative Application ACK (batch-bound)
 	ack := DeliveryAck{
 		Status:                  "ACCEPTED",
 		AcceptedThroughSequence: result.AcceptedThrough,
-		AgentID:                 authAgent.AgentID,
+		AgentID:                 assignCtx.AgentID,
 		BatchID:                 env.BatchID,
 		CorrelationID:           env.CorrelationID,
 	}
@@ -347,8 +400,6 @@ func isApplicationJSON(ct string) bool {
 	return strings.TrimSpace(mediaType) == "application/json"
 }
 
-// requireVerifiedClientLeaf extracts the leaf and verified chain from TLS state.
-// PeerCertificates alone are insufficient; VerifiedChains must be present and non-empty.
 func requireVerifiedClientLeaf(tlsState *tls.ConnectionState) (*x509.Certificate, []*x509.Certificate, error) {
 	if tlsState == nil {
 		return nil, nil, errors.New(ErrCodeAuthRequired + ": TLS connection state is missing")
@@ -367,6 +418,9 @@ func validateAssignmentContext(assignCtx AssignmentContext, authAgent Authentica
 	if !assignCtx.Assigned {
 		return errors.New("assignment not authorized")
 	}
+	if assignCtx.Generation < 1 {
+		return errors.New("assignment generation must be >= 1")
+	}
 	if strings.TrimSpace(assignCtx.TenantID) == "" {
 		return errors.New("assignment tenant is empty")
 	}
@@ -374,10 +428,11 @@ func validateAssignmentContext(assignCtx AssignmentContext, authAgent Authentica
 	if authoritativeAgentID == "" {
 		return errors.New("assignment agent is empty")
 	}
-	if authoritativeAgentID != authAgent.AgentID {
+	if id := strings.TrimSpace(authAgent.AgentID); id != "" && id != authoritativeAgentID {
 		return errors.New("assignment agent does not match authenticated agent")
 	}
-	if !strings.EqualFold(strings.TrimSpace(assignCtx.SensorID), strings.TrimSpace(receivingSensorID)) {
+	// Exact SensorID match (case-sensitive), matching Core.
+	if strings.TrimSpace(assignCtx.SensorID) != strings.TrimSpace(receivingSensorID) {
 		return errors.New("assignment sensor does not match receiving sensor")
 	}
 	return nil

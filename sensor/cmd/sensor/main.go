@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"platform/sensor/internal/agentreceiver"
 	"platform/sensor/internal/collector"
 	"platform/sensor/internal/config"
 	"platform/sensor/internal/coreclient"
@@ -95,10 +97,26 @@ func main() {
 	engine := collector.NewCollectorEngine(cfg.SensorID, cfg.SensorType, sink, cfg.PollInterval, logger)
 	engine.Start(ctx)
 
-	// Discovery executor/service only — Agent Receiver remains unwired.
 	discoveryExecutor := discovery.NewExecutor(cfg.SensorID, discovery.DefaultMaxConcurrent, logger)
 	discoveryService := discovery.NewService(cfg.SensorID, client, discoveryExecutor, cfg.PollInterval, logger)
 	discoveryService.Start(ctx)
+
+	var (
+		agentServer *agentreceiver.Server
+		agentSpool  *spool.DiskSpool
+	)
+	if cfg.AgentReceiverEnabled {
+		agentServer, agentSpool, err = startAgentReceiver(cfg, client, logger)
+		if err != nil {
+			logger.Error("Failed to start Agent Receiver", "error", err, "error_code", "SENSOR_AGENT_RECEIVER_INIT_FAILED")
+			os.Exit(1)
+		}
+		go func() {
+			if err := agentServer.ListenAndServe(); err != nil {
+				logger.Error("Agent Receiver listener stopped", "error", err, "error_code", "SENSOR_AGENT_RECEIVER_LISTEN_FAILED")
+			}
+		}()
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -106,6 +124,18 @@ func main() {
 	logger.Info("Received termination signal, starting graceful shutdown", "signal", sig.String())
 
 	cancel()
+	if agentServer != nil {
+		shutdownAgentCtx, shutdownAgentCancel := context.WithTimeout(context.Background(), cfg.AgentReceiverShutdownGrace)
+		defer shutdownAgentCancel()
+		if err := agentServer.Shutdown(shutdownAgentCtx); err != nil {
+			logger.Warn("Agent Receiver shutdown error", "error", err)
+		}
+	}
+	if agentSpool != nil {
+		if err := agentSpool.Close(); err != nil {
+			logger.Warn("Agent spool close error", "error", err)
+		}
+	}
 	discoveryService.Stop()
 	engine.Stop()
 
@@ -118,4 +148,77 @@ func main() {
 		logger.Warn("Health server shutdown error", "error_code", "SENSOR_HEALTH_SHUTDOWN_FAILED")
 	}
 	logger.Info("Platform Sensor shutdown complete")
+}
+
+func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *slog.Logger) (*agentreceiver.Server, *spool.DiskSpool, error) {
+	if err := config.ValidateAgentReceiverConfig(cfg); err != nil {
+		return nil, nil, err
+	}
+
+	role := agentreceiver.RoleFromSensorType(cfg.SensorType)
+	if !agentreceiver.IsRoleEligible(role) {
+		return nil, nil, fmt.Errorf("%s: sensor type %q maps to role %q which is not eligible for Agent ingress",
+			agentreceiver.ErrCodeRoleIneligible, cfg.SensorType, role)
+	}
+
+	agentDir := filepath.Clean(cfg.AgentSpoolDir)
+	agentSpool, err := spool.Open(spool.Config{
+		Dir:            agentDir,
+		MaxRecordBytes: 2 * 1024 * 1024,
+		Logger:         logger.With("spool", "agent-ingress"),
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open Agent spool: %w", err)
+	}
+
+	ident := agentreceiver.NewFingerprintIdentityVerifier()
+	authorizer, err := agentreceiver.NewCoreBackedAuthorizer(client, cfg.SensorID)
+	if err != nil {
+		_ = agentSpool.Close()
+		return nil, nil, err
+	}
+	acceptance, err := agentreceiver.NewSpoolAcceptanceSink(agentSpool, agentDir)
+	if err != nil {
+		_ = agentSpool.Close()
+		return nil, nil, err
+	}
+
+	// Fail closed if production adapters were somehow not installed.
+	if _, ok := any(ident).(*agentreceiver.FailClosedIdentityVerifier); ok {
+		_ = agentSpool.Close()
+		return nil, nil, fmt.Errorf("ERR_INVALID_CONFIG: Agent Receiver enabled but FailClosed identity verifier is still installed")
+	}
+	if _, ok := any(authorizer).(*agentreceiver.FailClosedAuthorizer); ok {
+		_ = agentSpool.Close()
+		return nil, nil, fmt.Errorf("ERR_INVALID_CONFIG: Agent Receiver enabled but FailClosed authorizer is still installed")
+	}
+	if _, ok := any(acceptance).(*agentreceiver.FailClosedAcceptanceSink); ok {
+		_ = agentSpool.Close()
+		return nil, nil, fmt.Errorf("ERR_INVALID_CONFIG: Agent Receiver enabled but FailClosed acceptance sink is still installed")
+	}
+
+	rcv, err := agentreceiver.NewReceiver(agentreceiver.Config{
+		SensorID:   cfg.SensorID,
+		SensorRole: role,
+	}, ident, authorizer, acceptance, logger)
+	if err != nil {
+		_ = agentSpool.Close()
+		return nil, nil, err
+	}
+
+	srv, err := agentreceiver.NewServer(agentreceiver.ServerConfig{
+		ListenAddr:     cfg.AgentReceiverListenAddr,
+		ServerCertFile: cfg.AgentServerCertFile,
+		ServerKeyFile:  cfg.AgentServerKeyFile,
+		ClientCAFile:   cfg.AgentClientCAFile,
+		MaxInFlight:    cfg.AgentReceiverMaxInFlight,
+		ShutdownGrace:  cfg.AgentReceiverShutdownGrace,
+		Handler:        rcv,
+		Logger:         logger,
+	})
+	if err != nil {
+		_ = agentSpool.Close()
+		return nil, nil, err
+	}
+	return srv, agentSpool, nil
 }
