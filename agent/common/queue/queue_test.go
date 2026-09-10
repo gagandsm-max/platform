@@ -371,3 +371,151 @@ func TestDurableQueueDeleteThroughOK(t *testing.T) {
 		t.Fatalf("partial delete failed: %+v", batch)
 	}
 }
+
+func TestDurableQueueSequenceLineageSurvivesDrain(t *testing.T) {
+	tempDir := t.TempDir()
+
+	q1, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last uint64
+	for i := 0; i < 3; i++ {
+		rec, err := q1.Enqueue([]byte("payload"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		last = rec.Sequence
+	}
+	if err := q1.DeleteThrough(last); err != nil {
+		t.Fatal(err)
+	}
+	if q1.Len() != 0 {
+		t.Fatalf("expected drained queue, got %d", q1.Len())
+	}
+
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := q2.Enqueue([]byte("after-reopen"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Sequence <= last {
+		t.Fatalf("next sequence %d must exceed prior high watermark %d", next.Sequence, last)
+	}
+}
+
+func TestDurableQueueCorruptMetaFailsClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	metaPath := filepath.Join(tempDir, sequenceMetaFile)
+	if err := os.WriteFile(metaPath, []byte("{not-json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024); err == nil {
+		t.Fatal("corrupt sequence metadata must fail closed")
+	}
+}
+
+func TestDurableQueueJSONCompleteness(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := q.Enqueue([]byte("valid-json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 1 || batch[0].Sequence != rec.Sequence {
+		t.Fatalf("valid object must pass: err=%v batch=%+v", err, batch)
+	}
+
+	// object + second JSON object
+	entries, _ := os.ReadDir(filepath.Join(tempDir, "active"))
+	activeFile := filepath.Join(tempDir, "active", entries[0].Name())
+	raw, err := os.ReadFile(activeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(activeFile, append(raw, []byte(`{"extra":true}`)...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 0 {
+		t.Fatalf("second JSON object must quarantine, got %d", len(batch))
+	}
+
+	// trailing non-JSON garbage on a fresh record
+	q2Dir := t.TempDir()
+	q2, err := NewDurableQueue(q2Dir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q2.Enqueue([]byte("again")); err != nil {
+		t.Fatal(err)
+	}
+	entries2, _ := os.ReadDir(filepath.Join(q2Dir, "active"))
+	active2 := filepath.Join(q2Dir, "active", entries2[0].Name())
+	raw2, _ := os.ReadFile(active2)
+	if err := os.WriteFile(active2, append(raw2, []byte("not-json-garbage")...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 0 {
+		t.Fatalf("trailing garbage must quarantine, got %d", len(batch))
+	}
+}
+
+func TestDurableQueueCorruptMetaNeverResetsSequence(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last uint64
+	for i := 0; i < 3; i++ {
+		rec, err := q.Enqueue([]byte("payload"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		last = rec.Sequence
+	}
+	metaPath := filepath.Join(tempDir, sequenceMetaFile)
+	if err := os.WriteFile(metaPath, append([]byte(`{"highestSequence":3}`), []byte(`{"highestSequence":1}`)...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024); err == nil {
+		t.Fatal("trailing second meta object must fail closed")
+	}
+	// After fail-closed reopen rejection, rewrite valid meta and ensure lineage continues above last.
+	if err := os.WriteFile(metaPath, []byte(`{"highestSequence":3}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := q2.Enqueue([]byte("after-corrupt-attempt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Sequence <= last {
+		t.Fatalf("corrupt meta must never reset sequence; next=%d last=%d", next.Sequence, last)
+	}
+}

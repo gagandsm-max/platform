@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ type DeliveryStats struct {
 type Worker struct {
 	q               DeliveryQueue
 	transport       client.Transport
+	agentID         string
 	maxBatchRecords int
 	maxBatchBytes   int64
 	retryBase       time.Duration
@@ -52,6 +54,7 @@ type Worker struct {
 func NewWorker(
 	q DeliveryQueue,
 	tr client.Transport,
+	agentID string,
 	maxBatchRecords int,
 	maxBatchBytes int64,
 	retryBase time.Duration,
@@ -64,6 +67,10 @@ func NewWorker(
 	}
 	if tr == nil {
 		return nil, errors.New("DELIVERY_TRANSPORT_REQUIRED: transport must be provided")
+	}
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return nil, errors.New("DELIVERY_AGENT_ID_REQUIRED: worker agent ID must be provided")
 	}
 	if maxBatchRecords <= 0 {
 		maxBatchRecords = 100
@@ -87,6 +94,7 @@ func NewWorker(
 	w := &Worker{
 		q:               q,
 		transport:       tr,
+		agentID:         agentID,
 		maxBatchRecords: maxBatchRecords,
 		maxBatchBytes:   maxBatchBytes,
 		retryBase:       retryBase,
@@ -174,8 +182,16 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
+	batchID := client.BuildBatchID(w.agentID, records)
+	if batchID == "" {
+		w.recordFailure(client.FailurePermanent, "DELIVERY_BATCH_ID_FAILED")
+		return false, errors.New("DELIVERY_BATCH_ID_FAILED: unable to compute batch identity")
+	}
+
 	batch := client.Batch{
 		CorrelationID: corrID,
+		AgentID:       w.agentID,
+		BatchID:       batchID,
 		Records:       records,
 	}
 
@@ -206,7 +222,7 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	if err := validateAck(records, ack); err != nil {
+	if err := validateAck(records, w.agentID, batchID, ack); err != nil {
 		w.recordFailure(client.FailurePermanent, "DELIVERY_ACK_INVALID")
 		w.logger.Error("Invalid delivery ACK rejected; queue retained", "error", err)
 		return false, err
@@ -231,9 +247,21 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-func validateAck(records []queue.Record, ack client.Ack) error {
+func validateAck(records []queue.Record, expectedAgentID, expectedBatchID string, ack client.Ack) error {
 	if ack.AcceptedThrough == 0 {
 		return errors.New("DELIVERY_ACK_EMPTY: empty ACK does not authorize deletion")
+	}
+	if strings.TrimSpace(ack.BatchID) == "" {
+		return errors.New("DELIVERY_ACK_MISSING_BATCH_ID: batch-bound ACK required before deletion")
+	}
+	if strings.TrimSpace(ack.AgentID) == "" {
+		return errors.New("DELIVERY_ACK_MISSING_AGENT_ID: agent-bound ACK required before deletion")
+	}
+	if ack.BatchID != expectedBatchID {
+		return fmt.Errorf("DELIVERY_ACK_BATCH_MISMATCH: ack batch_id %q does not match submitted %q", ack.BatchID, expectedBatchID)
+	}
+	if strings.TrimSpace(ack.AgentID) != expectedAgentID {
+		return fmt.Errorf("DELIVERY_ACK_AGENT_MISMATCH: ack agent_id %q does not match submitted %q", ack.AgentID, expectedAgentID)
 	}
 	if len(records) == 0 {
 		return errors.New("DELIVERY_ACK_EMPTY_BATCH: ACK without submitted records")
