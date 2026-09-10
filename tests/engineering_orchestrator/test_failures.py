@@ -8,11 +8,11 @@ import unittest
 from tools.engineering_orchestrator.engine import EngineError, OrchestratorEngine
 from tools.engineering_orchestrator.failures import (
     MAX_TRANSIENT_RETRIES,
+    FailurePolicyError,
     can_auto_rework,
     disposition_for_failure,
     next_retry_count,
 )
-from tools.engineering_orchestrator.failures import FailurePolicyError
 from tools.engineering_orchestrator.models import (
     Actor,
     FailureClass,
@@ -80,50 +80,59 @@ class FailureRetryTests(unittest.TestCase):
 
     def test_engine_transient_retries_then_block(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            engine = OrchestratorEngine(OrchestratorStore(tmp))
-            engine.init_task(task_id="T1", title="t", head_sha="h1")
-            engine.transition(State.SOURCE_INSPECTION, Actor.WRITER)
+            eng = OrchestratorEngine(OrchestratorStore(tmp))
+            eng.init_task(task_id="T1", title="t", head_sha="h1", base_sha="b1")
+            eng.transition(
+                State.SOURCE_INSPECTION,
+                Actor.WRITER,
+                expected_state=State.TASK_ACCEPTED,
+            )
 
-            r1 = engine.apply_failure(
+            r1 = eng.apply_failure(
                 FailureClass.TRANSIENT_EXTERNAL_FAILURE, Actor.WRITER
             )
             self.assertEqual(r1["disposition"], "RETRY")
-            self.assertEqual(engine.task.state, State.SOURCE_INSPECTION)
+            self.assertEqual(eng.task.state, State.SOURCE_INSPECTION)
 
-            r2 = engine.apply_failure(
+            r2 = eng.apply_failure(
                 FailureClass.TRANSIENT_EXTERNAL_FAILURE, Actor.WRITER
             )
             self.assertEqual(r2["disposition"], "RETRY")
 
-            r3 = engine.apply_failure(
+            r3 = eng.apply_failure(
                 FailureClass.TRANSIENT_EXTERNAL_FAILURE, Actor.WRITER
             )
             self.assertEqual(r3["disposition"], "BLOCKED")
-            self.assertEqual(engine.task.state, State.BLOCKED)
+            self.assertEqual(eng.task.state, State.BLOCKED)
 
     def test_engine_unknown_rca_rejects_rework_transition(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            engine = OrchestratorEngine(OrchestratorStore(tmp))
-            engine.init_task(task_id="T1", title="t", head_sha="h1")
-            engine.transition(State.SOURCE_INSPECTION, Actor.WRITER)
+            eng = OrchestratorEngine(OrchestratorStore(tmp))
+            eng.init_task(task_id="T1", title="t", head_sha="h1", base_sha="b1")
+            eng.transition(
+                State.SOURCE_INSPECTION,
+                Actor.WRITER,
+                expected_state=State.TASK_ACCEPTED,
+            )
             with self.assertRaises(EngineError):
-                engine.transition(
+                eng.transition(
                     State.REWORK,
                     Actor.WRITER,
+                    expected_state=State.SOURCE_INSPECTION,
                     failure_class=FailureClass.SOURCE_DEFECT,
                     rca_status=RcaStatus.UNKNOWN,
                 )
 
     def test_founder_cto_business_gate_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            engine = OrchestratorEngine(OrchestratorStore(tmp))
-            engine.init_task(task_id="T1", title="t", head_sha="h1")
-            engine.apply_failure(
+            eng = OrchestratorEngine(OrchestratorStore(tmp))
+            eng.init_task(task_id="T1", title="t", head_sha="h1", base_sha="b1")
+            eng.apply_failure(
                 FailureClass.BUSINESS_DECISION_REQUIRED,
                 Actor.WRITER,
                 rca_status=RcaStatus.KNOWN,
             )
-            status = engine.status()
+            status = eng.status()
             self.assertTrue(status["founder_action_required"])
             self.assertEqual(status["waiting_on"], "BUSINESS_DECISION")
 

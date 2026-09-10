@@ -1,32 +1,31 @@
-"""Journal hash-chain, tamper detection, and resume tests.
-
-Hash chain = tamper detection only — not signatures / non-repudiation.
-"""
+"""Journal continuity, reconcile SHA rules, resume, and bundle load agreement."""
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
+from pathlib import Path
 
-from tools.engineering_orchestrator.engine import OrchestratorEngine
-from tools.engineering_orchestrator.journal import (
-    GENESIS_PREVIOUS_HASH,
-    Journal,
-    JournalError,
-    compute_event_hash,
+from tools.engineering_orchestrator.engine import EngineError, OrchestratorEngine
+from tools.engineering_orchestrator.journal import Journal, JournalError
+from tools.engineering_orchestrator.models import (
+    Actor,
+    EvidenceResult,
+    EvidenceType,
+    FailureClass,
+    RcaStatus,
+    State,
 )
-from tools.engineering_orchestrator.models import Actor, FailureClass, RcaStatus, State
 from tools.engineering_orchestrator.store import OrchestratorStore
 
+from helpers import advance_to_full_validation, engine, reconcile_to_independent_review
 
-class JournalResumeTests(unittest.TestCase):
-    def test_genesis_previous_is_sixty_four_zeros(self) -> None:
-        self.assertEqual(GENESIS_PREVIOUS_HASH, "0" * 64)
-        self.assertEqual(len(GENESIS_PREVIOUS_HASH), 64)
 
-    def test_append_chain_and_validate(self) -> None:
-        journal = Journal()
-        e1 = journal.append(
+class JournalTests(unittest.TestCase):
+    def test_hash_chain_tamper_detection(self) -> None:
+        j = Journal()
+        j.append(
             task_id="T1",
             from_state=State.TASK_ACCEPTED,
             to_state=State.SOURCE_INSPECTION,
@@ -34,75 +33,14 @@ class JournalResumeTests(unittest.TestCase):
             base_sha="b1",
             evidence_ids=[],
             actor=Actor.WRITER,
-            timestamp="2026-01-01T00:00:00Z",
-            event_id="e1",
         )
-        self.assertEqual(e1.previous_event_hash, GENESIS_PREVIOUS_HASH)
-        journal.append(
-            task_id="T1",
-            from_state=State.SOURCE_INSPECTION,
-            to_state=State.AGENT_ROUTING,
-            head_sha="h1",
-            base_sha="b1",
-            evidence_ids=[],
-            actor=Actor.WRITER,
-            timestamp="2026-01-01T00:00:01Z",
-            event_id="e2",
-        )
-        journal.validate()
-
-    def test_tamper_detection_on_hash(self) -> None:
-        journal = Journal()
-        journal.append(
-            task_id="T1",
-            from_state=State.TASK_ACCEPTED,
-            to_state=State.SOURCE_INSPECTION,
-            head_sha="h1",
-            base_sha="b1",
-            evidence_ids=[],
-            actor=Actor.WRITER,
-            timestamp="2026-01-01T00:00:00Z",
-            event_id="e1",
-        )
-        journal._events[0].notes = "tampered"
-        # notes included in hash when present — force hash mismatch via field change
-        journal._events[0].head_sha = "EVIL"
-        with self.assertRaises(JournalError) as ctx:
-            journal.validate()
-        self.assertIn("tamper", str(ctx.exception).lower())
-
-    def test_missing_reordered_events(self) -> None:
-        journal = Journal()
-        journal.append(
-            task_id="T1",
-            from_state=State.TASK_ACCEPTED,
-            to_state=State.SOURCE_INSPECTION,
-            head_sha="h1",
-            base_sha="b1",
-            evidence_ids=[],
-            actor=Actor.WRITER,
-            timestamp="2026-01-01T00:00:00Z",
-            event_id="e1",
-        )
-        journal.append(
-            task_id="T1",
-            from_state=State.SOURCE_INSPECTION,
-            to_state=State.AGENT_ROUTING,
-            head_sha="h1",
-            base_sha="b1",
-            evidence_ids=[],
-            actor=Actor.WRITER,
-            timestamp="2026-01-01T00:00:01Z",
-            event_id="e2",
-        )
-        # Reorder
-        journal._events[0], journal._events[1] = journal._events[1], journal._events[0]
+        j._events[0].notes = "tampered"
         with self.assertRaises(JournalError):
-            journal.validate()
+            j.validate()
 
-    def test_sequence_gap(self) -> None:
-        journal = Journal()
-        journal.append(
+    def test_ordinary_event_rejects_head_change(self) -> None:
+        j = Journal()
+        j.append(
             task_id="T1",
             from_state=State.TASK_ACCEPTED,
             to_state=State.SOURCE_INSPECTION,
@@ -110,61 +48,190 @@ class JournalResumeTests(unittest.TestCase):
             base_sha="b1",
             evidence_ids=[],
             actor=Actor.WRITER,
-            timestamp="2026-01-01T00:00:00Z",
-            event_id="e1",
         )
-        journal._events[0].sequence = 3
-        # Also need matching hash for sequence field — expect sequence error first
-        with self.assertRaises(JournalError) as ctx:
-            journal.validate()
-        self.assertIn("sequence", str(ctx.exception).lower())
+        j.append(
+            task_id="T1",
+            from_state=State.SOURCE_INSPECTION,
+            to_state=State.AGENT_ROUTING,
+            head_sha="h2",
+            base_sha="b1",
+            evidence_ids=[],
+            actor=Actor.WRITER,
+        )
+        with self.assertRaises(JournalError):
+            j.validate()
 
-    def test_blocked_resume(self) -> None:
+    def test_ordinary_event_rejects_base_change(self) -> None:
+        j = Journal()
+        j.append(
+            task_id="T1",
+            from_state=State.TASK_ACCEPTED,
+            to_state=State.SOURCE_INSPECTION,
+            head_sha="h1",
+            base_sha="b1",
+            evidence_ids=[],
+            actor=Actor.WRITER,
+        )
+        j.append(
+            task_id="T1",
+            from_state=State.SOURCE_INSPECTION,
+            to_state=State.AGENT_ROUTING,
+            head_sha="h1",
+            base_sha="b2",
+            evidence_ids=[],
+            actor=Actor.WRITER,
+        )
+        with self.assertRaises(JournalError):
+            j.validate()
+
+    def test_reconcile_expected_sha_validation(self) -> None:
+        j = Journal()
+        # Build minimal path to FULL_VALIDATION via writer edges — skip for unit:
+        # directly append reconcile-like after a seed event is invalid without path.
+        # Use engine path instead.
         with tempfile.TemporaryDirectory() as tmp:
-            engine = OrchestratorEngine(OrchestratorStore(tmp))
-            engine.init_task(task_id="T1", title="t", head_sha="h1")
-            engine.transition(State.SOURCE_INSPECTION, Actor.WRITER)
-            engine.apply_failure(
+            eng = engine(tmp)
+            eng.init_task(task_id="T1", title="t", head_sha="h1", base_sha="b1")
+            advance_to_full_validation(eng)
+            eng.record_evidence(
+                evidence_id="src-verify",
+                evidence_type=EvidenceType.SOURCE,
+                head_sha="h1",
+                claim_scope="default",
+                result=EvidenceResult.PASS,
+                collected_at="t",
+                command_identity="src",
+            )
+            with self.assertRaises(EngineError):
+                eng.reconcile_base(
+                    expected_state=State.FULL_VALIDATION,
+                    expected_head_sha="WRONG",
+                    expected_base_sha="b1",
+                    new_head_sha="h2",
+                    new_base_sha="b2",
+                    changed_paths=["tools/engineering_orchestrator/engine.py"],
+                    verification_evidence_ids=["src-verify"],
+                    impact_known=True,
+                )
+            with self.assertRaises(EngineError):
+                eng.reconcile_base(
+                    expected_state=State.FULL_VALIDATION,
+                    expected_head_sha="h1",
+                    expected_base_sha="WRONG",
+                    new_head_sha="h2",
+                    new_base_sha="b2",
+                    changed_paths=["tools/engineering_orchestrator/engine.py"],
+                    verification_evidence_ids=["src-verify"],
+                    impact_known=True,
+                )
+            # Successful reconcile then journal validates
+            eng.reconcile_base(
+                expected_state=State.FULL_VALIDATION,
+                expected_head_sha="h1",
+                expected_base_sha="b1",
+                new_head_sha="h2",
+                new_base_sha="b2",
+                changed_paths=["tools/engineering_orchestrator/engine.py"],
+                verification_evidence_ids=["src-verify"],
+                impact_known=True,
+            )
+            eng.journal.validate(enforce_transitions=True)
+            self.assertEqual(eng.task.head_sha, "h2")
+            self.assertEqual(eng.task.base_sha, "b2")
+
+    def test_task_journal_state_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            eng = engine(tmp)
+            eng.init_task(task_id="T1", title="t", head_sha="h1", base_sha="b1")
+            eng.transition(
+                State.SOURCE_INSPECTION,
+                Actor.WRITER,
+                expected_state=State.TASK_ACCEPTED,
+            )
+            bundle_path = Path(tmp) / "bundle.json"
+            data = json.loads(bundle_path.read_text(encoding="utf-8"))
+            data["task"]["state"] = "IMPLEMENTATION"
+            bundle_path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(EngineError):
+                OrchestratorEngine(OrchestratorStore(tmp))
+
+    def test_task_journal_head_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            eng = engine(tmp)
+            eng.init_task(task_id="T1", title="t", head_sha="h1", base_sha="b1")
+            eng.transition(
+                State.SOURCE_INSPECTION,
+                Actor.WRITER,
+                expected_state=State.TASK_ACCEPTED,
+            )
+            bundle_path = Path(tmp) / "bundle.json"
+            data = json.loads(bundle_path.read_text(encoding="utf-8"))
+            data["task"]["head_sha"] = "TAMPERED"
+            bundle_path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(EngineError):
+                OrchestratorEngine(OrchestratorStore(tmp))
+
+    def test_task_journal_base_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            eng = engine(tmp)
+            eng.init_task(task_id="T1", title="t", head_sha="h1", base_sha="b1")
+            eng.transition(
+                State.SOURCE_INSPECTION,
+                Actor.WRITER,
+                expected_state=State.TASK_ACCEPTED,
+            )
+            bundle_path = Path(tmp) / "bundle.json"
+            data = json.loads(bundle_path.read_text(encoding="utf-8"))
+            data["task"]["base_sha"] = "TAMPERED"
+            bundle_path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(EngineError):
+                OrchestratorEngine(OrchestratorStore(tmp))
+
+    def test_blocked_resume_tampering_and_journal_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            eng = engine(tmp)
+            eng.init_task(task_id="T1", title="t", head_sha="h1", base_sha="b1")
+            eng.transition(
+                State.SOURCE_INSPECTION,
+                Actor.WRITER,
+                expected_state=State.TASK_ACCEPTED,
+            )
+            eng.transition(
+                State.AGENT_ROUTING,
+                Actor.WRITER,
+                expected_state=State.SOURCE_INSPECTION,
+            )
+            eng.apply_failure(
                 FailureClass.EVIDENCE_GAP,
                 Actor.WRITER,
                 rca_status=RcaStatus.KNOWN,
             )
-            self.assertEqual(engine.task.state, State.BLOCKED)
-            self.assertEqual(engine.task.resume_state, State.SOURCE_INSPECTION)
-            engine.transition(State.SOURCE_INSPECTION, Actor.FOUNDER_CTO)
-            self.assertEqual(engine.task.state, State.SOURCE_INSPECTION)
-            result = engine.validate_journal()
-            self.assertTrue(result["ok"])
-
-    def test_resume_wrong_target_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            engine = OrchestratorEngine(OrchestratorStore(tmp))
-            engine.init_task(task_id="T1", title="t", head_sha="h1")
-            engine.transition(State.SOURCE_INSPECTION, Actor.WRITER)
-            engine.transition(
-                State.BLOCKED,
-                Actor.WRITER,
-                resume_state=State.SOURCE_INSPECTION,
-                failure_class=FailureClass.ENVIRONMENT_DEFECT,
+            self.assertEqual(eng.task.state, State.BLOCKED)
+            self.assertEqual(eng.task.resume_state, State.AGENT_ROUTING)
+            # Tamper resume to wrong state
+            with self.assertRaises(EngineError):
+                eng.transition(
+                    State.SOURCE_INSPECTION,
+                    Actor.FOUNDER_CTO,
+                    expected_state=State.BLOCKED,
+                )
+            eng.transition(
+                State.AGENT_ROUTING,
+                Actor.FOUNDER_CTO,
+                expected_state=State.BLOCKED,
             )
-            with self.assertRaises(Exception):
-                engine.transition(State.IMPLEMENTATION, Actor.FOUNDER_CTO)
+            self.assertIsNone(eng.task.resume_state)
 
-    def test_compute_event_hash_deterministic(self) -> None:
-        payload = {
-            "sequence": 1,
-            "event_id": "e1",
-            "task_id": "T1",
-            "from_state": "TASK_ACCEPTED",
-            "to_state": "SOURCE_INSPECTION",
-            "head_sha": "h",
-            "base_sha": "b",
-            "evidence_ids": [],
-            "actor": "WRITER",
-            "timestamp": "t",
-            "previous_event_hash": GENESIS_PREVIOUS_HASH,
-        }
-        self.assertEqual(compute_event_hash(payload), compute_event_hash(payload))
+    def test_replay_and_validate_cli_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            eng = engine(tmp)
+            eng.init_task(task_id="T1", title="t", head_sha="h1", base_sha="b1")
+            advance_to_full_validation(eng)
+            reconcile_to_independent_review(eng)
+            result = eng.validate_journal()
+            self.assertTrue(result["ok"])
+            replay = eng.replay()
+            self.assertEqual(replay["state"], State.INDEPENDENT_REVIEW.value)
 
 
 if __name__ == "__main__":

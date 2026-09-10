@@ -2,20 +2,47 @@
 
 Transition tables encode allowed (from, to, actors). Authority-critical
 edges are also enforced in authority.py.
+
+FULL_VALIDATION → BASE_RECONCILIATION is NOT in ALLOWED_TRANSITIONS for
+generic transition(); it is only reachable via reconcile_base().
 """
 
 from __future__ import annotations
 
 from .models import Actor, State, TERMINAL_STATES
 
-# Happy-path sequential edges (writer/system may advance until REALITY_GATE).
-_HAPPY_EDGES: list[tuple[State, State]] = [
+# Pre-review happy path (writer/system) — stops at FULL_VALIDATION.
+_WRITER_HAPPY_EDGES: list[tuple[State, State]] = [
     (State.TASK_ACCEPTED, State.SOURCE_INSPECTION),
     (State.SOURCE_INSPECTION, State.AGENT_ROUTING),
     (State.AGENT_ROUTING, State.RCA_COMPLETE),
     (State.RCA_COMPLETE, State.IMPLEMENTATION),
     (State.IMPLEMENTATION, State.FOCUSED_VALIDATION),
     (State.FOCUSED_VALIDATION, State.FULL_VALIDATION),
+]
+
+# Post-reconcile happy edges with restricted actors (not blanket WRITER|SYSTEM).
+_RESTRICTED_HAPPY: list[tuple[State, State, frozenset[Actor]]] = [
+    (
+        State.BASE_RECONCILIATION,
+        State.INDEPENDENT_REVIEW,
+        frozenset({Actor.SYSTEM}),
+    ),
+    (
+        State.INDEPENDENT_REVIEW,
+        State.EXACT_HEAD_CI,
+        frozenset({Actor.INDEPENDENT_REVIEWER}),
+    ),
+    (
+        State.EXACT_HEAD_CI,
+        State.REALITY_GATE,
+        frozenset({Actor.SYSTEM}),
+    ),
+]
+
+# Display / helper path including reconcile (not all generic-transition edges).
+_HAPPY_EDGES: list[tuple[State, State]] = [
+    *_WRITER_HAPPY_EDGES,
     (State.FULL_VALIDATION, State.BASE_RECONCILIATION),
     (State.BASE_RECONCILIATION, State.INDEPENDENT_REVIEW),
     (State.INDEPENDENT_REVIEW, State.EXACT_HEAD_CI),
@@ -34,8 +61,11 @@ REWORK_REENTRY_TARGETS = frozenset(
 # Explicit allowed (from_state, to_state) -> frozenset of actors.
 ALLOWED_TRANSITIONS: dict[tuple[State, State], frozenset[Actor]] = {}
 
-for _src, _dst in _HAPPY_EDGES:
+for _src, _dst in _WRITER_HAPPY_EDGES:
     ALLOWED_TRANSITIONS[(_src, _dst)] = frozenset({Actor.WRITER, Actor.SYSTEM})
+
+for _src, _dst, _actors in _RESTRICTED_HAPPY:
+    ALLOWED_TRANSITIONS[(_src, _dst)] = _actors
 
 # Reality Checker owns ready-for-merge entry.
 ALLOWED_TRANSITIONS[(State.REALITY_GATE, State.READY_FOR_MERGE_GATE)] = frozenset(
@@ -103,11 +133,18 @@ def is_terminal(state: State) -> bool:
     return state in TERMINAL_STATES
 
 
+def is_reconcile_only_edge(from_state: State, to_state: State) -> bool:
+    return from_state == State.FULL_VALIDATION and to_state == State.BASE_RECONCILIATION
+
+
 def allowed_actors(from_state: State, to_state: State) -> frozenset[Actor]:
     return ALLOWED_TRANSITIONS.get((from_state, to_state), frozenset())
 
 
 def is_transition_allowed(from_state: State, to_state: State, actor: Actor) -> bool:
+    if is_reconcile_only_edge(from_state, to_state):
+        # Only reconcile_base may take this edge (SYSTEM).
+        return False
     actors = allowed_actors(from_state, to_state)
     return actor in actors
 
@@ -117,6 +154,10 @@ def validate_transition(from_state: State, to_state: State, actor: Actor) -> Non
         raise TransitionError(f"no-op transition rejected: {from_state.value}")
     if is_terminal(from_state):
         raise TransitionError(f"terminal state {from_state.value} cannot transition")
+    if is_reconcile_only_edge(from_state, to_state):
+        raise TransitionError(
+            "FULL_VALIDATION → BASE_RECONCILIATION only via reconcile_base()"
+        )
     actors = allowed_actors(from_state, to_state)
     if not actors:
         raise TransitionError(

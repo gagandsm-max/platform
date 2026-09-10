@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "engineering_orchestrator/event.schema.json",
   "title": "EngineeringOrchestratorJournalEvent",
-  "description": "Append-only journal event. event_hash is SHA-256 tamper detection only — not a signature and not non-repudiation.",
+  "description": "Append-only journal event. event_hash is SHA-256 tamper detection only — not a signature and not non-repudiation. HEAD/base may change only on reconcile events.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -30,7 +30,14 @@
     "evidence_ids": { "type": "array", "items": { "type": "string" } },
     "actor": {
       "type": "string",
-      "enum": ["WRITER", "REALITY_CHECKER", "MERGE_AUTHORITY", "FOUNDER_CTO", "SYSTEM"]
+      "enum": [
+        "WRITER",
+        "INDEPENDENT_REVIEWER",
+        "REALITY_CHECKER",
+        "MERGE_AUTHORITY",
+        "FOUNDER_CTO",
+        "SYSTEM"
+      ]
     },
     "timestamp": { "type": "string" },
     "previous_event_hash": {
@@ -46,6 +53,9 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "resume_state": { "type": ["string", "null"] },
-    "notes": { "type": "string" }
+    "notes": { "type": "string" },
+    "expected_head_sha": { "type": "string" },
+    "expected_base_sha": { "type": "string" },
+    "changed_paths": { "type": "array", "items": { "type": "string" } }
   }
 }

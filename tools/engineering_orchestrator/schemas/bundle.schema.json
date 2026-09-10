@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "engineering_orchestrator/bundle.schema.json",
+  "title": "EngineeringOrchestratorBundle",
+  "description": "Single canonical store. Phase 1 assumes one writer process; generation CAS is sequential only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generation",
+    "task",
+    "journal",
+    "evidence",
+    "lanes",
+    "migrations",
+    "handoffs"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "generation": { "type": "integer", "minimum": 0 },
+    "task": { "type": ["object", "null"] },
+    "journal": { "type": "array" },
+    "evidence": { "type": "array" },
+    "lanes": { "type": "array" },
+    "migrations": { "type": "array" },
+    "handoffs": { "type": "array" }
+  }
+}

@@ -43,6 +43,8 @@ def _waiting_on(task: Task) -> str:
         return "MERGE_AUTHORITY"
     if task.state == State.REALITY_GATE:
         return "REALITY_CHECKER"
+    if task.state == State.INDEPENDENT_REVIEW:
+        return "INDEPENDENT_REVIEWER"
     if task.state == State.BLOCKED:
         if task.failure_class == FailureClass.BUSINESS_DECISION_REQUIRED:
             return "BUSINESS_DECISION"

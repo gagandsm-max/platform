@@ -33,6 +33,8 @@
     },
     "head_sha": { "type": "string" },
     "base_sha": { "type": "string" },
+    "repository": { "type": "string" },
+    "branch": { "type": "string" },
     "actor_last": { "type": ["string", "null"] },
     "rca_status": {
       "type": "string",
@@ -42,11 +44,24 @@
     "resume_state": { "type": ["string", "null"] },
     "rework_target": { "type": ["string", "null"] },
     "readiness": { "type": "boolean" },
+    "readiness_target": {
+      "type": "string",
+      "enum": [
+        "IMPLEMENTED",
+        "COMPONENT_TESTED",
+        "FOUNDATION_SAFE_TO_LAND",
+        "PILOT_READY",
+        "PRODUCTION_READY",
+        "ENTERPRISE_GA_READY"
+      ]
+    },
     "evidence_ids": { "type": "array", "items": { "type": "string" } },
+    "required_gates": { "type": "array" },
     "lane_id": { "type": "string" },
     "path_prefixes": { "type": "array", "items": { "type": "string" } },
     "notes": { "type": "string" },
     "retry_counts": { "type": "object" },
-    "required_scopes": { "type": "array", "items": { "type": "string" } }
+    "required_scopes": { "type": "array", "items": { "type": "string" } },
+    "migration_reservation_allowed": { "type": "boolean" }
   }
 }
