@@ -21,16 +21,17 @@ const (
 	batchIndexDirName    = "batch-index"
 )
 
-// DurableReplayConflictError is returned when a durable batch index detects a
-// conflicting replay for the same (tenant, agent, batchID) key.
+// DurableReplayConflictError is returned when durable Agent sequence identity
+// is reused with different immutable batch contents.
 type DurableReplayConflictError struct {
-	TenantID string
-	AgentID  string
-	BatchID  string
+	TenantID      string
+	AgentID       string
+	FirstSequence uint64
+	LastSequence  uint64
 }
 
 func (e *DurableReplayConflictError) Error() string {
-	return ErrCodeReplayConflict + ": durable batch index conflict"
+	return ErrCodeReplayConflict + ": durable Agent sequence conflict"
 }
 
 func IsDurableReplayConflict(err error) bool {
@@ -46,7 +47,7 @@ type batchIndexEntry struct {
 	LastSequence     uint64 `json:"lastSequence"`
 	BatchChecksum    string `json:"batchChecksum"`
 	AcceptedThrough  uint64 `json:"acceptedThrough"`
-	SpoolSequence    uint64 `json:"spoolSequence,omitempty"`
+	SpoolSequence    uint64 `json:"spoolSequence"`
 	AssignmentGen    int64  `json:"assignmentGeneration,omitempty"`
 	ReceivingSensor  string `json:"receivingSensorId,omitempty"`
 }
@@ -67,11 +68,13 @@ type durableBatchPayload struct {
 }
 
 // SpoolAcceptanceSink durably accepts Agent batches into a dedicated DiskSpool
-// directory. It is isolated from the observation telemetry spool/uploader path.
+// directory. The spool is the durable source of truth; the batch index is only
+// a derived lookup accelerator and is rebuilt from the complete pending spool.
 type SpoolAcceptanceSink struct {
-	spool    *spool.DiskSpool
-	indexDir string
-	mu       sync.Mutex
+	spool              *spool.DiskSpool
+	indexDir           string
+	mu                 sync.Mutex
+	reconcileRequired  bool
 }
 
 func NewSpoolAcceptanceSink(agentSpool *spool.DiskSpool, agentSpoolDir string) (*SpoolAcceptanceSink, error) {
@@ -102,20 +105,25 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.reconcileRequired {
+		if err := s.reconcileAllLocked(); err != nil {
+			return AcceptanceResult{}, err
+		}
+	}
+
 	checksum := ComputeBatchChecksum(env.Records)
-	key := batchIndexKey(env.TenantID, env.AgentID, env.BatchID)
-	if existing, ok, err := s.readIndexLocked(key); err != nil {
+	key := batchIndexKey(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence)
+	if existing, ok, err := s.readVerifiedIndexLocked(key); err != nil {
 		return AcceptanceResult{}, err
 	} else if ok {
-		if existing.FirstSequence == env.FirstSequence &&
-			existing.LastSequence == env.LastSequence &&
-			existing.BatchChecksum == checksum {
+		if existing.BatchChecksum == checksum {
 			return AcceptanceResult{AcceptedThrough: existing.AcceptedThrough}, nil
 		}
 		return AcceptanceResult{}, &DurableReplayConflictError{
-			TenantID: env.TenantID,
-			AgentID:  env.AgentID,
-			BatchID:  env.BatchID,
+			TenantID:      env.TenantID,
+			AgentID:       env.AgentID,
+			FirstSequence: env.FirstSequence,
+			LastSequence:  env.LastSequence,
 		}
 	}
 
@@ -165,17 +173,22 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 		ReceivingSensor: env.ReceivingSensorID,
 	}
 	if err := s.writeIndexLocked(key, entry); err != nil {
-		// Payload is durable but index is not; refuse ACK so Agent retries.
+		// The payload is already durable. Block subsequent acceptance until the
+		// complete spool has been reconciled so retries cannot accumulate orphans.
+		s.reconcileRequired = true
 		return AcceptanceResult{}, err
 	}
 	return AcceptanceResult{AcceptedThrough: env.LastSequence}, nil
 }
 
-func batchIndexKey(tenantID, agentID, batchID string) string {
+// batchIndexKey intentionally excludes BatchID. Agent sequence/range is the
+// correctness identity; BatchID remains correlation metadata only.
+func batchIndexKey(tenantID, agentID string, firstSequence, lastSequence uint64) string {
 	var b []byte
 	b = appendLenPrefixed(b, tenantID)
 	b = appendLenPrefixed(b, agentID)
-	b = appendLenPrefixed(b, batchID)
+	b = appendLenPrefixed(b, fmt.Sprintf("%d", firstSequence))
+	b = appendLenPrefixed(b, fmt.Sprintf("%d", lastSequence))
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
@@ -196,6 +209,34 @@ func (s *SpoolAcceptanceSink) readIndexLocked(key string) (batchIndexEntry, bool
 	var entry batchIndexEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
 		return batchIndexEntry{}, false, fmt.Errorf("%s: corrupt batch index entry: %w", ErrCodeSinkFailed, err)
+	}
+	return entry, true, nil
+}
+
+func (s *SpoolAcceptanceSink) readVerifiedIndexLocked(key string) (batchIndexEntry, bool, error) {
+	entry, ok, err := s.readIndexLocked(key)
+	if err != nil || !ok {
+		return entry, ok, err
+	}
+	if entry.SpoolSequence == 0 {
+		return batchIndexEntry{}, false, fmt.Errorf("%s: batch index missing durable spool sequence", ErrCodeSinkFailed)
+	}
+	rec, err := s.spool.ReadPendingRecord(entry.SpoolSequence)
+	if err != nil {
+		return batchIndexEntry{}, false, fmt.Errorf("%s: batch index durable record unavailable: %w", ErrCodeSinkFailed, err)
+	}
+	if rec.Type != agentBatchRecordType {
+		return batchIndexEntry{}, false, fmt.Errorf("%s: batch index references wrong spool record type", ErrCodeSinkFailed)
+	}
+	var payload durableBatchPayload
+	if err := json.Unmarshal(rec.Payload, &payload); err != nil {
+		return batchIndexEntry{}, false, fmt.Errorf("%s: indexed durable payload is corrupt: %w", ErrCodeSinkFailed, err)
+	}
+	payloadKey := batchIndexKey(payload.TenantID, payload.AgentID, payload.FirstSequence, payload.LastSequence)
+	if payloadKey != key || payload.TenantID != entry.TenantID || payload.AgentID != entry.AgentID ||
+		payload.FirstSequence != entry.FirstSequence || payload.LastSequence != entry.LastSequence ||
+		payload.BatchChecksum != entry.BatchChecksum || entry.AcceptedThrough != payload.LastSequence {
+		return batchIndexEntry{}, false, fmt.Errorf("%s: batch index does not match durable spool payload", ErrCodeSinkFailed)
 	}
 	return entry, true, nil
 }
@@ -236,7 +277,11 @@ func (s *SpoolAcceptanceSink) writeIndexLocked(key string, entry batchIndexEntry
 		return fmt.Errorf("%s: failed to publish batch index: %w", ErrCodeSinkFailed, err)
 	}
 	cleanup = false
-	dirFile, err := os.Open(s.indexDir)
+	return syncIndexDir(s.indexDir)
+}
+
+func syncIndexDir(dir string) error {
+	dirFile, err := os.Open(dir)
 	if err != nil {
 		return fmt.Errorf("%s: failed to open batch index dir: %w", ErrCodeSinkFailed, err)
 	}
@@ -248,31 +293,65 @@ func (s *SpoolAcceptanceSink) writeIndexLocked(key string, entry batchIndexEntry
 }
 
 func (s *SpoolAcceptanceSink) rebuildIndexFromSpool() error {
-	// Best-effort rebuild for restart safety: scan pending spool records and
-	// ensure index entries exist for agent delivery batches.
-	const maxRecords = 1024
-	const maxBytes = 64 * 1024 * 1024
-	batch, err := s.spool.ReadBatch(maxRecords, maxBytes)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reconcileAllLocked()
+}
+
+func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
+	// The spool is authoritative. Remove only derived JSON index entries, then
+	// rebuild the complete index from every pending durable Agent record.
+	entries, err := os.ReadDir(s.indexDir)
 	if err != nil {
-		// Empty / no pending is fine; other errors surface.
-		if spool.CodeOf(err) == spool.CodeSequence || spool.CodeOf(err) == spool.CodeCorruption {
-			return fmt.Errorf("%s: agent spool recovery failed: %w", ErrCodeSinkFailed, err)
-		}
-		// ReadBatch with no pending records returns empty batch + nil.
+		return fmt.Errorf("%s: failed to list batch index directory: %w", ErrCodeSinkFailed, err)
 	}
-	for _, rec := range batch.Records {
-		if rec.Type != agentBatchRecordType {
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".json") {
 			continue
+		}
+		path := filepath.Join(s.indexDir, entry.Name())
+		info, err := os.Lstat(path)
+		if err != nil {
+			return fmt.Errorf("%s: failed to inspect batch index entry: %w", ErrCodeSinkFailed, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("%s: unsafe batch index entry type", ErrCodeSinkFailed)
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("%s: failed to clear derived batch index: %w", ErrCodeSinkFailed, err)
+		}
+	}
+	if err := syncIndexDir(s.indexDir); err != nil {
+		return err
+	}
+
+	seen := make(map[string]batchIndexEntry)
+	err = s.spool.VisitPending(func(rec spool.Record) error {
+		if rec.Type != agentBatchRecordType {
+			return nil
 		}
 		var payload durableBatchPayload
 		if err := json.Unmarshal(rec.Payload, &payload); err != nil {
-			continue
+			return fmt.Errorf("%s: corrupt durable Agent payload during recovery: %w", ErrCodeSinkFailed, err)
 		}
-		key := batchIndexKey(payload.TenantID, payload.AgentID, payload.BatchID)
-		if _, ok, err := s.readIndexLocked(key); err != nil {
-			return err
-		} else if ok {
-			continue
+		if strings.TrimSpace(payload.TenantID) == "" || strings.TrimSpace(payload.AgentID) == "" ||
+			payload.FirstSequence == 0 || payload.LastSequence < payload.FirstSequence ||
+			strings.TrimSpace(payload.BatchChecksum) == "" {
+			return fmt.Errorf("%s: incomplete durable Agent payload during recovery", ErrCodeSinkFailed)
+		}
+		key := batchIndexKey(payload.TenantID, payload.AgentID, payload.FirstSequence, payload.LastSequence)
+		if existing, ok := seen[key]; ok {
+			if existing.BatchChecksum != payload.BatchChecksum {
+				return &DurableReplayConflictError{
+					TenantID:      payload.TenantID,
+					AgentID:       payload.AgentID,
+					FirstSequence: payload.FirstSequence,
+					LastSequence:  payload.LastSequence,
+				}
+			}
+			// Exact duplicate already exists durably. Keep the earliest spool
+			// record as canonical and do not create another index entry.
+			return nil
 		}
 		entry := batchIndexEntry{
 			TenantID:        payload.TenantID,
@@ -286,9 +365,16 @@ func (s *SpoolAcceptanceSink) rebuildIndexFromSpool() error {
 			AssignmentGen:   payload.Generation,
 			ReceivingSensor: payload.SensorID,
 		}
+		seen[key] = entry
 		if err := s.writeIndexLocked(key, entry); err != nil {
 			return err
 		}
+		return nil
+	})
+	if err != nil {
+		s.reconcileRequired = true
+		return err
 	}
+	s.reconcileRequired = false
 	return nil
 }
