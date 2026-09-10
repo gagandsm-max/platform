@@ -152,7 +152,8 @@ func TestRejectionOnIdentityMismatch(t *testing.T) {
 	ident := NewStaticTestIdentityVerifier()
 	ident.AllowCommonName("agent-rogue", "agent-rogue")
 	auth := NewInMemoryAssignmentAuthorizer()
-	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	// Rogue peer must be assigned so authorize succeeds; claim agentId is then checked.
+	auth.Allow("agent-rogue", "sensor-infra-01", "tenant-1", "site-primary")
 	sink := NewInMemoryAcceptanceSink()
 	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
 
@@ -704,8 +705,8 @@ func TestPayloadCannotAlterNormalizedSinkEnvelope(t *testing.T) {
 	srv, client := mockTLSServer(rcv, "agent-1")
 	defer srv.Close()
 
-	// Matching claims (case-insensitive tenant) still normalize to authoritative values.
-	env := sampleEnvelope("Agent-1", "TENANT-AUTH", sampleRecord(1, "r-1", []byte(`{"m":1}`)))
+	// Agent ID is exact-case; tenant/site claims remain normalized to authoritative values.
+	env := sampleEnvelope("agent-1", "TENANT-AUTH", sampleRecord(1, "r-1", []byte(`{"m":1}`)))
 	env.SiteID = "SITE-AUTH"
 	body, _ := json.Marshal(env)
 	resp := postJSON(t, client, srv.URL+EndpointPath, body)
@@ -727,6 +728,7 @@ func TestInconsistentAssignmentSensorRejected(t *testing.T) {
 		SiteID:   "site-primary",
 		SensorID: "wrong-sensor",
 		AgentID:  "agent-1",
+		Generation: 1,
 		Assigned: true,
 	}}
 	sink := NewInMemoryAcceptanceSink()
@@ -751,6 +753,7 @@ func TestInconsistentAssignmentAgentRejected(t *testing.T) {
 		SiteID:   "site-primary",
 		SensorID: "sensor-infra-01",
 		AgentID:  "other-agent",
+		Generation: 1,
 		Assigned: true,
 	}}
 	sink := NewInMemoryAcceptanceSink()
@@ -775,6 +778,7 @@ func TestAssignmentContextEmptyAgentIDRejected(t *testing.T) {
 		SiteID:   "site-primary",
 		SensorID: "sensor-infra-01",
 		AgentID:  "",
+		Generation: 1,
 		Assigned: true,
 	}}
 	sink := NewInMemoryAcceptanceSink()
@@ -816,6 +820,7 @@ func TestAssignmentContextCaseOnlyAgentIDMismatchRejected(t *testing.T) {
 		SiteID:   "site-primary",
 		SensorID: "sensor-infra-01",
 		AgentID:  "AGENT-1",
+		Generation: 1,
 		Assigned: true,
 	}}
 	sink := NewInMemoryAcceptanceSink()
@@ -857,6 +862,7 @@ func TestAssignmentContextExactAgentIDMatchAccepted(t *testing.T) {
 		SiteID:   "site-primary",
 		SensorID: "sensor-infra-01",
 		AgentID:  "agent-1",
+		Generation: 1,
 		Assigned: true,
 	}}
 	sink := NewInMemoryAcceptanceSink()

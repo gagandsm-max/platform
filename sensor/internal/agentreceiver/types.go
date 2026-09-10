@@ -19,9 +19,11 @@ const (
 	ErrCodeRequestTooLarge        = "ERR_REQUEST_TOO_LARGE"
 	ErrCodeAuthRequired           = "ERR_AUTH_CERTIFICATE_REQUIRED"
 	ErrCodeAuthInvalid            = "ERR_AUTH_CERTIFICATE_INVALID"
-	ErrCodeAuthIdentityMismatch   = "ERR_AUTH_IDENTITY_MISMATCH"
-	ErrCodeAgentNotAssigned       = "ERR_AGENT_NOT_ASSIGNED"
-	ErrCodeRoleIneligible         = "ERR_ROLE_INELIGIBLE"
+	ErrCodeAuthIdentityMismatch            = "ERR_AUTH_IDENTITY_MISMATCH"
+	ErrCodeAgentNotAssigned                = "ERR_AGENT_NOT_ASSIGNED"
+	ErrCodeAgentAuthorityUnavailable       = "ERR_AGENT_AUTHORITY_UNAVAILABLE"
+	ErrCodeAgentAssignmentSensorMismatch   = "ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH"
+	ErrCodeRoleIneligible                  = "ERR_ROLE_INELIGIBLE"
 	ErrCodeUnsupportedSchema      = "ERR_UNSUPPORTED_SCHEMA_VERSION"
 	ErrCodeEmptyBatch             = "ERR_EMPTY_BATCH"
 	ErrCodeBatchTooLarge          = "ERR_BATCH_TOO_LARGE"
@@ -56,6 +58,10 @@ type DeliveryEnvelope struct {
 	LastSequence  uint64           `json:"lastSequence"`
 	RecordCount   int              `json:"recordCount"`
 	Records       []DeliveryRecord `json:"records"`
+
+	// Stamped by Receiver after authoritative assignment; never wire claims.
+	ReceivingSensorID      string `json:"-"`
+	AssignmentGeneration   int64  `json:"-"`
 }
 
 // DeliveryAck is the explicit application acknowledgement returned by the Sensor.

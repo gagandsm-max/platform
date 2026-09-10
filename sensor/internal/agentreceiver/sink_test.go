@@ -11,7 +11,10 @@ import (
 )
 
 // InMemoryAcceptanceSink is TEST-ONLY and is NOT durable correctness authority.
-// It retains batches in process memory for unit tests and harnesses only.
+// It retains logically accepted batches in process memory for unit tests and
+// harnesses only. Exact source-range/content replays are idempotent so tests can
+// observe logical acceptance while the Receiver still re-enters the sink to
+// re-verify its acceptance authority.
 type InMemoryAcceptanceSink struct {
 	mu            sync.Mutex
 	batches       []DeliveryEnvelope
@@ -35,6 +38,17 @@ func (s *InMemoryAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEn
 
 	if s.injectedError != nil {
 		return AcceptanceResult{}, s.injectedError
+	}
+
+	checksum := ComputeBatchChecksum(env.Records)
+	for _, existing := range s.batches {
+		if existing.TenantID == env.TenantID &&
+			existing.AgentID == env.AgentID &&
+			existing.FirstSequence == env.FirstSequence &&
+			existing.LastSequence == env.LastSequence &&
+			ComputeBatchChecksum(existing.Records) == checksum {
+			return AcceptanceResult{AcceptedThrough: existing.LastSequence}, nil
+		}
 	}
 
 	s.batches = append(s.batches, env)
@@ -83,11 +97,14 @@ func (s *InMemoryAcceptanceSink) Reset() {
 
 // DurableTestAcceptanceSink is TEST-ONLY. It writes accepted batches under a directory
 // with atomic temp+rename semantics sufficient for integration tests. It is not the
-// production Sensor spool adapter.
+// production Sensor spool adapter. Exact source-range/content replay is logically
+// idempotent so Receiver replay still re-enters the sink without creating a second
+// durable test artifact.
 type DurableTestAcceptanceSink struct {
-	mu  sync.Mutex
-	dir string
-	n   int
+	mu       sync.Mutex
+	dir      string
+	n        int
+	accepted map[string]string
 }
 
 func NewDurableTestAcceptanceSink(dir string) (*DurableTestAcceptanceSink, error) {
@@ -97,12 +114,21 @@ func NewDurableTestAcceptanceSink(dir string) (*DurableTestAcceptanceSink, error
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	return &DurableTestAcceptanceSink{dir: dir}, nil
+	return &DurableTestAcceptanceSink{dir: dir, accepted: make(map[string]string)}, nil
 }
 
 func (s *DurableTestAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvelope) (AcceptanceResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	key := fmt.Sprintf("%s\x00%s\x00%d\x00%d", env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence)
+	checksum := ComputeBatchChecksum(env.Records)
+	if existing, ok := s.accepted[key]; ok {
+		if existing != checksum {
+			return AcceptanceResult{}, errors.New("durable test sink replay conflict")
+		}
+		return AcceptanceResult{AcceptedThrough: env.LastSequence}, nil
+	}
 
 	s.n++
 	name := fmt.Sprintf("batch_%06d_%s.json", s.n, env.BatchID)
@@ -142,6 +168,7 @@ func (s *DurableTestAcceptanceSink) AcceptBatch(ctx context.Context, env Deliver
 	if err := dirFile.Close(); err != nil {
 		return AcceptanceResult{}, err
 	}
+	s.accepted[key] = checksum
 	return AcceptanceResult{AcceptedThrough: env.LastSequence}, nil
 }
 
