@@ -121,7 +121,7 @@ public class IngestionValidator {
 
         // Sensor identity verification against authoritative scope
         String claimedSensorId = batch.sensorId().trim();
-        if (!claimedSensorId.equalsIgnoreCase(scope.sensorId().trim())) {
+        if (!claimedSensorId.equals(scope.sensorId().trim())) {
             throw new IngestionException(
                     HttpStatus.FORBIDDEN,
                     "ERR_AUTH_IDENTITY_MISMATCH",
