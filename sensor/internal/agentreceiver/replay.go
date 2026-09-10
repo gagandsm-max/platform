@@ -61,12 +61,14 @@ func ComputeBatchChecksum(records []DeliveryRecord) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// ReplayTracker is a thread-safe, bounded in-memory cache that prevents duplicate
-// processing within a single Sensor process lifetime.
+// ReplayTracker is a thread-safe, bounded in-memory cache that prevents conflicting
+// reuse of a BatchID within a single Sensor process lifetime.
 //
 // IMPORTANT: ReplayTracker is a process-local OPTIMIZATION only — not correctness
-// authority across restart or eviction. Eviction or process restart does NOT
-// authorize Agent-side queue deletion; the Agent MUST retain records until it
+// authority across restart, eviction, or durable-storage failure. Exact cache hits
+// deliberately return ReplayNone so the Receiver must re-enter the durable acceptance
+// sink and verify spool truth before emitting an ACK. Eviction or process restart does
+// NOT authorize Agent-side queue deletion; the Agent MUST retain records until it
 // receives a valid durable batch-bound application ACK.
 type ReplayTracker struct {
 	mu         sync.RWMutex
@@ -87,6 +89,8 @@ func NewReplayTracker(maxEntries int) *ReplayTracker {
 }
 
 // Check evaluates whether a ReplayIdentity has been seen before in this process.
+// Exact matches intentionally fall through to durable verification; only conflicting
+// reuse is rejected from the process-local cache.
 func (t *ReplayTracker) Check(id ReplayIdentity, firstSeq, lastSeq uint64, batchChecksum string) (ReplayDecision, DeliveryAck) {
 	key := id.Key()
 	t.mu.RLock()
@@ -100,14 +104,15 @@ func (t *ReplayTracker) Check(id ReplayIdentity, firstSeq, lastSeq uint64, batch
 	if cached.firstSequence == firstSeq &&
 		cached.lastSequence == lastSeq &&
 		cached.batchChecksum == batchChecksum {
-		return ReplayExact, cached.ack
+		return ReplayNone, DeliveryAck{}
 	}
 
 	return ReplayConflict, DeliveryAck{}
 }
 
 // Record stores a successfully accepted batch and its authoritative ACK response.
-// Eviction of this entry never authorizes Agent deletion; Agents retain until valid ACK.
+// The stored ACK is diagnostic/cache state only and is never sufficient by itself to
+// authorize a future ACK; the durable sink remains authoritative.
 func (t *ReplayTracker) Record(id ReplayIdentity, firstSeq, lastSeq uint64, batchChecksum string, ack DeliveryAck) {
 	key := id.Key()
 	t.mu.Lock()
