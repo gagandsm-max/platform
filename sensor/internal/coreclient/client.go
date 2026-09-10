@@ -19,9 +19,11 @@ import (
 )
 
 const (
-	heartbeatPath = "/api/v1/sensor/heartbeat"
-	statusPath    = "/api/v1/sensor/status"
-	telemetryPath = "/api/v1/telemetry"
+	heartbeatPath        = "/api/v1/sensor/heartbeat"
+	statusPath           = "/api/v1/sensor/status"
+	telemetryPath        = "/api/v1/telemetry"
+	discoveryTasksPath   = "/api/v1/sensor/discovery/tasks"
+	discoveryResultsPath = "/api/v1/sensor/discovery/results"
 )
 
 type Config struct {
@@ -90,6 +92,48 @@ type UploadAck struct {
 	SensorIdentity          string  `json:"sensor_identity,omitempty"`
 }
 
+type DiscoveryTaskResponse struct {
+	Status               string   `json:"status"`
+	HasTask              bool     `json:"has_task"`
+	RequestID            string   `json:"request_id,omitempty"`
+	TenantID             string   `json:"tenant_id,omitempty"`
+	CorrelationID        string   `json:"correlation_id,omitempty"`
+	AssignmentVersion    uint64   `json:"assignment_version,omitempty"`
+	Targets              []string `json:"targets,omitempty"`
+	RequestedMethods     []string `json:"requested_methods,omitempty"`
+	CredentialProfileRef string   `json:"credential_profile_ref,omitempty"`
+	SNMPPort             int      `json:"snmp_port,omitempty"`
+	TimeoutMS            int      `json:"timeout_ms,omitempty"`
+	MaxRetries           int      `json:"max_retries,omitempty"`
+}
+
+type DiscoveryEvidencePayload struct {
+	Target           string         `json:"target"`
+	Protocol         string         `json:"protocol"`
+	Method           string         `json:"method"`
+	Status           string         `json:"status"`
+	ReachabilityKind string         `json:"reachability_kind"`
+	TechnicalCode    string         `json:"technical_code,omitempty"`
+	Attributes       map[string]any `json:"attributes,omitempty"`
+	RawEvidence      map[string]any `json:"raw_evidence,omitempty"`
+	DurationMS       int64          `json:"duration_ms"`
+}
+
+type DiscoveryResultSubmission struct {
+	RequestID         string                     `json:"request_id"`
+	AssignmentVersion uint64                     `json:"assignment_version"`
+	Status            string                     `json:"status"`
+	FailureReason     string                     `json:"failure_reason,omitempty"`
+	Evidence          []DiscoveryEvidencePayload `json:"evidence"`
+}
+
+type DiscoveryResultAck struct {
+	Status         string `json:"status"`
+	RequestID      string `json:"request_id"`
+	SensorIdentity string `json:"sensor_identity"`
+	ReceivedAt     string `json:"received_at"`
+}
+
 func New(cfg Config) (*Client, error) {
 	u, err := url.Parse(strings.TrimSpace(cfg.BaseURL))
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
@@ -107,7 +151,6 @@ func New(cfg Config) (*Client, error) {
 	if cfg.CertificateFile == "" || cfg.PrivateKeyFile == "" {
 		return nil, newError(CodeTLSConfiguration, "Sensor mTLS certificate and private key are required", nil, false)
 	}
-
 	caPEM, err := os.ReadFile(cfg.CAFile)
 	if err != nil {
 		return nil, newError(CodeTLSConfiguration, "failed to read Core CA certificate", err, false)
@@ -131,10 +174,6 @@ func New(cfg Config) (*Client, error) {
 	}, nil
 }
 
-// NewCoreClient exists only to keep the pre-runtime bootstrap source buildable
-// during migration. It deliberately fails closed instead of recreating the old
-// insecure development fallback. Production wiring must use New with explicit
-// bounds and checked error handling.
 func NewCoreClient(baseURL, certFile, keyFile, caCertFile string, logger *slog.Logger) *CoreClient {
 	return &Client{logger: logger, initErr: newError(CodeInvalidConfig,
 		"legacy Core client constructor is disabled; use checked New(Config) with explicit request/response bounds", nil, false)}
@@ -181,9 +220,26 @@ func (c *Client) Upload(ctx context.Context, batch Batch) (UploadAck, error) {
 	return ack, nil
 }
 
-// SendBatch is retained only for the pre-runtime demo collector to compile.
-// Raw unsequenced payloads cannot satisfy the durable replay contract and are
-// therefore rejected rather than falsely treated as delivered.
+// Sensor identity is deliberately absent from the discovery task body. Core binds this request to the mTLS certificate.
+func (c *Client) FetchDiscoveryTask(ctx context.Context) (DiscoveryTaskResponse, error) {
+	var out DiscoveryTaskResponse
+	if err := c.doJSON(ctx, http.MethodPost, discoveryTasksPath, nil, "", "", &out); err != nil {
+		return DiscoveryTaskResponse{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) SubmitDiscoveryResults(ctx context.Context, sub DiscoveryResultSubmission, correlationID string) (DiscoveryResultAck, error) {
+	if sub.RequestID == "" || sub.AssignmentVersion == 0 || sub.Status == "" {
+		return DiscoveryResultAck{}, newError(CodeInvalidConfig, "discovery result metadata is incomplete", nil, false)
+	}
+	var out DiscoveryResultAck
+	if err := c.doJSON(ctx, http.MethodPost, discoveryResultsPath, sub, correlationID, "", &out); err != nil {
+		return DiscoveryResultAck{}, err
+	}
+	return out, nil
+}
+
 func (c *Client) SendBatch(context.Context, []byte) error {
 	if c != nil && c.initErr != nil { return c.initErr }
 	return newError(CodeAckContractMissing, "raw unsequenced telemetry upload is disabled; use Upload with replay metadata", nil, false)
@@ -220,8 +276,6 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, corr
 	decoder := json.NewDecoder(bytes.NewReader(responseBody))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
-		// Core responses may gain additive fields across compatible versions. A
-		// narrow projection may ignore them, but malformed JSON is still rejected.
 		if err := json.Unmarshal(responseBody, out); err != nil { return newError(CodeProtocol, "Core response is not valid JSON", err, false) }
 	}
 	return nil
