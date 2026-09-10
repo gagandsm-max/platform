@@ -154,6 +154,38 @@ class AuthorizationRouteMapperIdentifierTest {
                 "/api/v1/tenants/" + TENANT + "/entities/identifiers/resolve");
     }
 
+    /**
+     * Post-#26: customer Discovery APIs remain unmapped. Existing tenant grants must not
+     * unlock Discovery until formal discovery.* permissions are defined. Do not invent them here.
+     */
+    @Test
+    void customerDiscoveryRoutesRemainDefaultDeniedUntilPermissionsDefined() {
+        PrincipalContext principal = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.TENANT_READ,
+                        ResourceScope.tenantWide(ResourceType.TENANT)
+                ),
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.ENTITY_READ,
+                        ResourceScope.tenantWide(ResourceType.ENTITY)
+                )
+        );
+        UUID requestId = UUID.fromString("018f0e0a-0000-7000-8000-000000000321");
+        assertDenied(principal, "POST", "/api/v1/tenants/" + TENANT + "/discovery");
+        assertDenied(principal, "GET", "/api/v1/tenants/" + TENANT + "/discovery");
+        assertDenied(principal, "GET",
+                "/api/v1/tenants/" + TENANT + "/discovery/" + requestId);
+        assertDenied(principal, "GET",
+                "/api/v1/tenants/" + TENANT + "/discovery/" + requestId + "/candidates");
+        assertDenied(principal, "GET",
+                "/api/v1/tenants/" + TENANT + "/discovery/" + requestId + "/evidence");
+        assertDenied(principal, "POST",
+                "/api/v1/tenants/" + TENANT + "/discovery/" + requestId + "/cancel");
+    }
+
     private static PrincipalContext principal(UUID tenantScope, PermissionGrant... grants) {
         return new PrincipalContext(
                 "subject",

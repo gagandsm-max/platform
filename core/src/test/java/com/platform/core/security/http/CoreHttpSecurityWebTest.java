@@ -10,11 +10,13 @@ import com.platform.core.api.TenantController;
 import com.platform.core.api.error.ApiExceptionHandler;
 import com.platform.core.controller.SensorIngestionController;
 import com.platform.core.controller.VersionController;
+import com.platform.core.domain.discovery.DiscoveryService;
 import com.platform.core.domain.tenant.Tenant;
 import com.platform.core.domain.tenant.TenantMode;
 import com.platform.core.domain.tenant.TenantService;
 import com.platform.core.domain.tenant.TenantStatus;
 import com.platform.core.ingestion.SensorIngestionService;
+import com.platform.core.ingestion.authority.SensorAuthorityResolver;
 import com.platform.core.logging.CorrelationIdFilter;
 import com.platform.core.security.authorization.PermissionGrant;
 import com.platform.core.security.authorization.PermissionGrantDirectory;
@@ -85,6 +87,12 @@ class CoreHttpSecurityWebTest {
 
     @MockBean
     private SensorIngestionService sensorIngestionService;
+
+    @MockBean
+    private DiscoveryService discoveryService;
+
+    @MockBean
+    private SensorAuthorityResolver sensorAuthorityResolver;
 
     @MockBean
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
@@ -356,6 +364,23 @@ class CoreHttpSecurityWebTest {
                 Instant.now().minusSeconds(60), Instant.now().plusSeconds(600));
         mockMvc.perform(get("/api/v1/health/connectivity")
                         .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void authenticatedTenantReadDoesNotUnlockCustomerDiscoveryRoutes() throws Exception {
+        // Concealment: unmapped Discovery customer routes deny as RESOURCE_NOT_FOUND.
+        String token = signedJwt((RSAPrivateKey) KEY_PAIR.getPrivate(), ISSUER, AUDIENCE, "user-a",
+                Instant.now().minusSeconds(60), Instant.now().plusSeconds(600));
+        String discoveryBase = "/api/v1/tenants/" + TENANT_A + "/discovery";
+        mockMvc.perform(get(discoveryBase).header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+        mockMvc.perform(post(discoveryBase)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"scan\",\"targets\":[\"10.0.0.1\"]}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }
