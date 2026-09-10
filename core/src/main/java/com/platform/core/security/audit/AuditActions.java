@@ -23,5 +23,18 @@ public final class AuditActions {
     public static final AuditAction DISCOVERY_PLACEMENT_ASSIGN = new AuditAction("discovery.placement.assign");
     public static final AuditAction DISCOVERY_PLACEMENT_REJECT = new AuditAction("discovery.placement.reject");
 
+    /** Agent Control Authority — credential lifecycle (no secrets). */
+    public static final AuditAction AGENT_ENROLL = new AuditAction("agent.enroll");
+    public static final AuditAction AGENT_CREDENTIAL_BIND = new AuditAction("agent.credential.bind");
+    public static final AuditAction AGENT_CREDENTIAL_ROTATE = new AuditAction("agent.credential.rotate");
+    public static final AuditAction AGENT_CREDENTIAL_REVOKE = new AuditAction("agent.credential.revoke");
+
+    /** Agent Control Authority — administration / assignment (disable ≠ revoke). */
+    public static final AuditAction AGENT_DISABLE = new AuditAction("agent.disable");
+    public static final AuditAction AGENT_REVOKE = new AuditAction("agent.revoke");
+    public static final AuditAction AGENT_ASSIGN = new AuditAction("agent.assign");
+    public static final AuditAction AGENT_REASSIGN = new AuditAction("agent.reassign");
+    public static final AuditAction AGENT_ASSIGNMENT_REVOKE = new AuditAction("agent.assignment.revoke");
+
     private AuditActions() {}
 }
