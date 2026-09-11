@@ -1,9 +1,9 @@
 # Platform — Discovery, Onboarding, Identity & Notification Master
 
-**Document ID:** PLATFORM-ONBOARDING-001  
-**Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — Discovery / Onboarding / Identity / Notification**  
-**Product:** Platform  
+**Document ID:** PLATFORM-ONBOARDING-001
+**Version:** 3.2.2
+**Status:** **Authoritative Mother Reference — Discovery / Onboarding / Identity / Notification**
+**Product:** Platform
 **Change class:** Additive approved product scope clarification; does not remove or weaken any v3.2.1/v3.2.2 requirement
 
 ---
