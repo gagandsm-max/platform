@@ -89,7 +89,9 @@ Authorized decisions are:
 - **Approve** — continue through normal preflight/provisioning and activate the effective monitoring configuration;
 - **Leave Unmanaged** — preserve inventory/reconciliation visibility but do not run normal monitoring/licence workload;
 - **Reject** — deny this candidate/enrollment outcome; for unauthorized Agent enrollment, identity/certificate is revoked/invalidated as policy requires;
-- **Exclude** — prevent repeated creation/re-notification for the matching scoped identity until exclusion is changed/expired.
+- **Exclude** — create a persistent/permanent exclusion for the matching scoped identity so rediscovery, Agent reconnect, later scans or passage of time do not automatically recreate or re-notify the candidate. Reversal requires an explicit authorized administrative action to remove/reopen the exclusion and must be audited.
+
+Temporary suppression, snooze or notification muting is a separate concept and must not be represented as **Exclude**.
 
 Every decision requires an operator comment/reason. Bulk actions require a common decision comment/reason and per-item result evidence; where an item requires a different reason, an authorized per-item override may be recorded.
 
@@ -175,6 +177,10 @@ candidate observation/enrollment
   -> normal preflight/provisioning when approved
 ```
 
+For Agent enrollment, Core may establish the existing Sensor Control assignment before approval as a **provisional enrollment/control/transport association**. That association exists only to establish certificate/identity authority, Agent→Sensor authenticated transport, bounded bootstrap/health evidence and candidate/reconciliation state. It does not itself activate normal monitoring, commercial/licence consumption, normal monitoring profiles, customer operational alerts or recurring monitored workload.
+
+After explicit authorized **Approve** or trusted auto-approval, normal entitlement, capacity and policy checks authorize the active monitoring workload. The existing Sensor Control/assignment mechanism remains the single authority: activation may retain the provisional Sensor or re-evaluate/reassign it through the same assignment/versioning contract. No second Sensor authority mechanism is introduced.
+
 Trusted auto-approval traverses the same identity/preflight/capacity/licence/audit path with policy provenance recorded as the authorizing decision.
 
 ### 4.2 Identity architecture
@@ -242,9 +248,11 @@ It does not own Alert Qualification/Incident state and does not convert every ra
 
 ### 5.4 Agent onboarding
 
-Secure bootstrap establishes unique Agent identity/certificate and accepts only the bounded enrollment/heartbeat data required for review. Default state is `PENDING_APPROVAL`; full monitoring/test workload and normal Sensor assignment are issued after approval or trusted auto-approval.
+Secure bootstrap establishes unique Agent identity/certificate. Core selects an eligible Sensor through the existing Sensor Control authority so the Agent can establish a provisional authenticated Agent→Sensor control/transport association. Before approval that association is limited to certificate/identity authority, onboarding/bootstrap validation, bounded health/bootstrap evidence and candidate/reconciliation traffic.
 
-`UNMANAGED` may retain bounded management identity/inventory visibility without full monitoring. `REJECTED` unauthorized enrollment revokes/invalidates identity as policy requires. `EXCLUDED` suppresses repeated matching review churn until policy changes.
+Default state is `PENDING_APPROVAL`. The provisional Sensor association does **not** activate commercial/licence consumption, customer operational alerts, the normal monitoring profile or recurring monitored workload. Normal monitoring/test workload becomes active only after explicit authorized **Approve** or trusted auto-approval and the normal entitlement/capacity/policy checks. Activation retains or re-evaluates the provisional assignment through the same Sensor Control assignment/versioning mechanism; no second Sensor authority exists.
+
+`UNMANAGED` may retain bounded management identity/inventory visibility without full monitoring. `REJECTED` unauthorized enrollment revokes/invalidates identity as policy requires. `EXCLUDED` is a persistent/permanent automatic-onboarding exclusion and remains effective across rediscovery, Agent reconnect, later scans and passage of time until an explicit authorized audited administrative action removes/reopens it.
 
 ---
 
@@ -260,7 +268,7 @@ onboarding_candidate
   source_ref
   entity_id nullable
   agent_id nullable
-  lifecycle_state DISCOVERED|ENROLLED|PENDING_APPROVAL|PROVISIONING|ACTIVE|UNMANAGED|REJECTED|EXCLUDED|RETIRED
+  lifecycle_state DISCOVERED|ENROLLED|PENDING_APPROVAL|PROVISIONING|ACTIVE|UNMANAGED|REJECTED|EXCLUDED|DECOMMISSION_REQUESTED|DECOMMISSIONED|RETIRED
   identity_conflict_state NONE|REVIEW_REQUIRED|SECURITY_HOLD
   discovered_name nullable
   proposed_display_name nullable
@@ -289,8 +297,11 @@ PENDING_APPROVAL -> PROVISIONING -> ACTIVE
 PENDING_APPROVAL -> UNMANAGED
 PENDING_APPROVAL -> REJECTED
 PENDING_APPROVAL -> EXCLUDED
-ACTIVE -> DECOMMISSION_REQUESTED -> DECOMMISSIONED/RETIRED
+ACTIVE -> DECOMMISSION_REQUESTED -> DECOMMISSIONED
+DECOMMISSIONED -> RETIRED  # optional archival/presentation terminal state where used
 ```
+
+`DECOMMISSION_REQUESTED` and `DECOMMISSIONED` are explicit lifecycle states. `RETIRED` may be used only as an optional post-decommission archival/presentation terminal state; it does not replace or bypass `DECOMMISSIONED`.
 
 Discovery absence does not automatically decommission an entity. Sustained disappearance creates reconciliation/review according to policy.
 
@@ -355,6 +366,7 @@ Every notification retrieval/action rechecks current authorization. A persisted 
 - Candidate/review list APIs are paginated, filterable and tenant/resource scoped.
 - Candidate detail exposes revision/ETag-equivalent for optimistic concurrency.
 - Approve/reject/unmanaged/exclude and bulk review mutations require idempotency key plus required decision comment/reason.
+- Removing/reopening an `EXCLUDED` candidate is a separate explicit authorized administrative mutation with audit evidence; EXCLUDE has no automatic expiry.
 - Stale candidate revision returns a stable conflict error and requires refresh.
 - Bulk operations return per-item success/failure/remediation.
 - Notification list/count/read/dismiss/action APIs are tenant/resource scoped and re-authorize the source object.
@@ -414,6 +426,7 @@ sequenceDiagram
   participant EN as Enrollment
   participant ID as Identity/Reconciliation
   participant ONB as Onboarding
+  participant P as Sensor Placement/Control
   participant N as Notification Center
   participant S as Sensor
 
@@ -421,15 +434,27 @@ sequenceDiagram
   EN->>ID: Validate tenant/token and existing Agent/entity identity
   ID-->>EN: Binding/new candidate/conflict
   EN-->>AG: Unique Agent ID + mTLS cert (or deny/hold)
+  EN->>P: Select eligible Sensor for provisional enrollment transport
+  P-->>AG: Provisional Sensor endpoints + assignment version
+  AG->>S: Establish authenticated mTLS onboarding/control transport
+  S-->>AG: Accept bounded bootstrap/health evidence only
   EN->>ONB: ENROLLED candidate + minimal metadata
   ONB->>N: Review-required notification
-  Note over AG,ONB: PENDING_APPROVAL by default; no full monitoring workload
-  ONB-->>AG: After approval: profile + Sensor assignment
-  AG->>S: Normal mTLS telemetry session
+  Note over AG,ONB: PENDING_APPROVAL by default; provisional transport is not monitoring/licence activation
+  alt Authorized APPROVE or trusted auto-approval
+    ONB->>P: Run entitlement/capacity/policy checks; retain or re-evaluate assignment
+    P-->>AG: Active monitoring assignment/profile version
+    S-->>AG: Activate normal monitoring/test profile
+    AG->>S: Normal recurring host metrics / Edge Test results
+  else Pending/Unmanaged/Rejected/Excluded
+    S-->>AG: No normal monitoring workload/profile
+  end
   AG->>ONB: Later heartbeat with changed IP/VPN/Wi-Fi address
   ONB->>ID: Update observed address/history for same identity
   ID-->>ONB: Same endpoint unless durable identity conflict exists
 ```
+
+The provisional and active phases use the same Sensor Control assignment authority and assignment/versioning contract. Approval does not introduce a second Sensor authority mechanism.
 
 ### DF-ONB-003 — Notification delivery
 
@@ -489,7 +514,7 @@ Required filters/columns include:
 
 Candidate detail shows identity evidence/provenance, editable metadata/grouping, effective policy inheritance, capacity/licence impact, preflight/compatibility/conflict evidence and audit/history.
 
-Actions are **Approve**, **Leave Unmanaged**, **Reject**, **Exclude** according to permission. Every action requires a comment/reason. Bulk actions show per-item outcomes.
+Actions are **Approve**, **Leave Unmanaged**, **Reject**, **Exclude Permanently** according to permission. Every action requires a comment/reason. Bulk actions show per-item outcomes. Reopening/removing a permanent exclusion is a distinct authorized audited administrative action, not an expiry behavior.
 
 ### 8.3 Agent review UX
 
@@ -507,7 +532,7 @@ Policy may notify on material drift:
 - unexpected site/ownership movement;
 - newly observed critical adjacency/relationship.
 
-Routine identical observations, transient address changes and repeated scan/reconnect churn are grouped/deduplicated.
+Routine identical observations, transient address changes and repeated scan/reconnect churn are grouped/deduplicated. A matching permanent exclusion prevents automatic candidate recreation/re-notification until explicitly removed by an authorized audited action.
 
 ---
 
@@ -516,8 +541,9 @@ Routine identical observations, transient address changes and repeated scan/reco
 - Discovery profiles are tenant/site/scope constrained and rate/burst bounded.
 - Discovery Credential Profiles retain normal `USE` authorization; review users do not gain secret access because a candidate was found.
 - Agent enrollment tokens are short-lived/single-use and scoped to tenant/deployment plus optional site/profile/auto-approval policy.
-- Successful bootstrap establishes unique `agent_id` + mTLS certificate identity.
-- Full monitoring remains pending review by default; trusted auto-approval may activate only after normal identity/preflight/audit checks.
+- Successful bootstrap establishes unique `agent_id` + mTLS certificate identity and may establish the provisional Sensor association required for authenticated onboarding/control transport.
+- Pre-approval Agent→Sensor traffic is limited to enrollment/control/bootstrap validation and bounded health/bootstrap evidence; it does not authorize normal monitoring, licence activation, normal monitoring profiles or customer operational alerts.
+- Full monitoring remains pending review by default; trusted auto-approval may activate only after normal identity/preflight/entitlement/capacity/policy/audit checks using the same Sensor Control authority.
 - Reuse of Agent identity/certificate by conflicting endpoints, clone/reimage evidence or durable-identity conflict enters security/reconciliation hold.
 - IP/MAC change on authenticated Agent is an observation, not new identity.
 - Review/auto-approval decisions are security-sensitive audit events with actor/policy, tenant, candidate/entity, result, comment/reason and request/correlation context.
@@ -552,8 +578,8 @@ Required mitigations include scoped single-use tokens, unique mTLS identities, e
 Mandatory regression coverage includes:
 
 1. Network discovery candidate enters review without active monitoring/licence by default.
-2. Agent enrollment establishes unique identity but remains pending review until approval/trusted auto-approval.
-3. Unapproved Agent does not receive normal full monitoring workload.
+2. Agent enrollment establishes unique identity and may establish the provisional authenticated Sensor transport association, but remains pending review until approval/trusted auto-approval.
+3. Unapproved Agent may exchange only bounded onboarding/control/bootstrap health evidence and does not receive normal monitoring workload/profile, commercial/licence activation or customer operational alerts.
 4. Approve/reject/unmanaged/exclude require comment/reason and complete audit evidence.
 5. Edited metadata/group/sub-group/profile/alert policy produces expected inherited effective configuration after activation.
 6. Bulk review is bounded and reports per-item success/failure.
@@ -566,6 +592,8 @@ Mandatory regression coverage includes:
 13. Discovery/reconnect storms are deduplicated/rate-limited without unbounded PostgreSQL growth/browser fan-out.
 14. Material discovery drift produces bounded review notifications; routine identical observations/dynamic-IP churn do not.
 15. Decision comments are safely rendered and cannot inject executable UI/script content.
+16. `EXCLUDED` candidates remain permanently excluded across rediscovery, Agent reconnect, scans and time passage; only an explicit authorized audited remove/reopen action reverses the exclusion.
+17. Lifecycle persistence and transitions represent `ACTIVE -> DECOMMISSION_REQUESTED -> DECOMMISSIONED`; optional `RETIRED` state, where used, occurs only after decommissioning.
 
 A tenant-isolation leak through onboarding/notifications, approval bypass, or identity collision/merge that can bind one customer's endpoint incorrectly is a release blocker under existing tenant/security/data-integrity gates.
 
@@ -580,7 +608,7 @@ Required runbooks/additions:
 - onboarding queue backlog;
 - notification-generation backlog/failure;
 - notification recipient scope/authorization investigation;
-- exclusion/unmanaged-state correction;
+- permanent-exclusion removal/reopen and unmanaged-state correction;
 - bulk-review partial failure;
 - auto-approval policy disable/rollback.
 
@@ -595,7 +623,7 @@ Operational self-monitoring includes candidate queue depth/age, review backlog, 
 | REQ ID | Requirement | Governing PRD | Architecture/HLD/LLD/Dataflow | UI/Security/Quality |
 |---|---|---|---|---|
 | `REQ-ONB-001` | Unified governed review lifecycle for network discovery, Agent enrollment and candidate-producing sources | `PRD-ONB-001/002` | §§4–7 | §§8–12 |
-| `REQ-ONB-002` | Review before full monitoring/licence by default; scoped trusted auto-approval | `PRD-ONB-001/008` | §§4–7 | §§9–11 |
+| `REQ-ONB-002` | Review before full monitoring/licence by default; provisional Agent transport association is not activation; scoped trusted auto-approval | `PRD-ONB-001/008` | §§4–7 | §§9–11 |
 | `REQ-ONB-003` | New candidate notification to authorized users with deep link, dedupe/rate limit | `PRD-ONB-003` | §§4–7 | §§8,10,11 |
 | `REQ-ONB-004` | Approve/reject/unmanaged/exclude require comment/reason and audit | `PRD-ONB-004` | §§5–7 | §§8–12 |
 | `REQ-ONB-005` | Review/edit customer metadata, site/group/sub-group/tags/criticality | `PRD-ONB-005` | §§5–7 | §8 |
