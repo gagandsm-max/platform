@@ -115,22 +115,32 @@ sequenceDiagram
   participant AG as Agent
   participant CE as Core Endpoint
   participant EN as Agent Enrollment
-  participant PS as Placement Service
+  participant PS as Placement/Sensor Control
+  participant ONB as Onboarding/Policy
   participant S as Assigned Sensor
 
   A->>AG: Install Agent with Core endpoint + enrollment token
   AG->>CE: Secure bootstrap
   CE->>EN: Validate tenant/token/host metadata
   EN-->>AG: Agent ID + mTLS certificate
-  EN->>PS: Request best Sensor for Agent/site/reachability
+  EN->>PS: Request eligible Sensor for provisional enrollment transport
   PS->>PS: Evaluate eligible Sensors + locality + capacity + HA
-  PS-->>AG: Primary + fallback Sensor endpoints, assignment version
-  AG->>S: Establish mTLS telemetry session
-  S-->>AG: Accept Agent + monitoring/test profile
-  AG->>S: Host metrics / Edge Test results
+  PS-->>AG: Primary + fallback Sensor endpoints, provisional assignment version
+  AG->>S: Establish authenticated mTLS onboarding/control transport
+  S-->>AG: Accept bounded bootstrap/health evidence only
+  EN->>ONB: Create/reconcile candidate; PENDING_APPROVAL by default
+  Note over AG,S: Provisional transport association is not monitoring/licence activation
+  alt Authorized APPROVE or trusted auto-approval
+    ONB->>PS: Confirm entitlement/capacity/policy; retain or re-evaluate Sensor
+    PS-->>AG: Active monitoring assignment/profile version
+    S-->>AG: Activate normal monitoring/test profile
+    AG->>S: Normal recurring host metrics / Edge Test results
+  else Pending/Unmanaged/Rejected/Excluded
+    S-->>AG: No normal monitoring workload/profile
+  end
 ```
 
-If Sensor capacity/location changes, Core sends a newer signed assignment; Agent reconnects without reinstall.
+The provisional and active phases use the same Sensor Control assignment authority and assignment/versioning contract; approval does not introduce a second Sensor authority mechanism. If Sensor capacity/location changes, Core sends a newer signed assignment; Agent reconnects without reinstall.
 
 ---
 
