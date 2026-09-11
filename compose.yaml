@@ -5,6 +5,14 @@
 
 name: platform
 
+# Shared development log rotation (Platform_13 / Platform_11 local disk protection).
+# All long-running services must inherit this bound — no unlimited json-file logs.
+x-logging: &platform-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 networks:
   platform_net:
     driver: bridge
@@ -56,11 +64,7 @@ services:
         limits:
           cpus: '1.0'
           memory: 512M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *platform-logging
 
   # ----------------------------------------------------------------------------
   # ClickHouse: Analytical High-Volume Telemetry Database
@@ -96,11 +100,7 @@ services:
         limits:
           cpus: '2.0'
           memory: 1536M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *platform-logging
 
   # ----------------------------------------------------------------------------
   # Apache Kafka: Internal Streaming Backbone (KRaft mode, No Host Port)
@@ -141,11 +141,7 @@ services:
         limits:
           cpus: '2.0'
           memory: 1024M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *platform-logging
 
   # ----------------------------------------------------------------------------
   # Valkey: Ephemeral State and Fast Cache
@@ -175,11 +171,7 @@ services:
         limits:
           cpus: '0.5'
           memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *platform-logging
 
   # ----------------------------------------------------------------------------
   # Platform Core (Primary Node)
@@ -240,11 +232,7 @@ services:
         limits:
           cpus: '2.0'
           memory: 1024M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *platform-logging
 
   # ----------------------------------------------------------------------------
   # Platform Core Standby (HA Profile)
@@ -301,11 +289,7 @@ services:
         limits:
           cpus: '2.0'
           memory: 1024M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *platform-logging
 
   # ----------------------------------------------------------------------------
   # Platform UI (HTTPS-Only Reverse Proxy + React SPA)
@@ -340,11 +324,7 @@ services:
         limits:
           cpus: '0.5'
           memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *platform-logging
 
   # ----------------------------------------------------------------------------
   # Sensor: Network Collector
@@ -391,11 +371,7 @@ services:
         limits:
           cpus: '0.5'
           memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *platform-logging
 
   # ----------------------------------------------------------------------------
   # Sensor: Infrastructure Collector
@@ -442,11 +418,7 @@ services:
         limits:
           cpus: '0.5'
           memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *platform-logging
 
   # ----------------------------------------------------------------------------
   # Scale Profile: Additional Network Sensor
@@ -487,6 +459,7 @@ services:
         limits:
           cpus: '0.5'
           memory: 256M
+    logging: *platform-logging
 
   # ----------------------------------------------------------------------------
   # Analytics: Baseline Analytics Engine
@@ -522,8 +495,4 @@ services:
         limits:
           cpus: '1.0'
           memory: 512M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *platform-logging

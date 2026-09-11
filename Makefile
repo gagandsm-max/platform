@@ -14,7 +14,7 @@ endif
 include $(ENV_FILE)
 export
 
-.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-static-contracts test-integration test-contract test-security-smoke evidence clean dev-reset certs post-reboot-verify
+.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-static-contracts test-integration test-contract test-security-smoke evidence clean dev-reset certs post-reboot-verify dev-disk-check dev-hygiene
 
 help: ## Show available Makefile targets
 	@echo "========================================================================"
@@ -46,6 +46,12 @@ doctor: ## Inspect host environment, verify Docker, Compose, ports, certs, disk,
 	@echo -n "Checking Host RAM... "
 	@echo "$$(free -h | awk '/^Mem:/ {print $$7}') available"
 	@echo "==> Platform Doctor Check Passed."
+
+dev-disk-check: ## Read-only disk/Docker pressure report (70/80/90 thresholds)
+	@bash scripts/dev-disk-check.sh
+
+dev-hygiene: ## Safe reclaim: aged/capped build cache + dangling images (+ labeled ephemeral vols)
+	@bash scripts/dev-hygiene.sh
 
 dev-build: certs ## Build all Platform container images
 	@echo "==> Building Platform containers..."
