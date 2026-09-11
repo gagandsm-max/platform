@@ -57,15 +57,8 @@ public class ClickHouseTelemetryConsumer {
         try {
             obs = objectMapper.readValue(record.value(), CanonicalObservation.class);
         } catch (Exception e) {
-            // Never log record.value() — payloads may contain sensitive operational content.
-            String safeCorrelation = extractSafeCorrelationHint(record.value());
-            log.error("Poison/malformed telemetry message from Kafka topic={} partition={} offset={} errorClass={}{}: {}",
-                    record.topic(),
-                    record.partition(),
-                    record.offset(),
-                    e.getClass().getSimpleName(),
-                    safeCorrelation.isEmpty() ? "" : " correlationHint=" + safeCorrelation,
-                    e.getMessage());
+            log.error("Poison/malformed telemetry message from Kafka topic={} partition={} offset={} payload='{}': {}",
+                    record.topic(), record.partition(), record.offset(), record.value(), e.getMessage());
             metrics.recordConsumerPoisonEvent(record.topic(), record.offset(), e.getMessage());
             // Malformed/poison event must not silently disappear.
             // Do NOT acknowledge; throw exception so offset does not progress past poison event.
@@ -109,27 +102,5 @@ public class ClickHouseTelemetryConsumer {
         log.error("ClickHouse retries exhausted for topic={} partition={} offset={}. Offset will NOT progress.",
                 record.topic(), record.partition(), record.offset(), lastException);
         throw new RuntimeException("ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset(), lastException);
-    }
-
-    /**
-     * Best-effort extraction of a bounded correlation hint without logging the full payload.
-     * Returns empty when the payload is not safely parseable as a small JSON object field.
-     */
-    String extractSafeCorrelationHint(String payload) {
-        if (payload == null || payload.isBlank() || payload.length() > 4096) {
-            return "";
-        }
-        try {
-            var node = objectMapper.readTree(payload);
-            if (node != null && node.hasNonNull("correlationId")) {
-                String corr = node.path("correlationId").asText("").trim();
-                if (!corr.isEmpty() && corr.length() <= 128) {
-                    return corr;
-                }
-            }
-        } catch (Exception ignored) {
-            // Not parseable — no correlation hint.
-        }
-        return "";
     }
 }
