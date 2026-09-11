@@ -1,0 +1,49 @@
+{
+  "version": 2,
+  "states": [
+    "INTAKE",
+    "REBASELINE",
+    "REQUIREMENTS",
+    "DIAGNOSIS",
+    "ROUTING",
+    "IMPLEMENTATION",
+    "LOCAL_VALIDATION",
+    "SOURCE_REVIEW",
+    "ADVERSARIAL_RUNTIME",
+    "SECURITY_DOMAIN_REVIEW",
+    "CI_VALIDATION",
+    "REALITY_GATE",
+    "MERGE_READY",
+    "POST_MERGE_VERIFY",
+    "COMPLETE",
+    "BLOCKED",
+    "REJECTED"
+  ],
+  "orderedFlow": [
+    "INTAKE",
+    "REBASELINE",
+    "REQUIREMENTS",
+    "DIAGNOSIS",
+    "ROUTING",
+    "IMPLEMENTATION",
+    "LOCAL_VALIDATION",
+    "SOURCE_REVIEW",
+    "ADVERSARIAL_RUNTIME",
+    "SECURITY_DOMAIN_REVIEW",
+    "CI_VALIDATION",
+    "REALITY_GATE",
+    "MERGE_READY",
+    "POST_MERGE_VERIFY",
+    "COMPLETE"
+  ],
+  "terminalStates": ["COMPLETE", "REJECTED"],
+  "exceptionStates": ["BLOCKED", "REJECTED"],
+  "rules": {
+    "writerSelfCertificationProhibited": true,
+    "mainOrHeadDriftBlocksStaleReview": true,
+    "validationGateModes": ["REQUIRED", "NOT_APPLICABLE_WITH_EVIDENCE"],
+    "mergeReadyRequiresIndependentVerification": true,
+    "blockedRequiresEvidence": true,
+    "rejectedRequiresEvidence": true
+  }
+}
