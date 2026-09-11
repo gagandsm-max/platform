@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"platform/sensor/internal/agentdrain"
 	"platform/sensor/internal/agentreceiver"
 	"platform/sensor/internal/collector"
 	"platform/sensor/internal/config"
@@ -104,6 +105,7 @@ func main() {
 	var (
 		agentServer *agentreceiver.Server
 		agentSpool  *spool.DiskSpool
+		agentDrain  *agentdrain.Drain
 	)
 	if cfg.AgentReceiverEnabled {
 		agentServer, agentSpool, err = startAgentReceiver(cfg, client, logger)
@@ -111,6 +113,31 @@ func main() {
 			logger.Error("Failed to start Agent Receiver", "error", err, "error_code", "SENSOR_AGENT_RECEIVER_INIT_FAILED")
 			os.Exit(1)
 		}
+		healthServer.SetAgentSpool(agentSpool)
+
+		agentDrain, err = agentdrain.New(agentdrain.Config{
+			SensorID:             cfg.SensorID,
+			AgentSpoolDir:        cfg.AgentSpoolDir,
+			MaxBatchRecords:      cfg.AgentDrainMaxBatchRecords,
+			MaxBatchPayloadBytes: cfg.AgentDrainMaxBatchPayloadBytes,
+			MaxRequestBytes:      cfg.AgentDrainMaxRequestBytes,
+			RequestTimeout:       cfg.AgentDrainRequestTimeout,
+			InitialBackoff:       cfg.AgentDrainInitialBackoff,
+			MaxBackoff:           cfg.AgentDrainMaxBackoff,
+			JitterFraction:       0.1,
+			IdleInterval:         cfg.AgentDrainIdleInterval,
+			ShutdownGrace:        cfg.AgentDrainShutdownGrace,
+			Logger:               logger,
+		}, agentSpool, client)
+		if err != nil {
+			logger.Error("Failed to initialize Agent drain", "error", err, "error_code", "SENSOR_AGENT_DRAIN_INIT_FAILED")
+			os.Exit(1)
+		}
+		if err := agentDrain.Start(ctx); err != nil {
+			logger.Error("Failed to start Agent drain", "error", err)
+			os.Exit(1)
+		}
+
 		go func() {
 			if err := agentServer.ListenAndServe(); err != nil {
 				logger.Error("Agent Receiver listener stopped", "error", err, "error_code", "SENSOR_AGENT_RECEIVER_LISTEN_FAILED")
@@ -124,11 +151,19 @@ func main() {
 	logger.Info("Received termination signal, starting graceful shutdown", "signal", sig.String())
 
 	cancel()
+	// Shutdown order: stop Agent ingress → stop Agent drain → close Agent spool → continue Sensor shutdown.
 	if agentServer != nil {
 		shutdownAgentCtx, shutdownAgentCancel := context.WithTimeout(context.Background(), cfg.AgentReceiverShutdownGrace)
 		defer shutdownAgentCancel()
 		if err := agentServer.Shutdown(shutdownAgentCtx); err != nil {
 			logger.Warn("Agent Receiver shutdown error", "error", err)
+		}
+	}
+	if agentDrain != nil {
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), cfg.AgentDrainShutdownGrace)
+		defer drainCancel()
+		if err := agentDrain.Shutdown(drainCtx); err != nil {
+			logger.Warn("Agent drain shutdown error", "error", err)
 		}
 	}
 	if agentSpool != nil {

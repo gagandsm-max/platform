@@ -32,6 +32,16 @@ type Config struct {
 	AgentSpoolDir              string
 	AgentReceiverMaxInFlight   int
 	AgentReceiverShutdownGrace time.Duration
+
+	// Agent drain (Sensor agent-ingress → Core agent-telemetry).
+	AgentDrainMaxBatchRecords      int
+	AgentDrainMaxBatchPayloadBytes int
+	AgentDrainMaxRequestBytes      int
+	AgentDrainRequestTimeout       time.Duration
+	AgentDrainInitialBackoff       time.Duration
+	AgentDrainMaxBackoff           time.Duration
+	AgentDrainIdleInterval         time.Duration
+	AgentDrainShutdownGrace        time.Duration
 }
 
 func getEnv(key, defaultVal string) string {
@@ -98,6 +108,15 @@ func LoadConfig() *Config {
 		AgentSpoolDir:              getEnv("SENSOR_AGENT_SPOOL_DIR", ""),
 		AgentReceiverMaxInFlight:   getEnvInt("SENSOR_AGENT_RECEIVER_MAX_IN_FLIGHT", 64),
 		AgentReceiverShutdownGrace: getEnvDurationSeconds("SENSOR_AGENT_RECEIVER_SHUTDOWN_GRACE_SECONDS", 10*time.Second),
+
+		AgentDrainMaxBatchRecords:      getEnvInt("SENSOR_AGENT_DRAIN_MAX_BATCH_RECORDS", 32),
+		AgentDrainMaxBatchPayloadBytes: getEnvInt("SENSOR_AGENT_DRAIN_MAX_BATCH_PAYLOAD_BYTES", 1024*1024),
+		AgentDrainMaxRequestBytes:      getEnvInt("SENSOR_AGENT_DRAIN_MAX_REQUEST_BYTES", 2*1024*1024),
+		AgentDrainRequestTimeout:       getEnvDurationSeconds("SENSOR_AGENT_DRAIN_REQUEST_TIMEOUT_SECONDS", 15*time.Second),
+		AgentDrainInitialBackoff:       getEnvDurationSeconds("SENSOR_AGENT_DRAIN_INITIAL_BACKOFF_SECONDS", 1*time.Second),
+		AgentDrainMaxBackoff:           getEnvDurationSeconds("SENSOR_AGENT_DRAIN_MAX_BACKOFF_SECONDS", 30*time.Second),
+		AgentDrainIdleInterval:         getEnvDurationSeconds("SENSOR_AGENT_DRAIN_IDLE_INTERVAL_SECONDS", 1*time.Second),
+		AgentDrainShutdownGrace:        getEnvDurationSeconds("SENSOR_AGENT_DRAIN_SHUTDOWN_GRACE_SECONDS", 10*time.Second),
 	}
 }
 
