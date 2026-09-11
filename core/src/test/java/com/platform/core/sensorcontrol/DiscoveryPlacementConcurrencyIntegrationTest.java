@@ -6,11 +6,14 @@ import com.platform.core.domain.discovery.DiscoveryMethod;
 import com.platform.core.domain.discovery.DiscoveryRequest;
 import com.platform.core.domain.discovery.DiscoveryService;
 import com.platform.core.domain.discovery.DiscoveryStatus;
+import com.platform.core.domain.inventory.Site;
+import com.platform.core.domain.inventory.SiteService;
 import com.platform.core.domain.tenant.Tenant;
 import com.platform.core.domain.tenant.TenantMode;
 import com.platform.core.domain.tenant.TenantService;
 import com.platform.core.domain.tenant.TenantStatus;
 import com.platform.core.persistence.DiscoveryRepository;
+import com.platform.core.persistence.SiteRepository;
 import com.platform.core.persistence.TenantRepository;
 import com.platform.core.security.http.SecurityAuditEmitter;
 import com.platform.core.support.PostgresTestSupport;
@@ -27,6 +30,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import javax.sql.DataSource;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -40,51 +45,84 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * PostgreSQL proof that first-placement is single-winner under concurrency.
+ * Uses a Spring TX-proxied {@link DiscoveryPlacementService} so production
+ * {@code @Transactional} + {@code FOR UPDATE} boundaries are exercised (not only autocommit CAS).
+ */
 @Tag("postgres")
 class DiscoveryPlacementConcurrencyIntegrationTest {
 
     private PostgresTestSupport pg;
+    private AnnotationConfigApplicationContext ctx;
     private TenantService tenantService;
+    private SiteService siteService;
     private SensorControlRepository sensorRepo;
     private SensorControlService sensorControl;
     private DiscoveryRepository discoveryRepo;
     private DiscoveryService discoveryService;
     private DiscoveryPlacementService placement;
+    private NamedParameterJdbcTemplate named;
 
     @BeforeEach
     void setUp() throws Exception {
         pg = new PostgresTestSupport();
         pg.start();
         pg.migrate();
+        named = pg.namedJdbc();
 
-        NamedParameterJdbcTemplate named = pg.namedJdbc();
-        TenantRepository tenantRepo = new TenantRepository(named);
-        tenantService = new TenantService(tenantRepo);
-        sensorRepo = new SensorControlRepository(named);
-        SecurityAuditEmitter audit = new SecurityAuditEmitter();
-        sensorControl = new SensorControlService(sensorRepo, audit);
-        discoveryRepo = new DiscoveryRepository(named);
-        discoveryService = new DiscoveryService(discoveryRepo, tenantService);
-        placement = new DiscoveryPlacementService(
-                sensorRepo, discoveryService, audit, new DiscoveryPlacementMetrics());
+        ctx = new AnnotationConfigApplicationContext();
+        ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+        ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+        ctx.register(PersistenceConfig.class);
+        ctx.registerBean(TenantRepository.class, () -> new TenantRepository(named));
+        ctx.registerBean(SiteRepository.class, () -> new SiteRepository(named));
+        ctx.registerBean(SensorControlRepository.class, () -> new SensorControlRepository(named));
+        ctx.registerBean(DiscoveryRepository.class, () -> new DiscoveryRepository(named));
+        ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+        ctx.registerBean(DiscoveryPlacementMetrics.class, DiscoveryPlacementMetrics::new);
+        ctx.register(
+                TenantService.class,
+                SiteService.class,
+                SensorControlService.class,
+                DiscoveryService.class,
+                DiscoveryPlacementService.class
+        );
+        ctx.refresh();
+
+        tenantService = ctx.getBean(TenantService.class);
+        siteService = ctx.getBean(SiteService.class);
+        sensorRepo = ctx.getBean(SensorControlRepository.class);
+        sensorControl = ctx.getBean(SensorControlService.class);
+        discoveryRepo = ctx.getBean(DiscoveryRepository.class);
+        discoveryService = ctx.getBean(DiscoveryService.class);
+        placement = ctx.getBean(DiscoveryPlacementService.class);
     }
 
     @AfterEach
     void tearDown() {
+        if (ctx != null) {
+            ctx.close();
+        }
         if (pg != null) {
             pg.stop();
         }
     }
 
     private DiscoveryRequest createPending(UUID tenantId, String name, String idem) {
+        return createPending(tenantId, name, idem, null);
+    }
+
+    private DiscoveryRequest createPending(UUID tenantId, String name, String idem, UUID siteId) {
         return discoveryService.createDiscovery(
                 tenantId,
                 name,
                 List.of("10.0.0.10"),
                 List.of(DiscoveryMethod.ICMP),
                 null,
-                null,
+                siteId,
                 null,
                 161,
                 1000,
@@ -95,15 +133,30 @@ class DiscoveryPlacementConcurrencyIntegrationTest {
         );
     }
 
+    private long assignmentVersion(UUID tenantId, UUID requestId) {
+        Long version = named.queryForObject(
+                """
+                        SELECT assignment_version
+                          FROM platform.discovery_request
+                         WHERE tenant_id = :tenantId AND request_id = :requestId
+                        """,
+                Map.of("tenantId", tenantId, "requestId", requestId),
+                Long.class
+        );
+        return version == null ? -1L : version;
+    }
+
     @Test
     void singlePlaceStillWorks() {
         Tenant tenant = tenantService.create("Single Place Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
         sensorControl.enrollSensor("sensor-a", tenant.tenantId(), null, SensorRole.NETWORK, true);
         DiscoveryRequest created = createPending(tenant.tenantId(), "single", "idem-single");
+        assertEquals(0L, assignmentVersion(tenant.tenantId(), created.requestId()));
 
         DiscoveryRequest assigned = placement.placePendingRequest(tenant.tenantId(), created.requestId());
         assertEquals(DiscoveryStatus.ASSIGNED, assigned.status());
         assertEquals("sensor-a", assigned.assignedSensorId());
+        assertEquals(1L, assignmentVersion(tenant.tenantId(), created.requestId()));
     }
 
     @Test
@@ -121,6 +174,7 @@ class DiscoveryPlacementConcurrencyIntegrationTest {
         DiscoveryRequest finalState = discoveryService.getRequest(tenant.tenantId(), created.requestId());
         assertEquals(DiscoveryStatus.ASSIGNED, finalState.status());
         assertEquals("sensor-a", finalState.assignedSensorId());
+        assertEquals(1L, assignmentVersion(tenant.tenantId(), created.requestId()));
     }
 
     @Test
@@ -138,10 +192,53 @@ class DiscoveryPlacementConcurrencyIntegrationTest {
         DiscoveryRequest finalState = discoveryService.getRequest(tenant.tenantId(), created.requestId());
         assertEquals(DiscoveryStatus.ASSIGNED, finalState.status());
         assertEquals("sensor-a", finalState.assignedSensorId());
+        assertEquals(1L, assignmentVersion(tenant.tenantId(), created.requestId()));
     }
 
     @Test
-    void loserCannotOverwriteWinnerAssignment() throws Exception {
+    void concurrentDualWriterDifferentSensorsOneAuthoritativeAssignment() throws Exception {
+        Tenant tenant = tenantService.create("Dual Writer Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-a", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        sensorControl.enrollSensor("sensor-b", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        DiscoveryRequest created = createPending(tenant.tenantId(), "dual-writer", "idem-dual-writer");
+
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger successes = new AtomicInteger();
+        AtomicInteger conflicts = new AtomicInteger();
+        AtomicReference<String> winnerSensor = new AtomicReference<>();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<?>> futures = List.of(
+                    pool.submit(() -> {
+                        raceFirstPlacement(start, tenant.tenantId(), created.requestId(),
+                                "sensor-a", successes, conflicts, winnerSensor);
+                        return null;
+                    }),
+                    pool.submit(() -> {
+                        raceFirstPlacement(start, tenant.tenantId(), created.requestId(),
+                                "sensor-b", successes, conflicts, winnerSensor);
+                        return null;
+                    })
+            );
+            start.countDown();
+            for (Future<?> future : futures) {
+                future.get(30, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertEquals(1, successes.get());
+        assertEquals(1, conflicts.get());
+        DiscoveryRequest finalState = discoveryService.getRequest(tenant.tenantId(), created.requestId());
+        assertEquals(DiscoveryStatus.ASSIGNED, finalState.status());
+        assertTrue(Set.of("sensor-a", "sensor-b").contains(finalState.assignedSensorId()));
+        assertEquals(winnerSensor.get(), finalState.assignedSensorId());
+        assertEquals(1L, assignmentVersion(tenant.tenantId(), created.requestId()));
+    }
+
+    @Test
+    void loserCannotOverwriteWinnerAssignment() {
         Tenant tenant = tenantService.create("No Overwrite Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
         sensorControl.enrollSensor("sensor-a", tenant.tenantId(), null, SensorRole.NETWORK, true);
         sensorControl.enrollSensor("sensor-b", tenant.tenantId(), null, SensorRole.NETWORK, true);
@@ -149,8 +246,8 @@ class DiscoveryPlacementConcurrencyIntegrationTest {
 
         DiscoveryRequest winner = placement.placePendingRequest(tenant.tenantId(), created.requestId());
         assertEquals("sensor-a", winner.assignedSensorId());
+        assertEquals(1L, assignmentVersion(tenant.tenantId(), created.requestId()));
 
-        // Direct first-placement CAS must refuse overwrite of existing assignment.
         assertFalse(discoveryRepo.assignSensorFirstPlacement(
                 tenant.tenantId(), created.requestId(), "sensor-b"));
 
@@ -162,6 +259,7 @@ class DiscoveryPlacementConcurrencyIntegrationTest {
         DiscoveryRequest still = discoveryService.getRequest(tenant.tenantId(), created.requestId());
         assertEquals("sensor-a", still.assignedSensorId());
         assertEquals(DiscoveryStatus.ASSIGNED, still.status());
+        assertEquals(1L, assignmentVersion(tenant.tenantId(), created.requestId()));
     }
 
     @Test
@@ -178,10 +276,11 @@ class DiscoveryPlacementConcurrencyIntegrationTest {
         DiscoveryRequest stillPending = discoveryService.getRequest(tenantA.tenantId(), created.requestId());
         assertEquals(DiscoveryStatus.PENDING, stillPending.status());
         assertNull(stillPending.assignedSensorId());
+        assertEquals(0L, assignmentVersion(tenantA.tenantId(), created.requestId()));
     }
 
     @Test
-    void ineligibleSensorFailClosed() {
+    void roleIneligibleSensorFailClosed() {
         Tenant tenant = tenantService.create("Ineligible Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
         sensorControl.enrollSensor("sensor-infra", tenant.tenantId(), null, SensorRole.INFRASTRUCTURE, true);
         DiscoveryRequest created = createPending(tenant.tenantId(), "ineligible", "idem-ineligible");
@@ -193,24 +292,66 @@ class DiscoveryPlacementConcurrencyIntegrationTest {
         DiscoveryRequest stillPending = discoveryService.getRequest(tenant.tenantId(), created.requestId());
         assertEquals(DiscoveryStatus.PENDING, stillPending.status());
         assertNull(stillPending.assignedSensorId());
+        assertEquals(0L, assignmentVersion(tenant.tenantId(), created.requestId()));
     }
 
     @Test
-    void staleSecondPlaceAfterAssignFails() {
+    void inactiveSensorFailClosed() {
+        Tenant tenant = tenantService.create("Inactive Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-a", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        sensorControl.disableSensor("sensor-a");
+        DiscoveryRequest created = createPending(tenant.tenantId(), "inactive", "idem-inactive");
+
+        SensorControlException ex = assertThrows(SensorControlException.class,
+                () -> placement.placePendingRequest(tenant.tenantId(), created.requestId()));
+        assertEquals(SensorControlException.ERR_NO_ELIGIBLE_SENSOR, ex.getCode());
+
+        DiscoveryRequest stillPending = discoveryService.getRequest(tenant.tenantId(), created.requestId());
+        assertEquals(DiscoveryStatus.PENDING, stillPending.status());
+        assertNull(stillPending.assignedSensorId());
+        assertEquals(0L, assignmentVersion(tenant.tenantId(), created.requestId()));
+    }
+
+    @Test
+    void siteIncompatibleSensorFailClosed() {
+        Tenant tenant = tenantService.create("Site Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        Site siteA = siteService.create(tenant.tenantId(), null, "Site A", "A", "UTC");
+        Site siteB = siteService.create(tenant.tenantId(), null, "Site B", "B", "UTC");
+        sensorControl.enrollSensor("sensor-b", tenant.tenantId(), siteB.siteId(), SensorRole.NETWORK, true);
+        DiscoveryRequest created = createPending(tenant.tenantId(), "site-miss", "idem-site-miss", siteA.siteId());
+
+        SensorControlException ex = assertThrows(SensorControlException.class,
+                () -> placement.placePendingRequest(tenant.tenantId(), created.requestId()));
+        assertEquals(SensorControlException.ERR_NO_ELIGIBLE_SENSOR, ex.getCode());
+
+        DiscoveryRequest stillPending = discoveryService.getRequest(tenant.tenantId(), created.requestId());
+        assertEquals(DiscoveryStatus.PENDING, stillPending.status());
+        assertNull(stillPending.assignedSensorId());
+        assertEquals(0L, assignmentVersion(tenant.tenantId(), created.requestId()));
+    }
+
+    @Test
+    void staleSecondPlaceAfterAssignFailsWithoutBumpingGeneration() {
         Tenant tenant = tenantService.create("Stale Place Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
         sensorControl.enrollSensor("sensor-a", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        sensorControl.enrollSensor("sensor-b", tenant.tenantId(), null, SensorRole.NETWORK, true);
         DiscoveryRequest created = createPending(tenant.tenantId(), "stale", "idem-stale");
 
         DiscoveryRequest assigned = placement.placePendingRequest(tenant.tenantId(), created.requestId());
         assertEquals("sensor-a", assigned.assignedSensorId());
+        assertEquals(1L, assignmentVersion(tenant.tenantId(), created.requestId()));
 
         SensorControlException ex = assertThrows(SensorControlException.class,
                 () -> placement.placePendingRequest(tenant.tenantId(), created.requestId()));
         assertEquals(SensorControlException.ERR_DISCOVERY_REQUEST_NOT_PLACEABLE, ex.getCode());
 
+        assertFalse(discoveryRepo.assignSensorFirstPlacement(
+                tenant.tenantId(), created.requestId(), "sensor-b"));
+
         DiscoveryRequest still = discoveryService.getRequest(tenant.tenantId(), created.requestId());
         assertEquals("sensor-a", still.assignedSensorId());
         assertEquals(DiscoveryStatus.ASSIGNED, still.status());
+        assertEquals(1L, assignmentVersion(tenant.tenantId(), created.requestId()));
     }
 
     @Test
@@ -219,18 +360,18 @@ class DiscoveryPlacementConcurrencyIntegrationTest {
         sensorControl.enrollSensor("sensor-a", tenant.tenantId(), null, SensorRole.NETWORK, true);
         DiscoveryRequest created = createPending(tenant.tenantId(), "rollback", "idem-rollback");
 
-        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
-            ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
-            ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
-            ctx.register(PersistenceConfig.class, FailingAfterAssignDiscoveryConfig.class);
-            ctx.registerBean(TenantRepository.class, () -> new TenantRepository(pg.namedJdbc()));
-            ctx.registerBean(SensorControlRepository.class, () -> sensorRepo);
-            ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
-            ctx.registerBean(DiscoveryPlacementMetrics.class, DiscoveryPlacementMetrics::new);
-            ctx.register(TenantService.class, DiscoveryService.class, DiscoveryPlacementService.class);
-            ctx.refresh();
+        try (AnnotationConfigApplicationContext failCtx = new AnnotationConfigApplicationContext()) {
+            failCtx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+            failCtx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+            failCtx.register(PersistenceConfig.class, FailingAfterAssignDiscoveryConfig.class);
+            failCtx.registerBean(TenantRepository.class, () -> new TenantRepository(named));
+            failCtx.registerBean(SensorControlRepository.class, () -> new SensorControlRepository(named));
+            failCtx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+            failCtx.registerBean(DiscoveryPlacementMetrics.class, DiscoveryPlacementMetrics::new);
+            failCtx.register(TenantService.class, DiscoveryService.class, DiscoveryPlacementService.class);
+            failCtx.refresh();
 
-            DiscoveryPlacementService txPlacement = ctx.getBean(DiscoveryPlacementService.class);
+            DiscoveryPlacementService txPlacement = failCtx.getBean(DiscoveryPlacementService.class);
             assertThrows(IllegalStateException.class,
                     () -> txPlacement.placePendingRequest(tenant.tenantId(), created.requestId()));
         }
@@ -238,6 +379,30 @@ class DiscoveryPlacementConcurrencyIntegrationTest {
         DiscoveryRequest stillPending = discoveryService.getRequest(tenant.tenantId(), created.requestId());
         assertEquals(DiscoveryStatus.PENDING, stillPending.status());
         assertNull(stillPending.assignedSensorId());
+        assertEquals(0L, assignmentVersion(tenant.tenantId(), created.requestId()));
+    }
+
+    private void raceFirstPlacement(
+            CountDownLatch start,
+            UUID tenantId,
+            UUID requestId,
+            String sensorId,
+            AtomicInteger successes,
+            AtomicInteger conflicts,
+            AtomicReference<String> winnerSensor
+    ) throws InterruptedException {
+        start.await();
+        try {
+            discoveryService.assignSensorFirstPlacementFromControlPlane(tenantId, requestId, sensorId);
+            successes.incrementAndGet();
+            winnerSensor.set(sensorId);
+        } catch (DomainException e) {
+            if ("DISCOVERY_PLACEMENT_CONFLICT".equals(e.getCode())) {
+                conflicts.incrementAndGet();
+            } else {
+                throw e;
+            }
+        }
     }
 
     private PlacementRaceResult racePlacement(UUID tenantId, UUID requestId, int threads) throws Exception {
@@ -257,9 +422,9 @@ class DiscoveryPlacementConcurrencyIntegrationTest {
                         successes.incrementAndGet();
                         winner.set(assigned);
                     } catch (SensorControlException e) {
+                        // Under TX + FOR UPDATE, losers may observe CAS conflict or post-commit not-placeable.
                         if (SensorControlException.ERR_DISCOVERY_PLACEMENT_CONFLICT.equals(e.getCode())
                                 || SensorControlException.ERR_DISCOVERY_REQUEST_NOT_PLACEABLE.equals(e.getCode())) {
-                            // Losers may see either conflict (CAS) or not-placeable (locked re-read).
                             conflicts.incrementAndGet();
                         } else {
                             otherFailures.incrementAndGet();
