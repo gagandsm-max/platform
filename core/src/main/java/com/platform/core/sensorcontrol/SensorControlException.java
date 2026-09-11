@@ -20,6 +20,7 @@ public class SensorControlException extends DomainException {
     public static final String ERR_SENSOR_STATE_INVALID = "ERR_SENSOR_STATE_INVALID";
     public static final String ERR_NO_ELIGIBLE_SENSOR = "ERR_NO_ELIGIBLE_SENSOR";
     public static final String ERR_DISCOVERY_REQUEST_NOT_PLACEABLE = "ERR_DISCOVERY_REQUEST_NOT_PLACEABLE";
+    public static final String ERR_DISCOVERY_PLACEMENT_CONFLICT = "ERR_DISCOVERY_PLACEMENT_CONFLICT";
 
     public SensorControlException(String code, String message) {
         super(code, message);
