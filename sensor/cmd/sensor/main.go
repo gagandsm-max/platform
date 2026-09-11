@@ -220,5 +220,9 @@ func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *s
 		_ = agentSpool.Close()
 		return nil, nil, err
 	}
+	if err := srv.Bind(); err != nil {
+		_ = agentSpool.Close()
+		return nil, nil, err
+	}
 	return srv, agentSpool, nil
 }

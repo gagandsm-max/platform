@@ -29,13 +29,14 @@ type ServerConfig struct {
 
 // Server is the Agent-facing HTTPS listener (RequireAndVerifyClientCert).
 type Server struct {
-	cfg      ServerConfig
-	httpSrv  *http.Server
-	listener net.Listener
-	logger   *slog.Logger
-	sem      chan struct{}
-	mu       sync.Mutex
-	started  bool
+	cfg          ServerConfig
+	httpSrv      *http.Server
+	listener     net.Listener
+	logger       *slog.Logger
+	sem          chan struct{}
+	mu           sync.Mutex
+	bound        bool
+	serveStarted bool
 }
 
 func NewServer(cfg ServerConfig) (*Server, error) {
@@ -114,27 +115,53 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}, nil
 }
 
-// ListenAndServe starts the TLS listener. It blocks until Shutdown or failure.
-func (s *Server) ListenAndServe() error {
+// Bind reserves the configured TCP listener synchronously so startup cannot
+// report success while the Agent ingress address is unavailable.
+func (s *Server) Bind() error {
 	s.mu.Lock()
-	if s.started {
-		s.mu.Unlock()
-		return errors.New("ERR_INVALID_CONFIG: Agent receiver server already started")
+	defer s.mu.Unlock()
+	if s.bound {
+		return errors.New("ERR_INVALID_CONFIG: Agent receiver server already bound")
 	}
 	ln, err := net.Listen("tcp", s.cfg.ListenAddr)
 	if err != nil {
-		s.mu.Unlock()
 		return fmt.Errorf("ERR_AGENT_RECEIVER_LISTEN_FAILED: %w", err)
 	}
 	s.listener = ln
-	s.started = true
+	s.bound = true
+	return nil
+}
+
+// ListenAndServe starts the TLS server on the listener reserved by Bind. For
+// compatibility, it binds itself when the caller has not already done so.
+func (s *Server) ListenAndServe() error {
+	s.mu.Lock()
+	bound := s.bound && s.listener != nil
+	s.mu.Unlock()
+	if !bound {
+		if err := s.Bind(); err != nil {
+			return err
+		}
+	}
+
+	s.mu.Lock()
+	if s.serveStarted {
+		s.mu.Unlock()
+		return errors.New("ERR_INVALID_CONFIG: Agent receiver server already started")
+	}
+	ln := s.listener
+	if ln == nil {
+		s.mu.Unlock()
+		return errors.New("ERR_AGENT_RECEIVER_LISTEN_FAILED: Agent receiver listener is unavailable")
+	}
+	s.serveStarted = true
 	s.mu.Unlock()
 
 	s.logger.Info("Agent receiver TLS listener started",
 		"listen_addr", s.cfg.ListenAddr,
 		"client_auth", "RequireAndVerifyClientCert",
 	)
-	err = s.httpSrv.Serve(tls.NewListener(ln, s.httpSrv.TLSConfig))
+	err := s.httpSrv.Serve(tls.NewListener(ln, s.httpSrv.TLSConfig))
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
