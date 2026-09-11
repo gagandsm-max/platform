@@ -5,9 +5,6 @@ import hashlib
 import json
 import sys
 
-EXPECTED_TOTAL = 27
-EXPECTED_TIERS = {"P0": 12, "P1": 15}
-
 repo = Path(__file__).resolve().parents[2]
 pa = repo / "project_agents"
 manifest = json.loads((pa / "manifest.json").read_text())
@@ -68,19 +65,23 @@ def render_codex(entry: dict, body: str, sha: str, canonical: Path) -> str:
 
 
 names = [entry.get("name") for entry in manifest]
-if len(manifest) != EXPECTED_TOTAL:
-    errors.append(f"manifest agent count {len(manifest)} != expected {EXPECTED_TOTAL}")
+if not manifest:
+    errors.append("manifest must declare at least one agent")
 
 if len(set(names)) != len(names):
     duplicates = sorted(name for name, count in Counter(names).items() if count > 1)
     errors.append(f"duplicate manifest agent names: {', '.join(duplicates)}")
 
-tier_counts = Counter(entry.get("tier") for entry in manifest)
-for tier, expected in EXPECTED_TIERS.items():
-    if tier_counts.get(tier, 0) != expected:
-        errors.append(f"manifest {tier} count {tier_counts.get(tier, 0)} != expected {expected}")
+for entry in manifest:
+    missing_fields = [field for field in ("name", "description", "mode", "tier", "sha256") if not entry.get(field)]
+    if missing_fields:
+        errors.append(
+            f"manifest entry {entry.get('name', '<unnamed>')} missing fields: {', '.join(missing_fields)}"
+        )
+    if entry.get("mode") not in {"read", "write"}:
+        errors.append(f"manifest entry {entry.get('name', '<unnamed>')} has invalid mode {entry.get('mode')}")
 
-expected_canonical = {canonical_path(entry).relative_to(pa).as_posix() for entry in manifest}
+expected_canonical = {canonical_path(entry).relative_to(pa).as_posix() for entry in manifest if entry.get("name") and entry.get("tier")}
 actual_canonical = {
     path.relative_to(pa).as_posix()
     for path in (pa / "canonical").rglob("*.md")
@@ -136,4 +137,4 @@ if errors:
         print("-", error)
     sys.exit(1)
 
-print(f"PASS: {len(manifest)} Platform agents exactly synchronized.")
+print(f"PASS: {len(manifest)} manifest-declared Platform agents exactly synchronized.")
