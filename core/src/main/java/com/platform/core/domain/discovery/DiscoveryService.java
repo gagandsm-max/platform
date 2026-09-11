@@ -107,13 +107,40 @@ public class DiscoveryService {
                 .orElseThrow(() -> new DomainException("RESOURCE_NOT_FOUND", "Discovery request not found"));
     }
 
+    /**
+     * Locked read for placement: holds a row lock when called inside an active transaction.
+     */
+    public DiscoveryRequest getRequestForUpdate(UUID tenantId, UUID requestId) {
+        tenantService.get(tenantId);
+        return repository.findByIdForUpdate(tenantId, requestId)
+                .orElseThrow(() -> new DomainException("RESOURCE_NOT_FOUND", "Discovery request not found"));
+    }
+
     public PageResult<DiscoveryRequest> listRequests(UUID tenantId, int page, int limit) {
         tenantService.get(tenantId);
         return repository.listRequests(tenantId, page, limit);
     }
 
     /**
-     * Internal control-plane boundary for Sensor Control/placement integration.
+     * First placement only (PENDING + unassigned). Concurrent losers receive
+     * {@code DISCOVERY_PLACEMENT_CONFLICT}; does not overwrite an existing assignment.
+     */
+    @Transactional
+    public DiscoveryRequest assignSensorFirstPlacementFromControlPlane(UUID tenantId, UUID requestId, String sensorId) {
+        tenantService.get(tenantId);
+        String sensor = boundedRequired(sensorId, 128, "Sensor identity");
+        DiscoveryLimits.validateNoSecrets(sensor);
+        if (!repository.assignSensorFirstPlacement(tenantId, requestId, sensor)) {
+            throw new DomainException("DISCOVERY_PLACEMENT_CONFLICT",
+                    "Discovery request placement lost a concurrent assignment race or is no longer pending");
+        }
+        log.info("Discovery request first-placed by Core control plane: requestId={}, tenantId={}, sensorId={}",
+                requestId, tenantId, sensor);
+        return getRequest(tenantId, requestId);
+    }
+
+    /**
+     * Internal control-plane boundary for intentional Sensor (re)assignment including ASSIGNED→ASSIGNED.
      * It is deliberately not exposed by the Discovery public API. The caller is responsible for supplying
      * an authoritative enrolled Sensor identity after normal Sensor eligibility/placement checks.
      */
