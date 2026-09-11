@@ -81,7 +81,8 @@ public class SensorAgentIngestionController {
         try {
             batchRequest = objectMapper.readValue(rawBody, AgentTelemetryBatchRequest.class);
         } catch (Exception e) {
-            log.warn("Malformed agent-telemetry batch JSON from remote={}: {}", request.getRemoteAddr(), e.getMessage());
+            log.warn("Malformed agent-telemetry batch JSON: code=ERR_MALFORMED_JSON, remoteAddr={}, failureClass={}, bodyBytes={}",
+                    request.getRemoteAddr(), e.getClass().getSimpleName(), rawBody.length);
             return ResponseEntity.badRequest().body(Map.of(
                     "status", "ERROR",
                     "code", "ERR_MALFORMED_JSON",
@@ -93,14 +94,16 @@ public class SensorAgentIngestionController {
             AgentTelemetryAckResponse ack = ingestionService.ingestAgentTelemetry(rawBody, batchRequest, clientCert);
             return ResponseEntity.ok(ack);
         } catch (IngestionException e) {
-            log.warn("Agent-telemetry ingestion rejected: code={}, message={}", e.getCode(), e.getMessage());
+            log.warn("Agent-telemetry ingestion rejected: code={}, status={} ({}), remoteAddr={}",
+                    e.getCode(), e.getStatus().value(), e.getStatus().name(), request.getRemoteAddr());
             return ResponseEntity.status(e.getStatus()).body(Map.of(
                     "status", "ERROR",
                     "code", e.getCode(),
                     "message", e.getMessage()
             ));
         } catch (Exception e) {
-            log.error("Agent-telemetry ingestion failed unexpectedly: {}", e.getMessage(), e);
+            log.error("Agent-telemetry ingestion failed unexpectedly: failureClass={}, code=ERR_INTERNAL_ERROR, remoteAddr={}",
+                    e.getClass().getSimpleName(), request.getRemoteAddr());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                     "status", "ERROR",
                     "code", "ERR_INTERNAL_ERROR",

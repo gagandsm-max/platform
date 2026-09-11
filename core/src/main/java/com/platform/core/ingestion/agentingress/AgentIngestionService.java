@@ -20,10 +20,13 @@ import java.util.List;
 /**
  * Agent → Sensor → Core agent-telemetry ingestion.
  * <p>
- * Cross-system atomicity note (at-least-once, not XA): Kafka publication and PostgreSQL
- * watermark updates are not bound by a distributed 2PC/XA transaction. If Core crashes
- * or PostgreSQL rolls back after Kafka commit, the Sensor receives no ACK and retries.
- * Idempotency is guaranteed by deterministic observation sequenceId keys and watermark CAS.
+ * Delivery semantics (at-least-once, not XA): Kafka publication and PostgreSQL watermark
+ * updates are not bound by a distributed 2PC/XA transaction. Exact replay of a batch after
+ * durable watermark commit is recognized via watermark CAS and is not republished. Observation
+ * {@code sequenceId} values are deterministic across Sensor retry so consumers can correlate
+ * retries. Because Kafka+PostgreSQL are not XA, at-least-once delivery applies: duplicate Kafka
+ * messages remain possible in the failure window between Kafka commit and durable watermark
+ * persistence. This path does not guarantee downstream physical deduplication.
  */
 @Service
 public class AgentIngestionService {
