@@ -11,11 +11,13 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Component
 public class ClickHouseTelemetryConsumer {
     private static final Logger log = LoggerFactory.getLogger(ClickHouseTelemetryConsumer.class);
+    private static final String ERR_KAFKA_POISON_EVENT = "ERR_KAFKA_POISON_EVENT";
 
     private final ClickHouseClient clickHouseClient;
     private final ObjectMapper objectMapper;
@@ -57,15 +59,27 @@ public class ClickHouseTelemetryConsumer {
         try {
             obs = objectMapper.readValue(record.value(), CanonicalObservation.class);
         } catch (Exception e) {
-            log.error("Poison/malformed telemetry message from Kafka topic={} partition={} offset={} payload='{}': {}",
-                    record.topic(), record.partition(), record.offset(), record.value(), e.getMessage());
-            metrics.recordConsumerPoisonEvent(record.topic(), record.offset(), e.getMessage());
+            String failureClass = e.getClass().getSimpleName();
+            int payloadBytes = record.value() == null
+                    ? 0
+                    : record.value().getBytes(StandardCharsets.UTF_8).length;
+            // Never log record.value(), payload fragments, or e.getMessage() (may echo attacker content).
+            log.error(
+                    "Poison/malformed telemetry message from Kafka topic={} partition={} offset={} failureClass={} payloadBytes={} code={}",
+                    record.topic(),
+                    record.partition(),
+                    record.offset(),
+                    failureClass,
+                    payloadBytes,
+                    ERR_KAFKA_POISON_EVENT
+            );
+            metrics.recordConsumerPoisonEvent(record.topic(), record.offset(), failureClass);
             // Malformed/poison event must not silently disappear.
             // Do NOT acknowledge; throw exception so offset does not progress past poison event.
             throw new IngestionException(
                     org.springframework.http.HttpStatus.BAD_REQUEST,
-                    "ERR_KAFKA_POISON_EVENT",
-                    "Malformed Kafka telemetry message at offset " + record.offset() + ": " + e.getMessage(),
+                    ERR_KAFKA_POISON_EVENT,
+                    "Malformed Kafka telemetry message at offset " + record.offset(),
                     e
             );
         }

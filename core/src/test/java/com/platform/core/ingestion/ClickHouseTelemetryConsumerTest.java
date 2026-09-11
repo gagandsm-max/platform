@@ -1,19 +1,28 @@
 package com.platform.core.ingestion;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.kafka.support.Acknowledgment;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.*;
 
 class ClickHouseTelemetryConsumerTest {
+
+    private static final String SUPER_SECRET_SENTINEL_DO_NOT_LOG = "SUPER_SECRET_SENTINEL_DO_NOT_LOG";
 
     private ClickHouseClient clickHouseClient;
     private ObjectMapper objectMapper;
@@ -49,18 +58,59 @@ class ClickHouseTelemetryConsumerTest {
 
     @Test
     void testMalformedPoisonMessageDoesNotAcknowledgeAndThrows() {
+        String poisonPayload = "{\"secret\":\"" + SUPER_SECRET_SENTINEL_DO_NOT_LOG + "\",not-json";
+        String topic = "telemetry.numeric.v1";
+        int partition = 0;
+        long offset = 101L;
         ConsumerRecord<String, String> record = new ConsumerRecord<>(
-                "telemetry.numeric.v1", 0, 101L, "key-bad", "not-json"
+                topic, partition, offset, "key-bad", poisonPayload
         );
         Acknowledgment ack = mock(Acknowledgment.class);
 
-        IngestionException ex = assertThrows(IngestionException.class, () ->
-                consumer.consume(record, ack));
-        assertEquals("ERR_KAFKA_POISON_EVENT", ex.getCode());
+        Logger logger = (Logger) LoggerFactory.getLogger(ClickHouseTelemetryConsumer.class);
+        ListAppender<ILoggingEvent> listAppender = new ListAppender<>();
+        listAppender.start();
+        logger.addAppender(listAppender);
+        Level previousLevel = logger.getLevel();
+        logger.setLevel(Level.ERROR);
+        try {
+            IngestionException ex = assertThrows(IngestionException.class, () ->
+                    consumer.consume(record, ack));
+            assertEquals("ERR_KAFKA_POISON_EVENT", ex.getCode());
 
-        verify(ack, never()).acknowledge();
-        assertTrue(metrics.isConsumerDegraded());
-        assertEquals(1, metrics.getConsumerPoisonEvents());
+            verify(ack, never()).acknowledge();
+            assertTrue(metrics.isConsumerDegraded());
+            assertEquals(1, metrics.getConsumerPoisonEvents());
+
+            String logs = listAppender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .collect(Collectors.joining("\n"));
+            assertFalse(logs.contains(SUPER_SECRET_SENTINEL_DO_NOT_LOG),
+                    "sentinel must not appear in poison-path logs");
+            assertFalse(logs.contains(poisonPayload),
+                    "full poison payload must not appear in logs");
+            assertTrue(logs.contains("ERR_KAFKA_POISON_EVENT"),
+                    "stable poison error code must be logged");
+            assertTrue(logs.contains(topic), "topic must be logged");
+            assertTrue(logs.contains(String.valueOf(partition)), "partition must be logged");
+            assertTrue(logs.contains(String.valueOf(offset)), "offset must be logged");
+            assertTrue(
+                    logs.contains("JsonParseException") || logs.contains("JsonMappingException")
+                            || logs.contains("MismatchedInputException")
+                            || logs.contains("Exception"),
+                    "parse failure class must be logged; got: " + logs
+            );
+            assertTrue(
+                    logs.contains(String.valueOf(poisonPayload.getBytes(StandardCharsets.UTF_8).length)),
+                    "payload byte length must be logged"
+            );
+            assertFalse(ex.getMessage().contains(SUPER_SECRET_SENTINEL_DO_NOT_LOG),
+                    "exception message must not echo sentinel");
+        } finally {
+            logger.detachAppender(listAppender);
+            logger.setLevel(previousLevel);
+            listAppender.stop();
+        }
     }
 
     @Test
