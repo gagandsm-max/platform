@@ -29,7 +29,7 @@ type Config struct {
 }
 
 func IsRoleEligible(role runtime.Role) bool {
-	return role == runtime.RoleInfrastructure || role == runtime.RoleCombined
+	return runtime.RoleAllows(role, runtime.CapabilityAgentIngress)
 }
 
 func RoleFromSensorType(sensorType string) runtime.Role {
@@ -63,7 +63,7 @@ type Receiver struct {
 
 func NewReceiver(cfg Config, identity AgentIdentityVerifier, authorizer AssignmentAuthorizer, sink AcceptanceSink, logger *slog.Logger) (*Receiver, error) {
 	if !IsRoleEligible(cfg.SensorRole) {
-		return nil, fmt.Errorf("%s: sensor role %q is not eligible for agent ingress; role must be INFRASTRUCTURE or COMBINED", ErrCodeRoleIneligible, cfg.SensorRole)
+		return nil, fmt.Errorf("%s: sensor role %q does not allow capability %s", ErrCodeRoleIneligible, cfg.SensorRole, runtime.CapabilityAgentIngress)
 	}
 	sensorID := strings.TrimSpace(cfg.SensorID)
 	if sensorID == "" {
