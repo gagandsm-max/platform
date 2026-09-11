@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "project_agents/schemas/handoff.schema.json",
+  "title": "Platform Control Plane Handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "taskId",
+    "inputHead",
+    "outputHead",
+    "fromOwner",
+    "nextOwner",
+    "state",
+    "runtimeEvidence",
+    "securityEvidence",
+    "claims"
+  ],
+  "properties": {
+    "taskId": {"type": "string", "minLength": 1},
+    "inputHead": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "outputHead": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "fromOwner": {"type": ["string", "null"]},
+    "nextOwner": {"type": ["string", "null"]},
+    "state": {"type": "string"},
+    "runtimeEvidence": {"type": "array", "items": {"type": "string"}},
+    "securityEvidence": {"type": "array", "items": {"type": "string"}},
+    "ciEvidence": {"type": "array", "items": {"type": "string"}},
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "statement"],
+        "properties": {
+          "type": {"enum": ["SOURCE_FACT", "EXECUTION_EVIDENCE", "CI_EVIDENCE", "INFERENCE", "UNVERIFIED"]},
+          "statement": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "blockers": {"type": "array", "items": {"type": "string"}}
+  }
+}
