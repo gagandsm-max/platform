@@ -29,13 +29,14 @@ type ServerConfig struct {
 
 // Server is the Agent-facing HTTPS listener (RequireAndVerifyClientCert).
 type Server struct {
-	cfg      ServerConfig
-	httpSrv  *http.Server
-	listener net.Listener
-	logger   *slog.Logger
-	sem      chan struct{}
-	mu       sync.Mutex
-	started  bool
+	cfg          ServerConfig
+	httpSrv      *http.Server
+	listener     net.Listener
+	logger       *slog.Logger
+	sem          chan struct{}
+	mu           sync.Mutex
+	bound        bool
+	serveStarted bool
 }
 
 func NewServer(cfg ServerConfig) (*Server, error) {
@@ -119,15 +120,15 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 func (s *Server) Bind() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.started {
-		return errors.New("ERR_INVALID_CONFIG: Agent receiver server already started")
+	if s.bound {
+		return errors.New("ERR_INVALID_CONFIG: Agent receiver server already bound")
 	}
 	ln, err := net.Listen("tcp", s.cfg.ListenAddr)
 	if err != nil {
 		return fmt.Errorf("ERR_AGENT_RECEIVER_LISTEN_FAILED: %w", err)
 	}
 	s.listener = ln
-	s.started = true
+	s.bound = true
 	return nil
 }
 
@@ -135,7 +136,7 @@ func (s *Server) Bind() error {
 // compatibility, it binds itself when the caller has not already done so.
 func (s *Server) ListenAndServe() error {
 	s.mu.Lock()
-	bound := s.started && s.listener != nil
+	bound := s.bound && s.listener != nil
 	s.mu.Unlock()
 	if !bound {
 		if err := s.Bind(); err != nil {
@@ -144,11 +145,17 @@ func (s *Server) ListenAndServe() error {
 	}
 
 	s.mu.Lock()
+	if s.serveStarted {
+		s.mu.Unlock()
+		return errors.New("ERR_INVALID_CONFIG: Agent receiver server already started")
+	}
 	ln := s.listener
-	s.mu.Unlock()
 	if ln == nil {
+		s.mu.Unlock()
 		return errors.New("ERR_AGENT_RECEIVER_LISTEN_FAILED: Agent receiver listener is unavailable")
 	}
+	s.serveStarted = true
+	s.mu.Unlock()
 
 	s.logger.Info("Agent receiver TLS listener started",
 		"listen_addr", s.cfg.ListenAddr,
