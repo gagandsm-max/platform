@@ -76,11 +76,11 @@ public class ClickHouseTelemetryConsumer {
             metrics.recordConsumerPoisonEvent(record.topic(), record.offset(), failureClass);
             // Malformed/poison event must not silently disappear.
             // Do NOT acknowledge; throw exception so offset does not progress past poison event.
+            // Do NOT attach parser/Jackson cause: DefaultErrorHandler may log the full cause chain.
             throw new IngestionException(
                     org.springframework.http.HttpStatus.BAD_REQUEST,
                     ERR_KAFKA_POISON_EVENT,
-                    "Malformed Kafka telemetry message at offset " + record.offset(),
-                    e
+                    "Malformed Kafka telemetry message at offset " + record.offset()
             );
         }
 
