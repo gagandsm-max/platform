@@ -1,9 +1,9 @@
 # Platform — Monitoring Intelligence, Alert Quality and AI Assurance Master
 
-**Document ID:** PLATFORM-MIA-001  
-**Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — Monitoring Intelligence / Alert Quality / AI Assurance (after merge)**  
-**Product:** Platform  
+**Document ID:** PLATFORM-MIA-001
+**Version:** 3.2.2
+**Status:** **Authoritative Mother Reference — Monitoring Intelligence / Alert Quality / AI Assurance (after merge)**
+**Product:** Platform
 **Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation, model selection, dependency selection or readiness claim
 
 ---
