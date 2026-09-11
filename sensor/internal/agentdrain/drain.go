@@ -249,11 +249,11 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
-	// Storage pressure awareness: do not amplify uploads under hard spool protection.
+	// Under spool protection (80%) or high FS use, keep draining so ACK→delete can free space.
+	// Pausing here would wedge the Agent spool (uploader does not pause either). Observe only.
 	if st, serr := d.spool.Stats(); serr == nil {
 		if st.FilesystemUsedPct >= 95 || st.ProtectionState == spool.ProtectionTriggered {
 			d.metrics.Backpressure.Add(1)
-			return false, codeErr(CodeSpool, "agent spool filesystem hard pressure; pausing drain", nil, true)
 		}
 	}
 
@@ -480,6 +480,12 @@ func (d *Drain) Shutdown(ctx context.Context) error {
 func isTerminalCoreError(err error) bool {
 	if coreclient.IsCoreAPICode(err, "ERR_AGENT_ENTITY_UNRESOLVED") ||
 		coreclient.IsCoreAPICode(err, "ERR_AGENT_ASSIGNMENT_UNKNOWN") ||
+		coreclient.IsCoreAPICode(err, "ERR_AUTH_IDENTITY_MISMATCH") ||
+		coreclient.IsCoreAPICode(err, "ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH") ||
+		coreclient.IsCoreAPICode(err, "ERR_AGENT_ACCEPTING_SENSOR_MISMATCH") ||
+		coreclient.IsCoreAPICode(err, "ERR_TENANT_SCOPE_MISMATCH") ||
+		coreclient.IsCoreAPICode(err, "ERR_IDEMPOTENCY_CONFLICT") ||
+		coreclient.IsCoreAPICode(err, "ERR_SEQUENCE_REGRESSION") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_JSON") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD_PAYLOAD") ||
@@ -491,7 +497,7 @@ func isTerminalCoreError(err error) bool {
 	var api *coreclient.CoreAPIError
 	if errors.As(err, &api) && !api.Transient() {
 		switch api.HTTPStatus {
-		case 400, 422:
+		case 400, 403, 409, 422:
 			return true
 		}
 	}

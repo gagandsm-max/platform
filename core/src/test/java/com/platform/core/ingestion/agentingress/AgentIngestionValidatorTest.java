@@ -161,6 +161,24 @@ class AgentIngestionValidatorTest {
     }
 
     @Test
+    void tenantScopeMismatchFailClosed() throws Exception {
+        UUID otherTenant = UUID.fromString("018f0e0a-0000-7000-8000-000000000099");
+        AgentIngressRecord record = new AgentIngressRecord(
+                1, "ingress-1", otherTenant.toString(), "agent-1",
+                "sensor-infra-01", 1, 10, 10, "agent-batch-1", "corr-1",
+                "2026-09-11T10:00:00Z", List.of()
+        );
+        String checksum = AgentIngestionValidator.calculateStableChecksum(List.of(record));
+        AgentTelemetryBatchRequest batch = new AgentTelemetryBatchRequest(
+                1, "sensor-infra-01", "batch-1", 1, 1, 1, checksum, "corr", List.of(record)
+        );
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract("{}".getBytes(), batch, scope));
+        assertEquals("ERR_TENANT_SCOPE_MISMATCH", ex.getCode());
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+    }
+
+    @Test
     void entityResolveHappyPath() throws Exception {
         AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 1);
         AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");

@@ -215,11 +215,84 @@ func TestIsTerminalCoreError(t *testing.T) {
 	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_AGENT_ENTITY_UNRESOLVED", HTTPStatus: 422}) {
 		t.Fatal("expected terminal")
 	}
+	for _, code := range []string{
+		"ERR_AUTH_IDENTITY_MISMATCH",
+		"ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH",
+		"ERR_AGENT_ACCEPTING_SENSOR_MISMATCH",
+		"ERR_TENANT_SCOPE_MISMATCH",
+		"ERR_IDEMPOTENCY_CONFLICT",
+		"ERR_SEQUENCE_REGRESSION",
+	} {
+		if !isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 403}) {
+			t.Fatalf("expected terminal for %s", code)
+		}
+	}
+	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_OTHER_CONTRACT", HTTPStatus: 409}) {
+		t.Fatal("non-transient 409 must be terminal")
+	}
 	if isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_INTERNAL", HTTPStatus: 500, Message: "x"}) {
-		// 500 without known terminal code and transient=false — classifyAgentTelemetry sets transient for 5xx
+		// 500 is transient via classifyAgentTelemetry; without transient flag still not status-terminal here
 	}
 	err := errors.New("other")
 	if isTerminalCoreError(err) {
 		t.Fatal("generic error must not be terminal")
+	}
+}
+
+type statsSpool struct {
+	*spool.DiskSpool
+	stats spool.Stats
+}
+
+func (s *statsSpool) Stats() (spool.Stats, error) {
+	return s.stats, nil
+}
+
+type echoingTransport struct {
+	calls int
+}
+
+func (e *echoingTransport) UploadAgentTelemetry(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+	e.calls++
+	return coreclient.AgentTelemetryAck{
+		Status:                         "ACCEPTED",
+		SensorID:                       batch.SensorID,
+		BatchID:                        batch.BatchID,
+		AcceptedThroughIngressSequence: batch.LastIngressSequence,
+		CorrelationID:                  batch.CorrelationID,
+	}, nil
+}
+
+func TestDrainContinuesUnderSpoolProtection(t *testing.T) {
+	s, dir := openSpool(t)
+	rec := appendDurable(t, s, 1)
+	tr := &echoingTransport{}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
+		JitterFraction: 0, IdleInterval: 10 * time.Millisecond, ShutdownGrace: time.Second,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.spool = &statsSpool{DiskSpool: s, stats: spool.Stats{
+		ProtectionState:   spool.ProtectionTriggered,
+		FilesystemUsedPct: 96,
+		RecordCount:       1,
+		NextSequence:      rec.Sequence + 1,
+	}}
+	ok, err := d.RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected successful drain under protection pressure")
+	}
+	if tr.calls != 1 {
+		t.Fatalf("expected one upload attempt, got %d", tr.calls)
+	}
+	if d.metrics.Backpressure.Load() < 1 {
+		t.Fatal("expected backpressure observation under protection")
 	}
 }

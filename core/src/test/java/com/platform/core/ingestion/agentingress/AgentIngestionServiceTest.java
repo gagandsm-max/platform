@@ -146,4 +146,27 @@ class AgentIngestionServiceTest {
         verify(kafkaProducer).publishBatchTransactionally(any());
         verify(watermarkStore).updateWatermark(tenantId, "sensor-infra-01", 15L, 13L, 15L, "chk-new", "batch-1");
     }
+
+    @Test
+    void kafkaCommitThenWatermarkFailureAllowsRetryRepublish() {
+        X509Certificate c = cert();
+        AgentTelemetryBatchRequest request = req(13, 15, "chk-new");
+        when(validator.resolveAuthority(c)).thenReturn(scope);
+        when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
+        when(watermarkStore.getWatermarkForUpdate(tenantId, "sensor-infra-01")).thenReturn(null);
+
+        doThrow(new RuntimeException("PostgreSQL connection terminated unexpectedly"))
+                .doNothing()
+                .when(watermarkStore).updateWatermark(
+                        eq(tenantId), eq("sensor-infra-01"), eq(15L), eq(13L), eq(15L), eq("chk-new"), eq("batch-1"));
+
+        RuntimeException first = assertThrows(RuntimeException.class, () ->
+                service.ingestAgentTelemetry("{}".getBytes(), request, c));
+        assertTrue(first.getMessage().contains("PostgreSQL connection terminated"));
+
+        AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, c);
+        assertEquals("ACCEPTED", ack.status());
+        assertEquals(15L, ack.acceptedThroughIngressSequence());
+        verify(kafkaProducer, times(2)).publishBatchTransactionally(any());
+    }
 }
