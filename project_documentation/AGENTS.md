@@ -16,10 +16,12 @@ Before changing code or build/deployment assets, read in this order:
 3. `Platform_03_Architecture.md`
 4. Relevant HLD/LLD/Dataflow sections
 5. `Platform_07_OSS_Catalog.md`
-6. Relevant specialized master (`09` through `19`)
+6. Relevant specialized master (`09` through `20`)
 7. `Platform_12_Decision_Source_Register.md` when a decision/source is unclear
 
 For work involving SaaS monitoring, carrier/ISP integration, external changes/deployments, cloud-native dependencies, Incident Flight Recorder, Similar Incident Memory, triggered packet evidence, controlled remediation, MTTR/value measurement or customer-value dashboards, **`Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` is mandatory preflight reading**.
+
+For work involving network discovery review, Agent onboarding/enrollment identity, dynamic endpoint identity/reconciliation, approval/exclusion workflow, or the in-product Notification Center, **`Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` is mandatory preflight reading**.
 
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
@@ -79,3 +81,13 @@ No implementation may permanently diverge from mother-reference truth. If implem
 A task is not complete until code, tests, observability, error behavior, upgrade/migration impact, OSS/security implications and relevant documentation/traceability are complete.
 
 For OIV capabilities, Definition of Done also includes applicable tenant isolation, evidence quality, packet-artifact protection, similarity false-positive, remediation deny/rollback, value-attribution and resource-regression tests defined in `Platform_19`.
+
+## v3.2.2 discovery, onboarding, identity and notification safeguards
+
+- Network auto-discovery and Agent enrollment feed a governed onboarding/review lifecycle. Newly found/enrolled entities do not silently become licensed/actively monitored unless an explicit authorized trusted auto-approval policy applies.
+- Approve, reject, unmanaged and exclude decisions are tenant-scoped, authorized and audited with actor, timestamp and operator comment/reason; bulk decisions preserve per-item result/evidence.
+- Before activation, authorized users can review/enrich Display Name, Alias, Description, Site, Group/Sub-group, Tags, Criticality, monitoring profile, alert/validation policy inheritance and applicable Sensor/licence/capacity impact.
+- Agent-backed endpoint identity is anchored to canonical `entity_id` plus unique `agent_id`/mTLS identity. System/host name is the preferred human-readable technical name; IP/MAC are mutable observations and must not create a new endpoint solely because DHCP/VPN/Wi-Fi changed them.
+- Reinstall, reimage, cloned Agent identity, hostname collision and conflicting stable identifiers require explicit reconciliation; never silently merge or duplicate inventory.
+- The in-product Notification Center is one role-aware global surface. Recipient access and deep links are enforced server-side by tenant, RBAC, resource scope and subscription; operational Alerts/Incidents remain distinct from platform/workflow notifications.
+- Discovery/onboarding notification generation is deduplicated, bounded and rate-limited so scans, rediscovery or Agent reconnect storms cannot create notification floods.
