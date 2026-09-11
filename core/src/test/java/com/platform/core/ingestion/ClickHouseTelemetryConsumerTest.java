@@ -50,7 +50,7 @@ class ClickHouseTelemetryConsumerTest {
     @Test
     void testMalformedPoisonMessageDoesNotAcknowledgeAndThrows() {
         ConsumerRecord<String, String> record = new ConsumerRecord<>(
-                "telemetry.numeric.v1", 0, 101L, "key-bad", "not-json"
+                "telemetry.numeric.v1", 0, 101L, "key-bad", "not-json-SECRET-PAYLOAD-xyz"
         );
         Acknowledgment ack = mock(Acknowledgment.class);
 
@@ -61,6 +61,32 @@ class ClickHouseTelemetryConsumerTest {
         verify(ack, never()).acknowledge();
         assertTrue(metrics.isConsumerDegraded());
         assertEquals(1, metrics.getConsumerPoisonEvents());
+    }
+
+    @Test
+    void poisonLogNeverIncludesRawPayload() {
+        String secretPayload = "{\"secret\":\"do-not-log-me\",\"token\":\"abc123\"}";
+        ConsumerRecord<String, String> record = new ConsumerRecord<>(
+                "telemetry.numeric.v1", 0, 102L, "key-bad", secretPayload
+        );
+        Acknowledgment ack = mock(Acknowledgment.class);
+
+        // Capture via a temporary logger is hard; assert helper never returns payload and
+        // the thrown path does not embed the raw value in the public exception message.
+        assertEquals("", consumer.extractSafeCorrelationHint(secretPayload));
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                consumer.consume(record, ack));
+        assertFalse(ex.getMessage().contains("do-not-log-me"));
+        assertFalse(ex.getMessage().contains(secretPayload));
+        assertFalse(ex.getMessage().contains("abc123"));
+    }
+
+    @Test
+    void extractSafeCorrelationHintBounded() {
+        String withCorr = "{\"correlationId\":\"corr-safe-1\",\"value\":1}";
+        assertEquals("corr-safe-1", consumer.extractSafeCorrelationHint(withCorr));
+        assertEquals("", consumer.extractSafeCorrelationHint("not-json"));
+        assertEquals("", consumer.extractSafeCorrelationHint(null));
     }
 
     @Test

@@ -228,6 +228,30 @@ public class AgentControlRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * Historical assignment lookup for Agent-ingress replay: returns ACTIVE or REVOKED row
+     * for the exact generation. Unknown generation → empty (fail-closed at caller).
+     */
+    public Optional<AgentSensorAssignment> findAssignmentByGeneration(
+            UUID tenantId,
+            String agentId,
+            long generation
+    ) {
+        List<AgentSensorAssignment> rows = jdbc.query("""
+                SELECT * FROM platform.agent_sensor_assignment
+                 WHERE tenant_id = :tenantId
+                   AND agent_id = :agentId
+                   AND generation = :generation
+                   AND status IN ('ACTIVE', 'REVOKED')
+                """,
+                new MapSqlParameterSource()
+                        .addValue("tenantId", tenantId)
+                        .addValue("agentId", agentId)
+                        .addValue("generation", generation),
+                ASSIGNMENT_MAPPER);
+        return rows.stream().findFirst();
+    }
+
     public List<AgentSensorAssignment> findActiveAssignmentsForSensor(UUID tenantId, String sensorId) {
         return jdbc.query("""
                 SELECT * FROM platform.agent_sensor_assignment
