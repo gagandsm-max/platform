@@ -1,9 +1,9 @@
 # Platform — Enterprise Gap Closure Master
 
-**Document ID:** PLATFORM-EGC-001  
-**Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — Enterprise Gap Closure (after merge)**  
-**Product:** Platform  
+**Document ID:** PLATFORM-EGC-001
+**Version:** 3.2.2
+**Status:** **Authoritative Mother Reference — Enterprise Gap Closure (after merge)**
+**Product:** Platform
 **Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation or readiness claim
 
 ---
