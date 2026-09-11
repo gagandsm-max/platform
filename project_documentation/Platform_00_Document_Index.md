@@ -2,7 +2,7 @@
 
 **Document ID:** PLATFORM-INDEX-001  
 **Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — 23-File Consolidated Engineering Source of Truth**  
+**Status:** **Authoritative Mother Reference — 23-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
 **Last reconciliation:** 2026-09-11 — v3.2.2 enterprise gap-closure specialized-master addition
