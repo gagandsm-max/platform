@@ -20,18 +20,35 @@ import java.util.UUID;
 /**
  * Ephemeral PostgreSQL helper for Day-02 Core integration tests.
  * Requires Docker. Does not use host PostgreSQL packages.
+ *
+ * <p>Ephemeral storage policy: PostgreSQL data is mounted on tmpfs so the
+ * image-declared VOLUME does not create anonymous Docker volumes. Teardown
+ * uses {@code docker rm -fv} so any unexpected volume is still removed.
  */
 public final class PostgresTestSupport {
 
     public static final String IMAGE = "postgres:16-alpine";
+    public static final String LABEL_LIFECYCLE = "com.platform.lifecycle=ephemeral";
+    public static final String LABEL_OWNER = "com.platform.owner=test";
+    public static final String PG_DATA_TMPFS = "/var/lib/postgresql/data:rw,exec,size=512m";
 
     private final String containerName;
+    private final String testRunId;
     private final int hostPort;
     private DataSource dataSource;
 
     public PostgresTestSupport() {
-        this.containerName = "platform-day02-pg-" + UUID.randomUUID().toString().substring(0, 8);
+        this.testRunId = UUID.randomUUID().toString().substring(0, 8);
+        this.containerName = "platform-day02-pg-" + testRunId;
         this.hostPort = allocatePort();
+    }
+
+    public String containerName() {
+        return containerName;
+    }
+
+    public String testRunId() {
+        return testRunId;
     }
 
     private static int allocatePort() {
@@ -47,6 +64,10 @@ public final class PostgresTestSupport {
         requireDockerAvailable();
         exec("docker", "run", "-d", "--rm",
                 "--name", containerName,
+                "--tmpfs", PG_DATA_TMPFS,
+                "--label", LABEL_LIFECYCLE,
+                "--label", LABEL_OWNER,
+                "--label", "com.platform.test-run=" + testRunId,
                 "-e", "POSTGRES_USER=platform_app",
                 "-e", "POSTGRES_PASSWORD=platform_test",
                 "-e", "POSTGRES_DB=platform",
@@ -61,7 +82,7 @@ public final class PostgresTestSupport {
         config.setPassword("platform_test");
         config.setMaximumPoolSize(4);
         config.setMinimumIdle(0);
-        config.setPoolName("day02-pg-" + containerName.substring(containerName.length() - 8));
+        config.setPoolName("day02-pg-" + testRunId);
         this.dataSource = new HikariDataSource(config);
     }
 
@@ -82,8 +103,10 @@ public final class PostgresTestSupport {
         if (dataSource instanceof HikariDataSource hikari) {
             hikari.close();
         }
+        dataSource = null;
         try {
-            exec("docker", "rm", "-f", containerName);
+            // -v removes anonymous volumes if any were created despite tmpfs.
+            exec("docker", "rm", "-fv", containerName);
         } catch (Exception ignored) {
             // best-effort cleanup
         }

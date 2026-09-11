@@ -88,6 +88,9 @@ for dir in device-packs schemas/provisioning schemas/presentation; do
   fi
 done
 
+echo "--> Dev disk hygiene guardrails"
+bash "${ROOT_DIR}/tests/test-dev-disk-hygiene.sh"
+
 echo "========================================================================"
 echo "STATIC CONTRACT VALIDATION PASSED"
 echo "========================================================================"
