@@ -1,5 +1,6 @@
 package com.platform.core.sensorcontrol;
 
+import com.platform.core.domain.DomainException;
 import com.platform.core.domain.discovery.DiscoveryRequest;
 import com.platform.core.domain.discovery.DiscoveryService;
 import com.platform.core.domain.discovery.DiscoveryStatus;
@@ -61,7 +62,7 @@ class DiscoveryPlacementServiceTest {
 
     @Test
     void placesLexicographicallyFirstDiscoveryCapableSensor() {
-        when(discoveryService.getRequest(TENANT, REQUEST)).thenReturn(pending(null));
+        when(discoveryService.getRequestForUpdate(TENANT, REQUEST)).thenReturn(pending(null));
         when(sensorRepository.listActivePrincipalsByTenant(TENANT)).thenReturn(List.of(
                 sensor("sensor-z", SensorRole.NETWORK, null),
                 sensor("sensor-a", SensorRole.INFRASTRUCTURE, null),
@@ -69,57 +70,57 @@ class DiscoveryPlacementServiceTest {
                 sensor("sensor-c", SensorRole.COMBINED, null)
         ));
         DiscoveryRequest assigned = pending(null);
-        when(discoveryService.assignSensorFromControlPlane(TENANT, REQUEST, "sensor-b"))
+        when(discoveryService.assignSensorFirstPlacementFromControlPlane(TENANT, REQUEST, "sensor-b"))
                 .thenReturn(assigned);
 
         // sensor-a is INFRASTRUCTURE (no DISCOVERY); among NETWORK/COMBINED, sensor-b < sensor-c < sensor-z
         placement.placePendingRequest(TENANT, REQUEST);
-        verify(discoveryService).assignSensorFromControlPlane(TENANT, REQUEST, "sensor-b");
+        verify(discoveryService).assignSensorFirstPlacementFromControlPlane(TENANT, REQUEST, "sensor-b");
         assertEquals(1, metrics.getPlacementSuccesses());
         assertEquals(1, metrics.getReasonCount(DiscoveryPlacementMetrics.REASON_ASSIGNED));
     }
 
     @Test
     void infrastructureOnlyIsNotEligibleForDiscovery() {
-        when(discoveryService.getRequest(TENANT, REQUEST)).thenReturn(pending(null));
+        when(discoveryService.getRequestForUpdate(TENANT, REQUEST)).thenReturn(pending(null));
         when(sensorRepository.listActivePrincipalsByTenant(TENANT)).thenReturn(List.of(
                 sensor("sensor-infra", SensorRole.INFRASTRUCTURE, null)
         ));
         SensorControlException ex = assertThrows(SensorControlException.class,
                 () -> placement.placePendingRequest(TENANT, REQUEST));
         assertEquals(SensorControlException.ERR_NO_ELIGIBLE_SENSOR, ex.getCode());
-        verify(discoveryService, never()).assignSensorFromControlPlane(any(), any(), any());
+        verify(discoveryService, never()).assignSensorFirstPlacementFromControlPlane(any(), any(), any());
         assertEquals(1, metrics.getReasonCount(DiscoveryPlacementMetrics.REASON_NO_ELIGIBLE_SENSOR));
     }
 
     @Test
     void siteScopedRequestRequiresMatchingSensorSite() {
-        when(discoveryService.getRequest(TENANT, REQUEST)).thenReturn(pending(SITE_A));
+        when(discoveryService.getRequestForUpdate(TENANT, REQUEST)).thenReturn(pending(SITE_A));
         when(sensorRepository.listActivePrincipalsByTenant(TENANT)).thenReturn(List.of(
                 sensor("sensor-wide", SensorRole.NETWORK, null),
                 sensor("sensor-b", SensorRole.NETWORK, SITE_B),
                 sensor("sensor-a", SensorRole.NETWORK, SITE_A)
         ));
-        when(discoveryService.assignSensorFromControlPlane(TENANT, REQUEST, "sensor-a"))
+        when(discoveryService.assignSensorFirstPlacementFromControlPlane(TENANT, REQUEST, "sensor-a"))
                 .thenReturn(pending(SITE_A));
 
         placement.placePendingRequest(TENANT, REQUEST);
-        verify(discoveryService).assignSensorFromControlPlane(TENANT, REQUEST, "sensor-a");
+        verify(discoveryService).assignSensorFirstPlacementFromControlPlane(TENANT, REQUEST, "sensor-a");
     }
 
     @Test
     void noEligibleLeavesPendingWithoutInventingSensor() {
-        when(discoveryService.getRequest(TENANT, REQUEST)).thenReturn(pending(SITE_A));
+        when(discoveryService.getRequestForUpdate(TENANT, REQUEST)).thenReturn(pending(SITE_A));
         when(sensorRepository.listActivePrincipalsByTenant(TENANT)).thenReturn(List.of(
                 sensor("sensor-wide", SensorRole.NETWORK, null)
         ));
         assertThrows(SensorControlException.class, () -> placement.placePendingRequest(TENANT, REQUEST));
-        verify(discoveryService, never()).assignSensorFromControlPlane(any(), any(), any());
+        verify(discoveryService, never()).assignSensorFirstPlacementFromControlPlane(any(), any(), any());
     }
 
     @Test
     void listActiveIsTenantScopedSoCrossTenantSensorsAreInvisible() {
-        when(discoveryService.getRequest(TENANT, REQUEST)).thenReturn(pending(null));
+        when(discoveryService.getRequestForUpdate(TENANT, REQUEST)).thenReturn(pending(null));
         // Repository is queried with request tenant only — other-tenant sensors never appear.
         when(sensorRepository.listActivePrincipalsByTenant(TENANT)).thenReturn(List.of());
         when(sensorRepository.listActivePrincipalsByTenant(OTHER_TENANT)).thenReturn(List.of(
@@ -129,7 +130,7 @@ class DiscoveryPlacementServiceTest {
         assertThrows(SensorControlException.class, () -> placement.placePendingRequest(TENANT, REQUEST));
         verify(sensorRepository).listActivePrincipalsByTenant(TENANT);
         verify(sensorRepository, never()).listActivePrincipalsByTenant(OTHER_TENANT);
-        verify(discoveryService, never()).assignSensorFromControlPlane(any(), any(), any());
+        verify(discoveryService, never()).assignSensorFirstPlacementFromControlPlane(any(), any(), any());
     }
 
     @Test
@@ -148,12 +149,27 @@ class DiscoveryPlacementServiceTest {
                 null, null, "sensor-a", List.of(), null, 161, 1000, 1, "user",
                 NOW, NOW, null, Map.of(), null
         );
-        when(discoveryService.getRequest(TENANT, REQUEST)).thenReturn(assigned);
+        when(discoveryService.getRequestForUpdate(TENANT, REQUEST)).thenReturn(assigned);
         SensorControlException ex = assertThrows(SensorControlException.class,
                 () -> placement.placePendingRequest(TENANT, REQUEST));
         assertEquals(SensorControlException.ERR_DISCOVERY_REQUEST_NOT_PLACEABLE, ex.getCode());
-        verify(discoveryService, never()).assignSensorFromControlPlane(eq(TENANT), eq(REQUEST), any());
+        verify(discoveryService, never()).assignSensorFirstPlacementFromControlPlane(eq(TENANT), eq(REQUEST), any());
         assertEquals(1, metrics.getReasonCount(DiscoveryPlacementMetrics.REASON_NOT_PLACEABLE));
         assertEquals(1, metrics.getPlacementFailures());
+    }
+
+    @Test
+    void placementConflictMappedToExplicitSensorControlCode() {
+        when(discoveryService.getRequestForUpdate(TENANT, REQUEST)).thenReturn(pending(null));
+        when(sensorRepository.listActivePrincipalsByTenant(TENANT)).thenReturn(List.of(
+                sensor("sensor-a", SensorRole.NETWORK, null)
+        ));
+        when(discoveryService.assignSensorFirstPlacementFromControlPlane(TENANT, REQUEST, "sensor-a"))
+                .thenThrow(new DomainException("DISCOVERY_PLACEMENT_CONFLICT", "race lost"));
+
+        SensorControlException ex = assertThrows(SensorControlException.class,
+                () -> placement.placePendingRequest(TENANT, REQUEST));
+        assertEquals(SensorControlException.ERR_DISCOVERY_PLACEMENT_CONFLICT, ex.getCode());
+        assertEquals(1, metrics.getReasonCount(DiscoveryPlacementMetrics.REASON_PLACEMENT_CONFLICT));
     }
 }

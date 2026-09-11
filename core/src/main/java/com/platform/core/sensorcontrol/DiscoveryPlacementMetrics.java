@@ -16,6 +16,7 @@ public class DiscoveryPlacementMetrics {
     public static final String REASON_ASSIGNED = "ASSIGNED";
     public static final String REASON_NOT_PLACEABLE = "NOT_PLACEABLE";
     public static final String REASON_NO_ELIGIBLE_SENSOR = "NO_ELIGIBLE_SENSOR";
+    public static final String REASON_PLACEMENT_CONFLICT = "PLACEMENT_CONFLICT";
     public static final String REASON_PLACEMENT_ERROR = "PLACEMENT_ERROR";
 
     private final ConcurrentHashMap<String, AtomicLong> reasonCounts = new ConcurrentHashMap<>();

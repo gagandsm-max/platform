@@ -1,5 +1,6 @@
 package com.platform.core.sensorcontrol;
 
+import com.platform.core.domain.DomainException;
 import com.platform.core.domain.discovery.DiscoveryRequest;
 import com.platform.core.domain.discovery.DiscoveryService;
 import com.platform.core.domain.discovery.DiscoveryStatus;
@@ -58,7 +59,7 @@ public class DiscoveryPlacementService {
         long startedNs = System.nanoTime();
 
         try {
-            DiscoveryRequest request = discoveryService.getRequest(tenantId, requestId);
+            DiscoveryRequest request = discoveryService.getRequestForUpdate(tenantId, requestId);
             if (request.status() != DiscoveryStatus.PENDING || request.assignedSensorId() != null) {
                 auditEmitter.emitControlEvent(
                         AuditCategory.SECURITY_ADMINISTRATION,
@@ -100,7 +101,7 @@ public class DiscoveryPlacementService {
             }
 
             SensorPrincipal chosen = eligible.getFirst();
-            DiscoveryRequest assigned = discoveryService.assignSensorFromControlPlane(
+            DiscoveryRequest assigned = discoveryService.assignSensorFirstPlacementFromControlPlane(
                     tenantId, requestId, chosen.sensorId());
             auditEmitter.emitControlEvent(
                     AuditCategory.SECURITY_ADMINISTRATION,
@@ -116,6 +117,24 @@ public class DiscoveryPlacementService {
             metrics.recordSuccess(DiscoveryPlacementMetrics.REASON_ASSIGNED, elapsedMs(startedNs));
             return assigned;
         } catch (SensorControlException e) {
+            throw e;
+        } catch (DomainException e) {
+            if ("DISCOVERY_PLACEMENT_CONFLICT".equals(e.getCode())) {
+                auditEmitter.emitControlEvent(
+                        AuditCategory.SECURITY_ADMINISTRATION,
+                        AuditActions.DISCOVERY_PLACEMENT_REJECT,
+                        AuditOutcome.FAILURE,
+                        tenantId,
+                        "DISCOVERY_PLACEMENT_CONFLICT",
+                        Map.of("request_id", requestId.toString())
+                );
+                metrics.recordFailure(DiscoveryPlacementMetrics.REASON_PLACEMENT_CONFLICT, elapsedMs(startedNs));
+                throw new SensorControlException(
+                        SensorControlException.ERR_DISCOVERY_PLACEMENT_CONFLICT,
+                        "Discovery request placement conflict or stale concurrent attempt"
+                );
+            }
+            metrics.recordFailure(DiscoveryPlacementMetrics.REASON_PLACEMENT_ERROR, elapsedMs(startedNs));
             throw e;
         } catch (RuntimeException e) {
             metrics.recordFailure(DiscoveryPlacementMetrics.REASON_PLACEMENT_ERROR, elapsedMs(startedNs));

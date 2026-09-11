@@ -195,6 +195,26 @@ public class DiscoveryRepository {
                 """, Map.of("tenantId", tenantId, "requestId", requestId), TARGET_MAPPER);
     }
 
+    /**
+     * First placement only: PENDING with no assigned sensor. Concurrent losers get {@code false}
+     * (no last-write-wins overwrite of an existing assignment).
+     */
+    public boolean assignSensorFirstPlacement(UUID tenantId, UUID requestId, String sensorId) {
+        int changed = jdbc.update("""
+                UPDATE platform.discovery_request
+                   SET assigned_sensor_id=:sensorId,
+                       assignment_version=assignment_version+1,
+                       status='ASSIGNED', started_at=NULL, completed_at=NULL, failure_reason=NULL
+                 WHERE tenant_id=:tenantId AND request_id=:requestId
+                   AND status='PENDING'
+                   AND assigned_sensor_id IS NULL
+                """, Map.of("tenantId", tenantId, "requestId", requestId, "sensorId", sensorId));
+        return changed == 1;
+    }
+
+    /**
+     * Intentional reassignment (PENDING→ASSIGNED or ASSIGNED→ASSIGNED). Not used for first placement races.
+     */
     public boolean assignSensor(UUID tenantId, UUID requestId, String sensorId) {
         int changed = jdbc.update("""
                 UPDATE platform.discovery_request
