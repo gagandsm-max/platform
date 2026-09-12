@@ -176,7 +176,18 @@ record "sensor-receiver-enabled" "PASS" "SENSOR_AGENT_RECEIVER_ENABLED=true list
 python3 "${E2E_DIR}/seed_authority.py" | tee "${EVIDENCE_DIR}/seed.txt"
 record "authority-sql-seed" "PASS"
 
-"${COMPOSE[@]}" up -d --build agent-runtime
+"${COMPOSE[@]}" build agent-runtime
+"${COMPOSE[@]}" up -d --force-recreate --no-deps agent-runtime-init
+if ! docker wait platform-agent-e2e-init >/dev/null; then
+    docker logs platform-agent-e2e-init 2>&1 || true
+    fail_closed "agent-runtime-init" "init container failed"
+fi
+init_ec="$(docker inspect --format '{{.State.ExitCode}}' platform-agent-e2e-init)"
+if [[ "${init_ec}" != "0" ]]; then
+    docker logs platform-agent-e2e-init 2>&1 || true
+    fail_closed "agent-runtime-init" "init exit=${init_ec}"
+fi
+"${COMPOSE[@]}" up -d --no-deps --no-build --force-recreate agent-runtime
 sleep 3
 if ! docker ps --format '{{.Names}}' | grep -qx platform-agent-e2e; then
     docker logs platform-agent-e2e 2>&1 | tail -50 || true

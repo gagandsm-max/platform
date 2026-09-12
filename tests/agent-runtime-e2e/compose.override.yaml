@@ -61,15 +61,22 @@ services:
     volumes:
       - platform_agent_e2e_state:/var/lib/platform/agent
       - ./tests/agent-runtime-e2e/identity.json:/seed/identity.json:ro
+      - ./deploy/docker/certs/ca.crt:/seed/ca.crt:ro
+      - ./tests/agent-runtime-e2e/certs/agent-e2e.crt:/seed/agent-e2e.crt:ro
+      - ./tests/agent-runtime-e2e/certs/agent-e2e.key:/seed/agent-e2e.key:ro
     command:
       - sh
       - -c
       - |
-        install -d -m 0700 -o 100 -g 100 /var/lib/platform/agent /var/lib/platform/agent/queue
+        install -d -m 0700 -o 100 -g 100 /var/lib/platform/agent /var/lib/platform/agent/queue /var/lib/platform/agent/tls
         cp /seed/identity.json /var/lib/platform/agent/identity.json
+        cp /seed/ca.crt /var/lib/platform/agent/tls/ca.crt
+        cp /seed/agent-e2e.crt /var/lib/platform/agent/tls/agent-e2e.crt
+        cp /seed/agent-e2e.key /var/lib/platform/agent/tls/agent-e2e.key
         chown -R 100:100 /var/lib/platform/agent
-        chmod 0700 /var/lib/platform/agent /var/lib/platform/agent/queue
-        chmod 0600 /var/lib/platform/agent/identity.json
+        chmod 0700 /var/lib/platform/agent /var/lib/platform/agent/queue /var/lib/platform/agent/tls
+        chmod 0600 /var/lib/platform/agent/identity.json /var/lib/platform/agent/tls/agent-e2e.key
+        chmod 0644 /var/lib/platform/agent/tls/ca.crt /var/lib/platform/agent/tls/agent-e2e.crt
     networks:
       - platform_net
     restart: "no"
@@ -90,9 +97,9 @@ services:
       PLATFORM_AGENT_TENANT_ID: "018f0e0a-0000-7000-8000-000000000001"
       PLATFORM_AGENT_ID: agent-e2e-01
       PLATFORM_AGENT_SENSOR_URL: https://sensor-infra:8444
-      PLATFORM_AGENT_CA_FILE: /certs/ca.crt
-      PLATFORM_AGENT_CERT_FILE: /certs/agent-e2e.crt
-      PLATFORM_AGENT_KEY_FILE: /certs/agent-e2e.key
+      PLATFORM_AGENT_CA_FILE: /var/lib/platform/agent/tls/ca.crt
+      PLATFORM_AGENT_CERT_FILE: /var/lib/platform/agent/tls/agent-e2e.crt
+      PLATFORM_AGENT_KEY_FILE: /var/lib/platform/agent/tls/agent-e2e.key
       PLATFORM_AGENT_STATE_DIR: /var/lib/platform/agent
       PLATFORM_AGENT_HEALTH_ADDRESS: 127.0.0.1:8089
       PLATFORM_AGENT_COLLECTION_INTERVAL: 2s
@@ -102,9 +109,6 @@ services:
       PLATFORM_LOG_LEVEL: INFO
     volumes:
       - platform_agent_e2e_state:/var/lib/platform/agent
-      - ./deploy/docker/certs/ca.crt:/certs/ca.crt:ro
-      - ./tests/agent-runtime-e2e/certs/agent-e2e.crt:/certs/agent-e2e.crt:ro
-      - ./tests/agent-runtime-e2e/certs/agent-e2e.key:/certs/agent-e2e.key:ro
     networks:
       - platform_net
     cpus: 0.5
