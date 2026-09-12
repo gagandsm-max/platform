@@ -23,6 +23,22 @@ jobs:
     runs-on: [self-hosted, Linux, X64, platform-ci]
     timeout-minutes: 15
     steps:
+      - name: Remove leftover root-owned Maven target
+        run: |
+          set -euo pipefail
+          # Persistent self-hosted workspaces may retain gitignored core/target
+          # from older RW Maven binds. Drop only that tree so checkout's
+          # git clean can run. Bind only core/; no prune, no worktree wipe.
+          core_dir="${GITHUB_WORKSPACE}/core"
+          if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
+            echo "[OK] No leftover core/target in the self-hosted workspace."
+            exit 0
+          fi
+          docker run --rm --user 0:0 --network none \
+            -v "${core_dir}:/core" \
+            maven:3.9.9-eclipse-temurin-21-alpine \
+            rm -rf /core/target
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,6 +109,19 @@ jobs:
     runs-on: [self-hosted, Linux, X64, platform-ci]
     timeout-minutes: 25
     steps:
+      - name: Remove leftover root-owned Maven target
+        run: |
+          set -euo pipefail
+          core_dir="${GITHUB_WORKSPACE}/core"
+          if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
+            echo "[OK] No leftover core/target in the self-hosted workspace."
+            exit 0
+          fi
+          docker run --rm --user 0:0 --network none \
+            -v "${core_dir}:/core" \
+            maven:3.9.9-eclipse-temurin-21-alpine \
+            rm -rf /core/target
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -141,6 +170,19 @@ jobs:
     runs-on: [self-hosted, Linux, X64, platform-ci]
     timeout-minutes: 20
     steps:
+      - name: Remove leftover root-owned Maven target
+        run: |
+          set -euo pipefail
+          core_dir="${GITHUB_WORKSPACE}/core"
+          if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
+            echo "[OK] No leftover core/target in the self-hosted workspace."
+            exit 0
+          fi
+          docker run --rm --user 0:0 --network none \
+            -v "${core_dir}:/core" \
+            maven:3.9.9-eclipse-temurin-21-alpine \
+            rm -rf /core/target
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -162,6 +204,19 @@ jobs:
     runs-on: [self-hosted, Linux, X64, platform-ci]
     timeout-minutes: 50
     steps:
+      - name: Remove leftover root-owned Maven target
+        run: |
+          set -euo pipefail
+          core_dir="${GITHUB_WORKSPACE}/core"
+          if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
+            echo "[OK] No leftover core/target in the self-hosted workspace."
+            exit 0
+          fi
+          docker run --rm --user 0:0 --network none \
+            -v "${core_dir}:/core" \
+            maven:3.9.9-eclipse-temurin-21-alpine \
+            rm -rf /core/target
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
