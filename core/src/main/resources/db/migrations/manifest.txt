@@ -3,3 +3,4 @@ V002__telemetry_replay_watermark.sql|Telemetry ingestion replay watermark state
 V003__discovery_foundation.sql|Discovery foundation requests targets evidence candidates review queue
 V004__sensor_control_authority.sql|Sensor control authority principal certificate bindings entity allowlist
 V005__agent_control_authority.sql|Agent control authority principal certificate bindings sensor assignment fence
+V006__agent_ingress_replay.sql|Agent ingress durable drain replay watermark state

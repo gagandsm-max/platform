@@ -39,5 +39,15 @@ func (e *Error) GoString() string { return e.Error() }
 func (e *Error) Unwrap() error { if e == nil { return nil }; return e.cause }
 func (e *Error) Transient() bool { return e != nil && e.transient }
 func newError(code ErrorCode, message string, cause error, transient bool) *Error { return &Error{Code:code,Message:message,cause:cause,transient:transient} }
-func IsCode(err error, code ErrorCode) bool { var target *Error; return errors.As(err,&target)&&target.Code==code }
-func IsTransient(err error) bool { var target *Error; return errors.As(err,&target)&&target.transient }
+func IsCode(err error, code ErrorCode) bool {
+	var target *Error
+	return errors.As(err, &target) && target.Code == code
+}
+func IsTransient(err error) bool {
+	var target *Error
+	if errors.As(err, &target) && target.transient {
+		return true
+	}
+	var api *CoreAPIError
+	return errors.As(err, &api) && api.transient
+}

@@ -1,0 +1,214 @@
+package coreclient
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+)
+
+const agentTelemetryPath = "/api/v1/sensor/agent-telemetry"
+
+// AgentTelemetryBatch is the Sensor→Core agent-ingress drain request.
+type AgentTelemetryBatch struct {
+	SchemaVersion         int                   `json:"schemaVersion"`
+	SensorID              string                `json:"sensorId"`
+	BatchID               string                `json:"batchId"`
+	FirstIngressSequence  uint64                `json:"firstIngressSequence"`
+	LastIngressSequence   uint64                `json:"lastIngressSequence"`
+	RecordCount           int                   `json:"recordCount"`
+	Checksum              string                `json:"checksum"`
+	CorrelationID         string                `json:"correlationId"`
+	Records               []AgentIngressRecord  `json:"records"`
+}
+
+// AgentIngressRecord preserves immutable accepted evidence from the Sensor Agent spool.
+type AgentIngressRecord struct {
+	SensorIngressSequence  uint64          `json:"sensorIngressSequence"`
+	SensorIngressRecordID  string          `json:"sensorIngressRecordId"`
+	TenantID               string          `json:"tenantId"`
+	AgentID                string          `json:"agentId"`
+	AcceptingSensorID      string          `json:"acceptingSensorId"`
+	AssignmentGeneration   int64           `json:"assignmentGeneration"`
+	AgentFirstSequence     uint64          `json:"agentFirstSequence"`
+	AgentLastSequence      uint64          `json:"agentLastSequence"`
+	AgentBatchID           string          `json:"agentBatchId"`
+	CorrelationID          string          `json:"correlationId"`
+	AcceptedAt             string          `json:"acceptedAt"`
+	Records                json.RawMessage `json:"records"`
+}
+
+// AgentTelemetryAck is the durable Core acknowledgement for agent-telemetry.
+type AgentTelemetryAck struct {
+	Status                           string `json:"status"`
+	SensorID                         string `json:"sensorId"`
+	BatchID                          string `json:"batchId"`
+	AcceptedThroughIngressSequence   uint64 `json:"acceptedThroughIngressSequence"`
+	CorrelationID                    string `json:"correlationId"`
+}
+
+// UnmarshalJSON keeps agent-telemetry ACK strict: unknown fields fail closed.
+func (a *AgentTelemetryAck) UnmarshalJSON(data []byte) error {
+	type alias AgentTelemetryAck
+	var decoded alias
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&decoded); err != nil {
+		return err
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return errors.New("agent-telemetry acknowledgement contains trailing JSON data")
+	}
+	if strings.TrimSpace(decoded.Status) == "" {
+		return errors.New("agent-telemetry acknowledgement missing status")
+	}
+	if strings.TrimSpace(decoded.SensorID) == "" {
+		return errors.New("agent-telemetry acknowledgement missing sensorId")
+	}
+	if strings.TrimSpace(decoded.BatchID) == "" {
+		return errors.New("agent-telemetry acknowledgement missing batchId")
+	}
+	if decoded.AcceptedThroughIngressSequence == 0 {
+		return errors.New("agent-telemetry acknowledgement missing acceptedThroughIngressSequence")
+	}
+	if strings.TrimSpace(decoded.CorrelationID) == "" {
+		return errors.New("agent-telemetry acknowledgement missing correlationId")
+	}
+	*a = AgentTelemetryAck(decoded)
+	return nil
+}
+
+// CoreAPIError captures a structured Core error body for terminal classification.
+type CoreAPIError struct {
+	Status    string
+	Code      string
+	Message   string
+	HTTPStatus int
+	transient bool
+}
+
+func (e *CoreAPIError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+func (e *CoreAPIError) Transient() bool { return e != nil && e.transient }
+
+func IsCoreAPICode(err error, code string) bool {
+	var target *CoreAPIError
+	return errors.As(err, &target) && target.Code == code
+}
+
+// UploadAgentTelemetry POSTs agent-ingress batches. HTTP 200 alone is insufficient;
+// ACK fields must bind to the submitted batch.
+func (c *Client) UploadAgentTelemetry(ctx context.Context, batch AgentTelemetryBatch) (AgentTelemetryAck, error) {
+	if c == nil {
+		return AgentTelemetryAck{}, newError(CodeInvalidConfig, "Core client is nil", nil, false)
+	}
+	if c.initErr != nil {
+		return AgentTelemetryAck{}, c.initErr
+	}
+	if ctx == nil {
+		return AgentTelemetryAck{}, newError(CodeInvalidConfig, "context must not be nil", nil, false)
+	}
+	if err := contextClassified(ctx); err != nil {
+		return AgentTelemetryAck{}, err
+	}
+	if batch.SchemaVersion <= 0 || strings.TrimSpace(batch.SensorID) == "" || strings.TrimSpace(batch.BatchID) == "" ||
+		batch.FirstIngressSequence == 0 || batch.LastIngressSequence < batch.FirstIngressSequence ||
+		batch.RecordCount == 0 || len(batch.Records) == 0 || strings.TrimSpace(batch.Checksum) == "" ||
+		strings.TrimSpace(batch.CorrelationID) == "" {
+		return AgentTelemetryAck{}, newError(CodeInvalidConfig, "agent-telemetry batch metadata is incomplete or invalid", nil, false)
+	}
+
+	payload, err := json.Marshal(batch)
+	if err != nil {
+		return AgentTelemetryAck{}, newError(CodeProtocol, "failed to encode agent-telemetry request", err, false)
+	}
+
+	endpoint := *c.baseURL
+	endpoint.Path = strings.TrimRight(c.baseURL.Path, "/") + agentTelemetryPath
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
+	if err != nil {
+		return AgentTelemetryAck{}, newError(CodeProtocol, "failed to create agent-telemetry request", err, false)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Correlation-ID", batch.CorrelationID)
+	req.Header.Set("Idempotency-Key", batch.BatchID)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return AgentTelemetryAck{}, classifyTransport(ctx, err)
+	}
+	defer resp.Body.Close()
+	responseBody, err := readBounded(resp.Body, c.maxResponseBytes)
+	if err != nil {
+		return AgentTelemetryAck{}, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return AgentTelemetryAck{}, classifyAgentTelemetryStatus(resp.StatusCode, responseBody)
+	}
+
+	var ack AgentTelemetryAck
+	if err := json.Unmarshal(responseBody, &ack); err != nil {
+		return AgentTelemetryAck{}, newError(CodeAckContractMissing,
+			"Core agent-telemetry response failed strict ACK contract", err, false)
+	}
+	if err := validateAgentTelemetryAck(batch, ack); err != nil {
+		return AgentTelemetryAck{}, err
+	}
+	return ack, nil
+}
+
+func validateAgentTelemetryAck(batch AgentTelemetryBatch, ack AgentTelemetryAck) error {
+	if !strings.EqualFold(ack.Status, "ACCEPTED") {
+		return newError(CodeProtocol, "Core agent-telemetry acknowledgement status is not ACCEPTED", nil, false)
+	}
+	if ack.SensorID != batch.SensorID {
+		return newError(CodeProtocol, "Core agent-telemetry acknowledgement sensorId does not match submitted batch", nil, false)
+	}
+	if ack.BatchID != batch.BatchID {
+		return newError(CodeProtocol, "Core agent-telemetry acknowledgement batchId does not match submitted batch", nil, false)
+	}
+	if ack.CorrelationID != batch.CorrelationID {
+		return newError(CodeProtocol, "Core agent-telemetry acknowledgement correlationId does not match submitted batch", nil, false)
+	}
+	if ack.AcceptedThroughIngressSequence != batch.LastIngressSequence {
+		if ack.AcceptedThroughIngressSequence < batch.FirstIngressSequence {
+			return newError(CodeProtocol, "Core agent-telemetry acknowledgement sequence is below submitted batch first sequence", nil, false)
+		}
+		if ack.AcceptedThroughIngressSequence > batch.LastIngressSequence {
+			return newError(CodeProtocol, "Core agent-telemetry acknowledgement sequence is above submitted batch last sequence", nil, false)
+		}
+		return newError(CodeProtocol, "Core agent-telemetry acknowledgement sequence is below submitted batch last sequence", nil, false)
+	}
+	return nil
+}
+
+func classifyAgentTelemetryStatus(status int, body []byte) error {
+	var apiErr struct {
+		Status  string `json:"status"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(body, &apiErr)
+	code := strings.TrimSpace(apiErr.Code)
+	msg := strings.TrimSpace(apiErr.Message)
+	if msg == "" {
+		msg = fmt.Sprintf("Core returned HTTP status %d", status)
+	}
+	transient := status == http.StatusTooManyRequests || status >= 500
+	if code != "" {
+		return &CoreAPIError{Status: apiErr.Status, Code: code, Message: msg, HTTPStatus: status, transient: transient}
+	}
+	return classifyStatus(status)
+}
