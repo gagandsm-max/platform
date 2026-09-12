@@ -1,0 +1,8 @@
+{
+  "agentId": "agent-e2e-01",
+  "tenantId": "018f0e0a-0000-7000-8000-000000000001",
+  "hostId": "host-e2e-agent-01",
+  "hostname": "agent-e2e",
+  "os": "linux",
+  "arch": "amd64"
+}

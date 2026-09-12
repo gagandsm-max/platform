@@ -14,7 +14,7 @@ endif
 include $(ENV_FILE)
 export
 
-.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-static-contracts test-integration test-contract test-security-smoke evidence clean dev-reset certs post-reboot-verify dev-disk-check dev-hygiene
+.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-static-contracts test-integration test-contract test-security-smoke test-agent-runtime-e2e evidence clean dev-reset certs post-reboot-verify dev-disk-check dev-hygiene
 
 help: ## Show available Makefile targets
 	@echo "========================================================================"
@@ -108,6 +108,10 @@ test-security-smoke: ## Run mTLS, port isolation, and host runtime security smok
 test-telemetry-pipeline: ## Run end-to-end Sensor->Spool->Core->Kafka->ClickHouse pipeline verification
 	@echo "==> Running Platform telemetry pipeline verification..."
 	@bash tests/run-telemetry-pipeline-test.sh
+
+test-agent-runtime-e2e: certs ## Real Agent→Sensor Receiver→Agent spool→Core→Kafka path (test-only overlay)
+	@echo "==> Running Agent runtime E2E (does not change SENSOR_AGENT_RECEIVER_ENABLED compose default)..."
+	@bash tests/agent-runtime-e2e/run.sh
 
 evidence: test test-contract test-security-smoke ## Run full regression and generate engineering evidence
 	@echo "==> Capturing complete GA engineering evidence..."
