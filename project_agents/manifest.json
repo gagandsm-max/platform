@@ -7,7 +7,7 @@
     "source": "engineering/engineering-minimal-change-engineer.md",
     "description": "Surgical Platform implementation specialist. Use after the root cause or requirement is known to make the smallest defensible code/config/test change with no unrelated refactor.",
     "canonical_path": "canonical/p0/platform-minimal-change-engineer.md",
-    "sha256": "0d069091e7d8479bce7cb878740abe13e39f60795659622c1b5636cde168e41e"
+    "sha256": "f3db9d4ca9814cec071df1f1e0c235a4083203bce21002820db82c9ad42f4530"
   },
   {
     "name": "platform-codebase-onboarding-engineer",
@@ -17,7 +17,7 @@
     "source": "engineering/engineering-codebase-onboarding-engineer.md",
     "description": "Read-only Platform repository explorer. Use first on unfamiliar subsystems to map real entry points, ownership, execution paths, data flow, tests and governing docs before changes.",
     "canonical_path": "canonical/p0/platform-codebase-onboarding-engineer.md",
-    "sha256": "d232a75f12319ea68b0f5c2d83a2c857cd77ba393d608227a0f7e20b288f7d0d"
+    "sha256": "de46f3bbbbd0ef9ecf996bb92ae58398c561a0492d73afcc499172a20893a624"
   },
   {
     "name": "platform-codebase-archaeologist",
@@ -27,7 +27,7 @@
     "source": "specialized/specialized-codebase-archaeologist.md",
     "description": "Read-only drift investigator for Platform. Use across parallel branches/PRs or mature subsystems to find duplicated responsibilities, contract drift, stale assumptions, partial migrations and doc-vs-code divergence.",
     "canonical_path": "canonical/p0/platform-codebase-archaeologist.md",
-    "sha256": "50823f7dfbf0848744b60cfeba03b946eee287759b47dc5e278cfa8c27f1eee9"
+    "sha256": "5887941943f581236b41baa73ce4c3f7bdf53095e0cf096995e6703e36186550"
   },
   {
     "name": "platform-code-reviewer",
@@ -37,7 +37,7 @@
     "source": "engineering/engineering-code-reviewer.md",
     "description": "Independent read-only PR/diff reviewer for Platform. Use after implementation to find correctness, security, contract, data integrity, performance and missing-test issues; ignore style-only noise.",
     "canonical_path": "canonical/p0/platform-code-reviewer.md",
-    "sha256": "487600f3daa0509ce567c2a2402952111d24fe5701163898672dba846884ec32"
+    "sha256": "0bd91f56c6094117d6b211d20e6f89ce5fa0e9cc177ae15e64a248b3ddedeea2"
   },
   {
     "name": "platform-reality-checker",
@@ -47,7 +47,7 @@
     "source": "testing/testing-reality-checker.md",
     "description": "Final evidence gate for Platform. Use when work is claimed complete, production-ready or release-ready to verify the claim against code, tests, runtime evidence and applicable quality gates.",
     "canonical_path": "canonical/p0/platform-reality-checker.md",
-    "sha256": "f74e928469307667535499b50c4f883e953d46c979cd1196c9d4fca8d5a036c9"
+    "sha256": "a1b699d0061c5b91fb0142935f5811dd3e7b251b5ad109141a5718e236ec83e6"
   },
   {
     "name": "platform-evidence-collector",
@@ -57,7 +57,7 @@
     "source": "testing/testing-evidence-collector.md",
     "description": "Evidence gathering specialist for Platform. Use after implementation to collect reproducible build, test, runtime, API, log, UI, performance and package evidence without making quality claims beyond the evidence.",
     "canonical_path": "canonical/p0/platform-evidence-collector.md",
-    "sha256": "fcfc5417dac9ec4322f0dcf51e801b50753df858d1e107d85c8de29eb39db5f7"
+    "sha256": "dff9bde3530daaf21694ee25a93151033bad04ab8aeb132ed7a7d8fd3ca5c624"
   },
   {
     "name": "platform-security-architect",
@@ -67,7 +67,7 @@
     "source": "security/security-architect.md",
     "description": "Platform security design reviewer. Use for new trust boundaries, protocols, auth flows, privileged actions, AI tools, Device Packs, integrations, HA/update channels or sensitive architecture changes.",
     "canonical_path": "canonical/p0/platform-security-architect.md",
-    "sha256": "c56c3e1b175f85aff492a436d542329ce5328d309a79da02971c17970e76a085"
+    "sha256": "d0879e31976c6bf17d41766c248798f30beddf5c46c70201c8a2d91c513516a5"
   },
   {
     "name": "platform-appsec-engineer",
@@ -77,7 +77,7 @@
     "source": "security/security-appsec-engineer.md",
     "description": "Application-security reviewer for Platform code and APIs. Use on auth, input handling, queries, file/package import, web/API endpoints, integrations and security-sensitive implementation changes.",
     "canonical_path": "canonical/p0/platform-appsec-engineer.md",
-    "sha256": "07701f844078f2abdfd9530f3c8e438590b2a5fa57b7f40452d285597d39da85"
+    "sha256": "2f7e7b38cbd09ba3168370d56bb32fd0e7a13f28d4a72dd187560abcd2d7b9da"
   },
   {
     "name": "platform-ai-code-security-auditor",
@@ -87,7 +87,7 @@
     "source": "security/security-ai-generated-code-auditor.md",
     "description": "Security audit specialist for code produced or heavily modified by AI coding tools. Use after Cursor/Antigravity/Codex changes to catch insecure shortcuts, leaked secrets, authorization gaps and model/tool trust mistakes.",
     "canonical_path": "canonical/p0/platform-ai-code-security-auditor.md",
-    "sha256": "f0decbed5162e2afa89716d3b901532d4538bc22e029defde3a9bbe4bf40bb73"
+    "sha256": "76eec6190406792cf212e8d4766a8788907350baf655bbdf03b579b1b5962be9"
   },
   {
     "name": "platform-secrets-credential-engineer",
@@ -97,7 +97,7 @@
     "source": "security/security-secrets-credential-engineer.md",
     "description": "Platform secrets/credential specialist. Use for Credential Profiles, mTLS/PKI, signing keys, API tokens, connector secrets, CI credentials, support bundles and log/redaction behavior.",
     "canonical_path": "canonical/p0/platform-secrets-credential-engineer.md",
-    "sha256": "1f6cdd1f93e203f3e93403e5859cf4dd51a25d835415cafdbb8c3e3e40e02283"
+    "sha256": "6a8316a740ca346b2a8646e169c9bb57d5f0e6b3bed887e86f5ec52178466859"
   },
   {
     "name": "platform-test-automation-engineer",
@@ -107,7 +107,7 @@
     "source": "testing/testing-test-automation-engineer.md",
     "description": "Platform automated-test specialist. Use to add the narrowest durable unit/component/contract/integration/UI/failure regression tests required by a change and wire them into existing Docker/CI conventions.",
     "canonical_path": "canonical/p0/platform-test-automation-engineer.md",
-    "sha256": "7e1c24764a722c8a87bbf23eefcfce804ec08cdf123c4cd659e12a4410de4dce"
+    "sha256": "8858306ddee206f623b87d6d811b1ea7bc91312fb88e96d94098a657e5d3de65"
   },
   {
     "name": "platform-performance-benchmarker",
@@ -117,7 +117,7 @@
     "source": "testing/testing-performance-benchmarker.md",
     "description": "Performance/capacity evidence specialist for Platform. Use for hot paths, Core/Sensor sizing, ingestion, polling, UI/query, storage, HA replay and release regression benchmarking.",
     "canonical_path": "canonical/p0/platform-performance-benchmarker.md",
-    "sha256": "1aba7eb3ec6b3333cef565405a0be41fd668fc3d50463a942cae3ccbd8250ca5"
+    "sha256": "a95d78cd6cbc4c0b0c3b953458d788f69b1625332902cb3bd78939a41d0db980"
   },
   {
     "name": "platform-api-platform-engineer",
@@ -127,7 +127,7 @@
     "source": "engineering/engineering-api-platform-engineer.md",
     "description": "Platform API/event contract specialist. Use for Core APIs, Sensor/Agent control, ingestion, gRPC/HTTPS, Kafka event schemas, idempotency, compatibility and error contracts.",
     "canonical_path": "canonical/p1/platform-api-platform-engineer.md",
-    "sha256": "05b66f74cd2fd68fc69bdf0827d4525379b86c038ee1a4e6c50c5b1601799b4b"
+    "sha256": "9b0a414b50c283d30867ff9709d583e84b35c65d33b97d8ee9fc304528892123"
   },
   {
     "name": "platform-network-engineer",
@@ -137,7 +137,7 @@
     "source": "engineering/engineering-network-engineer.md",
     "description": "Network monitoring and Sensor specialist. Use for SNMP, ICMP, flow, syslog, gNMI, NETCONF, SSH, routing/topology, discovery, Device Pack collection and Sensor worker behavior.",
     "canonical_path": "canonical/p1/platform-network-engineer.md",
-    "sha256": "0bb589a7685e1d51490c734cd7aafe6909932ac22085335443ef3ea8cf04d827"
+    "sha256": "703087ef21b7d835053c8603fd5e22430da6b7560a82c3a0f5c9e41a2f1d108f"
   },
   {
     "name": "platform-database-reliability-engineer",
@@ -147,7 +147,7 @@
     "source": "engineering/engineering-database-reliability-engineer.md",
     "description": "PostgreSQL/ClickHouse reliability specialist. Use for schemas, migrations, retention, query/data integrity, backup/restore, replication and HA experiments while respecting unresolved two-Core P0 designs.",
     "canonical_path": "canonical/p1/platform-database-reliability-engineer.md",
-    "sha256": "9347dfbe25a1d0efd06797d7796c264ae8900d1f20510327293e3709bf93021a"
+    "sha256": "657d2e747879d1e3ba7ce2d6355823244debdd07c5eced5713dcfba658e95fcd"
   },
   {
     "name": "platform-sre",
@@ -157,7 +157,7 @@
     "source": "engineering/engineering-sre.md",
     "description": "Platform reliability/operability specialist. Use for service health, self-monitoring, SLO evidence, failure recovery, queues/backlogs, HA/DR observability, runbooks and operational diagnostics.",
     "canonical_path": "canonical/p1/platform-sre.md",
-    "sha256": "10c5885026647fe8fb10d9abeefd991a2938694575eeeae4ac1e06801fc112cc"
+    "sha256": "96e8e2c081d80aca67f7a551b92e8a840d4af4ff4e21ccb667383dcb5f80f503"
   },
   {
     "name": "platform-identity-access-engineer",
@@ -167,7 +167,7 @@
     "source": "engineering/engineering-identity-access-engineer.md",
     "description": "Platform IAM specialist. Use for Keycloak integration, OIDC/SAML/LDAP/Entra, MFA, RBAC/resource scope, service identities, API tokens, mTLS enrollment and tenant isolation.",
     "canonical_path": "canonical/p1/platform-identity-access-engineer.md",
-    "sha256": "d1dca926b27ebe08adbb674818fbd0e783c4810776404d3961cf6151922b35f4"
+    "sha256": "ab03381d1dfe9d785472538f5045f35be1854925a54b8a1d9975e6acc0ac6fbf"
   },
   {
     "name": "platform-knowledge-graph-engineer",
@@ -177,7 +177,7 @@
     "source": "engineering/engineering-knowledge-graph-engineer.md",
     "description": "Temporal operational graph specialist. Use for canonical entity relationships, topology history, provenance/confidence, graph queries, service dependencies, RCA subgraphs and GNN features\u2014not for selecting a new graph database by default.",
     "canonical_path": "canonical/p1/platform-knowledge-graph-engineer.md",
-    "sha256": "40df0b0c3ebff34c1bcaa7d74a254b2ac4a372b9725915b6a504d88a8e397372"
+    "sha256": "c6aa5451821da65fa1c713b2b8a7891bceb6a946e172126abd9c2de66f67c50c"
   },
   {
     "name": "platform-ai-engineer",
@@ -187,7 +187,7 @@
     "source": "engineering/engineering-ai-engineer.md",
     "description": "Platform AI/ML engineer. Use for AI Gateway, evidence-grounded LLM features, anomaly/baseline models and GNN scoring under deterministic RCA and model-governance constraints.",
     "canonical_path": "canonical/p1/platform-ai-engineer.md",
-    "sha256": "97652f6a3a851e1d5f900ba6ca99d6b8439f1494a91a2909deda4c5c34f49db5"
+    "sha256": "5245c72f3ae89eb080d603f93c41e1c8deb4088ee7ed850ba6692d8dff9258c1"
   },
   {
     "name": "platform-model-qa",
@@ -197,7 +197,7 @@
     "source": "specialized/specialized-model-qa.md",
     "description": "Independent QA for Platform anomaly/GNN/LLM behavior. Use to evaluate correctness, calibration, leakage, regression, INCONCLUSIVE behavior, explanation completeness and safe rollout before model enablement.",
     "canonical_path": "canonical/p1/platform-model-qa.md",
-    "sha256": "867c7a4558fb78e751e7d7a49eedd2dd1d4f57de1204d7d515a9d1abf541b78c"
+    "sha256": "9f58c57559e6366679722c8f1b04d3e160b0a2b986e9d3bff3d3b5a1c4a63e44"
   },
   {
     "name": "platform-devops-automator",
@@ -207,7 +207,7 @@
     "source": "engineering/engineering-devops-automator.md",
     "description": "Platform CI/CD, Docker development, build, packaging and release automation specialist. Use for reproducible pipelines, SBOM/scans, deb/rpm/MSI workflows and release evidence\u2014not for unapproved cloud/platform redesign.",
     "canonical_path": "canonical/p1/platform-devops-automator.md",
-    "sha256": "26a7b3bf60e8a0fb4a69e4ee91243a16cbe9912343fe88b9664058518f0cec3d"
+    "sha256": "c0f9811334349a2d49cb1c594f4f6aaac0448bd8260c36db641c9db79a98a51a"
   },
   {
     "name": "platform-git-workflow-master",
@@ -217,7 +217,7 @@
     "source": "engineering/engineering-git-workflow-master.md",
     "description": "Git/PR coordination specialist for Platform parallel engineering lanes. Use for branch/worktree strategy, stacked PRs, rebases, clean diffs and conflict-safe integration; never merge or rewrite history unless explicitly authorized.",
     "canonical_path": "canonical/p1/platform-git-workflow-master.md",
-    "sha256": "61e99124d0748dae1a1514e5fd36c9d096e0793a7f6a4ade5fbc512ce36244be"
+    "sha256": "3479991b448f0e060424014df8ea735f95eb50e82e24681b12ff4fa390029cff"
   },
   {
     "name": "platform-workflow-architect",
@@ -227,7 +227,7 @@
     "source": "specialized/specialized-workflow-architect.md",
     "description": "Read-only workflow/state-machine architect for Platform. Use before complex provisioning, alert, incident, RCA, NCM, upgrade, HA, integration or remediation flows to map actors, states, handoffs, failures and cleanup.",
     "canonical_path": "canonical/p1/platform-workflow-architect.md",
-    "sha256": "32ec0cf7b6248aadc7973df960981e925d0c69a8c83af5621ad1fab15502e815"
+    "sha256": "a32912f602be3f90971f0a7f280f80fdec22397bab68a30a332b432f17ce7cd4"
   },
   {
     "name": "platform-frontend-developer",
@@ -237,7 +237,7 @@
     "source": "engineering/engineering-frontend-developer.md",
     "description": "React/TypeScript implementation specialist for Platform UI. Use after UX/workflow contract is clear to build role-aware, server-driven, accessible, fast operational screens without generic dashboard filler.",
     "canonical_path": "canonical/p1/platform-frontend-developer.md",
-    "sha256": "effad04b2347d5cadc5fe7429d47751be7f0517ad552b42ff43e91529e7c662a"
+    "sha256": "2c3d374e71e51780fdcdd4d9ff51650370300a748edd7259ea1f008368664e5e"
   },
   {
     "name": "platform-ux-architect",
@@ -247,7 +247,7 @@
     "source": "design/design-ux-architect.md",
     "description": "Platform UX/information-architecture specialist. Use before major UI implementation to translate operational requirements into developer-ready hierarchy, workflows, state behavior and responsive/accessibility constraints.",
     "canonical_path": "canonical/p1/platform-ux-architect.md",
-    "sha256": "cc9a06fb8356334fe79276d36739da4be20dbc936ffbf330bf6d36975960d5fc"
+    "sha256": "8683ef0db018d6d3f034491ac82c80647ce235edfda7e541ef37510d35e8ca24"
   },
   {
     "name": "platform-ui-finish-gate-reviewer",
@@ -257,7 +257,7 @@
     "source": "design/design-ui-finish-gate-reviewer.md",
     "description": "Independent UI finish gate for Platform. Use after UI implementation to prevent generic AI-generated dashboards and verify hierarchy, operational specificity, states, responsiveness and evidence before acceptance.",
     "canonical_path": "canonical/p1/platform-ui-finish-gate-reviewer.md",
-    "sha256": "161c2505c74791d42cc7b6a2f12cfc7868f3fcb47a03ab0b7f833cd91528c017"
+    "sha256": "87d3d134d590404d239b0895ad451bd671e1aa448e2a104d8d849d30280beba7"
   },
   {
     "name": "platform-accessibility-auditor",
@@ -267,6 +267,6 @@
     "source": "testing/testing-accessibility-auditor.md",
     "description": "Accessibility QA for Platform UI. Use on new/changed operational screens to verify WCAG-aligned semantics, keyboard/focus, contrast/status, zoom and assistive-technology behavior with automated plus manual evidence.",
     "canonical_path": "canonical/p1/platform-accessibility-auditor.md",
-    "sha256": "616a7dbe2a3531f3aa1c5c2b5accad81d92a13ea56fe64861bfd5b6d9a57e43b"
+    "sha256": "61f284d379fe2b399bd5b9bbf16574a4990c347149ff5d4c0e5459195d5638e0"
   }
 ]

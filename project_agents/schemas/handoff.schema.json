@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "project_agents/schemas/handoff.schema.json",
+  "title": "Platform Control Plane v2 Handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "phase",
+    "inputHead",
+    "outputHead",
+    "filesChanged",
+    "requirementsAddressed",
+    "testsExecuted",
+    "testResults",
+    "runtimeEvidence",
+    "securityEvidence",
+    "knownFailures",
+    "unresolvedRisks",
+    "claims",
+    "nextState",
+    "nextOwner",
+    "timestamp"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "v2", "type": "string"},
+    "taskId": {"type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,127}$"},
+    "phase": {
+      "type": "string",
+      "enum": [
+        "INTAKE",
+        "REBASELINE",
+        "REQUIREMENTS",
+        "DIAGNOSIS",
+        "ROUTING",
+        "IMPLEMENTATION",
+        "LOCAL_VALIDATION",
+        "SOURCE_REVIEW",
+        "ADVERSARIAL_RUNTIME",
+        "SECURITY_DOMAIN_REVIEW",
+        "CI_VALIDATION",
+        "REALITY_GATE",
+        "MERGE_READY",
+        "POST_MERGE_VERIFY",
+        "COMPLETE",
+        "BLOCKED",
+        "REJECTED"
+      ]
+    },
+    "inputHead": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "outputHead": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "filesChanged": {"type": "array", "items": {"type": "string"}},
+    "requirementsAddressed": {"type": "array", "items": {"type": "string"}},
+    "testsExecuted": {"type": "array", "items": {"type": "string"}},
+    "testResults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "enum": ["PASS", "FAIL", "SKIP", "ERROR"]}
+        }
+      }
+    },
+    "runtimeEvidence": {"type": "array", "items": {"type": "string"}},
+    "securityEvidence": {"type": "array", "items": {"type": "string"}},
+    "knownFailures": {"type": "array", "items": {"type": "string"}},
+    "unresolvedRisks": {"type": "array", "items": {"type": "string"}},
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claimType", "statement"],
+        "properties": {
+          "claimType": {
+            "type": "string",
+            "enum": ["SOURCE_FACT", "EXECUTION_EVIDENCE", "CI_EVIDENCE", "INFERENCE", "UNVERIFIED"]
+          },
+          "statement": {"type": "string", "minLength": 1},
+          "evidencePointer": {"type": "string", "minLength": 1}
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "claimType": {"enum": ["SOURCE_FACT", "EXECUTION_EVIDENCE", "CI_EVIDENCE"]}
+              },
+              "required": ["claimType"]
+            },
+            "then": {"required": ["evidencePointer"]}
+          }
+        ]
+      }
+    },
+    "nextState": {
+      "type": "string",
+      "enum": [
+        "INTAKE",
+        "REBASELINE",
+        "REQUIREMENTS",
+        "DIAGNOSIS",
+        "ROUTING",
+        "IMPLEMENTATION",
+        "LOCAL_VALIDATION",
+        "SOURCE_REVIEW",
+        "ADVERSARIAL_RUNTIME",
+        "SECURITY_DOMAIN_REVIEW",
+        "CI_VALIDATION",
+        "REALITY_GATE",
+        "MERGE_READY",
+        "POST_MERGE_VERIFY",
+        "COMPLETE",
+        "BLOCKED",
+        "REJECTED"
+      ]
+    },
+    "nextOwner": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "minLength": 1}
+  }
+}

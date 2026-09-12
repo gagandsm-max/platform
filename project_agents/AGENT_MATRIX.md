@@ -1,6 +1,6 @@
 # Platform Agent Matrix
 
-The pack contains **27 optimized agents: 12 P0 and 15 P1**. P0 means governance/assurance-critical, not “run on every task”. Use the smallest set that materially improves the task.
+The authoritative agent inventory and tier distribution are declared by `project_agents/manifest.json`; do not hard-code a permanent agent count or P0/P1 split in policy text or validators. P0 means governance/assurance-critical, not “run on every task”. Use the smallest set that materially improves the task.
 
 | Tier | Agent | Default mode | Use when |
 |---|---|---|---|

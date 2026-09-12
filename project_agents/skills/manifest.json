@@ -1,0 +1,14 @@
+[
+  {"name":"source_truth_rebaseline","description":"Re-fetch authoritative main, exact task head, PR base/head and governing repository truth before relying on prior conclusions."},
+  {"name":"mother_reference_reconciliation","description":"Discover the Mother Reference set dynamically from Platform_00 and reconcile requirements, decisions and implementation claims without stale document ceilings."},
+  {"name":"root_cause_first","description":"Establish the evidenced failure mechanism before implementation; reject symptom-only patches and unsupported assumptions."},
+  {"name":"bounded_implementation","description":"Apply the smallest defensible change inside the approved scope with explicit non-goals and no unrelated refactor."},
+  {"name":"migration_safety","description":"Protect schema/data migrations with compatibility, rollback, idempotency, tenant isolation and failure-path evidence."},
+  {"name":"security_negative_testing","description":"Prove security boundaries with adversarial and negative cases rather than success-path evidence alone."},
+  {"name":"runtime_failure_injection","description":"Exercise crash, retry, timeout, durability and partial-failure paths and distinguish runtime evidence from source inference."},
+  {"name":"alert_quality_evidence","description":"Evaluate alert evidence quality, telemetry trust, false-alert controls, severity/confidence separation and INCONCLUSIVE behavior."},
+  {"name":"ai_evidence_safety","description":"Constrain AI claims and actions to authoritative evidence, deterministic tool boundaries, tenant/data-egress controls and graceful degradation."},
+  {"name":"exact_head_merge_gate","description":"Gate review and merge claims on the exact current head, complete required CI/evidence and independent verification; drift invalidates stale evidence."},
+  {"name":"evidence_bundle","description":"Package typed SOURCE_FACT, EXECUTION_EVIDENCE, CI_EVIDENCE, INFERENCE and UNVERIFIED claims with reproducible references."},
+  {"name":"post_merge_rebaseline","description":"After an authorized merge, re-fetch main and dependent heads, invalidate stale stack assumptions and reconcile downstream work before continuing."}
+]
