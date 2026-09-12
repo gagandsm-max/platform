@@ -13,6 +13,13 @@ if [[ ! -f "${CA_DIR}/ca.crt" || ! -f "${CA_DIR}/ca.key" ]]; then
 fi
 
 mkdir -p "${OUT_DIR}"
+
+if [[ "${FORCE_CERTS:-}" != "1" && -f "${OUT_DIR}/metadata.json" && -f "${OUT_DIR}/agent-e2e.crt" && -f "${OUT_DIR}/agent-e2e.key" && -f "${OUT_DIR}/sensor-infra-agent-server.crt" && -f "${OUT_DIR}/agent-e2e-expired.crt" && -f "${OUT_DIR}/agent-e2e-notyet.crt" ]]; then
+    echo "[OK] Reusing existing Agent E2E certs in ${OUT_DIR} (FORCE_CERTS=1 to regenerate)"
+    python3 -c 'import json,sys; print("fingerprint", json.load(open(sys.argv[1]))["fingerprint_sha256"])' "${OUT_DIR}/metadata.json"
+    exit 0
+fi
+
 rm -rf "${OUT_DIR}/ca-tmp"
 
 sign_leaf() {
