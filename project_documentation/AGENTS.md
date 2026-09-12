@@ -25,6 +25,8 @@ For work involving network discovery review, Agent onboarding/enrollment identit
 
 For work involving normalized SD-WAN, SCIM lifecycle, SLI/SLO/error budgets, audit tamper evidence, middleware/backup/SASE connectors, tenant offboarding/data portability, licensing safety, declarative configuration/policy-as-code, Incident Command Workspace, privacy-bounded endpoint DEX, browser synthetics, customer-operated outside-in probes or future regional federation, **`Platform_21_Enterprise_Gap_Closure_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
+For work involving alert qualification/evidence contracts, telemetry-quality trust, semantic monitoring states, alert-policy lifecycle/backtesting/shadowing, false-alert measurement, active evidence acquisition, evidence coverage, RCA confidence/contradictions, AI/ML evaluation, Incident Copilot, AI provider/egress controls, tenant-scoped learning, prompt-injection/tool-use controls, shared-service dependency monitoring, PKI assurance, predictive operations or AI observability, **`Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
+
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
 ## Canonical GitHub governance (USER-FIXED)
@@ -71,7 +73,13 @@ No implementation may permanently diverge from mother-reference truth. If implem
 - Core and Sensor 80% storage protection is mandatory.
 - UI is HTTPS-only; no application listener on port 80.
 - Do not declare device-down solely because SNMP or another primary monitor fails when corroborating evidence shows the device remains reachable.
+- Alert policy must use class-appropriate evidence contracts; telemetry/collector health is evaluated before operational failure is asserted.
+- Alert severity and evidentiary confidence are separate dimensions. `MONITORING_DEGRADED`, `REDUNDANCY_LOST`, `SLA_DEGRADED`, `EXPECTED_STATE`, `UNKNOWN` and `STALE` must not be collapsed into generic DOWN semantics.
 - AI/GNN output is evidence/hypothesis support, not unquestioned causal truth. RCA must support `INCONCLUSIVE`.
+- GNN/LLM output must never be treated as causal authority merely because the model score or wording is confident.
+- LLM/AI tool use is mediated through deterministic allowlisted actions, tenant/resource authorization, schema validation and policy enforcement; prompt content cannot grant privilege.
+- Learning/evaluation data is tenant-scoped unless explicitly authorized otherwise; no silent cross-tenant training or evidence mixing.
+- Core monitoring/RCA must remain operational when hosted AI is unavailable; graceful AI degradation cannot disable deterministic monitoring.
 - Triggered packet evidence must remain bounded, privileged, tenant-scoped, auditable and resource-limited; it does not authorize full always-on DPI.
 - Similar Incident Memory is advisory; historical similarity must not silently become current root cause.
 - External provider/change evidence is supporting evidence; provider text or temporal proximity alone is not causal proof.
@@ -85,6 +93,8 @@ A task is not complete until code, tests, observability, error behavior, upgrade
 For OIV capabilities, Definition of Done also includes applicable tenant isolation, evidence quality, packet-artifact protection, similarity false-positive, remediation deny/rollback, value-attribution and resource-regression tests defined in `Platform_19`.
 
 For enterprise-gap capabilities governed by `Platform_21`, Definition of Done also includes applicable canonical-model/connector contract tests, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior, upgrade/backward compatibility, audit evidence and the formal `REQ-EGC-*` acceptance evidence.
+
+For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`, Definition of Done also includes the applicable Alert Evidence Contract, telemetry-quality negative cases, semantic-state behavior, false-alert/backtest/shadow evidence, confidence/evidence coverage, contradiction handling, tenant-isolation and data-egress tests, prompt-injection/tool-firewall tests, graceful AI degradation, model/data-drift observability and the formal `REQ-MIA-*` acceptance evidence.
 
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
@@ -107,3 +117,17 @@ For enterprise-gap capabilities governed by `Platform_21`, Definition of Done al
 - Policy-as-code/Git inputs are declarations only and cannot bypass Platform RBAC, validation, approval, audit or runtime safety.
 - Endpoint DEX is operational-experience monitoring, not employee surveillance; prohibited content/surveillance collection remains out of scope.
 - Browser synthetics, outside-in probes and regional federation do not select a runtime/vendor/dependency or reopen v1 exactly-two-Core Active/Standby by implication.
+
+## v3.2.2 monitoring-intelligence, alert-quality and AI-assurance safeguards
+
+- Every material operational assertion uses a class-specific Alert Evidence Contract; single-source failure does not become authoritative failure when contradictory evidence remains credible.
+- Evaluate collector reachability, freshness, timestamp quality, source health and evidence gaps before classifying the monitored resource as failed.
+- Alert severity expresses operational impact; confidence expresses evidentiary support. Never substitute one for the other.
+- New/changed alert policies progress through governed `DRAFT -> BACKTEST -> SHADOW -> ACTIVE` lifecycle where applicable, with reproducible evidence and no invented universal quality threshold.
+- Active evidence acquisition is bounded, authorized, tenant-scoped, rate/resource limited and must not create a self-induced outage or bypass protocol/security policy.
+- RCA and Incident Copilot outputs expose observed facts, likely cause, confidence, supporting evidence, contradictions, missing evidence and next validation; `INCONCLUSIVE` is an acceptable correct result.
+- Operator feedback is structured/audited input to evaluation and policy/model improvement; it must not silently mutate active alert policy or model behavior.
+- Prompt/model output cannot directly invoke privileged actions. Deterministic tool-use policy, schema validation, authorization and audit remain authoritative.
+- Hosted/private/local/no-LLM provider modes must preserve data-egress controls and deterministic fallback; core monitoring cannot require Internet or an LLM/GNN to function.
+- AI/ML releases require reproducible evaluation, provenance, model/data-drift visibility and resource-budget evidence. Champion/challenger decisions require measured evidence, not vendor/model reputation.
+- Shared services such as DNS/DHCP/NTP/PTP/RADIUS/TACACS+/LDAP/AD and PKI/certificate state are dependency evidence for incident reasoning; facilities/power evidence may explain infrastructure incidents but does not turn Platform into BMS/DCIM.

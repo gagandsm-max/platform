@@ -2,16 +2,16 @@
 
 **Document ID:** PLATFORM-INDEX-001  
 **Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — 23-File Consolidated Engineering Source of Truth**
+**Status:** **Authoritative Mother Reference — 24-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-11 — v3.2.2 enterprise gap-closure specialized-master addition
+**Last reconciliation:** 2026-09-12 — v3.2.2 monitoring-intelligence / alert-quality / AI-assurance specialized-master addition
 
 ## 1. Authority
 
 **v3.2.2 supersedes v3.2.1 as the authoritative Platform mother-reference set after merge to the canonical GitHub `main`.**
 
-v3.2.2 is an additive product/engineering scope revision. It includes three specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value; `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center; and `Platform_21_Enterprise_Gap_Closure_Master.md` for enterprise adoption gaps such as normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, tamper-evident audit, governed offboarding/data portability, connector families and other bounded enterprise capabilities. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement.
+v3.2.2 is an additive product/engineering scope revision. It includes four specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value; `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center; `Platform_21_Enterprise_Gap_Closure_Master.md` for enterprise adoption gaps such as normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, tamper-evident audit, governed offboarding/data portability and connector families; and `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` for evidence-qualified alerting, monitoring-state semantics, RCA/AI assurance, bounded AI assistance and related shared-service evidence. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement.
 
 v3.2.1 superseded v3.2 as a corrective/governance patch. v3.2 superseded v3.1 as a documentation-packaging revision. Earlier v1/v2/v3.0/v3.1 generated master packages and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as Platform engineering sources of truth.
 
@@ -26,7 +26,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 - Security/compliance readiness must never be represented as achieved certification until independently achieved.
 - Customer-value/MTTR percentages are not product claims until supported by disclosed reproducible customer/pilot evidence.
 
-## 3. Exact 23-file mother-reference set
+## 3. Exact 24-file mother-reference set
 
 | # | File | Governing scope |
 |---:|---|---|
@@ -53,6 +53,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 | 21 | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | Authoritative OIV specialized master: SaaS/carrier/change intelligence, Flight Recorder, Similar Incident Memory, triggered packet evidence, controlled remediation, MTTR/value engine, formal `PRD-OIV-*` + `REQ-OIV-*` supplement |
 | 22 | `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` | Authoritative onboarding specialized master: discovery review, Agent enrollment/identity continuity, approval/audit, grouping/policy preview, Notification Center, formal `PRD-ONB-*` + `REQ-ONB-*` supplement |
 | 23 | `Platform_21_Enterprise_Gap_Closure_Master.md` | Authoritative enterprise gap-closure specialized master: normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, audit tamper evidence, enterprise connector/offboarding/licensing/policy-as-code requirements, formal `PRD-EGC-*` + `REQ-EGC-*` supplement |
+| 24 | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Authoritative monitoring-intelligence specialized master: class-specific Alert Evidence Contracts, telemetry trust, semantic monitoring states, alert-quality lifecycle, RCA/AI assurance, Incident Copilot, AI safety/provenance, formal `PRD-MIA-*` + `REQ-MIA-*` supplement |
 
 ## 4. Consolidation and version map
 
@@ -77,7 +78,9 @@ v3.2.2 adds specialized masters under a consolidated-amendment pattern instead o
 
 The 2026-09-11 reconciliation adds `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` under the same pattern. Its §§3–12 carry product/architecture/HLD/LLD/dataflow/UI/security/quality/operations authority for the onboarding capability family, and §13 provides formal `REQ-ONB-*` traceability.
 
-The enterprise gap-closure reconciliation adds `Platform_21_Enterprise_Gap_Closure_Master.md` under the same pattern. Its `PRD-EGC-*` and `REQ-EGC-*` requirements govern the enterprise capability family while explicitly reserving monitoring-intelligence/alert-quality/AI-assurance requirements for a separate specialized master. This remains **v3.2.2**; no v3.2.3 product-version number is created.
+The enterprise gap-closure reconciliation adds `Platform_21_Enterprise_Gap_Closure_Master.md` under the same pattern. Its `PRD-EGC-*` and `REQ-EGC-*` requirements govern the enterprise capability family while explicitly reserving monitoring-intelligence/alert-quality/AI-assurance requirements for a separate specialized master.
+
+The 2026-09-12 monitoring-intelligence reconciliation adds `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`. Its `PRD-MIA-*` and `REQ-MIA-*` requirements govern alert evidence/quality, semantic monitoring states, RCA/AI assurance, bounded AI assistance and related dependency evidence. This remains **v3.2.2**; no v3.2.3 product-version number is created.
 
 The older files remain authoritative for their existing scope and are explicitly supplemented by specialized masters; they are not considered obsolete. This packaging choice is deliberate change control, not a waiver of traceability.
 
@@ -98,7 +101,9 @@ When requirements appear to conflict:
 
 **Onboarding special case:** `Platform_20` is a consolidated specialized amendment. Its `PRD-ONB-*` requirements act as authoritative BRD/PRD supplements; its logical-layer sections carry the corresponding architecture/HLD/LLD/dataflow/UI/security/quality/operations authority; its `REQ-ONB-*` catalogue is the formal RTM supplement.
 
-**Enterprise gap-closure special case:** `Platform_21` is a consolidated specialized amendment. Its `PRD-EGC-*` requirements act as authoritative product supplements for its assigned enterprise capability family; its architecture/security/operability sections govern that scope and its `REQ-EGC-*` catalogue is the formal RTM supplement. It does not own monitoring-intelligence/alert-quality/AI-assurance requirements reserved for a separate specialized master.
+**Enterprise gap-closure special case:** `Platform_21` is a consolidated specialized amendment. Its `PRD-EGC-*` requirements act as authoritative product supplements for its assigned enterprise capability family; its architecture/security/operability sections govern that scope and its `REQ-EGC-*` catalogue is the formal RTM supplement.
+
+**Monitoring-intelligence special case:** `Platform_22` is a consolidated specialized amendment. Its `PRD-MIA-*` requirements act as authoritative product supplements for alert quality, evidence qualification and AI/RCA assurance; its architecture/security/operability sections govern that capability family and its `REQ-MIA-*` catalogue is the formal RTM supplement. It does not silently override Platform_19 OIV or Platform_21 enterprise-gap authority outside its assigned scope.
 
 Conflicts require documented change control; implementation must not silently choose a convenient interpretation.
 
@@ -140,6 +145,10 @@ Conflicts require documented change control; implementation must not silently ch
 - Declarative policy/configuration inputs cannot bypass Platform RBAC, validation, approvals, audit or runtime safety.
 - Endpoint DEX is bounded operational-experience monitoring, not employee surveillance.
 - Future regional federation does not reopen the v1 exactly-two-Core Active/Standby topology by implication.
+- Material alert classes use class-specific evidence contracts and telemetry-quality trust checks before authoritative operational-failure assertions.
+- Alert severity and evidentiary confidence are independent; semantic states such as `MONITORING_DEGRADED`, `REDUNDANCY_LOST`, `SLA_DEGRADED`, `EXPECTED_STATE`, `UNKNOWN` and `STALE` are preserved where applicable rather than collapsed into generic DOWN.
+- GNN/LLM outputs are evidence/hypothesis assistance, never causal authority; `INCONCLUSIVE` remains valid and prompt/model text cannot grant privileged execution authority.
+- Core monitoring and deterministic RCA/alerting continue without Internet/hosted AI availability; hosted/private/local/no-LLM operation is governed by explicit data-egress and fallback controls.
 
 ## 7. OSS governance
 
@@ -148,7 +157,7 @@ Top-level licence alone is insufficient; transitive/bundled licences, notices, v
 Every release produces SPDX and CycloneDX SBOMs, third-party notices/licence texts, version locks, checksums and provenance.
 Implementation dependencies must match the catalogue; catalogue omissions discovered in implementation require catalogue/change-control updates before milestone/release.
 
-`Platform_19`, `Platform_20` and `Platform_21` do not by themselves select new runtime dependencies. Any new vector database, packet-analysis product, SaaS SDK, browser automation engine, probe runtime, vendor SDK or other dependency requires normal OSS catalogue/security/performance approval.
+`Platform_19`, `Platform_20`, `Platform_21` and `Platform_22` do not by themselves select new runtime dependencies. Any new vector database, packet-analysis product, SaaS SDK, browser automation engine, probe runtime, AI/model runtime, vendor SDK or other dependency requires normal OSS catalogue/security/performance approval.
 
 ## 8. Completeness control
 
@@ -157,6 +166,7 @@ Implementation dependencies must match the catalogue; catalogue omissions discov
 For v3.2.2 OIV scope, `Platform_19` contains the authoritative `REQ-OIV-*` traceability supplement.
 For v3.2.2 onboarding scope, `Platform_20` contains the authoritative `REQ-ONB-*` traceability supplement.
 For v3.2.2 enterprise gap-closure scope, `Platform_21` contains the authoritative `REQ-EGC-*` traceability supplement mapped to `PRD-EGC-*` requirements and their governing architecture/security/operability clauses.
+For v3.2.2 monitoring-intelligence/alert-quality/AI-assurance scope, `Platform_22` contains the authoritative `REQ-MIA-*` traceability supplement mapped to `PRD-MIA-*` requirements and their governing evidence/security/operability clauses.
 
 A new requirement is considered incorporated only when it has an ID, affected-layer mapping and sufficient normative behavior for implementation without inventing a load-bearing decision. Specialized masters satisfy this requirement only within their explicitly assigned capability family.
 
@@ -184,6 +194,7 @@ Before coding a module, an engineer or coding agent reads `AGENTS.md`, this Inde
 For any OIV task, `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` is mandatory preflight reading.
 For discovery review, Agent onboarding/enrollment identity, dynamic endpoint identity/reconciliation or in-product Notification Center work, `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` is mandatory preflight reading.
 For normalized SD-WAN, SCIM lifecycle, SLI/SLO/error budgets, audit tamper evidence, middleware/backup/SASE connectors, tenant offboarding/data portability, licensing safety, declarative configuration/policy-as-code, Incident Command Workspace, privacy-bounded endpoint DEX, browser synthetics, customer-operated probes or future regional federation, `Platform_21_Enterprise_Gap_Closure_Master.md` is mandatory preflight reading.
+For alert evidence/qualification, semantic monitoring states, alert-policy lifecycle/quality, active evidence acquisition, RCA confidence/contradictions, AI evaluation/safety, Incident Copilot, AI provider/egress controls, prompt-injection/tool-use protection, tenant-scoped learning, shared-service dependency evidence, PKI assurance or AI observability, `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` is mandatory preflight reading.
 
 A feature is not complete when it only compiles: tests, observability, error/failure behavior, upgrade/migration impact, security/OSS implications, traceability and acceptance evidence are part of Definition of Done.
 
@@ -222,6 +233,6 @@ Such changes require deliberate change control, cross-document reconciliation, D
 
 ## 13. Repository placement
 
-For ChatGPT Project use, these **23 Markdown mother-reference files** are sufficient as the authoritative source set for this branch.
+For ChatGPT Project use, these **24 Markdown mother-reference files** are sufficient as the authoritative source set.
 For code-agent enforcement, `AGENTS.md` should also be available at repository root (`~/nms/AGENTS.md` in a working clone), preferably as the existing symlink to `project_documentation/AGENTS.md`, so tools that auto-discover root instructions see the same content.
 Authority of the clone follows §12 after merge to the canonical GitHub repository.
