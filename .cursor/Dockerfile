@@ -7,10 +7,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         git \
         gnupg \
+        iproute2 \
         iptables \
         jq \
         make \
         openssl \
+        procps \
         python3 \
         sudo \
     && rm -rf /var/lib/apt/lists/*

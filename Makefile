@@ -34,17 +34,24 @@ doctor: ## Inspect host environment, verify Docker, Compose, ports, certs, disk,
 	@echo -n "Checking Dev TLS Certificates... "
 	@[ -f deploy/docker/certs/platform-dev.crt ] && [ -f deploy/docker/certs/platform-dev.key ] && echo "OK" || (echo "MISSING; run 'make certs'"; exit 1)
 	@echo -n "Checking Port Conflicts in range 20000-29999... "
-	@for p in $(PLATFORM_CORE_HOST_PORT) $(PLATFORM_UI_HOST_PORT) $(PLATFORM_POSTGRES_HOST_PORT) $(PLATFORM_CLICKHOUSE_HTTP_HOST_PORT) $(PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT) $(PLATFORM_VALKEY_HOST_PORT); do \
-		if ss -tuln | grep -q ":$$p "; then \
-			if [ -z "$$(docker compose ps -q 2>/dev/null)" ]; then \
-				echo "PORT CONFLICT: $$p is already bound on host by foreign process"; exit 1; \
+	@command -v ss >/dev/null 2>&1 || (echo "FAILED: ss not found (install iproute2)"; exit 1)
+	@ss_out="$$(ss -tuln)"; \
+		if [ -z "$$ss_out" ]; then echo "FAILED: ss produced no listen table"; exit 1; fi; \
+		for p in $(PLATFORM_CORE_HOST_PORT) $(PLATFORM_UI_HOST_PORT) $(PLATFORM_POSTGRES_HOST_PORT) $(PLATFORM_CLICKHOUSE_HTTP_HOST_PORT) $(PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT) $(PLATFORM_VALKEY_HOST_PORT); do \
+			if printf '%s\n' "$$ss_out" | grep -q ":$$p "; then \
+				if [ -z "$$(docker compose ps -q 2>/dev/null)" ]; then \
+					echo "PORT CONFLICT: $$p is already bound on host by foreign process"; exit 1; \
+				fi; \
 			fi; \
-		fi; \
-	done; echo "OK (No conflicts detected)"
+		done; \
+		echo "OK (No conflicts detected; $$(printf '%s\n' "$$ss_out" | wc -l) ss listen rows)"
 	@echo -n "Checking Host Disk Space... "
 	@echo "$$(df -h / | awk 'NR==2 {print $$4}') available"
 	@echo -n "Checking Host RAM... "
-	@echo "$$(free -h | awk '/^Mem:/ {print $$7}') available"
+	@command -v free >/dev/null 2>&1 || (echo "FAILED: free not found (install procps)"; exit 1)
+	@free_avail="$$(free -h | awk '/^Mem:/ {print $$7}')"; \
+		if [ -z "$$free_avail" ]; then echo "FAILED: free did not report Mem available"; exit 1; fi; \
+		echo "$$free_avail available"
 	@echo "==> Platform Doctor Check Passed."
 
 dev-disk-check: ## Read-only disk/Docker pressure report (70/80/90 thresholds)
