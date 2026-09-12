@@ -1,5 +1,3 @@
-<!-- generated from project_agents/skills/source_truth_rebaseline/SKILL.md -->
-
 # source_truth_rebaseline
 
 ## Purpose
