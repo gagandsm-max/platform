@@ -64,9 +64,22 @@ def main() -> int:
 
     sql = f"""
 BEGIN;
+DELETE FROM platform.agent_sensor_assignment
+ WHERE tenant_id = '{TENANT}' AND agent_id = '{AGENT_ID}';
+DELETE FROM platform.agent_certificate_credential
+ WHERE tenant_id = '{TENANT}'
+   AND (agent_id = '{AGENT_ID}' OR credential_id = '{CREDENTIAL_ID}' OR fingerprint_sha256 = '{fp}');
+DELETE FROM platform.entity_identifier
+ WHERE tenant_id = '{TENANT}'
+   AND (
+        identifier_id = '{IDENTIFIER_ID}'
+        OR (namespace = 'platform.agent' AND identifier_type = 'HOST_ID' AND identifier_value = '{HOST_ID}')
+   );
+DELETE FROM platform.entity WHERE entity_id = '{ENTITY_ID}';
+DELETE FROM platform.agent WHERE agent_id = '{AGENT_ID}';
+
 INSERT INTO platform.agent (agent_id, tenant_id, site_id, status, created_at, updated_at)
-VALUES ('{AGENT_ID}', '{TENANT}', NULL, 'ACTIVE', now(), now())
-ON CONFLICT (agent_id) DO UPDATE SET status = 'ACTIVE', updated_at = now();
+VALUES ('{AGENT_ID}', '{TENANT}', NULL, 'ACTIVE', now(), now());
 
 INSERT INTO platform.agent_certificate_credential (
     credential_id, tenant_id, agent_id, fingerprint_sha256, spki_sha256,
@@ -76,18 +89,13 @@ INSERT INTO platform.agent_certificate_credential (
     '{CREDENTIAL_ID}', '{TENANT}', '{AGENT_ID}', '{fp}', NULL,
     '{serial}', '{issuer_dn}', '{issuer_fp}',
     '{not_before}', '{not_after}', 'ACTIVE', now(), NULL, now(), now()
-)
-ON CONFLICT (fingerprint_sha256) DO UPDATE
-    SET status = 'ACTIVE', not_before = EXCLUDED.not_before, not_after = EXCLUDED.not_after,
-        agent_id = EXCLUDED.agent_id, tenant_id = EXCLUDED.tenant_id, updated_at = now();
+);
 
 INSERT INTO platform.agent_sensor_assignment (
     assignment_id, tenant_id, agent_id, sensor_id, generation, status, created_at, updated_at, revoked_at
 ) VALUES (
     '{ASSIGNMENT_ID}', '{TENANT}', '{AGENT_ID}', '{SENSOR_ID}', 1, 'ACTIVE', now(), now(), NULL
-)
-ON CONFLICT (tenant_id, agent_id, generation) DO UPDATE
-    SET status = 'ACTIVE', sensor_id = EXCLUDED.sensor_id, revoked_at = NULL, updated_at = now();
+);
 
 INSERT INTO platform.entity (
     entity_id, tenant_id, entity_type, display_name, lifecycle_state,
@@ -95,8 +103,7 @@ INSERT INTO platform.entity (
 ) VALUES (
     '{ENTITY_ID}', '{TENANT}', 'HOST', 'agent-e2e-01', 'ACTIVE',
     now(), now(), now(), now()
-)
-ON CONFLICT (entity_id) DO UPDATE SET lifecycle_state = 'ACTIVE', updated_at = now();
+);
 
 INSERT INTO platform.entity_identifier (
     identifier_id, tenant_id, entity_id, identifier_type, namespace, identifier_value,
@@ -104,9 +111,7 @@ INSERT INTO platform.entity_identifier (
 ) VALUES (
     '{IDENTIFIER_ID}', '{TENANT}', '{ENTITY_ID}', 'HOST_ID', 'platform.agent', '{HOST_ID}',
     1.0, now(), now()
-)
-ON CONFLICT (tenant_id, namespace, identifier_type, identifier_value) DO UPDATE
-    SET entity_id = EXCLUDED.entity_id, last_seen_at = now();
+);
 COMMIT;
 SELECT 'seeded-agent=' || '{AGENT_ID}' || ' fingerprint=' || '{fp}';
 """
