@@ -4,7 +4,7 @@ Record of **verified** mechanisms only. Unverified surfaces are labelled as such
 Do not treat this file as permission to invent CLI flags, skill paths, or
 subagent loaders.
 
-**Verification date:** 2026-09-12  
+**Verification date:** 2026-09-12
 **Verified against repository HEAD at write time on branch**
 `feature/engineering-capability-pack-v1-2`, after fetching `origin/main`
 `a8ddda794ac50368c4d917e0ae3d51703b79124e` (Platform CI run `34687320630`,
