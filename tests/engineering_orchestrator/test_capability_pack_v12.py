@@ -464,8 +464,28 @@ class CapabilityPackUiAmendmentTests(unittest.TestCase):
     def test_effective_diff_excludes_product_runtime(self) -> None:
         import subprocess
 
+        def _has_commit(ref: str) -> bool:
+            return (
+                subprocess.run(
+                    ["git", "cat-file", "-e", f"{ref}^{{commit}}"],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    check=False,
+                ).returncode
+                == 0
+            )
+
+        candidates = [
+            os.environ.get("BASE_SHA", "").strip(),
+            os.environ.get("GITHUB_BASE_SHA", "").strip(),
+            "origin/main",
+            "main",
+        ]
+        base = next((item for item in candidates if item and _has_commit(item)), None)
+        if base is None:
+            self.skipTest("no resolvable base commit for runtime-diff check")
         named = subprocess.check_output(
-            ["git", "diff", "--name-only", "origin/main"],
+            ["git", "diff", "--name-only", f"{base}...HEAD"],
             cwd=REPO_ROOT,
             text=True,
         )
@@ -476,7 +496,10 @@ class CapabilityPackUiAmendmentTests(unittest.TestCase):
             "package-lock.json",
         )
         for line in named.splitlines():
-            self.assertFalse(any(line == prefix.rstrip("/") or line.startswith(prefix) for prefix in forbidden_prefixes), line)
+            self.assertFalse(
+                any(line == prefix.rstrip("/") or line.startswith(prefix) for prefix in forbidden_prefixes),
+                line,
+            )
             self.assertNotIn(line, forbidden_files)
 
 
