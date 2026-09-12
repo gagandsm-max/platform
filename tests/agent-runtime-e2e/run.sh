@@ -132,16 +132,27 @@ count_agent_kafka() {
     printf '%s\n' "${dump}" | grep -c "${needle}" || true
 }
 
+reset_test_volumes() {
+    log "==> resetting test-only Agent queue and Sensor Agent-spool volumes"
+    docker stop platform-agent-e2e >/dev/null 2>&1 || true
+    docker rm -f platform-agent-e2e platform-agent-e2e-init >/dev/null 2>&1 || true
+    docker stop platform-sensor-infra >/dev/null 2>&1 || true
+    docker rm -f platform-sensor-infra platform-sensor-agent-spool-init >/dev/null 2>&1 || true
+    docker volume rm -f platform_agent_e2e_state platform_sensor_infra_agent_spool >/dev/null 2>&1 || true
+}
+
 dump_evidence() {
     {
         echo "=== agent logs ==="
         docker logs platform-agent-e2e --tail 80 2>/dev/null || true
         echo "=== sensor-infra logs ==="
-        docker logs platform-sensor-infra --tail 80 2>/dev/null || true
+        docker logs platform-sensor-infra --tail 120 2>/dev/null || true
         echo "=== queue ==="
         docker exec platform-agent-e2e sh -c 'ls -la /var/lib/platform/agent/queue/active 2>/dev/null; ls -la /var/lib/platform/agent/queue 2>/dev/null' || true
         echo "=== sensor agent spool ==="
-        docker exec platform-sensor-infra sh -c 'ls -la /var/lib/platform/sensor/agent-spool 2>/dev/null | head' || true
+        docker exec platform-sensor-infra sh -c 'ls -la /var/lib/platform/sensor/agent-spool 2>/dev/null | head -40; echo --- poison ---; ls -la /var/lib/platform/sensor/agent-spool/agent-poison 2>/dev/null | head' || true
+        echo "=== core agent-ingress ==="
+        docker logs platform-core --tail 80 2>/dev/null | grep -E 'agent-telemetry|RECORD_TOO_LARGE|agent-e2e' || true
     } > "${EVIDENCE_DIR}/debug.txt" 2>&1 || true
     cp "${EVIDENCE_DIR}/debug.txt" "${ARTIFACT_DIR}/agent-runtime-e2e-debug.txt" 2>/dev/null || true
 }
@@ -155,6 +166,7 @@ if [[ ! -f deploy/docker/certs/ca.crt ]]; then
     make certs
 fi
 bash "${E2E_DIR}/generate-certs.sh"
+reset_test_volumes
 
 log "==> starting infrastructure with test-only Agent Receiver overlay"
 "${COMPOSE[@]}" up -d postgres clickhouse kafka valkey core
@@ -163,8 +175,9 @@ if ! wait_healthy platform-core 90; then
 fi
 record "infra-core-healthy" "PASS"
 
-"${COMPOSE[@]}" up -d --force-recreate sensor-infra
-if ! wait_healthy platform-sensor-infra 60; then
+log "==> rebuilding Sensor with Agent Receiver overlay (does not flip compose.yaml default)"
+"${COMPOSE[@]}" up -d --build --force-recreate sensor-infra
+if ! wait_healthy platform-sensor-infra 90; then
     fail_closed "sensor-infra-healthy" "sensor-infra did not become healthy with Agent Receiver enabled"
 fi
 if ! wait_receiver; then
@@ -175,6 +188,9 @@ record "sensor-receiver-enabled" "PASS" "SENSOR_AGENT_RECEIVER_ENABLED=true list
 
 python3 "${E2E_DIR}/seed_authority.py" | tee "${EVIDENCE_DIR}/seed.txt"
 record "authority-sql-seed" "PASS"
+
+log "==> capturing Kafka baseline before Agent start"
+KAFKA_BEFORE="$(count_agent_kafka '"agentId":"agent-e2e-01"')"
 
 "${COMPOSE[@]}" build agent-runtime
 "${COMPOSE[@]}" up -d --force-recreate --no-deps agent-runtime-init
@@ -200,19 +216,19 @@ record "agent-process-start" "PASS" "production platform-agent-linux"
 
 # Happy path: real collectors → spool → mTLS → Sensor ACK → Core → Kafka
 log "==> waiting for real Agent host telemetry on telemetry.numeric.v1"
-HAPPY_HITS=0
+HAPPY_HITS="${KAFKA_BEFORE}"
 for i in $(seq 1 24); do
     HAPPY_HITS="$(count_agent_kafka '"agentId":"agent-e2e-01"')"
-    if [[ "${HAPPY_HITS}" -ge 1 ]]; then
+    if [[ "${HAPPY_HITS}" -gt "${KAFKA_BEFORE}" ]]; then
         break
     fi
     sleep 5
 done
-if [[ "${HAPPY_HITS}" -lt 1 ]]; then
+if [[ "${HAPPY_HITS}" -le "${KAFKA_BEFORE}" ]]; then
     dump_evidence
-    fail_closed "happy-path-kafka" "no AGENT Kafka records for agent-e2e-01"
+    fail_closed "happy-path-kafka" "no new AGENT Kafka records for agent-e2e-01 (before=${KAFKA_BEFORE} after=${HAPPY_HITS})"
 fi
-record "happy-path-kafka" "PASS" "agentId=agent-e2e-01 hits=${HAPPY_HITS} topic=telemetry.numeric.v1"
+record "happy-path-kafka" "PASS" "agentId=agent-e2e-01 before=${KAFKA_BEFORE} after=${HAPPY_HITS} topic=telemetry.numeric.v1"
 
 # Queue should drain after valid ACK
 sleep 3

@@ -16,6 +16,17 @@ make test-agent-runtime-e2e
 memory). If CA files are missing, `run.sh` calls `make certs` once. Do not run
 `make certs` against a live stack.
 
+Each run deletes only the test-only named volumes `platform_agent_e2e_state`
+and `platform_sensor_infra_agent_spool` so leftover oversized Agent batches
+cannot head-of-line block Sensor drain. Postgres/Kafka/Core volumes are left
+alone.
+
+Agent `PLATFORM_AGENT_MAX_BATCH_BYTES` defaults to 384 KiB so one delivery
+envelope stays under Core `AgentIngestionValidator.MAX_RECORD_BYTES` (512 KiB).
+The overlay also sets that cap explicitly. Sensor Agent Receiver default max
+body is 512 KiB. Core 413 `ERR_RECORD_TOO_LARGE` is a terminal drain poison
+(not an infinite retry).
+
 ```bash
 # only if ca.crt is missing, and only while Compose is down:
 # make certs
