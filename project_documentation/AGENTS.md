@@ -12,16 +12,18 @@ Local clones (including `~/nms`) are working copies. Changes become authoritativ
 Before changing code or build/deployment assets, read in this order:
 
 1. `project_documentation/Platform_00_Document_Index.md`
-2. Relevant BRD/PRD requirement(s), including formal `PRD-OIV-*` supplements where applicable
+2. Relevant BRD/PRD requirement(s), including formal specialized-master supplements where applicable
 3. `Platform_03_Architecture.md`
 4. Relevant HLD/LLD/Dataflow sections
 5. `Platform_07_OSS_Catalog.md`
-6. Relevant specialized master (`09` through `20`)
+6. Relevant specialized masters discovered from `Platform_00_Document_Index.md`
 7. `Platform_12_Decision_Source_Register.md` when a decision/source is unclear
 
 For work involving SaaS monitoring, carrier/ISP integration, external changes/deployments, cloud-native dependencies, Incident Flight Recorder, Similar Incident Memory, triggered packet evidence, controlled remediation, MTTR/value measurement or customer-value dashboards, **`Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` is mandatory preflight reading**.
 
 For work involving network discovery review, Agent onboarding/enrollment identity, dynamic endpoint identity/reconciliation, approval/exclusion workflow, or the in-product Notification Center, **`Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` is mandatory preflight reading**.
+
+For work involving normalized SD-WAN, SCIM lifecycle, SLI/SLO/error budgets, audit tamper evidence, middleware/backup/SASE connectors, tenant offboarding/data portability, licensing safety, declarative configuration/policy-as-code, Incident Command Workspace, privacy-bounded endpoint DEX, browser synthetics, customer-operated outside-in probes or future regional federation, **`Platform_21_Enterprise_Gap_Closure_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
@@ -82,6 +84,8 @@ A task is not complete until code, tests, observability, error behavior, upgrade
 
 For OIV capabilities, Definition of Done also includes applicable tenant isolation, evidence quality, packet-artifact protection, similarity false-positive, remediation deny/rollback, value-attribution and resource-regression tests defined in `Platform_19`.
 
+For enterprise-gap capabilities governed by `Platform_21`, Definition of Done also includes applicable canonical-model/connector contract tests, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior, upgrade/backward compatibility, audit evidence and the formal `REQ-EGC-*` acceptance evidence.
+
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
 - Network auto-discovery and Agent enrollment feed a governed onboarding/review lifecycle. Newly found/enrolled entities do not silently become licensed/actively monitored unless an explicit authorized trusted auto-approval policy applies.
@@ -91,3 +95,15 @@ For OIV capabilities, Definition of Done also includes applicable tenant isolati
 - Reinstall, reimage, cloned Agent identity, hostname collision and conflicting stable identifiers require explicit reconciliation; never silently merge or duplicate inventory.
 - The in-product Notification Center is one role-aware global surface. Recipient access and deep links are enforced server-side by tenant, RBAC, resource scope and subscription; operational Alerts/Incidents remain distinct from platform/workflow notifications.
 - Discovery/onboarding notification generation is deduplicated, bounded and rate-limited so scans, rediscovery or Agent reconnect storms cannot create notification floods.
+
+## v3.2.2 enterprise gap-closure safeguards
+
+- Vendor SD-WAN/SASE/backup/middleware integrations normalize into Platform-owned contracts; vendor identifiers never override tenant/entity authority.
+- SCIM v2 is a compatibility target until independently validated; do not claim certification/compliance by specification alone.
+- SLI/SLO/error-budget calculations expose scope, windows, exclusions and evidence; contractual commitments remain Founder-reserved unless formally approved.
+- Audit integrity must provide independently verifiable tamper evidence without assuming a cryptographic construction before architecture/security review.
+- Tenant offboarding distinguishes active-data deletion, backup/archive retention or expiry, legal hold and final destruction evidence; never promise immediate physical erasure from immutable backups.
+- Existing seven-day licence grace remains governed behavior; do not invent prices, quantities or SKUs.
+- Policy-as-code/Git inputs are declarations only and cannot bypass Platform RBAC, validation, approval, audit or runtime safety.
+- Endpoint DEX is operational-experience monitoring, not employee surveillance; prohibited content/surveillance collection remains out of scope.
+- Browser synthetics, outside-in probes and regional federation do not select a runtime/vendor/dependency or reopen v1 exactly-two-Core Active/Standby by implication.
