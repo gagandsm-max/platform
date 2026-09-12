@@ -494,18 +494,37 @@ class CapabilityPackUiAmendmentTests(unittest.TestCase):
             cwd=REPO_ROOT,
             text=True,
         )
+        names = [line for line in named.splitlines() if line]
+        pack_prefixes = (
+            "project_agents/",
+            ".agents/",
+            ".cursor/agents/",
+            "skills/",
+            "project_documentation/AGENTS.md",
+        )
         forbidden_prefixes = ("ui/", "core/", "sensor/", "agent/")
         forbidden_files = (
             "ui/package.json",
             "core/pom.xml",
             "package-lock.json",
         )
-        for line in named.splitlines():
-            self.assertFalse(
-                any(line == prefix.rstrip("/") or line.startswith(prefix) for prefix in forbidden_prefixes),
-                line,
-            )
-            self.assertNotIn(line, forbidden_files)
+        touches_pack = any(
+            name.startswith(prefix) or name == prefix.rstrip("/")
+            for name in names
+            for prefix in pack_prefixes
+        )
+        product_hits = [
+            name
+            for name in names
+            if name in forbidden_files
+            or any(name == prefix.rstrip("/") or name.startswith(prefix) for prefix in forbidden_prefixes)
+        ]
+        if not touches_pack:
+            # Product runtime PRs (for example Issue #46 Agent) are expected to
+            # touch agent/sensor/core/ui. This invariant only forbids mixing a
+            # capability-pack changeset with product runtime files.
+            return
+        self.assertFalse(product_hits, product_hits)
 
 
 class CapabilityPackSecurityAuthorityDeltaTests(unittest.TestCase):
