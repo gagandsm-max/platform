@@ -1,3 +1,8 @@
+---
+name: security_negative_testing
+description: Prove security boundaries with adversarial and negative cases rather than success-path evidence alone.
+---
+
 # security_negative_testing
 
 ## Purpose

@@ -145,3 +145,21 @@ Cloud VMs follow the same contract as a developer laptop:
 - Do not start the full Compose stack unless the assigned task needs running services. The stack is memory-heavy.
 - Default loopback ports: UI `23000`, Core `28443`.
 - A personal My Machines worker named `platform-dev` can execute Cloud Agent tool calls against this local checkout.
+
+## Engineering capability pack (routing)
+
+Do not paste the agent or Skill catalogue here. Resolve it from manifests.
+
+- Canonical agents: `project_agents/canonical/` via `project_agents/manifest.json`
+- Canonical Skills: `project_agents/skills/` via `project_agents/skills/manifest.json`
+- Generated Cursor subagents: `.cursor/agents/`
+- Generated Antigravity agents: `.agents/agents/`
+- Generated shared Skills (Cursor + Antigravity): `.agents/skills/`
+- Legacy Skill mirror: `skills/`
+- Codex compatibility projection: `.codex/agents/` (not a v1.2 certification gate)
+- Routing: `project_agents/AGENT_MATRIX.md`, `project_agents/CHATGPT_AGENT_ROUTER.md`, `project_agents/skills/AGENT_SKILL_MATRIX.md`, `project_agents/skills/SKILL_ROUTER.md`
+- Tool contracts: `project_agents/TOOL_COMPATIBILITY.md`
+- Writer isolation: one writer per checkout; parallel writes use separate branches/worktrees
+- Evidence: typed claims, exact-head current-base CI, no writer self-certification
+
+Capability Pack v1.2 currently resolves 12 P0 + 21 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.2.2. Current Mother Reference file count is discovered from `Platform_00_Document_Index.md` (24 files at pack authoring; do not freeze a historical 21-file ceiling).

@@ -1,3 +1,8 @@
+---
+name: bounded_implementation
+description: Apply the smallest defensible change inside the approved scope with explicit non-goals and no unrelated refactor.
+---
+
 # bounded_implementation
 
 ## Purpose

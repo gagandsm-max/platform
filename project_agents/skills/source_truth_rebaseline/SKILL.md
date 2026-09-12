@@ -1,3 +1,8 @@
+---
+name: source_truth_rebaseline
+description: Re-fetch authoritative main, exact task head, PR base/head and governing repository truth before relying on prior conclusions.
+---
+
 # source_truth_rebaseline
 
 ## Purpose

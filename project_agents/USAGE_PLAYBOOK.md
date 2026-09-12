@@ -19,7 +19,12 @@ Use 2–5 agents for most tasks. Add specialists and canonical skills only when 
 | Small bug | `platform-codebase-onboarding-engineer` → `platform-minimal-change-engineer` → `platform-code-reviewer` → `platform-evidence-collector`; `source_truth_rebaseline`, `root_cause_first`, `bounded_implementation`, `evidence_bundle` |
 | Cross-cutting/unclear bug | `platform-codebase-onboarding-engineer` + `platform-codebase-archaeologist` → domain specialist → `platform-minimal-change-engineer` → reviewer/evidence; add `root_cause_first` and `post_merge_rebaseline` |
 | Core API/event | onboarding → `platform-api-platform-engineer` + minimal-change → test-automation → code-reviewer → evidence → reality-checker when completion is claimed; add security/failure skills as risk dictates |
-| Sensor/protocol | onboarding → `platform-network-engineer` + minimal-change → test-automation → performance-benchmarker for hot path → reviewer/evidence; use `runtime_failure_injection` for failover/queue/durability semantics |
+| Sensor/protocol | onboarding → `platform-network-engineer` for protocol/domain + `platform-sensor-runtime-engineer` when pools/spool/uploader/leases change → minimal-change → test-automation → performance-benchmarker for hot path → reviewer/evidence; `snmp_mib` / `sensor_edge` / `runtime_failure_injection` as applicable |
+| Device Pack | onboarding → `platform-device-pack-engineer` → network-engineer if protocol mapping decode is in play → test-automation → reviewer/evidence; `device_pack_authoring` |
+| Telemetry pipeline | onboarding → `platform-telemetry-pipeline-engineer` → database-reliability for datastore engine/schema → test-automation → reviewer/evidence; `kafka`, `replay_idempotency` |
+| NCM / remediation | onboarding → `platform-workflow-architect` if the flow is unclear → `platform-ncm-remediation-engineer` → security-architect/appsec → test-automation → reviewer/evidence; `remediation_safety` is required; LLM output must not execute privileged actions |
+| Connector / ITSM / change feed | onboarding → `platform-integration-connector-engineer` → api-platform-engineer for contracts → secrets/appsec as needed → reviewer/evidence; `connector_framework`, `itsm_change_telemetry` |
+| Infrastructure / cloud target | onboarding → `platform-infrastructure-cloud-engineer` → identity if enrollment identity is involved → test-automation → reviewer/evidence; do not move Platform Core onto Kubernetes |
 | Database/migration | onboarding → `platform-database-reliability-engineer` → appsec if tenant/security-sensitive → test-automation → reviewer/evidence/reality-checker; `migration_safety` is required for schema/data migrations |
 | IAM/security | onboarding → `platform-identity-access-engineer` + `platform-security-architect` → appsec/secrets → test-automation → AI-code-security-auditor if AI-generated → evidence/reality-checker; add `security_negative_testing` |
 | UI feature | `platform-ux-architect` → frontend-developer → test-automation → accessibility-auditor → ui-finish-gate-reviewer → evidence |
@@ -30,7 +35,7 @@ Use 2–5 agents for most tasks. Add specialists and canonical skills only when 
 
 ## Skill authority
 
-Canonical skills live in `project_agents/skills/`. Root `skills/` are deterministic generated mirrors for discovery and must match canonical content exactly. Resolve the current skill inventory from `project_agents/skills/manifest.json`; do not freeze a skill count in policy.
+Canonical skills live in `project_agents/skills/`. `.agents/skills/` is the shared Cursor/Antigravity generated projection. Root `skills/` remains the legacy generated mirror in this tranche. Both generated trees must match canonical content exactly. Resolve the current skill inventory from `project_agents/skills/manifest.json`; do not freeze a skill count in policy. Per-agent required/conditional Skills: `project_agents/skills/AGENT_SKILL_MATRIX.md`.
 
 Skills complement agents; they do not create new authority or allow a writer to certify its own output.
 
@@ -47,6 +52,12 @@ For parallel write work, use separate Git branches/worktrees and let `platform-g
 - Security-sensitive acknowledgement/offset behavior must be tested fail-closed where applicable.
 - Do not weaken tests, auth, tenant isolation, durability or branch/security controls to obtain green CI.
 - Do not use destructive generic Docker prune or `down -v` operations as a routine cleanup or validation shortcut.
+
+## Routing chain
+
+`task intent → owning agent (AGENT_MATRIX) → required Skills (AGENT_SKILL_MATRIX) → risk-triggered reviewers → writerTool → verifierTool → evidence gate`
+
+ChatGPT+GitHub should route from these documents without loading every Skill body. Cursor `--agent` is unsupported. Antigravity default posture is read-only/adversarial; write requires explicit authority. See `TOOL_COMPATIBILITY.md`.
 
 ## Do not use an agent when
 

@@ -79,3 +79,29 @@ Return concise, evidence-backed output with:
 4. **Next action** — only the next action required; do not expand scope silently.
 
 Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without evidence supporting that exact claim.
+
+## Required Skills
+- `source_truth_rebaseline`
+- `mother_reference_reconciliation`
+- `evidence_bundle`
+- `root_cause_first`
+
+## Conditional Skills
+- `temporal_operational_graph`
+- `api_event_contracts`
+
+## Explicit non-ownership
+- Does not rewrite history or merge PRs.
+
+## Handoff
+Record drift evidence; route repair to the owning subsystem writer.
+
+## Security constraints
+
+- Do not bypass tests, weaken tenant isolation, write directly to `main`, or force-push.
+- Do not disable TLS validation or embed secrets, credentials, or unredacted customer payloads.
+- Do not use destructive Docker prune or `down -v` to dodge a defect.
+- Do not add dependencies to bypass failures.
+- LLM output must not directly execute privileged remediation.
+- Writer cannot self-certify `MERGE_READY` or `COMPLETE`.
+- Do not claim production/GA readiness without independent evidence.

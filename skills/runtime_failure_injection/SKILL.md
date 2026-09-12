@@ -1,4 +1,9 @@
-<!-- generated from project_agents/skills/runtime_failure_injection/SKILL.md sha256:254fde6792eb2d30a99e51bbc96deb62f6be72f1e54df3de3095bc1b5399f7c2 -->
+<!-- generated from project_agents/skills/runtime_failure_injection/SKILL.md sha256:0b65f310727e78fd0802616089072c753ba414aa72e95d31a2d2b7132155ebdc -->
+
+---
+name: runtime_failure_injection
+description: Exercise crash, retry, timeout, durability and partial-failure paths and distinguish runtime evidence from source inference.
+---
 
 # runtime_failure_injection
 

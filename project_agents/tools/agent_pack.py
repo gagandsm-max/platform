@@ -29,6 +29,17 @@ SKILL_MARK_RE = re.compile(
     r"<!-- generated from project_agents/skills/[a-z0-9_]+/SKILL\.md sha256:[0-9a-f]{64} -->"
 )
 TMP_SUFFIX = ".platform-sync.tmp"
+ALLOWED_FRONTMATTER_KEYS = frozenset({"name", "description"})
+POLICY_PERMIT_RE = re.compile(
+    r"(?i)\b(you may|you can|allowed to|should force-push|skip tests to|disable tls validation|"
+    r"insecureskipverify\s*=\s*true|docker system prune|compose down -v|"
+    r"llm (may|can|should) (directly )?(execute|perform) privileged|"
+    r"writer (may|can) self-certify|claim (it|the work) is (production|ga)-ready)\b"
+)
+SECRET_RE = re.compile(
+    r"BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY|AKIA[0-9A-Z]{16}|xox[baprs]-[0-9A-Za-z-]{10,}"
+)
+MATRIX_PATH = "skills/agent_skill_matrix.json"
 ADAPTER_ROOTS = (
     (".cursor", "agents"),
     (".agents", "agents"),
@@ -143,9 +154,55 @@ def render_codex(entry: dict[str, Any], body: str, sha: str, canonical: Path, re
     )
 
 
-def render_root_skill(name: str, body: str) -> str:
+def render_generated_skill(name: str, body: str) -> str:
     sha = sha256_text(body)
     return f"<!-- generated from project_agents/skills/{name}/SKILL.md sha256:{sha} -->\n\n{body}"
+
+
+render_root_skill = render_generated_skill
+
+
+def parse_frontmatter(text: str, label: str) -> tuple[dict[str, str], str]:
+    if not text.startswith("---\n"):
+        raise AgentPackError(f"{label} missing YAML frontmatter")
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        raise AgentPackError(f"{label} frontmatter is not terminated")
+    raw = text[4:end]
+    data: dict[str, str] = {}
+    for line in raw.splitlines():
+        if not line.strip() or line.strip().startswith("#"):
+            continue
+        if ":" not in line:
+            raise AgentPackError(f"{label} invalid frontmatter line: {line!r}")
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key not in ALLOWED_FRONTMATTER_KEYS:
+            raise AgentPackError(f"{label} unsupported frontmatter key {key!r}")
+        data[key] = value
+    missing = sorted(ALLOWED_FRONTMATTER_KEYS - set(data))
+    if missing:
+        raise AgentPackError(f"{label} frontmatter missing {missing}")
+    body = text[end + 5 :]
+    return data, body
+
+
+def policy_scan(path: Path, text: str) -> list[str]:
+    errors: list[str] = []
+    rel = path.as_posix()
+    if SECRET_RE.search(text):
+        errors.append(f"secret-like material in {rel}")
+    for line_no, line in enumerate(text.splitlines(), 1):
+        lowered = line.lower()
+        if any(
+            token in lowered
+            for token in ("do not", "don't", "never ", "must not", "cannot", "forbidden", "prohibited")
+        ):
+            continue
+        if POLICY_PERMIT_RE.search(line):
+            errors.append(f"policy violation {rel}:{line_no}: {line.strip()}")
+    return errors
 
 
 def has_generated_adapter_marker(path: Path) -> bool:
@@ -275,15 +332,18 @@ def sync_agent_pack(repo: Path) -> str:
     declared_names = [str(entry["name"]) for entry in skill_manifest]
     if len(declared_names) != len(set(declared_names)):
         raise AgentPackError("duplicate skill names in project_agents/skills/manifest.json")
-    generated_root = repo / "skills"
-    generated_root.mkdir(parents=True, exist_ok=True)
+    generated_roots = [repo / "skills", repo / ".agents" / "skills"]
+    for generated_root in generated_roots:
+        generated_root.mkdir(parents=True, exist_ok=True)
     for skill in skill_manifest:
         name = assert_safe_name(str(skill.get("name", "")), SKILL_NAME_RE, "skill")
         canonical_skill = pa / "skills" / name / "SKILL.md"
         if not canonical_skill.is_file() or canonical_skill.is_symlink():
             raise AgentPackError(f"missing canonical skill: {canonical_skill.relative_to(repo)}")
-        destination = owned_path(generated_root, name, SKILL_NAME_RE, "skill") / "SKILL.md"
-        atomic_write(destination, render_root_skill(name, canonical_skill.read_text(encoding="utf-8")), repo)
+        rendered = render_generated_skill(name, canonical_skill.read_text(encoding="utf-8"))
+        for generated_root in generated_roots:
+            destination = owned_path(generated_root, name, SKILL_NAME_RE, "skill") / "SKILL.md"
+            atomic_write(destination, rendered, repo)
 
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
@@ -296,8 +356,10 @@ def sync_agent_pack(repo: Path) -> str:
     for directory, expected_names in expected_adapter_names.items():
         review.extend(prune_retired_adapters(directory, expected_names, repo))
         clean_tmp_files(directory, repo)
-    review.extend(prune_retired_skill_mirrors(generated_root, set(declared_names), repo))
-    clean_tmp_files(generated_root, repo)
+    review.extend(prune_retired_skill_mirrors(generated_roots[0], set(declared_names), repo))
+    review.extend(prune_retired_skill_mirrors(generated_roots[1], set(declared_names), repo))
+    for generated_root in generated_roots:
+        clean_tmp_files(generated_root, repo)
     if review:
         sys.stderr.write(
             "unowned generated-tree paths were preserved for review:\n- "
@@ -388,6 +450,7 @@ def validate_agent_pack(repo: Path) -> list[str]:
         if not canonical.exists():
             continue
         body = canonical.read_text(encoding="utf-8")
+        errors.extend(policy_scan(canonical.relative_to(repo), body))
         sha = sha256_text(body)
         if sha != entry.get("sha256"):
             errors.append(f"canonical changed without sync: {entry['name']}")
@@ -432,43 +495,98 @@ def validate_agent_pack(repo: Path) -> list[str]:
             if extra:
                 errors.append(f"unmanifested canonical skill directories: {', '.join(extra)}")
 
-        generated_root = repo / "skills"
-        generated_dirs = {path.name for path in generated_root.iterdir() if path.is_dir() or path.is_symlink()} if generated_root.exists() else set()
-        tmp_residue = []
-        if generated_root.exists():
-            tmp_residue = sorted(path.relative_to(repo).as_posix() for path in generated_root.rglob(f"*{TMP_SUFFIX}"))
-        if tmp_residue:
-            errors.append("interrupted sync residue in skills/: " + ", ".join(tmp_residue))
-        missing = sorted(declared - generated_dirs)
-        extra = sorted(generated_dirs - declared)
-        if missing:
-            errors.append(f"missing generated root skill directories: {', '.join(missing)}")
-        for name in extra:
-            directory = generated_root / name
-            rel = directory.relative_to(repo).as_posix()
-            skill_md = directory / "SKILL.md"
-            if directory.is_symlink() or skill_md.is_symlink():
-                errors.append(f"unowned root skill requires review (symlink not deleted): {rel}")
-            elif skill_md.is_file() and has_generated_skill_marker(skill_md):
-                errors.append(f"generated root skill leftover requires sync: {rel}")
-            else:
-                errors.append(f"unowned root skill requires review (not deleted): {rel}")
-
         for name in sorted(declared):
             canonical_skill = pa / "skills" / name / "SKILL.md"
-            generated_skill = generated_root / name / "SKILL.md"
             if not canonical_skill.is_file():
                 errors.append(f"canonical skill missing SKILL.md: project_agents/skills/{name}")
                 continue
-            if generated_skill.is_symlink():
-                errors.append(f"generated root skill is a symlink and was not followed: skills/{name}/SKILL.md")
+            body = canonical_skill.read_text(encoding="utf-8")
+            errors.extend(policy_scan(canonical_skill.relative_to(repo), body))
+            try:
+                meta, _rest = parse_frontmatter(body, f"project_agents/skills/{name}/SKILL.md")
+            except AgentPackError as exc:
+                errors.append(str(exc))
                 continue
-            if not generated_skill.is_file():
-                errors.append(f"generated root skill missing SKILL.md: skills/{name}")
-                continue
-            expected = render_root_skill(name, canonical_skill.read_text(encoding="utf-8"))
-            if generated_skill.read_text(encoding="utf-8") != expected:
-                errors.append(f"generated root skill drift: skills/{name}/SKILL.md")
+            if meta.get("name") != name:
+                errors.append(
+                    f"folder/name mismatch: directory {name} frontmatter name {meta.get('name')!r}"
+                )
+
+        for generated_root, label in (
+            (repo / "skills", "legacy skills/"),
+            (repo / ".agents" / "skills", "native .agents/skills/"),
+        ):
+            generated_dirs = {path.name for path in generated_root.iterdir() if path.is_dir() or path.is_symlink()} if generated_root.exists() else set()
+            tmp_residue = []
+            if generated_root.exists():
+                tmp_residue = sorted(path.relative_to(repo).as_posix() for path in generated_root.rglob(f"*{TMP_SUFFIX}"))
+            if tmp_residue:
+                errors.append(f"interrupted sync residue in {label}: " + ", ".join(tmp_residue))
+            missing = sorted(declared - generated_dirs)
+            extra = sorted(generated_dirs - declared)
+            if missing:
+                errors.append(f"missing generated {label} directories: {', '.join(missing)}")
+            for extra_name in extra:
+                directory = generated_root / extra_name
+                rel = directory.relative_to(repo).as_posix()
+                skill_md = directory / "SKILL.md"
+                if directory.is_symlink() or skill_md.is_symlink():
+                    errors.append(f"unowned {label} requires review (symlink not deleted): {rel}")
+                elif skill_md.is_file() and has_generated_skill_marker(skill_md):
+                    errors.append(f"generated {label} leftover requires sync: {rel}")
+                else:
+                    errors.append(f"unowned {label} requires review (not deleted): {rel}")
+            for name in sorted(declared):
+                canonical_skill = pa / "skills" / name / "SKILL.md"
+                generated_skill = generated_root / name / "SKILL.md"
+                if not canonical_skill.is_file():
+                    continue
+                rel = generated_skill.relative_to(repo).as_posix()
+                if generated_skill.is_symlink():
+                    errors.append(f"generated skill is a symlink and was not followed: {rel}")
+                    continue
+                if not generated_skill.is_file():
+                    errors.append(f"generated skill missing SKILL.md: {rel}")
+                    continue
+                expected = render_generated_skill(name, canonical_skill.read_text(encoding="utf-8"))
+                if generated_skill.read_text(encoding="utf-8") != expected:
+                    errors.append(f"generated skill drift: {rel}")
+
+        matrix_path = pa / "skills" / "agent_skill_matrix.json"
+        if matrix_path.is_file():
+            try:
+                matrix = load_json(matrix_path)
+            except (OSError, json.JSONDecodeError) as exc:
+                errors.append(f"agent skill matrix is not valid JSON: {exc}")
+                matrix = {}
+            if not isinstance(matrix, dict):
+                errors.append("agent skill matrix must be an object")
+            else:
+                agent_names = {str(entry.get("name")) for entry in manifest if entry.get("name")}
+                if set(matrix) != agent_names:
+                    missing = sorted(agent_names - set(matrix))
+                    extra = sorted(set(matrix) - agent_names)
+                    if missing:
+                        errors.append(f"agent skill matrix missing agents: {', '.join(missing)}")
+                    if extra:
+                        errors.append(f"agent skill matrix has unknown agents: {', '.join(extra)}")
+                required_sizes: list[int] = []
+                for agent_name, spec in matrix.items():
+                    if not isinstance(spec, dict):
+                        errors.append(f"agent skill matrix {agent_name} must be an object")
+                        continue
+                    required = spec.get("requiredSkills") or []
+                    conditional = spec.get("conditionalSkills") or []
+                    if not required:
+                        errors.append(f"{agent_name} has no required Skills")
+                    required_sizes.append(len(required))
+                    for skill_name in list(required) + list(conditional):
+                        if skill_name not in declared:
+                            errors.append(f"{agent_name} references unknown skill {skill_name}")
+                if declared and required_sizes and all(set(matrix[name]["requiredSkills"]) == declared for name in matrix if isinstance(matrix.get(name), dict)):
+                    errors.append("every agent requires every skill; routing is not bounded")
+                if declared and required_sizes and max(required_sizes) >= len(declared):
+                    errors.append("an agent requires the entire skill inventory")
 
     agents_md = repo / "AGENTS.md"
     if agents_md.exists() or agents_md.is_symlink():

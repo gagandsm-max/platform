@@ -1,0 +1,1057 @@
+[
+  {
+    "name": "source_truth_rebaseline",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "mother_reference_reconciliation",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "root_cause_first",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "bounded_implementation",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "migration_safety",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "security_negative_testing",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "runtime_failure_injection",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "alert_quality_evidence",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "ai_evidence_safety",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "exact_head_merge_gate",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "evidence_bundle",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "post_merge_rebaseline",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "distributed_systems",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "sensor_edge",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "ha_dr",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "capacity_performance",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "go_runtime",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "java_spring",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "typescript_react",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "python_runtime",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "linux_systems",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "snmp_mib",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "icmp_path",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "flow_telemetry",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "syslog_traps",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "device_control_protocols",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "topology_routing",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "windows_monitoring",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "agent_architecture",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "virtualization_storage",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "kubernetes_monitoring",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "cloud_monitoring",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "postgresql",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "clickhouse",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "kafka",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "replay_idempotency",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "backup_restore",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "api_event_contracts",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "connector_framework",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "oauth_oidc_clients",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "itsm_change_telemetry",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "threat_modelling",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "tenant_isolation",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "pki_mtls",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "secrets_handling",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "remediation_safety",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "docker_compose",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "ci_cd",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "sbom_provenance",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "install_upgrade",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "device_pack_authoring",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "monitoring_work_units",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "temporal_operational_graph",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "rca_hypothesis_fusion",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "incident_flight_recorder",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "change_intelligence",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "customer_value_mttr",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 skill"
+  },
+  {
+    "name": "core_platform",
+    "disposition": "MERGE_INTO:distributed_systems",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "linux_monitoring",
+    "disposition": "MERGE_INTO:linux_systems",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "network_services",
+    "disposition": "MERGE_INTO:topology_routing",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "ssh_cli",
+    "disposition": "MERGE_INTO:device_control_protocols",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "netconf_yang",
+    "disposition": "MERGE_INTO:device_control_protocols",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "gnmi_grpc",
+    "disposition": "MERGE_INTO:device_control_protocols",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "opentelemetry",
+    "disposition": "MERGE_INTO:cloud_monitoring",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "schema_migration",
+    "disposition": "MERGE_INTO:migration_safety",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "retention_cardinality",
+    "disposition": "MERGE_INTO:backup_restore",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "rest_grpc",
+    "disposition": "MERGE_INTO:api_event_contracts",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "rbac",
+    "disposition": "MERGE_INTO:tenant_isolation",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "supply_chain",
+    "disposition": "MERGE_INTO:sbom_provenance",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "packaging_lifecycle",
+    "disposition": "MERGE_INTO:install_upgrade",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "systemd_service_lifecycle",
+    "disposition": "MERGE_INTO:install_upgrade",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "device_identification",
+    "disposition": "MERGE_INTO:device_pack_authoring",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "sensor_placement",
+    "disposition": "MERGE_INTO:monitoring_work_units",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "alert_qualification",
+    "disposition": "MERGE_INTO:alert_quality_evidence",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "topology_provenance_confidence",
+    "disposition": "MERGE_INTO:temporal_operational_graph",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "similar_incident_memory",
+    "disposition": "MERGE_INTO:incident_flight_recorder",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "controlled_remediation",
+    "disposition": "MERGE_INTO:remediation_safety",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "unit_testing",
+    "disposition": "MERGE_INTO:root_cause_first",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "component_testing",
+    "disposition": "MERGE_INTO:root_cause_first",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "contract_testing",
+    "disposition": "MERGE_INTO:api_event_contracts",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "integration_testing",
+    "disposition": "MERGE_INTO:runtime_failure_injection",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "performance_load",
+    "disposition": "MERGE_INTO:capacity_performance",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "chaos_testing",
+    "disposition": "MERGE_INTO:runtime_failure_injection",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "package_reboot_testing",
+    "disposition": "MERGE_INTO:install_upgrade",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "replay_testing",
+    "disposition": "MERGE_INTO:replay_idempotency",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "data_integrity_testing",
+    "disposition": "MERGE_INTO:backup_restore",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "security_architecture",
+    "disposition": "MERGE_INTO:threat_modelling",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "log_redaction",
+    "disposition": "MERGE_INTO:secrets_handling",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "support_bundle_safety",
+    "disposition": "MERGE_INTO:secrets_handling",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "mtls_enrollment",
+    "disposition": "MERGE_INTO:pki_mtls",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "certificate_expiry",
+    "disposition": "MERGE_INTO:pki_mtls",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "keycloak_oidc",
+    "disposition": "MERGE_INTO:oauth_oidc_clients",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "notification_center_fanout",
+    "disposition": "MERGE_INTO:itsm_change_telemetry",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "webhook_retry",
+    "disposition": "MERGE_INTO:connector_framework",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "carrier_status_ingest",
+    "disposition": "MERGE_INTO:itsm_change_telemetry",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "saas_connector_auth",
+    "disposition": "MERGE_INTO:connector_framework",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "kafka_poison_parking",
+    "disposition": "MERGE_INTO:kafka",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "clickhouse_insert_retry",
+    "disposition": "MERGE_INTO:clickhouse",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "postgres_tenant_predicates",
+    "disposition": "MERGE_INTO:postgresql",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "valkey_ephemeral_only",
+    "disposition": "MERGE_INTO:distributed_systems",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "spool_uploader",
+    "disposition": "MERGE_INTO:sensor_edge",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "worker_pool_scheduling",
+    "disposition": "MERGE_INTO:sensor_edge",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "lease_fencing",
+    "disposition": "MERGE_INTO:sensor_edge",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "sensor_self_observability",
+    "disposition": "MERGE_INTO:sensor_edge",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "snmpv3_security",
+    "disposition": "MERGE_INTO:snmp_mib",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "mib_compilation",
+    "disposition": "MERGE_INTO:device_pack_authoring",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "trap_storm_control",
+    "disposition": "MERGE_INTO:syslog_traps",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "flow_cardinality",
+    "disposition": "MERGE_INTO:flow_telemetry",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "icmp_rate_limit",
+    "disposition": "MERGE_INTO:icmp_path",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "windows_msi",
+    "disposition": "MERGE_INTO:windows_monitoring",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "linux_agent_identity",
+    "disposition": "MERGE_INTO:agent_architecture",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "endpoint_dex_privacy",
+    "disposition": "MERGE_INTO:agent_architecture",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "k8s_collector_health",
+    "disposition": "MERGE_INTO:kubernetes_monitoring",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "otel_receiver_bounds",
+    "disposition": "MERGE_INTO:cloud_monitoring",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "hypervisor_metrics",
+    "disposition": "MERGE_INTO:virtualization_storage",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "storage_protection_80",
+    "disposition": "MERGE_INTO:backup_restore",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "flyway_retry_assessment",
+    "disposition": "MERGE_INTO:migration_safety",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "exactly_once_effects",
+    "disposition": "MERGE_INTO:replay_idempotency",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "error_code_stability",
+    "disposition": "MERGE_INTO:api_event_contracts",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "correlation_ids",
+    "disposition": "MERGE_INTO:api_event_contracts",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "actuator_health_boundary",
+    "disposition": "MERGE_INTO:api_event_contracts",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "maker_checker",
+    "disposition": "MERGE_INTO:remediation_safety",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "blast_radius",
+    "disposition": "MERGE_INTO:remediation_safety",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "ncm_rollback",
+    "disposition": "MERGE_INTO:remediation_safety",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "gnn_not_causal",
+    "disposition": "MERGE_INTO:rca_hypothesis_fusion",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "inconclusive_rca",
+    "disposition": "MERGE_INTO:rca_hypothesis_fusion",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "flight_recorder_bounds",
+    "disposition": "MERGE_INTO:incident_flight_recorder",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "packet_evidence_limits",
+    "disposition": "MERGE_INTO:incident_flight_recorder",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "mttr_cohort_methodology",
+    "disposition": "MERGE_INTO:customer_value_mttr",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "value_dashboard_assumptions",
+    "disposition": "MERGE_INTO:customer_value_mttr",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "graph_no_new_database",
+    "disposition": "MERGE_INTO:temporal_operational_graph",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "device_pack_certification",
+    "disposition": "MERGE_INTO:device_pack_authoring",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "work_unit_licence_preview",
+    "disposition": "MERGE_INTO:monitoring_work_units",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "compose_named_volumes",
+    "disposition": "MERGE_INTO:docker_compose",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "github_actions_exact_head",
+    "disposition": "MERGE_INTO:ci_cd",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "deb_rpm_msi",
+    "disposition": "MERGE_INTO:install_upgrade",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "crash_loop_diagnostics",
+    "disposition": "MERGE_INTO:install_upgrade",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "java21_only",
+    "disposition": "MERGE_INTO:java_spring",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "react_server_authority",
+    "disposition": "MERGE_INTO:typescript_react",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "go_context_timeouts",
+    "disposition": "MERGE_INTO:go_runtime",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "python_approved_paths_only",
+    "disposition": "MERGE_INTO:python_runtime",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "ha_two_core_only",
+    "disposition": "MERGE_INTO:ha_dr",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "sensor_continue_on_core_failover",
+    "disposition": "MERGE_INTO:ha_dr",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "backpressure",
+    "disposition": "MERGE_INTO:distributed_systems",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "split_brain_avoidance",
+    "disposition": "MERGE_INTO:ha_dr",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "ui_no_generic_dashboard",
+    "disposition": "MERGE_INTO:typescript_react",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "wcag_operational_screens",
+    "disposition": "MERGE_INTO:typescript_react",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "nested_exception_leakage",
+    "disposition": "MERGE_INTO:security_negative_testing",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "fail_closed_offsets",
+    "disposition": "MERGE_INTO:kafka",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "no_llm_privileged_exec",
+    "disposition": "MERGE_INTO:remediation_safety",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "no_writer_self_certify",
+    "disposition": "MERGE_INTO:exact_head_merge_gate",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "no_force_push",
+    "disposition": "MERGE_INTO:bounded_implementation",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "no_direct_main",
+    "disposition": "MERGE_INTO:bounded_implementation",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "no_secret_in_git",
+    "disposition": "MERGE_INTO:secrets_handling",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "no_docker_prune",
+    "disposition": "MERGE_INTO:docker_compose",
+    "notes": "overlapping auditor alias"
+  },
+  {
+    "name": "browser_synthetics_runtime",
+    "disposition": "DEFER: no runtime/vendor selected; Platform_21 reserved",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "outside_in_probe_runtime",
+    "disposition": "DEFER: customer-operated probes not a v1.2 runtime pick",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "regional_federation",
+    "disposition": "DEFER: must not reopen two-Core HA",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "vector_database",
+    "disposition": "DEFER: OSS/security/performance review required",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "gpu_gnn_runtime",
+    "disposition": "DEFER: GNN production runtime is TBD",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "scim_certification",
+    "disposition": "DEFER: SCIM is compatibility target until independently validated",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "contractual_slo_commitments",
+    "disposition": "DEFER: Founder-reserved",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "audit_crypto_construction",
+    "disposition": "DEFER: needs architecture/security review before construction choice",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "dcim_bms_integration",
+    "disposition": "DEFER: facilities evidence must not expand product into BMS/DCIM",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "always_on_dpi",
+    "disposition": "DEFER: triggered packet evidence does not authorize DPI",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "employee_surveillance",
+    "disposition": "DEFER: prohibited; endpoint DEX is operational only",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "cross_tenant_learning",
+    "disposition": "DEFER: forbidden unless explicitly authorized",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "new_graph_database",
+    "disposition": "DEFER: do not select by default",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "multi_cloud_control_plane",
+    "disposition": "DEFER: Platform is not a public-cloud control plane",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "price_sku_invention",
+    "disposition": "DEFER: Founder-reserved licensing",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "prometheus_remote_write_product",
+    "disposition": "DEFER: not selected as product dependency",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "opensearch_product",
+    "disposition": "DEFER: not in current datastore authority",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "timeseries_db_replacement",
+    "disposition": "DEFER: ClickHouse remains historical analytics",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "service_mesh_product",
+    "disposition": "DEFER: not a Platform Core dependency",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "ebpf_agent",
+    "disposition": "DEFER: not selected",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "wasm_plugins",
+    "disposition": "DEFER: not selected",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "mobile_app",
+    "disposition": "DEFER: out of v1.2 programme",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "public_rest_sdk",
+    "disposition": "DEFER: no customer SDK commitment",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "terraform_provider",
+    "disposition": "DEFER: policy-as-code inputs cannot bypass RBAC",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "ansible_collection",
+    "disposition": "DEFER: NCM owns privileged network change",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "helm_chart_product",
+    "disposition": "DEFER: packaging remains deb/rpm/MSI",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "operator_pattern",
+    "disposition": "DEFER: k8s is a monitored target, not Core runtime",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "istio_telemetry",
+    "disposition": "DEFER: not selected",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "cilium_hubble",
+    "disposition": "DEFER: not selected",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "vault_product_lockin",
+    "disposition": "DEFER: secret service is Platform-owned abstraction",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "okta_only_identity",
+    "disposition": "DEFER: identity remains protocol-based",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "slack_first_notifications",
+    "disposition": "DEFER: Notification Center is the product surface",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "pagerduty_exclusive",
+    "disposition": "DEFER: connector family, not exclusive vendor",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "datadog_export",
+    "disposition": "DEFER: Platform is the monitoring product",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "grafana_embedding",
+    "disposition": "DEFER: UI is Platform React, not Grafana",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "notebook_rca",
+    "disposition": "DEFER: RCA is in-product and evidence-bound",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "auto_remediate_by_llm",
+    "disposition": "DEFER: forbidden privileged LLM execution",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "model_vendor_lock",
+    "disposition": "DEFER: AI Gateway is provider-independent",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "internet_required_monitoring",
+    "disposition": "DEFER: core monitoring cannot require Internet/LLM",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "clickhouse_as_control_state",
+    "disposition": "DEFER: forbidden",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "valkey_as_authority",
+    "disposition": "DEFER: forbidden",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "kafka_external_api",
+    "disposition": "DEFER: Kafka stays internal",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "port_80_ui",
+    "disposition": "DEFER: forbidden",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "snmp_alone_device_down",
+    "disposition": "DEFER: forbidden",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "universal_alert_threshold",
+    "disposition": "DEFER: forbidden",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "down_migrations_required",
+    "disposition": "DEFER: not implied by Flyway numbering",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "v1_three_core_ha",
+    "disposition": "DEFER: forbidden; exactly two Cores",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "thought_data_reuse",
+    "disposition": "DEFER: clean-room; forbidden",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "enterprise360_reuse",
+    "disposition": "DEFER: forbidden",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "netai_reuse",
+    "disposition": "DEFER: forbidden",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "host_java_install",
+    "disposition": "DEFER: Docker Compose only for routine tests",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "cursor_agent_cli_flag",
+    "disposition": "DEFER: Cursor `--agent` unsupported",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "antigravity_write_by_default",
+    "disposition": "DEFER: default posture is read-only/adversarial",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "codex_skill_path",
+    "disposition": "DEFER: no invented Codex skill path",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "federation_runtime",
+    "disposition": "DEFER: future regional federation is not a v1.2 pick",
+    "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "probe_browser_engine",
+    "disposition": "DEFER: browser synthetics runtime not selected",
+    "notes": "out of v1.2 bounded library"
+  }
+]

@@ -1,4 +1,9 @@
-<!-- generated from project_agents/skills/evidence_bundle/SKILL.md sha256:6db5ef8670c0c99c80b655ac3db989c8a362fb783a2ed78361428ff16879b602 -->
+<!-- generated from project_agents/skills/evidence_bundle/SKILL.md sha256:fc06c136730c6450752d7c948e04ef6a2fcfef2824df88fcf92d2aeb3b3a7b52 -->
+
+---
+name: evidence_bundle
+description: Package typed SOURCE_FACT, EXECUTION_EVIDENCE, CI_EVIDENCE, INFERENCE and UNVERIFIED claims with reproducible references.
+---
 
 # evidence_bundle
 
