@@ -126,6 +126,7 @@ type Drain struct {
 	metrics  *Metrics
 	logger   *slog.Logger
 	poisonDir string
+	syncDir   func(string) error
 
 	mu          sync.Mutex
 	cancel      context.CancelFunc
@@ -187,6 +188,7 @@ func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
 		metrics:   &Metrics{},
 		logger:    logger.With("component", "agentdrain"),
 		poisonDir: poisonDir,
+		syncDir:   defaultSyncDir,
 		done:      make(chan struct{}),
 		wait:      waitContext,
 		jitter:    jitterDuration,
@@ -384,6 +386,19 @@ func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, 
 	return out, nil
 }
 
+func defaultSyncDir(dirPath string) error {
+	dir, err := os.Open(dirPath)
+	if err != nil {
+		return err
+	}
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
+}
+
 func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 	if len(batch.Records) == 0 {
 		return nil
@@ -402,7 +417,7 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 	metaBytes, _ := json.Marshal(meta)
 	tmp, err := os.CreateTemp(d.poisonDir, ".poison-*.tmp")
 	if err != nil {
-		return codeErr(CodePoison, "failed creating poison temp file", err, false)
+		return codeErr(CodePoison, "failed creating poison temp file", err, true)
 	}
 	tmpName := tmp.Name()
 	cleanup := true
@@ -413,27 +428,35 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 	}()
 	if _, err := tmp.Write(metaBytes); err != nil {
 		_ = tmp.Close()
-		return codeErr(CodePoison, "failed writing poison metadata", err, false)
+		return codeErr(CodePoison, "failed writing poison metadata", err, true)
 	}
 	if _, err := tmp.Write([]byte("\n")); err != nil {
 		_ = tmp.Close()
-		return codeErr(CodePoison, "failed writing poison separator", err, false)
+		return codeErr(CodePoison, "failed writing poison separator", err, true)
 	}
 	if _, err := tmp.Write(head.Payload); err != nil {
 		_ = tmp.Close()
-		return codeErr(CodePoison, "failed writing poison payload", err, false)
+		return codeErr(CodePoison, "failed writing poison payload", err, true)
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		return codeErr(CodePoison, "failed syncing poison file", err, false)
+		return codeErr(CodePoison, "failed syncing poison file", err, true)
 	}
 	if err := tmp.Close(); err != nil {
-		return codeErr(CodePoison, "failed closing poison file", err, false)
+		return codeErr(CodePoison, "failed closing poison file", err, true)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		return codeErr(CodePoison, "failed publishing poison file", err, false)
+		return codeErr(CodePoison, "failed publishing poison file", err, true)
 	}
 	cleanup = false
+	syncFn := d.syncDir
+	if syncFn == nil {
+		syncFn = defaultSyncDir
+	}
+	if err := syncFn(d.poisonDir); err != nil {
+		d.metrics.Backpressure.Add(1)
+		return codeErr(CodePoison, "failed syncing poison directory", err, true)
+	}
 	if err := d.spool.AcknowledgeThrough(head.Sequence); err != nil {
 		return codeErr(CodeSpool, "failed removing parked record from spool", err, false)
 	}

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -184,6 +186,166 @@ func TestDrainParksTerminalEntityUnresolved(t *testing.T) {
 	_ = rec
 }
 
+func TestPoisonParkingDirectorySyncFailurePreventsAckAndAllowsRetry(t *testing.T) {
+	s, dir := openSpool(t)
+	rec := appendDurable(t, s, 1)
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{
+		Code: "ERR_AGENT_ENTITY_UNRESOLVED", Message: "missing", HTTPStatus: 422,
+	}}
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
+		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
+		Logger: logger,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Simulate directory sync failure.
+	syncFailures := 1
+	d.syncDir = func(dirPath string) error {
+		if syncFailures > 0 {
+			syncFailures--
+			return errors.New("simulated poison directory fsync failure")
+		}
+		return defaultSyncDir(dirPath)
+	}
+
+	// First attempt must fail closed on dir fsync failure.
+	_, err = d.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected directory sync failure")
+	}
+	var drainErr *Error
+	if !errors.As(err, &drainErr) || !drainErr.transient || drainErr.Code != CodePoison {
+		t.Fatalf("expected transient poison error, got: %v", err)
+	}
+
+	// Source record MUST remain in spool.
+	st, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.RecordCount != 1 {
+		t.Fatalf("source record must remain pending on sync failure, got count=%d", st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 0 {
+		t.Fatalf("poison count must be 0 on sync failure, got %d", d.Metrics().PoisonCount.Load())
+	}
+	if d.Metrics().Backpressure.Load() != 1 {
+		t.Fatalf("backpressure metric must be incremented on sync failure, got %d", d.Metrics().Backpressure.Load())
+	}
+
+	// 2. Retry: now directory sync succeeds.
+	_, err = d.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected poison error on parking completion")
+	}
+
+	// Source record must now be acknowledged.
+	st, err = s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.RecordCount != 0 {
+		t.Fatalf("poisoned record must leave hot spool on successful sync, got %d", st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 {
+		t.Fatalf("poison count must be 1, got %d", d.Metrics().PoisonCount.Load())
+	}
+
+	// Check poison artifact on disk.
+	poisonDir := filepath.Join(dir, poisonDirName)
+	entries, err := os.ReadDir(poisonDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parkedFile string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			parkedFile = filepath.Join(poisonDir, e.Name())
+		}
+		if strings.HasPrefix(e.Name(), ".poison-") && strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("found leftover temp file: %s", e.Name())
+		}
+	}
+	if parkedFile == "" {
+		t.Fatal("expected parked json file in poison directory")
+	}
+
+	data, err := os.ReadFile(parkedFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.SplitN(string(data), "\n", 2)
+	if len(parts) != 2 {
+		t.Fatalf("expected metadata newline payload, got: %s", string(data))
+	}
+	if !strings.Contains(parts[1], string(rec.Payload)) {
+		t.Fatalf("expected payload in poison artifact, got: %s", parts[1])
+	}
+
+	// Verify poison payload does NOT appear in ordinary logs.
+	logOutput := logBuf.String()
+	if strings.Contains(logOutput, string(rec.Payload)) {
+		t.Fatalf("poison payload must NOT appear in ordinary logs: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "Parked terminal agent-ingress record") {
+		t.Fatalf("expected parking log message, got: %s", logOutput)
+	}
+
+	// 3. No duplicate destructive acknowledgement on subsequent run.
+	ok, err := d.RunOnce(context.Background())
+	if err != nil || ok {
+		t.Fatalf("idle drain must return ok=false, err=nil, got ok=%v, err=%v", ok, err)
+	}
+}
+
+func TestPoisonParkingDirectorySyncSuccessPermitsSourceAck(t *testing.T) {
+	s, dir := openSpool(t)
+	_ = appendDurable(t, s, 1)
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{
+		Code: "ERR_AGENT_ENTITY_UNRESOLVED", Message: "missing", HTTPStatus: 422,
+	}}
+	syncCalled := false
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
+		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.syncDir = func(dirPath string) error {
+		syncCalled = true
+		return defaultSyncDir(dirPath)
+	}
+
+	_, err = d.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected poison error")
+	}
+	if !syncCalled {
+		t.Fatal("expected directory sync to be called")
+	}
+	st, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.RecordCount != 0 {
+		t.Fatalf("expected source spool drained, got %d", st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 {
+		t.Fatalf("expected PoisonCount == 1, got %d", d.Metrics().PoisonCount.Load())
+	}
+}
+
 func TestShutdownIdempotent(t *testing.T) {
 	s, dir := openSpool(t)
 	tr := &echoTransport{inner: &fakeTransport{}}
@@ -294,5 +456,45 @@ func TestDrainContinuesUnderSpoolProtection(t *testing.T) {
 	}
 	if d.metrics.Backpressure.Load() < 1 {
 		t.Fatal("expected backpressure observation under protection")
+	}
+}
+
+func TestDrainDoesNotAdvanceSpoolOnInvalidAck(t *testing.T) {
+	s, dir := openSpool(t)
+	_ = appendDurable(t, s, 1)
+	_ = appendDurable(t, s, 2)
+	tr := &fakeTransport{ack: coreclient.AgentTelemetryAck{
+		Status:                         "ACCEPTED",
+		SensorID:                       "sensor-infra-01",
+		BatchID:                        "batch-1",
+		AcceptedThroughIngressSequence: 1, // Below last sequence (2)
+		CorrelationID:                  "corr-1",
+	}}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
+		JitterFraction: 0, IdleInterval: 10 * time.Millisecond, ShutdownGrace: time.Second,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tr.err = &coreclient.Error{Code: coreclient.CodeProtocol, Message: "Core agent-telemetry acknowledgement sequence does not match submitted batch last sequence"}
+
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("expected error on invalid ACK, got ok=%v err=%v", ok, err)
+	}
+
+	st, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.RecordCount != 2 {
+		t.Fatalf("spool must not advance or delete on invalid ACK, expected 2 records, got %d", st.RecordCount)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("durable acks must remain 0 on invalid ACK, got %d", d.Metrics().DurableAcks.Load())
 	}
 }

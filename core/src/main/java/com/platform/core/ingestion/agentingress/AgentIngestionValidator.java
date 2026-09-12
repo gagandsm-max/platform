@@ -2,6 +2,7 @@ package com.platform.core.ingestion.agentingress;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.core.agentcontrol.AgentAssignmentStatus;
 import com.platform.core.agentcontrol.AgentControlRepository;
 import com.platform.core.agentcontrol.AgentSensorAssignment;
 import com.platform.core.domain.inventory.EntityIdentifier;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Component;
 import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -329,6 +331,10 @@ public class AgentIngestionValidator {
                 );
             }
 
+            if (asg.status() == AgentAssignmentStatus.REVOKED) {
+                validateRevokedAssignmentTemporalAuthority(ingress, asg);
+            }
+
             if (ingress.records() == null || ingress.records().isEmpty()) {
                 throw new IngestionException(
                         HttpStatus.BAD_REQUEST,
@@ -349,6 +355,50 @@ public class AgentIngestionValidator {
             }
         }
         return results;
+    }
+
+    private void validateRevokedAssignmentTemporalAuthority(
+            AgentIngressRecord ingress,
+            AgentSensorAssignment asg
+    ) {
+        if (ingress.acceptedAt() == null || ingress.acceptedAt().isBlank()) {
+            throw new IngestionException(
+                    HttpStatus.FORBIDDEN,
+                    "ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED",
+                    "Sensor acceptance timestamp is required for revoked assignment generation"
+            );
+        }
+        Instant acceptedInstant;
+        try {
+            acceptedInstant = Instant.parse(ingress.acceptedAt().trim());
+        } catch (DateTimeParseException e) {
+            throw new IngestionException(
+                    HttpStatus.FORBIDDEN,
+                    "ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID",
+                    "Sensor acceptance timestamp is malformed for revoked assignment generation"
+            );
+        }
+        if (acceptedInstant.isBefore(asg.createdAt())) {
+            throw new IngestionException(
+                    HttpStatus.FORBIDDEN,
+                    "ERR_REVOKED_ASSIGNMENT_ACCEPTED_BEFORE_ACTIVATION",
+                    "Sensor acceptance timestamp is earlier than assignment activation"
+            );
+        }
+        if (asg.revokedAt() == null) {
+            throw new IngestionException(
+                    HttpStatus.FORBIDDEN,
+                    "ERR_REVOKED_ASSIGNMENT_REVOKED_AT_MISSING",
+                    "Revoked assignment is missing authoritative revocation timestamp"
+            );
+        }
+        if (acceptedInstant.isAfter(asg.revokedAt())) {
+            throw new IngestionException(
+                    HttpStatus.FORBIDDEN,
+                    "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION",
+                    "Sensor acceptance timestamp is later than assignment revocation"
+            );
+        }
     }
 
     private void validateIngressRecordAuthority(

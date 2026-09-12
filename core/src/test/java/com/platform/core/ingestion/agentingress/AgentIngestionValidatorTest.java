@@ -52,6 +52,12 @@ class AgentIngestionValidatorTest {
     }
 
     private AgentIngressRecord sampleRecord(long ingressSeq, String acceptingSensor, long generation) throws Exception {
+        return sampleRecordWithAcceptedAt(ingressSeq, acceptingSensor, generation, "2026-09-11T10:00:00Z");
+    }
+
+    private AgentIngressRecord sampleRecordWithAcceptedAt(
+            long ingressSeq, String acceptingSensor, long generation, String acceptedAt
+    ) throws Exception {
         String payload = """
                 {"hostId":"host-abc","collectedAt":"2026-09-11T10:00:00Z","observations":[{
                   "observationId":"obs-1","metricKey":"cpu.util","value":42.5,
@@ -65,7 +71,7 @@ class AgentIngestionValidatorTest {
         return new AgentIngressRecord(
                 ingressSeq, "ingress-" + ingressSeq, tenantId.toString(), "agent-1",
                 acceptingSensor, generation, 10, 10, "agent-batch-1", "corr-1",
-                "2026-09-11T10:00:00Z", List.of(delivery)
+                acceptedAt, List.of(delivery)
         );
     }
 
@@ -132,10 +138,12 @@ class AgentIngestionValidatorTest {
     void historicalRevokedGenerationAccepted() throws Exception {
         AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 2);
         AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T09:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T11:00:00Z");
         when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
                 .thenReturn(Optional.of(new AgentSensorAssignment(
                         UUID.randomUUID(), tenantId, "agent-1", "sensor-infra-01", 2L,
-                        AgentAssignmentStatus.REVOKED, Instant.now(), Instant.now(), Instant.now()
+                        AgentAssignmentStatus.REVOKED, created, created, revoked
                 )));
         stubEntity();
         List<CanonicalObservation> obs = validator.validateAndExtract("{}".getBytes(), batch, scope);
@@ -146,6 +154,117 @@ class AgentIngestionValidatorTest {
         assertEquals(2L, obs.get(0).assignmentGeneration());
         assertEquals(entityId.toString(), obs.get(0).entityId());
         assertTrue(obs.get(0).sequenceId().contains("agent-1:2:10:0:cpu.util"));
+    }
+
+    @Test
+    void historicalRevokedGenerationAcceptedExactlyOnActivationBoundary() throws Exception {
+        AgentIngressRecord record = sampleRecordWithAcceptedAt(1, "sensor-infra-01", 2, "2026-09-11T10:00:00Z");
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T10:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T11:00:00Z");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(
+                        UUID.randomUUID(), tenantId, "agent-1", "sensor-infra-01", 2L,
+                        AgentAssignmentStatus.REVOKED, created, created, revoked
+                )));
+        stubEntity();
+        List<CanonicalObservation> obs = validator.validateAndExtract("{}".getBytes(), batch, scope);
+        assertEquals(1, obs.size());
+    }
+
+    @Test
+    void historicalRevokedGenerationAcceptedExactlyOnRevocationBoundary() throws Exception {
+        AgentIngressRecord record = sampleRecordWithAcceptedAt(1, "sensor-infra-01", 2, "2026-09-11T10:00:00Z");
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T09:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T10:00:00Z");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(
+                        UUID.randomUUID(), tenantId, "agent-1", "sensor-infra-01", 2L,
+                        AgentAssignmentStatus.REVOKED, created, created, revoked
+                )));
+        stubEntity();
+        List<CanonicalObservation> obs = validator.validateAndExtract("{}".getBytes(), batch, scope);
+        assertEquals(1, obs.size());
+    }
+
+    @Test
+    void historicalRevokedGenerationRejectedAcceptedAfterRevocation() throws Exception {
+        AgentIngressRecord record = sampleRecordWithAcceptedAt(1, "sensor-infra-01", 2, "2026-09-11T10:00:01Z");
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T09:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T10:00:00Z");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(
+                        UUID.randomUUID(), tenantId, "agent-1", "sensor-infra-01", 2L,
+                        AgentAssignmentStatus.REVOKED, created, created, revoked
+                )));
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract("{}".getBytes(), batch, scope));
+        assertEquals("ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION", ex.getCode());
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+    }
+
+    @Test
+    void historicalRevokedGenerationRejectedAcceptedBeforeActivation() throws Exception {
+        AgentIngressRecord record = sampleRecordWithAcceptedAt(1, "sensor-infra-01", 2, "2026-09-11T08:59:59Z");
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T09:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T10:00:00Z");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(
+                        UUID.randomUUID(), tenantId, "agent-1", "sensor-infra-01", 2L,
+                        AgentAssignmentStatus.REVOKED, created, created, revoked
+                )));
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract("{}".getBytes(), batch, scope));
+        assertEquals("ERR_REVOKED_ASSIGNMENT_ACCEPTED_BEFORE_ACTIVATION", ex.getCode());
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+    }
+
+    @Test
+    void historicalRevokedGenerationRejectedMissingAcceptanceTime() throws Exception {
+        AgentIngressRecord record = sampleRecordWithAcceptedAt(1, "sensor-infra-01", 2, null);
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T09:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T10:00:00Z");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(
+                        UUID.randomUUID(), tenantId, "agent-1", "sensor-infra-01", 2L,
+                        AgentAssignmentStatus.REVOKED, created, created, revoked
+                )));
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract("{}".getBytes(), batch, scope));
+        assertEquals("ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED", ex.getCode());
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+    }
+
+    @Test
+    void historicalRevokedGenerationRejectedMalformedAcceptanceTime() throws Exception {
+        AgentIngressRecord record = sampleRecordWithAcceptedAt(1, "sensor-infra-01", 2, "not-a-timestamp");
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T09:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T10:00:00Z");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(
+                        UUID.randomUUID(), tenantId, "agent-1", "sensor-infra-01", 2L,
+                        AgentAssignmentStatus.REVOKED, created, created, revoked
+                )));
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract("{}".getBytes(), batch, scope));
+        assertEquals("ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID", ex.getCode());
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+    }
+
+    @Test
+    void currentActiveAssignmentAccepted() throws Exception {
+        AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 1);
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        stubAssignment(1, "sensor-infra-01");
+        stubEntity();
+        List<CanonicalObservation> obs = validator.validateAndExtract("{}".getBytes(), batch, scope);
+        assertEquals(1, obs.size());
+        assertEquals("cpu.util", obs.get(0).metricId());
     }
 
     @Test

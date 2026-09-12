@@ -182,9 +182,14 @@ func validateAgentTelemetryAck(batch AgentTelemetryBatch, ack AgentTelemetryAck)
 	if ack.CorrelationID != batch.CorrelationID {
 		return newError(CodeProtocol, "Core agent-telemetry acknowledgement correlationId does not match submitted batch", nil, false)
 	}
-	if ack.AcceptedThroughIngressSequence < batch.FirstIngressSequence ||
-		ack.AcceptedThroughIngressSequence > batch.LastIngressSequence {
-		return newError(CodeProtocol, "Core agent-telemetry acknowledgement sequence is outside submitted batch range", nil, false)
+	if ack.AcceptedThroughIngressSequence != batch.LastIngressSequence {
+		if ack.AcceptedThroughIngressSequence < batch.FirstIngressSequence {
+			return newError(CodeProtocol, "Core agent-telemetry acknowledgement sequence is below submitted batch first sequence", nil, false)
+		}
+		if ack.AcceptedThroughIngressSequence > batch.LastIngressSequence {
+			return newError(CodeProtocol, "Core agent-telemetry acknowledgement sequence is above submitted batch last sequence", nil, false)
+		}
+		return newError(CodeProtocol, "Core agent-telemetry acknowledgement sequence is below submitted batch last sequence", nil, false)
 	}
 	return nil
 }
