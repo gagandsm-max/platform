@@ -2,16 +2,16 @@
 
 **Document ID:** PLATFORM-INDEX-001  
 **Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — 21-File Consolidated Engineering Source of Truth**  
+**Status:** **Authoritative Mother Reference — 22-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-07 — v3.2.2 operational-intelligence, MTTR and customer-value scope addition
+**Last reconciliation:** 2026-09-11 — v3.2.2 discovery/onboarding/identity/notification specialized-master addition
 
 ## 1. Authority
 
 **v3.2.2 supersedes v3.2.1 as the authoritative Platform mother-reference set after merge to the canonical GitHub `main`.**
 
-v3.2.2 is an additive product/engineering scope revision. It introduces one new specialized mother document, `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`, promoted to authoritative status for operational intelligence, MTTR reduction and customer-value requirements. It does not intentionally remove or weaken any v3.2.1 requirement.
+v3.2.2 is an additive product/engineering scope revision. It includes two specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value and `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement.
 
 v3.2.1 superseded v3.2 as a corrective/governance patch. v3.2 superseded v3.1 as a documentation-packaging revision. Earlier v1/v2/v3.0/v3.1 generated master packages and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as Platform engineering sources of truth.
 
@@ -26,7 +26,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 - Security/compliance readiness must never be represented as achieved certification until independently achieved.
 - Customer-value/MTTR percentages are not product claims until supported by disclosed reproducible customer/pilot evidence.
 
-## 3. Exact 21-file mother-reference set
+## 3. Exact 22-file mother-reference set
 
 | # | File | Governing scope |
 |---:|---|---|
@@ -51,6 +51,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 | 19 | `Platform_17_API_Event_and_Data_Model_Contracts.md` | API/event compatibility + PostgreSQL/ClickHouse/Kafka/Valkey data contracts |
 | 20 | `Platform_18_Security_Threat_Model.md` | Trust boundaries, threats, abuse cases and mitigations |
 | 21 | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | Authoritative OIV specialized master: SaaS/carrier/change intelligence, Flight Recorder, Similar Incident Memory, triggered packet evidence, controlled remediation, MTTR/value engine, formal `PRD-OIV-*` + `REQ-OIV-*` supplement |
+| 22 | `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` | Authoritative onboarding specialized master: discovery review, Agent enrollment/identity continuity, approval/audit, grouping/policy preview, Notification Center, formal `PRD-ONB-*` + `REQ-ONB-*` supplement |
 
 ## 4. Consolidation and version map
 
@@ -67,7 +68,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 
 Every source section is retained in the destination document. Consolidation is not permission to drop a requirement.
 
-### 4.2 v3.2.1 → v3.2.2 addition
+### 4.2 v3.2.1 → v3.2.2 additions
 
 v3.2.2 adds `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` as an authoritative specialized master instead of duplicating the same OIV text across many legacy files.
 
@@ -76,6 +77,8 @@ For the OIV capability family, `Platform_19` contains logical business/product, 
 The older files remain authoritative for their existing scope and are explicitly supplemented by `Platform_19`; they are not considered obsolete.
 
 This packaging choice is deliberate change control, not a waiver of traceability. `Platform_19` §14 maps every OIV requirement to its governing logical layers, and `AGENTS.md` makes the specialized master mandatory preflight for OIV work.
+
+The 2026-09-11 reconciliation adds `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` under the same consolidated-specialized-master pattern. Its §§3–12 carry product/architecture/HLD/LLD/dataflow/UI/security/quality/operations authority for the onboarding capability family, and §13 provides formal `REQ-ONB-*` traceability. This remains **v3.2.2**; no v3.2.3 product-version number is created.
 
 ## 5. Precedence
 
@@ -91,6 +94,8 @@ When requirements appear to conflict:
 8. Decision Register — provenance/TBD control.
 
 **OIV special case:** `Platform_19` is a consolidated specialized amendment that explicitly labels the logical layer of each section. Its §3 `PRD-OIV-*` requirements act as authoritative PRD supplements; §§4–13 carry the corresponding architecture/HLD/LLD/dataflow/UI/security/quality/operations authority for that additive capability family. It may add behavior where v3.2.1 files are silent, but may not silently override an explicit higher-precedence existing requirement.
+
+**Onboarding special case:** `Platform_20` is a consolidated specialized amendment. Its §3 `PRD-ONB-*` requirements act as authoritative BRD/PRD supplements; §§4–12 carry the corresponding architecture/HLD/LLD/dataflow/UI/security/quality/operations authority; §13 is the formal RTM supplement. It may add behavior where existing files are silent but may not silently override an explicit higher-precedence requirement.
 
 Conflicts require documented change control; implementation must not silently choose a convenient interpretation.
 
@@ -123,6 +128,10 @@ Conflicts require documented change control; implementation must not silently ch
 - Incident Flight Recorder, Similar Incident Memory and cross-domain Change Intelligence are approved MTTR-reduction capabilities.
 - Controlled remediation is approved only with deterministic action definitions, authorization, preconditions, blast-radius controls, approval/policy, audit, post-action validation and rollback/fail-safe handling; no direct LLM privileged execution.
 - Platform Value / MTTR Improvement measurement and the four-layer customer-value dashboard are approved product scope; unsupported causal or financial claims are prohibited.
+- Network auto-discovery and Windows/Linux Agent enrollment use a governed review lifecycle; full monitoring/licence activation requires review by default unless authorized trusted auto-approval policy applies.
+- Approve/reject/unmanaged/exclude onboarding decisions require operator comment/reason and audit; pre-activation review supports metadata, group/sub-group and monitoring/alert-policy preview.
+- Agent-backed endpoint identity is anchored to canonical `entity_id` plus unique `agent_id`/mTLS identity; system/host name is human-readable technical identity and dynamic IP/MAC values are mutable observations.
+- Platform exposes one global per-user Notification Center/bell with server-side tenant/RBAC/resource scoping; operational Alerts/Incidents remain distinct from platform/workflow notifications.
 
 ## 7. OSS governance
 
@@ -139,7 +148,9 @@ Implementation dependencies must match the catalogue; catalogue omissions discov
 
 For v3.2.2 OIV scope, `Platform_19` §14 is an **authoritative requirements-traceability supplement** containing formal `REQ-OIV-*` IDs mapped to formal `PRD-OIV-*` IDs and the product/architecture/HLD/LLD/dataflow/UI/security/quality sections that govern them.
 
-A new requirement is considered incorporated only when it has an ID, affected-layer mapping and sufficient normative behavior for implementation without inventing a load-bearing decision. `Platform_19` satisfies this for the approved OIV scope through its consolidated logical-layer contract.
+For v3.2.2 onboarding scope, `Platform_20` §13 is an **authoritative requirements-traceability supplement** containing formal `REQ-ONB-*` IDs mapped to formal `PRD-ONB-*` IDs and the logical-layer sections that govern them.
+
+A new requirement is considered incorporated only when it has an ID, affected-layer mapping and sufficient normative behavior for implementation without inventing a load-bearing decision. `Platform_19` satisfies this for the approved OIV scope through its consolidated logical-layer contract. `Platform_20` satisfies this for the approved discovery/onboarding/identity/notification scope through its consolidated logical-layer contract and §13 traceability supplement.
 
 ## 9. Explicit unresolved/P0 items
 
@@ -161,9 +172,11 @@ The new OIV scope does not resolve any of these P0/TBD items by declaration.
 
 ## 10. Development-stage readiness
 
-Before coding a module, an engineer or coding agent reads `AGENTS.md`, this Index, the relevant BRD/PRD requirement, Architecture/HLD/LLD/Dataflow sections, OSS Catalogue, relevant specialized master (`09` through `19`) and Decision Register.
+Before coding a module, an engineer or coding agent reads `AGENTS.md`, this Index, the relevant BRD/PRD requirement, Architecture/HLD/LLD/Dataflow sections, OSS Catalogue, relevant specialized master (`09` through `20`) and Decision Register.
 
 For any OIV task, `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` is mandatory preflight reading.
+
+For discovery review, Agent onboarding/enrollment identity, dynamic endpoint identity/reconciliation or in-product Notification Center work, `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` is mandatory preflight reading.
 
 A feature is not complete when it only compiles: tests, observability, error/failure behavior, upgrade/migration impact, security/OSS implications, traceability and acceptance evidence are part of Definition of Done.
 
@@ -205,6 +218,6 @@ If implementation discovers an error in the mother documents, engineering must c
 
 ## 13. Repository placement
 
-For ChatGPT Project use, these **21 Markdown mother-reference files** are sufficient as the authoritative source set.
+For ChatGPT Project use, these **22 Markdown mother-reference files** are sufficient as the authoritative source set.
 For code-agent enforcement, `AGENTS.md` should also be available at repository root (`~/nms/AGENTS.md` in a working clone), preferably as a copy or symlink to `project_documentation/AGENTS.md`, so tools that auto-discover root instructions see the same content.
 Authority of the clone follows §12 after merge to the canonical GitHub repository.

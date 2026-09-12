@@ -147,3 +147,15 @@ v3.2.1 does not reopen fixed product/architecture decisions and does not replace
 | OIV architecture reuse | ARCH-DELEGATED | Extend existing Incident/RCA/Graph/Integration/NCM/Reporting/Sensor modules and existing data stack before introducing new mandatory services/databases. |
 
 These decisions are additive and do not reopen §5 P0/TBD items.
+
+## 9. v3.2.2 USER-FIXED discovery/onboarding/notification decisions — 2026-09-11
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Unified onboarding review | USER-FIXED | Network auto-discovery and Windows/Linux Agent enrollment shall surface in one governed customer review lifecycle. Review before full monitoring/licence is the safe default; trusted scoped auto-approval may be configured by authorized policy. |
+| Review enrichment and decision evidence | USER-FIXED | Before activation authorized users may edit Display Name/Alias/Description, Site, Group/Sub-group, Tags, Criticality and applicable monitoring/alert-policy assignment. Approve/reject/unmanaged/exclude decisions require user comment/reason and audit evidence. |
+| Agent endpoint identity | USER-FIXED | Canonical `entity_id` plus unique `agent_id`/mTLS identity is the durable Agent-backed endpoint identity. System/host name is the preferred human-readable technical name; dynamic IP/MAC values are mutable observations and do not create a new endpoint by themselves. |
+| Identity reconciliation | USER-FIXED | Reinstall/reimage/clone/hostname/stable-identifier conflicts must be explicitly reconciled; Platform must not silently merge distinct endpoints or create silent duplicate active bindings when durable identity evidence conflicts. |
+| Global Notification Center | USER-FIXED | Platform shall expose one global per-user Notification Center/bell with categories, unread state, deep links and preferences. Recipient visibility is server-side tenant/RBAC/resource scoped. Operational Alerts/Incidents remain semantically distinct from platform/workflow notifications. |
+| Discovery drift notification | USER-FIXED | Meaningful new/disappeared/conflicting/materially moved discovery facts may notify according to policy; routine rediscovery churn, dynamic-IP changes and scan/reconnect storms must be deduplicated/rate-limited. |
+| Onboarding specification packaging | ARCH-DELEGATED | `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` is the consolidated authoritative v3.2.2 specialized master for this capability family, following the approved Platform_19 logical-layer pattern and avoiding duplicated normative text across many base documents. |
