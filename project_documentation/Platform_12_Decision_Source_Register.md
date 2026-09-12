@@ -159,3 +159,43 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Global Notification Center | USER-FIXED | Platform shall expose one global per-user Notification Center/bell with categories, unread state, deep links and preferences. Recipient visibility is server-side tenant/RBAC/resource scoped. Operational Alerts/Incidents remain semantically distinct from platform/workflow notifications. |
 | Discovery drift notification | USER-FIXED | Meaningful new/disappeared/conflicting/materially moved discovery facts may notify according to policy; routine rediscovery churn, dynamic-IP changes and scan/reconnect storms must be deduplicated/rate-limited. |
 | Onboarding specification packaging | ARCH-DELEGATED | `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` is the consolidated authoritative v3.2.2 specialized master for this capability family, following the approved Platform_19 logical-layer pattern and avoiding duplicated normative text across many base documents. |
+
+## 10. v3.2.2 USER-FIXED / ARCH-DELEGATED enterprise gap-closure decisions — 2026-09-11
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Enterprise gap-closure product scope | USER-FIXED | `PRD-EGC-001` through `PRD-EGC-015` in `Platform_21_Enterprise_Gap_Closure_Master.md` are approved additive v3.2.2 product requirements/targets within their stated release classification. |
+| Enterprise gap-closure traceability | ARCH-DELEGATED | `REQ-EGC-001` through `REQ-EGC-015` in `Platform_21` are the authoritative RTM supplement for that capability family. |
+| Normalized vendor integrations | USER-FIXED + ARCH-DELEGATED implementation | SD-WAN, SASE/SSE/ZTNA, middleware and backup integrations normalize into Platform-owned canonical contracts; vendor identifiers never override tenant/entity authority. |
+| SCIM lifecycle target | USER-FIXED | SCIM v2-compatible lifecycle integration is an enterprise target; specification or implementation must not be represented as independent SCIM certification/compliance until validated. |
+| SLI/SLO/error-budget capability | USER-FIXED | Platform shall support governed SLI/SLO/error-budget and burn-rate evaluation. Exact customer/contractual targets remain policy or Founder-reserved unless separately fixed. |
+| Audit tamper evidence | USER-FIXED + ARCH-DELEGATED implementation | Security-relevant audit requires independently verifiable tamper evidence; this decision does not preselect hash chaining, signing, external anchoring or key-custody construction. |
+| Tenant offboarding/data portability | USER-FIXED | Offboarding distinguishes governed export, active-data deletion, backup/archive expiry, legal hold and final destruction evidence; Platform must not promise immediate physical erasure from immutable backups. |
+| Licence safety | USER-FIXED | Existing 30-day warning, 7-day banner and seven-day default post-expiry grace remain governed behavior. Commercial quantities, packaging, pricing and SKUs remain Founder-reserved. |
+| Declarative policy/configuration | USER-FIXED | Git/policy-as-code may express desired state but cannot bypass Platform RBAC, validation, approvals, audit, bounded rollout or runtime safety authority. |
+| Incident Command Workspace | USER-FIXED | Platform may provide a lean incident evidence/action workspace integrated with ITSM/collaboration systems; it does not become an independent chat product. |
+| Endpoint DEX privacy boundary | USER-FIXED | Optional DEX is bounded operational-experience telemetry, not employee surveillance. Keystroke/content/screenshot/microphone/camera/productivity-scoring collection is outside approved scope. |
+| Future browser synthetics / outside-in probes | USER-FIXED + ARCH-DELEGATED implementation | These are future capability requirements only; no browser/runtime/vendor/dependency or Platform-operated global probe SaaS is selected by declaration. |
+| Regional federation | USER-FIXED | Future regional federation requires separate architecture/change control and does not reopen v1 exactly-two-Core Active/Standby by implication. |
+| Enterprise gap-closure packaging | ARCH-DELEGATED | `Platform_21_Enterprise_Gap_Closure_Master.md` is the consolidated authoritative v3.2.2 specialized master for enterprise adoption gaps; monitoring-intelligence/alert-quality/AI-assurance remains reserved for a separate specialized master. |
+
+## 11. v3.2.2 USER-FIXED / ARCH-DELEGATED monitoring-intelligence and AI-assurance decisions — 2026-09-12
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Monitoring-intelligence product scope | USER-FIXED | The formal `PRD-MIA-*` requirements in `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` are approved additive v3.2.2 requirements within their stated release classification. |
+| Monitoring-intelligence traceability | ARCH-DELEGATED | The `REQ-MIA-*` catalogue in `Platform_22` is the authoritative RTM supplement for alert quality, evidence qualification, RCA/AI assurance and related shared-service evidence. |
+| Alert Evidence Contracts | USER-FIXED + ARCH-DELEGATED implementation | Material alert/failure classes use class-specific required/contradictory/missing evidence semantics; a single monitor failure is not authoritative when credible corroborating evidence contradicts the asserted state. |
+| Telemetry-quality trust gate | USER-FIXED | Collector/source health, freshness, timestamp quality and evidence gaps are evaluated before Platform converts weak telemetry into an operational-failure assertion. |
+| Severity versus confidence | USER-FIXED | Operational severity and evidentiary confidence are separate dimensions. High severity does not imply high confidence and vice versa. |
+| Semantic operational states | USER-FIXED | Platform supports explicit non-DOWN states including `MONITORING_DEGRADED`, `REDUNDANCY_LOST`, `SLA_DEGRADED`, `EXPECTED_STATE`, `UNKNOWN` and `STALE` where applicable. |
+| Alert-policy lifecycle | USER-FIXED + ARCH-DELEGATED implementation | New/changed alert policy follows governed `DRAFT -> BACKTEST -> SHADOW -> ACTIVE` progression where applicable; promotion requires reproducible evidence rather than invented universal thresholds. |
+| Active evidence acquisition | USER-FIXED + ARCH-DELEGATED implementation | Additional diagnostic evidence may be gathered only through bounded, authorized, tenant-scoped and resource-limited actions that cannot bypass protocol/security policy. |
+| RCA / AI epistemic contract | USER-FIXED | GNN/LLM are evidence/hypothesis assistants, never causal authority. `INCONCLUSIVE` remains valid and Incident Copilot must expose evidence, contradictions, missing evidence and next validation rather than fabricate certainty. |
+| AI tool-use firewall | USER-FIXED + ARCH-DELEGATED implementation | Prompt/model output cannot directly execute privileged actions. Deterministic allowlists, schema validation, tenant/resource authorization, policy, audit and post-action verification remain authoritative. |
+| Tenant-scoped learning | USER-FIXED | No silent cross-tenant training, retrieval or evidence mixing. Any cross-tenant learning requires explicit approved governance and privacy controls. |
+| Graceful AI degradation | USER-FIXED | Core monitoring, deterministic alerting and deterministic RCA functions must continue when hosted/private/local AI providers are unavailable; Internet/LLM/GNN availability is not a core-monitoring prerequisite. |
+| AI evaluation and drift | USER-FIXED + ARCH-DELEGATED implementation | AI/ML releases require reproducible evaluation, provenance, model/data-drift visibility, resource-budget evidence and measured champion/challenger comparison before promotion. |
+| AI provider abstraction and data egress | USER-FIXED + ARCH-DELEGATED implementation | Hosted/private/local/no-LLM operation must preserve explicit data-egress policy and deterministic fallback. A model/vendor/runtime dependency is not selected merely by this requirement. |
+| Shared-service / PKI evidence | USER-FIXED | DNS/DHCP/NTP/PTP/RADIUS/TACACS+/LDAP/AD and PKI/certificate state are valid dependency evidence for incident reasoning; facilities/power evidence may explain infrastructure incidents but does not expand Platform into BMS/DCIM scope. |
+| Monitoring-intelligence packaging | ARCH-DELEGATED | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` is the consolidated authoritative v3.2.2 specialized master for this capability family and does not replace Platform_19 OIV or Platform_21 enterprise-gap authority outside its assigned scope. |
