@@ -121,20 +121,25 @@ kafka_end_offsets() {
 }
 
 consume_since_offsets() {
-    # telemetry.numeric.v1 has multiple partitions. A single --from-beginning
-    # consumer with --timeout-ms can exit after one partition goes idle.
+    # telemetry.numeric.v1 has multiple partitions. Seek one offset back so a
+    # record written at the captured log-end offset is not skipped, and stream
+    # without a wall-clock kill that drops docker exec stdout.
     local offset_file="$1"
-    local idle_seconds="${2:-8}"
+    local idle_seconds="${2:-6}"
     local idle_ms=$((idle_seconds * 1000))
-    local topic part off
+    local topic part off start
     while IFS=: read -r topic part off; do
         [[ -n "${part}" && -n "${off}" ]] || continue
-        timeout 40 docker exec platform-kafka \
+        start="${off}"
+        if [[ "${off}" =~ ^[0-9]+$ && "${off}" -gt 0 ]]; then
+            start=$((off - 1))
+        fi
+        docker exec platform-kafka \
             /opt/kafka/bin/kafka-console-consumer.sh \
             --bootstrap-server localhost:9092 \
             --topic "${topic}" \
             --partition "${part}" \
-            --offset "${off}" \
+            --offset "${start}" \
             --timeout-ms "${idle_ms}" \
             --property print.key=true \
             --property key.separator='|' \
@@ -257,6 +262,12 @@ else
     record "ack-before-delete" "PASS" "active queue depth=${Q_AFTER} after delivery (at-least-once retry window)"
 fi
 
+# Pause host collectors so injected batches are not buried under filesystem cardinality
+# or Core Kafka 503 head-of-line stalls.
+log "==> pausing Agent collectors for injected identity/authority batches"
+docker pause platform-agent-e2e >/dev/null
+sleep 2
+
 # Injected unique metric for identity tracing
 METRIC="e2e.cpu.unique.$(date +%s)"
 kafka_end_offsets > "${EVIDENCE_DIR}/offsets-unique.txt"
@@ -346,6 +357,9 @@ else
 fi
 REPLAY_COUNT="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
 record "replay-kafka-identity" "PASS" "metric ${METRIC} kafka hits=${REPLAY_COUNT} (at-least-once; no new logical id required)"
+
+log "==> resuming Agent collectors for failure-path scenarios"
+docker unpause platform-agent-e2e >/dev/null || true
 
 # mTLS / transport negatives against the live Receiver
 NOCERT="$(curl -sS -k --connect-timeout 5 -o /dev/null -w '%{http_code}' -X POST "https://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" || true)"
