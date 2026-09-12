@@ -1,4 +1,9 @@
-<!-- generated from project_agents/skills/bounded_implementation/SKILL.md sha256:90e1214c03188336ee021b32c57625c1b929137d67112e7e8d12b77cb445ded0 -->
+<!-- generated from project_agents/skills/bounded_implementation/SKILL.md sha256:bed49fba60918fc6b22d456297af997131635100259d51bb881433bc9e9cfc71 -->
+
+---
+name: bounded_implementation
+description: Apply the smallest defensible change inside the approved scope with explicit non-goals and no unrelated refactor.
+---
 
 # bounded_implementation
 

@@ -1,3 +1,8 @@
+---
+name: mother_reference_reconciliation
+description: Discover the Mother Reference set dynamically from Platform_00 and reconcile requirements, decisions and implementation claims without stale document ceilings.
+---
+
 # mother_reference_reconciliation
 
 ## Purpose

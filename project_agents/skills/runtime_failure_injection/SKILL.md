@@ -1,3 +1,8 @@
+---
+name: runtime_failure_injection
+description: Exercise crash, retry, timeout, durability and partial-failure paths and distinguish runtime evidence from source inference.
+---
+
 # runtime_failure_injection
 
 ## Purpose

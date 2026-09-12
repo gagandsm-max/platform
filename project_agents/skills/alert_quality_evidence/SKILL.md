@@ -1,3 +1,8 @@
+---
+name: alert_quality_evidence
+description: Evaluate alert evidence quality, telemetry trust, false-alert controls, severity/confidence separation and INCONCLUSIVE behavior.
+---
+
 # alert_quality_evidence
 
 ## Purpose

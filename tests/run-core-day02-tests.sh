@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Day-02 Core PostgreSQL integration gate (Docker-in-Docker / docker.sock required).
+# Day-02 Core PostgreSQL integration gate (Docker-out-of-Docker / docker.sock required).
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -10,13 +10,19 @@ echo "========================================================================"
 LOG_FILE=$(mktemp /tmp/day02-pg-tests-XXXXXX.log)
 trap 'rm -f "${LOG_FILE}"' EXIT
 
+# Maven in this image runs as uid 0. A RW host bind of core/ would write
+# core/target as root onto persistent self-hosted CI workspaces and break
+# the next job's `git clean -ffdx`. Copy source into a container-local tree
+# (same pattern as tests/run-unit-tests.sh) so target/ dies with --rm.
+# Host ${HOME}/.m2 is not bind-mounted: the same root user would chown the
+# runner home cache. Reuse a Docker-owned named volume instead.
 docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "${ROOT_DIR}/core:/app" -w /app \
-  -v "${HOME}/.m2:/root/.m2" \
+  -v "${ROOT_DIR}/core:/src:ro" \
+  -v platform-day02-maven-repo:/root/.m2 \
   --network host \
   maven:3.9.9-eclipse-temurin-21-alpine \
-  sh -c 'apk add --no-cache docker-cli >/dev/null && mvn -B -Dgroups=postgres -DfailIfNoSpecifiedTests=true test' | tee "${LOG_FILE}"
+  sh -c 'apk add --no-cache docker-cli >/dev/null && cp -r /src /build && rm -rf /build/target && cd /build && mvn -B -Dgroups=postgres -DfailIfNoSpecifiedTests=true test' | tee "${LOG_FILE}"
 
 SUMMARY_LINE=$(grep -E "Tests run: [0-9]+, Failures: [0-9]+, Errors: [0-9]+, Skipped: [0-9]+" "${LOG_FILE}" | tail -n 1 || true)
 

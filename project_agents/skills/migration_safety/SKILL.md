@@ -1,3 +1,8 @@
+---
+name: migration_safety
+description: Protect schema/data migrations with compatibility, rollback, idempotency, tenant isolation and failure-path evidence.
+---
+
 # migration_safety
 
 ## Purpose

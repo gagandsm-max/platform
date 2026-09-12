@@ -29,5 +29,12 @@ These are transformed Platform-specific derivatives of the uploaded `agency-agen
 | `platform-workflow-architect` | P1 | `specialized/specialized-workflow-architect.md` |
 | `platform-frontend-developer` | P1 | `engineering/engineering-frontend-developer.md` |
 | `platform-ux-architect` | P1 | `design/design-ux-architect.md` |
+| `platform-product-ui-designer` | P1 | Capability Pack v1.2 UI amendment clean-room owner (`source: capability-pack-v1.2`) |
 | `platform-ui-finish-gate-reviewer` | P1 | `design/design-ui-finish-gate-reviewer.md` |
 | `platform-accessibility-auditor` | P1 | `testing/testing-accessibility-auditor.md` |
+| `platform-sensor-runtime-engineer` | P1 | Capability Pack v1.2 clean-room owner (`source: capability-pack-v1.2`) |
+| `platform-infrastructure-cloud-engineer` | P1 | Capability Pack v1.2 clean-room owner (`source: capability-pack-v1.2`) |
+| `platform-telemetry-pipeline-engineer` | P1 | Capability Pack v1.2 clean-room owner (`source: capability-pack-v1.2`) |
+| `platform-device-pack-engineer` | P1 | Capability Pack v1.2 clean-room owner (`source: capability-pack-v1.2`) |
+| `platform-ncm-remediation-engineer` | P1 | Capability Pack v1.2 clean-room owner (`source: capability-pack-v1.2`) |
+| `platform-integration-connector-engineer` | P1 | Capability Pack v1.2 clean-room owner (`source: capability-pack-v1.2`) |

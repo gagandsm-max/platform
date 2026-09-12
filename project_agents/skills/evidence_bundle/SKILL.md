@@ -1,3 +1,8 @@
+---
+name: evidence_bundle
+description: Package typed SOURCE_FACT, EXECUTION_EVIDENCE, CI_EVIDENCE, INFERENCE and UNVERIFIED claims with reproducible references.
+---
+
 # evidence_bundle
 
 ## Purpose

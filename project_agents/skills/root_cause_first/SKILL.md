@@ -1,3 +1,8 @@
+---
+name: root_cause_first
+description: Establish the evidenced failure mechanism before implementation; reject symptom-only patches and unsupported assumptions.
+---
+
 # root_cause_first
 
 ## Purpose

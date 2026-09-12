@@ -90,6 +90,22 @@ python3 -m tools.engineering_orchestrator record-evidence \
 Subcommands: `init-task`, `transition`, `reconcile-base`, `record-evidence`,
 `status`, `replay`, `validate-journal`, `handoff-create`.
 
+## Capability Pack v1.2
+
+The Engineering Orchestrator remains the Phase 1 deterministic task/evidence
+engine. Agent/Skill **semantics** for Cursor Cloud, Cursor CLI, Antigravity CLI
+and ChatGPT+GitHub live in the Capability Pack:
+
+- Canonical agents/skills: `project_agents/`
+- Generated adapters: `.cursor/agents/`, `.agents/agents/`, `.codex/agents/`
+- Generated shared skills: `.agents/skills/` (legacy mirror: `skills/`)
+- Routing: `project_agents/CHATGPT_AGENT_ROUTER.md` and
+  `project_agents/skills/AGENT_SKILL_MATRIX.md`
+
+This orchestrator does not own those generated projections. Sync/validate with
+`python3 project_agents/tools/sync_agents.py` and
+`python3 project_agents/tools/validate_agents.py`.
+
 ## Tests
 
 ```bash

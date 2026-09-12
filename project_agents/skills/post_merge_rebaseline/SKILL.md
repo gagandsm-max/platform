@@ -1,3 +1,8 @@
+---
+name: post_merge_rebaseline
+description: After an authorized merge, re-fetch main and dependent heads, invalidate stale stack assumptions and reconcile downstream work before continuing.
+---
+
 # post_merge_rebaseline
 
 ## Purpose

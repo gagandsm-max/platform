@@ -1,4 +1,9 @@
-<!-- generated from project_agents/skills/mother_reference_reconciliation/SKILL.md sha256:28b5deb394e30c5d2987827eeede063b3069a411abf9b8811a1bfb9cba1b3dcf -->
+<!-- generated from project_agents/skills/mother_reference_reconciliation/SKILL.md sha256:1294a75458a8f7e3ca80cb139d0b689385abd5efe72f0e42833a77b52f764a68 -->
+
+---
+name: mother_reference_reconciliation
+description: Discover the Mother Reference set dynamically from Platform_00 and reconcile requirements, decisions and implementation claims without stale document ceilings.
+---
 
 # mother_reference_reconciliation
 

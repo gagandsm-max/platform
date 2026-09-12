@@ -91,7 +91,13 @@ def _write(path: Path, content: str) -> None:
 
 def _build_fixture(root: Path) -> None:
     canonical = "# Demo Agent\n\nFixture canonical agent.\n"
-    skill = "# demo_skill\n\nFixture canonical skill.\n"
+    skill = (
+        "---\n"
+        "name: demo_skill\n"
+        "description: Fixture skill\n"
+        "---\n\n"
+        "# demo_skill\n\nFixture canonical skill.\n"
+    )
     manifest = [
         {
             "name": "demo-agent",
@@ -159,6 +165,44 @@ class ControlPlaneContractTests(unittest.TestCase):
                 selectedAgents=["platform-minimal-change-engineer"],
                 selectedSkills=["root_cause_first"],
                 scope=["project_agents/"],
+            )
+        )
+
+    def test_routing_rejects_empty_selected_skills(self) -> None:
+        control_plane.validate_task_manifest(
+            _task(status="INTAKE", selectedAgents=[], selectedSkills=[], scope=[])
+        )
+        control_plane.validate_task_manifest(
+            _task(status="DIAGNOSIS", selectedAgents=[], selectedSkills=[], scope=[])
+        )
+        with self.assertRaises(control_plane.ControlPlaneError) as ctx:
+            control_plane.validate_task_manifest(
+                _task(
+                    status="ROUTING",
+                    exactHead=SHA_B,
+                    selectedAgents=["platform-minimal-change-engineer"],
+                    selectedSkills=[],
+                    scope=[],
+                )
+            )
+        self.assertIn("selectedSkills must be resolved before ROUTING", str(ctx.exception))
+        with self.assertRaises(control_plane.ControlPlaneError):
+            control_plane.validate_task_manifest(
+                _task(
+                    status="ROUTING",
+                    exactHead=SHA_B,
+                    selectedAgents=["platform-minimal-change-engineer"],
+                    selectedSkills=["not_a_real_skill"],
+                    scope=[],
+                )
+            )
+        control_plane.validate_task_manifest(
+            _task(
+                status="ROUTING",
+                exactHead=SHA_B,
+                selectedAgents=["platform-minimal-change-engineer"],
+                selectedSkills=["source_truth_rebaseline", "bounded_implementation"],
+                scope=[],
             )
         )
 
@@ -245,6 +289,9 @@ class AgentPackSafetyTests(unittest.TestCase):
                 if path.is_file() and not path.is_symlink()
             }
             self.assertEqual(agent_pack.validate_agent_pack(root), [])
+            self.assertTrue((root / ".agents" / "skills" / "demo_skill" / "SKILL.md").is_file())
+            self.assertTrue((root / "skills" / "demo_skill" / "SKILL.md").is_file())
+            self.assertFalse((root / ".cursor" / "skills").exists())
             agent_pack.sync_agent_pack(root)
             second = {
                 path.relative_to(root).as_posix(): path.read_bytes()
@@ -289,7 +336,10 @@ class AgentPackSafetyTests(unittest.TestCase):
             agent_pack.sync_agent_pack(root)
             self.assertTrue(unknown.is_file())
             errors = agent_pack.validate_agent_pack(root)
-            self.assertTrue(any("unowned root skill requires review" in item for item in errors), errors)
+            self.assertTrue(
+                any("unowned" in item and "requires review" in item for item in errors),
+                errors,
+            )
 
     def test_proven_generated_leftovers_are_pruned(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -304,15 +354,18 @@ class AgentPackSafetyTests(unittest.TestCase):
                 encoding="utf-8",
             )
             leftover_skill = root / "skills" / "retired_skill" / "SKILL.md"
-            _write(
-                leftover_skill,
+            leftover_native = root / ".agents" / "skills" / "retired_skill" / "SKILL.md"
+            marker = (
                 "<!-- generated from project_agents/skills/retired_skill/SKILL.md sha256:"
                 + ("b" * 64)
-                + " -->\n# retired\n",
+                + " -->\n# retired\n"
             )
+            _write(leftover_skill, marker)
+            _write(leftover_native, marker)
             agent_pack.sync_agent_pack(root)
             self.assertFalse(leftover_adapter.exists())
             self.assertFalse(leftover_skill.exists())
+            self.assertFalse(leftover_native.exists())
             self.assertEqual(agent_pack.validate_agent_pack(root), [])
 
     def test_symlink_adapters_are_not_followed_for_deletion(self) -> None:
@@ -362,6 +415,11 @@ class RepositoryGovernanceTests(unittest.TestCase):
     def test_ci_filter_includes_root_skills(self) -> None:
         text = (REPO_ROOT / ".github" / "workflows" / "platform-ci.yml").read_text(encoding="utf-8")
         self.assertIn("|skills/)", text)
+        self.assertIn(".agents/skills/", text)
+        self.assertIn("project_agents/", text)
+        self.assertIn(".cursor/agents/", text)
+        self.assertIn(".agents/agents/", text)
+        self.assertIn(".codex/agents/", text)
         self.assertIn("python3 project_agents/tools/validate_agents.py", text)
 
     def test_task_schema_uses_writer_tool_names(self) -> None:
@@ -381,8 +439,12 @@ class RepositoryGovernanceTests(unittest.TestCase):
             TOOLS / "validate_agents.py"
         ).read_text(encoding="utf-8")
         self.assertNotIn("len(manifest) == 27", source)
+        self.assertNotIn("len(manifest) == 33", source)
+        self.assertNotIn("len(manifest) == 34", source)
         self.assertNotIn("P0=12", source)
         self.assertNotIn("P1=15", source)
+        self.assertNotIn("P1=21", source)
+        self.assertNotIn("P1=22", source)
 
 
 if __name__ == "__main__":

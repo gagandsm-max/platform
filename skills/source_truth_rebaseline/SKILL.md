@@ -1,4 +1,9 @@
-<!-- generated from project_agents/skills/source_truth_rebaseline/SKILL.md sha256:ff2529e8d43b8f0b018e30e4ef3510a55270fff2f7003bd32af571dd8cb2a5b3 -->
+<!-- generated from project_agents/skills/source_truth_rebaseline/SKILL.md sha256:3de34d43dc4f3b7ae69c8f16a9dd9fac4f968fb23c9233d048bc16cb37e5abf3 -->
+
+---
+name: source_truth_rebaseline
+description: Re-fetch authoritative main, exact task head, PR base/head and governing repository truth before relying on prior conclusions.
+---
 
 # source_truth_rebaseline
 

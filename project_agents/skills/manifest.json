@@ -1,14 +1,242 @@
 [
-  {"name":"source_truth_rebaseline","description":"Re-fetch authoritative main, exact task head, PR base/head and governing repository truth before relying on prior conclusions."},
-  {"name":"mother_reference_reconciliation","description":"Discover the Mother Reference set dynamically from Platform_00 and reconcile requirements, decisions and implementation claims without stale document ceilings."},
-  {"name":"root_cause_first","description":"Establish the evidenced failure mechanism before implementation; reject symptom-only patches and unsupported assumptions."},
-  {"name":"bounded_implementation","description":"Apply the smallest defensible change inside the approved scope with explicit non-goals and no unrelated refactor."},
-  {"name":"migration_safety","description":"Protect schema/data migrations with compatibility, rollback, idempotency, tenant isolation and failure-path evidence."},
-  {"name":"security_negative_testing","description":"Prove security boundaries with adversarial and negative cases rather than success-path evidence alone."},
-  {"name":"runtime_failure_injection","description":"Exercise crash, retry, timeout, durability and partial-failure paths and distinguish runtime evidence from source inference."},
-  {"name":"alert_quality_evidence","description":"Evaluate alert evidence quality, telemetry trust, false-alert controls, severity/confidence separation and INCONCLUSIVE behavior."},
-  {"name":"ai_evidence_safety","description":"Constrain AI claims and actions to authoritative evidence, deterministic tool boundaries, tenant/data-egress controls and graceful degradation."},
-  {"name":"exact_head_merge_gate","description":"Gate review and merge claims on the exact current head, complete required CI/evidence and independent verification; drift invalidates stale evidence."},
-  {"name":"evidence_bundle","description":"Package typed SOURCE_FACT, EXECUTION_EVIDENCE, CI_EVIDENCE, INFERENCE and UNVERIFIED claims with reproducible references."},
-  {"name":"post_merge_rebaseline","description":"After an authorized merge, re-fetch main and dependent heads, invalidate stale stack assumptions and reconcile downstream work before continuing."}
+  {
+    "name": "source_truth_rebaseline",
+    "description": "Re-fetch authoritative main, exact task head, PR base/head and governing repository truth before relying on prior conclusions."
+  },
+  {
+    "name": "mother_reference_reconciliation",
+    "description": "Discover the Mother Reference set dynamically from Platform_00 and reconcile requirements, decisions and implementation claims without stale document ceilings."
+  },
+  {
+    "name": "root_cause_first",
+    "description": "Establish the evidenced failure mechanism before implementation; reject symptom-only patches and unsupported assumptions."
+  },
+  {
+    "name": "bounded_implementation",
+    "description": "Apply the smallest defensible change inside the approved scope with explicit non-goals and no unrelated refactor."
+  },
+  {
+    "name": "migration_safety",
+    "description": "Protect schema/data migrations with compatibility, rollback, idempotency, tenant isolation and failure-path evidence."
+  },
+  {
+    "name": "security_negative_testing",
+    "description": "Prove security boundaries with adversarial and negative cases rather than success-path evidence alone."
+  },
+  {
+    "name": "runtime_failure_injection",
+    "description": "Exercise crash, retry, timeout, durability and partial-failure paths and distinguish runtime evidence from source inference."
+  },
+  {
+    "name": "alert_quality_evidence",
+    "description": "Evaluate alert evidence quality, telemetry trust, false-alert controls, severity/confidence separation and INCONCLUSIVE behavior."
+  },
+  {
+    "name": "ai_evidence_safety",
+    "description": "Constrain AI claims and actions to authoritative evidence, deterministic tool boundaries, tenant/data-egress controls and graceful degradation."
+  },
+  {
+    "name": "exact_head_merge_gate",
+    "description": "Gate review and merge claims on the exact current head, complete required CI/evidence and independent verification; drift invalidates stale evidence."
+  },
+  {
+    "name": "evidence_bundle",
+    "description": "Package typed SOURCE_FACT, EXECUTION_EVIDENCE, CI_EVIDENCE, INFERENCE and UNVERIFIED claims with reproducible references."
+  },
+  {
+    "name": "post_merge_rebaseline",
+    "description": "After an authorized merge, re-fetch main and dependent heads, invalidate stale stack assumptions and reconcile downstream work before continuing."
+  },
+  {
+    "name": "distributed_systems",
+    "description": "Design and change Core/Sensor distributed behavior: queues, backpressure, timeouts, consistency, failover and split-brain avoidance without reopening two-Core P0 designs."
+  },
+  {
+    "name": "sensor_edge",
+    "description": "Sensor process/runtime mechanics: scheduling, worker pools, leases/fencing, durable spool, uploader/replay, resource lifecycle and Sensor self-observability."
+  },
+  {
+    "name": "ha_dr",
+    "description": "Exactly-two-Core Active/Standby HA/DR operability, failover evidence and Sensor continue-to-collect behavior without inventing unresolved replication designs."
+  },
+  {
+    "name": "capacity_performance",
+    "description": "Hot-path capacity, latency, lag, cardinality and resource-budget evidence for Core, Sensor, UI and storage protection."
+  },
+  {
+    "name": "go_runtime",
+    "description": "Go Sensor/Agent implementation: context/cancellation, bounded concurrency, durable files, and fail-closed ack/offset behavior."
+  },
+  {
+    "name": "java_spring",
+    "description": "Java 21 / Spring Core implementation: transactions, validation, actuator boundaries, and fail-closed consumers."
+  },
+  {
+    "name": "typescript_react",
+    "description": "TypeScript/React UI: role-aware operational screens, server-driven state, accessibility and no generic dashboard filler."
+  },
+  {
+    "name": "python_runtime",
+    "description": "Approved Python use for AI/analytics/NCM workers: isolation, no silent host installs, and catalogue-constrained dependencies."
+  },
+  {
+    "name": "linux_systems",
+    "description": "Linux OS, systemd, process, disk, and host-path semantics for Core/Sensor/Agent packaging and monitoring targets."
+  },
+  {
+    "name": "snmp_mib",
+    "description": "SNMP/MIB collection, SNMPv3 security, counter semantics and Device Pack mapping without declaring device-down from SNMP alone."
+  },
+  {
+    "name": "icmp_path",
+    "description": "ICMP/path reachability, RTT/loss/timeout evidence and path diagnostics as corroboration, not sole identity."
+  },
+  {
+    "name": "flow_telemetry",
+    "description": "Flow export collection, template/replay/drop counters, cardinality control and Sensor isolation from flow floods."
+  },
+  {
+    "name": "syslog_traps",
+    "description": "Syslog and SNMP trap ingestion, source attribution, storm control and evidence-quality parsing."
+  },
+  {
+    "name": "device_control_protocols",
+    "description": "SSH/CLI, NETCONF/YANG and gNMI/gRPC device control/telemetry with credential, timeout and blast-radius constraints."
+  },
+  {
+    "name": "topology_routing",
+    "description": "Routing/topology discovery, network-service dependencies (DNS/DHCP/NTP/AAA) and provenance/confidence on graph edges."
+  },
+  {
+    "name": "windows_monitoring",
+    "description": "Windows Agent service, MSI/BAT install, event/perf evidence and privacy-bounded endpoint collection."
+  },
+  {
+    "name": "agent_architecture",
+    "description": "Endpoint Agent identity, enrollment/mTLS, durable local collection and privacy-bounded operational telemetry."
+  },
+  {
+    "name": "virtualization_storage",
+    "description": "Virtualization, datastore and storage-target monitoring without turning Platform into DCIM/BMS."
+  },
+  {
+    "name": "kubernetes_monitoring",
+    "description": "Kubernetes/container target monitoring, workload identity and collector-health separation."
+  },
+  {
+    "name": "cloud_monitoring",
+    "description": "Cloud-account/target monitoring, OpenTelemetry import boundaries and vendor-ID normalization."
+  },
+  {
+    "name": "postgresql",
+    "description": "PostgreSQL control-state schema, transactions, tenant isolation and backup/restore of authoritative data."
+  },
+  {
+    "name": "clickhouse",
+    "description": "ClickHouse historical analytics, insert idempotency, retention and lag without treating CH as control state."
+  },
+  {
+    "name": "kafka",
+    "description": "Internal Kafka transport, consumer fail-closed ACK/offset, poison parking and lag evidence."
+  },
+  {
+    "name": "replay_idempotency",
+    "description": "Replay, dedup, late-data and exactly-once-effect evidence across Sensor spool, Kafka and datastores."
+  },
+  {
+    "name": "backup_restore",
+    "description": "Backup/restore, retention, cardinality and 80% storage-protection behavior including legal-hold limits."
+  },
+  {
+    "name": "api_event_contracts",
+    "description": "HTTPS/gRPC/REST and Kafka event contracts, compatibility, error codes and correlation IDs."
+  },
+  {
+    "name": "connector_framework",
+    "description": "Outbound connector framework: auth, rate limit, retry, idempotency, durable outbound and certification."
+  },
+  {
+    "name": "oauth_oidc_clients",
+    "description": "OAuth/OIDC client integrations, token handling, redirect safety and secret storage."
+  },
+  {
+    "name": "itsm_change_telemetry",
+    "description": "ITSM/notification/change-telemetry connectors as supporting evidence, not causal proof."
+  },
+  {
+    "name": "threat_modelling",
+    "description": "Threat-model trust boundaries, privileged actions, Device Packs, AI tools and update channels before implementation."
+  },
+  {
+    "name": "tenant_isolation",
+    "description": "Server-side tenant isolation, RBAC/resource scope and cross-tenant negative cases."
+  },
+  {
+    "name": "pki_mtls",
+    "description": "PKI, mTLS enrollment, certificate identity and untrusted-cert rejection."
+  },
+  {
+    "name": "secrets_handling",
+    "description": "Credential Profiles, connector secrets, CI credentials, redaction and support-bundle safety."
+  },
+  {
+    "name": "remediation_safety",
+    "description": "Controlled remediation: deterministic actions, maker-checker, blast-radius, rollback and no LLM privileged execution."
+  },
+  {
+    "name": "docker_compose",
+    "description": "Docker Compose development/test hygiene: named volumes, healthchecks, no destructive prune, reboot-safe local stack."
+  },
+  {
+    "name": "ci_cd",
+    "description": "GitHub Actions/CI wiring, exact-head evidence, and no test weakening to obtain green."
+  },
+  {
+    "name": "sbom_provenance",
+    "description": "SBOM, provenance, CVE/licence review and supply-chain evidence before new OSS."
+  },
+  {
+    "name": "install_upgrade",
+    "description": "deb/rpm/MSI packaging, systemd lifecycle, upgrade/rollback and reboot auto-start evidence."
+  },
+  {
+    "name": "device_pack_authoring",
+    "description": "Device Pack schema, identification, mappings, versioning, certification/provenance and test-lab semantics."
+  },
+  {
+    "name": "monitoring_work_units",
+    "description": "Monitoring work-unit placement, Sensor assignment, capacity impact and locality constraints."
+  },
+  {
+    "name": "temporal_operational_graph",
+    "description": "Temporal operational graph, topology provenance/confidence and relationship history."
+  },
+  {
+    "name": "rca_hypothesis_fusion",
+    "description": "RCA hypothesis fusion: observed facts, likely cause, confidence, contradictions, missing evidence and INCONCLUSIVE."
+  },
+  {
+    "name": "incident_flight_recorder",
+    "description": "Incident Flight Recorder and Similar Incident Memory: bounded, tenant-scoped, advisory historical evidence."
+  },
+  {
+    "name": "change_intelligence",
+    "description": "Change Intelligence: external/provider/change evidence as supporting context with explicit non-causality."
+  },
+  {
+    "name": "customer_value_mttr",
+    "description": "MTTR/value analytics with cohort methodology, data quality and no fabricated savings percentages."
+  },
+  {
+    "name": "ux_operational_design",
+    "description": "Operational UX for Platform NOC/admin screens: job-to-be-done, hierarchy, dense-data presentation, microcopy intent and implementation-ready design handoff."
+  },
+  {
+    "name": "web_interface_quality",
+    "description": "Platform web implementation quality: existing design-system use, component consistency, responsive behaviour, state completeness, runtime/visual validation and frontend performance."
+  },
+  {
+    "name": "accessibility_inclusive_design",
+    "description": "Accessible Platform operational UI: keyboard/focus, semantic HTML, screen-reader intent, non-colour status, contrast, reduced motion and inclusive resilient design."
+  }
 ]

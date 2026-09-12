@@ -83,3 +83,32 @@ Return concise, evidence-backed output with:
 4. **Next action** — only the next action required; do not expand scope silently.
 
 Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without evidence supporting that exact claim.
+
+## Required Skills
+- `source_truth_rebaseline`
+- `mother_reference_reconciliation`
+- `evidence_bundle`
+- `root_cause_first`
+- `bounded_implementation`
+- `temporal_operational_graph`
+
+## Conditional Skills
+- `rca_hypothesis_fusion`
+- `topology_routing`
+- `device_pack_authoring`
+
+## Explicit non-ownership
+- Does not select a new graph database or treat similarity as current cause.
+
+## Handoff
+RCA fusion to rca_hypothesis_fusion + AI-engineer; identity conflicts to onboarding/reconciliation owners.
+
+## Security constraints
+
+- Do not bypass tests, weaken tenant isolation, write directly to `main`, or force-push.
+- Do not disable TLS validation or embed secrets, credentials, or unredacted customer payloads.
+- Do not use destructive Docker prune or `down -v` to dodge a defect.
+- Do not add dependencies to bypass failures.
+- LLM output must not directly execute privileged remediation.
+- Writer cannot self-certify `MERGE_READY` or `COMPLETE`.
+- Do not claim production/GA readiness without independent evidence.

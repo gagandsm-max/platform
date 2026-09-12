@@ -22,6 +22,9 @@ ACCEPTANCE
 
 AGENT ROUTING
 Read project_agents/AGENT_MATRIX.md and project_agents/USAGE_PLAYBOOK.md. Select the smallest useful set of agents. Use read-only diagnosis first when the implementation/root cause is unclear. Use platform-minimal-change-engineer for bounded implementation discipline. Use independent review/evidence after writes. Do not run parallel write agents in the same checkout.
+From ROUTING onward record explicit selectedAgents and selectedSkills. selectedSkills must not be empty; a governance-only task still selects canonical Skills such as source_truth_rebaseline / bounded_implementation.
+selectedAgents: [<exact canonical agent names>]
+selectedSkills: [<exact canonical skill names>]
 
 COMPLETION
 Return changed files, tests/evidence, risks/limitations and unresolved items. Do not claim production/GA readiness unless platform-reality-checker verifies the applicable quality gates.

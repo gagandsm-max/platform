@@ -1,4 +1,9 @@
-<!-- generated from project_agents/skills/ai_evidence_safety/SKILL.md sha256:9c2b7514b2f869089269e961d1ecbd6e09f96e13bf6c28948e61b785326c09db -->
+<!-- generated from project_agents/skills/ai_evidence_safety/SKILL.md sha256:56aa913e7b558ceec3b696cca566169278e5e2702cbf9a8c06f63103ea43ad15 -->
+
+---
+name: ai_evidence_safety
+description: Constrain AI claims and actions to authoritative evidence, deterministic tool boundaries, tenant/data-egress controls and graceful degradation.
+---
 
 # ai_evidence_safety
 

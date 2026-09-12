@@ -1,3 +1,8 @@
+---
+name: ai_evidence_safety
+description: Constrain AI claims and actions to authoritative evidence, deterministic tool boundaries, tenant/data-egress controls and graceful degradation.
+---
+
 # ai_evidence_safety
 
 ## Purpose

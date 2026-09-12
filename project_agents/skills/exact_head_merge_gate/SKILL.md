@@ -1,3 +1,8 @@
+---
+name: exact_head_merge_gate
+description: Gate review and merge claims on the exact current head, complete required CI/evidence and independent verification; drift invalidates stale evidence.
+---
+
 # exact_head_merge_gate
 
 ## Purpose

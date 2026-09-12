@@ -1,0 +1,589 @@
+{
+  "platform-minimal-change-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation"
+    ],
+    "conditionalSkills": [
+      "migration_safety",
+      "go_runtime",
+      "java_spring",
+      "typescript_react"
+    ],
+    "typicalTriggers": "Surgical patch after root cause is known.",
+    "forbiddenOwnershipAssumptions": "Does not own architecture, RCA authority, or merge certification."
+  },
+  "platform-codebase-onboarding-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle"
+    ],
+    "conditionalSkills": [
+      "distributed_systems",
+      "sensor_edge",
+      "ha_dr"
+    ],
+    "typicalTriggers": "Unfamiliar subsystem mapping before changes.",
+    "forbiddenOwnershipAssumptions": "Does not implement product changes."
+  },
+  "platform-codebase-archaeologist": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first"
+    ],
+    "conditionalSkills": [
+      "temporal_operational_graph",
+      "api_event_contracts"
+    ],
+    "typicalTriggers": "Drift, duplication, partial migrations across branches.",
+    "forbiddenOwnershipAssumptions": "Does not rewrite history or merge PRs."
+  },
+  "platform-code-reviewer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "exact_head_merge_gate"
+    ],
+    "conditionalSkills": [
+      "security_negative_testing",
+      "threat_modelling",
+      "tenant_isolation",
+      "migration_safety",
+      "replay_idempotency"
+    ],
+    "typicalTriggers": "After implementation, before merge-ready claims.",
+    "forbiddenOwnershipAssumptions": "Does not write the patch or self-merge."
+  },
+  "platform-reality-checker": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "exact_head_merge_gate"
+    ],
+    "conditionalSkills": [
+      "capacity_performance",
+      "install_upgrade",
+      "alert_quality_evidence"
+    ],
+    "typicalTriggers": "Completion/release-readiness claims.",
+    "forbiddenOwnershipAssumptions": "Does not implement fixes or certify from chat summaries."
+  },
+  "platform-evidence-collector": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "evidence_bundle"
+    ],
+    "conditionalSkills": [
+      "runtime_failure_injection",
+      "security_negative_testing",
+      "capacity_performance"
+    ],
+    "typicalTriggers": "After implementation when evidence must be packaged.",
+    "forbiddenOwnershipAssumptions": "Does not make quality claims beyond collected evidence."
+  },
+  "platform-security-architect": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "threat_modelling",
+      "pki_mtls",
+      "tenant_isolation"
+    ],
+    "conditionalSkills": [
+      "remediation_safety",
+      "ai_evidence_safety",
+      "sbom_provenance"
+    ],
+    "typicalTriggers": "New trust boundaries, privileged actions, AI tools, Device Packs.",
+    "forbiddenOwnershipAssumptions": "Does not select unresolved crypto constructions or new OSS by fiat."
+  },
+  "platform-appsec-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "security_negative_testing",
+      "threat_modelling",
+      "tenant_isolation",
+      "secrets_handling"
+    ],
+    "conditionalSkills": [
+      "oauth_oidc_clients",
+      "pki_mtls",
+      "kafka"
+    ],
+    "typicalTriggers": "Auth, input, queries, uploads, integrations, AI-generated code paths.",
+    "forbiddenOwnershipAssumptions": "Does not own identity product architecture (IAM engineer) or pack schema."
+  },
+  "platform-ai-code-security-auditor": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "ai_evidence_safety",
+      "secrets_handling",
+      "tenant_isolation"
+    ],
+    "conditionalSkills": [
+      "remediation_safety",
+      "pki_mtls"
+    ],
+    "typicalTriggers": "AI-generated or heavily AI-modified diffs.",
+    "forbiddenOwnershipAssumptions": "Does not become the implementing writer."
+  },
+  "platform-secrets-credential-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "secrets_handling",
+      "pki_mtls"
+    ],
+    "conditionalSkills": [
+      "oauth_oidc_clients",
+      "install_upgrade"
+    ],
+    "typicalTriggers": "Credential Profiles, CI secrets, support bundles, redaction.",
+    "forbiddenOwnershipAssumptions": "Does not design RBAC policy (IAM) or connector business logic."
+  },
+  "platform-test-automation-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "runtime_failure_injection",
+      "security_negative_testing"
+    ],
+    "conditionalSkills": [
+      "migration_safety",
+      "capacity_performance",
+      "docker_compose"
+    ],
+    "typicalTriggers": "When a changed invariant needs a durable automated test.",
+    "forbiddenOwnershipAssumptions": "Does not weaken tests to obtain green CI."
+  },
+  "platform-performance-benchmarker": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "capacity_performance"
+    ],
+    "conditionalSkills": [
+      "ha_dr",
+      "kafka",
+      "sensor_edge"
+    ],
+    "typicalTriggers": "Hot-path, sizing, lag, or resource-budget claims.",
+    "forbiddenOwnershipAssumptions": "Does not invent universal SLO percentages or final benchmark constants."
+  },
+  "platform-api-platform-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "api_event_contracts"
+    ],
+    "conditionalSkills": [
+      "kafka",
+      "replay_idempotency",
+      "pki_mtls",
+      "tenant_isolation"
+    ],
+    "typicalTriggers": "Core APIs, Sensor/Agent control, ingestion, event schemas.",
+    "forbiddenOwnershipAssumptions": "Does not own datastore engines or UI rendering."
+  },
+  "platform-network-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "snmp_mib",
+      "icmp_path",
+      "flow_telemetry",
+      "syslog_traps",
+      "device_control_protocols",
+      "topology_routing"
+    ],
+    "conditionalSkills": [
+      "device_pack_authoring",
+      "alert_quality_evidence",
+      "sensor_edge"
+    ],
+    "typicalTriggers": "SNMP, ICMP, flow, syslog/traps, gNMI/NETCONF/SSH, routing/topology, discovery behavior.",
+    "forbiddenOwnershipAssumptions": "Does not own generic Sensor runtime (pools/leases/spool/uploader), Device Pack schema, or post-accept Kafka pipeline."
+  },
+  "platform-database-reliability-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "postgresql",
+      "clickhouse",
+      "migration_safety",
+      "backup_restore"
+    ],
+    "conditionalSkills": [
+      "replay_idempotency",
+      "ha_dr",
+      "tenant_isolation"
+    ],
+    "typicalTriggers": "PostgreSQL/ClickHouse schema, retention, backup/restore, data integrity.",
+    "forbiddenOwnershipAssumptions": "Does not own Kafka transport semantics or Sensor spool."
+  },
+  "platform-sre": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "ha_dr",
+      "install_upgrade",
+      "capacity_performance"
+    ],
+    "conditionalSkills": [
+      "docker_compose",
+      "ci_cd",
+      "linux_systems"
+    ],
+    "typicalTriggers": "Service health, failover operability, runbooks, crash-loop diagnostics.",
+    "forbiddenOwnershipAssumptions": "Does not invent two-Core replication designs or product SLOs that are Founder-reserved."
+  },
+  "platform-identity-access-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "tenant_isolation",
+      "oauth_oidc_clients",
+      "pki_mtls"
+    ],
+    "conditionalSkills": [
+      "secrets_handling",
+      "threat_modelling"
+    ],
+    "typicalTriggers": "Keycloak/OIDC/SAML/LDAP, MFA, RBAC, enrollment identity.",
+    "forbiddenOwnershipAssumptions": "Does not own Notification Center product UX or Device Pack identity keys."
+  },
+  "platform-knowledge-graph-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "temporal_operational_graph"
+    ],
+    "conditionalSkills": [
+      "rca_hypothesis_fusion",
+      "topology_routing",
+      "device_pack_authoring"
+    ],
+    "typicalTriggers": "Canonical relationships, topology history, provenance/confidence, RCA subgraphs.",
+    "forbiddenOwnershipAssumptions": "Does not select a new graph database or treat similarity as current cause."
+  },
+  "platform-ai-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "ai_evidence_safety",
+      "rca_hypothesis_fusion"
+    ],
+    "conditionalSkills": [
+      "alert_quality_evidence",
+      "incident_flight_recorder",
+      "python_runtime"
+    ],
+    "typicalTriggers": "AI Gateway, evidence-grounded LLM, anomaly/GNN scoring.",
+    "forbiddenOwnershipAssumptions": "Does not make GNN/LLM causal authority or execute privileged actions."
+  },
+  "platform-model-qa": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "ai_evidence_safety",
+      "alert_quality_evidence"
+    ],
+    "conditionalSkills": [
+      "rca_hypothesis_fusion",
+      "capacity_performance"
+    ],
+    "typicalTriggers": "Before enabling or promoting a model/policy.",
+    "forbiddenOwnershipAssumptions": "Does not train across tenants or silently mutate active policy from feedback."
+  },
+  "platform-devops-automator": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "ci_cd",
+      "docker_compose",
+      "install_upgrade",
+      "sbom_provenance"
+    ],
+    "conditionalSkills": [
+      "linux_systems",
+      "secrets_handling"
+    ],
+    "typicalTriggers": "CI, packaging, SBOM, compose, upgrade automation.",
+    "forbiddenOwnershipAssumptions": "Does not redesign production onto an unapproved cloud platform."
+  },
+  "platform-git-workflow-master": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "source_truth_rebaseline",
+      "post_merge_rebaseline"
+    ],
+    "conditionalSkills": [
+      "exact_head_merge_gate"
+    ],
+    "typicalTriggers": "Parallel branches, stacked PRs, integration, rebase coordination when authorized.",
+    "forbiddenOwnershipAssumptions": "Does not merge, force-push shared branches, or rewrite published history unless explicitly authorized."
+  },
+  "platform-workflow-architect": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first"
+    ],
+    "conditionalSkills": [
+      "remediation_safety",
+      "alert_quality_evidence",
+      "ha_dr"
+    ],
+    "typicalTriggers": "Before complex provisioning/alert/incident/NCM/upgrade/HA/integration flows.",
+    "forbiddenOwnershipAssumptions": "Does not implement the flow or fill P0 TBD states."
+  },
+  "platform-frontend-developer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "typescript_react",
+      "web_interface_quality",
+      "accessibility_inclusive_design"
+    ],
+    "conditionalSkills": [
+      "capacity_performance",
+      "tenant_isolation"
+    ],
+    "typicalTriggers": "After approved UX architecture and implementation-ready UI specification for operational screens.",
+    "forbiddenOwnershipAssumptions": "Does not own product design authority, invent client-side authorization, or generic dashboards. Does not certify accessibility or final UI finish."
+  },
+  "platform-ux-architect": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "ux_operational_design",
+      "accessibility_inclusive_design"
+    ],
+    "conditionalSkills": [
+      "capacity_performance",
+      "typescript_react"
+    ],
+    "typicalTriggers": "Before major UI implementation: job/task flow, IA, taxonomy, navigation and cognitive-load architecture.",
+    "forbiddenOwnershipAssumptions": "Does not implement React, specify pixels/components, override RBAC, certify accessibility, or approve final UI finish."
+  },
+  "platform-ui-finish-gate-reviewer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "ux_operational_design",
+      "web_interface_quality",
+      "accessibility_inclusive_design"
+    ],
+    "conditionalSkills": [
+      "typescript_react",
+      "capacity_performance"
+    ],
+    "typicalTriggers": "Independent final UI quality/adversarial review after implementation, before acceptance.",
+    "forbiddenOwnershipAssumptions": "Does not restyle to personal taste, implement the UI, or certify GA. Independent of designer and frontend writer. Read-only."
+  },
+  "platform-accessibility-auditor": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "accessibility_inclusive_design",
+      "web_interface_quality"
+    ],
+    "conditionalSkills": [
+      "typescript_react"
+    ],
+    "typicalTriggers": "Independent accessibility certification of new/changed operational screens.",
+    "forbiddenOwnershipAssumptions": "Does not implement the UI, does not own the design specification, and is independent of the designer and frontend writer."
+  },
+  "platform-sensor-runtime-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "sensor_edge",
+      "go_runtime",
+      "replay_idempotency"
+    ],
+    "conditionalSkills": [
+      "ha_dr",
+      "capacity_performance",
+      "runtime_failure_injection",
+      "linux_systems"
+    ],
+    "typicalTriggers": "Sensor process, worker pools, leases, spool/uploader, Sensor health, 80% disk protection, or continue-to-collect during Core failover.",
+    "forbiddenOwnershipAssumptions": "Protocol/domain semantics (SNMP/ICMP/flow/syslog/gNMI/NETCONF/routing/discovery) belong to platform-network-engineer.; Device Pack schema/identification belongs to platform-device-pack-engineer.; Post-accept Kafka/ClickHouse streaming belongs to platform-telemetry-pipeline-engineer.; Does not choose unresolved two-Core fencing."
+  },
+  "platform-infrastructure-cloud-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "linux_systems",
+      "windows_monitoring",
+      "virtualization_storage",
+      "kubernetes_monitoring",
+      "cloud_monitoring",
+      "agent_architecture"
+    ],
+    "conditionalSkills": [
+      "capacity_performance",
+      "pki_mtls",
+      "tenant_isolation"
+    ],
+    "typicalTriggers": "Linux/Windows host monitoring, hypervisor/storage targets, Kubernetes/container targets, cloud-account monitoring, or OpenTelemetry import boundaries.",
+    "forbiddenOwnershipAssumptions": "Platform Core/Sensor HA design remains exactly two Cores; this agent does not move Platform onto Kubernetes as its control plane.; Agent enrollment identity reconciliation belongs with identity/onboarding owners.; Network protocol collectors belong to platform-network-engineer.; Does not select unapproved cloud SDKs."
+  },
+  "platform-telemetry-pipeline-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "kafka",
+      "replay_idempotency",
+      "clickhouse",
+      "distributed_systems"
+    ],
+    "conditionalSkills": [
+      "postgresql",
+      "capacity_performance",
+      "runtime_failure_injection",
+      "java_spring"
+    ],
+    "typicalTriggers": "After Sensor/Agent acceptance: canonical telemetry, Kafka consumers/producers, ClickHouse insert path, lag, poison, or produced\u2192accepted\u2192processed\u2192inserted counters.",
+    "forbiddenOwnershipAssumptions": "Datastore engine/schema ownership remains with platform-database-reliability-engineer.; Sensor spool/uploader runtime belongs to platform-sensor-runtime-engineer.; API contract shape belongs to platform-api-platform-engineer.; Does not invent two-Core Kafka fencing."
+  },
+  "platform-device-pack-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "device_pack_authoring"
+    ],
+    "conditionalSkills": [
+      "snmp_mib",
+      "device_control_protocols",
+      "sbom_provenance",
+      "migration_safety"
+    ],
+    "typicalTriggers": "Device Pack schema, vendor identification, metric/command mappings, pack versioning, certification, or test-lab fixtures.",
+    "forbiddenOwnershipAssumptions": "SNMP/CLI/NETCONF/gNMI protocol engines belong to platform-network-engineer.; NCM privileged execution belongs to platform-ncm-remediation-engineer.; Does not add unapproved vendor SDKs."
+  },
+  "platform-ncm-remediation-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "remediation_safety",
+      "device_control_protocols"
+    ],
+    "conditionalSkills": [
+      "threat_modelling",
+      "secrets_handling",
+      "change_intelligence"
+    ],
+    "typicalTriggers": "NCM jobs, config backup/diff/compliance, privileged CLI/NETCONF actions, auto-remediation proposals, or rollback.",
+    "forbiddenOwnershipAssumptions": "Protocol transport adapters belong to platform-network-engineer.; Device Pack command mapping schema belongs to platform-device-pack-engineer.; Cannot grant privilege via prompt content."
+  },
+  "platform-integration-connector-engineer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "root_cause_first",
+      "bounded_implementation",
+      "connector_framework",
+      "itsm_change_telemetry",
+      "oauth_oidc_clients"
+    ],
+    "conditionalSkills": [
+      "change_intelligence",
+      "secrets_handling",
+      "api_event_contracts",
+      "tenant_isolation"
+    ],
+    "typicalTriggers": "New/changed outbound connectors, ITSM/notifications, change feeds, webhooks, carrier status, or connector certification.",
+    "forbiddenOwnershipAssumptions": "Notification Center recipient/RBAC policy belongs with identity/onboarding/notification owners.; Does not let vendor IDs override tenant/entity authority.; Does not invent SKUs or contractual SLOs."
+  },
+  "platform-product-ui-designer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "ux_operational_design",
+      "web_interface_quality",
+      "accessibility_inclusive_design"
+    ],
+    "conditionalSkills": [
+      "typescript_react",
+      "capacity_performance",
+      "tenant_isolation"
+    ],
+    "typicalTriggers": "Material operational screen needs an implementation-ready specification after UX architecture and before React work.",
+    "forbiddenOwnershipAssumptions": "Does not own product requirements, React implementation, API contracts, authorization implementation, accessibility certification, final UI finish, or dependency/framework selection."
+  }
+}
