@@ -113,37 +113,49 @@ post_envelope() {
         --data-binary "@${body_file}" || true
 }
 
-consume_kafka() {
-    # Drain the topic until idle. A wall-clock `timeout N` on --from-beginning
-    # was killing the consumer before it reached later Agent records.
-    local idle_seconds="${1:-5}"
-    local idle_ms=$((idle_seconds * 1000))
-    timeout 90 docker exec platform-kafka \
-        /opt/kafka/bin/kafka-console-consumer.sh \
+kafka_end_offsets() {
+    docker exec platform-kafka /opt/kafka/bin/kafka-get-offsets.sh \
         --bootstrap-server localhost:9092 \
         --topic telemetry.numeric.v1 \
-        --from-beginning \
-        --timeout-ms "${idle_ms}" \
-        --property print.key=true \
-        --property key.separator='|' \
-        2>/dev/null || true
+        --time -1
 }
 
-count_agent_kafka() {
+consume_since_offsets() {
+    # telemetry.numeric.v1 has multiple partitions. A single --from-beginning
+    # consumer with --timeout-ms can exit after one partition goes idle.
+    local offset_file="$1"
+    local idle_seconds="${2:-8}"
+    local idle_ms=$((idle_seconds * 1000))
+    local topic part off
+    while IFS=: read -r topic part off; do
+        [[ -n "${part}" && -n "${off}" ]] || continue
+        timeout 40 docker exec platform-kafka \
+            /opt/kafka/bin/kafka-console-consumer.sh \
+            --bootstrap-server localhost:9092 \
+            --topic "${topic}" \
+            --partition "${part}" \
+            --offset "${off}" \
+            --timeout-ms "${idle_ms}" \
+            --property print.key=true \
+            --property key.separator='|' \
+            2>/dev/null || true
+    done < "${offset_file}"
+}
+
+count_kafka_since() {
     local needle="$1"
+    local offset_file="$2"
     local dump
-    dump="$(consume_kafka 12)"
+    dump="$(consume_since_offsets "${offset_file}" 8)"
     printf '%s\n' "${dump}" > "${EVIDENCE_DIR}/kafka-dump.txt"
     printf '%s\n' "${dump}" | grep -c "${needle}" || true
 }
 
 reset_test_volumes() {
-    log "==> resetting test-only Agent queue and Sensor Agent-spool volumes"
+    log "==> resetting test-only Agent durable volume (Sensor Agent spool kept so Core ingress sequences do not rewind)"
     docker stop platform-agent-e2e >/dev/null 2>&1 || true
     docker rm -f platform-agent-e2e platform-agent-e2e-init >/dev/null 2>&1 || true
-    docker stop platform-sensor-infra >/dev/null 2>&1 || true
-    docker rm -f platform-sensor-infra platform-sensor-agent-spool-init >/dev/null 2>&1 || true
-    docker volume rm -f platform_agent_e2e_state platform_sensor_infra_agent_spool >/dev/null 2>&1 || true
+    docker volume rm -f platform_agent_e2e_state >/dev/null 2>&1 || true
 }
 
 dump_evidence() {
@@ -195,8 +207,8 @@ record "sensor-receiver-enabled" "PASS" "SENSOR_AGENT_RECEIVER_ENABLED=true list
 python3 "${E2E_DIR}/seed_authority.py" | tee "${EVIDENCE_DIR}/seed.txt"
 record "authority-sql-seed" "PASS"
 
-log "==> capturing Kafka baseline before Agent start"
-KAFKA_BEFORE="$(count_agent_kafka '"agentId":"agent-e2e-01"')"
+log "==> capturing Kafka end offsets before Agent start"
+kafka_end_offsets | tee "${EVIDENCE_DIR}/offsets-before-agent.txt"
 
 "${COMPOSE[@]}" build agent-runtime
 "${COMPOSE[@]}" up -d --force-recreate --no-deps agent-runtime-init
@@ -222,19 +234,19 @@ record "agent-process-start" "PASS" "production platform-agent-linux"
 
 # Happy path: real collectors → spool → mTLS → Sensor ACK → Core → Kafka
 log "==> waiting for real Agent host telemetry on telemetry.numeric.v1"
-HAPPY_HITS="${KAFKA_BEFORE}"
+HAPPY_HITS=0
 for i in $(seq 1 24); do
-    HAPPY_HITS="$(count_agent_kafka '"agentId":"agent-e2e-01"')"
-    if [[ "${HAPPY_HITS}" -gt "${KAFKA_BEFORE}" ]]; then
+    HAPPY_HITS="$(count_kafka_since '"agentId":"agent-e2e-01"' "${EVIDENCE_DIR}/offsets-before-agent.txt")"
+    if [[ "${HAPPY_HITS}" -ge 1 ]]; then
         break
     fi
     sleep 5
 done
-if [[ "${HAPPY_HITS}" -le "${KAFKA_BEFORE}" ]]; then
+if [[ "${HAPPY_HITS}" -lt 1 ]]; then
     dump_evidence
-    fail_closed "happy-path-kafka" "no new AGENT Kafka records for agent-e2e-01 (before=${KAFKA_BEFORE} after=${HAPPY_HITS})"
+    fail_closed "happy-path-kafka" "no new AGENT Kafka records for agent-e2e-01 since offsets $(tr '\n' ' ' < "${EVIDENCE_DIR}/offsets-before-agent.txt")"
 fi
-record "happy-path-kafka" "PASS" "agentId=agent-e2e-01 before=${KAFKA_BEFORE} after=${HAPPY_HITS} topic=telemetry.numeric.v1"
+record "happy-path-kafka" "PASS" "agentId=agent-e2e-01 new_hits=${HAPPY_HITS} topic=telemetry.numeric.v1 partitions=$(tr '\n' ',' < "${EVIDENCE_DIR}/offsets-before-agent.txt")"
 
 # Queue should drain after valid ACK
 sleep 3
@@ -247,6 +259,7 @@ fi
 
 # Injected unique metric for identity tracing
 METRIC="e2e.cpu.unique.$(date +%s)"
+kafka_end_offsets > "${EVIDENCE_DIR}/offsets-unique.txt"
 python3 "${E2E_DIR}/build_envelope.py" \
     --envelope-tenant "${TENANT}" --payload-tenant "${TENANT}" \
     --agent-id "${AGENT_ID}" --host-id "${HOST_ID}" \
@@ -263,7 +276,7 @@ fi
 
 UNIQUE_HITS=0
 for i in $(seq 1 20); do
-    UNIQUE_HITS="$(count_agent_kafka "${METRIC}")"
+    UNIQUE_HITS="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
     if [[ "${UNIQUE_HITS}" -ge 1 ]]; then
         break
     fi
@@ -287,6 +300,7 @@ else
     fail_closed "tenant-envelope-forgery-denied" "${FORGED_ENV_ACK}"
 fi
 
+kafka_end_offsets > "${EVIDENCE_DIR}/offsets-forged.txt"
 python3 "${E2E_DIR}/build_envelope.py" \
     --envelope-tenant "${TENANT}" --payload-tenant "${FORGED_TENANT}" \
     --agent-id "${AGENT_ID}" --host-id "${HOST_ID}" \
@@ -302,7 +316,7 @@ fi
 FORGED_HITS=0
 FORGED_METRIC="e2e.forged.payload.${RUN_ID}"
 for i in $(seq 1 20); do
-    dump="$(consume_kafka 5)"
+    dump="$(consume_since_offsets "${EVIDENCE_DIR}/offsets-forged.txt" 8)"
     if echo "${dump}" | grep -q "${FORGED_METRIC}"; then
         echo "${dump}" | grep "${FORGED_METRIC}" > "${EVIDENCE_DIR}/forged-payload-kafka.txt"
         if echo "${dump}" | grep "${FORGED_METRIC}" | grep -q "${TENANT}" \
@@ -330,7 +344,7 @@ if echo "${REPLAY_ACK}" | grep -q '"status":"ACCEPTED"'; then
 else
     record "replay-same-batch-ack" "FAIL" "${REPLAY_ACK}"
 fi
-REPLAY_COUNT="$(count_agent_kafka "${METRIC}")"
+REPLAY_COUNT="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
 record "replay-kafka-identity" "PASS" "metric ${METRIC} kafka hits=${REPLAY_COUNT} (at-least-once; no new logical id required)"
 
 # mTLS / transport negatives against the live Receiver
@@ -389,7 +403,7 @@ fi
 
 # Sensor unavailable: stop receiver, prove queue retains, restore, Kafka continues
 log "==> Sensor unavailable / Agent retain / restore"
-BEFORE_STOP="$(count_agent_kafka '"agentId":"agent-e2e-01"')"
+kafka_end_offsets > "${EVIDENCE_DIR}/offsets-sensor-down.txt"
 docker stop platform-sensor-infra >/dev/null
 sleep 5
 READY_DOWN="$(agent_ready_code)"
@@ -405,11 +419,11 @@ if ! wait_healthy platform-sensor-infra 40; then
 fi
 wait_receiver || true
 sleep 8
-AFTER_RESTORE="$(count_agent_kafka '"agentId":"agent-e2e-01"')"
-if [[ "${AFTER_RESTORE}" -ge "${BEFORE_STOP}" ]]; then
-    record "sensor-restore-drain" "PASS" "kafka hits ${BEFORE_STOP} -> ${AFTER_RESTORE}"
+AFTER_RESTORE="$(count_kafka_since '"agentId":"agent-e2e-01"' "${EVIDENCE_DIR}/offsets-sensor-down.txt")"
+if [[ "${AFTER_RESTORE}" -ge 1 ]]; then
+    record "sensor-restore-drain" "PASS" "new kafka hits after restore=${AFTER_RESTORE}"
 else
-    record "sensor-restore-drain" "FAIL" "kafka hits ${BEFORE_STOP} -> ${AFTER_RESTORE}"
+    record "sensor-restore-drain" "FAIL" "no new agent Kafka records after Sensor restore"
 fi
 
 # Agent restart with durable volume
@@ -430,12 +444,12 @@ docker start platform-sensor-infra >/dev/null
 wait_healthy platform-sensor-infra 40 || true
 wait_receiver || true
 sleep 10
-RESTART_HITS="$(count_agent_kafka '"agentId":"agent-e2e-01"')"
-record "agent-restart-then-kafka" "PASS" "kafka hits=${RESTART_HITS}"
+RESTART_HITS="$(count_kafka_since '"agentId":"agent-e2e-01"' "${EVIDENCE_DIR}/offsets-sensor-down.txt")"
+record "agent-restart-then-kafka" "PASS" "kafka hits since sensor-down offset=${RESTART_HITS}"
 
 # Core unavailable: Sensor still accepts; spool retained; restore drains
 log "==> Core unavailable while Sensor still accepts Agent telemetry"
-BEFORE_CORE="$(count_agent_kafka '"agentId":"agent-e2e-01"')"
+kafka_end_offsets > "${EVIDENCE_DIR}/offsets-core-pause.txt"
 docker pause platform-core >/dev/null
 python3 "${E2E_DIR}/build_envelope.py" \
     --envelope-tenant "${TENANT}" --payload-tenant "${TENANT}" \
@@ -455,7 +469,7 @@ docker unpause platform-core >/dev/null
 sleep 12
 CORE_HITS=0
 for i in $(seq 1 20); do
-    CORE_HITS="$(count_agent_kafka "e2e.core.pause.${RUN_ID}")"
+    CORE_HITS="$(count_kafka_since "e2e.core.pause.${RUN_ID}" "${EVIDENCE_DIR}/offsets-core-pause.txt")"
     if [[ "${CORE_HITS}" -ge 1 ]]; then
         break
     fi
@@ -469,6 +483,7 @@ fi
 
 # Sensor restart after Sensor ACK, before/during Core drain
 log "==> Sensor restart after durable Agent acceptance"
+kafka_end_offsets > "${EVIDENCE_DIR}/offsets-sensor-restart.txt"
 docker pause platform-core >/dev/null
 python3 "${E2E_DIR}/build_envelope.py" \
     --envelope-tenant "${TENANT}" --payload-tenant "${TENANT}" \
@@ -488,7 +503,7 @@ wait_receiver || true
 docker unpause platform-core >/dev/null
 SR_HITS=0
 for i in $(seq 1 24); do
-    SR_HITS="$(count_agent_kafka "e2e.sensor.restart.${RUN_ID}")"
+    SR_HITS="$(count_kafka_since "e2e.sensor.restart.${RUN_ID}" "${EVIDENCE_DIR}/offsets-sensor-restart.txt")"
     if [[ "${SR_HITS}" -ge 1 ]]; then
         break
     fi

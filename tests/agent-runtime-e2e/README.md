@@ -16,10 +16,14 @@ make test-agent-runtime-e2e
 memory). If CA files are missing, `run.sh` calls `make certs` once. Do not run
 `make certs` against a live stack.
 
-Each run deletes only the test-only named volumes `platform_agent_e2e_state`
-and `platform_sensor_infra_agent_spool` so leftover oversized Agent batches
-cannot head-of-line block Sensor drain. Postgres/Kafka/Core volumes are left
-alone.
+Each run deletes only the test-only named volume `platform_agent_e2e_state`.
+The Sensor Agent spool volume is retained so Core agent-ingress sequences do
+not rewind (`ERR_SEQUENCE_REGRESSION`). Oversized leftover spool records are
+parked as terminal poison on HTTP 413.
+
+Kafka assertions consume **all partitions** from a saved end-offset snapshot.
+`telemetry.numeric.v1` is partitioned; a single `--from-beginning` consumer
+with `--timeout-ms` can miss later Agent records.
 
 Agent `PLATFORM_AGENT_MAX_BATCH_BYTES` defaults to 384 KiB so one delivery
 envelope stays under Core `AgentIngestionValidator.MAX_RECORD_BYTES` (512 KiB).
