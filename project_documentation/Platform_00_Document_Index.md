@@ -229,3 +229,10 @@ Such changes require deliberate change control, cross-document reconciliation, D
 - Commits must be traceable to the implementation/change being made.
 - Do not force-push shared/default branches.
 - GitHub history must preserve architecture/document decision provenance.
+- Selecting GitHub as source of record does **not** by itself freeze a CI provider. GitHub Actions may be evaluated later; it is not a fixed architecture decision unless separately approved.
+
+## 13. Repository placement
+
+For ChatGPT Project use, these **24 Markdown mother-reference files** are sufficient as the authoritative source set.
+For code-agent enforcement, `AGENTS.md` should also be available at repository root (`~/nms/AGENTS.md` in a working clone), preferably as the existing symlink to `project_documentation/AGENTS.md`, so tools that auto-discover root instructions see the same content.
+Authority of the clone follows §12 after merge to the canonical GitHub repository.
