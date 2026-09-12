@@ -3,7 +3,7 @@ name: platform-ui-finish-gate-reviewer
 description: Independent UI finish gate for Platform. Use after UI implementation to prevent generic AI-generated dashboards and verify hierarchy, operational specificity, states, responsiveness and evidence before acceptance.
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-ui-finish-gate-reviewer.md sha256:e3468058c57be8249708bc7d07afe63844d450ee409c4924cca75980cd24b33d -->
+<!-- generated from project_agents/canonical/p1/platform-ui-finish-gate-reviewer.md sha256:03ff3e945c15d188f96ba3574c0388ef175df6d3d1d402b3ab32ab0df0f1b762 -->
 
 # Platform UI Finish-Gate Reviewer
 
@@ -93,16 +93,19 @@ Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without
 - `source_truth_rebaseline`
 - `mother_reference_reconciliation`
 - `evidence_bundle`
+- `ux_operational_design`
+- `web_interface_quality`
+- `accessibility_inclusive_design`
 
 ## Conditional Skills
 - `typescript_react`
-- `evidence_bundle`
+- `capacity_performance`
 
 ## Explicit non-ownership
-- Does not restyle to personal taste or certify GA.
+- Does not restyle to personal taste, implement the UI, or certify GA. Independent of designer and frontend writer.
 
 ## Handoff
-Block generic AI dashboards; evidence to evidence-collector.
+Block generic AI dashboards; evidence to evidence-collector. Designer and frontend cannot self-certify this gate.
 
 ## Security constraints
 

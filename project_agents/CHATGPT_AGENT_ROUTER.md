@@ -56,9 +56,9 @@ First map the actual implementation with platform-codebase-onboarding-engineer. 
 
 `task intent → owning agent → required Skills → risk-triggered reviewers → writerTool → verifierTool → evidence gate`
 
-Do not load every Skill body. Use this table, `AGENT_MATRIX.md` and `skills/AGENT_SKILL_MATRIX.md`.
+Do not load every Skill body. Use this table, `AGENT_MATRIX.md` and `skills/AGENT_SKILL_MATRIX.md`. Implementation-stage rows record explicit `selectedAgents` and `selectedSkills`. From ROUTING onward, `selectedSkills` must not be empty.
 
-| Scenario | Owning agent | Required Skills (minimum) | Risk-triggered reviewers | writerTool | verifierTool | Evidence gate |
+| Scenario | selectedAgents | selectedSkills (minimum) | Risk-triggered reviewers | writerTool | verifierTool | Evidence gate |
 |---|---|---|---|---|---|---|
 | Surgical bug fix after RCA | `platform-minimal-change-engineer` | `root_cause_first`, `bounded_implementation`, `evidence_bundle` | `platform-code-reviewer` | `cursor-cloud` | `chatgpt-github` | `exact_head_merge_gate` |
 | Sensor spool/uploader/leases | `platform-sensor-runtime-engineer` | `sensor_edge`, `go_runtime`, `replay_idempotency` | `platform-code-reviewer`, `platform-sre` | `cursor-cloud` | `chatgpt-github` | `evidence_bundle` |
@@ -68,6 +68,10 @@ Do not load every Skill body. Use this table, `AGENT_MATRIX.md` and `skills/AGEN
 | Privileged NCM change | `platform-ncm-remediation-engineer` | `remediation_safety`, `device_control_protocols` | `platform-security-architect`, `platform-appsec-engineer` | `cursor-cloud` | `chatgpt-github` | `security_negative_testing` |
 | ITSM/connector | `platform-integration-connector-engineer` | `connector_framework`, `itsm_change_telemetry`, `oauth_oidc_clients` | `platform-api-platform-engineer`, `platform-appsec-engineer` | `cursor-cloud` | `chatgpt-github` | `evidence_bundle` |
 | Linux/K8s/cloud **target** monitoring | `platform-infrastructure-cloud-engineer` | `linux_systems`, `kubernetes_monitoring`, `cloud_monitoring` | `platform-security-architect` | `cursor-cloud` | `chatgpt-github` | `evidence_bundle` |
+| Material UI specification + implementation | `platform-ux-architect`, `platform-product-ui-designer`, `platform-frontend-developer` | `ux_operational_design`, `web_interface_quality`, `accessibility_inclusive_design`, `typescript_react` | `platform-accessibility-auditor`, `platform-ui-finish-gate-reviewer`, `platform-evidence-collector` | `cursor-cloud` | `chatgpt-github` | `evidence_bundle` |
+| Tiny UI copy/spacing fix | `platform-frontend-developer` | `bounded_implementation`, `typescript_react`, `web_interface_quality`, `evidence_bundle` | `platform-code-reviewer` | `cursor-cloud` | `chatgpt-github` | `evidence_bundle` |
 | Merge-ready claim | `platform-reality-checker` | `exact_head_merge_gate`, `evidence_bundle` | independent verifier only; writer forbidden | n/a (read) | `chatgpt-github` | exact-head current-base CI |
+
+Material UI pipeline: requirements/source review → `platform-ux-architect` → `platform-product-ui-designer` → implementation-ready UI specification → `platform-frontend-developer` → runtime/UI tests → `platform-accessibility-auditor` → large-estate/performance review where applicable → `platform-ui-finish-gate-reviewer` → `platform-evidence-collector`. Tiny UI fixes need not invoke the entire chain.
 
 Writer self-certification is prohibited. Antigravity verifier-first means default read-only/adversarial review before any write grant.

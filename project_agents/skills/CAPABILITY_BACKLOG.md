@@ -1,13 +1,16 @@
-# Capability Backlog — Auditor 211-Skill Disposition (v1.2)
+# Capability Backlog — Auditor Skill Disposition (v1.2)
 
-The auditor proposed 211 Skill names. v1.2 does **not** implement all 211.
+The auditor proposed overlapping Skill names. v1.2 does **not** implement every proposed name.
 Machine form: `project_agents/skills/auditor_skill_disposition.json`.
+Counts below are derived from that file; do not freeze them as permanent validator policy.
 
-- IMPLEMENT_NOW: 57
-- MERGE_INTO: 98
+- IMPLEMENT_NOW: 60
+- MERGE_INTO: 108
 - DEFER: 56
+- Disposition rows: 224
 
 Canonical Skill inventory remains the IMPLEMENT_NOW set in `manifest.json`.
+UI amendment maps ten auditor-proposed UI Skill areas into three canonical Skills via MERGE_INTO. Do not create Skill aliases.
 
 ## IMPLEMENT_NOW
 
@@ -70,6 +73,9 @@ Canonical Skill inventory remains the IMPLEMENT_NOW set in `manifest.json`.
 | `incident_flight_recorder` | canonical v1.2 skill |
 | `change_intelligence` | canonical v1.2 skill |
 | `customer_value_mttr` | canonical v1.2 skill |
+| `ux_operational_design` | canonical v1.2 UI skill |
+| `web_interface_quality` | canonical v1.2 UI skill |
+| `accessibility_inclusive_design` | canonical v1.2 UI skill |
 
 ## MERGE_INTO
 
@@ -163,8 +169,8 @@ Canonical Skill inventory remains the IMPLEMENT_NOW set in `manifest.json`.
 | `sensor_continue_on_core_failover` | `ha_dr` | overlapping auditor alias |
 | `backpressure` | `distributed_systems` | overlapping auditor alias |
 | `split_brain_avoidance` | `ha_dr` | overlapping auditor alias |
-| `ui_no_generic_dashboard` | `typescript_react` | overlapping auditor alias |
-| `wcag_operational_screens` | `typescript_react` | overlapping auditor alias |
+| `ui_no_generic_dashboard` | `ux_operational_design` | retargeted from typescript_react; operational specificity lives in UX/design Skills |
+| `wcag_operational_screens` | `accessibility_inclusive_design` | retargeted from typescript_react; independent accessibility Skill |
 | `nested_exception_leakage` | `security_negative_testing` | overlapping auditor alias |
 | `fail_closed_offsets` | `kafka` | overlapping auditor alias |
 | `no_llm_privileged_exec` | `remediation_safety` | overlapping auditor alias |
@@ -173,10 +179,20 @@ Canonical Skill inventory remains the IMPLEMENT_NOW set in `manifest.json`.
 | `no_direct_main` | `bounded_implementation` | overlapping auditor alias |
 | `no_secret_in_git` | `secrets_handling` | overlapping auditor alias |
 | `no_docker_prune` | `docker_compose` | overlapping auditor alias |
+| `usability_information_architecture` | `ux_operational_design` | UI amendment MERGE_INTO; usability/IA |
+| `product_ui_visual_interaction` | `ux_operational_design` | UI amendment MERGE_INTO; product UI visual/interaction design |
+| `ux_writing_content_intent` | `ux_operational_design` | UI amendment MERGE_INTO; UX writing/content intent |
+| `dashboard_decision_design` | `ux_operational_design` | UI amendment MERGE_INTO; dashboard decision design |
+| `noc_operational_ux` | `ux_operational_design` | UI amendment MERGE_INTO; NOC operational UX |
+| `large_estate_dense_ui` | `ux_operational_design` | UI amendment MERGE_INTO; large-estate/data-dense UI |
+| `design_system_architecture` | `web_interface_quality` | UI amendment MERGE_INTO; design-system architecture |
+| `web_visual_runtime_validation` | `web_interface_quality` | UI amendment MERGE_INTO; runtime/visual validation and responsive quality |
+| `frontend_state_completeness` | `web_interface_quality` | UI amendment MERGE_INTO; state completeness and frontend performance |
+| `inclusive_keyboard_semantics` | `accessibility_inclusive_design` | UI amendment MERGE_INTO; keyboard/focus/semantic/inclusive design |
 
 ## DEFER
 
-| Proposed name | Trigger / reason | Notes |
+| Proposed name | Disposition | Notes |
 |---|---|---|
 | `browser_synthetics_runtime` | DEFER: no runtime/vendor selected; Platform_21 reserved | out of v1.2 bounded library |
 | `outside_in_probe_runtime` | DEFER: customer-operated probes not a v1.2 runtime pick | out of v1.2 bounded library |

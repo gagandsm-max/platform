@@ -168,6 +168,44 @@ class ControlPlaneContractTests(unittest.TestCase):
             )
         )
 
+    def test_routing_rejects_empty_selected_skills(self) -> None:
+        control_plane.validate_task_manifest(
+            _task(status="INTAKE", selectedAgents=[], selectedSkills=[], scope=[])
+        )
+        control_plane.validate_task_manifest(
+            _task(status="DIAGNOSIS", selectedAgents=[], selectedSkills=[], scope=[])
+        )
+        with self.assertRaises(control_plane.ControlPlaneError) as ctx:
+            control_plane.validate_task_manifest(
+                _task(
+                    status="ROUTING",
+                    exactHead=SHA_B,
+                    selectedAgents=["platform-minimal-change-engineer"],
+                    selectedSkills=[],
+                    scope=[],
+                )
+            )
+        self.assertIn("selectedSkills must be resolved before ROUTING", str(ctx.exception))
+        with self.assertRaises(control_plane.ControlPlaneError):
+            control_plane.validate_task_manifest(
+                _task(
+                    status="ROUTING",
+                    exactHead=SHA_B,
+                    selectedAgents=["platform-minimal-change-engineer"],
+                    selectedSkills=["not_a_real_skill"],
+                    scope=[],
+                )
+            )
+        control_plane.validate_task_manifest(
+            _task(
+                status="ROUTING",
+                exactHead=SHA_B,
+                selectedAgents=["platform-minimal-change-engineer"],
+                selectedSkills=["source_truth_rebaseline", "bounded_implementation"],
+                scope=[],
+            )
+        )
+
     def test_writer_verifier_aliases_rejected(self) -> None:
         with self.assertRaises(control_plane.ControlPlaneError):
             control_plane.validate_task_manifest(_task(writer="cursor-cloud"))
@@ -402,9 +440,11 @@ class RepositoryGovernanceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("len(manifest) == 27", source)
         self.assertNotIn("len(manifest) == 33", source)
+        self.assertNotIn("len(manifest) == 34", source)
         self.assertNotIn("P0=12", source)
         self.assertNotIn("P1=15", source)
         self.assertNotIn("P1=21", source)
+        self.assertNotIn("P1=22", source)
 
 
 if __name__ == "__main__":

@@ -33,7 +33,10 @@ Do not load every Skill body into context. Resolve names from this router and
 | Hot-path capacity / cardinality | `capacity_performance` |
 | `sensor/` or `agent/` Go | `go_runtime` |
 | `core/` Java 21 / Spring | `java_spring` |
-| `ui/` React/TypeScript | `typescript_react` |
+| `ui/` React/TypeScript implementation | `typescript_react` |
+| Operator job / IA / NOC / dense-data UX | `ux_operational_design` |
+| Design-system use, component consistency, responsive/state/performance | `web_interface_quality` |
+| Keyboard/focus, semantics, contrast, reduced motion | `accessibility_inclusive_design` |
 | Approved Python workers | `python_runtime` |
 | SNMP/MIB | `snmp_mib` |
 | ICMP / path | `icmp_path` |
@@ -84,6 +87,7 @@ Add only when the change actually carries that risk:
 - Privileged device action: `remediation_safety`
 - AI/LLM: `ai_evidence_safety`
 - Alert semantics: `alert_quality_evidence`
+- Material UI: `ux_operational_design`, `web_interface_quality`, `accessibility_inclusive_design`
 - Migration: `migration_safety`
 - Release/install: `install_upgrade`, `sbom_provenance`, `ci_cd`
 

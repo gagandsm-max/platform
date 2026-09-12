@@ -237,7 +237,7 @@
     "source": "engineering/engineering-frontend-developer.md",
     "description": "React/TypeScript implementation specialist for Platform UI. Use after UX/workflow contract is clear to build role-aware, server-driven, accessible, fast operational screens without generic dashboard filler.",
     "canonical_path": "canonical/p1/platform-frontend-developer.md",
-    "sha256": "33ecce3b02b2c4789901e464572cf0b05ac4b95e2f49d8d79177effb41d83065"
+    "sha256": "f651c9c32de1d494d67fe5cf18a26b63439abed3bc90301372b4e24f590bc328"
   },
   {
     "name": "platform-ux-architect",
@@ -247,7 +247,7 @@
     "source": "design/design-ux-architect.md",
     "description": "Platform UX/information-architecture specialist. Use before major UI implementation to translate operational requirements into developer-ready hierarchy, workflows, state behavior and responsive/accessibility constraints.",
     "canonical_path": "canonical/p1/platform-ux-architect.md",
-    "sha256": "5340789a6067f1f68862bf1edd17021bd4d65f8b9fe5a598b46395f3876bc210"
+    "sha256": "9f4c9cfae769ea8e92e43b41003d12e570835ee0ba3cfa2e47cd269d8e8a6c61"
   },
   {
     "name": "platform-ui-finish-gate-reviewer",
@@ -257,7 +257,7 @@
     "source": "design/design-ui-finish-gate-reviewer.md",
     "description": "Independent UI finish gate for Platform. Use after UI implementation to prevent generic AI-generated dashboards and verify hierarchy, operational specificity, states, responsiveness and evidence before acceptance.",
     "canonical_path": "canonical/p1/platform-ui-finish-gate-reviewer.md",
-    "sha256": "e3468058c57be8249708bc7d07afe63844d450ee409c4924cca75980cd24b33d"
+    "sha256": "03ff3e945c15d188f96ba3574c0388ef175df6d3d1d402b3ab32ab0df0f1b762"
   },
   {
     "name": "platform-accessibility-auditor",
@@ -267,7 +267,7 @@
     "source": "testing/testing-accessibility-auditor.md",
     "description": "Accessibility QA for Platform UI. Use on new/changed operational screens to verify WCAG-aligned semantics, keyboard/focus, contrast/status, zoom and assistive-technology behavior with automated plus manual evidence.",
     "canonical_path": "canonical/p1/platform-accessibility-auditor.md",
-    "sha256": "26d2997e1377bc7c5a425183514da876a898739a5f253bc22ec2cf41c5e323c4"
+    "sha256": "40edab5c4d901cc88746a9b70c8ab1c43ad9ccb86cd14ee91044bf6887649af9"
   },
   {
     "name": "platform-sensor-runtime-engineer",
@@ -328,5 +328,15 @@
     "description": "Connector framework and SaaS/ITSM/webhooks/carrier/change telemetry including auth, rate limiting, retry, idempotency, outbound durability and certification.",
     "canonical_path": "canonical/p1/platform-integration-connector-engineer.md",
     "sha256": "100b0a2e567889a6613e8acc7f3f8db7aef9e68e097199ba1bbebbcf77a2fe21"
+  },
+  {
+    "name": "platform-product-ui-designer",
+    "title": "Platform Product UI Designer",
+    "tier": "P1",
+    "mode": "write",
+    "source": "capability-pack-v1.2",
+    "description": "Converts requirements, operator jobs and Platform UI architecture into implementation-ready screen/interaction specifications. Does not own React implementation, accessibility certification or final UI finish.",
+    "canonical_path": "canonical/p1/platform-product-ui-designer.md",
+    "sha256": "8ab79b53eb279dd5400c60f9d7eddf973767f931c1dafa8bd70aca359780a3d2"
   }
 ]

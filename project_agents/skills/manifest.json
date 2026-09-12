@@ -226,5 +226,17 @@
   {
     "name": "customer_value_mttr",
     "description": "MTTR/value analytics with cohort methodology, data quality and no fabricated savings percentages."
+  },
+  {
+    "name": "ux_operational_design",
+    "description": "Operational UX for Platform NOC/admin screens: job-to-be-done, hierarchy, dense-data presentation, microcopy intent and implementation-ready design handoff."
+  },
+  {
+    "name": "web_interface_quality",
+    "description": "Platform web implementation quality: existing design-system use, component consistency, responsive behaviour, state completeness, runtime/visual validation and frontend performance."
+  },
+  {
+    "name": "accessibility_inclusive_design",
+    "description": "Accessible Platform operational UI: keyboard/focus, semantic HTML, screen-reader intent, non-colour status, contrast, reduced motion and inclusive resilient design."
   }
 ]

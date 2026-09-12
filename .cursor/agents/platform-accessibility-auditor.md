@@ -3,7 +3,7 @@ name: platform-accessibility-auditor
 description: Accessibility QA for Platform UI. Use on new/changed operational screens to verify WCAG-aligned semantics, keyboard/focus, contrast/status, zoom and assistive-technology behavior with automated plus manual evidence.
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-accessibility-auditor.md sha256:26d2997e1377bc7c5a425183514da876a898739a5f253bc22ec2cf41c5e323c4 -->
+<!-- generated from project_agents/canonical/p1/platform-accessibility-auditor.md sha256:40edab5c4d901cc88746a9b70c8ab1c43ad9ccb86cd14ee91044bf6887649af9 -->
 
 # Platform Accessibility Auditor
 
@@ -90,15 +90,17 @@ Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without
 - `source_truth_rebaseline`
 - `mother_reference_reconciliation`
 - `evidence_bundle`
+- `accessibility_inclusive_design`
+- `web_interface_quality`
 
 ## Conditional Skills
 - `typescript_react`
 
 ## Explicit non-ownership
-- Does not implement the UI.
+- Does not implement the UI, does not own the design specification, and is independent of the designer and frontend writer.
 
 ## Handoff
-Keyboard/focus/contrast evidence to frontend-developer and finish-gate.
+Keyboard/focus/contrast evidence to frontend-developer and finish-gate. Designer intent is not certification.
 
 ## Security constraints
 

@@ -4,7 +4,7 @@ Canonical Skill source: `project_agents/skills/`.
 Inventory is declared by `project_agents/skills/manifest.json`; do not freeze a Skill count as permanent validator policy.
 v1.2 currently ships the following bounded library (governance Skills retained; overlapping auditor names merged or deferred).
 
-Current canonical Skill count (manifest-derived): **57**.
+Current canonical Skill count (manifest-derived): **60**. That snapshot is not a permanent hardcoded validator policy.
 
 ## Governance / workflow
 
@@ -112,3 +112,11 @@ Current canonical Skill count (manifest-derived): **57**.
 | `incident_flight_recorder` | Incident Flight Recorder and Similar Incident Memory: bounded, tenant-scoped, advisory historical evidence. |
 | `change_intelligence` | Change Intelligence: external/provider/change evidence as supporting context with explicit non-causality. |
 | `customer_value_mttr` | MTTR/value analytics with cohort methodology, data quality and no fabricated savings percentages. |
+
+## Operational UI
+
+| Skill | Description |
+|---|---|
+| `ux_operational_design` | Operational UX for Platform NOC/admin screens: job-to-be-done, hierarchy, dense-data presentation, microcopy intent and implementation-ready design handoff. |
+| `web_interface_quality` | Platform web implementation quality: existing design-system use, component consistency, responsive behaviour, state completeness, runtime/visual validation and frontend performance. |
+| `accessibility_inclusive_design` | Accessible Platform operational UI: keyboard/focus, semantic HTML, screen-reader intent, non-colour status, contrast, reduced motion and inclusive resilient design. |

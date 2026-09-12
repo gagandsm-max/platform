@@ -27,10 +27,11 @@ The authoritative agent inventory and tier distribution are declared by `project
 | P1 | `platform-devops-automator` | Bounded write | Platform CI/CD, Docker development, build, packaging and release automation specialist. Use for reproducible pipelines, SBOM/scans, deb/rpm/MSI workflows and release evidence—not for unapproved cloud/platform redesign. |
 | P1 | `platform-git-workflow-master` | Bounded write | Git/PR coordination specialist for Platform parallel engineering lanes. Use for branch/worktree strategy, stacked PRs, rebases, clean diffs and conflict-safe integration; never merge or rewrite history unless explicitly authorized. |
 | P1 | `platform-workflow-architect` | Read-only | Read-only workflow/state-machine architect for Platform. Use before complex provisioning, alert, incident, RCA, NCM, upgrade, HA, integration or remediation flows to map actors, states, handoffs, failures and cleanup. |
-| P1 | `platform-frontend-developer` | Bounded write | React/TypeScript implementation specialist for Platform UI. Use after UX/workflow contract is clear to build role-aware, server-driven, accessible, fast operational screens without generic dashboard filler. |
-| P1 | `platform-ux-architect` | Read-only | Platform UX/information-architecture specialist. Use before major UI implementation to translate operational requirements into developer-ready hierarchy, workflows, state behavior and responsive/accessibility constraints. |
-| P1 | `platform-ui-finish-gate-reviewer` | Read-only | Independent UI finish gate for Platform. Use after UI implementation to prevent generic AI-generated dashboards and verify hierarchy, operational specificity, states, responsiveness and evidence before acceptance. |
-| P1 | `platform-accessibility-auditor` | Read-only | Accessibility QA for Platform UI. Use on new/changed operational screens to verify WCAG-aligned semantics, keyboard/focus, contrast/status, zoom and assistive-technology behavior with automated plus manual evidence. |
+| P1 | `platform-frontend-developer` | Bounded write | React/TypeScript implementation specialist for Platform UI. Use after an approved implementation-ready specification to build role-aware, server-driven, accessible, fast operational screens without redesigning material UX. |
+| P1 | `platform-ux-architect` | Read-only | Owns job/task flow, IA, mental model, taxonomy, navigation, discoverability and cognitive-load architecture. Does not produce pixel/component specifications. |
+| P1 | `platform-product-ui-designer` | Bounded write / spec only | Converts requirements, operator jobs and Platform UI architecture into an implementation-ready screen/interaction specification. Does not own `ui/` source, accessibility certification or final finish. |
+| P1 | `platform-ui-finish-gate-reviewer` | Read-only | Independent UI finish gate for Platform. Use after UI implementation to prevent generic AI-generated dashboards and verify hierarchy, operational specificity, states, responsiveness and evidence before acceptance. Neither designer nor frontend may self-certify this gate. |
+| P1 | `platform-accessibility-auditor` | Read-only | Independent accessibility certification for Platform UI. Use on new/changed operational screens to verify WCAG-aligned semantics, keyboard/focus, contrast/status, zoom and assistive-technology behavior. Designer/frontend intent is not certification. |
 | P1 | `platform-sensor-runtime-engineer` | Bounded write | Sensor runtime mechanics: scheduling, worker pools, leases/fencing, durable spool, uploader/replay, resource lifecycle and Sensor self-observability. |
 | P1 | `platform-infrastructure-cloud-engineer` | Bounded write | Monitored-target implementation across OS, virtualization, storage, Kubernetes, cloud and infrastructure dependencies. Does not move Platform Core onto Kubernetes. |
 | P1 | `platform-telemetry-pipeline-engineer` | Bounded write | Streaming after acceptance: normalization, Kafka interaction, replay/idempotency, event time, backpressure, lag and reconciliation. Datastores remain with Database Reliability. |
@@ -40,4 +41,12 @@ The authoritative agent inventory and tier distribution are declared by `project
 
 Required vs conditional Skills for every agent are in `project_agents/skills/AGENT_SKILL_MATRIX.md`. Tool surfaces are in `project_agents/TOOL_COMPATIBILITY.md`. ChatGPT routing without loading Skill bodies is in `project_agents/CHATGPT_AGENT_ROUTER.md`.
 
-v1.2 currently resolves to 12 P0 + 21 P1 agents from `manifest.json`. That snapshot is not a permanent hardcoded validator policy; future packs may add or retire agents through the manifest.
+## UI ownership chain
+
+Material UI work uses this risk-based sequence. Tiny copy/spacing fixes need not invoke the entire chain.
+
+`requirements/source review → platform-ux-architect → platform-product-ui-designer → implementation-ready UI specification → platform-frontend-developer → runtime/UI tests → platform-accessibility-auditor → large-estate/performance review where applicable → platform-ui-finish-gate-reviewer → platform-evidence-collector`
+
+Neither `platform-product-ui-designer` nor `platform-frontend-developer` may self-certify accessibility or final UI finish.
+
+v1.2 currently resolves to 12 P0 + 22 P1 agents from `manifest.json`. That snapshot is not a permanent hardcoded validator policy; future packs may add or retire agents through the manifest.

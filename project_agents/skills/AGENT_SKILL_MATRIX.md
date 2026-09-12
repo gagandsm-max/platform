@@ -192,34 +192,34 @@ Routing: task intent → owning agent → required Skills → risk-triggered rev
 ## `platform-frontend-developer`
 
 - **Tier / mode:** P1 / write
-- **Typical triggers:** After UX contract is clear for operational UI.
-- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `root_cause_first`, `bounded_implementation`, `typescript_react`
-- **Conditional Skills:** `tenant_isolation`, `alert_quality_evidence`
-- **Forbidden ownership assumptions:** Does not invent client-side authorization or generic dashboards.
+- **Typical triggers:** After approved UX architecture and implementation-ready UI specification for operational screens.
+- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `root_cause_first`, `bounded_implementation`, `typescript_react`, `web_interface_quality`, `accessibility_inclusive_design`
+- **Conditional Skills:** `capacity_performance`, `tenant_isolation`
+- **Forbidden ownership assumptions:** Does not own product design authority, invent client-side authorization, or generic dashboards. Does not certify accessibility or final UI finish.
 
 ## `platform-ux-architect`
 
 - **Tier / mode:** P1 / read
-- **Typical triggers:** Before major UI implementation.
-- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`
-- **Conditional Skills:** `typescript_react`, `alert_quality_evidence`
-- **Forbidden ownership assumptions:** Does not implement pixels or override RBAC.
+- **Typical triggers:** Before major UI implementation: job/task flow, IA, taxonomy, navigation and cognitive-load architecture.
+- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `ux_operational_design`, `accessibility_inclusive_design`
+- **Conditional Skills:** `capacity_performance`, `typescript_react`
+- **Forbidden ownership assumptions:** Does not implement React, specify pixels/components, override RBAC, certify accessibility, or approve final UI finish.
 
 ## `platform-ui-finish-gate-reviewer`
 
 - **Tier / mode:** P1 / read
-- **Typical triggers:** After UI implementation, before acceptance.
-- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`
-- **Conditional Skills:** `typescript_react`, `evidence_bundle`
-- **Forbidden ownership assumptions:** Does not restyle to personal taste or certify GA.
+- **Typical triggers:** Independent final UI quality/adversarial review after implementation, before acceptance.
+- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `ux_operational_design`, `web_interface_quality`, `accessibility_inclusive_design`
+- **Conditional Skills:** `typescript_react`, `capacity_performance`
+- **Forbidden ownership assumptions:** Does not restyle to personal taste, implement the UI, or certify GA. Independent of designer and frontend writer. Read-only.
 
 ## `platform-accessibility-auditor`
 
 - **Tier / mode:** P1 / read
-- **Typical triggers:** New/changed operational screens.
-- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`
+- **Typical triggers:** Independent accessibility certification of new/changed operational screens.
+- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `accessibility_inclusive_design`, `web_interface_quality`
 - **Conditional Skills:** `typescript_react`
-- **Forbidden ownership assumptions:** Does not implement the UI.
+- **Forbidden ownership assumptions:** Does not implement the UI, does not own the design specification, and is independent of the designer and frontend writer.
 
 ## `platform-sensor-runtime-engineer`
 
@@ -268,3 +268,11 @@ Routing: task intent → owning agent → required Skills → risk-triggered rev
 - **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `root_cause_first`, `bounded_implementation`, `connector_framework`, `itsm_change_telemetry`, `oauth_oidc_clients`
 - **Conditional Skills:** `change_intelligence`, `secrets_handling`, `api_event_contracts`, `tenant_isolation`
 - **Forbidden ownership assumptions:** Notification Center recipient/RBAC policy belongs with identity/onboarding/notification owners.; Does not let vendor IDs override tenant/entity authority.; Does not invent SKUs or contractual SLOs.
+
+## `platform-product-ui-designer`
+
+- **Tier / mode:** P1 / write
+- **Typical triggers:** Material operational screen needs an implementation-ready specification after UX architecture and before React work.
+- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `ux_operational_design`, `web_interface_quality`, `accessibility_inclusive_design`
+- **Conditional Skills:** `typescript_react`, `capacity_performance`, `tenant_isolation`
+- **Forbidden ownership assumptions:** Does not own product requirements, React implementation, API contracts, authorization implementation, accessibility certification, final UI finish, or dependency/framework selection.

@@ -83,15 +83,17 @@ Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without
 - `source_truth_rebaseline`
 - `mother_reference_reconciliation`
 - `evidence_bundle`
+- `accessibility_inclusive_design`
+- `web_interface_quality`
 
 ## Conditional Skills
 - `typescript_react`
 
 ## Explicit non-ownership
-- Does not implement the UI.
+- Does not implement the UI, does not own the design specification, and is independent of the designer and frontend writer.
 
 ## Handoff
-Keyboard/focus/contrast evidence to frontend-developer and finish-gate.
+Keyboard/focus/contrast evidence to frontend-developer and finish-gate. Designer intent is not certification.
 
 ## Security constraints
 

@@ -26,46 +26,66 @@ Constraints: <branch/PR/scope constraints, if any>
 
 ## Five common examples
 
+Implementation-stage examples record explicit `selectedAgents` and `selectedSkills`. From ROUTING onward an active engineering task cannot proceed with an empty `selectedSkills` array. A governance-only task still selects canonical governance Skills such as `source_truth_rebaseline` / `bounded_implementation`.
+
 ### Fix a bug
 
 ```text
-Use platform-codebase-onboarding-engineer to verify the root cause, platform-minimal-change-engineer to make the smallest fix, then platform-code-reviewer and platform-evidence-collector to verify it independently. Apply root_cause_first, bounded_implementation and evidence_bundle as applicable.
+Use platform-codebase-onboarding-engineer to verify the root cause, platform-minimal-change-engineer to make the smallest fix, then platform-code-reviewer and platform-evidence-collector to verify it independently.
+selectedAgents: [platform-codebase-onboarding-engineer, platform-minimal-change-engineer, platform-code-reviewer, platform-evidence-collector]
+selectedSkills: [source_truth_rebaseline, root_cause_first, bounded_implementation, evidence_bundle]
 ```
 
 ### Build a network/Sensor feature
 
 ```text
 Use platform-codebase-onboarding-engineer. Route protocol/domain work to platform-network-engineer, Sensor runtime (pools/spool/uploader/leases) to platform-sensor-runtime-engineer, and Device Pack schema to platform-device-pack-engineer. Use platform-minimal-change-engineer for the patch and platform-test-automation-engineer for tests. Finish with code-reviewer and evidence-collector.
+selectedAgents: [platform-codebase-onboarding-engineer, platform-network-engineer, platform-sensor-runtime-engineer, platform-device-pack-engineer, platform-minimal-change-engineer, platform-test-automation-engineer, platform-code-reviewer, platform-evidence-collector]
+selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, bounded_implementation, snmp_mib, sensor_edge, device_pack_authoring, evidence_bundle]
 ```
 
 ### Privileged NCM / connector / telemetry pipeline
 
 ```text
 NCM/remediation: platform-ncm-remediation-engineer with remediation_safety (no LLM privileged execution). Connectors: platform-integration-connector-engineer. Post-accept streaming: platform-telemetry-pipeline-engineer. Infrastructure targets: platform-infrastructure-cloud-engineer. Always separate writerTool from verifierTool and close with evidence_bundle / exact_head_merge_gate.
+selectedAgents: [platform-ncm-remediation-engineer, platform-integration-connector-engineer, platform-telemetry-pipeline-engineer, platform-infrastructure-cloud-engineer, platform-code-reviewer, platform-evidence-collector]
+selectedSkills: [source_truth_rebaseline, bounded_implementation, remediation_safety, connector_framework, kafka, kubernetes_monitoring, evidence_bundle]
 ```
 
 ### Build a UI feature
 
+Material UI uses the ownership chain. Tiny copy/spacing fixes need not invoke the entire chain.
+
 ```text
-Use platform-ux-architect to define the screen contract, platform-frontend-developer to implement it, then platform-accessibility-auditor and platform-ui-finish-gate-reviewer. Collect browser/test evidence before calling it complete.
+Material operational screen:
+selectedAgents: [platform-ux-architect, platform-product-ui-designer, platform-frontend-developer, platform-test-automation-engineer, platform-accessibility-auditor, platform-ui-finish-gate-reviewer, platform-evidence-collector]
+selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, bounded_implementation, ux_operational_design, web_interface_quality, accessibility_inclusive_design, typescript_react, evidence_bundle]
+
+Tiny UI copy/spacing fix:
+selectedAgents: [platform-frontend-developer, platform-code-reviewer]
+selectedSkills: [bounded_implementation, typescript_react, web_interface_quality, evidence_bundle]
 ```
 
 ### Build AI/RCA capability
 
 ```text
-Use platform-knowledge-graph-engineer and platform-ai-engineer, then platform-model-qa. Add platform-security-architect/appsec for tool access, tenant data, prompt/context or automated-action risk. Apply ai_evidence_safety and alert_quality_evidence where relevant. Reality-check before enablement claims.
+Use platform-knowledge-graph-engineer and platform-ai-engineer, then platform-model-qa. Add platform-security-architect/appsec for tool access, tenant data, prompt/context or automated-action risk. Reality-check before enablement claims.
+selectedAgents: [platform-knowledge-graph-engineer, platform-ai-engineer, platform-model-qa, platform-security-architect, platform-reality-checker]
+selectedSkills: [source_truth_rebaseline, ai_evidence_safety, alert_quality_evidence, rca_hypothesis_fusion, evidence_bundle]
 ```
 
 ### Review a PR
 
 ```text
 Use platform-code-reviewer plus the domain specialist. Add platform-appsec-engineer if auth/tenant/secrets/untrusted input is touched. Run platform-evidence-collector. Apply exact_head_merge_gate before any merge-ready claim. Use platform-reality-checker only for a completion/release-readiness decision.
+selectedAgents: [platform-code-reviewer, platform-evidence-collector, platform-reality-checker]
+selectedSkills: [source_truth_rebaseline, exact_head_merge_gate, evidence_bundle]
 ```
 
 ## What P0 and P1 mean
 
 - **P0 agents** protect engineering truth: scope, code understanding, review, security, testing, evidence and performance. They are not all invoked on every task.
-- **P1 agents** are domain specialists for API, network, Sensor runtime, Device Packs, telemetry pipelines, NCM/remediation, connectors, infrastructure targets, database, SRE, IAM, graph/AI, DevOps/Git/workflows and UI.
+- **P1 agents** are domain specialists for API, network, Sensor runtime, Device Packs, telemetry pipelines, NCM/remediation, connectors, infrastructure targets, database, SRE, IAM, graph/AI, DevOps/Git/workflows, UX architecture, product UI specification and UI implementation.
 
 If you are unsure which agent to use, do not guess. Route from `project_agents/manifest.json`, `project_agents/AGENT_MATRIX.md`, `project_agents/USAGE_PLAYBOOK.md`, `project_agents/skills/AGENT_SKILL_MATRIX.md`, and the applicable canonical skills.
 

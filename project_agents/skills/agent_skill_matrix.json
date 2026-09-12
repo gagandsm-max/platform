@@ -394,52 +394,61 @@
       "evidence_bundle",
       "root_cause_first",
       "bounded_implementation",
-      "typescript_react"
+      "typescript_react",
+      "web_interface_quality",
+      "accessibility_inclusive_design"
     ],
     "conditionalSkills": [
-      "tenant_isolation",
-      "alert_quality_evidence"
+      "capacity_performance",
+      "tenant_isolation"
     ],
-    "typicalTriggers": "After UX contract is clear for operational UI.",
-    "forbiddenOwnershipAssumptions": "Does not invent client-side authorization or generic dashboards."
+    "typicalTriggers": "After approved UX architecture and implementation-ready UI specification for operational screens.",
+    "forbiddenOwnershipAssumptions": "Does not own product design authority, invent client-side authorization, or generic dashboards. Does not certify accessibility or final UI finish."
   },
   "platform-ux-architect": {
     "requiredSkills": [
       "source_truth_rebaseline",
       "mother_reference_reconciliation",
-      "evidence_bundle"
+      "evidence_bundle",
+      "ux_operational_design",
+      "accessibility_inclusive_design"
     ],
     "conditionalSkills": [
-      "typescript_react",
-      "alert_quality_evidence"
+      "capacity_performance",
+      "typescript_react"
     ],
-    "typicalTriggers": "Before major UI implementation.",
-    "forbiddenOwnershipAssumptions": "Does not implement pixels or override RBAC."
+    "typicalTriggers": "Before major UI implementation: job/task flow, IA, taxonomy, navigation and cognitive-load architecture.",
+    "forbiddenOwnershipAssumptions": "Does not implement React, specify pixels/components, override RBAC, certify accessibility, or approve final UI finish."
   },
   "platform-ui-finish-gate-reviewer": {
     "requiredSkills": [
       "source_truth_rebaseline",
       "mother_reference_reconciliation",
-      "evidence_bundle"
+      "evidence_bundle",
+      "ux_operational_design",
+      "web_interface_quality",
+      "accessibility_inclusive_design"
     ],
     "conditionalSkills": [
       "typescript_react",
-      "evidence_bundle"
+      "capacity_performance"
     ],
-    "typicalTriggers": "After UI implementation, before acceptance.",
-    "forbiddenOwnershipAssumptions": "Does not restyle to personal taste or certify GA."
+    "typicalTriggers": "Independent final UI quality/adversarial review after implementation, before acceptance.",
+    "forbiddenOwnershipAssumptions": "Does not restyle to personal taste, implement the UI, or certify GA. Independent of designer and frontend writer. Read-only."
   },
   "platform-accessibility-auditor": {
     "requiredSkills": [
       "source_truth_rebaseline",
       "mother_reference_reconciliation",
-      "evidence_bundle"
+      "evidence_bundle",
+      "accessibility_inclusive_design",
+      "web_interface_quality"
     ],
     "conditionalSkills": [
       "typescript_react"
     ],
-    "typicalTriggers": "New/changed operational screens.",
-    "forbiddenOwnershipAssumptions": "Does not implement the UI."
+    "typicalTriggers": "Independent accessibility certification of new/changed operational screens.",
+    "forbiddenOwnershipAssumptions": "Does not implement the UI, does not own the design specification, and is independent of the designer and frontend writer."
   },
   "platform-sensor-runtime-engineer": {
     "requiredSkills": [
@@ -559,5 +568,22 @@
     ],
     "typicalTriggers": "New/changed outbound connectors, ITSM/notifications, change feeds, webhooks, carrier status, or connector certification.",
     "forbiddenOwnershipAssumptions": "Notification Center recipient/RBAC policy belongs with identity/onboarding/notification owners.; Does not let vendor IDs override tenant/entity authority.; Does not invent SKUs or contractual SLOs."
+  },
+  "platform-product-ui-designer": {
+    "requiredSkills": [
+      "source_truth_rebaseline",
+      "mother_reference_reconciliation",
+      "evidence_bundle",
+      "ux_operational_design",
+      "web_interface_quality",
+      "accessibility_inclusive_design"
+    ],
+    "conditionalSkills": [
+      "typescript_react",
+      "capacity_performance",
+      "tenant_isolation"
+    ],
+    "typicalTriggers": "Material operational screen needs an implementation-ready specification after UX architecture and before React work.",
+    "forbiddenOwnershipAssumptions": "Does not own product requirements, React implementation, API contracts, authorization implementation, accessibility certification, final UI finish, or dependency/framework selection."
   }
 }

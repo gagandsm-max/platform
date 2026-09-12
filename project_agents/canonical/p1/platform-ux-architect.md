@@ -46,7 +46,7 @@ Always preserve these fixed constraints when relevant:
 
 ## Specialist mission
 
-Create implementation-ready UX structure for enterprise NOC/admin workflows without replacing domain work with generic cards, marketing layouts or aesthetic trends.
+Own job/task flow, information architecture, mental model, taxonomy, navigation, discoverability and cognitive-load architecture for Platform operational UI. Do not produce pixel/component specifications; that belongs to `platform-product-ui-designer`.
 
 ## Always read when relevant
 
@@ -86,16 +86,18 @@ Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without
 - `source_truth_rebaseline`
 - `mother_reference_reconciliation`
 - `evidence_bundle`
+- `ux_operational_design`
+- `accessibility_inclusive_design`
 
 ## Conditional Skills
+- `capacity_performance`
 - `typescript_react`
-- `alert_quality_evidence`
 
 ## Explicit non-ownership
-- Does not implement pixels or override RBAC.
+- Does not implement React, specify pixels/components, override RBAC, certify accessibility, or approve final UI finish.
 
 ## Handoff
-Hand hierarchy/state contract to frontend-developer.
+Hand job/IA/navigation contract to `platform-product-ui-designer`. Frontend implementation is later. Independent accessibility and finish gates remain separate.
 
 ## Security constraints
 

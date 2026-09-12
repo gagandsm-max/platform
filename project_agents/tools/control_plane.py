@@ -404,8 +404,8 @@ def validate_task_manifest(
         )
     if not selected_agents and status in HEAD_REQUIRED_STATES:
         raise ControlPlaneError("selectedAgents must be resolved before ROUTING")
-    if not selected_skills and status in FROZEN_SCOPE_STATES:
-        raise ControlPlaneError("selectedSkills must be resolved before IMPLEMENTATION")
+    if not selected_skills and status in HEAD_REQUIRED_STATES:
+        raise ControlPlaneError("selectedSkills must be resolved before ROUTING")
     if status in VALIDATION_GATE_STATES and not required_evidence:
         raise ControlPlaneError("requiredEvidence must be declared before validation gates")
     return dict(obj)

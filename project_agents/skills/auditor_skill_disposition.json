@@ -726,13 +726,13 @@
   },
   {
     "name": "ui_no_generic_dashboard",
-    "disposition": "MERGE_INTO:typescript_react",
-    "notes": "overlapping auditor alias"
+    "disposition": "MERGE_INTO:ux_operational_design",
+    "notes": "retargeted from typescript_react; operational specificity lives in UX/design Skills"
   },
   {
     "name": "wcag_operational_screens",
-    "disposition": "MERGE_INTO:typescript_react",
-    "notes": "overlapping auditor alias"
+    "disposition": "MERGE_INTO:accessibility_inclusive_design",
+    "notes": "retargeted from typescript_react; independent accessibility Skill"
   },
   {
     "name": "nested_exception_leakage",
@@ -1053,5 +1053,70 @@
     "name": "probe_browser_engine",
     "disposition": "DEFER: browser synthetics runtime not selected",
     "notes": "out of v1.2 bounded library"
+  },
+  {
+    "name": "ux_operational_design",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 UI skill"
+  },
+  {
+    "name": "web_interface_quality",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 UI skill"
+  },
+  {
+    "name": "accessibility_inclusive_design",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.2 UI skill"
+  },
+  {
+    "name": "usability_information_architecture",
+    "disposition": "MERGE_INTO:ux_operational_design",
+    "notes": "UI amendment MERGE_INTO; usability/IA"
+  },
+  {
+    "name": "product_ui_visual_interaction",
+    "disposition": "MERGE_INTO:ux_operational_design",
+    "notes": "UI amendment MERGE_INTO; product UI visual/interaction design"
+  },
+  {
+    "name": "ux_writing_content_intent",
+    "disposition": "MERGE_INTO:ux_operational_design",
+    "notes": "UI amendment MERGE_INTO; UX writing/content intent"
+  },
+  {
+    "name": "dashboard_decision_design",
+    "disposition": "MERGE_INTO:ux_operational_design",
+    "notes": "UI amendment MERGE_INTO; dashboard decision design"
+  },
+  {
+    "name": "noc_operational_ux",
+    "disposition": "MERGE_INTO:ux_operational_design",
+    "notes": "UI amendment MERGE_INTO; NOC operational UX"
+  },
+  {
+    "name": "large_estate_dense_ui",
+    "disposition": "MERGE_INTO:ux_operational_design",
+    "notes": "UI amendment MERGE_INTO; large-estate/data-dense UI"
+  },
+  {
+    "name": "design_system_architecture",
+    "disposition": "MERGE_INTO:web_interface_quality",
+    "notes": "UI amendment MERGE_INTO; design-system architecture"
+  },
+  {
+    "name": "web_visual_runtime_validation",
+    "disposition": "MERGE_INTO:web_interface_quality",
+    "notes": "UI amendment MERGE_INTO; runtime/visual validation and responsive quality"
+  },
+  {
+    "name": "frontend_state_completeness",
+    "disposition": "MERGE_INTO:web_interface_quality",
+    "notes": "UI amendment MERGE_INTO; state completeness and frontend performance"
+  },
+  {
+    "name": "inclusive_keyboard_semantics",
+    "disposition": "MERGE_INTO:accessibility_inclusive_design",
+    "notes": "UI amendment MERGE_INTO; keyboard/focus/semantic/inclusive design"
   }
 ]
