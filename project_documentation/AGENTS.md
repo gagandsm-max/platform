@@ -131,3 +131,17 @@ For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`,
 - Hosted/private/local/no-LLM provider modes must preserve data-egress controls and deterministic fallback; core monitoring cannot require Internet or an LLM/GNN to function.
 - AI/ML releases require reproducible evaluation, provenance, model/data-drift visibility and resource-budget evidence. Champion/challenger decisions require measured evidence, not vendor/model reputation.
 - Shared services such as DNS/DHCP/NTP/PTP/RADIUS/TACACS+/LDAP/AD and PKI/certificate state are dependency evidence for incident reasoning; facilities/power evidence may explain infrastructure incidents but does not turn Platform into BMS/DCIM.
+
+## Cursor Cloud specific instructions
+
+Hosted Cloud Agents use `.cursor/environment.json` and `.cursor/Dockerfile`. The GitHub repository is `https://github.com/gagandsm-max/platform`.
+
+Cloud VMs follow the same contract as a developer laptop:
+
+- Do not install project-specific Java, Go, Python, Node, Kafka, PostgreSQL, ClickHouse, or Valkey on the Cloud VM host.
+- All routine development and automated testing run through Docker Compose (`make doctor`, `make certs`, `make dev-up`, `make test-unit`).
+- Copy `.env.example` to `.env` when `.env` is missing. Never commit `.env`, generated certs, or keys.
+- The environment `start` command starts Docker. Then run `make certs` if `deploy/docker/certs/platform-dev.crt` is missing.
+- Do not start the full Compose stack unless the assigned task needs running services. The stack is memory-heavy.
+- Default loopback ports: UI `23000`, Core `28443`.
+- A personal My Machines worker named `platform-dev` can execute Cloud Agent tool calls against this local checkout.
