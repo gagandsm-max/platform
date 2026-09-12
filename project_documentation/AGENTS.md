@@ -91,3 +91,17 @@ For OIV capabilities, Definition of Done also includes applicable tenant isolati
 - Reinstall, reimage, cloned Agent identity, hostname collision and conflicting stable identifiers require explicit reconciliation; never silently merge or duplicate inventory.
 - The in-product Notification Center is one role-aware global surface. Recipient access and deep links are enforced server-side by tenant, RBAC, resource scope and subscription; operational Alerts/Incidents remain distinct from platform/workflow notifications.
 - Discovery/onboarding notification generation is deduplicated, bounded and rate-limited so scans, rediscovery or Agent reconnect storms cannot create notification floods.
+
+## Cursor Cloud specific instructions
+
+Hosted Cloud Agents use `.cursor/environment.json` and `.cursor/Dockerfile`. The GitHub repository is `https://github.com/gagandsm-max/platform`.
+
+Cloud VMs follow the same contract as a developer laptop:
+
+- Do not install project-specific Java, Go, Python, Node, Kafka, PostgreSQL, ClickHouse, or Valkey on the Cloud VM host.
+- All routine development and automated testing run through Docker Compose (`make doctor`, `make certs`, `make dev-up`, `make test-unit`).
+- Copy `.env.example` to `.env` when `.env` is missing. Never commit `.env`, generated certs, or keys.
+- The environment `start` command starts Docker. Then run `make certs` if `deploy/docker/certs/platform-dev.crt` is missing.
+- Do not start the full Compose stack unless the assigned task needs running services. The stack is memory-heavy.
+- Default loopback ports: UI `23000`, Core `28443`.
+- A personal My Machines worker named `platform-dev` can execute Cloud Agent tool calls against this local checkout.

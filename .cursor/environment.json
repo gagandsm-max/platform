@@ -1,0 +1,16 @@
+{
+  "name": "platform",
+  "user": "ubuntu",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "install": "test -f .env || cp .env.example .env",
+  "start": "sudo service docker start",
+  "enable_testing": true,
+  "egressMode": "allow_all",
+  "ports": [
+    { "name": "ui", "port": 23000 },
+    { "name": "core", "port": 28443 }
+  ]
+}
