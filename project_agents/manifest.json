@@ -267,7 +267,7 @@
     "source": "testing/testing-accessibility-auditor.md",
     "description": "Accessibility QA for Platform UI. Use on new/changed operational screens to verify WCAG-aligned semantics, keyboard/focus, contrast/status, zoom and assistive-technology behavior with automated plus manual evidence.",
     "canonical_path": "canonical/p1/platform-accessibility-auditor.md",
-    "sha256": "40edab5c4d901cc88746a9b70c8ab1c43ad9ccb86cd14ee91044bf6887649af9"
+    "sha256": "9c13d973a4a24f8585f6129451921cb1e560edfd957b2072b71e64601b6d087d"
   },
   {
     "name": "platform-sensor-runtime-engineer",
@@ -337,6 +337,6 @@
     "source": "capability-pack-v1.2",
     "description": "Converts requirements, operator jobs and Platform UI architecture into implementation-ready screen/interaction specifications. Does not own React implementation, accessibility certification or final UI finish.",
     "canonical_path": "canonical/p1/platform-product-ui-designer.md",
-    "sha256": "8ab79b53eb279dd5400c60f9d7eddf973767f931c1dafa8bd70aca359780a3d2"
+    "sha256": "8d3a491686677eba23a4c72856b07b6953f0a2c50118ac25b351d9cfeed79254"
   }
 ]

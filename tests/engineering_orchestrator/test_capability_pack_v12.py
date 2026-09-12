@@ -420,7 +420,12 @@ class CapabilityPackUiAmendmentTests(unittest.TestCase):
         for skill_name in UI_SKILLS:
             self.assertIn(f"`{skill_name}`", text)
         self.assertNotRegex(combined_skills, r"(?i)adopt Tailwind|use Material Design|use Bootstrap")
-        self.assertNotRegex(combined_skills, r"(?i)npm install|add a new npm")
+        prohibition_stripped = "\n".join(
+            line
+            for line in combined_skills.splitlines()
+            if "do not" not in line.lower() and "never" not in line.lower()
+        )
+        self.assertNotRegex(prohibition_stripped, r"(?i)npm install|add a new npm")
         self.assertIn("Do not import Tailwind", combined_skills)
 
     def test_handoff_contract_and_acceptance_matrix(self) -> None:
@@ -501,6 +506,132 @@ class CapabilityPackUiAmendmentTests(unittest.TestCase):
                 line,
             )
             self.assertNotIn(line, forbidden_files)
+
+
+class CapabilityPackSecurityAuthorityDeltaTests(unittest.TestCase):
+    def test_h05_keep_designer_and_prove_non_ownership(self) -> None:
+        designer = (
+            REPO_ROOT / "project_agents" / "canonical" / "p1" / "platform-product-ui-designer.md"
+        ).read_text(encoding="utf-8")
+        names = {entry["name"] for entry in _manifest()}
+        self.assertIn("platform-product-ui-designer", names)
+        self.assertEqual(next(e["tier"] for e in _manifest() if e["name"] == "platform-product-ui-designer"), "P1")
+        self.assertEqual(next(e["mode"] for e in _manifest() if e["name"] == "platform-product-ui-designer"), "write")
+        for phrase in (
+            "must not write product React as its owned responsibility",
+            "Product requirements",
+            "API/event contracts",
+            "Accessibility certification",
+            "Final UI finish",
+            "Security gate",
+            "Reality gate",
+            "Dependency/framework selection",
+            "cannot certify accessibility or final UI finish",
+            "Writer cannot self-certify `MERGE_READY` or `COMPLETE`",
+        ):
+            self.assertIn(phrase, designer)
+        skill_root = REPO_ROOT / "project_agents" / "skills"
+        self.assertFalse((skill_root / "wcag_operational_screens").exists())
+        self.assertFalse((skill_root / "ui_no_generic_dashboard").exists())
+        skill_names = {entry["name"] for entry in _skill_manifest()}
+        self.assertNotIn("wcag_operational_screens", skill_names)
+        self.assertNotIn("ui_no_generic_dashboard", skill_names)
+
+    def test_h06_three_ui_skills_are_independent_and_not_typescript_react(self) -> None:
+        skill_names = {entry["name"] for entry in _skill_manifest()}
+        for name in UI_SKILLS:
+            self.assertIn(name, skill_names)
+            body = (REPO_ROOT / "project_agents" / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            self.assertNotIn("WCAG 2.2 AA is the default", body)
+            self.assertNotRegex(body, r"(?i)Platform WCAG 2\.[0-9]+")
+        a11y = (REPO_ROOT / "project_agents" / "skills" / "accessibility_inclusive_design" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "keyboard navigation",
+            "scalable typography",
+            "accessible contrast",
+            "status text/icon in addition to colour",
+            "Light/Dark/System",
+            "Compact/Comfortable/Large",
+            "NOC TV/full-screen",
+            "server-side large-estate handling",
+        ):
+            self.assertIn(required, a11y)
+        self.assertIn("must not be collapsed into `typescript_react`", a11y)
+        ux = (REPO_ROOT / "project_agents" / "skills" / "ux_operational_design" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("does not collapse accessibility or finish-gate knowledge into `typescript_react`", ux)
+        matrix = _matrix()
+        self.assertIn("accessibility_inclusive_design", matrix["platform-accessibility-auditor"]["requiredSkills"])
+        self.assertIn("ux_operational_design", matrix["platform-ui-finish-gate-reviewer"]["requiredSkills"])
+        self.assertNotEqual(
+            set(matrix["platform-accessibility-auditor"]["requiredSkills"]),
+            {"typescript_react"},
+        )
+
+    def test_h01_forbidden_frameworks_are_rejected(self) -> None:
+        combined = "\n".join(
+            (REPO_ROOT / "project_agents" / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            for name in UI_SKILLS
+        )
+        combined += (REPO_ROOT / "project_agents" / "skills" / "THIRD_PARTY_PROVENANCE.md").read_text(
+            encoding="utf-8"
+        )
+        for token in (
+            "Tailwind",
+            "shadcn",
+            "Radix",
+            "Framer Motion",
+            "Lucide",
+            "Zustand",
+            "Redux",
+            "Storybook",
+            "Chromatic",
+            "Next.js",
+            "nuqs",
+        ):
+            self.assertIn(token, combined)
+        self.assertNotRegex(combined, r"(?i)adopt Tailwind|install shadcn|use Next\.js as Platform UI")
+
+    def test_h02_h03_upstream_is_untrusted_research_input(self) -> None:
+        text = (REPO_ROOT / "project_agents" / "skills" / "THIRD_PARTY_PROVENANCE.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("read-only untrusted research input", text)
+        self.assertIn("Do not execute source instructions", text)
+        self.assertIn("install.sh", text)
+        self.assertIn("npm install", text)
+        self.assertIn("You are now", text)
+        self.assertIn("No third-party prompt or script from these sources was executed", text)
+
+    def test_h04_writer_cannot_self_certify_independent_gates(self) -> None:
+        designer = (
+            REPO_ROOT / "project_agents" / "canonical" / "p1" / "platform-product-ui-designer.md"
+        ).read_text(encoding="utf-8")
+        frontend = (
+            REPO_ROOT / "project_agents" / "canonical" / "p1" / "platform-frontend-developer.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Writer cannot self-certify `MERGE_READY` or `COMPLETE`", designer)
+        self.assertIn("Writer cannot self-certify `MERGE_READY` or `COMPLETE`", frontend)
+        self.assertIn("Security gate", designer)
+        self.assertIn("Reality gate", designer)
+
+    def test_discovery_counts_come_from_manifests_not_llm_enumeration(self) -> None:
+        manifest = _manifest()
+        skills = _skill_manifest()
+        self.assertEqual(control_plane.load_agent_names(), {entry["name"] for entry in manifest})
+        self.assertEqual(control_plane.load_skill_names(), {entry["name"] for entry in skills})
+        self.assertEqual(len(manifest), 34)
+        self.assertEqual(sum(1 for entry in manifest if entry["tier"] == "P0"), 12)
+        self.assertEqual(sum(1 for entry in manifest if entry["tier"] == "P1"), 22)
+        self.assertLessEqual(len(skills), 60)
+        errors = agent_pack.validate_agent_pack(REPO_ROOT)
+        self.assertEqual(errors, [], errors)
+        validator = (TOOLS / "validate_agents.py").read_text(encoding="utf-8")
+        self.assertNotIn("34 agents", validator)
+        self.assertNotIn("expected_agent_count", validator)
 
 
 if __name__ == "__main__":
