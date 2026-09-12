@@ -297,7 +297,9 @@ func (w *Worker) recordFailure(class client.FailureClass, code string) {
 	}
 	w.stats.LastFailureClass = class
 	w.stats.LastErrorCode = code
-	w.stats.ReceiverAvailable = w.transport.Available()
+	// Last delivery failed: do not report the Sensor receiver as available
+	// merely because the HTTPS client was constructed.
+	w.stats.ReceiverAvailable = false
 }
 
 func randomJitter() float64 {

@@ -176,6 +176,7 @@ func newHTTPSTransport(cfg HTTPSConfig, tlsConfig *tls.Config) (*HTTPSTransport,
 	}
 
 	transport := &http.Transport{
+		Proxy:                 noProxy,
 		TLSClientConfig:       tlsConfig,
 		ResponseHeaderTimeout: cfg.Timeout,
 		IdleConnTimeout:       90 * time.Second,
@@ -184,8 +185,9 @@ func newHTTPSTransport(cfg HTTPSConfig, tlsConfig *tls.Config) (*HTTPSTransport,
 	}
 
 	httpClient := &http.Client{
-		Transport: transport,
-		Timeout:   cfg.Timeout + (2 * time.Second),
+		Transport:     transport,
+		Timeout:       cfg.Timeout + (2 * time.Second),
+		CheckRedirect: denyHTTPRedirect,
 	}
 
 	endpoint := strings.TrimRight(cfg.SensorURL, "/") + "/api/v1/agent/telemetry"
@@ -196,6 +198,16 @@ func newHTTPSTransport(cfg HTTPSConfig, tlsConfig *tls.Config) (*HTTPSTransport,
 		endpoint:   endpoint,
 		logger:     cfg.Logger.With("component", "agent-https-transport", "sensor_url", cfg.SensorURL),
 	}, nil
+}
+
+var errRedirectForbidden = errors.New("DELIVERY_REDIRECT_FORBIDDEN: agent telemetry POST must not follow HTTP redirects")
+
+func noProxy(*http.Request) (*url.URL, error) {
+	return nil, nil
+}
+
+func denyHTTPRedirect(*http.Request, []*http.Request) error {
+	return errRedirectForbidden
 }
 
 // enforceTLSConstraints clones cfg and rejects insecure or incomplete TLS material.
@@ -330,6 +342,9 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 		// Classify context cancellation / deadline vs network error
 		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return Ack{}, &DeliveryError{Code: "DELIVERY_CONTEXT_ABORTED", Class: FailureTemporary, Err: ctx.Err()}
+		}
+		if errors.Is(err, errRedirectForbidden) {
+			return Ack{}, &DeliveryError{Code: "DELIVERY_REDIRECT_FORBIDDEN", Class: FailurePermanent, Err: err}
 		}
 		return Ack{}, &DeliveryError{Code: "DELIVERY_NETWORK_ERROR", Class: FailureTemporary, Err: err}
 	}

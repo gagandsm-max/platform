@@ -185,6 +185,9 @@ func TestDeliveryWorkerTemporaryErrorRetainsRecords(t *testing.T) {
 	if stats.LastFailureClass != client.FailureTemporary {
 		t.Fatalf("expected FailureTemporary, got %s", stats.LastFailureClass)
 	}
+	if stats.ReceiverAvailable {
+		t.Fatal("temporary Sensor failure must not report receiver available")
+	}
 }
 
 func TestDeliveryWorkerAuthAndPermanentRetain(t *testing.T) {

@@ -52,9 +52,9 @@ type Ack struct {
 	BatchID         string
 }
 
-// Transport is the receiving-side boundary. The current repository does not yet
-// implement the authoritative Agent -> assigned Sensor receiver, so production
-// wiring uses UnavailableTransport until that owned server-side dependency lands.
+// Transport is the Agent→Sensor delivery boundary. Production wiring uses
+// HTTPSTransport against the Sensor Agent Receiver. Tests may inject
+// UnavailableTransport or a fake Transport.
 type Transport interface {
 	Available() bool
 	Deliver(context.Context, Batch) (Ack, error)

@@ -122,14 +122,15 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		deliv = s.provider.DeliveryStats()
 	}
 
-	// While authoritative receiver is unavailable, /ready returns 503 DEGRADED
-	if !deliv.ReceiverAvailable {
+	// HTTPS transport construction is not Sensor reachability. /ready degrades
+	// when the transport is unwired or the last delivery attempt failed.
+	if !deliv.ReceiverAvailable || deliv.LastFailureClass != "" {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":             "DEGRADED",
 			"ready":              false,
-			"receiver_available": false,
-			"reason":             "AGENT_RECEIVER_NOT_IMPLEMENTED",
+			"receiver_available": deliv.ReceiverAvailable,
+			"reason":             unavailableReason(deliv),
 		})
 		return
 	}
@@ -158,9 +159,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	status := "UP"
 	reasons := []string{}
-	if !dStats.ReceiverAvailable {
+	if !dStats.ReceiverAvailable || dStats.LastFailureClass != "" {
 		status = "DEGRADED"
-		reasons = append(reasons, "AGENT_RECEIVER_NOT_IMPLEMENTED")
+		reasons = append(reasons, unavailableReason(dStats))
 	}
 	if qStats.AtCapacity {
 		status = "DEGRADED"
@@ -210,4 +211,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func unavailableReason(d delivery.DeliveryStats) string {
+	if d.LastErrorCode != "" {
+		return d.LastErrorCode
+	}
+	return "SENSOR_TRANSPORT_UNAVAILABLE"
 }

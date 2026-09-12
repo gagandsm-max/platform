@@ -44,9 +44,24 @@ func NewAgentService(
 		logger = slog.Default()
 	}
 
-	// If no transport injected, wire to authoritative unavailable transport
+	// If no transport injected, wire production HTTPS+mTLS to the assigned Sensor.
+	// Tests inject UnavailableTransport or a fake Transport explicitly.
 	if tr == nil {
-		tr = client.NewUnavailableTransport("AGENT_RECEIVER_NOT_IMPLEMENTED")
+		httpsTr, err := client.NewHTTPSTransport(client.HTTPSConfig{
+			SensorURL:      cfg.SensorURL,
+			AgentID:        ident.AgentID,
+			TenantID:       ident.TenantID,
+			SiteID:         cfg.SiteID,
+			CACertFile:     cfg.CAFile,
+			ClientCertFile: cfg.CertFile,
+			ClientKeyFile:  cfg.KeyFile,
+			Timeout:        cfg.DeliveryTimeout,
+			Logger:         logger,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("AGENT_TRANSPORT_INIT_FAILED: %w", err)
+		}
+		tr = httpsTr
 	}
 
 	// 1. Initialize durable queue

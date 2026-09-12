@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -23,6 +24,11 @@ import (
 )
 
 func generateTestCertificates(t *testing.T, commonName string) (caPEM, certPEM, keyPEM []byte, tlsConfig *tls.Config, serverTLS *tls.Config) {
+	now := time.Now()
+	return generateTestCertificatesWindow(t, commonName, now.Add(-1*time.Hour), now.Add(24*time.Hour))
+}
+
+func generateTestCertificatesWindow(t *testing.T, commonName string, clientNotBefore, clientNotAfter time.Time) (caPEM, certPEM, keyPEM []byte, tlsConfig *tls.Config, serverTLS *tls.Config) {
 	t.Helper()
 
 	caPriv, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -88,8 +94,8 @@ func generateTestCertificates(t *testing.T, commonName string) (caPEM, certPEM, 
 		Subject: pkix.Name{
 			CommonName: commonName,
 		},
-		NotBefore:   time.Now().Add(-1 * time.Hour),
-		NotAfter:    time.Now().Add(24 * time.Hour),
+		NotBefore:   clientNotBefore,
+		NotAfter:    clientNotAfter,
 		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}
@@ -297,7 +303,6 @@ func ackHandler(t *testing.T, agentID string) http.HandlerFunc {
 	}
 }
 
-
 func testBatch(agentID string, recs ...queue.Record) Batch {
 	return Batch{
 		CorrelationID: "test-corr-1",
@@ -344,6 +349,46 @@ func TestHTTPSDeliverSuccess(t *testing.T) {
 	}
 	if ack.BatchID == "" || ack.AgentID != "agent-01" {
 		t.Errorf("expected batch-bound ACK identity, got %+v", ack)
+	}
+}
+
+func TestHTTPSDeliverUsesConfiguredTenant(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+	var gotTenant string
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var env DeliveryEnvelope
+		if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
+			t.Errorf("decode: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		gotTenant = env.TenantID
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(DeliveryAck{
+			Status:                  "ACCEPTED",
+			AcceptedThroughSequence: env.LastSequence,
+			AgentID:                 env.AgentID,
+			BatchID:                 env.BatchID,
+			CorrelationID:           env.CorrelationID,
+		})
+	}))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-config-authority",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"tenantId":"forged-tenant"}`)})); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if gotTenant != "tenant-config-authority" {
+		t.Fatalf("envelope tenant must come from transport config, got %q", gotTenant)
 	}
 }
 
@@ -539,5 +584,224 @@ func TestHTTPSDeliverContextTimeout(t *testing.T) {
 	}
 	if Classify(err) != FailureTemporary {
 		t.Errorf("expected FailureTemporary on timeout, got %q", Classify(err))
+	}
+}
+
+func TestHTTPSDeliverRejectsHTTPRedirect(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+	followed := false
+	cleartext := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		followed = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer cleartext.Close()
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, cleartext.URL+"/api/v1/agent/telemetry", http.StatusTemporaryRedirect)
+	}))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}))
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_REDIRECT_FORBIDDEN") {
+		t.Fatalf("expected redirect forbidden, got %v", err)
+	}
+	if Classify(err) != FailurePermanent {
+		t.Fatalf("expected FailurePermanent on redirect, got %q", Classify(err))
+	}
+	if followed {
+		t.Fatal("agent must not follow a 307 redirect to cleartext HTTP")
+	}
+}
+
+func TestHTTPSDeliverRejectsForeignHostRedirect(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://evil.example.invalid/api/v1/agent/telemetry", http.StatusPermanentRedirect)
+	}))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}))
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_REDIRECT_FORBIDDEN") {
+		t.Fatalf("expected foreign-host redirect forbidden, got %v", err)
+	}
+}
+
+func TestHTTPSDeliverIgnoresEnvironmentProxy(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+	proxyHits := 0
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHits++
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer proxy.Close()
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("HTTPS_PROXY", proxy.URL)
+	t.Setenv("http_proxy", proxy.URL)
+	t.Setenv("https_proxy", proxy.URL)
+	t.Setenv("ALL_PROXY", proxy.URL)
+	t.Setenv("all_proxy", proxy.URL)
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
+
+	server := httptest.NewUnstartedServer(ackHandler(t, "agent-01"))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)})); err != nil {
+		t.Fatalf("direct Sensor delivery must ignore HTTPS_PROXY: %v", err)
+	}
+	if proxyHits != 0 {
+		t.Fatalf("environment proxy was used (%d hits); Agent must disable ProxyFromEnvironment", proxyHits)
+	}
+}
+
+func TestHTTPSDeliverRejectsExpiredClientCert(t *testing.T) {
+	now := time.Now()
+	_, _, _, clientTLS, serverTLS := generateTestCertificatesWindow(t, "agent-01", now.Add(-48*time.Hour), now.Add(-24*time.Hour))
+
+	server := httptest.NewUnstartedServer(ackHandler(t, "agent-01"))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}))
+	if err == nil {
+		t.Fatal("expected TLS failure for expired client certificate")
+	}
+	if Classify(err) != FailureTemporary {
+		t.Fatalf("handshake failure should classify temporary, got %q (%v)", Classify(err), err)
+	}
+}
+
+func TestHTTPSDeliverRejectsNotYetValidClientCert(t *testing.T) {
+	now := time.Now()
+	_, _, _, clientTLS, serverTLS := generateTestCertificatesWindow(t, "agent-01", now.Add(24*time.Hour), now.Add(48*time.Hour))
+
+	server := httptest.NewUnstartedServer(ackHandler(t, "agent-01"))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}))
+	if err == nil {
+		t.Fatal("expected TLS failure for not-yet-valid client certificate")
+	}
+}
+
+func TestHTTPSDeliverRejectsWrongCA(t *testing.T) {
+	_, _, _, clientTLS, _ := generateTestCertificates(t, "agent-01")
+	_, _, _, _, otherServerTLS := generateTestCertificates(t, "agent-other")
+
+	server := httptest.NewUnstartedServer(ackHandler(t, "agent-01"))
+	server.TLS = otherServerTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}))
+	if err == nil {
+		t.Fatal("expected TLS failure when Sensor cert is signed by an untrusted CA")
+	}
+}
+
+func TestHTTPSDeliverRejectsOversizedAck(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bytes.Repeat([]byte("a"), 2048))
+	}))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL:        server.URL,
+		AgentID:          "agent-01",
+		TenantID:         "tenant-01",
+		MaxResponseBytes: 64,
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}))
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_RESPONSE_TRUNCATED") {
+		t.Fatalf("expected truncated ACK rejection, got %v", err)
+	}
+}
+
+func TestHTTPSDeliverRejectsUnknownAckFields(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ACCEPTED","accepted_through_sequence":1,"agent_id":"agent-01","batch_id":"x","correlation_id":"c","evil":true}`))
+	}))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}))
+	if err == nil || !strings.Contains(err.Error(), "DELIVERY_ACK_MALFORMED") {
+		t.Fatalf("expected unknown ACK field rejection, got %v", err)
 	}
 }
