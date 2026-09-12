@@ -1,3 +1,5 @@
+<!-- generated from project_agents/skills/post_merge_rebaseline/SKILL.md sha256:75cdce1f9235f2a60c7016127ce6b896b91faa86a689b995d554f2bc747340b3 -->
+
 # post_merge_rebaseline
 
 ## Purpose

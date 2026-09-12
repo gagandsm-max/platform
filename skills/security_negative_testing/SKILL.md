@@ -1,3 +1,5 @@
+<!-- generated from project_agents/skills/security_negative_testing/SKILL.md sha256:9aae151a1215d2c319754332b1b1d7dec96ebb55460c2fa2d06dafdc8c5c5e4c -->
+
 # security_negative_testing
 
 ## Purpose

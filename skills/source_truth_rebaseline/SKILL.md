@@ -1,3 +1,5 @@
+<!-- generated from project_agents/skills/source_truth_rebaseline/SKILL.md sha256:ff2529e8d43b8f0b018e30e4ef3510a55270fff2f7003bd32af571dd8cb2a5b3 -->
+
 # source_truth_rebaseline
 
 ## Purpose

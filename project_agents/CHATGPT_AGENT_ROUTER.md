@@ -11,7 +11,7 @@ Before routing any non-trivial task:
 3. Parse `project_documentation/Platform_00_Document_Index.md` to resolve the current Mother Reference set and precedence dynamically; do not rely on a remembered file count or historical ceiling.
 4. Read `project_agents/manifest.json`, then choose only exact canonical agent names from `project_agents/AGENT_MATRIX.md`.
 5. Select applicable capability/risk procedures from canonical `project_agents/skills/`; root `skills/` are generated discovery mirrors, not a second source of truth.
-6. Record security boundaries, migrations, dependencies, required tests/evidence, writer, verifier and gatekeeper in the task manifest when the task warrants a governed workflow.
+6. Record security boundaries, migrations, dependencies, required tests/evidence, `writerTool`, `verifierTool` and gatekeeper in the task manifest when the task warrants a governed workflow. Do not use `writer`/`verifier` aliases.
 7. Writer self-certification is prohibited; main/head drift invalidates stale review.
 
 ### Generic invocation

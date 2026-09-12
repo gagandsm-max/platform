@@ -1,3 +1,5 @@
+<!-- generated from project_agents/skills/ai_evidence_safety/SKILL.md sha256:9c2b7514b2f869089269e961d1ecbd6e09f96e13bf6c28948e61b785326c09db -->
+
 # ai_evidence_safety
 
 ## Purpose

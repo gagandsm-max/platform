@@ -15,3 +15,4 @@ Implement the smallest defensible change after the requirement/root cause is kno
 - No test/auth/tenant/durability/security weakening.
 - No new dependency, database, service, model or vendor commitment without approved review.
 - Writer cannot self-certify completion.
+- Once IMPLEMENTATION has frozen `scope[]`, do not silently write outside it. If a genuinely required file is discovered outside frozen scope, return through DIAGNOSIS/ROUTING, record the scope amendment, then resume.

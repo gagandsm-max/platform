@@ -1,3 +1,5 @@
+<!-- generated from project_agents/skills/mother_reference_reconciliation/SKILL.md sha256:28b5deb394e30c5d2987827eeede063b3069a411abf9b8811a1bfb9cba1b3dcf -->
+
 # mother_reference_reconciliation
 
 ## Purpose

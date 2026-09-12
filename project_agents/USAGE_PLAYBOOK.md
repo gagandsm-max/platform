@@ -8,7 +8,7 @@ The normal governed pattern is:
 
 `INTAKE → REBASELINE → REQUIREMENTS → DIAGNOSIS → ROUTING → IMPLEMENTATION → LOCAL_VALIDATION → SOURCE_REVIEW → ADVERSARIAL_RUNTIME → SECURITY_DOMAIN_REVIEW → CI_VALIDATION → REALITY_GATE → MERGE_READY → POST_MERGE_VERIFY → COMPLETE`
 
-`BLOCKED` and `REJECTED` are valid terminal/interruption states. Risk gates may be `REQUIRED` or `NOT_APPLICABLE_WITH_EVIDENCE`; they are never silently skipped. Writer self-certification is prohibited, and authoritative-main/exact-head drift blocks stale review.
+`REJECTED` is a terminal exception. `BLOCKED` is a resumable exception, not a success terminal. `MERGE_READY` is not terminal: `COMPLETE` requires `POST_MERGE_VERIFY`. Risk gates may be `REQUIRED` or `NOT_APPLICABLE_WITH_EVIDENCE`; they are never silently skipped. Writer self-certification is prohibited, and authoritative-main/exact-head drift fails closed.
 
 Use 2–5 agents for most tasks. Add specialists and canonical skills only when the subsystem/risk requires them.
 
@@ -30,9 +30,7 @@ Use 2–5 agents for most tasks. Add specialists and canonical skills only when 
 
 ## Skill authority
 
-Canonical skills live in `project_agents/skills/`. Root `skills/` are deterministic generated mirrors for discovery and must match canonical content exactly. The initial Control Plane v2 skill families are:
-
-`source_truth_rebaseline`, `mother_reference_reconciliation`, `root_cause_first`, `bounded_implementation`, `migration_safety`, `security_negative_testing`, `runtime_failure_injection`, `alert_quality_evidence`, `ai_evidence_safety`, `exact_head_merge_gate`, `evidence_bundle`, `post_merge_rebaseline`.
+Canonical skills live in `project_agents/skills/`. Root `skills/` are deterministic generated mirrors for discovery and must match canonical content exactly. Resolve the current skill inventory from `project_agents/skills/manifest.json`; do not freeze a skill count in policy.
 
 Skills complement agents; they do not create new authority or allow a writer to certify its own output.
 
