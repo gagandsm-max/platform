@@ -15,9 +15,12 @@ fi
 mkdir -p "${OUT_DIR}"
 
 if [[ "${FORCE_CERTS:-}" != "1" && -f "${OUT_DIR}/metadata.json" && -f "${OUT_DIR}/agent-e2e.crt" && -f "${OUT_DIR}/agent-e2e.key" && -f "${OUT_DIR}/sensor-infra-agent-server.crt" && -f "${OUT_DIR}/agent-e2e-expired.crt" && -f "${OUT_DIR}/agent-e2e-notyet.crt" ]]; then
-    echo "[OK] Reusing existing Agent E2E certs in ${OUT_DIR} (FORCE_CERTS=1 to regenerate)"
-    python3 -c 'import json,sys; print("fingerprint", json.load(open(sys.argv[1]))["fingerprint_sha256"])' "${OUT_DIR}/metadata.json"
-    exit 0
+    if openssl verify -CAfile "${CA_DIR}/ca.crt" "${OUT_DIR}/sensor-infra-agent-server.crt" "${OUT_DIR}/agent-e2e.crt" >/dev/null 2>&1; then
+        echo "[OK] Reusing existing Agent E2E certs in ${OUT_DIR} (FORCE_CERTS=1 to regenerate)"
+        python3 -c 'import json,sys; print("fingerprint", json.load(open(sys.argv[1]))["fingerprint_sha256"])' "${OUT_DIR}/metadata.json"
+        exit 0
+    fi
+    echo "[WARN] Cached Agent E2E certs do not verify against the Platform CA; regenerating"
 fi
 
 rm -rf "${OUT_DIR}/ca-tmp"
@@ -127,6 +130,10 @@ sign_leaf "agent-e2e" "agent-e2e-01.agent.platform.local" "${OUT_DIR}/agent-clie
 # Handshake-negative leaves signed by the real CA.
 sign_dated_leaf "agent-e2e-expired" "agent-e2e-expired.agent.platform.local" "${OUT_DIR}/agent-client.cnf" 20200101000000Z 20200102000000Z
 sign_dated_leaf "agent-e2e-notyet" "agent-e2e-notyet.agent.platform.local" "${OUT_DIR}/agent-client.cnf" 20400101000000Z 20401231000000Z
+
+openssl verify -CAfile "${CA_DIR}/ca.crt" \
+    "${OUT_DIR}/sensor-infra-agent-server.crt" \
+    "${OUT_DIR}/agent-e2e.crt"
 
 python3 - <<PY
 import json, subprocess, hashlib
