@@ -20,6 +20,7 @@ TENANT="018f0e0a-0000-7000-8000-000000000001"
 FORGED_TENANT="018f0e0a-0000-7000-8000-000000000099"
 AGENT_ID="agent-e2e-01"
 HOST_ID="host-e2e-agent-01"
+RUN_ID="$(date +%s)"
 SENSOR_ID="${SENSOR_INFRA_ID:-sensor-infra-01}"
 RECEIVER_PORT="${PLATFORM_SENSOR_AGENT_RECEIVER_HOST_PORT:-28444}"
 CA="${ROOT_DIR}/deploy/docker/certs/ca.crt"
@@ -113,12 +114,16 @@ post_envelope() {
 }
 
 consume_kafka() {
-    local seconds="${1:-8}"
-    timeout "${seconds}" docker exec platform-kafka \
+    # Drain the topic until idle. A wall-clock `timeout N` on --from-beginning
+    # was killing the consumer before it reached later Agent records.
+    local idle_seconds="${1:-5}"
+    local idle_ms=$((idle_seconds * 1000))
+    timeout 90 docker exec platform-kafka \
         /opt/kafka/bin/kafka-console-consumer.sh \
         --bootstrap-server localhost:9092 \
         --topic telemetry.numeric.v1 \
         --from-beginning \
+        --timeout-ms "${idle_ms}" \
         --property print.key=true \
         --property key.separator='|' \
         2>/dev/null || true
@@ -176,7 +181,8 @@ fi
 record "infra-core-healthy" "PASS"
 
 log "==> rebuilding Sensor with Agent Receiver overlay (does not flip compose.yaml default)"
-"${COMPOSE[@]}" up -d --build --force-recreate sensor-infra
+"${COMPOSE[@]}" build sensor-infra
+"${COMPOSE[@]}" up -d --no-build --force-recreate sensor-infra
 if ! wait_healthy platform-sensor-infra 90; then
     fail_closed "sensor-infra-healthy" "sensor-infra did not become healthy with Agent Receiver enabled"
 fi
@@ -272,7 +278,7 @@ record "injected-batch-kafka" "PASS" "metricId=${METRIC} hits=${UNIQUE_HITS}"
 python3 "${E2E_DIR}/build_envelope.py" \
     --envelope-tenant "${FORGED_TENANT}" --payload-tenant "${FORGED_TENANT}" \
     --agent-id "${AGENT_ID}" --host-id "${HOST_ID}" \
-    --sequence 900010 --metric-key "e2e.forged.envelope" --value 1 \
+    --sequence 900010 --metric-key "e2e.forged.envelope.${RUN_ID}" --value 1 \
     > "${EVIDENCE_DIR}/forged-envelope-tenant.json"
 FORGED_ENV_ACK="$(post_envelope "${EVIDENCE_DIR}/forged-envelope-tenant.json")"
 if echo "${FORGED_ENV_ACK}" | grep -q 'ERR_AGENT_NOT_ASSIGNED\|Payload tenant claim'; then
@@ -284,8 +290,8 @@ fi
 python3 "${E2E_DIR}/build_envelope.py" \
     --envelope-tenant "${TENANT}" --payload-tenant "${FORGED_TENANT}" \
     --agent-id "${AGENT_ID}" --host-id "${HOST_ID}" \
-    --sequence 900011 --metric-key "e2e.forged.payload" --value 7 \
-    --batch-id "batch-e2e-forged-payload" \
+    --sequence 900011 --metric-key "e2e.forged.payload.${RUN_ID}" --value 7 \
+    --batch-id "batch-e2e-forged-payload-${RUN_ID}" \
     > "${EVIDENCE_DIR}/forged-payload-tenant.json"
 FORGED_PAY_ACK="$(post_envelope "${EVIDENCE_DIR}/forged-payload-tenant.json")"
 if echo "${FORGED_PAY_ACK}" | grep -q '"status":"ACCEPTED"'; then
@@ -294,15 +300,16 @@ else
     fail_closed "tenant-payload-claim-accepted-as-evidence" "${FORGED_PAY_ACK}"
 fi
 FORGED_HITS=0
+FORGED_METRIC="e2e.forged.payload.${RUN_ID}"
 for i in $(seq 1 20); do
-    dump="$(consume_kafka 10)"
-    if echo "${dump}" | grep -q 'e2e.forged.payload'; then
-        echo "${dump}" | grep 'e2e.forged.payload' > "${EVIDENCE_DIR}/forged-payload-kafka.txt"
-        if echo "${dump}" | grep 'e2e.forged.payload' | grep -q "${TENANT}" \
-            && ! echo "${dump}" | grep 'e2e.forged.payload' | grep -q "${FORGED_TENANT}"; then
+    dump="$(consume_kafka 5)"
+    if echo "${dump}" | grep -q "${FORGED_METRIC}"; then
+        echo "${dump}" | grep "${FORGED_METRIC}" > "${EVIDENCE_DIR}/forged-payload-kafka.txt"
+        if echo "${dump}" | grep "${FORGED_METRIC}" | grep -q "${TENANT}" \
+            && ! echo "${dump}" | grep "${FORGED_METRIC}" | grep -q "${FORGED_TENANT}"; then
             FORGED_HITS=1
         else
-            fail_closed "tenant-payload-not-authoritative" "Kafka tenant did not stay server-derived: $(echo "${dump}" | grep e2e.forged.payload | head -1)"
+            fail_closed "tenant-payload-not-authoritative" "Kafka tenant did not stay server-derived: $(echo "${dump}" | grep "${FORGED_METRIC}" | head -1)"
         fi
         break
     fi
@@ -433,8 +440,8 @@ docker pause platform-core >/dev/null
 python3 "${E2E_DIR}/build_envelope.py" \
     --envelope-tenant "${TENANT}" --payload-tenant "${TENANT}" \
     --agent-id "${AGENT_ID}" --host-id "${HOST_ID}" \
-    --sequence 900021 --metric-key "e2e.core.pause" --value 3 \
-    --batch-id "batch-e2e-core-pause" \
+    --sequence 900021 --metric-key "e2e.core.pause.${RUN_ID}" --value 3 \
+    --batch-id "batch-e2e-core-pause-${RUN_ID}" \
     > "${EVIDENCE_DIR}/core-pause-envelope.json"
 CORE_PAUSE_ACK="$(post_envelope "${EVIDENCE_DIR}/core-pause-envelope.json")"
 if echo "${CORE_PAUSE_ACK}" | grep -q '"status":"ACCEPTED"'; then
@@ -448,14 +455,14 @@ docker unpause platform-core >/dev/null
 sleep 12
 CORE_HITS=0
 for i in $(seq 1 20); do
-    CORE_HITS="$(count_agent_kafka 'e2e.core.pause')"
+    CORE_HITS="$(count_agent_kafka "e2e.core.pause.${RUN_ID}")"
     if [[ "${CORE_HITS}" -ge 1 ]]; then
         break
     fi
     sleep 3
 done
 if [[ "${CORE_HITS}" -ge 1 ]]; then
-    record "core-restore-kafka" "PASS" "e2e.core.pause hits=${CORE_HITS}"
+    record "core-restore-kafka" "PASS" "e2e.core.pause.${RUN_ID} hits=${CORE_HITS}"
 else
     record "core-restore-kafka" "FAIL" "paused-core batch never reached Kafka"
 fi
@@ -466,8 +473,8 @@ docker pause platform-core >/dev/null
 python3 "${E2E_DIR}/build_envelope.py" \
     --envelope-tenant "${TENANT}" --payload-tenant "${TENANT}" \
     --agent-id "${AGENT_ID}" --host-id "${HOST_ID}" \
-    --sequence 900031 --metric-key "e2e.sensor.restart" --value 5 \
-    --batch-id "batch-e2e-sensor-restart" \
+    --sequence 900031 --metric-key "e2e.sensor.restart.${RUN_ID}" --value 5 \
+    --batch-id "batch-e2e-sensor-restart-${RUN_ID}" \
     > "${EVIDENCE_DIR}/sensor-restart-envelope.json"
 SR_ACK="$(post_envelope "${EVIDENCE_DIR}/sensor-restart-envelope.json")"
 if echo "${SR_ACK}" | grep -q '"status":"ACCEPTED"'; then
@@ -481,14 +488,14 @@ wait_receiver || true
 docker unpause platform-core >/dev/null
 SR_HITS=0
 for i in $(seq 1 24); do
-    SR_HITS="$(count_agent_kafka 'e2e.sensor.restart')"
+    SR_HITS="$(count_agent_kafka "e2e.sensor.restart.${RUN_ID}")"
     if [[ "${SR_HITS}" -ge 1 ]]; then
         break
     fi
     sleep 3
 done
 if [[ "${SR_HITS}" -ge 1 ]]; then
-    record "sensor-restart-recovers-accepted-batch" "PASS" "e2e.sensor.restart hits=${SR_HITS}"
+    record "sensor-restart-recovers-accepted-batch" "PASS" "e2e.sensor.restart.${RUN_ID} hits=${SR_HITS}"
 else
     record "sensor-restart-recovers-accepted-batch" "FAIL" "accepted batch did not reach Kafka after Sensor restart"
 fi
