@@ -20,7 +20,7 @@ env:
 jobs:
   static-contracts:
     name: Static contracts
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, platform-ci]
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -41,9 +41,32 @@ jobs:
           fi
 
       - name: Prepare deterministic environment
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           cp .env.example .env
+          RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
+
+          sed -i "s/^PLATFORM_CORE_HOST_PORT=.*/PLATFORM_CORE_HOST_PORT=21443/" .env
+          sed -i "s/^PLATFORM_UI_HOST_PORT=.*/PLATFORM_UI_HOST_PORT=21000/" .env
+          sed -i "s/^PLATFORM_POSTGRES_HOST_PORT=.*/PLATFORM_POSTGRES_HOST_PORT=21432/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=.*/PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=21123/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=.*/PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=21900/" .env
+          sed -i "s/^PLATFORM_VALKEY_HOST_PORT=.*/PLATFORM_VALKEY_HOST_PORT=21379/" .env
+          sed -i "s/^PLATFORM_ENV=.*/PLATFORM_ENV=ci/" .env
+
+          cat <<EOF >> .env
+          PLATFORM_PG_DATA_VOLUME=ci_${RUN_IDENTITY}_pg_data
+          PLATFORM_CH_DATA_VOLUME=ci_${RUN_IDENTITY}_ch_data
+          PLATFORM_KAFKA_DATA_VOLUME=ci_${RUN_IDENTITY}_kafka_data
+          PLATFORM_VALKEY_DATA_VOLUME=ci_${RUN_IDENTITY}_valkey_data
+          PLATFORM_SENSOR_NET_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_net_spool
+          PLATFORM_SENSOR_INFRA_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_infra_spool
+          EOF
+          sed -i 's/^[[:space:]]*//' .env
+
           make certs
           docker compose config -q
 
@@ -67,7 +90,7 @@ jobs:
 
   unit:
     name: Unit tests
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, platform-ci]
     timeout-minutes: 25
     steps:
       - name: Checkout
@@ -77,9 +100,32 @@ jobs:
           persist-credentials: false
 
       - name: Prepare environment
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           cp .env.example .env
+          RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
+
+          sed -i "s/^PLATFORM_CORE_HOST_PORT=.*/PLATFORM_CORE_HOST_PORT=21443/" .env
+          sed -i "s/^PLATFORM_UI_HOST_PORT=.*/PLATFORM_UI_HOST_PORT=21000/" .env
+          sed -i "s/^PLATFORM_POSTGRES_HOST_PORT=.*/PLATFORM_POSTGRES_HOST_PORT=21432/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=.*/PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=21123/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=.*/PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=21900/" .env
+          sed -i "s/^PLATFORM_VALKEY_HOST_PORT=.*/PLATFORM_VALKEY_HOST_PORT=21379/" .env
+          sed -i "s/^PLATFORM_ENV=.*/PLATFORM_ENV=ci/" .env
+
+          cat <<EOF >> .env
+          PLATFORM_PG_DATA_VOLUME=ci_${RUN_IDENTITY}_pg_data
+          PLATFORM_CH_DATA_VOLUME=ci_${RUN_IDENTITY}_ch_data
+          PLATFORM_KAFKA_DATA_VOLUME=ci_${RUN_IDENTITY}_kafka_data
+          PLATFORM_VALKEY_DATA_VOLUME=ci_${RUN_IDENTITY}_valkey_data
+          PLATFORM_SENSOR_NET_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_net_spool
+          PLATFORM_SENSOR_INFRA_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_infra_spool
+          EOF
+          sed -i 's/^[[:space:]]*//' .env
+
           mkdir -p "${HOME}/.m2"
 
       - name: Run containerized unit tests
@@ -92,7 +138,7 @@ jobs:
 
   ui-build:
     name: UI test and production build
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, platform-ci]
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -113,7 +159,7 @@ jobs:
 
   integration-security:
     name: Integration, PostgreSQL, contract, security
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, platform-ci]
     timeout-minutes: 50
     steps:
       - name: Checkout
@@ -121,12 +167,142 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Prepare environment
+      - name: Preflight host container and port collision safety
+        run: |
+          set -euo pipefail
+          echo "==> [Preflight 1/2] Checking normal development container collisions..."
+          DEV_CONTAINERS=(
+            "platform-postgres"
+            "platform-clickhouse"
+            "platform-kafka"
+            "platform-valkey"
+            "platform-core"
+            "platform-core-standby"
+            "platform-sensor-net"
+            "platform-sensor-infra"
+            "platform-analytics"
+            "platform-ui"
+          )
+          EXISTING_CONTAINERS=$(docker ps -a --format '{{.Names}}')
+          COLLISIONS=()
+          for name in "${DEV_CONTAINERS[@]}"; do
+            if printf '%s\n' "${EXISTING_CONTAINERS}" | grep -Fxq "${name}"; then
+              COLLISIONS+=("${name}")
+            fi
+          done
+          if [ ${#COLLISIONS[@]} -gt 0 ]; then
+            echo "[ERROR] Pre-existing Platform development containers detected: ${COLLISIONS[*]}"
+            echo "Platform development containers are present. Preserve developer data and run 'make dev-down' before self-hosted CI."
+            exit 1
+          fi
+          echo "[OK] No normal development container collisions detected."
+
+          echo "==> [Preflight 2/2] Checking CI host port availability..."
+          CI_PORTS=(21443 21000 21432 21123 21900 21379)
+          OCCUPIED_PORTS=()
+          SS_LISTENERS=$(ss -tuln 2>/dev/null || netstat -tuln 2>/dev/null || true)
+          for port in "${CI_PORTS[@]}"; do
+            if printf '%s\n' "${SS_LISTENERS}" | grep -Eq "[:.]${port}[[:space:]]"; then
+              OCCUPIED_PORTS+=("${port}")
+            fi
+          done
+          if [ ${#OCCUPIED_PORTS[@]} -gt 0 ]; then
+            echo "[ERROR] Designated CI host port(s) already bound: ${OCCUPIED_PORTS[*]}"
+            exit 1
+          fi
+          echo "[OK] All 6 CI host ports (21000-21900 range) are free."
+
+      - name: Prepare deterministic environment and configure isolated CI runtime
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           cp .env.example .env
+          RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
+
+          # Assign coherent CI-only ports (20000-29999, non-overlapping with dev/HA defaults)
+          sed -i "s/^PLATFORM_CORE_HOST_PORT=.*/PLATFORM_CORE_HOST_PORT=21443/" .env
+          sed -i "s/^PLATFORM_UI_HOST_PORT=.*/PLATFORM_UI_HOST_PORT=21000/" .env
+          sed -i "s/^PLATFORM_POSTGRES_HOST_PORT=.*/PLATFORM_POSTGRES_HOST_PORT=21432/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=.*/PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=21123/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=.*/PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=21900/" .env
+          sed -i "s/^PLATFORM_VALKEY_HOST_PORT=.*/PLATFORM_VALKEY_HOST_PORT=21379/" .env
+          sed -i "s/^PLATFORM_ENV=.*/PLATFORM_ENV=ci/" .env
+
+          # Assign unique run/attempt-scoped persistent volume targets
+          cat <<EOF >> .env
+          PLATFORM_PG_DATA_VOLUME=ci_${RUN_IDENTITY}_pg_data
+          PLATFORM_CH_DATA_VOLUME=ci_${RUN_IDENTITY}_ch_data
+          PLATFORM_KAFKA_DATA_VOLUME=ci_${RUN_IDENTITY}_kafka_data
+          PLATFORM_VALKEY_DATA_VOLUME=ci_${RUN_IDENTITY}_valkey_data
+          PLATFORM_SENSOR_NET_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_net_spool
+          PLATFORM_SENSOR_INFRA_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_infra_spool
+          EOF
+          sed -i 's/^[[:space:]]*//' .env
+
           make certs
-          docker compose config -q
+
+      - name: Verify safe rendered compose configuration
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, subprocess, sys
+
+          raw = subprocess.check_output(
+              ["docker", "compose", "config", "--format", "json"],
+              text=True,
+          )
+          cfg = json.loads(raw)
+
+          expected_volumes = {
+              "platform_pg_data",
+              "platform_ch_data",
+              "platform_kafka_data",
+              "platform_valkey_data",
+              "platform_sensor_net_spool",
+              "platform_sensor_infra_spool",
+          }
+          forbidden_names = set(expected_volumes)
+
+          volumes = cfg.get("volumes", {})
+          missing = expected_volumes - set(volumes.keys())
+          if missing:
+              print(f"[ERROR] Rendered Compose missing volume definitions: {sorted(missing)}")
+              sys.exit(1)
+
+          for v_key in expected_volumes:
+              target = volumes[v_key].get("name", "")
+              if not target.startswith("ci_"):
+                  print(f"[ERROR] Volume target {v_key}='{target}' is not CI-prefixed")
+                  sys.exit(1)
+              if target in forbidden_names:
+                  print(f"[ERROR] Volume target {v_key} matches persistent dev volume '{target}'")
+                  sys.exit(1)
+
+          expected_ports = {"21443", "21000", "21432", "21123", "21900", "21379"}
+          dev_ports = {"28443", "23000", "25432", "28123", "29000", "26379", "25442"}
+          published_ports = set()
+          for svc in cfg.get("services", {}).values():
+              for p in svc.get("ports", []):
+                  if isinstance(p, dict) and "published" in p:
+                      published_ports.add(str(p["published"]))
+                  elif isinstance(p, str) and ":" in p:
+                      parts = p.split(":")
+                      if len(parts) >= 2:
+                          published_ports.add(parts[-2])
+
+          if published_ports != expected_ports:
+              print(f"[ERROR] Rendered published ports {sorted(published_ports)} != expected {sorted(expected_ports)}")
+              sys.exit(1)
+
+          overlap = published_ports & dev_ports
+          if overlap:
+              print(f"[ERROR] Rendered published ports overlap dev/HA ports: {sorted(overlap)}")
+              sys.exit(1)
+
+          print("[OK] Rendered Compose safety gate PASSED: 6 isolated CI volumes and 6 CI ports verified.")
+          PY
 
       - name: Run 20-test integration suite
         run: make test-integration
@@ -148,4 +324,10 @@ jobs:
 
       - name: Clean CI stack
         if: always()
-        run: docker compose down -v --remove-orphans || true
+        run: |
+          if [ -f .env ] && grep -q '^PLATFORM_PG_DATA_VOLUME=ci_' .env 2>/dev/null; then
+            echo "==> Verified CI-owned configuration; tearing down CI stack and CI volumes..."
+            docker compose down -v --remove-orphans || true
+          else
+            echo "[WARN] .env does not contain verified CI volume markers; skipping docker compose down -v to protect local data."
+          fi
