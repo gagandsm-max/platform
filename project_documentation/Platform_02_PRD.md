@@ -288,7 +288,9 @@ Device count alone shall not be the sole enforcement model.
 
 - Separate Windows and Linux Agent builds.
 - Initial Agent enrollment takes a stable Core endpoint.
-- Core authenticates/enrolls Agent and assigns an appropriate available Sensor.
+- Core authenticates/enrolls Agent and shall select an appropriate eligible Sensor during enrollment for a provisional authenticated Agent→Sensor control/transport association used for certificate/identity authority, onboarding/bootstrap validation, bounded health/bootstrap evidence and candidate reconciliation.
+- The provisional Sensor association does not itself activate full monitoring, commercial/licence consumption, normal monitoring profiles, customer operational alerts or recurring monitored workload.
+- Normal monitoring workload/profile becomes active only after explicit authorized approval or an authorized trusted auto-approval policy and after normal entitlement, capacity and policy checks. Activation retains or re-evaluates the provisional Sensor through the same Sensor Control assignment/versioning authority; no second Sensor authority mechanism is created.
 - Core may reassign Agent to another Sensor based on locality/capacity/HA policy.
 - Agent shall support secure mTLS identity and certificate rotation.
 - Agent shall support host metrics, process/service monitoring, selected logs and local network experience tests.
