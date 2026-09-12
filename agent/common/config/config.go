@@ -270,7 +270,9 @@ func LoadConfigFromEnv(environ []string) (*Config, error) {
 		c.MaxBatchRecords = n
 	}
 
-	c.MaxBatchBytes = 1024 * 1024 // 1MB
+	// One Agent delivery envelope becomes one Core agent-ingress record.
+	// Core AgentIngestionValidator.MAX_RECORD_BYTES is 512 KiB; leave wrap room.
+	c.MaxBatchBytes = 384 * 1024
 	if val := envMap["PLATFORM_AGENT_MAX_BATCH_BYTES"]; val != "" {
 		n, err := strconv.ParseInt(val, 10, 64)
 		if err != nil || n < 1024 || n > 10*1024*1024 {

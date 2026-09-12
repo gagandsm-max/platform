@@ -76,7 +76,7 @@ func NewWorker(
 		maxBatchRecords = 100
 	}
 	if maxBatchBytes <= 0 {
-		maxBatchBytes = 1024 * 1024
+		maxBatchBytes = 384 * 1024
 	}
 	if retryBase <= 0 {
 		retryBase = time.Second

@@ -86,6 +86,9 @@ func TestConfigValidation(t *testing.T) {
 	if cfg.CoreURL != "https://core.platform.local:8443" {
 		t.Fatalf("core url mismatch: %s", cfg.CoreURL)
 	}
+	if cfg.MaxBatchBytes != 384*1024 {
+		t.Fatalf("default MaxBatchBytes must stay under Core 512KiB record limit, got %d", cfg.MaxBatchBytes)
+	}
 
 	// 2. Cleartext HTTP rejected for Sensor telemetry URL
 	httpEnv := append([]string{}, baseEnv...)

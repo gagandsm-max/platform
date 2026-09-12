@@ -373,9 +373,47 @@ func TestShutdownIdempotent(t *testing.T) {
 	}
 }
 
+func TestDrainParksRecordTooLarge(t *testing.T) {
+	s, dir := openSpool(t)
+	_ = appendDurable(t, s, 1)
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{
+		Code: "ERR_RECORD_TOO_LARGE", Message: "record exceeds maximum size", HTTPStatus: 413,
+	}}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
+		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = d.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected poison error")
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 0 {
+		t.Fatalf("oversized Core rejection must leave hot spool, got %d", st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 {
+		t.Fatalf("poison count=%d", d.Metrics().PoisonCount.Load())
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
+	if len(entries) == 0 {
+		t.Fatal("expected poison file for ERR_RECORD_TOO_LARGE")
+	}
+}
+
 func TestIsTerminalCoreError(t *testing.T) {
 	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_AGENT_ENTITY_UNRESOLVED", HTTPStatus: 422}) {
 		t.Fatal("expected terminal")
+	}
+	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_RECORD_TOO_LARGE", HTTPStatus: 413}) {
+		t.Fatal("413 ERR_RECORD_TOO_LARGE must be terminal so drain is not head-of-line blocked")
+	}
+	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_OTHER_CONTRACT", HTTPStatus: 413}) {
+		t.Fatal("non-transient 413 must be terminal")
 	}
 	for _, code := range []string{
 		"ERR_AUTH_IDENTITY_MISMATCH",
