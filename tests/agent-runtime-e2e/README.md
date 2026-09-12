@@ -11,6 +11,17 @@ make certs
 make test-agent-runtime-e2e
 ```
 
+`make test-agent-runtime-e2e` does **not** regenerate `deploy/docker/certs`
+(that would rotate the Root CA while Core still holds the previous keystore in
+memory). If CA files are missing, `run.sh` calls `make certs` once. Do not run
+`make certs` against a live stack.
+
+```bash
+# only if ca.crt is missing, and only while Compose is down:
+# make certs
+make test-agent-runtime-e2e
+```
+
 Path proven:
 
 Agent process → local durable queue → mTLS `POST /api/v1/agent/telemetry` →
