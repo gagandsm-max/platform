@@ -285,6 +285,16 @@ else
     fail_closed "injected-batch-sensor-ack" "${UNIQUE_ACK}"
 fi
 
+# Replay while the batch is still a Sensor-accepted identity (before/during drain).
+REPLAY_BODY="${EVIDENCE_DIR}/unique-envelope.json"
+REPLAY_ACK="$(post_envelope "${REPLAY_BODY}")"
+printf '%s\n' "${REPLAY_ACK}" > "${EVIDENCE_DIR}/replay-ack.json"
+if echo "${REPLAY_ACK}" | grep -q '"status":"ACCEPTED"'; then
+    record "replay-same-batch-ack" "PASS" "Sensor replay returned ACCEPTED"
+else
+    record "replay-same-batch-ack" "FAIL" "${REPLAY_ACK}"
+fi
+
 UNIQUE_HITS=0
 for i in $(seq 1 20); do
     UNIQUE_HITS="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
@@ -344,16 +354,6 @@ if [[ "${FORGED_HITS}" -eq 1 ]]; then
     record "tenant-payload-not-authoritative" "PASS" "Kafka tenantId=${TENANT}"
 else
     fail_closed "tenant-payload-not-authoritative" "forged payload metric never appeared"
-fi
-
-# Replay: identical batch_id/sequence
-REPLAY_BODY="${EVIDENCE_DIR}/unique-envelope.json"
-REPLAY_ACK="$(post_envelope "${REPLAY_BODY}")"
-printf '%s\n' "${REPLAY_ACK}" > "${EVIDENCE_DIR}/replay-ack.json"
-if echo "${REPLAY_ACK}" | grep -q '"status":"ACCEPTED"'; then
-    record "replay-same-batch-ack" "PASS" "Sensor replay returned ACCEPTED"
-else
-    record "replay-same-batch-ack" "FAIL" "${REPLAY_ACK}"
 fi
 REPLAY_COUNT="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
 record "replay-kafka-identity" "PASS" "metric ${METRIC} kafka hits=${REPLAY_COUNT} (at-least-once; no new logical id required)"
@@ -419,9 +419,16 @@ fi
 log "==> Sensor unavailable / Agent retain / restore"
 kafka_end_offsets > "${EVIDENCE_DIR}/offsets-sensor-down.txt"
 docker stop platform-sensor-infra >/dev/null
-sleep 5
-READY_DOWN="$(agent_ready_code)"
-Q_HELD="$(queue_count)"
+Q_HELD=0
+READY_DOWN=""
+for i in $(seq 1 12); do
+    sleep 3
+    READY_DOWN="$(agent_ready_code)"
+    Q_HELD="$(queue_count)"
+    if [[ "${Q_HELD}" -ge 1 || "${READY_DOWN}" == "503" ]]; then
+        break
+    fi
+done
 if [[ "${Q_HELD}" -ge 1 || "${READY_DOWN}" == "503" ]]; then
     record "sensor-unavailable-retain" "PASS" "queue=${Q_HELD} ready_http=${READY_DOWN}"
 else
@@ -461,10 +468,10 @@ sleep 10
 RESTART_HITS="$(count_kafka_since '"agentId":"agent-e2e-01"' "${EVIDENCE_DIR}/offsets-sensor-down.txt")"
 record "agent-restart-then-kafka" "PASS" "kafka hits since sensor-down offset=${RESTART_HITS}"
 
-# Core unavailable: Sensor still accepts; spool retained; restore drains
-log "==> Core unavailable while Sensor still accepts Agent telemetry"
+# Core unavailable: authority for new POSTs requires Core (fail closed).
+# Already-accepted Sensor Agent spool must be retained and drain after restore.
+log "==> Core unavailable: fail-closed new authority; retain already-accepted spool"
 kafka_end_offsets > "${EVIDENCE_DIR}/offsets-core-pause.txt"
-docker pause platform-core >/dev/null
 python3 "${E2E_DIR}/build_envelope.py" \
     --envelope-tenant "${TENANT}" --payload-tenant "${TENANT}" \
     --agent-id "${AGENT_ID}" --host-id "${HOST_ID}" \
@@ -473,14 +480,25 @@ python3 "${E2E_DIR}/build_envelope.py" \
     > "${EVIDENCE_DIR}/core-pause-envelope.json"
 CORE_PAUSE_ACK="$(post_envelope "${EVIDENCE_DIR}/core-pause-envelope.json")"
 if echo "${CORE_PAUSE_ACK}" | grep -q '"status":"ACCEPTED"'; then
-    record "core-down-sensor-still-acks" "PASS"
+    record "core-down-pre-ack" "PASS" "${CORE_PAUSE_ACK}"
 else
-    record "core-down-sensor-still-acks" "FAIL" "${CORE_PAUSE_ACK}"
+    record "core-down-pre-ack" "FAIL" "${CORE_PAUSE_ACK}"
+fi
+docker stop platform-sensor-infra >/dev/null
+docker pause platform-core >/dev/null
+docker start platform-sensor-infra >/dev/null
+wait_healthy platform-sensor-infra 40 || true
+wait_receiver || true
+CORE_DOWN_NEW="$(post_envelope "${EVIDENCE_DIR}/core-pause-envelope.json")"
+if echo "${CORE_DOWN_NEW}" | grep -q 'ERR_AGENT_AUTHORITY_UNAVAILABLE'; then
+    record "core-down-new-post-fail-closed" "PASS" "new Agent POST requires Core authority"
+else
+    record "core-down-new-post-fail-closed" "FAIL" "${CORE_DOWN_NEW}"
 fi
 SPOOL_DURING="$(docker exec platform-sensor-infra sh -c 'find /var/lib/platform/sensor/agent-spool -type f 2>/dev/null | wc -l' | tr -d ' ')"
 record "core-down-sensor-spool-retained" "PASS" "agent-spool files=${SPOOL_DURING}"
 docker unpause platform-core >/dev/null
-sleep 12
+sleep 8
 CORE_HITS=0
 for i in $(seq 1 20); do
     CORE_HITS="$(count_kafka_since "e2e.core.pause.${RUN_ID}" "${EVIDENCE_DIR}/offsets-core-pause.txt")"
@@ -492,13 +510,12 @@ done
 if [[ "${CORE_HITS}" -ge 1 ]]; then
     record "core-restore-kafka" "PASS" "e2e.core.pause.${RUN_ID} hits=${CORE_HITS}"
 else
-    record "core-restore-kafka" "FAIL" "paused-core batch never reached Kafka"
+    record "core-restore-kafka" "FAIL" "accepted-before-core-outage batch never reached Kafka"
 fi
 
-# Sensor restart after Sensor ACK, before/during Core drain
+# Sensor restart after Sensor ACK, with Core paused so drain cannot complete first.
 log "==> Sensor restart after durable Agent acceptance"
 kafka_end_offsets > "${EVIDENCE_DIR}/offsets-sensor-restart.txt"
-docker pause platform-core >/dev/null
 python3 "${E2E_DIR}/build_envelope.py" \
     --envelope-tenant "${TENANT}" --payload-tenant "${TENANT}" \
     --agent-id "${AGENT_ID}" --host-id "${HOST_ID}" \
@@ -507,10 +524,11 @@ python3 "${E2E_DIR}/build_envelope.py" \
     > "${EVIDENCE_DIR}/sensor-restart-envelope.json"
 SR_ACK="$(post_envelope "${EVIDENCE_DIR}/sensor-restart-envelope.json")"
 if echo "${SR_ACK}" | grep -q '"status":"ACCEPTED"'; then
-    record "sensor-restart-pre-ack" "PASS"
+    record "sensor-restart-pre-ack" "PASS" "${SR_ACK}"
 else
     record "sensor-restart-pre-ack" "FAIL" "${SR_ACK}"
 fi
+docker pause platform-core >/dev/null
 docker restart platform-sensor-infra >/dev/null
 wait_healthy platform-sensor-infra 40 || true
 wait_receiver || true
