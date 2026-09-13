@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
 	"net/http"
@@ -803,5 +804,124 @@ func TestHTTPSDeliverRejectsUnknownAckFields(t *testing.T) {
 	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{}`)}))
 	if err == nil || !strings.Contains(err.Error(), "DELIVERY_ACK_MALFORMED") {
 		t.Fatalf("expected unknown ACK field rejection, got %v", err)
+	}
+}
+
+func TestMaxWrapSafeEnvelopeFitsSensorReceiver(t *testing.T) {
+	payload, err := json.Marshal(map[string]string{"pad": strings.Repeat("x", 384*1024)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := DeliveryEnvelope{
+		SchemaVersion: 1,
+		AgentID:       "agent-01",
+		TenantID:      "tenant-01",
+		SiteID:        "site-01",
+		CorrelationID: "corr-" + strings.Repeat("c", 32),
+		BatchID:       "batch-agent-01-00000000000000000001-00000000000000000001-0123456789abcdef",
+		FirstSequence: 1,
+		LastSequence:  1,
+		RecordCount:   1,
+		Records: []DeliveryRecord{{
+			Sequence:  1,
+			ID:        "rec-1",
+			CreatedAt: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC),
+			Checksum:  strings.Repeat("a", 64),
+			Payload:   payload,
+		}},
+	}
+	body, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int64(len(body)) > SensorReceiverMaxBodyBytes {
+		t.Fatalf("wrap-safe 384KiB payload marshaled to %d bytes, exceeds Sensor %d", len(body), SensorReceiverMaxBodyBytes)
+	}
+}
+
+func TestHTTPSDeliverClassifies413AsOversizedNotTransient(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+	var gotRequests int
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRequests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		_ = json.NewEncoder(w).Encode(ErrorResponse{
+			Status:  "ERROR",
+			Code:    "ERR_REQUEST_TOO_LARGE",
+			Message: "Request body exceeds maximum size limit of 524288 bytes",
+		})
+	}))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", queue.Record{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)}))
+	if err == nil {
+		t.Fatal("expected HTTP 413 to fail delivery")
+	}
+	if Classify(err) != FailureOversized {
+		t.Fatalf("HTTP 413 must be FailureOversized, not %q (%v)", Classify(err), err)
+	}
+	var de *DeliveryError
+	if !errors.As(err, &de) || de.Code != "ERR_REQUEST_TOO_LARGE" {
+		t.Fatalf("expected ERR_REQUEST_TOO_LARGE, got %+v", err)
+	}
+	if gotRequests != 1 {
+		t.Fatalf("expected one POST, got %d", gotRequests)
+	}
+}
+
+func TestHTTPSDeliverRejectsEnvelopeOverSensorBodyLocally(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+	var gotRequests int
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRequests++
+		w.WriteHeader(http.StatusOK)
+	}))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hugePayload, err := json.Marshal(map[string]string{"pad": strings.Repeat("x", SensorReceiverMaxBodyBytes+1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	huge := queue.Record{
+		Sequence:  1,
+		ID:        "r-huge",
+		CreatedAt: time.Now().UTC(),
+		Checksum:  strings.Repeat("a", 64),
+		Payload:   hugePayload,
+	}
+	_, err = tr.Deliver(context.Background(), testBatch("agent-01", huge))
+	if err == nil {
+		t.Fatal("expected local envelope size rejection")
+	}
+	if Classify(err) != FailureOversized {
+		t.Fatalf("expected FailureOversized, got %q (%v)", Classify(err), err)
+	}
+	var de *DeliveryError
+	if !errors.As(err, &de) || de.Code != errDeliveryEnvelopeTooLarge {
+		t.Fatalf("expected %s, got %+v", errDeliveryEnvelopeTooLarge, err)
+	}
+	if gotRequests != 0 {
+		t.Fatalf("oversized envelope must not be POSTed, requests=%d", gotRequests)
 	}
 }

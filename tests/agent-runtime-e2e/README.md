@@ -27,9 +27,17 @@ with `--timeout-ms` can miss later Agent records.
 
 Agent `PLATFORM_AGENT_MAX_BATCH_BYTES` defaults to 384 KiB so one delivery
 envelope stays under Core `AgentIngestionValidator.MAX_RECORD_BYTES` (512 KiB).
-The overlay also sets that cap explicitly. Sensor Agent Receiver default max
-body is 512 KiB. Core 413 `ERR_RECORD_TOO_LARGE` is a terminal drain poison
-(not an infinite retry).
+The overlay also sets that cap explicitly. Operator overrides above 384 KiB are
+rejected at Agent config load (`CONFIG_MAX_BATCH_BYTES_OUT_OF_BOUNDS`) so the
+process cannot start a deterministic HTTP 413 retry loop. Sensor Agent Receiver
+default max body is 512 KiB. Agent HTTP 413 `ERR_REQUEST_TOO_LARGE` is classified
+`OVERSIZED` (queue retained, no hot retry). Core 413 `ERR_RECORD_TOO_LARGE` is a
+terminal drain poison (not an infinite retry).
+
+Post-drain duplicate replay uses the durable batch-index acceptance receipt. The
+pending Agent spool record may be gone after downstream drain; an identical
+retry must still return the original `accepted_through_sequence`. Mutated reuse
+of the same sequence range returns `ERR_REPLAY_CONFLICT`.
 
 ```bash
 # only if ca.crt is missing, and only while Compose is down:

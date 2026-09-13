@@ -39,6 +39,25 @@ var allowedEnvVars = map[string]bool{
 	"PLATFORM_ENV":                       true,
 }
 
+const (
+	// DefaultMaxBatchBytes is the wrap-safe Agent delivery budget. One Agent
+	// envelope is one Sensor body and one Core agent-ingress record.
+	DefaultMaxBatchBytes = 384 * 1024
+	// MaxConfiguredBatchBytes is the highest operator-configurable batch budget.
+	// It must stay at or below DefaultMaxBatchBytes so a configured Agent cannot
+	// serialize a body the Sensor receiver (512 KiB) will deterministically reject.
+	MaxConfiguredBatchBytes = DefaultMaxBatchBytes
+	MinConfiguredBatchBytes = 1024
+	DefaultMaxRecordBytes   = 64 * 1024
+	// MaxConfiguredRecordBytes is capped to the same wrap-safe budget: ReadBatch
+	// always emits a first record even when it exceeds MaxBatchBytes.
+	MaxConfiguredRecordBytes = DefaultMaxBatchBytes
+	MinConfiguredRecordBytes = 1024
+	// SensorReceiverMaxBodyBytes matches sensor agentreceiver.DefaultMaxBodyBytes
+	// and Core AgentIngestionValidator.MAX_RECORD_BYTES.
+	SensorReceiverMaxBodyBytes = 512 * 1024
+)
+
 type Config struct {
 	TenantID           string
 	SensorURL          string
@@ -252,11 +271,11 @@ func LoadConfigFromEnv(environ []string) (*Config, error) {
 		c.MaxBufferBytes = n
 	}
 
-	c.MaxRecordBytes = 64 * 1024 // 64KB
+	c.MaxRecordBytes = DefaultMaxRecordBytes
 	if val := envMap["PLATFORM_AGENT_MAX_RECORD_BYTES"]; val != "" {
 		n, err := strconv.Atoi(val)
-		if err != nil || n < 1024 || n > 1024*1024 {
-			return nil, errors.New("CONFIG_MAX_RECORD_BYTES_OUT_OF_BOUNDS: must be between 1KB and 1MB")
+		if err != nil || n < MinConfiguredRecordBytes || n > MaxConfiguredRecordBytes {
+			return nil, fmt.Errorf("CONFIG_MAX_RECORD_BYTES_OUT_OF_BOUNDS: must be between %d and %d bytes (Sensor/Core acceptance ceiling is %d)", MinConfiguredRecordBytes, MaxConfiguredRecordBytes, SensorReceiverMaxBodyBytes)
 		}
 		c.MaxRecordBytes = n
 	}
@@ -272,11 +291,11 @@ func LoadConfigFromEnv(environ []string) (*Config, error) {
 
 	// One Agent delivery envelope becomes one Core agent-ingress record.
 	// Core AgentIngestionValidator.MAX_RECORD_BYTES is 512 KiB; leave wrap room.
-	c.MaxBatchBytes = 384 * 1024
+	c.MaxBatchBytes = DefaultMaxBatchBytes
 	if val := envMap["PLATFORM_AGENT_MAX_BATCH_BYTES"]; val != "" {
 		n, err := strconv.ParseInt(val, 10, 64)
-		if err != nil || n < 1024 || n > 10*1024*1024 {
-			return nil, errors.New("CONFIG_MAX_BATCH_BYTES_OUT_OF_BOUNDS: must be between 1KB and 10MB")
+		if err != nil || n < MinConfiguredBatchBytes || n > MaxConfiguredBatchBytes {
+			return nil, fmt.Errorf("CONFIG_MAX_BATCH_BYTES_OUT_OF_BOUNDS: must be between %d and %d bytes; values above this can exceed the Sensor %d-byte receiver contract and cause non-retryable HTTP 413", MinConfiguredBatchBytes, MaxConfiguredBatchBytes, SensorReceiverMaxBodyBytes)
 		}
 		c.MaxBatchBytes = n
 	}

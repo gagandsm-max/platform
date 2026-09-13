@@ -21,6 +21,16 @@ import (
 	"platform/agent/common/queue"
 )
 
+const (
+	// SensorReceiverMaxBodyBytes matches sensor agentreceiver.DefaultMaxBodyBytes.
+	SensorReceiverMaxBodyBytes  = 512 * 1024
+	errCodeRequestTooLarge      = "ERR_REQUEST_TOO_LARGE"
+	errCodeRecordTooLarge       = "ERR_RECORD_TOO_LARGE"
+	errCodeBatchTooLarge        = "ERR_BATCH_TOO_LARGE"
+	errDeliveryEnvelopeTooLarge = "DELIVERY_ENVELOPE_TOO_LARGE"
+	errDeliveryRequestTooLarge  = "DELIVERY_REQUEST_TOO_LARGE"
+)
+
 // Wire models matching the authoritative Sensor Agent receiver contract
 type DeliveryRecord struct {
 	Sequence  uint64          `json:"sequence"`
@@ -327,6 +337,13 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 	if err != nil {
 		return Ack{}, &DeliveryError{Code: "DELIVERY_SERIALIZE_FAILED", Class: FailurePermanent, Err: err}
 	}
+	if int64(len(bodyBytes)) > SensorReceiverMaxBodyBytes {
+		return Ack{}, &DeliveryError{
+			Code:  errDeliveryEnvelopeTooLarge,
+			Class: FailureOversized,
+			Err:   fmt.Errorf("serialized Agent envelope is %d bytes; Sensor receiver maximum is %d", len(bodyBytes), SensorReceiverMaxBodyBytes),
+		}
+	}
 
 	// 2. Formulate HTTP POST Request
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.endpoint, bytes.NewReader(bodyBytes))
@@ -451,6 +468,24 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 			Code:  code,
 			Class: FailurePermanent,
 			Err:   fmt.Errorf("sensor rejected delivery as invalid (HTTP %d): %s", resp.StatusCode, errResp.Message),
+		}
+
+	case resp.StatusCode == http.StatusRequestEntityTooLarge:
+		var errResp ErrorResponse
+		_ = json.Unmarshal(respBytes, &errResp)
+		code := errDeliveryRequestTooLarge
+		if errResp.Code != "" {
+			code = errResp.Code
+		}
+		class := FailureOversized
+		switch code {
+		case errCodeRequestTooLarge, errCodeRecordTooLarge, errCodeBatchTooLarge, errDeliveryRequestTooLarge:
+			class = FailureOversized
+		}
+		return Ack{}, &DeliveryError{
+			Code:  code,
+			Class: class,
+			Err:   fmt.Errorf("sensor rejected oversized delivery (HTTP 413): %s", errResp.Message),
 		}
 
 	case resp.StatusCode >= 500:

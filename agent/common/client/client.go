@@ -19,6 +19,10 @@ const (
 	FailureAuthentication      FailureClass = "AUTHENTICATION"
 	FailurePermanent           FailureClass = "PERMANENT"
 	FailureReceiverUnavailable FailureClass = "RECEIVER_UNAVAILABLE"
+	// FailureOversized is a deterministic payload that the Sensor receiver
+	// cannot accept (HTTP 413 / envelope over the 512 KiB contract). The local
+	// queue must be retained; the delivery loop must not hot-retry it.
+	FailureOversized FailureClass = "OVERSIZED"
 )
 
 type DeliveryError struct {

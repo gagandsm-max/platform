@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -185,5 +186,47 @@ func TestConfigValidation(t *testing.T) {
 	}
 	if cfg.CoreURL != "" {
 		t.Fatalf("expected empty core url, got %s", cfg.CoreURL)
+	}
+
+	// 11. Batch-size contract: valid maximum is accepted; first invalid value fails closed.
+	maxEnv := append([]string{}, baseEnv...)
+	maxEnv = append(maxEnv, fmt.Sprintf("PLATFORM_AGENT_MAX_BATCH_BYTES=%d", MaxConfiguredBatchBytes))
+	cfg, err = LoadConfigFromEnv(maxEnv)
+	if err != nil {
+		t.Fatalf("valid maximum MaxBatchBytes must load: %v", err)
+	}
+	if cfg.MaxBatchBytes != MaxConfiguredBatchBytes {
+		t.Fatalf("expected MaxBatchBytes=%d, got %d", MaxConfiguredBatchBytes, cfg.MaxBatchBytes)
+	}
+
+	overEnv := append([]string{}, baseEnv...)
+	overEnv = append(overEnv, fmt.Sprintf("PLATFORM_AGENT_MAX_BATCH_BYTES=%d", MaxConfiguredBatchBytes+1))
+	_, err = LoadConfigFromEnv(overEnv)
+	if err == nil || !strings.Contains(err.Error(), "CONFIG_MAX_BATCH_BYTES_OUT_OF_BOUNDS") {
+		t.Fatalf("first invalid MaxBatchBytes must fail closed, got %v", err)
+	}
+
+	legacyTenMB := append([]string{}, baseEnv...)
+	legacyTenMB = append(legacyTenMB, "PLATFORM_AGENT_MAX_BATCH_BYTES=10485760")
+	_, err = LoadConfigFromEnv(legacyTenMB)
+	if err == nil || !strings.Contains(err.Error(), "CONFIG_MAX_BATCH_BYTES_OUT_OF_BOUNDS") {
+		t.Fatalf("10MiB MaxBatchBytes must no longer be configurable, got %v", err)
+	}
+
+	justBelow := append([]string{}, baseEnv...)
+	justBelow = append(justBelow, fmt.Sprintf("PLATFORM_AGENT_MAX_BATCH_BYTES=%d", MaxConfiguredBatchBytes-1))
+	cfg, err = LoadConfigFromEnv(justBelow)
+	if err != nil {
+		t.Fatalf("just-below-max MaxBatchBytes must load: %v", err)
+	}
+	if cfg.MaxBatchBytes != MaxConfiguredBatchBytes-1 {
+		t.Fatalf("expected MaxBatchBytes=%d, got %d", MaxConfiguredBatchBytes-1, cfg.MaxBatchBytes)
+	}
+
+	overRecord := append([]string{}, baseEnv...)
+	overRecord = append(overRecord, fmt.Sprintf("PLATFORM_AGENT_MAX_RECORD_BYTES=%d", MaxConfiguredRecordBytes+1))
+	_, err = LoadConfigFromEnv(overRecord)
+	if err == nil || !strings.Contains(err.Error(), "CONFIG_MAX_RECORD_BYTES_OUT_OF_BOUNDS") {
+		t.Fatalf("MaxRecordBytes above wrap-safe cap must fail closed, got %v", err)
 	}
 }

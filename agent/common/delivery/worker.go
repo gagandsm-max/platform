@@ -129,6 +129,20 @@ func (w *Worker) runLoop(ctx context.Context) {
 
 		delivered, err := w.DeliverOnce(ctx)
 		if err != nil {
+			failClass := client.Classify(err)
+			if failClass == client.FailureOversized {
+				w.logger.Error("oversized Agent batch is not retryable without configuration change; queue retained",
+					"code", w.Stats().LastErrorCode,
+					"error", err,
+				)
+				select {
+				case <-w.stopCh:
+					return
+				case <-ctx.Done():
+					return
+				}
+			}
+
 			w.mu.Lock()
 			attempt := w.stats.RetryAttempt
 			w.mu.Unlock()
