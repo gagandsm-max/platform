@@ -185,6 +185,9 @@ func TestDeliveryWorkerTemporaryErrorRetainsRecords(t *testing.T) {
 	if stats.LastFailureClass != client.FailureTemporary {
 		t.Fatalf("expected FailureTemporary, got %s", stats.LastFailureClass)
 	}
+	if stats.ReceiverAvailable {
+		t.Fatal("temporary Sensor failure must not report receiver available")
+	}
 }
 
 func TestDeliveryWorkerAuthAndPermanentRetain(t *testing.T) {
@@ -412,4 +415,36 @@ func TestDeliveryWorkerStopIdempotent(t *testing.T) {
 	w.Start(ctx)
 	w.Stop()
 	w.Stop() // must not panic
+}
+
+func TestDeliveryWorkerOversizedDoesNotRetryLoopOrDelete(t *testing.T) {
+	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
+	tr := &mockTransport{
+		available: true,
+		err:       &client.DeliveryError{Code: "ERR_REQUEST_TOO_LARGE", Class: client.FailureOversized},
+	}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.Start(ctx)
+	time.Sleep(150 * time.Millisecond)
+	w.Stop()
+	if tr.calls != 1 {
+		t.Fatalf("oversized delivery must not hot-retry, calls=%d", tr.calls)
+	}
+	if q.Len() != 1 {
+		t.Fatal("413/oversized must retain the local queue")
+	}
+	if w.Stats().Successes != 0 {
+		t.Fatal("oversized must not count as success")
+	}
+	if w.Stats().LastFailureClass != client.FailureOversized {
+		t.Fatalf("expected FailureOversized, got %s", w.Stats().LastFailureClass)
+	}
+	if w.Stats().LastErrorCode != "ERR_REQUEST_TOO_LARGE" {
+		t.Fatalf("expected ERR_REQUEST_TOO_LARGE, got %s", w.Stats().LastErrorCode)
+	}
 }

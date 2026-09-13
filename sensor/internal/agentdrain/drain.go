@@ -514,13 +514,16 @@ func isTerminalCoreError(err error) bool {
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD_PAYLOAD") ||
 		coreclient.IsCoreAPICode(err, "ERR_UNSUPPORTED_SCHEMA_VERSION") ||
 		coreclient.IsCoreAPICode(err, "ERR_CHECKSUM_MISMATCH") ||
-		coreclient.IsCoreAPICode(err, "ERR_AGENT_HOST_ID_REQUIRED") {
+		coreclient.IsCoreAPICode(err, "ERR_AGENT_HOST_ID_REQUIRED") ||
+		coreclient.IsCoreAPICode(err, "ERR_RECORD_TOO_LARGE") ||
+		coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") ||
+		coreclient.IsCoreAPICode(err, "ERR_REQUEST_TOO_LARGE") {
 		return true
 	}
 	var api *coreclient.CoreAPIError
 	if errors.As(err, &api) && !api.Transient() {
 		switch api.HTTPStatus {
-		case 400, 403, 409, 422:
+		case 400, 403, 409, 413, 422:
 			return true
 		}
 	}

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"platform/agent/common/client"
 	"platform/agent/common/delivery"
 	"platform/agent/common/queue"
 )
@@ -31,6 +33,8 @@ type mockStatsProvider struct {
 	atCapacity        bool
 	quarantine        int
 	collectorErrors   int
+	lastErrorCode     string
+	lastFailureClass  client.FailureClass
 }
 
 func (m *mockStatsProvider) QueueStats() queue.QueueStats {
@@ -42,6 +46,8 @@ func (m *mockStatsProvider) DeliveryStats() delivery.DeliveryStats {
 		ReceiverAvailable: m.receiverAvailable,
 		Attempts:          10,
 		Successes:         5,
+		LastErrorCode:     m.lastErrorCode,
+		LastFailureClass:  m.lastFailureClass,
 	}
 }
 
@@ -89,7 +95,32 @@ func TestHealthEndpoints(t *testing.T) {
 		t.Fatalf("expected DEGRADED status, got %v", hMap["status"])
 	}
 
-	// 2. When receiver is available
+	// 2. Wired HTTPS transport is not readiness: last failure class must degrade /ready.
+	provFailedDelivery := &mockStatsProvider{
+		receiverAvailable: true,
+		lastFailureClass:  client.FailureTemporary,
+		lastErrorCode:     "DELIVERY_NETWORK_ERROR",
+	}
+	sFailed, err := NewServer("127.0.0.1:0", provFailedDelivery, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wReadyFailed := httptest.NewRecorder()
+	sFailed.handleReady(wReadyFailed, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if wReadyFailed.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected /ready 503 after last delivery failure, got %d", wReadyFailed.Code)
+	}
+	if !strings.Contains(wReadyFailed.Body.String(), "DELIVERY_NETWORK_ERROR") {
+		t.Fatalf("expected last error code in ready body, got %s", wReadyFailed.Body.String())
+	}
+
+	wHealthFailed := httptest.NewRecorder()
+	sFailed.handleHealth(wHealthFailed, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if wHealthFailed.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected /health 503 after last delivery failure, got %d", wHealthFailed.Code)
+	}
+
+	// 3. When receiver is available and last delivery succeeded
 	provAvailable := &mockStatsProvider{receiverAvailable: true}
 	s2, _ := NewServer("127.0.0.1:0", provAvailable, nil)
 
@@ -97,6 +128,25 @@ func TestHealthEndpoints(t *testing.T) {
 	s2.handleReady(wReady2, reqReady)
 	if wReady2.Code != http.StatusOK {
 		t.Fatalf("expected /ready 200 when receiver available, got %d", wReady2.Code)
+	}
+}
+
+func TestHealthUnavailableReasonUsesLastErrorCode(t *testing.T) {
+	prov := &mockStatsProvider{receiverAvailable: false, lastErrorCode: "DELIVERY_NETWORK_ERROR"}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wReady := httptest.NewRecorder()
+	s.handleReady(wReady, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if wReady.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", wReady.Code)
+	}
+	if !strings.Contains(wReady.Body.String(), "DELIVERY_NETWORK_ERROR") {
+		t.Fatalf("expected last error code in ready body, got %s", wReady.Body.String())
+	}
+	if strings.Contains(wReady.Body.String(), "AGENT_RECEIVER_NOT_IMPLEMENTED") {
+		t.Fatal("health must not hardcode AGENT_RECEIVER_NOT_IMPLEMENTED")
 	}
 }
 

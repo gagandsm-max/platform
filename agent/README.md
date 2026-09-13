@@ -1,19 +1,16 @@
-# Platform Agent runtime foundation
+# Platform Agent runtime
 
-This directory contains the Linux-first Platform Agent runtime checkpoint governed by Platform v3.2.2.
+This directory contains the Linux-first Platform Agent runtime governed by Platform v3.2.2.
 
 ## Architecture boundary
 
 The authoritative flow is:
 
-1. Agent initially enrolls through the stable Core endpoint.
-2. Core owns tenant/site identity and assigns primary/fallback Infrastructure Sensor endpoints.
-3. Runtime telemetry flows Agent -> assigned Sensor over the Platform mTLS channel.
-4. The Sensor owns downstream normalization/spooling/upload to Core ingestion.
+1. Operators provision Agent identity (`PLATFORM_AGENT_ID`) and mTLS material. Core enrollment/assignment remains a separate control-plane hop; this runtime does not invent a public enrollment client.
+2. Runtime telemetry flows **Agent → assigned Infrastructure Sensor** over HTTPS+mTLS to `POST /api/v1/agent/telemetry`.
+3. The Sensor owns downstream Agent spool drain into Core agent-ingress (`POST /api/v1/sensor/agent-telemetry`). Agent never talks to Core, Kafka, or databases for telemetry.
 
-The current repository does **not** yet contain the receiving-side Agent ingress implementation on Sensor. This Agent therefore does not invent an HTTP/gRPC endpoint. It collects and durably buffers real Linux host telemetry and exposes a typed delivery/ACK boundary. Production delivery is intentionally wired to `AGENT_RECEIVER_NOT_IMPLEMENTED` until the Sensor-owned receiver contract lands.
-
-`/live` reports process liveness. `/health`, `/healthz`, and `/ready` remain degraded/not-ready while the authoritative receiver is unavailable, so a live process cannot falsely report a healthy telemetry pipeline.
+Tenant and Sensor authority are **server-derived**. Agent payload `tenantId` is evidence, not authorization. Sensor ACK `status=ACCEPTED` plus matching `agent_id` / `batch_id` / `accepted_through_sequence` is required before local queue delete.
 
 ## Implemented Linux telemetry
 
@@ -25,7 +22,7 @@ The Linux collectors use bounded standard-library `/proc` and `statfs` access on
 - memory total/available/used/utilization;
 - bounded mounted-filesystem total/used/free/utilization with mount and filesystem type.
 
-This checkpoint does not collect process command lines, environment variables, packet contents, arbitrary command output, application traces, or unrestricted process data. Windows is a compile-boundary harness only (`GOOS=windows` build of `windows/cmd`); it is not a production Windows Agent. Windows Service/SCM, Event Log, signed EXE, and MSI packaging are not implemented in this checkpoint.
+This checkpoint does not collect process command lines, environment variables, packet contents, arbitrary command output, application traces, or unrestricted process data.
 
 ## Durable local buffer
 
@@ -40,23 +37,26 @@ Agent telemetry is persisted before delivery using:
 - symlink/path protections and `0700`/`0600` state permissions;
 - configured maximum record count, total serialized buffer bytes, and payload record size.
 
-The fixed Sensor/Core 80% storage watermark is **not** copied to Agent because Platform v3.2.2 does not define that same mandatory Agent threshold. Agent buffer bounds are engineering safety guards, not commercial sizing claims.
+The fixed Sensor/Core 80% storage watermark is **not** copied to Agent because Platform v3.2.2 does not define that same mandatory Agent threshold. Agent buffer bounds are engineering safety guards, not commercial sizing claims. Delivery is at-least-once; this runtime does not claim exactly-once.
 
 ## Configuration
 
-Configuration is explicit environment input. Unknown `PLATFORM_AGENT_*` settings fail closed. Required runtime inputs are:
+Configuration is explicit environment input. Unknown `PLATFORM_AGENT_*` settings fail closed.
+
+Required runtime inputs:
 
 - `PLATFORM_AGENT_TENANT_ID`
-- `PLATFORM_AGENT_CORE_URL` — HTTPS origin only; no URL credentials/path/query/fragment
+- `PLATFORM_AGENT_ID` — Core-assigned Agent identity; must match Sensor authorization
+- `PLATFORM_AGENT_SENSOR_URL` — HTTPS origin of the assigned Sensor Agent Receiver; no URL credentials/path/query/fragment
 - `PLATFORM_AGENT_CA_FILE`
 - `PLATFORM_AGENT_CERT_FILE`
 - `PLATFORM_AGENT_KEY_FILE`
 
 Optional governed inputs:
 
-- `PLATFORM_AGENT_ID`
+- `PLATFORM_AGENT_CORE_URL` — HTTPS origin only; enrollment/control-plane identity, **never** telemetry
 - `PLATFORM_AGENT_SITE_ID`
-- `PLATFORM_AGENT_STATE_DIR`
+- `PLATFORM_AGENT_STATE_DIR` (default `/var/lib/platform/agent`)
 - `PLATFORM_AGENT_COLLECTION_INTERVAL`
 - `PLATFORM_AGENT_COLLECTION_TIMEOUT`
 - `PLATFORM_AGENT_HEALTH_ADDRESS` (loopback only)
@@ -71,11 +71,35 @@ Optional governed inputs:
 - `PLATFORM_AGENT_DELIVERY_TIMEOUT`
 - `PLATFORM_LOG_LEVEL`
 
-TLS material is validated before runtime startup. Private keys must be regular, non-symlink files without group/world permissions. Errors/logs do not print secret material.
+TLS material is validated before network/spool activation. Private keys must be regular, non-symlink files without group/world permissions. Errors/logs do not print secret material.
+
+Startup exit codes: `1` configuration, `2` identity, `3` service init, `4` start.
+
+## Linux service lifecycle
+
+`agent/linux/systemd/platform-agent.service` is the LLD §71.3 unit contract (also published under `deploy/systemd/` for installer packaging):
+
+- dedicated `platform-agent` user/group created by the Linux package (this unit does not create them)
+- required `EnvironmentFile=/etc/platform/agent.env` (missing file fails the unit; fail-closed)
+- `StateDirectory=platform/agent` with working directory `/var/lib/platform/agent`
+- `Restart=on-failure` with bounded `RestartSec`
+- explicit start/stop timeouts
+- `NoNewPrivileges=true`
+- SIGTERM graceful stop
+
+Real host `systemd` install/enable/reboot certification is **NOT_RUN — REQUIRES HOST CERTIFICATION** on Cursor Cloud / Docker-only environments. Package this unit from `.deb`/`.rpm` in a later installer tranche.
+
+## Health
+
+`/live` reports process liveness (loopback only). `/ready` and `/health` are ready when the Sensor HTTPS transport is wired **and** the last delivery attempt did not fail. They degrade on Sensor transport unavailability, last delivery failure, queue full, quarantine, or collector errors. Constructing an mTLS client is not treated as Sensor reachability.
+
+## Windows
+
+`windows/cmd` is a compile-boundary harness (`GOOS=windows` build). Windows Service/SCM, Event Log, signed EXE, and MSI packaging are **not** implemented. Do not treat an Ubuntu Cloud VM cross-compile as Windows runtime certification.
 
 ## Engineering verification
 
-The repository CI already executes Agent unit tests in a Go 1.27.1 container. The Agent Docker build additionally runs Agent-owned static/race gates before producing the Linux runtime image:
+The repository CI executes Agent unit tests in a Go 1.27.1 container. The Agent Docker build additionally runs Agent-owned static/race gates before producing the Linux runtime image:
 
 ```text
 go vet ./...
@@ -83,4 +107,4 @@ go test -race ./...
 go build ./linux/cmd
 ```
 
-The runtime image is non-root and contains no Go compiler/toolchain. Final Windows Service/SCM/MSI certification remains a separate Windows-runner requirement.
+The runtime image is non-root and contains no Go compiler/toolchain.

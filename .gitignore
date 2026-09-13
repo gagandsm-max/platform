@@ -9,6 +9,7 @@ secrets/
 deploy/docker/certs/*.key
 deploy/docker/certs/*.pem
 deploy/docker/certs/*.crt
+deploy/docker/certs/*.srl
 
 # Java / Maven build artifacts
 core/target/

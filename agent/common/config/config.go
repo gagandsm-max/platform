@@ -15,6 +15,7 @@ import (
 
 var allowedEnvVars = map[string]bool{
 	"PLATFORM_AGENT_TENANT_ID":           true,
+	"PLATFORM_AGENT_SENSOR_URL":          true,
 	"PLATFORM_AGENT_CORE_URL":            true,
 	"PLATFORM_AGENT_CA_FILE":             true,
 	"PLATFORM_AGENT_CERT_FILE":           true,
@@ -38,8 +39,28 @@ var allowedEnvVars = map[string]bool{
 	"PLATFORM_ENV":                       true,
 }
 
+const (
+	// DefaultMaxBatchBytes is the wrap-safe Agent delivery budget. One Agent
+	// envelope is one Sensor body and one Core agent-ingress record.
+	DefaultMaxBatchBytes = 384 * 1024
+	// MaxConfiguredBatchBytes is the highest operator-configurable batch budget.
+	// It must stay at or below DefaultMaxBatchBytes so a configured Agent cannot
+	// serialize a body the Sensor receiver (512 KiB) will deterministically reject.
+	MaxConfiguredBatchBytes = DefaultMaxBatchBytes
+	MinConfiguredBatchBytes = 1024
+	DefaultMaxRecordBytes   = 64 * 1024
+	// MaxConfiguredRecordBytes is capped to the same wrap-safe budget: ReadBatch
+	// always emits a first record even when it exceeds MaxBatchBytes.
+	MaxConfiguredRecordBytes = DefaultMaxBatchBytes
+	MinConfiguredRecordBytes = 1024
+	// SensorReceiverMaxBodyBytes matches sensor agentreceiver.DefaultMaxBodyBytes
+	// and Core AgentIngestionValidator.MAX_RECORD_BYTES.
+	SensorReceiverMaxBodyBytes = 512 * 1024
+)
+
 type Config struct {
 	TenantID           string
+	SensorURL          string
 	CoreURL            string
 	CAFile             string
 	CertFile           string
@@ -91,28 +112,25 @@ func LoadConfigFromEnv(environ []string) (*Config, error) {
 		return nil, errors.New("CONFIG_TENANT_ID_REQUIRED: PLATFORM_AGENT_TENANT_ID must be set")
 	}
 
-	// 2. Required Core URL (HTTPS only, no userinfo, origin only)
-	coreRaw := strings.TrimSpace(envMap["PLATFORM_AGENT_CORE_URL"])
-	if coreRaw == "" {
-		return nil, errors.New("CONFIG_CORE_URL_REQUIRED: PLATFORM_AGENT_CORE_URL must be set")
-	}
-	u, err := url.Parse(coreRaw)
+	// 2. Required Sensor telemetry URL (HTTPS origin only). Telemetry never
+	// uses Core. Optional Core URL is enrollment/control-plane origin only.
+	sensorOrigin, err := parseHTTPSOrigin(envMap["PLATFORM_AGENT_SENSOR_URL"], "PLATFORM_AGENT_SENSOR_URL")
 	if err != nil {
-		return nil, fmt.Errorf("CONFIG_CORE_URL_INVALID: %w", err)
+		return nil, err
 	}
-	if u.Scheme != "https" {
-		return nil, errors.New("CONFIG_CORE_URL_SCHEME_INSECURE: PLATFORM_AGENT_CORE_URL must use https")
+	if sensorOrigin == "" {
+		return nil, errors.New("CONFIG_SENSOR_URL_REQUIRED: PLATFORM_AGENT_SENSOR_URL must be set")
 	}
-	if u.User != nil {
-		return nil, errors.New("CONFIG_CORE_URL_CREDENTIALS_PROHIBITED: PLATFORM_AGENT_CORE_URL must not contain credentials")
+	c.SensorURL = sensorOrigin
+
+	coreRaw := strings.TrimSpace(envMap["PLATFORM_AGENT_CORE_URL"])
+	if coreRaw != "" {
+		coreOrigin, err := parseHTTPSOrigin(coreRaw, "PLATFORM_AGENT_CORE_URL")
+		if err != nil {
+			return nil, err
+		}
+		c.CoreURL = coreOrigin
 	}
-	if u.Host == "" {
-		return nil, errors.New("CONFIG_CORE_URL_HOST_REQUIRED: PLATFORM_AGENT_CORE_URL must include valid host")
-	}
-	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
-		return nil, errors.New("CONFIG_CORE_URL_PATH_PROHIBITED: PLATFORM_AGENT_CORE_URL must be origin-only")
-	}
-	c.CoreURL = fmt.Sprintf("https://%s", u.Host)
 
 	// 3. Required TLS file paths
 	c.CAFile = strings.TrimSpace(envMap["PLATFORM_AGENT_CA_FILE"])
@@ -146,6 +164,9 @@ func LoadConfigFromEnv(environ []string) (*Config, error) {
 
 	// 4. Optional IDs and directories
 	c.AgentID = strings.TrimSpace(envMap["PLATFORM_AGENT_ID"])
+	if c.AgentID == "" {
+		return nil, errors.New("CONFIG_AGENT_ID_REQUIRED: PLATFORM_AGENT_ID must be set; Sensor authorizes Core-assigned agent identity")
+	}
 	c.SiteID = strings.TrimSpace(envMap["PLATFORM_AGENT_SITE_ID"])
 
 	c.StateDir = strings.TrimSpace(envMap["PLATFORM_AGENT_STATE_DIR"])
@@ -250,11 +271,11 @@ func LoadConfigFromEnv(environ []string) (*Config, error) {
 		c.MaxBufferBytes = n
 	}
 
-	c.MaxRecordBytes = 64 * 1024 // 64KB
+	c.MaxRecordBytes = DefaultMaxRecordBytes
 	if val := envMap["PLATFORM_AGENT_MAX_RECORD_BYTES"]; val != "" {
 		n, err := strconv.Atoi(val)
-		if err != nil || n < 1024 || n > 1024*1024 {
-			return nil, errors.New("CONFIG_MAX_RECORD_BYTES_OUT_OF_BOUNDS: must be between 1KB and 1MB")
+		if err != nil || n < MinConfiguredRecordBytes || n > MaxConfiguredRecordBytes {
+			return nil, fmt.Errorf("CONFIG_MAX_RECORD_BYTES_OUT_OF_BOUNDS: must be between %d and %d bytes (Sensor/Core acceptance ceiling is %d)", MinConfiguredRecordBytes, MaxConfiguredRecordBytes, SensorReceiverMaxBodyBytes)
 		}
 		c.MaxRecordBytes = n
 	}
@@ -268,11 +289,13 @@ func LoadConfigFromEnv(environ []string) (*Config, error) {
 		c.MaxBatchRecords = n
 	}
 
-	c.MaxBatchBytes = 1024 * 1024 // 1MB
+	// One Agent delivery envelope becomes one Core agent-ingress record.
+	// Core AgentIngestionValidator.MAX_RECORD_BYTES is 512 KiB; leave wrap room.
+	c.MaxBatchBytes = DefaultMaxBatchBytes
 	if val := envMap["PLATFORM_AGENT_MAX_BATCH_BYTES"]; val != "" {
 		n, err := strconv.ParseInt(val, 10, 64)
-		if err != nil || n < 1024 || n > 10*1024*1024 {
-			return nil, errors.New("CONFIG_MAX_BATCH_BYTES_OUT_OF_BOUNDS: must be between 1KB and 10MB")
+		if err != nil || n < MinConfiguredBatchBytes || n > MaxConfiguredBatchBytes {
+			return nil, fmt.Errorf("CONFIG_MAX_BATCH_BYTES_OUT_OF_BOUNDS: must be between %d and %d bytes; values above this can exceed the Sensor %d-byte receiver contract and cause non-retryable HTTP 413", MinConfiguredBatchBytes, MaxConfiguredBatchBytes, SensorReceiverMaxBodyBytes)
 		}
 		c.MaxBatchBytes = n
 	}
@@ -304,6 +327,30 @@ func LoadConfigFromEnv(environ []string) (*Config, error) {
 	}
 
 	return c, nil
+}
+
+func parseHTTPSOrigin(raw, name string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("CONFIG_%s_INVALID: %w", strings.TrimPrefix(name, "PLATFORM_AGENT_"), err)
+	}
+	if u.Scheme != "https" {
+		return "", fmt.Errorf("CONFIG_%s_SCHEME_INSECURE: %s must use https", strings.TrimPrefix(name, "PLATFORM_AGENT_"), name)
+	}
+	if u.User != nil {
+		return "", fmt.Errorf("CONFIG_%s_CREDENTIALS_PROHIBITED: %s must not contain credentials", strings.TrimPrefix(name, "PLATFORM_AGENT_"), name)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("CONFIG_%s_HOST_REQUIRED: %s must include valid host", strings.TrimPrefix(name, "PLATFORM_AGENT_"), name)
+	}
+	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("CONFIG_%s_PATH_PROHIBITED: %s must be origin-only", strings.TrimPrefix(name, "PLATFORM_AGENT_"), name)
+	}
+	return "https://" + u.Host, nil
 }
 
 func validateRegularFile(path string, checkKeyPerms bool) error {

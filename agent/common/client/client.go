@@ -19,6 +19,10 @@ const (
 	FailureAuthentication      FailureClass = "AUTHENTICATION"
 	FailurePermanent           FailureClass = "PERMANENT"
 	FailureReceiverUnavailable FailureClass = "RECEIVER_UNAVAILABLE"
+	// FailureOversized is a deterministic payload that the Sensor receiver
+	// cannot accept (HTTP 413 / envelope over the 512 KiB contract). The local
+	// queue must be retained; the delivery loop must not hot-retry it.
+	FailureOversized FailureClass = "OVERSIZED"
 )
 
 type DeliveryError struct {
@@ -52,9 +56,9 @@ type Ack struct {
 	BatchID         string
 }
 
-// Transport is the receiving-side boundary. The current repository does not yet
-// implement the authoritative Agent -> assigned Sensor receiver, so production
-// wiring uses UnavailableTransport until that owned server-side dependency lands.
+// Transport is the Agent→Sensor delivery boundary. Production wiring uses
+// HTTPSTransport against the Sensor Agent Receiver. Tests may inject
+// UnavailableTransport or a fake Transport.
 type Transport interface {
 	Available() bool
 	Deliver(context.Context, Batch) (Ack, error)

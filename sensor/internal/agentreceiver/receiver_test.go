@@ -892,3 +892,40 @@ func TestAssignmentContextExactAgentIDMatchAccepted(t *testing.T) {
 		t.Fatalf("successful delivery must record replay state, size=%d", rcv.ReplayTracker().Size())
 	}
 }
+
+func TestReceiverHTTP413RequestTooLarge(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	rcv, err := NewReceiver(Config{
+		SensorID:        "sensor-infra-01",
+		SensorRole:      runtime.RoleInfrastructure,
+		MaxBodyBytes:    64,
+		MaxBatchRecords: 50,
+		MaxRecordBytes:  64 * 1024,
+	}, ident, auth, NewInMemoryAcceptanceSink(), logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	body := []byte(`{"schemaVersion":1,"agentId":"agent-1","tenantId":"tenant-1","correlationId":"c","batchId":"b","firstSequence":1,"lastSequence":1,"recordCount":1,"records":[{"sequence":1,"id":"r","createdAt":"2026-09-08T12:00:00Z","checksum":"00","payload":{"pad":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}]}`)
+	if int64(len(body)) <= 64 {
+		t.Fatalf("fixture must exceed MaxBodyBytes, got %d", len(body))
+	}
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected HTTP 413, got %d", resp.StatusCode)
+	}
+	var er ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
+		t.Fatal(err)
+	}
+	if er.Code != ErrCodeRequestTooLarge {
+		t.Fatalf("expected %s, got %q", ErrCodeRequestTooLarge, er.Code)
+	}
+}
