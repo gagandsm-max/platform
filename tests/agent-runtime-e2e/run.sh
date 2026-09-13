@@ -12,8 +12,12 @@ export COMPOSE_PROFILES="${COMPOSE_PROFILES:-dev}"
 E2E_DIR="${ROOT_DIR}/tests/agent-runtime-e2e"
 CERT_DIR="${E2E_DIR}/certs"
 EVIDENCE_DIR="${E2E_DIR}/evidence"
-ARTIFACT_DIR="/opt/cursor/artifacts"
-mkdir -p "${EVIDENCE_DIR}" "${ARTIFACT_DIR}"
+ARTIFACT_DIR="${PLATFORM_E2E_ARTIFACT_DIR:-${EVIDENCE_DIR}/artifacts}"
+mkdir -p "${EVIDENCE_DIR}" "${ARTIFACT_DIR}" 2>/dev/null || {
+    log "WARN: could not create ${ARTIFACT_DIR}; falling back to ${EVIDENCE_DIR}/artifacts"
+    ARTIFACT_DIR="${EVIDENCE_DIR}/artifacts"
+    mkdir -p "${ARTIFACT_DIR}"
+}
 
 COMPOSE=(docker compose --env-file .env -f compose.yaml -f "${E2E_DIR}/compose.override.yaml")
 TENANT="018f0e0a-0000-7000-8000-000000000001"
@@ -114,6 +118,12 @@ post_envelope() {
 }
 
 kafka_end_offsets() {
+    docker exec platform-kafka /opt/kafka/bin/kafka-topics.sh \
+        --bootstrap-server localhost:9092 \
+        --create --if-not-exists \
+        --topic telemetry.numeric.v1 \
+        --partitions 3 \
+        --replication-factor 1 >/dev/null 2>&1 || true
     docker exec platform-kafka /opt/kafka/bin/kafka-get-offsets.sh \
         --bootstrap-server localhost:9092 \
         --topic telemetry.numeric.v1 \
@@ -170,7 +180,7 @@ reset_test_volumes() {
     docker run --rm \
         -v "${PLATFORM_SENSOR_INFRA_AGENT_SPOOL_VOLUME:-platform_sensor_infra_agent_spool}:/data" \
         alpine:3.24 \
-        sh -c 'mkdir -p /data/batch-index && find /data/batch-index -type f -name "*.json" -delete' \
+        sh -c 'mkdir -p /data/batch-index /data/stream-state && find /data/batch-index /data/stream-state -type f -name "*.json" -delete' \
         >/dev/null
 }
 
@@ -312,6 +322,7 @@ record "injected-batch-kafka" "PASS" "metricId=${METRIC} hits=${UNIQUE_HITS}"
 sleep 5
 
 # TEST A — lost ACK after durable accept + drain: identical retry must ACK without a second logical batch.
+PRE_REPLAY_HITS="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
 REPLAY_BODY="${EVIDENCE_DIR}/unique-envelope.json"
 REPLAY_ACK="$(post_envelope "${REPLAY_BODY}")"
 printf '%s\n' "${REPLAY_ACK}" > "${EVIDENCE_DIR}/replay-ack.json"
@@ -320,11 +331,16 @@ if echo "${REPLAY_ACK}" | grep -q '"status":"ACCEPTED"' && echo "${REPLAY_ACK}" 
 else
     fail_closed "lost-ack-after-drain-replay" "${REPLAY_ACK}"
 fi
+sleep 4
 POST_REPLAY_HITS="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
-record "lost-ack-after-drain-no-second-logical" "PASS" "metric ${METRIC} kafka hits=${POST_REPLAY_HITS} after identical replay (at-least-once)"
+if [[ "${POST_REPLAY_HITS}" -gt "${PRE_REPLAY_HITS}" ]]; then
+    fail_closed "lost-ack-after-drain-no-second-logical" "Kafka hits increased from ${PRE_REPLAY_HITS} to ${POST_REPLAY_HITS} after identical replay"
+fi
+record "lost-ack-after-drain-no-second-logical" "PASS" "metric ${METRIC} kafka hits stayed at ${POST_REPLAY_HITS} (pre=${PRE_REPLAY_HITS})"
 
 # TEST B — same identity after Sensor restart.
 log "==> Sensor restart between drain and duplicate retry"
+PRE_RESTART_REPLAY_HITS="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
 docker restart platform-sensor-infra >/dev/null
 if ! wait_healthy platform-sensor-infra 40; then
     fail_closed "lost-ack-sensor-restart" "sensor-infra did not recover"
@@ -337,6 +353,12 @@ if echo "${RESTART_REPLAY_ACK}" | grep -q '"status":"ACCEPTED"' && echo "${RESTA
 else
     fail_closed "lost-ack-after-drain-and-sensor-restart" "${RESTART_REPLAY_ACK}"
 fi
+sleep 4
+POST_RESTART_REPLAY_HITS="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
+if [[ "${POST_RESTART_REPLAY_HITS}" -gt "${PRE_RESTART_REPLAY_HITS}" ]]; then
+    fail_closed "lost-ack-after-restart-no-second-logical" "Kafka hits increased from ${PRE_RESTART_REPLAY_HITS} to ${POST_RESTART_REPLAY_HITS} after restart replay"
+fi
+record "lost-ack-after-restart-no-second-logical" "PASS" "metric ${METRIC} kafka hits stayed at ${POST_RESTART_REPLAY_HITS} (pre=${PRE_RESTART_REPLAY_HITS})"
 
 # TEST C — mutated replay of the accepted sequence/range.
 kafka_end_offsets > "${EVIDENCE_DIR}/offsets-before-mutated.txt"
@@ -407,6 +429,9 @@ else
     fail_closed "tenant-payload-not-authoritative" "forged payload metric never appeared"
 fi
 REPLAY_COUNT="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
+if [[ "${REPLAY_COUNT}" -gt "${PRE_REPLAY_HITS}" ]]; then
+    fail_closed "replay-kafka-identity" "Kafka hits increased from ${PRE_REPLAY_HITS} to ${REPLAY_COUNT} across replays"
+fi
 record "replay-kafka-identity" "PASS" "metric ${METRIC} kafka hits=${REPLAY_COUNT} (at-least-once; no new logical id required)"
 
 log "==> resuming Agent collectors for failure-path scenarios"
