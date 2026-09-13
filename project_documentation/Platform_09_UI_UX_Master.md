@@ -1,10 +1,10 @@
 # Platform — UI/UX, Navigation & Out-of-Box Dashboard Master
 
-**Document ID:** PLATFORM-UIUX-001  
-**Version:** 3.2.1  
-**Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**  
-**Product:** Platform  
-**Last reconciliation:** 2026-09-06
+**Document ID:** PLATFORM-UIUX-001
+**Version:** 3.2.2
+**Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
+**Product:** Platform
+**Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master UI amendment for Notification Center and Discovery Review
 
 ## 1. Authority and no-assumption rule
 
@@ -47,7 +47,7 @@ Navigation entries are shown/hidden/read-only/action-limited according to RBAC, 
 - Global search across device/IP/MAC/serial/site/tag/interface/circuit/incident/alert/ticket/IPAM/NCM/DB/VM/cloud/K8s entities.
 - Time range, timezone, comparison period and auto-refresh.
 - Quick actions based on permission: Add Device, Create Dashboard, Add Maintenance, Run Investigation, Create Report, Open CLI.
-- Platform notifications: Sensor, integration, report, licence, HA, approval and security conditions.
+- Platform notifications: Sensor, integration, report, licence, HA, approval and security conditions. The global per-user Notification Center/bell is governed by `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`; this base catalogue is not the detailed owner.
 - Context help and user menu: profile, preferences, sessions, API tokens, theme, timezone, language and logout.
 
 ### 2.3 Global navigation behavior
@@ -6880,3 +6880,38 @@ The UI must distinguish:
 - healthy after automatic recovery.
 
 Normal users do not receive raw secret-bearing logs. Diagnostic download/generation is RBAC controlled and redacted.
+
+## 9. v3.2.2 specialized-master UI amendment — Notification Center and Discovery Review
+
+The 98 out-of-box screens in §5 remain the base mandatory catalogue and are not silently renumbered. Specialized-master views supplement that catalogue. They are not additional `UI-099+` rows unless separately added to §5 through change control.
+
+### 9.1 Global Notification Center
+
+Normative owner: `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`. This amendment is a cross-reference only.
+
+Required UI behavior:
+
+- one global per-user bell/center;
+- tenant/RBAC/resource scoped server-side;
+- platform/workflow notifications remain distinct from operational Alerts/Incidents;
+- unread/read state;
+- deep links;
+- acknowledgement/action only when authorized.
+
+### 9.2 Discovery / Onboarding Review
+
+Normative owner: `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`. This amendment is a cross-reference only.
+
+Required UI behavior:
+
+- candidate review queue;
+- identity/reconciliation evidence;
+- duplicate/conflict state;
+- approve/reject/unmanaged/exclude controls where authorized;
+- reason/comment;
+- group/sub-group assignment;
+- policy preview;
+- capacity preview;
+- audit trail.
+
+Capability Pack / dimensional-certification operator views, when later specified, are supplements governed by `Platform_23` and must not be invented as a parallel screen catalogue here.

@@ -55,6 +55,7 @@ Discover and specify complete workflows—including failure, retry, cancellation
 - `project_documentation/Platform_04_HLD.md`
 - `project_documentation/Platform_05_LLD.md`
 - `project_documentation/Platform_06_Dataflow.md`
+- `project_documentation/Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
 
 ## Specialist rules
 

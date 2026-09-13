@@ -49,4 +49,6 @@ Material UI work uses this risk-based sequence. Tiny copy/spacing fixes need not
 
 Neither `platform-product-ui-designer` nor `platform-frontend-developer` may self-certify accessibility or final UI finish.
 
+Capability Pack / enterprise monitoring coverage (`Platform_23`) and governed discovery/onboarding/Notification Center (`Platform_20`) route through existing specialists in this matrix. Do not create a parallel Technology Pack agent or a dedicated onboarding-identity agent.
+
 v1.2 currently resolves to 12 P0 + 22 P1 agents from `manifest.json`. That snapshot is not a permanent hardcoded validator policy; future packs may add or retire agents through the manifest.

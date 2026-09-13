@@ -23,6 +23,8 @@ Implementation-stage rows include explicit `selectedAgents` and `selectedSkills`
 | Core API/event | `platform-codebase-onboarding-engineer`, `platform-api-platform-engineer`, `platform-minimal-change-engineer`, `platform-test-automation-engineer`, `platform-code-reviewer`, `platform-evidence-collector` | `source_truth_rebaseline`, `bounded_implementation`, `api_event_contracts`, `evidence_bundle` |
 | Sensor/protocol | `platform-codebase-onboarding-engineer`, `platform-network-engineer`, `platform-sensor-runtime-engineer`, `platform-minimal-change-engineer`, `platform-test-automation-engineer`, `platform-code-reviewer`, `platform-evidence-collector` | `source_truth_rebaseline`, `bounded_implementation`, `snmp_mib`, `sensor_edge`, `runtime_failure_injection`, `evidence_bundle` |
 | Device Pack | `platform-codebase-onboarding-engineer`, `platform-device-pack-engineer`, `platform-test-automation-engineer`, `platform-code-reviewer`, `platform-evidence-collector` | `source_truth_rebaseline`, `bounded_implementation`, `device_pack_authoring`, `evidence_bundle` |
+| Discovery / onboarding / Notification Center | `platform-identity-access-engineer`, `platform-workflow-architect`, `platform-network-engineer`, `platform-ux-architect`, `platform-product-ui-designer`, `platform-frontend-developer`, `platform-test-automation-engineer` | `source_truth_rebaseline`, `mother_reference_reconciliation`, `tenant_isolation`, `ux_operational_design`, `evidence_bundle` |
+| Capability Pack / enterprise monitoring coverage | `platform-device-pack-engineer`, `platform-infrastructure-cloud-engineer`, `platform-telemetry-pipeline-engineer`, `platform-integration-connector-engineer`, `platform-ncm-remediation-engineer`, `platform-network-engineer`, `platform-test-automation-engineer` | `source_truth_rebaseline`, `mother_reference_reconciliation`, `device_pack_authoring`, `connector_framework`, `evidence_bundle` |
 | Telemetry pipeline | `platform-codebase-onboarding-engineer`, `platform-telemetry-pipeline-engineer`, `platform-database-reliability-engineer`, `platform-test-automation-engineer`, `platform-code-reviewer`, `platform-evidence-collector` | `source_truth_rebaseline`, `bounded_implementation`, `kafka`, `replay_idempotency`, `evidence_bundle` |
 | NCM / remediation | `platform-codebase-onboarding-engineer`, `platform-workflow-architect`, `platform-ncm-remediation-engineer`, `platform-security-architect`, `platform-test-automation-engineer`, `platform-code-reviewer`, `platform-evidence-collector` | `source_truth_rebaseline`, `bounded_implementation`, `remediation_safety`, `evidence_bundle` |
 | Connector / ITSM / change feed | `platform-codebase-onboarding-engineer`, `platform-integration-connector-engineer`, `platform-api-platform-engineer`, `platform-code-reviewer`, `platform-evidence-collector` | `source_truth_rebaseline`, `bounded_implementation`, `connector_framework`, `itsm_change_telemetry`, `evidence_bundle` |
@@ -57,6 +59,15 @@ For parallel write work, use separate Git branches/worktrees and let `platform-g
 - Security-sensitive acknowledgement/offset behavior must be tested fail-closed where applicable.
 - Do not weaken tests, auth, tenant isolation, durability or branch/security controls to obtain green CI.
 - Do not use destructive generic Docker prune or `down -v` operations as a routine cleanup or validation shortcut.
+
+Material product/capability changes (new monitoring family, pack class, integration coverage, or certification claim) must answer:
+
+- **A.** Does the implementation comply with the current Mother Reference set discovered from `Platform_00_Document_Index.md` §3, including task-relevant specialized masters?
+- **B.** Does it measurably improve Real Customer Enterprise Coverage as normalized in `Platform_23` (not a lab-only slice presented as coverage)?
+- **C.** Which Capability Pack / Integration coverage state changed (architecture, specification, implementation, pack, certification, or integration)? Specified is not implemented.
+- **D.** What certification evidence exists for the claimed dimensions? Do not treat listing a technology family as certification.
+
+Trivial edits, comments, and isolated bug fixes do not require this checklist.
 
 ## Routing chain
 

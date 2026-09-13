@@ -129,6 +129,39 @@ class CapabilityPackInventoryTests(unittest.TestCase):
         self.assertNotIn("len(manifest) == 34", source)
         self.assertNotIn("expected_agent_count = 34", source)
 
+    def test_mother_reference_coverage_matches_platform_00(self) -> None:
+        index = (REPO_ROOT / "project_documentation" / "Platform_00_Document_Index.md").read_text(
+            encoding="utf-8"
+        )
+        files = agent_pack.parse_platform_00_mother_reference_files(index)
+        self.assertEqual(
+            files.count(
+                "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md"
+            ),
+            1,
+        )
+        self.assertIn(
+            "Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md",
+            files,
+        )
+        coverage = json.loads(
+            (REPO_ROOT / "project_agents" / "mother_reference_coverage.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        mapped = [row["file"] for row in coverage["mappings"]]
+        self.assertEqual(set(mapped), set(files))
+        owners = {row["file"]: row["owners"] for row in coverage["mappings"]}
+        self.assertTrue(
+            owners["Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md"]
+        )
+        self.assertTrue(
+            owners["Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md"]
+        )
+        validator_src = (TOOLS / "agent_pack.py").read_text(encoding="utf-8")
+        self.assertNotIn("len(index_files) == 25", validator_src)
+        self.assertNotIn("expected_mother_count", validator_src)
+
     def test_every_agent_has_bounded_required_skills(self) -> None:
         manifest_names = {entry["name"] for entry in _manifest()}
         skill_names = {entry["name"] for entry in _skill_manifest()}

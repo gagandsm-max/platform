@@ -24,7 +24,7 @@ Task: <what I want>
 Constraints: <branch/PR/scope constraints, if any>
 ```
 
-## Five common examples
+## Common examples
 
 Implementation-stage examples record explicit `selectedAgents` and `selectedSkills`. From ROUTING onward an active engineering task cannot proceed with an empty `selectedSkills` array. A governance-only task still selects canonical governance Skills such as `source_truth_rebaseline` / `bounded_implementation`.
 
@@ -72,6 +72,22 @@ selectedSkills: [bounded_implementation, typescript_react, web_interface_quality
 Use platform-knowledge-graph-engineer and platform-ai-engineer, then platform-model-qa. Add platform-security-architect/appsec for tool access, tenant data, prompt/context or automated-action risk. Reality-check before enablement claims.
 selectedAgents: [platform-knowledge-graph-engineer, platform-ai-engineer, platform-model-qa, platform-security-architect, platform-reality-checker]
 selectedSkills: [source_truth_rebaseline, ai_evidence_safety, alert_quality_evidence, rca_hypothesis_fusion, evidence_bundle]
+```
+
+### Governed discovery / onboarding / Notification Center
+
+```text
+Use existing specialists. Do not create a new onboarding-identity agent.
+selectedAgents: [platform-identity-access-engineer, platform-workflow-architect, platform-network-engineer, platform-product-ui-designer, platform-ux-architect, platform-frontend-developer, platform-security-architect, platform-test-automation-engineer]
+selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, tenant_isolation, ux_operational_design, evidence_bundle]
+```
+
+### Enterprise monitoring coverage / Capability Pack certification (specification or later pack work)
+
+```text
+Capability Pack is the single extensibility architecture. Device Pack remains a classification.
+selectedAgents: [platform-device-pack-engineer, platform-infrastructure-cloud-engineer, platform-telemetry-pipeline-engineer, platform-integration-connector-engineer, platform-ncm-remediation-engineer, platform-network-engineer, platform-test-automation-engineer]
+selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, device_pack_authoring, connector_framework, evidence_bundle]
 ```
 
 ### Review a PR

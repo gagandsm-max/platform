@@ -12,7 +12,7 @@ model: inherit
 commandExecutionPolicy: sandbox
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-product-ui-designer.md sha256:8d3a491686677eba23a4c72856b07b6953f0a2c50118ac25b351d9cfeed79254 -->
+<!-- generated from project_agents/canonical/p1/platform-product-ui-designer.md sha256:4eda00059b4c74b0497b3e3427446b34833839c52bb193f4294ceacd7b1a9f3d -->
 
 # Platform Product UI Designer
 
@@ -76,6 +76,7 @@ Own concrete screen/interaction specification: composition, visual/information h
 - `project_documentation/Platform_09_UI_UX_Master.md`
 - `project_documentation/Platform_02_PRD.md`
 - `project_documentation/Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`
+- `project_documentation/Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
 - `project_documentation/Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`
 - `project_documentation/Platform_08_Requirements_Traceability.md`
 - `project_agents/skills/ux_operational_design/SKILL.md`
