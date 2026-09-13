@@ -539,7 +539,11 @@ This PR performs **EMC-0** only.
 
 ## 26. Founder-reserved decisions
 
-Founder approval remains required for commercial licence quantities/pricing/SKUs, contractual SLO/RPO/RTO/retention commitments, claims of external certification/compliance, and any change to the v1 exactly-two-Core Active/Standby topology.
+Founder-reserved decisions remain pricing, licensing, commercial SKUs, contractual/customer concessions, contractual SLO/RPO/RTO/retention commitments, legal/regulatory/IP matters, external certification/compliance claims, external customer/partner/investor commitments, and material spending/vendor commitments.
+
+ChatGPT / Platform technical authority governs product architecture, HA topology, databases, services, APIs, security architecture, deployment architecture, technical sequencing, and implementation and release engineering.
+
+The v1 exactly-two-Core Active/Standby topology remains a current fixed Mother Reference decision. It is not casually changed or reopened. Changes to that technical topology are governed by deliberate Mother Reference architecture change control and technical evidence. Founder escalation is required only if a proposed topology change materially changes Founder-reserved business intent, commercial commitments, contractual promises, material spending/vendor commitments, or external commitments.
 
 ---
 

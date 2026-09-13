@@ -662,6 +662,11 @@ def validate_mother_reference_coverage(repo: Path, pa: Path, manifest: list[dict
         errors.append(str(exc))
         return errors
 
+    for filename in index_files:
+        path = repo / "project_documentation" / filename
+        if not path.is_file():
+            errors.append(f"mother-reference file missing: project_documentation/{filename}")
+
     agent_names = {str(entry.get("name")) for entry in manifest if entry.get("name")}
     mapped_files: list[str] = []
     seen_files: set[str] = set()

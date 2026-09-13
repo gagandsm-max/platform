@@ -325,6 +325,12 @@ Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack complete
 - Sizing/MWU/Sensor count/storage lifecycle contract: `Platform_11_Sizing_Capacity_Storage_Master.md`.
 - Decision provenance/no-assumption control: `Platform_12_Decision_Source_Register.md`.
 - Full OSS license/use/restriction catalogue: `Platform_07_OSS_Catalog.md`.
+- Engineering/development/Docker standards: `Platform_13_Engineering_Development_and_Docker_Standards.md`.
+- Test/performance/release-quality contract: `Platform_14_Test_Performance_and_Release_Quality.md`.
+- CI/CD/packaging/distribution contract: `Platform_15_CI_CD_Packaging_and_Distribution.md`.
+- Installation/upgrade/rollback/operations contract: `Platform_16_Installation_Upgrade_Rollback_and_Operations.md`.
+- API/event/data-model contract: `Platform_17_API_Event_and_Data_Model_Contracts.md`.
+- Security threat model: `Platform_18_Security_Threat_Model.md`.
 - OIV specialized-master RTM supplement: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`.
 - Discovery/onboarding/identity/notification specialized-master RTM supplement: `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`.
 - Enterprise gap-closure specialized-master RTM supplement: `Platform_21_Enterprise_Gap_Closure_Master.md`.
