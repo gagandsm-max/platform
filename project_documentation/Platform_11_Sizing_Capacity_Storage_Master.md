@@ -1,7 +1,7 @@
 # Platform — Sizing, Capacity, Sensor Distribution & Storage Master
 
 **Document ID:** PLATFORM-SIZING-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2  
 **Status:** **Authoritative Mother Reference — Engineering Sizing Model**  
 **Product:** Platform
 
@@ -38,6 +38,46 @@ HA uses **exactly two full Core nodes**, one Active and one Standby. Each full C
 | 15,000 | 2 | 24 vCPU / 48 GB |
 
 The exact two-Core synchronization/fencing mechanisms for Kafka/ClickHouse/PostgreSQL are P0 engineering spikes. Technology must adapt to the fixed product requirement; no third full Core may be introduced silently.
+
+### 2.3 Local AI / ML / LLM compute envelope — v3.2.2
+
+Local intelligence is part of the planned Core footprint; it shall **not increase the minimum certified Core sizing tiers**. Standard Platform operation is CPU-first and shall not require a GPU. AI/ML/LLM workloads are subordinate to collection, ingestion, storage durability, alert qualification, incident processing and deterministic RCA.
+
+Planning envelopes below are hard design targets until benchmark certification:
+
+| Per-Core target | Local-intelligence peak budget | Default local LLM class | Concurrent local LLM requests | Notes |
+|---|---:|---|---:|---|
+| **8 vCPU / 16 GB** | **≤2 vCPU burst / ≤3 GB RAM peak** | **0.5B–1.5B parameter, 4-bit quantized** | **1** | Standard smallest Core. A model above 1.5B is not assumed; up to ~3B may be admitted only if SNWP certification proves no monitoring regression. |
+| **12 vCPU / 24 GB** | **≤3 vCPU burst / ≤4 GB RAM peak** | **1B–3B, 4-bit quantized** | **1–2** | Extra capacity primarily buys monitoring/user concurrency, not permission for an unnecessarily large model. |
+| **16 vCPU / 32 GB** | **≤3 vCPU burst / ≤5 GB RAM peak** | **1B–3B, 4-bit quantized** | **2** | AI remains lower priority than live monitoring and storage. |
+| **24 vCPU / 48 GB** | **≤4 vCPU burst / ≤6 GB RAM peak** | **1B–3B, 4-bit quantized** | **2–4** | Higher concurrency is preferred over increasing model size. |
+
+For the 8 vCPU / 16 GB tier the normal non-interactive local-intelligence target is **<1 vCPU average and approximately 1–1.5 GB RAM**, with the larger peak envelope used only during bounded inference/analytics activity.
+
+Mandatory resource rules:
+
+- **No mandatory GPU/NPU.** Optional accelerator support may be certified later, but no GPU may become a prerequisite for standard Core monitoring, alerting or deterministic RCA.
+- **No foundation-model training/fine-tuning on customer production Core.** Platform ships/loads approved pre-trained quantized local models. Customer-specific intelligence comes from evidence retrieval, tools, topology, Similar Incident Memory and policy, not foundation-model fine-tuning.
+- Lightweight statistical/ML baseline recalibration is permitted, but it is scheduled, bounded, interruptible and lower priority than live monitoring.
+- Local LLM inference is **on demand**. On the 8/16 tier the model should be unloaded or memory-mapped with minimal resident state when idle and released after a bounded idle period unless benchmarked headroom permits keeping it warm.
+- Small-Core local LLM operating context should normally remain **2K–4K tokens**; Platform retrieval/context builders reduce large telemetry sets to bounded structured evidence before inference. Raw high-volume telemetry is not streamed wholesale into an LLM.
+- GNN inference operates on bounded incident-relevant temporal subgraphs, not the full enterprise graph for every observation.
+- AI resource limits are enforced by a Resource Governor/circuit breaker. Recommended degradation order under resource pressure is: postpone model recalibration/training → reduce/queue LLM concurrency → defer optional GNN/embedding work → unload/suspend local LLM. Deterministic monitoring, alert qualification and RCA continue.
+- Resource protection inputs include Core CPU/memory/swap pressure, Kafka lag, ClickHouse/ingestion backlog, query latency, incident storms and storage pressure.
+- Service/process controls shall enforce CPU quota, memory limit, bounded queue/concurrency, inference timeout and lower CPU/I/O priority for AI/analytics workers relative to protected Core functions.
+- Local model/runtime artifacts are offline-packaged, signed/checksummed, versioned and governed by the Platform model registry. Planning allowance for the standard local model/ML/GNN artifacts and bounded runtime cache is approximately **3–6 GB disk**; exact packaged size is release-measured.
+
+Resource priority is:
+
+```text
+Priority 1  collection / ingestion / PostgreSQL / ClickHouse / Kafka / Sensor communication
+Priority 2  alert qualification / incident correlation / deterministic RCA
+Priority 3  lightweight ML and bounded GNN inference
+Priority 4  local LLM interactive assistance
+Priority 5  model recalibration / training / challenger evaluation
+```
+
+A Core release fails resource certification if enabling the supported local-intelligence profile causes the certified monitoring workload to miss ingestion, alerting, query, durability, failover or storage-protection objectives.
 
 ## 3. Network Sensor planning
 
@@ -148,6 +188,8 @@ Incident/investigation legal holds protect selected time windows/entities/eviden
 ## 12. Performance/resource certification
 
 Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, Flow records/sec, syslog EPS, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, compression, retention cleanup and failure recovery. Regressions beyond approved tolerance fail certification or require documented exception.
+
+For releases enabling Local AI/ML/LLM, certification additionally records per-module normal/peak CPU and RAM, inference latency, local LLM concurrency/context, model load/unload behavior, queue/backpressure, GNN/embedding workload, AI artifact disk footprint and the effect of AI load on ingestion, alert qualification, query latency and failover. The supported local-intelligence profile must pass inside the same certified Core tier; it does not create a hidden higher minimum hardware requirement.
 
 ## 13. Development workstation resource behavior — v3.1
 
