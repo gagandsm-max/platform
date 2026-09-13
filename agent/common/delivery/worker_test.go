@@ -14,14 +14,20 @@ import (
 )
 
 type mockQueue struct {
-	mu      sync.Mutex
-	records []queue.Record
-	deleted []uint64
+	mu        sync.Mutex
+	records   []queue.Record
+	deleted   []uint64
+	readErr   error
+	readCalls int
 }
 
 func (m *mockQueue) ReadBatch(maxRecords int, maxBytes int64) ([]queue.Record, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.readCalls++
+	if m.readErr != nil {
+		return nil, m.readErr
+	}
 	if len(m.records) == 0 {
 		return nil, nil
 	}
@@ -539,5 +545,50 @@ func TestDeliveryWorkerPermanentAndAuthStillRetainWithoutSkip(t *testing.T) {
 		if q.Len() != 2 || len(q.deleted) != 0 {
 			t.Fatalf("%v: must retain all records without skip, len=%d deleted=%v", derr, q.Len(), q.deleted)
 		}
+	}
+}
+
+func TestDeliveryWorkerDestExistsDoesNotRetry(t *testing.T) {
+	if client.Classify(queue.ErrQuarantineDestExists) != client.FailureBlocked {
+		t.Fatal("destination-exists must classify as BLOCKED, not TEMPORARY")
+	}
+	q := &mockQueue{
+		records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}},
+		readErr: queue.ErrQuarantineDestExists,
+	}
+	tr := &mockTransport{available: true}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.Start(ctx)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if w.Stats().LastFailureClass == client.FailureBlocked {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if w.Stats().LastFailureClass != client.FailureBlocked {
+		t.Fatalf("expected FailureBlocked, got %s", w.Stats().LastFailureClass)
+	}
+	time.Sleep(80 * time.Millisecond)
+	q.mu.Lock()
+	callsAfterBlock := q.readCalls
+	q.mu.Unlock()
+	w.Stop()
+	if tr.calls != 0 {
+		t.Fatalf("destination-exists must not submit telemetry, transport calls=%d", tr.calls)
+	}
+	if callsAfterBlock != 1 {
+		t.Fatalf("destination-exists must not hot-retry ReadBatch, calls=%d", callsAfterBlock)
+	}
+	if w.Stats().LastErrorCode != "QUEUE_QUARANTINE_DEST_EXISTS" {
+		t.Fatalf("expected QUEUE_QUARANTINE_DEST_EXISTS, got %s", w.Stats().LastErrorCode)
+	}
+	if w.Stats().Successes != 0 {
+		t.Fatal("destination-exists must not count as success")
 	}
 }

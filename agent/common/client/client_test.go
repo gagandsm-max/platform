@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"platform/agent/common/queue"
 )
 
 func TestUnavailableTransport(t *testing.T) {
@@ -34,10 +36,20 @@ func TestClassify(t *testing.T) {
 	cases := []struct {
 		err  error
 		want FailureClass
-	}{{&DeliveryError{Code: "AUTH", Class: FailureAuthentication}, FailureAuthentication}, {context.DeadlineExceeded, FailureTemporary}, {errors.New("network"), FailureTemporary}}
+	}{
+		{&DeliveryError{Code: "AUTH", Class: FailureAuthentication}, FailureAuthentication},
+		{context.DeadlineExceeded, FailureTemporary},
+		{errors.New("network"), FailureTemporary},
+		{queue.ErrQuarantineDestExists, FailureBlocked},
+		{queue.ErrUnknownSequence, FailureBlocked},
+		{queue.ErrQuarantineUncertain, FailureBlocked},
+		{queue.ErrQuarantineSourceSyncFailed, FailureBlocked},
+		{queue.ErrDeliveryBlocked, FailureBlocked},
+		{queue.ErrQuarantineFull, FailureBlocked},
+	}
 	for _, tc := range cases {
 		if got := Classify(tc.err); got != tc.want {
-			t.Fatalf("got %s want %s", got, tc.want)
+			t.Fatalf("got %s want %s for %v", got, tc.want, tc.err)
 		}
 	}
 }

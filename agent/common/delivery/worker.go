@@ -328,6 +328,12 @@ func queueFailureCode(err error) string {
 		return "QUEUE_QUARANTINE_FULL"
 	case errors.Is(err, queue.ErrQuarantineDestExists):
 		return "QUEUE_QUARANTINE_DEST_EXISTS"
+	case errors.Is(err, queue.ErrUnknownSequence):
+		return "QUEUE_UNKNOWN_SEQUENCE_BLOCK"
+	case errors.Is(err, queue.ErrQuarantineUncertain):
+		return "QUEUE_QUARANTINE_UNCERTAIN"
+	case errors.Is(err, queue.ErrQuarantineSourceSyncFailed):
+		return "QUEUE_QUARANTINE_SOURCE_SYNC_FAILED"
 	default:
 		return "QUEUE_READ_FAILED"
 	}

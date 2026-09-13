@@ -94,6 +94,18 @@ func Classify(err error) FailureClass {
 	if errors.Is(err, queue.ErrQuarantineFull) {
 		return FailureBlocked
 	}
+	if errors.Is(err, queue.ErrQuarantineDestExists) {
+		return FailureBlocked
+	}
+	if errors.Is(err, queue.ErrUnknownSequence) {
+		return FailureBlocked
+	}
+	if errors.Is(err, queue.ErrQuarantineUncertain) {
+		return FailureBlocked
+	}
+	if errors.Is(err, queue.ErrQuarantineSourceSyncFailed) {
+		return FailureBlocked
+	}
 	var de *DeliveryError
 	if errors.As(err, &de) && de.Class != "" {
 		return de.Class

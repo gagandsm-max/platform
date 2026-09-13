@@ -19,14 +19,30 @@ import (
 )
 
 var (
-	ErrQueueFull            = errors.New("QUEUE_FULL: capacity limit reached")
-	ErrRecordTooLarge       = errors.New("QUEUE_RECORD_TOO_LARGE: payload exceeds max allowed record size")
-	ErrRecordCorrupted      = errors.New("QUEUE_RECORD_CORRUPT: record checksum mismatch")
-	ErrInvalidDirectory     = errors.New("QUEUE_DIR_INVALID: queue directory is invalid or unsafe")
-	ErrQuarantineFull       = errors.New("QUEUE_QUARANTINE_FULL: quarantine capacity limit reached")
-	ErrDeliveryBlocked      = errors.New("QUEUE_DELIVERY_BLOCKED: quarantined sequence blocks later delivery")
-	ErrQuarantineDestExists = errors.New("QUEUE_QUARANTINE_DEST_EXISTS: refusing to overwrite quarantine record")
+	ErrQueueFull                  = errors.New("QUEUE_FULL: capacity limit reached")
+	ErrRecordTooLarge             = errors.New("QUEUE_RECORD_TOO_LARGE: payload exceeds max allowed record size")
+	ErrRecordCorrupted            = errors.New("QUEUE_RECORD_CORRUPT: record checksum mismatch")
+	ErrInvalidDirectory           = errors.New("QUEUE_DIR_INVALID: queue directory is invalid or unsafe")
+	ErrQuarantineFull             = errors.New("QUEUE_QUARANTINE_FULL: quarantine capacity limit reached")
+	ErrDeliveryBlocked            = errors.New("QUEUE_DELIVERY_BLOCKED: quarantined sequence blocks later delivery")
+	ErrQuarantineDestExists       = errors.New("QUEUE_QUARANTINE_DEST_EXISTS: refusing to overwrite quarantine record")
+	ErrUnknownSequence            = errors.New("QUEUE_UNKNOWN_SEQUENCE_BLOCK: queue record filename has no safe sequence")
+	ErrQuarantineUncertain        = errors.New("QUEUE_QUARANTINE_UNCERTAIN: durable record location cannot be confirmed")
+	ErrQuarantineSourceSyncFailed = errors.New("QUEUE_QUARANTINE_SOURCE_SYNC_FAILED: quarantine destination durable; source dirsync failed")
 )
+
+const (
+	recordSequenceWidth     = 19
+	uncertainMarkerFile     = "location.uncertain"
+	syncPhaseQuarantineDest = "quarantine-dest"
+	syncPhaseActiveSource   = "active-source"
+	syncPhaseRollbackDest   = "rollback-dest"
+	syncPhaseRollbackSource = "rollback-source"
+)
+
+// syncHookFunc is a per-queue test seam for directory fsync phases. Production
+// leaves this nil. Hooks must not be process-global mutable state.
+type syncHookFunc func(phase, dir string) error
 
 type Record struct {
 	Sequence  uint64    `json:"sequence"`
@@ -51,6 +67,8 @@ type QueueStats struct {
 	QuarantineAtCapacity bool
 	BlockedFromSequence  uint64
 	DeliveryBlocked      bool
+	UnknownSequenceBlock bool
+	LocationUncertain    bool
 }
 
 type DurableQueue struct {
@@ -70,6 +88,9 @@ type DurableQueue struct {
 	quarantineCount      int
 	quarantineBytes      int64
 	blockedFromSequence  uint64
+	unknownSequenceBlock bool
+	locationUncertain    bool
+	syncHook             syncHookFunc
 }
 
 const sequenceMetaFile = "sequence.meta"
@@ -166,6 +187,12 @@ func (q *DurableQueue) recoverState() error {
 	cleanTemp(q.activeDir)
 	cleanTemp(q.quarantineDir)
 
+	q.unknownSequenceBlock = false
+	q.locationUncertain = false
+	if err := q.loadUncertainMarkerLocked(); err != nil {
+		return err
+	}
+
 	qHigh, err := q.scanQuarantineLocked()
 	if err != nil {
 		return err
@@ -184,7 +211,18 @@ func (q *DurableQueue) recoverState() error {
 	}
 
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), "rec_") || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() || !isRecordJSON(e.Name()) {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			return fmt.Errorf("QUEUE_RECOVER_STAT_FAILED: %w", err)
+		}
+		fileSeq, _, nameErr := parseRecordFileName(e.Name())
+		if nameErr != nil {
+			q.unknownSequenceBlock = true
+			q.activeCount++
+			q.activeBytes += fi.Size()
 			continue
 		}
 		filePath := filepath.Join(q.activeDir, e.Name())
@@ -192,9 +230,27 @@ func (q *DurableQueue) recoverState() error {
 		if err != nil {
 			return fmt.Errorf("QUEUE_RECOVER_READ_FAILED: %w", err)
 		}
-		rec, fileSeq, parseErr := decodeRecordFile(e.Name(), data)
+		rec, _, parseErr := decodeRecordFile(e.Name(), data)
 		if parseErr != nil {
+			if _, destErr := os.Lstat(filepath.Join(q.quarantineDir, e.Name())); destErr == nil {
+				q.activeCount++
+				q.activeBytes += fi.Size()
+				if fileSeq > highestSeq {
+					highestSeq = fileSeq
+				}
+				continue
+			}
 			if qErr := q.quarantineRecordLocked(e.Name(), "QUEUE_RECORD_CORRUPT"); qErr != nil {
+				if _, stillActive := os.Lstat(filePath); stillActive == nil {
+					q.activeCount++
+					q.activeBytes += fi.Size()
+				}
+				if fileSeq > highestSeq {
+					highestSeq = fileSeq
+				}
+				if isFailClosedQuarantineErr(qErr) {
+					continue
+				}
 				return qErr
 			}
 			if fileSeq > highestSeq {
@@ -203,15 +259,15 @@ func (q *DurableQueue) recoverState() error {
 			continue
 		}
 		_ = rec
-		fi, err := e.Info()
-		if err != nil {
-			return fmt.Errorf("QUEUE_RECOVER_STAT_FAILED: %w", err)
-		}
 		q.activeCount++
 		q.activeBytes += fi.Size()
 		if fileSeq > highestSeq {
 			highestSeq = fileSeq
 		}
+	}
+
+	if err := q.reconcileDuplicatesLocked(); err != nil {
+		return err
 	}
 
 	durableWM, err := q.readSequenceWatermarkLocked()
@@ -401,6 +457,10 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
+	if q.locationUncertain {
+		return nil, ErrQuarantineUncertain
+	}
+
 	entries, err := os.ReadDir(q.activeDir)
 	if err != nil {
 		return nil, fmt.Errorf("QUEUE_READ_DIR_FAILED: %w", err)
@@ -408,11 +468,21 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 
 	var fileNames []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), "rec_") && strings.HasSuffix(e.Name(), ".json") {
+		if !e.IsDir() && isRecordJSON(e.Name()) {
 			fileNames = append(fileNames, e.Name())
 		}
 	}
 	sort.Strings(fileNames)
+
+	for _, name := range fileNames {
+		if _, _, nameErr := parseRecordFileName(name); nameErr != nil {
+			q.unknownSequenceBlock = true
+			return nil, ErrUnknownSequence
+		}
+	}
+	if q.unknownSequenceBlock {
+		return nil, ErrUnknownSequence
+	}
 
 	var batch []Record
 	var currentBytes int64
@@ -425,15 +495,19 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 
 		fileSeq, _, nameErr := parseRecordFileName(name)
 		if nameErr != nil {
-			if qErr := q.quarantineRecordLocked(name, "QUEUE_RECORD_CORRUPT"); qErr != nil {
-				if len(batch) > 0 {
-					return batch, nil
-				}
-				return nil, qErr
-			}
-			break
+			q.unknownSequenceBlock = true
+			return nil, ErrUnknownSequence
 		}
 		if blocked > 0 && fileSeq > blocked {
+			break
+		}
+
+		dup, dupErr := q.duplicateStateLocked(name)
+		if dupErr != nil {
+			return nil, dupErr
+		}
+		if dup {
+			q.noteBlockedLocked(fileSeq)
 			break
 		}
 
@@ -453,6 +527,9 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 		rec, _, parseErr := decodeRecordFile(name, data)
 		if parseErr != nil {
 			if qErr := q.quarantineRecordLocked(name, "QUEUE_RECORD_CORRUPT"); qErr != nil {
+				if q.locationUncertain || errors.Is(qErr, ErrQuarantineUncertain) || errors.Is(qErr, ErrUnknownSequence) {
+					return nil, qErr
+				}
 				if len(batch) > 0 {
 					return batch, nil
 				}
@@ -513,7 +590,7 @@ func decodeRecordFile(name string, data []byte) (*Record, uint64, error) {
 }
 
 func parseRecordFileName(name string) (uint64, string, error) {
-	// rec_<19-digit-seq>_<id>.json
+	// Canonical: rec_<19-digit-seq>_<id>.json
 	if !strings.HasPrefix(name, "rec_") || !strings.HasSuffix(name, ".json") {
 		return 0, "", fmt.Errorf("%w: bad filename", ErrRecordCorrupted)
 	}
@@ -521,6 +598,15 @@ func parseRecordFileName(name string) (uint64, string, error) {
 	parts := strings.SplitN(body, "_", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return 0, "", fmt.Errorf("%w: bad filename parts", ErrRecordCorrupted)
+	}
+	if len(parts[0]) != recordSequenceWidth {
+		return 0, "", fmt.Errorf("%w: noncanonical sequence width", ErrRecordCorrupted)
+	}
+	for i := 0; i < len(parts[0]); i++ {
+		c := parts[0][i]
+		if c < '0' || c > '9' {
+			return 0, "", fmt.Errorf("%w: bad sequence", ErrRecordCorrupted)
+		}
 	}
 	seq, err := strconv.ParseUint(parts[0], 10, 64)
 	if err != nil {
@@ -546,7 +632,7 @@ func (q *DurableQueue) scanQuarantineLocked() (uint64, error) {
 	q.blockedFromSequence = 0
 	var highest uint64
 	for _, e := range qEntries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), "rec_") || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() || !isRecordJSON(e.Name()) {
 			continue
 		}
 		fi, err := e.Info()
@@ -555,7 +641,10 @@ func (q *DurableQueue) scanQuarantineLocked() (uint64, error) {
 		}
 		fileSeq, _, nameErr := parseRecordFileName(e.Name())
 		if nameErr != nil {
-			return 0, fmt.Errorf("QUEUE_QUARANTINE_NAME_CORRUPT: %w", nameErr)
+			q.unknownSequenceBlock = true
+			q.quarantineCount++
+			q.quarantineBytes += fi.Size()
+			continue
 		}
 		q.quarantineCount++
 		q.quarantineBytes += fi.Size()
@@ -577,6 +666,12 @@ func (q *DurableQueue) noteBlockedLocked(seq uint64) {
 }
 
 func (q *DurableQueue) errIfDeliveryBlockedLocked(hasPrefix bool) error {
+	if q.locationUncertain {
+		return ErrQuarantineUncertain
+	}
+	if q.unknownSequenceBlock {
+		return ErrUnknownSequence
+	}
 	if hasPrefix || q.blockedFromSequence == 0 {
 		return nil
 	}
@@ -702,25 +797,32 @@ func (q *DurableQueue) quarantineRecordLocked(name, code string) error {
 		return err
 	}
 
-	fileSeq, _, _ := parseRecordFileName(name)
+	fileSeq, _, parseErr := parseRecordFileName(name)
+	if parseErr != nil {
+		q.unknownSequenceBlock = true
+		return ErrUnknownSequence
+	}
 
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return fmt.Errorf("QUEUE_QUARANTINE_FAILED: %w", err)
 	}
-	restore := func() {
-		_ = os.Rename(newPath, oldPath)
+
+	if err := q.syncPhase(syncPhaseQuarantineDest, q.quarantineDir); err != nil {
+		return q.rollbackQuarantineMoveLocked(name, err)
 	}
-	if err := syncDir(q.activeDir); err != nil {
-		// Best-effort restore so corrupt data is not silently vanished mid-flight.
-		restore()
-		return fmt.Errorf("QUEUE_QUARANTINE_DIR_SYNC_FAILED: %w", err)
-	}
-	if err := syncDir(q.quarantineDir); err != nil {
-		restore()
-		_ = syncDir(q.activeDir)
-		return fmt.Errorf("QUEUE_QUARANTINE_DIR_SYNC_FAILED: %w", err)
+	if err := q.syncPhase(syncPhaseActiveSource, q.activeDir); err != nil {
+		// Destination directory entry is durable. Do not reverse: a rollback
+		// could drop the only durable copy. Quarantine is authoritative.
+		q.applyQuarantineCountersLocked(size, fileSeq)
+		return fmt.Errorf("%w: %v", ErrQuarantineSourceSyncFailed, err)
 	}
 
+	q.applyQuarantineCountersLocked(size, fileSeq)
+	q.writeQuarantineReason(name, code)
+	return nil
+}
+
+func (q *DurableQueue) applyQuarantineCountersLocked(size int64, fileSeq uint64) {
 	q.activeCount--
 	q.activeBytes -= size
 	if q.activeCount < 0 {
@@ -731,11 +833,161 @@ func (q *DurableQueue) quarantineRecordLocked(name, code string) error {
 	}
 	q.quarantineCount++
 	q.quarantineBytes += size
-	if fileSeq > 0 {
-		q.noteBlockedLocked(fileSeq)
+	q.noteBlockedLocked(fileSeq)
+}
+
+func (q *DurableQueue) rollbackQuarantineMoveLocked(name string, destSyncErr error) error {
+	activePath := filepath.Join(q.activeDir, name)
+	quarantinePath := filepath.Join(q.quarantineDir, name)
+	if err := os.Rename(quarantinePath, activePath); err != nil {
+		return q.enterUncertainLocked(fmt.Errorf("rollback rename failed: %w", err))
 	}
-	q.writeQuarantineReason(name, code)
+	if err := q.syncPhase(syncPhaseRollbackDest, q.activeDir); err != nil {
+		return q.enterUncertainLocked(fmt.Errorf("rollback dest sync failed: %w", err))
+	}
+	if err := q.syncPhase(syncPhaseRollbackSource, q.quarantineDir); err != nil {
+		// Rollback destination (active/) is durable. Do not reverse again.
+		return fmt.Errorf("QUEUE_QUARANTINE_DIR_SYNC_FAILED: %w", destSyncErr)
+	}
+	return fmt.Errorf("QUEUE_QUARANTINE_DIR_SYNC_FAILED: %w", destSyncErr)
+}
+
+func (q *DurableQueue) syncPhase(phase, dir string) error {
+	if q.syncHook != nil {
+		if err := q.syncHook(phase, dir); err != nil {
+			return err
+		}
+	}
+	return syncDir(dir)
+}
+
+func (q *DurableQueue) enterUncertainLocked(cause error) error {
+	q.locationUncertain = true
+	_ = q.persistUncertainMarkerLocked()
+	return fmt.Errorf("%w: %v", ErrQuarantineUncertain, cause)
+}
+
+func (q *DurableQueue) persistUncertainMarkerLocked() error {
+	path := filepath.Join(q.dir, uncertainMarkerFile)
+	payload := []byte(`{"code":"QUEUE_QUARANTINE_UNCERTAIN"}`)
+	tmp, err := os.CreateTemp(q.dir, "uncertain.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(payload); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	return syncDir(q.dir)
+}
+
+func (q *DurableQueue) loadUncertainMarkerLocked() error {
+	path := filepath.Join(q.dir, uncertainMarkerFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("QUEUE_UNCERTAIN_MARKER_READ_FAILED: %w", err)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		q.locationUncertain = true
+		return nil
+	}
+	var meta map[string]string
+	if err := json.Unmarshal(data, &meta); err != nil {
+		q.locationUncertain = true
+		return nil
+	}
+	if meta["code"] != "QUEUE_QUARANTINE_UNCERTAIN" {
+		q.locationUncertain = true
+		return nil
+	}
+	q.locationUncertain = true
 	return nil
+}
+
+func (q *DurableQueue) duplicateStateLocked(name string) (bool, error) {
+	qPath := filepath.Join(q.quarantineDir, name)
+	qInfo, err := os.Lstat(qPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("QUEUE_DUPLICATE_STAT_FAILED: %w", err)
+	}
+	if qInfo.Mode()&os.ModeSymlink != 0 {
+		return false, errors.New("QUEUE_QUARANTINE_SYMLINK_REJECTED: quarantine record path is a symlink")
+	}
+	aPath := filepath.Join(q.activeDir, name)
+	aData, err := os.ReadFile(aPath)
+	if err != nil {
+		return false, fmt.Errorf("QUEUE_DUPLICATE_ACTIVE_READ_FAILED: %w", err)
+	}
+	qData, err := os.ReadFile(qPath)
+	if err != nil {
+		return false, fmt.Errorf("QUEUE_DUPLICATE_QUARANTINE_READ_FAILED: %w", err)
+	}
+	if !bytes.Equal(aData, qData) {
+		return false, q.enterUncertainLocked(errors.New("active and quarantine copies conflict"))
+	}
+	return true, nil
+}
+
+func (q *DurableQueue) reconcileDuplicatesLocked() error {
+	entries, err := os.ReadDir(q.activeDir)
+	if err != nil {
+		return fmt.Errorf("QUEUE_SCAN_FAILED: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !isRecordJSON(e.Name()) {
+			continue
+		}
+		if _, destErr := os.Lstat(filepath.Join(q.quarantineDir, e.Name())); destErr != nil {
+			continue
+		}
+		dup, dupErr := q.duplicateStateLocked(e.Name())
+		if dupErr != nil {
+			if errors.Is(dupErr, ErrQuarantineUncertain) {
+				continue
+			}
+			return dupErr
+		}
+		if dup {
+			if fileSeq, _, parseErr := parseRecordFileName(e.Name()); parseErr == nil {
+				q.noteBlockedLocked(fileSeq)
+			}
+		}
+	}
+	return nil
+}
+
+func isRecordJSON(name string) bool {
+	return strings.HasPrefix(name, "rec_") && strings.HasSuffix(name, ".json")
+}
+
+func isFailClosedQuarantineErr(err error) bool {
+	return errors.Is(err, ErrQuarantineUncertain) ||
+		errors.Is(err, ErrQuarantineSourceSyncFailed) ||
+		errors.Is(err, ErrQuarantineDestExists) ||
+		errors.Is(err, ErrQuarantineFull) ||
+		errors.Is(err, ErrUnknownSequence)
 }
 
 func (q *DurableQueue) DeleteThrough(seq uint64) error {
@@ -824,7 +1076,9 @@ func (q *DurableQueue) Stats() QueueStats {
 		AtCapacity:           atCapacity,
 		QuarantineAtCapacity: quarantineAtCapacity,
 		BlockedFromSequence:  q.blockedFromSequence,
-		DeliveryBlocked:      q.hasActiveAfterBlockedLocked(),
+		DeliveryBlocked:      q.unknownSequenceBlock || q.locationUncertain || q.hasActiveAfterBlockedLocked(),
+		UnknownSequenceBlock: q.unknownSequenceBlock,
+		LocationUncertain:    q.locationUncertain,
 	}
 }
 

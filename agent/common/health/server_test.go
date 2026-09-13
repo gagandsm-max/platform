@@ -34,6 +34,26 @@ func TestHealthDeliveryBlockedDegraded(t *testing.T) {
 	}
 }
 
+func TestHealthUnknownSequenceDegraded(t *testing.T) {
+	prov := &mockStatsProvider{receiverAvailable: true, unknownSequence: true}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wHealth := httptest.NewRecorder()
+	s.handleHealth(wHealth, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if wHealth.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected /health 503 for unknown-sequence block, got %d", wHealth.Code)
+	}
+	body := wHealth.Body.String()
+	if !strings.Contains(body, "QUEUE_UNKNOWN_SEQUENCE_BLOCK") {
+		t.Fatalf("expected QUEUE_UNKNOWN_SEQUENCE_BLOCK, got %s", body)
+	}
+	if strings.Contains(body, "payload") || strings.Contains(body, "secret") {
+		t.Fatalf("health must not include payload material: %s", body)
+	}
+}
+
 func TestHealthQueueFullDegraded(t *testing.T) {
 	prov := &mockStatsProvider{receiverAvailable: true, atCapacity: true}
 	s, err := NewServer("127.0.0.1:0", prov, nil)
@@ -56,15 +76,19 @@ type mockStatsProvider struct {
 	lastErrorCode     string
 	lastFailureClass  client.FailureClass
 	deliveryBlocked   bool
+	unknownSequence   bool
+	locationUncertain bool
 }
 
 func (m *mockStatsProvider) QueueStats() queue.QueueStats {
 	return queue.QueueStats{
-		ActiveCount:     5,
-		ActiveBytes:     1024,
-		AtCapacity:      m.atCapacity,
-		QuarantineCount: m.quarantine,
-		DeliveryBlocked: m.deliveryBlocked,
+		ActiveCount:          5,
+		ActiveBytes:          1024,
+		AtCapacity:           m.atCapacity,
+		QuarantineCount:      m.quarantine,
+		DeliveryBlocked:      m.deliveryBlocked || m.unknownSequence || m.locationUncertain,
+		UnknownSequenceBlock: m.unknownSequence,
+		LocationUncertain:    m.locationUncertain,
 	}
 }
 

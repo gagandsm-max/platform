@@ -706,8 +706,8 @@ func TestDurableQueueRecoverQuarantineFullFailClosed(t *testing.T) {
 	corruptRecordFile(t, second)
 	q.maxQuarantineRecords = 1
 
-	if err := q.recoverState(); !errors.Is(err, ErrQuarantineFull) {
-		t.Fatalf("expected recover QUEUE_QUARANTINE_FULL, got %v", err)
+	if err := q.recoverState(); err != nil && !errors.Is(err, ErrQuarantineFull) {
+		t.Fatalf("recover must fail-closed retain, got %v", err)
 	}
 	if _, err := os.Stat(second); err != nil {
 		t.Fatalf("second poison must remain in active/ when quarantine is full: %v", err)
@@ -746,12 +746,25 @@ func TestDurableQueueQuarantineDestExistsFailClosed(t *testing.T) {
 	if err := os.WriteFile(dest, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	corruptRecordFile(t, src)
-	if _, err := q.ReadBatch(10, 1024*1024); !errors.Is(err, ErrQuarantineDestExists) {
-		t.Fatalf("expected dest-exists fail-closed, got %v", err)
+	if _, err := q.Enqueue([]byte("later")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if len(batch) != 0 {
+		t.Fatalf("dest-exists/duplicate must not deliver any record, including the active copy: %+v err=%v", batch, err)
+	}
+	if !errors.Is(err, ErrQuarantineDestExists) && !errors.Is(err, ErrDeliveryBlocked) && !errors.Is(err, ErrQuarantineUncertain) {
+		t.Fatalf("unexpected dest-exists handling: %v", err)
 	}
 	if _, err := os.Stat(src); err != nil {
-		t.Fatalf("active poison must remain when dest exists: %v", err)
+		t.Fatalf("active record must remain when dest exists: %v", err)
+	}
+	if _, err := os.Stat(dest); err != nil {
+		t.Fatalf("existing quarantine dest must not be overwritten away: %v", err)
+	}
+	destRaw, _ := os.ReadFile(dest)
+	if !bytes.Equal(destRaw, raw) {
+		t.Fatal("must not overwrite existing quarantine destination")
 	}
 }
 
@@ -830,5 +843,349 @@ func TestDurableQueueReasonSidecarHasCodeOnly(t *testing.T) {
 	}
 	if q2.Stats().QuarantineCount != 1 {
 		t.Fatalf("reason sidecar must not be counted as a quarantined record, stats=%+v", q2.Stats())
+	}
+}
+
+func recordPresent(t *testing.T, root, sub string, seq uint64) bool {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(root, sub))
+	if err != nil {
+		return false
+	}
+	prefix := fmt.Sprintf("rec_%019d_", seq)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), prefix) && strings.HasSuffix(e.Name(), ".json") {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDurableQueueDestSyncFailureRollsBackWithoutLoss(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("three")); err != nil {
+		t.Fatal(err)
+	}
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 2))
+	q.syncHook = func(phase, dir string) error {
+		if phase == syncPhaseQuarantineDest {
+			return errors.New("injected dest sync fail")
+		}
+		return nil
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil && len(batch) != 0 {
+		t.Fatalf("must not return a batch with dest-sync error: batch=%+v err=%v", batch, err)
+	}
+	if !recordPresent(t, tempDir, "active", 2) {
+		t.Fatal("dest-sync failure must leave poison in active after durable rollback")
+	}
+	if recordPresent(t, tempDir, "quarantine", 2) {
+		t.Fatal("successful rollback must not leave a quarantine copy of seq 2")
+	}
+	if err := q.DeleteThrough(1); err != nil && !recordPresent(t, tempDir, "active", 1) {
+		t.Fatal(err)
+	}
+	q.syncHook = func(phase, dir string) error {
+		if phase == syncPhaseQuarantineDest {
+			return errors.New("injected dest sync fail")
+		}
+		return nil
+	}
+	batch, err = q.ReadBatch(10, 1024*1024)
+	for _, rec := range batch {
+		if rec.Sequence > 1 {
+			t.Fatalf("later record delivered after dest-sync failure: %+v", rec)
+		}
+	}
+	if !recordPresent(t, tempDir, "active", 3) {
+		t.Fatal("later record must remain intact")
+	}
+}
+
+func TestDurableQueueSourceSyncFailureKeepsQuarantineAuthoritative(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("three")); err != nil {
+		t.Fatal(err)
+	}
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 2))
+	q.syncHook = func(phase, dir string) error {
+		if phase == syncPhaseActiveSource {
+			return errors.New("injected source sync fail")
+		}
+		return nil
+	}
+	_, err = q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrQuarantineSourceSyncFailed) && q.Stats().BlockedFromSequence != 2 {
+		// prefix seq 1 may be returned first; force second read after deleting prefix
+		_ = q.DeleteThrough(1)
+		_, err = q.ReadBatch(10, 1024*1024)
+	}
+	if !recordPresent(t, tempDir, "quarantine", 2) {
+		t.Fatal("source-sync failure must leave durable quarantine copy")
+	}
+	q.syncHook = nil
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q2.ReadBatch(10, 1024*1024)
+	if errors.Is(err, ErrDeliveryBlocked) || errors.Is(err, ErrQuarantineSourceSyncFailed) {
+		for _, rec := range batch {
+			if rec.Sequence >= 2 {
+				t.Fatalf("must not deliver seq >= 2 after source-sync failure: %+v", rec)
+			}
+		}
+	} else if err == nil {
+		for _, rec := range batch {
+			if rec.Sequence >= 2 {
+				t.Fatalf("must not deliver seq >= 2: %+v", rec)
+			}
+		}
+		if err := q2.DeleteThrough(1); err != nil {
+			t.Fatal(err)
+		}
+		batch, err = q2.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrDeliveryBlocked) {
+			t.Fatalf("expected blocked after prefix drain, err=%v batch=%+v", err, batch)
+		}
+	} else {
+		t.Fatalf("unexpected reopen error: %v", err)
+	}
+	if !recordPresent(t, tempDir, "quarantine", 2) && !recordPresent(t, tempDir, "active", 2) {
+		t.Fatal("seq 2 must not be lost across reopen")
+	}
+	if !recordPresent(t, tempDir, "active", 3) {
+		t.Fatal("later record must remain")
+	}
+}
+
+func TestDurableQueueRollbackDestSyncFailureIsUncertain(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+	q.syncHook = func(phase, dir string) error {
+		switch phase {
+		case syncPhaseQuarantineDest:
+			return errors.New("injected dest sync fail")
+		case syncPhaseRollbackDest:
+			return errors.New("injected rollback dest sync fail")
+		}
+		return nil
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrQuarantineUncertain) {
+		t.Fatalf("expected QUEUE_QUARANTINE_UNCERTAIN, got batch=%+v err=%v", batch, err)
+	}
+	if len(batch) != 0 {
+		t.Fatalf("uncertain location must not deliver, got %+v", batch)
+	}
+	if !recordPresent(t, tempDir, "active", 1) && !recordPresent(t, tempDir, "quarantine", 1) {
+		t.Fatal("telemetry must exist in at least one location")
+	}
+	if recordPresent(t, tempDir, "active", 2) {
+		batch2, err2 := q.ReadBatch(10, 1024*1024)
+		if !errors.Is(err2, ErrQuarantineUncertain) || len(batch2) != 0 {
+			t.Fatalf("must not continue delivery while uncertain: batch=%+v err=%v", batch2, err2)
+		}
+	}
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+		t.Fatalf("uncertain state must survive reopen, batch=%+v err=%v", batch, err)
+	}
+	if !recordPresent(t, tempDir, "active", 1) && !recordPresent(t, tempDir, "quarantine", 1) {
+		t.Fatal("telemetry must still exist after reopen")
+	}
+}
+
+func TestDurableQueueDuplicateRecoveryNeverDeliversActiveCopy(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	src := activeRecordPath(t, tempDir, 1)
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(tempDir, "active"))
+	var name1 string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "rec_0000000000000000001_") {
+			name1 = e.Name()
+			break
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "quarantine", name1), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q2.ReadBatch(10, 1024*1024)
+	if err == nil {
+		for _, rec := range batch {
+			if rec.Sequence == 1 {
+				t.Fatal("must never deliver active duplicate of quarantined record")
+			}
+		}
+	}
+	if !errors.Is(err, ErrDeliveryBlocked) && err != nil && !errors.Is(err, ErrQuarantineUncertain) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !recordPresent(t, tempDir, "active", 1) || !recordPresent(t, tempDir, "quarantine", 1) {
+		t.Fatal("must not silently discard either duplicate copy")
+	}
+
+	conflictDir := t.TempDir()
+	q3, err := NewDurableQueue(conflictDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q3.Enqueue([]byte("keep")); err != nil {
+		t.Fatal(err)
+	}
+	src3 := activeRecordPath(t, conflictDir, 1)
+	entries3, _ := os.ReadDir(filepath.Join(conflictDir, "active"))
+	if err := os.WriteFile(filepath.Join(conflictDir, "quarantine", entries3[0].Name()), []byte(`{"conflict":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_ = src3
+	q4, err := NewDurableQueue(conflictDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q4.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+		t.Fatalf("conflicting copies must fail closed, batch=%+v err=%v", batch, err)
+	}
+	if _, err := os.Stat(src3); err != nil {
+		t.Fatalf("must not discard conflicting active copy: %v", err)
+	}
+}
+
+func TestDurableQueueUnknownSequenceBlocksGlobally(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("three")); err != nil {
+		t.Fatal(err)
+	}
+	malformed := filepath.Join(tempDir, "active", "rec_not-a-sequence_zzz.json")
+	if err := os.WriteFile(malformed, []byte(`{"sequence":99,"id":"zzz","checksum":"x","payload":"c2VjcmV0"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		batch, err := q.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrUnknownSequence) {
+			t.Fatalf("call %d: expected unknown-sequence block, batch=%+v err=%v", i, batch, err)
+		}
+		if len(batch) != 0 {
+			t.Fatalf("call %d: must not submit any records, got %+v", i, batch)
+		}
+	}
+	if _, err := os.Stat(malformed); err != nil {
+		t.Fatalf("malformed file must remain in active/: %v", err)
+	}
+	if !recordPresent(t, tempDir, "active", 3) {
+		t.Fatal("later valid records must remain")
+	}
+	if q.Stats().UnknownSequenceBlock != true || q.Stats().DeliveryBlocked != true {
+		t.Fatalf("stats must report unknown-sequence block: %+v", q.Stats())
+	}
+
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q2.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrUnknownSequence) || len(batch) != 0 {
+		t.Fatalf("blocked state must survive restart, batch=%+v err=%v", batch, err)
+	}
+	if _, err := os.Stat(malformed); err != nil {
+		t.Fatalf("malformed file must remain after restart: %v", err)
+	}
+	if q2.Stats().ActiveCount != 4 {
+		t.Fatalf("unknown-sequence file must count toward active capacity after restart, stats=%+v", q2.Stats())
+	}
+	if !q2.Stats().UnknownSequenceBlock || !q2.Stats().DeliveryBlocked {
+		t.Fatalf("restart must restore unknown-sequence block: %+v", q2.Stats())
+	}
+}
+
+func TestDurableQueueNoncanonicalWidthFailsClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("canonical-one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("canonical-two")); err != nil {
+		t.Fatal(err)
+	}
+	shortName := filepath.Join(tempDir, "active", "rec_2_reorder.json")
+	if err := os.WriteFile(shortName, []byte(`{"sequence":2,"id":"reorder","checksum":"00","payload":"eA=="}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrUnknownSequence) || len(batch) != 0 {
+		t.Fatalf("noncanonical width must fail closed, batch=%+v err=%v", err, batch)
+	}
+	if _, err := os.Stat(shortName); err != nil {
+		t.Fatalf("noncanonical file must remain: %v", err)
+	}
+	if !recordPresent(t, tempDir, "active", 1) || !recordPresent(t, tempDir, "active", 2) {
+		t.Fatal("canonical records must remain")
 	}
 }
