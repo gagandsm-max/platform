@@ -305,3 +305,194 @@ func TestRebuildIndexesEntirePendingSpoolBeyond1024(t *testing.T) {
 		t.Fatalf("retry after >1024 recovery appended duplicate: before=%d after=%d", before.RecordCount, after.RecordCount)
 	}
 }
+
+func drainPending(t *testing.T, s *spool.DiskSpool) {
+	t.Helper()
+	stats, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.RecordCount == 0 {
+		return
+	}
+	through := stats.NextSequence - 1
+	if err := s.AcknowledgeThrough(through); err != nil {
+		t.Fatalf("drain AcknowledgeThrough(%d): %v", through, err)
+	}
+	stats, err = s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.RecordCount != 0 {
+		t.Fatalf("expected empty pending spool after drain, got %d", stats.RecordCount)
+	}
+}
+
+func TestLostAckAfterDrainIdempotentReplay(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent-spool")
+	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sink, err := NewSpoolAcceptanceSink(s, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	env := sampleEnvelope("agent-a", "tenant-1", sampleRecord(900, "r-900", []byte(`{"lost-ack":true}`)))
+	env.BatchID = "batch-lost-ack-900"
+	env.ReceivingSensorID = "sensor-infra-01"
+	env.AssignmentGeneration = 1
+	first, err := sink.AcceptBatch(context.Background(), env)
+	if err != nil || first.AcceptedThrough != 900 {
+		t.Fatalf("initial accept failed: res=%+v err=%v", first, err)
+	}
+
+	drainPending(t, s)
+	if _, err := os.Stat(sink.indexPath(batchIndexKey(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence))); err != nil {
+		t.Fatalf("acceptance receipt must survive drain: %v", err)
+	}
+
+	replay, err := sink.AcceptBatch(context.Background(), env)
+	if err != nil || replay.AcceptedThrough != first.AcceptedThrough {
+		t.Fatalf("identical post-drain replay must return original watermark: res=%+v err=%v", replay, err)
+	}
+	stats, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.RecordCount != 0 {
+		t.Fatalf("post-drain identical replay appended a second logical batch: recordCount=%d", stats.RecordCount)
+	}
+}
+
+func TestLostAckAfterDrainSurvivesSensorRestart(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent-spool")
+	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink, err := NewSpoolAcceptanceSink(s, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := sampleEnvelope("agent-a", "tenant-1", sampleRecord(901, "r-901", []byte(`{"restart":true}`)))
+	env.BatchID = "batch-lost-ack-restart-901"
+	env.ReceivingSensorID = "sensor-infra-01"
+	env.AssignmentGeneration = 1
+	first, err := sink.AcceptBatch(context.Background(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainPending(t, s)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	sink2, err := NewSpoolAcceptanceSink(s2, dir)
+	if err != nil {
+		t.Fatalf("restart recovery failed: %v", err)
+	}
+	replay, err := sink2.AcceptBatch(context.Background(), env)
+	if err != nil || replay.AcceptedThrough != first.AcceptedThrough {
+		t.Fatalf("post-restart drained replay failed: res=%+v err=%v", replay, err)
+	}
+	stats, err := s2.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.RecordCount != 0 {
+		t.Fatalf("restart replay appended duplicate: recordCount=%d", stats.RecordCount)
+	}
+}
+
+func TestLostAckAfterDrainMutatedReplayConflicts(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent-spool")
+	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sink, err := NewSpoolAcceptanceSink(s, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := sampleEnvelope("agent-a", "tenant-1", sampleRecord(902, "r-902", []byte(`{"original":true}`)))
+	env.BatchID = "batch-lost-ack-mutate-902"
+	env.ReceivingSensorID = "sensor-infra-01"
+	env.AssignmentGeneration = 1
+	if _, err := sink.AcceptBatch(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	drainPending(t, s)
+
+	mutated := env
+	mutated.Records = []DeliveryRecord{sampleRecord(902, "r-902", []byte(`{"original":false}`))}
+	mutated.RecordCount = 1
+	if _, err := sink.AcceptBatch(context.Background(), mutated); !IsDurableReplayConflict(err) {
+		t.Fatalf("mutated post-drain replay must conflict, got %v", err)
+	}
+	stats, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.RecordCount != 0 {
+		t.Fatalf("mutated replay must not append: recordCount=%d", stats.RecordCount)
+	}
+}
+
+func TestDrainedReceiptBoundRetainsLatestAndRejectsEvictedReuse(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent-spool")
+	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sink, err := NewSpoolAcceptanceSink(s, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.maxDrainedReceipts = 2
+
+	var envs []DeliveryEnvelope
+	for i := 1; i <= 3; i++ {
+		seq := uint64(1000 + i)
+		env := sampleEnvelope("agent-a", "tenant-1", sampleRecord(seq, fmt.Sprintf("r-%d", seq), []byte(fmt.Sprintf(`{"n":%d}`, i))))
+		env.BatchID = fmt.Sprintf("batch-bound-%d", i)
+		env.ReceivingSensorID = "sensor-infra-01"
+		env.AssignmentGeneration = 1
+		if _, err := sink.AcceptBatch(context.Background(), env); err != nil {
+			t.Fatalf("accept %d: %v", i, err)
+		}
+		envs = append(envs, env)
+		drainPending(t, s)
+	}
+
+	next := sampleEnvelope("agent-a", "tenant-1", sampleRecord(1004, "r-1004", []byte(`{"n":4}`)))
+	next.BatchID = "batch-bound-4"
+	next.ReceivingSensorID = "sensor-infra-01"
+	next.AssignmentGeneration = 1
+	if _, err := sink.AcceptBatch(context.Background(), next); err != nil {
+		t.Fatalf("accept 4: %v", err)
+	}
+
+	if _, err := sink.AcceptBatch(context.Background(), envs[0]); !IsDurableReplayConflict(err) {
+		t.Fatalf("evicted drained identity must fail closed, got %v", err)
+	}
+	if res, err := sink.AcceptBatch(context.Background(), envs[2]); err != nil || res.AcceptedThrough != 1003 {
+		t.Fatalf("latest drained identity must remain replayable: res=%+v err=%v", res, err)
+	}
+	stats, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.RecordCount != 1 {
+		t.Fatalf("evicted reuse must not append; only batch 4 should be pending, recordCount=%d", stats.RecordCount)
+	}
+}

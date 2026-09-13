@@ -87,7 +87,7 @@ run_agent_ack_unit_tests() {
         -v "${ROOT_DIR}/agent:/src:ro" \
         -w /src \
         golang:1.27.1-alpine3.24 \
-        sh -c 'CGO_ENABLED=0 go test -count=1 ./common/client ./common/delivery ./common/queue ./common/health'
+        sh -c 'CGO_ENABLED=0 go test -count=1 ./common/client ./common/delivery ./common/queue ./common/health ./common/config'
 }
 
 queue_count() {
@@ -285,16 +285,7 @@ else
     fail_closed "injected-batch-sensor-ack" "${UNIQUE_ACK}"
 fi
 
-# Replay while the batch is still a Sensor-accepted identity (before/during drain).
-REPLAY_BODY="${EVIDENCE_DIR}/unique-envelope.json"
-REPLAY_ACK="$(post_envelope "${REPLAY_BODY}")"
-printf '%s\n' "${REPLAY_ACK}" > "${EVIDENCE_DIR}/replay-ack.json"
-if echo "${REPLAY_ACK}" | grep -q '"status":"ACCEPTED"'; then
-    record "replay-same-batch-ack" "PASS" "Sensor replay returned ACCEPTED"
-else
-    record "replay-same-batch-ack" "FAIL" "${REPLAY_ACK}"
-fi
-
+# Unique batch must reach Kafka (Sensor drain) before lost-ACK replay.
 UNIQUE_HITS=0
 for i in $(seq 1 20); do
     UNIQUE_HITS="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
@@ -307,6 +298,55 @@ if [[ "${UNIQUE_HITS}" -lt 1 ]]; then
     fail_closed "injected-batch-kafka" "metric ${METRIC} not observed on Kafka"
 fi
 record "injected-batch-kafka" "PASS" "metricId=${METRIC} hits=${UNIQUE_HITS}"
+sleep 5
+
+# TEST A — lost ACK after durable accept + drain: identical retry must ACK without a second logical batch.
+REPLAY_BODY="${EVIDENCE_DIR}/unique-envelope.json"
+REPLAY_ACK="$(post_envelope "${REPLAY_BODY}")"
+printf '%s\n' "${REPLAY_ACK}" > "${EVIDENCE_DIR}/replay-ack.json"
+if echo "${REPLAY_ACK}" | grep -q '"status":"ACCEPTED"' && echo "${REPLAY_ACK}" | grep -q '"accepted_through_sequence":900001'; then
+    record "lost-ack-after-drain-replay" "PASS" "${REPLAY_ACK}"
+else
+    fail_closed "lost-ack-after-drain-replay" "${REPLAY_ACK}"
+fi
+POST_REPLAY_HITS="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
+record "lost-ack-after-drain-no-second-logical" "PASS" "metric ${METRIC} kafka hits=${POST_REPLAY_HITS} after identical replay (at-least-once)"
+
+# TEST B — same identity after Sensor restart.
+log "==> Sensor restart between drain and duplicate retry"
+docker restart platform-sensor-infra >/dev/null
+if ! wait_healthy platform-sensor-infra 40; then
+    fail_closed "lost-ack-sensor-restart" "sensor-infra did not recover"
+fi
+wait_receiver || fail_closed "lost-ack-sensor-restart" "receiver not ready after restart"
+RESTART_REPLAY_ACK="$(post_envelope "${REPLAY_BODY}")"
+printf '%s\n' "${RESTART_REPLAY_ACK}" > "${EVIDENCE_DIR}/replay-after-sensor-restart-ack.json"
+if echo "${RESTART_REPLAY_ACK}" | grep -q '"status":"ACCEPTED"' && echo "${RESTART_REPLAY_ACK}" | grep -q '"accepted_through_sequence":900001'; then
+    record "lost-ack-after-drain-and-sensor-restart" "PASS" "${RESTART_REPLAY_ACK}"
+else
+    fail_closed "lost-ack-after-drain-and-sensor-restart" "${RESTART_REPLAY_ACK}"
+fi
+
+# TEST C — mutated replay of the accepted sequence/range.
+kafka_end_offsets > "${EVIDENCE_DIR}/offsets-before-mutated.txt"
+python3 "${E2E_DIR}/build_envelope.py" \
+    --envelope-tenant "${TENANT}" --payload-tenant "${TENANT}" \
+    --agent-id "${AGENT_ID}" --host-id "${HOST_ID}" \
+    --sequence 900001 --metric-key "${METRIC}" --value 99 \
+    --batch-id "batch-e2e-unique-900001" \
+    > "${EVIDENCE_DIR}/unique-envelope-mutated.json"
+MUTATED_ACK="$(post_envelope "${EVIDENCE_DIR}/unique-envelope-mutated.json")"
+printf '%s\n' "${MUTATED_ACK}" > "${EVIDENCE_DIR}/replay-mutated-ack.json"
+if echo "${MUTATED_ACK}" | grep -q 'ERR_REPLAY_CONFLICT'; then
+    record "mutated-replay-conflict" "PASS" "${MUTATED_ACK}"
+else
+    fail_closed "mutated-replay-conflict" "${MUTATED_ACK}"
+fi
+MUTATED_KAFKA="$(consume_since_offsets "${EVIDENCE_DIR}/offsets-before-mutated.txt" 6 || true)"
+if echo "${MUTATED_KAFKA}" | grep -q '"value":99'; then
+    fail_closed "mutated-replay-no-new-downstream" "mutated replay produced a new Kafka payload"
+fi
+record "mutated-replay-no-new-downstream" "PASS" "no new value=99 event after conflict"
 
 # Envelope tenant forgery is denied; payload tenant forgery cannot override Kafka tenant.
 python3 "${E2E_DIR}/build_envelope.py" \
@@ -410,7 +450,7 @@ fi
 # Invalid ACK cannot be emitted by the production Sensor; exercise Agent package contracts.
 log "==> Agent invalid-ACK / fail-closed transport unit contracts (real Agent packages)"
 if run_agent_ack_unit_tests | tee "${EVIDENCE_DIR}/agent-ack-unit.txt"; then
-    record "invalid-ack-unit-suite" "PASS" "go test ./common/client ./common/delivery ./common/queue ./common/health"
+    record "invalid-ack-unit-suite" "PASS" "go test ./common/client ./common/delivery ./common/queue ./common/health ./common/config"
 else
     record "invalid-ack-unit-suite" "FAIL" "see evidence/agent-ack-unit.txt"
 fi
