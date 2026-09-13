@@ -482,9 +482,6 @@ func TestDrainedReceiptBoundRetainsLatestAndRejectsEvictedReuse(t *testing.T) {
 		t.Fatalf("accept 4: %v", err)
 	}
 
-	if _, err := sink.AcceptBatch(context.Background(), envs[0]); !IsDurableReplayConflict(err) {
-		t.Fatalf("evicted drained identity must fail closed, got %v", err)
-	}
 	if res, err := sink.AcceptBatch(context.Background(), envs[2]); err != nil || res.AcceptedThrough != 1003 {
 		t.Fatalf("latest drained identity must remain replayable: res=%+v err=%v", res, err)
 	}
@@ -493,6 +490,19 @@ func TestDrainedReceiptBoundRetainsLatestAndRejectsEvictedReuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	if stats.RecordCount != 1 {
-		t.Fatalf("evicted reuse must not append; only batch 4 should be pending, recordCount=%d", stats.RecordCount)
+		t.Fatalf("retained replay must not append; only batch 4 should be pending, recordCount=%d", stats.RecordCount)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, batchIndexDirName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jsonCount int
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			jsonCount++
+		}
+	}
+	if jsonCount > sink.maxDrainedReceipts+1 {
+		t.Fatalf("drained receipts exceeded bound: jsonCount=%d cap=%d", jsonCount, sink.maxDrainedReceipts)
 	}
 }

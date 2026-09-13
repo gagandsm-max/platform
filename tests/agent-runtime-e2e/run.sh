@@ -490,9 +490,10 @@ if ! wait_healthy platform-sensor-infra 40; then
     fail_closed "sensor-restore" "sensor-infra did not recover"
 fi
 wait_receiver || true
+kafka_end_offsets > "${EVIDENCE_DIR}/offsets-sensor-restore.txt"
 AFTER_RESTORE=0
 for i in $(seq 1 20); do
-    AFTER_RESTORE="$(count_kafka_since '"agentId":"agent-e2e-01"' "${EVIDENCE_DIR}/offsets-sensor-down.txt")"
+    AFTER_RESTORE="$(count_kafka_since '"agentId":"agent-e2e-01"' "${EVIDENCE_DIR}/offsets-sensor-restore.txt")"
     if [[ "${AFTER_RESTORE}" -ge 1 ]]; then
         break
     fi

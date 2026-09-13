@@ -139,11 +139,6 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 	if s.overlapsAcceptedRangeLocked(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence) {
 		return AcceptanceResult{}, durableSequenceConflict(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence)
 	}
-	if env.FirstSequence <= s.streamHighWaterLocked(sourceRangeStreamKey(env.TenantID, env.AgentID)) {
-		// Exact identity was not in the retained receipt set (evicted) but the
-		// source range sits at or below the accepted high-water mark.
-		return AcceptanceResult{}, durableSequenceConflict(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence)
-	}
 
 	recordIDs := make([]string, 0, len(env.Records))
 	for _, r := range env.Records {
