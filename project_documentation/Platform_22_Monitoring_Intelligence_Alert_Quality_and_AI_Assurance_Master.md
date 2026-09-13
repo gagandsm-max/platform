@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Monitoring Intelligence / Alert Quality / AI Assurance (after merge)**
 **Product:** Platform
-**Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation, model selection, dependency selection or readiness claim
+**Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation, commercial provider commitment or readiness claim
 
 ---
 
@@ -14,7 +14,7 @@ This document is the consolidated specialized master for monitoring intelligence
 
 `Platform_00_Document_Index.md` defines precedence. This master supplements existing v3.2.2 requirements and must not silently override a higher-precedence explicit requirement. Contradictions require change control before implementation.
 
-Nothing in this document selects a new model, model provider, vector database, browser/runtime, OSS dependency, database, mandatory microservice, commercial SKU, price, compliance certification or vendor commitment. Capability statements are requirements/targets, not implementation or production-readiness claims.
+Nothing in this document selects a commercial model/provider, vector database, mandatory microservice, commercial SKU, price, compliance certification or vendor commitment. Runtime/library candidates named below remain subject to `Platform_07_OSS_Catalog.md`, exact-version security/licence review and benchmark admission before shipment. Capability statements and sizing values are requirements/engineering targets, not implementation or production-readiness claims.
 
 ---
 
@@ -30,6 +30,8 @@ Nothing in this document selects a new model, model provider, vector database, b
 8. **No silent learning across tenants.** Tenant data, operator feedback and incident evidence remain tenant scoped unless an explicitly approved privacy/security/governance process authorizes another use.
 9. **No invented universal thresholds.** Alert evidence and release gates are class-specific and policy/evidence driven.
 10. **AI claims require provenance.** Every causal or recommended-action claim must trace to authoritative evidence and disclose uncertainty/contradictions.
+11. **Local intelligence is lightweight by design.** Local AI/ML/LLM shall run inside the existing certified Core tiers, shall not create a mandatory GPU requirement and shall yield resources before live monitoring is degraded.
+12. **Small model, strong tools.** Platform shall reduce/query/correlate evidence deterministically before LLM inference; the local LLM is an explanation/copilot layer, not the hot-path monitoring or causal engine.
 
 ---
 
@@ -69,6 +71,16 @@ Nothing in this document selects a new model, model provider, vector database, b
 | `PRD-MIA-030` | P1 | Facilities/power evidence may be ingested to explain infrastructure incidents, but Platform shall not expand into BMS/DCIM control-plane scope by implication. |
 | `PRD-MIA-031` | P0 | AI/analytics workloads shall have explicit CPU/memory/GPU/concurrency/queue/time budgets and fail-safe degradation so intelligence cannot starve core monitoring. |
 | `PRD-MIA-032` | P0 | AI/ML operations shall expose model/prompt/policy/version provenance, latency, error/timeout/fallback rates, token/compute usage where relevant, cache use, grounding/evidence coverage and decision audit. |
+| `PRD-MIA-033` | P0 | Platform shall implement the Local Intelligence capability as bounded logical modules under the existing modular Core/analytics architecture; the module map in §15.1 is authoritative and does not imply one process/microservice per module. |
+| `PRD-MIA-034` | P0 | Supported Local AI/ML/LLM shall fit inside the existing Core sizing tiers in `Platform_11`; standard deployment shall be CPU-first with **no mandatory GPU** and shall preserve monitoring/ingestion/storage/alert/RCA objectives under certified AI load. |
+| `PRD-MIA-035` | P0 | On the 8 vCPU/16 GB tier the default local LLM target is a **0.5B–1.5B parameter 4-bit-quantized** model with one concurrent request; larger models, including up to approximately 3B, require explicit benchmark certification and may not silently raise the minimum Core requirement. |
+| `PRD-MIA-036` | P0 | Customer production Core shall not train or fine-tune foundation LLMs. Local LLM intelligence shall use approved pretrained quantized artifacts plus Platform evidence retrieval/tools; lightweight statistical/ML recalibration remains permitted when bounded and interruptible. |
+| `PRD-MIA-037` | P0 | Local LLM input shall be produced by a bounded context/evidence builder; high-volume raw telemetry shall be aggregated/queried by Platform first, and the supported small-Core operating context shall normally remain within a 2K–4K token envelope unless benchmarked otherwise. |
+| `PRD-MIA-038` | P0 | GNN inference shall use bounded incident-relevant temporal subgraphs and shall not evaluate the complete enterprise graph for every observation; GNN remains optional assistance behind deterministic RCA and may be deferred under resource pressure. |
+| `PRD-MIA-039` | P0 | Local intelligence shall implement a Resource Governor/circuit breaker with the protection order `live collection/ingestion/storage → alert/incident/deterministic RCA → ML/GNN → interactive LLM → training/recalibration`; lower-priority work shall queue, defer, unload or stop first. |
+| `PRD-MIA-040` | P0 | Local model/runtime artifacts shall be offline-packageable, signed/checksummed, versioned and governed by a Platform Model Registry with provenance, evaluation status, compatibility and rollback metadata. |
+| `PRD-MIA-041` | P1 | Similar-incident, runbook and knowledge retrieval shall prefer Platform-owned structured/graph/keyword retrieval plus bounded embeddings where useful; no dedicated vector database is required unless benchmark evidence demonstrates a material gap. |
+| `PRD-MIA-042` | P0 | Runtime/library selection shall remain dependency-governed: existing approved NumPy/Polars/scikit-learn may be used; PyTorch/PyG remain GNN candidates; **llama.cpp** is the preferred P0 candidate for CPU/GGUF local-LLM inference and **ONNX Runtime CPU** the preferred P0 candidate for compact embedding/ML inference, but neither may ship until admitted by `Platform_07` exact-version licence/CVE/SBOM and performance review. |
 
 ---
 
@@ -186,7 +198,7 @@ Security testing shall include direct and indirect prompt injection, encoded/obf
 
 ## 13. Provider abstraction, egress and graceful degradation
 
-AI capability shall be designed behind an interface that can support approved hosted, private-hosted and local/on-prem providers plus a **no-LLM** operating mode. This requirement does not approve a specific model/runtime.
+AI capability shall be designed behind an interface that can support approved hosted, private-hosted and local/on-prem providers plus a **no-LLM** operating mode. This requirement does not approve a commercial model/provider.
 
 Data-egress policy shall classify allowed/blocked data types, provider/region destination, masking/redaction, retention, opt-out and audit. Secrets, raw credentials and unnecessarily sensitive payloads must not be included in prompts/model context.
 
@@ -212,6 +224,105 @@ Operational telemetry shall expose at minimum: request volume; provider/model/pr
 
 No raw customer secrets or unsafe payloads may be written to AI observability logs, traces, support bundles or evaluation artifacts.
 
+### 15.1 Authoritative Local Intelligence module map
+
+These are **logical modules/capabilities**. They shall be grouped into the existing modular Core, `platform-ai`/analytics worker and existing Incident/RCA/Graph/Sensor domains as appropriate; Platform shall not create thirty mandatory microservices.
+
+| # | Logical module | Ownership | Approved/expected foundation | Responsibility |
+|---:|---|---|---|---|
+| 1 | Local Intelligence Orchestrator | **BUILD** | Java/Python within modular Core | Coordinates evidence, ML/GNN/LLM invocation, model selection, queues and graceful degradation. |
+| 2 | Telemetry Quality Engine | **BUILD** | Deterministic Core logic | Scores freshness/source health/time/schema/sequence quality before operational assertions. |
+| 3 | Feature & Evidence Builder | **BUILD** | ClickHouse/PostgreSQL + Java/Python | Converts high-volume raw observations into bounded typed features/evidence. |
+| 4 | Baseline Engine | **BUILD on OSS** | NumPy/scikit-learn/SQL | Rolling, robust, seasonal and learned baselines with version/provenance. |
+| 5 | Anomaly Detection Engine | **BUILD on OSS** | scikit-learn/approved inference runtime | Produces anomaly candidates; never directly declares causality/failure. |
+| 6 | Multivariate Anomaly Engine | **BUILD on OSS** | statistical/scikit-learn methods | Detects correlated abnormal patterns across related metrics. |
+| 7 | Peer/Cohort Intelligence Engine | **BUILD** | statistical/ML | Compares entities with governed comparable cohorts and sufficiency controls. |
+| 8 | Forecast & Capacity Prediction Engine | **BUILD on OSS** | regression/statistical ML | Defensible capacity/exhaustion/degradation forecasts with calibration. |
+| 9 | Graph Intelligence Engine | **BUILD** | Platform temporal graph | Deterministic dependency traversal, common-cause, blast-radius and temporal graph reasoning. |
+| 10 | GNN Inference Engine | **BUILD on candidate OSS** | PyTorch/PyG candidate | Bounded root-candidate/propagation/impact/relationship scoring on incident subgraphs. |
+| 11 | Causal RCA Fusion Engine | **BUILD** | deterministic evidence + graph + ML/GNN | Fuses evidence into explainable hypotheses/confidence; preserves `INCONCLUSIVE`. |
+| 12 | Causal Contradiction Engine | **BUILD** | deterministic rules/graph | Searches for observations that disprove or materially weaken hypotheses. |
+| 13 | Active Evidence Acquisition Engine | **BUILD** | existing Sensor/Core diagnostics | Selects bounded read-only validation actions by information gain/safety/resource cost. |
+| 14 | Similar Incident Memory Engine | **BUILD** | PostgreSQL/ClickHouse/graph + optional embeddings | Finds relevant historical incidents without copying their cause. |
+| 15 | Change Intelligence Engine | **BUILD** | Platform_19 change facts | Correlates NCM/cloud/K8s/CI/CD/DB/cert/ITSM changes with incident windows. |
+| 16 | Incident Flight Recorder | **BUILD** | Platform_19 evidence windows | Preserves bounded before/during/after operational evidence and graph state. |
+| 17 | Embedding Inference Service | **BUILD wrapper; runtime candidate** | preferred ONNX Runtime CPU candidate | Compact local embeddings for incidents/runbooks/knowledge where justified. |
+| 18 | Local Retrieval / RAG Engine | **BUILD** | PostgreSQL/ClickHouse/graph/search + optional embeddings | Hybrid structured/graph/keyword/embedding retrieval; no dedicated vector DB by default. |
+| 19 | Local LLM Runtime Adapter | **BUILD wrapper; runtime candidate** | preferred llama.cpp/GGUF CPU candidate | Bounded quantized local text-generation inference behind AI Gateway. |
+| 20 | Local Incident Copilot | **BUILD** | Local LLM + Platform tools | Evidence-grounded operator Q&A, explanation, investigation and PIR/report assistance. |
+| 21 | LLM Context Builder | **BUILD** | deterministic evidence summarization | Converts large evidence sets into small typed/cited context; enforces token/data minimization. |
+| 22 | LLM Tool Firewall | **BUILD** | structured tool schemas + RBAC/policy | Validates tool proposal, tenant/resource scope, parameters, rate, approval and audit. |
+| 23 | Prompt-Injection Defense Layer | **BUILD** | policy/input classification | Treats logs/tickets/config/docs/API text as untrusted data and blocks instruction escalation. |
+| 24 | AI Model Registry | **BUILD** | PostgreSQL metadata + signed artifacts | Model/runtime version, checksum/signature, compatibility, approval, evaluation and rollback. |
+| 25 | AI Resource Governor | **BUILD** | process/cgroup/service quotas + Core health | CPU/RAM/concurrency/queue/time limits and circuit-breaker degradation. |
+| 26 | AI Evaluation & Benchmark Engine | **BUILD** | Python test/evaluation harness | Reproducible alert/anomaly/RCA/GNN/LLM quality and resource regression gates. |
+| 27 | Model/Data Drift Engine | **BUILD** | statistics/Platform telemetry | Detects population/feature/model quality drift and raises review state. |
+| 28 | Champion/Challenger Manager | **BUILD** | Model Registry + evaluation | Shadow comparison and controlled promotion/rollback of model/rule versions. |
+| 29 | AI Provenance & Explainability Engine | **BUILD** | PostgreSQL/audit/evidence IDs | Persists model/prompt/policy/evidence/tool/confidence provenance for consequential outputs. |
+| 30 | AI Self-Monitoring | **BUILD using Platform monitoring** | existing Platform telemetry/health | Monitors inference latency, queue, resources, errors, fallback, drift and model health. |
+
+### 15.2 Local runtime/dependency boundary
+
+Current approved foundations remain NumPy, Polars and scikit-learn for lightweight analytics/ML. PyTorch and PyTorch Geometric remain candidate GNN foundations subject to the existing P0 benchmark/licence decision.
+
+For the new local inference functions, the preferred engineering candidates are:
+
+- **llama.cpp / GGUF** for CPU-first quantized local LLM inference because the desired deployment is small, offline-capable and does not require a GPU;
+- **ONNX Runtime CPU** for compact embedding and portable ML inference where it materially reduces resident framework footprint.
+
+These are **candidate selections, not shipment approval**. Before merge of a runtime implementation they must be entered/admitted in `Platform_07_OSS_Catalog.md` at an exact pinned version after transitive/bundled licence, CVE, supply-chain, air-gap packaging and performance review. Model weights have their own licences/provenance and are not licensed merely because the inference runtime is permissive.
+
+Do not add a mandatory LangChain/LlamaIndex/Ray/Spark/MLflow/vector-database/Kubernetes-AI stack merely to orchestrate these capabilities. A new dependency requires evidence that existing Platform code and approved libraries cannot meet the requirement safely within the resource envelope.
+
+### 15.3 Local LLM role and model contract
+
+The local LLM is responsible for natural-language explanation, evidence summarization, operator Q&A, structured tool proposal, runbook/similar-incident explanation, report/PIR assistance and other bounded language tasks. It is **not** responsible for polling, metric calculation, threshold/baseline evaluation, authoritative alert qualification, graph traversal, raw incident correlation or independent causal proof.
+
+Standard smallest-Core target:
+
+```text
+Core tier                  8 vCPU / 16 GB RAM
+Local LLM target           0.5B–1.5B parameters, 4-bit quantized
+Concurrent local requests  1
+Operating context          normally 2K–4K tokens
+LLM CPU burst              within the Platform_11 ≤2 vCPU AI burst envelope
+AI peak RAM                within the Platform_11 ≤3 GB aggregate AI envelope
+Mandatory GPU              none
+Foundation-model training  prohibited on customer production Core
+```
+
+A model up to approximately 3B may be enabled on a tier only after that exact model/runtime/context combination passes the tier's resource and monitoring-regression certification. Larger model size is not a default scaling objective; higher Core tiers should preferentially improve monitoring and AI concurrency.
+
+### 15.4 Local ML/GNN operating contract
+
+- Baseline/anomaly/cohort/forecast functions shall favor incremental/statistical/classical models over deep networks where accuracy is sufficient.
+- Normal continuous ML activity on the 8/16 Core targets a sub-core average CPU footprint and bounded memory; expensive fitting/recalibration is scheduled, interruptible and may be postponed indefinitely while the Core is under pressure.
+- GNN inference is incident/event driven over bounded temporal subgraphs. Training/experimentation is not part of the live monitoring hot path.
+- Optional embedding computation is batch/on-demand and shall not become a prerequisite for Similar Incident Memory or runbook retrieval; deterministic/structured search remains the fallback.
+- Customer-specific behavior is expressed through Platform data/evidence retrieval, policy, feedback and governed lightweight models—not through continuous foundation-model fine-tuning.
+
+### 15.5 Resource Governor and circuit breaker
+
+The Local Intelligence Orchestrator and deployment controls enforce this priority:
+
+```text
+1  Collection / Sensor communication / ingestion / Kafka / PostgreSQL / ClickHouse durability
+2  Alert qualification / incident correlation / deterministic RCA
+3  Lightweight ML / bounded GNN inference
+4  Local LLM interactive assistance / embeddings
+5  Recalibration / challenger evaluation / training jobs
+```
+
+When CPU, memory, swap, ingestion lag, Kafka/ClickHouse backlog, query latency, incident-storm load or storage pressure crosses the certified guard band, Platform shall progressively postpone training/recalibration, reduce or queue LLM concurrency, defer optional embeddings/GNN, unload the local LLM and finally disable optional AI assistance before protected monitoring functions are allowed to miss objectives.
+
+The 8/16 profile shall normally unload/release the local LLM after a bounded idle period unless a benchmarked warm-model profile proves sufficient headroom. AI queue depth and degraded/suspended state are visible to the user and to Platform self-monitoring.
+
+### 15.6 Local model lifecycle and offline packaging
+
+Every shipped local model/embedding/GNN artifact records at least: model ID/type/version, source/provenance, model-specific licence, cryptographic checksum/signature, supported runtime and CPU architecture, quantization, context limit, feature/schema version, evaluation dataset/version, measured quality, resource envelope, approval state, activation time and rollback predecessor.
+
+Air-gapped installation/upgrade includes the exact approved runtime/model artifacts in signed offline media; runtime may not fetch model weights from the Internet. Untrusted or customer-supplied models are disabled by default and require a governed import/security/evaluation workflow.
+
 ---
 
 ## 16. Security, privacy and air-gap requirements
@@ -224,6 +335,8 @@ No raw customer secrets or unsafe payloads may be written to AI observability lo
 - External provider failure or denial must not block core incident workflows.
 - Operator feedback, prompts and model outputs follow configured retention/export/deletion policy.
 - No employee/user-surveillance inference is authorized by this intelligence master.
+- Local model weights and runtimes are supply-chain artifacts: checksum/signature/provenance/licence/CVE policy applies before activation.
+- Model files and retrieved context are never treated as trusted instructions; imported models execute only inside the constrained inference boundary and receive no direct credentials or unrestricted filesystem/network/tool authority.
 
 ---
 
@@ -261,6 +374,15 @@ No raw customer secrets or unsafe payloads may be written to AI observability lo
 | `REQ-MIA-028` | P0 | Resource-exhaustion tests prove AI/analytics degrades before core monitoring and exposes queue/resource/fallback telemetry. |
 | `REQ-MIA-029` | P0 | AI observability records version/provenance/latency/error/fallback/evidence coverage/tool decisions while secret-scanning logs/traces/support/evaluation bundles. |
 | `REQ-MIA-030` | P0 | Air-gap tests prove core deterministic monitoring requires no external AI/internet service and locally configured AI can be disabled without functional collapse. |
+| `REQ-MIA-031` | P0 | Architecture/component tests map the §15.1 logical modules to bounded deployment units and prove no module bypasses authoritative telemetry/evidence, tenant scope or deterministic RCA/tool policy. |
+| `REQ-MIA-032` | P0 | SNWP-2500-v1 resource certification proves the supported 8 vCPU/16 GB local-intelligence profile remains within **≤2 vCPU AI burst and ≤3 GB aggregate AI peak RAM**, with no regression beyond approved monitoring/ingestion/query/failover tolerances. |
+| `REQ-MIA-033` | P0 | CPU-only certification proves all mandatory Local AI/ML/LLM capabilities can operate without a GPU; optional accelerator failure/removal does not disable core monitoring or supported CPU fallback. |
+| `REQ-MIA-034` | P0 | Local-LLM tests prove default small-Core 0.5B–1.5B Q4 operation, single-request concurrency, bounded 2K–4K context, idle unload/release behavior and refusal to enable an uncertified larger model/profile. |
+| `REQ-MIA-035` | P0 | Production packaging/tests prove foundation-model training/fine-tuning is unavailable on customer Core while lightweight ML recalibration remains bounded, interruptible and lower priority than monitoring. |
+| `REQ-MIA-036` | P0 | GNN/embedding tests prove bounded incident/subgraph and batch/on-demand behavior; full-graph-per-observation or embedding-dependent monitoring hot paths are rejected by design/performance tests. |
+| `REQ-MIA-037` | P0 | Resource-governor failure/load tests prove the documented degradation order, AI queue visibility and local-model unload/suspension before protected collection/ingestion/storage/alert/RCA objectives are violated. |
+| `REQ-MIA-038` | P0 | Model-registry/offline-package tests verify model/runtime checksum/signature, licence/provenance, compatibility, evaluation/resource metadata, no runtime Internet download and rollback to a previously approved artifact. |
+| `REQ-MIA-039` | P0 | Dependency admission tests prove llama.cpp/ONNX Runtime or any replacement runtime cannot ship until exact-version `Platform_07` admission, transitive/bundled licence review, CVE/SBOM scan and resource/security benchmark evidence exist. |
 
 ---
 
@@ -270,24 +392,30 @@ P0/P1 implementation under this master is not complete until the relevant requir
 
 A model, prompt, policy or rule version may not be promoted solely because aggregate accuracy improved. Safety, tenant isolation, evidence grounding, false-alert behavior, latency/resource consumption and graceful-degradation regressions are independent blockers.
 
+The Local Intelligence profile is additionally release-blocked if it raises the certified minimum Core requirement, requires a GPU for mandatory capabilities, exceeds the applicable `Platform_11` envelope, performs foundation-model training on production Core, performs unbounded full-graph/raw-telemetry inference, downloads model artifacts at runtime in air-gap mode, or starves protected monitoring functions.
+
 `V1.x` requirements are not v1 GA blockers unless separately promoted through change control. A capability may not be advertised as implemented merely because this master defines it.
 
 ---
 
 ## 19. Explicit exclusions and unresolved engineering spikes
 
-This master does **not** approve autonomous unrestricted remediation, direct LLM privileged execution, cross-tenant learning, employee surveillance, model-provider internet dependency for core monitoring, a specific GNN/LLM/vector/runtime dependency, universal alert thresholds, or AI-generated causal claims without evidence.
+This master does **not** approve autonomous unrestricted remediation, direct LLM privileged execution, cross-tenant learning, employee surveillance, model-provider internet dependency for core monitoring, a dedicated vector database, universal alert thresholds, AI-generated causal claims without evidence, mandatory GPU/NPU hardware, foundation-model training/fine-tuning on customer Core, or a separate microservice per Local Intelligence logical module.
 
-Engineering decisions still requiring bounded spikes before implementation include: first Alert Evidence Contract schemas and class-specific acceptance envelopes; evaluation dataset governance; model/provider compatibility and air-gap footprint; local/private model resource sizing; tool-firewall schema; cohort-definition strategy; drift metrics; predictive calibration method; and storage/retention for AI provenance/evaluation artifacts.
+Engineering decisions still requiring bounded spikes before implementation include: first Alert Evidence Contract schemas and class-specific acceptance envelopes; evaluation dataset governance; exact local LLM model artifact/licence/quality; exact llama.cpp or replacement runtime version/build options; exact ONNX Runtime or replacement inference package/build options; exact GNN model architecture/training labels; CPU architecture-specific throughput; model cold/warm load latency; certified context/concurrency per Core tier; tool-firewall schema; cohort-definition strategy; drift metrics; predictive calibration method; and storage/retention for AI provenance/evaluation artifacts.
+
+The **resource envelopes and module boundaries in this master and `Platform_11` are fixed engineering targets**; benchmark spikes certify or reduce supported profiles. They may not silently raise the minimum Core sizing. A material increase to minimum Core compute requires explicit architecture/product change control rather than treating benchmark failure as permission to add hardware.
 
 ---
 
 ## 20. Founder-reserved decisions
 
-Founder/change-control approval remains required for external AI/model-provider commercial commitments, material cloud/GPU spend, cross-tenant pooled learning, contractual AI accuracy/MTTR/prediction claims, new external data-egress destinations, surveillance-adjacent product behavior, and any new model/runtime/dependency not admitted through normal OSS/security/performance governance.
+Founder/change-control approval remains required for external AI/model-provider commercial commitments, material cloud/GPU spend, cross-tenant pooled learning, contractual AI accuracy/MTTR/prediction claims, new external data-egress destinations, surveillance-adjacent product behavior, and any commercial/licensing commitment around model weights or hosted inference.
+
+Engineering dependency/runtime admission remains subject to normal architecture/OSS/security/performance governance and does not itself constitute a commercial provider commitment.
 
 ---
 
 ## 21. Implementation-status disclaimer
 
-At creation, this document is a requirements/architecture authority only. It does not assert that any `PRD-MIA-*` or `REQ-MIA-*` capability has been implemented, benchmarked, certified or released. Implementation status must be established from exact source, executable tests, exact-head CI/runtime evidence and release records.
+At creation/update, this document is a requirements/architecture authority only. It does not assert that any `PRD-MIA-*` or `REQ-MIA-*` capability, local model, llama.cpp/ONNX runtime, GNN model or resource envelope has been implemented, benchmarked, certified or released. Implementation status must be established from exact source, executable tests, exact-head CI/runtime evidence and release records.
