@@ -18,7 +18,10 @@ memory). If CA files are missing, `run.sh` calls `make certs` once. Do not run
 
 Each run deletes only the test-only named volume `platform_agent_e2e_state`.
 The Sensor Agent spool volume is retained so Core agent-ingress sequences do
-not rewind (`ERR_SEQUENCE_REGRESSION`). Oversized leftover spool records are
+not rewind (`ERR_SEQUENCE_REGRESSION`). Drained `batch-index` receipts from a
+previous run are removed at start because the Agent queue reset restarts source
+sequences at 1; that wipe is test-only. Mid-run Sensor restart keeps receipts so
+lost-ACK replay after drain remains valid. Oversized leftover spool records are
 parked as terminal poison on HTTP 413.
 
 Kafka assertions consume **all partitions** from a saved end-offset snapshot.

@@ -161,6 +161,17 @@ reset_test_volumes() {
     docker stop platform-agent-e2e >/dev/null 2>&1 || true
     docker rm -f platform-agent-e2e platform-agent-e2e-init >/dev/null 2>&1 || true
     docker volume rm -f platform_agent_e2e_state >/dev/null 2>&1 || true
+
+    # The Agent queue reset restarts source sequences at 1. Durable acceptance
+    # receipts from prior E2E runs would then conflict those sequences. Product
+    # receipts survive drain/restart; this wipe is test-only because this harness
+    # resets Agent sequence space without rotating agent_id. Poison/state remain.
+    docker stop platform-sensor-infra >/dev/null 2>&1 || true
+    docker run --rm \
+        -v "${PLATFORM_SENSOR_INFRA_AGENT_SPOOL_VOLUME:-platform_sensor_infra_agent_spool}:/data" \
+        alpine:3.24 \
+        sh -c 'mkdir -p /data/batch-index && find /data/batch-index -type f -name "*.json" -delete' \
+        >/dev/null
 }
 
 dump_evidence() {
