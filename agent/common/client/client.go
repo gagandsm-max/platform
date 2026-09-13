@@ -23,6 +23,9 @@ const (
 	// cannot accept (HTTP 413 / envelope over the 512 KiB contract). The local
 	// queue must be retained; the delivery loop must not hot-retry it.
 	FailureOversized FailureClass = "OVERSIZED"
+	// FailureBlocked is a durable Agent-local delivery hold: a quarantined
+	// sequence occupies the stream and later records must not be submitted.
+	FailureBlocked FailureClass = "BLOCKED"
 )
 
 type DeliveryError struct {
@@ -84,6 +87,12 @@ func (t *UnavailableTransport) Deliver(context.Context, Batch) (Ack, error) {
 func Classify(err error) FailureClass {
 	if err == nil {
 		return ""
+	}
+	if errors.Is(err, queue.ErrDeliveryBlocked) {
+		return FailureBlocked
+	}
+	if errors.Is(err, queue.ErrQuarantineFull) {
+		return FailureBlocked
 	}
 	var de *DeliveryError
 	if errors.As(err, &de) && de.Class != "" {

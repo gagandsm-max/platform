@@ -3,6 +3,8 @@ package delivery
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -446,5 +448,96 @@ func TestDeliveryWorkerOversizedDoesNotRetryLoopOrDelete(t *testing.T) {
 	}
 	if w.Stats().LastErrorCode != "ERR_REQUEST_TOO_LARGE" {
 		t.Fatalf("expected ERR_REQUEST_TOO_LARGE, got %s", w.Stats().LastErrorCode)
+	}
+}
+
+func TestDeliveryWorkerBlockedSequenceDoesNotSubmitLaterRecords(t *testing.T) {
+	dir := t.TempDir()
+	q, err := queue.NewDurableQueue(dir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("three")); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "active"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seq2 string
+	for _, e := range entries {
+		if len(e.Name()) >= 23 && e.Name()[4:23] == "0000000000000000002" {
+			seq2 = filepath.Join(dir, "active", e.Name())
+			break
+		}
+	}
+	if seq2 == "" {
+		t.Fatal("missing sequence 2")
+	}
+	if err := os.WriteFile(seq2, []byte(`{"sequence":2,"id":"rec-x","checksum":"wrong","payload":"dGVzdA=="}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	tr := &mockTransport{available: true, echoID: true, ack: client.Ack{AcceptedThrough: 1}}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered, err := w.DeliverOnce(context.Background())
+	if err != nil || !delivered {
+		t.Fatalf("prefix sequence 1 must deliver, delivered=%v err=%v", delivered, err)
+	}
+	if tr.calls != 1 || len(tr.batches[0].Records) != 1 || tr.batches[0].Records[0].Sequence != 1 {
+		t.Fatalf("must submit only sequence 1, calls=%d batch=%+v", tr.calls, tr.batches)
+	}
+
+	delivered, err = w.DeliverOnce(context.Background())
+	if delivered || !errors.Is(err, queue.ErrDeliveryBlocked) {
+		t.Fatalf("later records must be blocked, delivered=%v err=%v", delivered, err)
+	}
+	if tr.calls != 1 {
+		t.Fatalf("blocked stream must not submit sequence 3, calls=%d", tr.calls)
+	}
+	if q.Len() != 1 {
+		t.Fatalf("sequence 3 must remain intact in active, len=%d", q.Len())
+	}
+	if w.Stats().LastFailureClass != client.FailureBlocked {
+		t.Fatalf("expected FailureBlocked, got %s", w.Stats().LastFailureClass)
+	}
+	if w.Stats().LastErrorCode != "QUEUE_DELIVERY_BLOCKED" {
+		t.Fatalf("expected QUEUE_DELIVERY_BLOCKED, got %s", w.Stats().LastErrorCode)
+	}
+}
+
+func TestDeliveryWorkerPermanentAndAuthStillRetainWithoutSkip(t *testing.T) {
+	retainErrs := []error{
+		&client.DeliveryError{Code: "ERR_AUTH_IDENTITY_MISMATCH", Class: client.FailureAuthentication},
+		&client.DeliveryError{Code: "ERR_REPLAY_CONFLICT", Class: client.FailurePermanent},
+		&client.DeliveryError{Code: "DELIVERY_ACK_INVALID", Class: client.FailurePermanent},
+		&client.DeliveryError{Code: "ERR_REQUEST_TOO_LARGE", Class: client.FailureOversized},
+		&client.DeliveryError{Code: "ERR_SEQUENCE_GAP", Class: client.FailurePermanent},
+	}
+	for _, derr := range retainErrs {
+		q := &mockQueue{records: []queue.Record{
+			{Sequence: 1, ID: "rec-1", Payload: []byte("keep-me")},
+			{Sequence: 2, ID: "rec-2", Payload: []byte("later")},
+		}}
+		tr := &mockTransport{available: true, err: derr}
+		w, err := NewWorker(q, tr, "agent-1", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.DeliverOnce(context.Background()); err == nil {
+			t.Fatalf("%v: expected delivery error", derr)
+		}
+		if q.Len() != 2 || len(q.deleted) != 0 {
+			t.Fatalf("%v: must retain all records without skip, len=%d deleted=%v", derr, q.Len(), q.deleted)
+		}
 	}
 }

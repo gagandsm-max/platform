@@ -3,8 +3,11 @@ package queue
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -517,5 +520,315 @@ func TestDurableQueueCorruptMetaNeverResetsSequence(t *testing.T) {
 	}
 	if next.Sequence <= last {
 		t.Fatalf("corrupt meta must never reset sequence; next=%d last=%d", next.Sequence, last)
+	}
+}
+
+func activeRecordPath(t *testing.T, dir string, seq uint64) string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(dir, "active"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := fmt.Sprintf("rec_%019d_", seq)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), prefix) {
+			return filepath.Join(dir, "active", e.Name())
+		}
+	}
+	t.Fatalf("no active record for sequence %d", seq)
+	return ""
+}
+
+func corruptRecordFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(`{"sequence":1,"id":"rec-1","checksum":"wrong_hash","payload":"dGVzdA=="}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDurableQueueMidQueueQuarantineBlocksLaterDelivery(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("three")); err != nil {
+		t.Fatal(err)
+	}
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 2))
+
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatalf("prefix before poison must remain readable: %v", err)
+	}
+	if len(batch) != 1 || batch[0].Sequence != 1 || !bytes.Equal(batch[0].Payload, []byte("one")) {
+		t.Fatalf("expected only sequence 1, got %+v", batch)
+	}
+	if q.Stats().QuarantineCount != 1 {
+		t.Fatalf("expected seq 2 quarantined, stats=%+v", q.Stats())
+	}
+
+	laterPath := activeRecordPath(t, tempDir, 3)
+	raw, err := os.ReadFile(laterPath)
+	if err != nil {
+		t.Fatalf("later record must remain intact: %v", err)
+	}
+	if !bytes.Contains(raw, []byte(`"sequence":3`)) {
+		t.Fatalf("later sequence missing: %s", raw)
+	}
+
+	if err := q.DeleteThrough(1); err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrDeliveryBlocked) {
+		t.Fatalf("expected QUEUE_DELIVERY_BLOCKED after quarantined sequence, got batch=%+v err=%v", batch, err)
+	}
+	if len(batch) != 0 {
+		t.Fatalf("blocked read must not return later records, got %+v", batch)
+	}
+	if _, err := os.Stat(laterPath); err != nil {
+		t.Fatalf("sequence 3 must remain in active/: %v", err)
+	}
+	if q.Len() != 1 {
+		t.Fatalf("later record must occupy active queue, len=%d", q.Len())
+	}
+}
+
+func TestDurableQueueQuarantineBlockSurvivesRestart(t *testing.T) {
+	tempDir := t.TempDir()
+	q1, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q1.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q1.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q1.Enqueue([]byte("three")); err != nil {
+		t.Fatal(err)
+	}
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 2))
+	if _, err := q1.ReadBatch(10, 1024*1024); err != nil {
+		t.Fatal(err)
+	}
+
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q2.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatalf("prefix must survive restart: %v", err)
+	}
+	if len(batch) != 1 || batch[0].Sequence != 1 {
+		t.Fatalf("expected sequence 1 after restart, got %+v", batch)
+	}
+	if err := q2.DeleteThrough(1); err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrDeliveryBlocked) {
+		t.Fatalf("blocked stream must survive restart, batch=%+v err=%v", batch, err)
+	}
+	if q2.Stats().BlockedFromSequence != 2 {
+		t.Fatalf("expected blocked-from 2, got %+v", q2.Stats())
+	}
+	next, err := q2.Enqueue([]byte("four"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Sequence != 4 {
+		t.Fatalf("quarantine must not reset sequence lineage, got %d", next.Sequence)
+	}
+}
+
+func TestDurableQueueQuarantineFullFailClosedNoOldestDelete(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.maxQuarantineRecords = 0
+
+	if _, err := q.Enqueue([]byte("head-poison")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("later-valid")); err != nil {
+		t.Fatal(err)
+	}
+	head := activeRecordPath(t, tempDir, 1)
+	later := activeRecordPath(t, tempDir, 2)
+	corruptRecordFile(t, head)
+
+	_, err = q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrQuarantineFull) {
+		t.Fatalf("expected QUEUE_QUARANTINE_FULL, got %v", err)
+	}
+	if q.Stats().QuarantineCount != 0 {
+		t.Fatalf("quarantine-full must not transfer, stats=%+v", q.Stats())
+	}
+	if _, err := os.Stat(head); err != nil {
+		t.Fatalf("poison head must remain in active/: %v", err)
+	}
+	if _, err := os.Stat(later); err != nil {
+		t.Fatalf("later record must remain intact: %v", err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrQuarantineFull) {
+		t.Fatalf("must not skip to later records when head cannot quarantine, batch=%+v err=%v", batch, err)
+	}
+}
+
+func TestDurableQueueRecoverQuarantineFullFailClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("first-poison")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("second-poison")); err != nil {
+		t.Fatal(err)
+	}
+	first := activeRecordPath(t, tempDir, 1)
+	second := activeRecordPath(t, tempDir, 2)
+	corruptRecordFile(t, first)
+	corruptRecordFile(t, second)
+	q.maxQuarantineRecords = 1
+
+	if err := q.recoverState(); !errors.Is(err, ErrQuarantineFull) {
+		t.Fatalf("expected recover QUEUE_QUARANTINE_FULL, got %v", err)
+	}
+	if _, err := os.Stat(second); err != nil {
+		t.Fatalf("second poison must remain in active/ when quarantine is full: %v", err)
+	}
+	qEntries, err := os.ReadDir(filepath.Join(tempDir, "quarantine"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonCount := 0
+	for _, e := range qEntries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			jsonCount++
+		}
+	}
+	if jsonCount != 1 {
+		t.Fatalf("must not delete oldest quarantine record, jsonCount=%d", jsonCount)
+	}
+}
+
+func TestDurableQueueQuarantineDestExistsFailClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("payload")); err != nil {
+		t.Fatal(err)
+	}
+	src := activeRecordPath(t, tempDir, 1)
+	entries, _ := os.ReadDir(filepath.Join(tempDir, "active"))
+	dest := filepath.Join(tempDir, "quarantine", entries[0].Name())
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	corruptRecordFile(t, src)
+	if _, err := q.ReadBatch(10, 1024*1024); !errors.Is(err, ErrQuarantineDestExists) {
+		t.Fatalf("expected dest-exists fail-closed, got %v", err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("active poison must remain when dest exists: %v", err)
+	}
+}
+
+func TestDurableQueueEmptyPayloadQuarantine(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue(nil); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 0 {
+		t.Fatalf("empty payload must not be delivered, got %+v", batch)
+	}
+	if q.Stats().QuarantineCount != 1 {
+		t.Fatalf("empty payload must quarantine, stats=%+v", q.Stats())
+	}
+}
+
+func TestDurableQueueReasonSidecarHasCodeOnly(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("secret-payload-must-not-be-copied-to-reason")); err != nil {
+		t.Fatal(err)
+	}
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+	if _, err := q.ReadBatch(10, 1024*1024); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(tempDir, "quarantine"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundReason := false
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".reason") {
+			continue
+		}
+		foundReason = true
+		if strings.HasSuffix(e.Name(), ".json") {
+			t.Fatal("reason sidecar must not use .json suffix")
+		}
+		raw, err := os.ReadFile(filepath.Join(tempDir, "quarantine", e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte("secret-payload-must-not-be-copied-to-reason")) {
+			t.Fatalf("reason sidecar leaked payload: %s", raw)
+		}
+		var meta map[string]any
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			t.Fatal(err)
+		}
+		if len(meta) != 1 {
+			t.Fatalf("reason sidecar must contain only code, got %v", meta)
+		}
+		if meta["code"] != "QUEUE_RECORD_CORRUPT" {
+			t.Fatalf("unexpected reason code %v", meta["code"])
+		}
+	}
+	if !foundReason {
+		t.Fatal("expected quarantine reason sidecar")
+	}
+
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q2.Stats().QuarantineCount != 1 {
+		t.Fatalf("reason sidecar must not be counted as a quarantined record, stats=%+v", q2.Stats())
 	}
 }

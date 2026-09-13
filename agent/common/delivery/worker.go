@@ -130,8 +130,9 @@ func (w *Worker) runLoop(ctx context.Context) {
 		delivered, err := w.DeliverOnce(ctx)
 		if err != nil {
 			failClass := client.Classify(err)
-			if failClass == client.FailureOversized {
-				w.logger.Error("oversized Agent batch is not retryable without configuration change; queue retained",
+			if failClass == client.FailureOversized || failClass == client.FailureBlocked {
+				w.logger.Error("Agent delivery is not retryable without operator intervention; queue retained",
+					"class", failClass,
 					"code", w.Stats().LastErrorCode,
 					"error", err,
 				)
@@ -182,7 +183,10 @@ func (w *Worker) runLoop(ctx context.Context) {
 func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 	records, err := w.q.ReadBatch(w.maxBatchRecords, w.maxBatchBytes)
 	if err != nil {
-		w.logger.Error("Failed to read batch from queue", "error", err)
+		failClass := client.Classify(err)
+		code := queueFailureCode(err)
+		w.recordFailure(failClass, code)
+		w.logger.Error("Failed to read batch from queue", "class", failClass, "code", code, "error", err)
 		return false, err
 	}
 
@@ -314,6 +318,19 @@ func (w *Worker) recordFailure(class client.FailureClass, code string) {
 	// Last delivery failed: do not report the Sensor receiver as available
 	// merely because the HTTPS client was constructed.
 	w.stats.ReceiverAvailable = false
+}
+
+func queueFailureCode(err error) string {
+	switch {
+	case errors.Is(err, queue.ErrDeliveryBlocked):
+		return "QUEUE_DELIVERY_BLOCKED"
+	case errors.Is(err, queue.ErrQuarantineFull):
+		return "QUEUE_QUARANTINE_FULL"
+	case errors.Is(err, queue.ErrQuarantineDestExists):
+		return "QUEUE_QUARANTINE_DEST_EXISTS"
+	default:
+		return "QUEUE_READ_FAILED"
+	}
 }
 
 func randomJitter() float64 {

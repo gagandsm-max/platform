@@ -171,6 +171,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		status = "DEGRADED"
 		reasons = append(reasons, "QUEUE_QUARANTINE_PRESENT")
 	}
+	if qStats.DeliveryBlocked {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_DELIVERY_BLOCKED")
+	}
+	if qStats.QuarantineAtCapacity {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_QUARANTINE_FULL")
+	}
 	if collectorErrors > 0 {
 		status = "DEGRADED"
 		reasons = append(reasons, "COLLECTOR_ERRORS")
@@ -186,12 +194,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"collector_errors": collectorErrors,
 		},
 		"queue": map[string]any{
-			"active_count":     qStats.ActiveCount,
-			"active_bytes":     qStats.ActiveBytes,
-			"quarantine_count": qStats.QuarantineCount,
-			"oldest_age_sec":   qStats.OldestAge.Seconds(),
-			"last_sequence":    qStats.LastSequence,
-			"at_capacity":      qStats.AtCapacity,
+			"active_count":           qStats.ActiveCount,
+			"active_bytes":           qStats.ActiveBytes,
+			"quarantine_count":       qStats.QuarantineCount,
+			"quarantine_bytes":       qStats.QuarantineBytes,
+			"oldest_age_sec":         qStats.OldestAge.Seconds(),
+			"last_sequence":          qStats.LastSequence,
+			"at_capacity":            qStats.AtCapacity,
+			"quarantine_at_capacity": qStats.QuarantineAtCapacity,
+			"blocked_from_sequence":  qStats.BlockedFromSequence,
+			"delivery_blocked":       qStats.DeliveryBlocked,
 		},
 		"delivery": map[string]any{
 			"attempts":           dStats.Attempts,
