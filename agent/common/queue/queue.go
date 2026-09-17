@@ -32,6 +32,7 @@ var (
 	ErrSequenceGap                = errors.New("QUEUE_SEQUENCE_GAP: missing unacknowledged sequence blocks delivery")
 	ErrSequenceConflict           = errors.New("QUEUE_SEQUENCE_CONFLICT: multiple active records share a sequence")
 	ErrMetaUncertain              = errors.New("QUEUE_META_UNCERTAIN: durable sequence metadata state cannot be confirmed")
+	ErrAckRecoveryConflict        = errors.New("QUEUE_ACK_RECOVERY_CONFLICT: unauthorized or conflicting record at or below acceptedThrough")
 )
 
 const (
@@ -99,39 +100,41 @@ type QueueStats struct {
 	DeliveryBlocked       bool
 	UnknownSequenceBlock  bool
 	LocationUncertain     bool
-	MetaUncertain         bool
-	SequenceGapBlock      bool
-	SequenceConflictBlock bool
+	MetaUncertain            bool
+	SequenceGapBlock         bool
+	SequenceConflictBlock    bool
+	AckRecoveryConflictBlock bool
 }
 
 type DurableQueue struct {
-	dir                   string
-	activeDir             string
-	quarantineDir         string
-	metaPath              string
-	maxRecords            int
-	maxBytes              int64
-	maxRecordBytes        int
-	maxQuarantineRecords  int
-	maxQuarantineBytes    int64
-	mu                    sync.Mutex
-	lastSeq               uint64
-	acceptedThrough       uint64
-	acceptedRecords       []acceptedRecordRef
-	activeCount           int
-	activeBytes           int64
-	quarantineCount       int
-	quarantineBytes       int64
-	blockedFromSequence   uint64
-	unknownSequenceBlock  bool
-	locationUncertain     bool
-	metaUncertain         bool
-	sequenceGapBlock      bool
-	sequenceConflictBlock bool
-	syncHook              syncHookFunc
-	readDirHook           pathHookFunc
-	lstatHook             pathHookFunc
-	removeHook            pathHookFunc
+	dir                      string
+	activeDir                string
+	quarantineDir            string
+	metaPath                 string
+	maxRecords               int
+	maxBytes                 int64
+	maxRecordBytes           int
+	maxQuarantineRecords     int
+	maxQuarantineBytes       int64
+	mu                       sync.Mutex
+	lastSeq                  uint64
+	acceptedThrough          uint64
+	acceptedRecords          []acceptedRecordRef
+	activeCount              int
+	activeBytes              int64
+	quarantineCount          int
+	quarantineBytes          int64
+	blockedFromSequence      uint64
+	unknownSequenceBlock     bool
+	locationUncertain        bool
+	metaUncertain            bool
+	sequenceGapBlock         bool
+	sequenceConflictBlock    bool
+	ackRecoveryConflictBlock bool
+	syncHook                 syncHookFunc
+	readDirHook              pathHookFunc
+	lstatHook                pathHookFunc
+	removeHook               pathHookFunc
 }
 
 const sequenceMetaFile = "sequence.meta"
@@ -667,6 +670,9 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 	if q.sequenceConflictBlock {
 		return nil, ErrSequenceConflict
 	}
+	if q.ackRecoveryConflictBlock {
+		return nil, ErrAckRecoveryConflict
+	}
 	if q.sequenceGapBlock {
 		return nil, ErrSequenceGap
 	}
@@ -877,6 +883,9 @@ func (q *DurableQueue) errIfDeliveryBlockedLocked(hasPrefix bool) error {
 	}
 	if q.sequenceConflictBlock {
 		return ErrSequenceConflict
+	}
+	if q.ackRecoveryConflictBlock {
+		return ErrAckRecoveryConflict
 	}
 	if q.sequenceGapBlock {
 		return ErrSequenceGap
@@ -1515,6 +1524,7 @@ func recordFileName(seq uint64, id string) string {
 func (q *DurableQueue) refreshSequenceIntegrityLocked() error {
 	q.sequenceGapBlock = false
 	q.sequenceConflictBlock = false
+	q.ackRecoveryConflictBlock = false
 
 	covered := make(map[uint64]struct{})
 	bySeq := make(map[uint64][]string)
@@ -1538,6 +1548,31 @@ func (q *DurableQueue) refreshSequenceIntegrityLocked() error {
 		if len(names) > 1 {
 			q.sequenceConflictBlock = true
 			return nil
+		}
+	}
+
+	// Any active record at sequence <= acceptedThrough must exactly match
+	// persisted acceptedRecords authorization, or the queue is blocked.
+	if q.acceptedThrough > 0 {
+		authBySeq := make(map[uint64]string, len(q.acceptedRecords))
+		for _, r := range q.acceptedRecords {
+			authBySeq[r.Sequence] = r.ID
+		}
+		for fileSeq, names := range bySeq {
+			if fileSeq > q.acceptedThrough {
+				continue
+			}
+			for _, name := range names {
+				_, fileID, nameErr := parseRecordFileName(name)
+				if nameErr != nil {
+					q.ackRecoveryConflictBlock = true
+					continue
+				}
+				authID, ok := authBySeq[fileSeq]
+				if !ok || fileID != authID || name != recordFileName(fileSeq, authID) {
+					q.ackRecoveryConflictBlock = true
+				}
+			}
 		}
 	}
 
@@ -1593,6 +1628,11 @@ func (q *DurableQueue) reconcileAcceptedLeftoversLocked() error {
 		// Ambiguous same-sequence leftovers: fail closed without deleting.
 		return nil
 	}
+	if q.ackRecoveryConflictBlock {
+		// Unauthorized / ID-mismatched leftovers at or below acceptedThrough:
+		// retain records, retain acceptedRecords, do not treat as healthy skip.
+		return nil
+	}
 
 	authBySeq := make(map[uint64]string, len(q.acceptedRecords))
 	for _, r := range q.acceptedRecords {
@@ -1609,7 +1649,6 @@ func (q *DurableQueue) reconcileAcceptedLeftoversLocked() error {
 		size int64
 	}
 	var deletes []leftoverDelete
-	anomaly := false
 	for _, e := range entries {
 		if e.IsDir() || !isRecordJSON(e.Name()) {
 			continue
@@ -1622,24 +1661,16 @@ func (q *DurableQueue) reconcileAcceptedLeftoversLocked() error {
 			continue
 		}
 		authID, ok := authBySeq[fileSeq]
-		if !ok {
-			// Leftover without ACK authorization: fail closed, delete nothing.
-			anomaly = true
-			continue
-		}
-		if fileID != authID || e.Name() != recordFileName(fileSeq, authID) {
-			// Same sequence, different ID (or name mismatch): must not delete replacement.
-			anomaly = true
-			continue
+		if !ok || fileID != authID || e.Name() != recordFileName(fileSeq, authID) {
+			// Should already be flagged by refresh; never delete unauthorized.
+			q.ackRecoveryConflictBlock = true
+			return nil
 		}
 		fi, err := e.Info()
 		if err != nil {
 			return fmt.Errorf("QUEUE_RECOVER_LEFTOVER_STAT_FAILED: %w", err)
 		}
 		deletes = append(deletes, leftoverDelete{name: e.Name(), size: fi.Size()})
-	}
-	if anomaly {
-		return q.refreshSequenceIntegrityLocked()
 	}
 	if len(deletes) == 0 && len(q.acceptedRecords) == 0 {
 		return q.refreshSequenceIntegrityLocked()
@@ -1893,12 +1924,13 @@ func (q *DurableQueue) Stats() QueueStats {
 		AtCapacity:            atCapacity,
 		QuarantineAtCapacity:  quarantineAtCapacity,
 		BlockedFromSequence:   q.blockedFromSequence,
-		DeliveryBlocked:       q.unknownSequenceBlock || q.locationUncertain || q.metaUncertain || q.sequenceGapBlock || q.sequenceConflictBlock || hasActiveBlocked || hasActiveErr != nil,
-		UnknownSequenceBlock:  q.unknownSequenceBlock,
-		LocationUncertain:     q.locationUncertain,
-		MetaUncertain:         q.metaUncertain,
-		SequenceGapBlock:      q.sequenceGapBlock,
-		SequenceConflictBlock: q.sequenceConflictBlock,
+		DeliveryBlocked:          q.unknownSequenceBlock || q.locationUncertain || q.metaUncertain || q.sequenceGapBlock || q.sequenceConflictBlock || q.ackRecoveryConflictBlock || hasActiveBlocked || hasActiveErr != nil,
+		UnknownSequenceBlock:     q.unknownSequenceBlock,
+		LocationUncertain:        q.locationUncertain,
+		MetaUncertain:            q.metaUncertain,
+		SequenceGapBlock:         q.sequenceGapBlock,
+		SequenceConflictBlock:    q.sequenceConflictBlock,
+		AckRecoveryConflictBlock: q.ackRecoveryConflictBlock,
 	}
 }
 

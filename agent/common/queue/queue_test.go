@@ -2491,6 +2491,7 @@ func TestDurableQueueRestartSameSeqReplacementFailsClosed(t *testing.T) {
 	if err != nil || len(batch) < 1 {
 		t.Fatalf("expected batch, got %+v err=%v", batch, err)
 	}
+	authorizedID := batch[0].ID
 	q.removeHook = func(path string) error {
 		if strings.Contains(path, string(filepath.Separator)+"active"+string(filepath.Separator)) && strings.HasSuffix(path, ".json") {
 			return errors.New("injected active delete fail")
@@ -2531,6 +2532,82 @@ func TestDurableQueueRestartSameSeqReplacementFailsClosed(t *testing.T) {
 	}
 	if q2.Stats().AcceptedThrough != rec.Sequence {
 		t.Fatalf("acceptedThrough must remain %d, got %d", rec.Sequence, q2.Stats().AcceptedThrough)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrAckRecoveryConflict) || len(batch) != 0 {
+		t.Fatalf("expected QUEUE_ACK_RECOVERY_CONFLICT with empty batch, got batch=%+v err=%v", batch, err)
+	}
+	stats := q2.Stats()
+	if !stats.DeliveryBlocked || !stats.AckRecoveryConflictBlock {
+		t.Fatalf("stats must be delivery-blocked with ack recovery conflict: %+v", stats)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 1 || meta.AcceptedRecords[0].ID != authorizedID || meta.AcceptedRecords[0].Sequence != rec.Sequence {
+		t.Fatalf("acceptedRecords auth must not be cleared, got %+v", meta.AcceptedRecords)
+	}
+
+	q3, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q3.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrAckRecoveryConflict) || len(batch) != 0 {
+		t.Fatalf("second restart must remain blocked, batch=%+v err=%v", batch, err)
+	}
+	if !recordPresent(t, tempDir, "active", rec.Sequence) {
+		t.Fatal("replacement B must never be deleted")
+	}
+	meta = readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 1 || meta.AcceptedRecords[0].ID != authorizedID {
+		t.Fatalf("auth metadata must survive second restart, got %+v", meta.AcceptedRecords)
+	}
+}
+
+func TestDurableQueueUnauthorizedOldSequenceFailsClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, 1, "unexpected-old", []byte("unauthorized"))
+	writeActiveRecord(t, tempDir, 2, "later", []byte("later"))
+	metaPayload := `{"highestSequence":2,"acceptedThrough":1}`
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(metaPayload), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !recordPresent(t, tempDir, "active", 1) {
+		t.Fatal("unauthorized old-sequence record must be retained")
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrAckRecoveryConflict) || len(batch) != 0 {
+		t.Fatalf("expected QUEUE_ACK_RECOVERY_CONFLICT, got batch=%+v err=%v", batch, err)
+	}
+	stats := q.Stats()
+	if !stats.DeliveryBlocked || !stats.AckRecoveryConflictBlock || stats.AcceptedThrough != 1 {
+		t.Fatalf("must fail closed with acceptedThrough unchanged: %+v", stats)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.AcceptedThrough != 1 || len(meta.AcceptedRecords) != 0 {
+		t.Fatalf("meta must remain acceptedThrough=1 without fabricated auth: %+v", meta)
+	}
+	if !recordPresent(t, tempDir, "active", 1) || !recordPresent(t, tempDir, "active", 2) {
+		t.Fatal("neither record may be deleted")
+	}
+
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrAckRecoveryConflict) || len(batch) != 0 {
+		t.Fatalf("restart must remain blocked, batch=%+v err=%v", batch, err)
 	}
 }
 
