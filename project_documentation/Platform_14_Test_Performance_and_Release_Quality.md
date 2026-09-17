@@ -1,10 +1,10 @@
 # Platform — Test, Performance, Benchmark & Release Quality Master
 
 **Document ID:** PLATFORM-QUALITY-001
-**Version:** 3.2.1
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
-**Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
+**Consolidation rule:** This document preserves the normative content of the listed v3.1 source documents (via v3.2/v3.2.1). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement. v3.2.2 adds specialized-master quality supplements in §6 without rewriting the base gates.
 
 ## 1. Purpose
 
@@ -119,3 +119,29 @@ Full regression, performance certification, HA/DR evidence, migration/upgrade ma
 ## 5. Evidence
 
 Every GA build has a release evidence bundle containing test results, benchmark summary, package hashes/signatures, SBOMs, OSS notices, vulnerability scan, upgrade/rollback results, HA/DR results and known limitations.
+
+## 6. v3.2.2 specialized-master quality supplements
+
+Generic test layers and Alpha/Beta/RC/GA gates above remain the base quality contract. Family-specific gates live in the owning specialized masters and are not duplicated here.
+
+Capability Pack certification, when a pack is implemented, requires evidence appropriate to:
+
+- functional behavior;
+- version compatibility;
+- malformed/partial responses;
+- timeouts;
+- authentication failures;
+- rate limiting;
+- stale telemetry;
+- tenant isolation;
+- least privilege;
+- resource consumption;
+- upgrades;
+- rollback/migration;
+- deprecation/EOL.
+
+Customer Acceptance Profile results must be evidence-backed. A technology listed in `Platform_23` is not certified by specification.
+
+Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certified ≠ deployed.
+
+OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively.

@@ -27,6 +27,8 @@ For work involving normalized SD-WAN, SCIM lifecycle, SLI/SLO/error budgets, aud
 
 For work involving alert qualification/evidence contracts, telemetry-quality trust, semantic monitoring states, alert-policy lifecycle/backtesting/shadowing, false-alert measurement, active evidence acquisition, evidence coverage, RCA confidence/contradictions, AI/ML evaluation, Incident Copilot, AI provider/egress controls, tenant-scoped learning, prompt-injection/tool-use controls, shared-service dependency monitoring, PKI assurance, predictive operations or AI observability, **`Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
+For work involving enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph versus governed-CMDB semantics, or coverage measurement, **`Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
+
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
 ## Canonical GitHub governance (USER-FIXED)
@@ -96,6 +98,8 @@ For enterprise-gap capabilities governed by `Platform_21`, Definition of Done al
 
 For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`, Definition of Done also includes the applicable Alert Evidence Contract, telemetry-quality negative cases, semantic-state behavior, false-alert/backtest/shadow evidence, confidence/evidence coverage, contradiction handling, tenant-isolation and data-egress tests, prompt-injection/tool-firewall tests, graceful AI degradation, model/data-drift observability and the formal `REQ-MIA-*` acceptance evidence.
 
+For enterprise-monitoring-coverage / Capability Pack capabilities governed by `Platform_23`, Definition of Done also includes dimensional certification evidence, pack compatibility/version evidence, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior and the formal `REQ-EMC-*` acceptance evidence. Specification of a technology family is not certification.
+
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
 - Network auto-discovery and Agent enrollment feed a governed onboarding/review lifecycle. Newly found/enrolled entities do not silently become licensed/actively monitored unless an explicit authorized trusted auto-approval policy applies.
@@ -132,6 +136,15 @@ For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`,
 - AI/ML releases require reproducible evaluation, provenance, model/data-drift visibility and resource-budget evidence. Champion/challenger decisions require measured evidence, not vendor/model reputation.
 - Shared services such as DNS/DHCP/NTP/PTP/RADIUS/TACACS+/LDAP/AD and PKI/certificate state are dependency evidence for incident reasoning; facilities/power evidence may explain infrastructure incidents but does not turn Platform into BMS/DCIM.
 
+## v3.2.2 enterprise monitoring coverage and Capability Pack safeguards
+
+- Capability Pack is the only extensibility architecture. Technology Monitoring, Device/Network, SaaS Monitoring, Integration and optional Customer Extension packs are classifications of that architecture, not competing frameworks.
+- Certification is dimensional. Do not collapse Discovery/L1/L2/L3/Topology/NCM/Security into one scalar support claim.
+- Named products in `Platform_23` are certification targets, not Core hard-coding, shipped packs or achieved certification.
+- Coverage metrics remain distinct (architecture/specification/implementation/pack/certification/integration). Specified is not implemented; tested is not certified; certified is not deployed.
+- OEM/customer extensions use supported pack/SDK mechanisms. Core forks are prohibited.
+- Always-on full DPI, unrestricted SIEM replacement, full bytecode APM, broad BMS/DCIM and uncontrolled automated NCM remain excluded or deferred as recorded in `Platform_23`.
+
 ## Cursor Cloud specific instructions
 
 Hosted Cloud Agents use `.cursor/environment.json` and `.cursor/Dockerfile`. The GitHub repository is `https://github.com/gagandsm-max/platform`.
@@ -162,4 +175,4 @@ Do not paste the agent or Skill catalogue here. Resolve it from manifests.
 - Writer isolation: one writer per checkout; parallel writes use separate branches/worktrees
 - Evidence: typed claims, exact-head current-base CI, no writer self-certification
 
-Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.2.2. Current Mother Reference file count is discovered from `Platform_00_Document_Index.md` (24 files at pack authoring; do not freeze a historical 21-file ceiling).
+Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.2.2. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.

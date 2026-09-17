@@ -57,6 +57,7 @@ Own monitored-target implementation across OS, virtualization, storage, Kubernet
 - `project_documentation/Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
 - `project_documentation/Platform_21_Enterprise_Gap_Closure_Master.md`
 - `project_documentation/Platform_11_Sizing_Capacity_Storage_Master.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Responsibilities
 1. Normalize vendor identifiers into Platform-owned entities; vendor IDs never override tenant/entity authority.

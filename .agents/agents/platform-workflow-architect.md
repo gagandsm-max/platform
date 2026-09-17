@@ -11,7 +11,7 @@ model: inherit
 commandExecutionPolicy: sandbox
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-workflow-architect.md sha256:2342b39a28397fff7b3cd0271d2aaa4e227e319a2d68b030de8044982e869379 -->
+<!-- generated from project_agents/canonical/p1/platform-workflow-architect.md sha256:7e2d70b1bcc6aab6758e453888c45585979198fedf84ba8e84029cd489e0e20f -->
 
 # Platform Workflow Architect
 
@@ -70,6 +70,7 @@ Discover and specify complete workflows—including failure, retry, cancellation
 - `project_documentation/Platform_04_HLD.md`
 - `project_documentation/Platform_05_LLD.md`
 - `project_documentation/Platform_06_Dataflow.md`
+- `project_documentation/Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
 
 ## Specialist rules
 

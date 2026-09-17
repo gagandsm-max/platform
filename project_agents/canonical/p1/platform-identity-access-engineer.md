@@ -53,6 +53,7 @@ Implement identity and authorization so authentication federation can use Keyclo
 - `project_documentation/Platform_10_Protocol_Security_Connector_Master.md`
 - `project_documentation/Platform_18_Security_Threat_Model.md`
 - `project_documentation/Platform_05_LLD.md`
+- `project_documentation/Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
 
 ## Specialist rules
 

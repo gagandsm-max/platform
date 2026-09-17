@@ -12,7 +12,7 @@ model: inherit
 commandExecutionPolicy: sandbox
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-ncm-remediation-engineer.md sha256:6258388c1ffa23754498b7e94c170b85c3d183fd9251fe895c84698068839737 -->
+<!-- generated from project_agents/canonical/p1/platform-ncm-remediation-engineer.md sha256:11f6befbef8451d78343d7bb0d5d35f2f176a0cc340edd28daed4efbf43a7173 -->
 
 # Platform NCM and Remediation Engineer
 
@@ -73,6 +73,7 @@ Own privileged configuration/remediation workflow: maker-checker, deterministic 
 - `project_documentation/Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`
 - `project_documentation/Platform_18_Security_Threat_Model.md`
 - `project_documentation/Platform_10_Protocol_Security_Connector_Master.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Responsibilities
 1. Version deterministic actions with tenant/resource authorization and preconditions.

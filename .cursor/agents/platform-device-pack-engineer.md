@@ -3,7 +3,7 @@ name: platform-device-pack-engineer
 description: Device Pack schema, identification, mappings, versioning, certification/provenance and test-lab semantics.
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-device-pack-engineer.md sha256:b412683e11a30c2aa72680600f9ff08cbafb03f6847d8fa3e9d507c37743e612 -->
+<!-- generated from project_agents/canonical/p1/platform-device-pack-engineer.md sha256:86cc30e8aaab8469b7ca26cf6fe0301d813d39402ea4cc8c73aa768eb2e99b23 -->
 
 # Platform Device Pack Engineer
 
@@ -64,6 +64,7 @@ Own Device Pack schema, identification, mappings, versioning, certification/prov
 - `project_documentation/Platform_10_Protocol_Security_Connector_Master.md`
 - `device-packs/README.md`
 - `project_documentation/Platform_08_Requirements_Traceability.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Responsibilities
 1. Keep identification in the pack contract, not DHCP/IP.

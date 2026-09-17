@@ -671,4 +671,107 @@ def validate_agent_pack(repo: Path) -> list[str]:
         except OSError as exc:
             errors.append(f"control-plane schema/state-machine check failed: {exc}")
 
+    errors.extend(validate_mother_reference_coverage(repo, pa, manifest))
+
+    return errors
+
+
+MOTHER_INDEX_SECTION_RE = re.compile(
+    r"^## 3\. Exact \d+-file mother-reference set\s*\n(?P<body>.*?)(?=^## |\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+MOTHER_INDEX_ROW_RE = re.compile(r"^\|\s*\d+\s*\|\s*`([^`]+)`\s*\|", re.MULTILINE)
+
+
+def parse_platform_00_mother_reference_files(index_text: str) -> list[str]:
+    match = MOTHER_INDEX_SECTION_RE.search(index_text)
+    if match is None:
+        raise AgentPackError("Platform_00 §3 mother-reference table was not found")
+    files = MOTHER_INDEX_ROW_RE.findall(match.group("body"))
+    if not files:
+        raise AgentPackError("Platform_00 §3 mother-reference table has no file rows")
+    return files
+
+
+def validate_mother_reference_coverage(repo: Path, pa: Path, manifest: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    coverage_path = pa / "mother_reference_coverage.json"
+    index_path = repo / "project_documentation" / "Platform_00_Document_Index.md"
+    if not index_path.is_file():
+        return errors
+    if not coverage_path.is_file():
+        errors.append("missing project_agents/mother_reference_coverage.json")
+        return errors
+
+    try:
+        coverage = load_json(coverage_path)
+    except (OSError, json.JSONDecodeError, AgentPackError) as exc:
+        errors.append(f"mother-reference coverage is not valid JSON: {exc}")
+        return errors
+    if not isinstance(coverage, dict):
+        errors.append("mother-reference coverage must be an object")
+        return errors
+    if coverage.get("schemaVersion") != 1:
+        errors.append("mother-reference coverage schemaVersion must be 1")
+
+    mappings = coverage.get("mappings")
+    if not isinstance(mappings, list) or not mappings:
+        errors.append("mother-reference coverage mappings must be a non-empty array")
+        return errors
+
+    try:
+        index_files = parse_platform_00_mother_reference_files(index_path.read_text(encoding="utf-8"))
+    except (OSError, AgentPackError) as exc:
+        errors.append(str(exc))
+        return errors
+
+    for filename in index_files:
+        path = repo / "project_documentation" / filename
+        if not path.is_file():
+            errors.append(f"mother-reference file missing: project_documentation/{filename}")
+
+    agent_names = {str(entry.get("name")) for entry in manifest if entry.get("name")}
+    mapped_files: list[str] = []
+    seen_files: set[str] = set()
+    for index, mapping in enumerate(mappings):
+        prefix = f"mother-reference coverage mapping[{index}]"
+        if not isinstance(mapping, dict):
+            errors.append(f"{prefix} must be an object")
+            continue
+        filename = mapping.get("file")
+        if not isinstance(filename, str) or not filename.strip() or "/" in filename or "\\" in filename:
+            errors.append(f"{prefix} file must be a repository-local basename")
+            continue
+        filename = filename.strip()
+        if filename in seen_files:
+            errors.append(f"{prefix} duplicates file {filename}")
+        seen_files.add(filename)
+        mapped_files.append(filename)
+        owners = mapping.get("owners")
+        supporters = mapping.get("supporters") or []
+        if not isinstance(owners, list) or not owners:
+            errors.append(f"{prefix} {filename} must declare at least one owner")
+            owners = []
+        if not isinstance(supporters, list):
+            errors.append(f"{prefix} {filename} supporters must be an array")
+            supporters = []
+        for role, names in (("owner", owners), ("supporter", supporters)):
+            for name in names:
+                if not isinstance(name, str) or not AGENT_NAME_RE.match(name):
+                    errors.append(f"{prefix} {filename} has invalid {role} name {name!r}")
+                    continue
+                if name not in agent_names:
+                    errors.append(f"{prefix} {filename} maps unknown {role} {name}")
+
+    index_set = set(index_files)
+    mapped_set = set(mapped_files)
+    missing = sorted(index_set - mapped_set)
+    extra = sorted(mapped_set - index_set)
+    if missing:
+        errors.append(f"mother-reference coverage missing files: {', '.join(missing)}")
+    if extra:
+        errors.append(f"mother-reference coverage has stale files: {', '.join(extra)}")
+    if len(index_files) != len(index_set):
+        errors.append("Platform_00 §3 contains duplicate mother-reference filenames")
+
     return errors

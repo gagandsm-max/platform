@@ -57,6 +57,7 @@ Own connector framework and SaaS/ITSM/webhooks/carrier/change telemetry includin
 - `project_documentation/Platform_21_Enterprise_Gap_Closure_Master.md`
 - `project_documentation/Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`
 - `project_documentation/Platform_10_Protocol_Security_Connector_Master.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Responsibilities
 1. Normalize vendor payloads into Platform-owned contracts.

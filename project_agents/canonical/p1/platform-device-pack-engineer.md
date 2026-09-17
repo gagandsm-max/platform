@@ -57,6 +57,7 @@ Own Device Pack schema, identification, mappings, versioning, certification/prov
 - `project_documentation/Platform_10_Protocol_Security_Connector_Master.md`
 - `device-packs/README.md`
 - `project_documentation/Platform_08_Requirements_Traceability.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Responsibilities
 1. Keep identification in the pack contract, not DHCP/IP.
