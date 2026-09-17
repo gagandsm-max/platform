@@ -950,7 +950,7 @@ func TestDurableQueueSourceSyncFailureKeepsQuarantineAuthoritative(t *testing.T)
 		t.Fatal(err)
 	}
 	batch, err := q2.ReadBatch(10, 1024*1024)
-	if errors.Is(err, ErrDeliveryBlocked) || errors.Is(err, ErrQuarantineSourceSyncFailed) {
+	if errors.Is(err, ErrDeliveryBlocked) || errors.Is(err, ErrQuarantineSourceSyncFailed) || errors.Is(err, ErrQuarantineUncertain) {
 		for _, rec := range batch {
 			if rec.Sequence >= 2 {
 				t.Fatalf("must not deliver seq >= 2 after source-sync failure: %+v", rec)
@@ -1357,6 +1357,57 @@ func TestDurableQueueSuccessfulIntentAndClear(t *testing.T) {
 	}
 }
 
+func TestDurableQueueExistingIntentRefusesOverwrite(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("rec-1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("rec-2")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plant an exclusive intent AFTER Open so recovery did not consume it into
+	// blockedFromSequence; the next quarantine must refuse to overwrite it.
+	rec1Path := activeRecordPath(t, tempDir, 1)
+	rec1Name := filepath.Base(rec1Path)
+	originalIntent := transitionIntent{Version: 1, Record: rec1Name, Sequence: 1, Code: "QUEUE_RECORD_CORRUPT"}
+	originalData, err := json.Marshal(originalIntent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intentPath := filepath.Join(tempDir, transitionIntentFile)
+	if err := os.WriteFile(intentPath, originalData, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+		t.Fatalf("existing intent must refuse a second quarantine transition: batch=%+v err=%v", batch, err)
+	}
+
+	got, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, originalData) {
+		t.Fatalf("existing intent must not be overwritten: got=%s want=%s", got, originalData)
+	}
+	if !recordPresent(t, tempDir, "active", 1) {
+		t.Fatal("poison record must remain in active when intent lease is held")
+	}
+	if recordPresent(t, tempDir, "quarantine", 1) {
+		t.Fatal("poison must not move while prior intent exists")
+	}
+	if _, err := os.Lstat(filepath.Join(tempDir, uncertainMarkerFile)); err != nil {
+		t.Fatalf("uncertain marker must persist when intent overwrite is refused: %v", err)
+	}
+}
+
 func TestDurableQueueIntentClearFailureLeavesFailClosed(t *testing.T) {
 	tempDir := t.TempDir()
 	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
@@ -1468,14 +1519,17 @@ func TestDurableQueueRollbackDestSourceClearFailures(t *testing.T) {
 		}
 
 		batch, err := q.ReadBatch(10, 1024*1024)
-		if err == nil || len(batch) != 0 {
-			t.Fatalf("expected error and empty batch, got batch=%+v err=%v", batch, err)
+		if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+			t.Fatalf("expected ErrQuarantineUncertain, got batch=%+v err=%v", batch, err)
 		}
 		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
 			t.Fatalf("queue must be uncertain and delivery blocked: %+v", q.Stats())
 		}
 		if _, err := os.Lstat(filepath.Join(tempDir, transitionIntentFile)); err != nil {
 			t.Fatalf("intent must remain when rollback source sync fails: %v", err)
+		}
+		if _, err := os.Lstat(filepath.Join(tempDir, uncertainMarkerFile)); err != nil {
+			t.Fatalf("uncertain marker must be durable after rollback source sync failure: %v", err)
 		}
 		if !recordPresent(t, tempDir, "active", 1) {
 			t.Fatal("rollback dest durability must leave record in active/")

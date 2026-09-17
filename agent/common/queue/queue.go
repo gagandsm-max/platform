@@ -859,14 +859,12 @@ func (q *DurableQueue) quarantineRecordLocked(name, code string) error {
 
 	// 1. Establish durable PRE-TRANSITION INTENT before any rename
 	if err := q.persistTransitionIntentLocked(name, fileSeq, code); err != nil {
-		q.locationUncertain = true
-		return fmt.Errorf("%w: transition intent failed: %v", ErrQuarantineUncertain, err)
+		return q.enterUncertainLocked(fmt.Errorf("transition intent failed: %w", err))
 	}
 
 	// 2. Perform active -> quarantine rename
 	if err := os.Rename(oldPath, newPath); err != nil {
-		q.locationUncertain = true
-		return fmt.Errorf("%w: quarantine rename failed: %v", ErrQuarantineUncertain, err)
+		return q.enterUncertainLocked(fmt.Errorf("quarantine rename failed: %w", err))
 	}
 
 	// 3. Sync quarantine destination directory
@@ -879,7 +877,9 @@ func (q *DurableQueue) quarantineRecordLocked(name, code string) error {
 		// Destination directory entry is durable. Do not reverse: a rollback
 		// could drop the only durable copy. Quarantine is authoritative.
 		q.applyQuarantineCountersLocked(size, fileSeq)
-		q.locationUncertain = true
+		if merr := q.persistUncertainStateLocked(); merr != nil {
+			return fmt.Errorf("%w: marker persistence failed (%v) after source sync failed: %v", ErrQuarantineUncertain, merr, err)
+		}
 		return fmt.Errorf("%w: %v", ErrQuarantineSourceSyncFailed, err)
 	}
 
@@ -889,8 +889,7 @@ func (q *DurableQueue) quarantineRecordLocked(name, code string) error {
 
 	// 6. Clear transition intent durably
 	if err := q.clearTransitionIntentLocked(); err != nil {
-		q.locationUncertain = true
-		return fmt.Errorf("%w: clear transition intent failed: %v", ErrQuarantineUncertain, err)
+		return q.enterUncertainLocked(fmt.Errorf("clear transition intent failed: %w", err))
 	}
 
 	return nil
@@ -927,14 +926,12 @@ func (q *DurableQueue) rollbackQuarantineMoveLocked(name string, destSyncErr err
 	// Step 2: Sync rollback source (quarantine directory)
 	if err := q.syncDirPhase(syncPhaseRollbackSource, q.quarantineDir); err != nil {
 		// Rollback destination (active/) is durable. Do not reverse again.
-		q.locationUncertain = true
-		return fmt.Errorf("QUEUE_QUARANTINE_DIR_SYNC_FAILED: %w", destSyncErr)
+		return q.enterUncertainLocked(fmt.Errorf("rollback source sync failed after dest sync error: %w", destSyncErr))
 	}
 
 	// Rollback durability established: attempt to clear transition intent
 	if err := q.clearTransitionIntentLocked(); err != nil {
-		q.locationUncertain = true
-		return fmt.Errorf("%w: clear transition intent after rollback failed: %v", ErrQuarantineUncertain, err)
+		return q.enterUncertainLocked(fmt.Errorf("clear transition intent after rollback failed: %w", err))
 	}
 
 	return fmt.Errorf("QUEUE_QUARANTINE_DIR_SYNC_FAILED: %w", destSyncErr)
@@ -980,7 +977,14 @@ func (q *DurableQueue) persistTransitionIntentLocked(recordName string, seq uint
 	}
 
 	intentPath := filepath.Join(q.dir, transitionIntentFile)
-	f, err := os.OpenFile(intentPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if fi, err := q.lstatFile(intentPath); err == nil {
+		return fmt.Errorf("QUEUE_INTENT_EXISTS: transition intent already present (mode=%v)", fi.Mode())
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("QUEUE_INTENT_STAT_FAILED: %w", err)
+	}
+
+	// O_EXCL: never overwrite an existing intent lease.
+	f, err := os.OpenFile(intentPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("QUEUE_INTENT_OPEN_FAILED: %w", err)
 	}
@@ -1151,9 +1155,13 @@ func (q *DurableQueue) recoverTransitionIntentLocked() (uint64, bool, error) {
 	return intent.Sequence, true, nil
 }
 
-func (q *DurableQueue) enterUncertainLocked(cause error) error {
+func (q *DurableQueue) persistUncertainStateLocked() error {
 	q.locationUncertain = true
-	if err := q.persistUncertainMarkerLocked(); err != nil {
+	return q.persistUncertainMarkerLocked()
+}
+
+func (q *DurableQueue) enterUncertainLocked(cause error) error {
+	if err := q.persistUncertainStateLocked(); err != nil {
 		return fmt.Errorf("%w: marker persistence failed (%v) after cause: %v", ErrQuarantineUncertain, err, cause)
 	}
 	return fmt.Errorf("%w: %v", ErrQuarantineUncertain, cause)
