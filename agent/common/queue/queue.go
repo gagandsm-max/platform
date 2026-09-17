@@ -29,6 +29,8 @@ var (
 	ErrUnknownSequence            = errors.New("QUEUE_UNKNOWN_SEQUENCE_BLOCK: queue record filename has no safe sequence")
 	ErrQuarantineUncertain        = errors.New("QUEUE_QUARANTINE_UNCERTAIN: durable record location cannot be confirmed")
 	ErrQuarantineSourceSyncFailed = errors.New("QUEUE_QUARANTINE_SOURCE_SYNC_FAILED: quarantine destination durable; source dirsync failed")
+	ErrSequenceGap                = errors.New("QUEUE_SEQUENCE_GAP: missing unacknowledged sequence blocks delivery")
+	ErrSequenceConflict           = errors.New("QUEUE_SEQUENCE_CONFLICT: multiple active records share a sequence")
 )
 
 const (
@@ -43,6 +45,9 @@ const (
 	syncPhaseRollbackDest   = "rollback-dest"
 	syncPhaseRollbackSource = "rollback-source"
 	syncPhaseIntentClearDir = "intent-clear-dir"
+	syncPhaseMetaFile       = "meta-file"
+	syncPhaseMetaDir        = "meta-dir"
+	syncPhaseActiveCommit   = "active-commit"
 )
 
 // syncHookFunc is a per-queue test seam for directory and file fsync phases. Production
@@ -82,6 +87,7 @@ type QueueStats struct {
 	QuarantineBytes      int64
 	OldestAge            time.Duration
 	LastSequence         uint64
+	AcceptedThrough      uint64
 	MaxRecords           int
 	MaxBytes             int64
 	MaxQuarantineRecords int
@@ -92,31 +98,36 @@ type QueueStats struct {
 	DeliveryBlocked      bool
 	UnknownSequenceBlock bool
 	LocationUncertain    bool
+	SequenceGapBlock     bool
+	SequenceConflictBlock bool
 }
 
 type DurableQueue struct {
-	dir                  string
-	activeDir            string
-	quarantineDir        string
-	metaPath             string
-	maxRecords           int
-	maxBytes             int64
-	maxRecordBytes       int
-	maxQuarantineRecords int
-	maxQuarantineBytes   int64
-	mu                   sync.Mutex
-	lastSeq              uint64
-	activeCount          int
-	activeBytes          int64
-	quarantineCount      int
-	quarantineBytes      int64
-	blockedFromSequence  uint64
-	unknownSequenceBlock bool
-	locationUncertain    bool
-	syncHook             syncHookFunc
-	readDirHook          pathHookFunc
-	lstatHook            pathHookFunc
-	removeHook           pathHookFunc
+	dir                   string
+	activeDir             string
+	quarantineDir         string
+	metaPath              string
+	maxRecords            int
+	maxBytes              int64
+	maxRecordBytes        int
+	maxQuarantineRecords  int
+	maxQuarantineBytes    int64
+	mu                    sync.Mutex
+	lastSeq               uint64
+	acceptedThrough       uint64
+	activeCount           int
+	activeBytes           int64
+	quarantineCount       int
+	quarantineBytes       int64
+	blockedFromSequence   uint64
+	unknownSequenceBlock  bool
+	locationUncertain     bool
+	sequenceGapBlock      bool
+	sequenceConflictBlock bool
+	syncHook              syncHookFunc
+	readDirHook           pathHookFunc
+	lstatHook             pathHookFunc
+	removeHook            pathHookFunc
 }
 
 const sequenceMetaFile = "sequence.meta"
@@ -302,47 +313,80 @@ func (q *DurableQueue) recoverState() error {
 		return err
 	}
 
-	durableWM, err := q.readSequenceWatermarkLocked()
+	meta, err := q.readSequenceMetaLocked()
 	if err != nil {
 		return err
 	}
 
 	// lastSeq = max(file highest, durable watermark) so drained queues retain lineage.
 	q.lastSeq = highestSeq
-	if durableWM > q.lastSeq {
-		q.lastSeq = durableWM
+	if meta.HighestSequence > q.lastSeq {
+		q.lastSeq = meta.HighestSequence
+	}
+	q.acceptedThrough = meta.AcceptedThrough
+	if q.acceptedThrough > q.lastSeq {
+		return errors.New("QUEUE_META_CORRUPT: acceptedThrough exceeds highestSequence lineage")
+	}
+
+	if err := q.reconcileAcceptedLeftoversLocked(); err != nil {
+		return err
+	}
+	if err := q.refreshSequenceIntegrityLocked(); err != nil {
+		return err
 	}
 	return nil
 }
 
 type sequenceMeta struct {
 	HighestSequence uint64 `json:"highestSequence"`
+	AcceptedThrough uint64 `json:"acceptedThrough,omitempty"`
 }
 
-func (q *DurableQueue) readSequenceWatermarkLocked() (uint64, error) {
+func (q *DurableQueue) readSequenceMetaLocked() (sequenceMeta, error) {
 	data, err := os.ReadFile(q.metaPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return 0, nil
+			return sequenceMeta{}, nil
 		}
-		return 0, fmt.Errorf("QUEUE_META_READ_FAILED: %w", err)
+		return sequenceMeta{}, fmt.Errorf("QUEUE_META_READ_FAILED: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return 0, errors.New("QUEUE_META_CORRUPT: sequence metadata is empty")
+		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: sequence metadata is empty")
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var meta sequenceMeta
 	if err := dec.Decode(&meta); err != nil {
-		return 0, fmt.Errorf("QUEUE_META_CORRUPT: %w", err)
+		return sequenceMeta{}, fmt.Errorf("QUEUE_META_CORRUPT: %w", err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return 0, errors.New("QUEUE_META_CORRUPT: trailing data in sequence metadata")
+		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: trailing data in sequence metadata")
+	}
+	if meta.AcceptedThrough > meta.HighestSequence {
+		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: acceptedThrough exceeds highestSequence")
+	}
+	return meta, nil
+}
+
+func (q *DurableQueue) readSequenceWatermarkLocked() (uint64, error) {
+	meta, err := q.readSequenceMetaLocked()
+	if err != nil {
+		return 0, err
 	}
 	return meta.HighestSequence, nil
 }
 
 func (q *DurableQueue) persistSequenceWatermarkLocked(seq uint64) error {
-	meta := sequenceMeta{HighestSequence: seq}
+	return q.persistSequenceMetaLocked(seq, q.acceptedThrough)
+}
+
+func (q *DurableQueue) persistSequenceMetaLocked(highest, accepted uint64) error {
+	if accepted > highest {
+		return errors.New("QUEUE_META_CORRUPT: acceptedThrough exceeds highestSequence")
+	}
+	if accepted < q.acceptedThrough {
+		return errors.New("QUEUE_META_REGRESS: acceptedThrough must never regress")
+	}
+	meta := sequenceMeta{HighestSequence: highest, AcceptedThrough: accepted}
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("QUEUE_META_MARSHAL_FAILED: %w", err)
@@ -362,7 +406,7 @@ func (q *DurableQueue) persistSequenceWatermarkLocked(seq uint64) error {
 		_ = tmp.Close()
 		return fmt.Errorf("QUEUE_META_WRITE_FAILED: %w", err)
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := q.syncFilePhase(syncPhaseMetaFile, tmp); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("QUEUE_META_SYNC_FAILED: %w", err)
 	}
@@ -372,7 +416,7 @@ func (q *DurableQueue) persistSequenceWatermarkLocked(seq uint64) error {
 	if err := os.Rename(tmpName, q.metaPath); err != nil {
 		return fmt.Errorf("QUEUE_META_RENAME_FAILED: %w", err)
 	}
-	if err := syncDir(q.dir); err != nil {
+	if err := q.syncDirPhase(syncPhaseMetaDir, q.dir); err != nil {
 		return fmt.Errorf("QUEUE_META_DIR_SYNC_FAILED: %w", err)
 	}
 	return nil
@@ -516,6 +560,16 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 		return nil, ErrUnknownSequence
 	}
 
+	if err := q.refreshSequenceIntegrityLocked(); err != nil {
+		return nil, err
+	}
+	if q.sequenceConflictBlock {
+		return nil, ErrSequenceConflict
+	}
+	if q.sequenceGapBlock {
+		return nil, ErrSequenceGap
+	}
+
 	var batch []Record
 	var currentBytes int64
 	blocked := q.blockedFromSequence
@@ -529,6 +583,10 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 		if nameErr != nil {
 			q.unknownSequenceBlock = true
 			return nil, ErrUnknownSequence
+		}
+		if fileSeq <= q.acceptedThrough {
+			// Durable ACK leftovers are skipped for delivery; recovery cleans them.
+			continue
 		}
 		if blocked > 0 && fileSeq >= blocked {
 			break
@@ -566,6 +624,15 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 					return batch, nil
 				}
 				return nil, qErr
+			}
+			break
+		}
+
+		if q.acceptedThrough > 0 && len(batch) == 0 && rec.Sequence != q.acceptedThrough+1 {
+			expected := q.acceptedThrough + 1
+			if q.blockedFromSequence == 0 || q.blockedFromSequence > expected {
+				q.sequenceGapBlock = true
+				return nil, ErrSequenceGap
 			}
 			break
 		}
@@ -703,6 +770,12 @@ func (q *DurableQueue) errIfDeliveryBlockedLocked(hasPrefix bool) error {
 	}
 	if q.unknownSequenceBlock {
 		return ErrUnknownSequence
+	}
+	if q.sequenceConflictBlock {
+		return ErrSequenceConflict
+	}
+	if q.sequenceGapBlock {
+		return ErrSequenceGap
 	}
 	if hasPrefix || q.blockedFromSequence == 0 {
 		return nil
@@ -1331,40 +1404,248 @@ func isFailClosedQuarantineErr(err error) bool {
 		errors.Is(err, ErrUnknownSequence)
 }
 
-func (q *DurableQueue) DeleteThrough(seq uint64) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+func recordFileName(seq uint64, id string) string {
+	return fmt.Sprintf("rec_%019d_%s.json", seq, id)
+}
+
+func (q *DurableQueue) refreshSequenceIntegrityLocked() error {
+	q.sequenceGapBlock = false
+	q.sequenceConflictBlock = false
 
 	entries, err := os.ReadDir(q.activeDir)
 	if err != nil {
-		return fmt.Errorf("QUEUE_DELETE_SCAN_FAILED: %w", err)
+		return fmt.Errorf("QUEUE_SCAN_FAILED: %w", err)
 	}
 
+	bySeq := make(map[uint64][]string)
+	var lowestUnacked uint64
+	var hasUnacked bool
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), "rec_") || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() || !isRecordJSON(e.Name()) {
 			continue
 		}
-
-		fileSeq, _, err := parseRecordFileName(e.Name())
-		if err != nil || fileSeq > seq {
+		fileSeq, _, nameErr := parseRecordFileName(e.Name())
+		if nameErr != nil {
 			continue
 		}
+		bySeq[fileSeq] = append(bySeq[fileSeq], e.Name())
+		if fileSeq > q.acceptedThrough {
+			if !hasUnacked || fileSeq < lowestUnacked {
+				lowestUnacked = fileSeq
+				hasUnacked = true
+			}
+		}
+	}
+	for _, names := range bySeq {
+		if len(names) > 1 {
+			q.sequenceConflictBlock = true
+			return nil
+		}
+	}
+	if q.acceptedThrough > 0 && hasUnacked && lowestUnacked != q.acceptedThrough+1 {
+		expected := q.acceptedThrough + 1
+		// Quarantine at/before the next expected sequence owns the delivery hold.
+		if q.blockedFromSequence == 0 || q.blockedFromSequence > expected {
+			q.sequenceGapBlock = true
+		}
+	}
+	return nil
+}
 
+func (q *DurableQueue) reconcileAcceptedLeftoversLocked() error {
+	if q.acceptedThrough == 0 {
+		return nil
+	}
+	if err := q.refreshSequenceIntegrityLocked(); err != nil {
+		return err
+	}
+	if q.sequenceConflictBlock {
+		// Ambiguous same-sequence leftovers: fail closed without deleting.
+		return nil
+	}
+
+	entries, err := os.ReadDir(q.activeDir)
+	if err != nil {
+		return fmt.Errorf("QUEUE_RECOVER_SCAN_FAILED: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !isRecordJSON(e.Name()) {
+			continue
+		}
+		fileSeq, _, nameErr := parseRecordFileName(e.Name())
+		if nameErr != nil {
+			continue
+		}
+		if fileSeq > q.acceptedThrough {
+			continue
+		}
 		filePath := filepath.Join(q.activeDir, e.Name())
 		fi, err := e.Info()
 		if err != nil {
-			return fmt.Errorf("QUEUE_DELETE_STAT_FAILED: %w", err)
+			return fmt.Errorf("QUEUE_RECOVER_LEFTOVER_STAT_FAILED: %w", err)
 		}
-		if err := os.Remove(filePath); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return fmt.Errorf("QUEUE_DELETE_FAILED: %w", err)
+		if err := os.Remove(filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("QUEUE_RECOVER_LEFTOVER_DELETE_FAILED: %w", err)
 		}
 		q.activeCount--
 		q.activeBytes -= fi.Size()
 	}
+	if q.activeCount < 0 {
+		q.activeCount = 0
+	}
+	if q.activeBytes < 0 {
+		q.activeBytes = 0
+	}
+	if err := syncDir(q.activeDir); err != nil {
+		return fmt.Errorf("QUEUE_RECOVER_LEFTOVER_DIR_SYNC_FAILED: %w", err)
+	}
+	return q.refreshSequenceIntegrityLocked()
+}
 
+// CommitAccepted durably advances acceptedThrough for the exact submitted ACK
+// prefix, then deletes only those authorized active records.
+func (q *DurableQueue) CommitAccepted(records []Record, acceptedThrough uint64) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.locationUncertain {
+		return ErrQuarantineUncertain
+	}
+	if acceptedThrough == 0 {
+		return errors.New("QUEUE_COMMIT_EMPTY: empty ACK does not authorize deletion")
+	}
+	if len(records) == 0 {
+		return errors.New("QUEUE_COMMIT_EMPTY_BATCH: ACK without submitted records")
+	}
+
+	var prefix []Record
+	found := false
+	for _, r := range records {
+		if r.Sequence == 0 || strings.TrimSpace(r.ID) == "" {
+			return errors.New("QUEUE_COMMIT_INVALID_RECORD: submitted record missing sequence or id")
+		}
+		prefix = append(prefix, r)
+		if r.Sequence == acceptedThrough {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("QUEUE_COMMIT_NOT_IN_BATCH: acceptedThrough %d was not in the submitted batch", acceptedThrough)
+	}
+	for i := 1; i < len(prefix); i++ {
+		if prefix[i].Sequence != prefix[i-1].Sequence+1 {
+			return errors.New("QUEUE_COMMIT_GAP: submitted ACK prefix is not contiguous")
+		}
+	}
+	if acceptedThrough < q.acceptedThrough {
+		return errors.New("QUEUE_META_REGRESS: acceptedThrough must never regress")
+	}
+	if q.acceptedThrough > 0 && prefix[0].Sequence != q.acceptedThrough+1 {
+		q.sequenceGapBlock = true
+		return ErrSequenceGap
+	}
+
+	entries, err := os.ReadDir(q.activeDir)
+	if err != nil {
+		return fmt.Errorf("QUEUE_COMMIT_SCAN_FAILED: %w", err)
+	}
+
+	bySeq := make(map[uint64][]string)
+	for _, e := range entries {
+		if e.IsDir() || !isRecordJSON(e.Name()) {
+			continue
+		}
+		fileSeq, _, nameErr := parseRecordFileName(e.Name())
+		if nameErr != nil {
+			q.unknownSequenceBlock = true
+			return ErrUnknownSequence
+		}
+		bySeq[fileSeq] = append(bySeq[fileSeq], e.Name())
+	}
+	for seq, names := range bySeq {
+		if len(names) > 1 {
+			q.sequenceConflictBlock = true
+			return ErrSequenceConflict
+		}
+		if seq >= prefix[0].Sequence && seq <= acceptedThrough {
+			expected := false
+			for _, r := range prefix {
+				if r.Sequence == seq {
+					expected = true
+					break
+				}
+			}
+			if !expected {
+				return fmt.Errorf("QUEUE_COMMIT_UNEXPECTED: unexpected active record sequence %d in ACK range", seq)
+			}
+		}
+	}
+
+	type authorizedDelete struct {
+		name string
+		size int64
+	}
+	var deletes []authorizedDelete
+	for _, r := range prefix {
+		expectedName := recordFileName(r.Sequence, r.ID)
+		names := bySeq[r.Sequence]
+		if len(names) == 0 {
+			if r.Sequence <= q.acceptedThrough {
+				continue
+			}
+			return fmt.Errorf("QUEUE_COMMIT_MISSING: expected active record %s", expectedName)
+		}
+		if len(names) != 1 || names[0] != expectedName {
+			q.sequenceConflictBlock = true
+			return ErrSequenceConflict
+		}
+		filePath := filepath.Join(q.activeDir, expectedName)
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("QUEUE_COMMIT_READ_FAILED: %w", err)
+		}
+		rec, _, parseErr := decodeRecordFile(expectedName, data)
+		if parseErr != nil {
+			return fmt.Errorf("QUEUE_COMMIT_RECORD_INVALID: %w", parseErr)
+		}
+		if rec.Sequence != r.Sequence || rec.ID != r.ID {
+			q.sequenceConflictBlock = true
+			return ErrSequenceConflict
+		}
+		fi, err := os.Lstat(filePath)
+		if err != nil {
+			return fmt.Errorf("QUEUE_COMMIT_STAT_FAILED: %w", err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+			return errors.New("QUEUE_COMMIT_RECORD_NOT_REGULAR: active record path is not a regular file")
+		}
+		deletes = append(deletes, authorizedDelete{name: expectedName, size: fi.Size()})
+	}
+
+	highest := q.lastSeq
+	if acceptedThrough > highest {
+		highest = acceptedThrough
+	}
+	if err := q.persistSequenceMetaLocked(highest, acceptedThrough); err != nil {
+		return err
+	}
+	q.acceptedThrough = acceptedThrough
+	q.sequenceGapBlock = false
+
+	for _, d := range deletes {
+		filePath := filepath.Join(q.activeDir, d.name)
+		if q.removeHook != nil {
+			if err := q.removeHook(filePath); err != nil {
+				return fmt.Errorf("QUEUE_COMMIT_DELETE_FAILED: %w", err)
+			}
+		}
+		if err := os.Remove(filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("QUEUE_COMMIT_DELETE_FAILED: %w", err)
+		}
+		q.activeCount--
+		q.activeBytes -= d.size
+	}
 	if q.activeCount < 0 {
 		q.activeCount = 0
 	}
@@ -1372,11 +1653,10 @@ func (q *DurableQueue) DeleteThrough(seq uint64) error {
 		q.activeBytes = 0
 	}
 
-	if err := syncDir(q.activeDir); err != nil {
-		return fmt.Errorf("QUEUE_DELETE_DIR_SYNC_FAILED: %w", err)
+	if err := q.syncDirPhase(syncPhaseActiveCommit, q.activeDir); err != nil {
+		return fmt.Errorf("QUEUE_COMMIT_DIR_SYNC_FAILED: %w", err)
 	}
-
-	return nil
+	return q.refreshSequenceIntegrityLocked()
 }
 
 func (q *DurableQueue) Stats() QueueStats {
@@ -1388,12 +1668,15 @@ func (q *DurableQueue) Stats() QueueStats {
 	if err == nil {
 		var minMod time.Time
 		for _, e := range entries {
-			if !e.IsDir() && strings.HasPrefix(e.Name(), "rec_") {
-				if fi, err := e.Info(); err == nil {
-					if minMod.IsZero() || fi.ModTime().Before(minMod) {
-						minMod = fi.ModTime()
-					}
-				}
+			if e.IsDir() || !isRecordJSON(e.Name()) {
+				continue
+			}
+			fi, infoErr := e.Info()
+			if infoErr != nil {
+				continue
+			}
+			if minMod.IsZero() || fi.ModTime().Before(minMod) {
+				minMod = fi.ModTime()
 			}
 		}
 		if !minMod.IsZero() {
@@ -1405,22 +1688,25 @@ func (q *DurableQueue) Stats() QueueStats {
 	quarantineAtCapacity := q.quarantineCount >= q.maxQuarantineRecords || q.quarantineBytes >= q.maxQuarantineBytes
 	hasActiveBlocked, hasActiveErr := q.hasActiveAfterBlockedLocked()
 	return QueueStats{
-		ActiveCount:          q.activeCount,
-		ActiveBytes:          q.activeBytes,
-		QuarantineCount:      q.quarantineCount,
-		QuarantineBytes:      q.quarantineBytes,
-		OldestAge:            oldestAge,
-		LastSequence:         q.lastSeq,
-		MaxRecords:           q.maxRecords,
-		MaxBytes:             q.maxBytes,
-		MaxQuarantineRecords: q.maxQuarantineRecords,
-		MaxQuarantineBytes:   q.maxQuarantineBytes,
-		AtCapacity:           atCapacity,
-		QuarantineAtCapacity: quarantineAtCapacity,
-		BlockedFromSequence:  q.blockedFromSequence,
-		DeliveryBlocked:      q.unknownSequenceBlock || q.locationUncertain || hasActiveBlocked || hasActiveErr != nil,
-		UnknownSequenceBlock: q.unknownSequenceBlock,
-		LocationUncertain:    q.locationUncertain,
+		ActiveCount:           q.activeCount,
+		ActiveBytes:           q.activeBytes,
+		QuarantineCount:       q.quarantineCount,
+		QuarantineBytes:       q.quarantineBytes,
+		OldestAge:             oldestAge,
+		LastSequence:          q.lastSeq,
+		AcceptedThrough:       q.acceptedThrough,
+		MaxRecords:            q.maxRecords,
+		MaxBytes:              q.maxBytes,
+		MaxQuarantineRecords:  q.maxQuarantineRecords,
+		MaxQuarantineBytes:    q.maxQuarantineBytes,
+		AtCapacity:            atCapacity,
+		QuarantineAtCapacity:  quarantineAtCapacity,
+		BlockedFromSequence:   q.blockedFromSequence,
+		DeliveryBlocked:       q.unknownSequenceBlock || q.locationUncertain || q.sequenceGapBlock || q.sequenceConflictBlock || hasActiveBlocked || hasActiveErr != nil,
+		UnknownSequenceBlock:  q.unknownSequenceBlock,
+		LocationUncertain:     q.locationUncertain,
+		SequenceGapBlock:      q.sequenceGapBlock,
+		SequenceConflictBlock: q.sequenceConflictBlock,
 	}
 }
 

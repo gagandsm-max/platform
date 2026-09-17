@@ -46,6 +46,8 @@ func TestClassify(t *testing.T) {
 		{queue.ErrQuarantineSourceSyncFailed, FailureBlocked},
 		{queue.ErrDeliveryBlocked, FailureBlocked},
 		{queue.ErrQuarantineFull, FailureBlocked},
+		{queue.ErrSequenceGap, FailureBlocked},
+		{queue.ErrSequenceConflict, FailureBlocked},
 	}
 	for _, tc := range cases {
 		if got := Classify(tc.err); got != tc.want {

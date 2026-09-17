@@ -18,7 +18,7 @@ import (
 
 type DeliveryQueue interface {
 	ReadBatch(maxRecords int, maxBytes int64) ([]queue.Record, error)
-	DeleteThrough(seq uint64) error
+	CommitAccepted(records []queue.Record, acceptedThrough uint64) error
 	Len() int
 }
 
@@ -246,9 +246,14 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	if err := w.q.DeleteThrough(ack.AcceptedThrough); err != nil {
-		w.recordQueueFailure(client.FailureTemporary, "DELIVERY_DELETE_FAILED")
-		w.logger.Error("Failed to delete acknowledged records from queue", "through", ack.AcceptedThrough, "error", err)
+	if err := w.q.CommitAccepted(records, ack.AcceptedThrough); err != nil {
+		failClass := client.Classify(err)
+		code := "DELIVERY_COMMIT_FAILED"
+		if failClass == client.FailureBlocked {
+			code = queueFailureCode(err)
+		}
+		w.recordQueueFailure(failClass, code)
+		w.logger.Error("Failed to commit acknowledged records in queue", "through", ack.AcceptedThrough, "error", err)
 		return false, err
 	}
 
@@ -345,6 +350,10 @@ func queueFailureCode(err error) string {
 		return "QUEUE_QUARANTINE_UNCERTAIN"
 	case errors.Is(err, queue.ErrQuarantineSourceSyncFailed):
 		return "QUEUE_QUARANTINE_SOURCE_SYNC_FAILED"
+	case errors.Is(err, queue.ErrSequenceGap):
+		return "QUEUE_SEQUENCE_GAP"
+	case errors.Is(err, queue.ErrSequenceConflict):
+		return "QUEUE_SEQUENCE_CONFLICT"
 	default:
 		return "QUEUE_READ_FAILED"
 	}

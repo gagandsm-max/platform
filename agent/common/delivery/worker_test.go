@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -16,7 +17,7 @@ import (
 type mockQueue struct {
 	mu        sync.Mutex
 	records   []queue.Record
-	deleted   []uint64
+	committed []uint64
 	readErr   error
 	readCalls int
 }
@@ -39,15 +40,24 @@ func (m *mockQueue) ReadBatch(maxRecords int, maxBytes int64) ([]queue.Record, e
 	return out, nil
 }
 
-func (m *mockQueue) DeleteThrough(seq uint64) error {
+func (m *mockQueue) CommitAccepted(records []queue.Record, acceptedThrough uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.deleted = append(m.deleted, seq)
+	m.committed = append(m.committed, acceptedThrough)
+	prefixIDs := make(map[string]struct{})
+	for _, r := range records {
+		prefixIDs[fmt.Sprintf("%d:%s", r.Sequence, r.ID)] = struct{}{}
+		if r.Sequence == acceptedThrough {
+			break
+		}
+	}
 	var remaining []queue.Record
 	for _, r := range m.records {
-		if r.Sequence > seq {
-			remaining = append(remaining, r)
+		key := fmt.Sprintf("%d:%s", r.Sequence, r.ID)
+		if _, ok := prefixIDs[key]; ok {
+			continue
 		}
+		remaining = append(remaining, r)
 	}
 	m.records = remaining
 	return nil
@@ -309,16 +319,16 @@ func TestDeliveryWorkerBatchBoundAckMatrix(t *testing.T) {
 				if err != nil || !delivered {
 					t.Fatalf("expected success, delivered=%v err=%v", delivered, err)
 				}
-				if q.Len() != 0 || len(q.deleted) != 1 {
-					t.Fatalf("expected deletion, len=%d deleted=%v", q.Len(), q.deleted)
+				if q.Len() != 0 || len(q.committed) != 1 {
+					t.Fatalf("expected commit, len=%d committed=%v", q.Len(), q.committed)
 				}
 				return
 			}
 			if err == nil || delivered {
 				t.Fatalf("expected rejection, delivered=%v err=%v", delivered, err)
 			}
-			if q.Len() != len(tc.records) || len(q.deleted) != 0 {
-				t.Fatalf("must not delete: len=%d deleted=%v", q.Len(), q.deleted)
+			if q.Len() != len(tc.records) || len(q.committed) != 0 {
+				t.Fatalf("must not commit: len=%d committed=%v", q.Len(), q.committed)
 			}
 		})
 	}
@@ -354,8 +364,8 @@ func TestDeliveryWorkerCaseOnlyAckAgentIDMismatchRetainsRecords(t *testing.T) {
 	if q.Len() != len(records) {
 		t.Fatalf("queue records must remain, len=%d", q.Len())
 	}
-	if len(q.deleted) != 0 {
-		t.Fatalf("DeleteThrough must not be called, deleted=%v", q.deleted)
+	if len(q.committed) != 0 {
+		t.Fatalf("CommitAccepted must not be called, committed=%v", q.committed)
 	}
 }
 
@@ -383,8 +393,8 @@ type failingDeleteQueue struct {
 	mockQueue
 }
 
-func (f *failingDeleteQueue) DeleteThrough(seq uint64) error {
-	return errors.New("QUEUE_DELETE_FAILED: injected")
+func (f *failingDeleteQueue) CommitAccepted(records []queue.Record, acceptedThrough uint64) error {
+	return errors.New("QUEUE_COMMIT_DELETE_FAILED: injected")
 }
 
 func TestDeliveryWorkerDeleteFailureNotSuccess(t *testing.T) {
@@ -401,6 +411,9 @@ func TestDeliveryWorkerDeleteFailureNotSuccess(t *testing.T) {
 	}
 	if w.Stats().Successes != 0 {
 		t.Fatal("delete failure must not count as success")
+	}
+	if !w.Stats().ReceiverAvailable {
+		t.Fatal("valid ACK followed by local queue commit failure must not set ReceiverAvailable=false")
 	}
 }
 
@@ -542,8 +555,8 @@ func TestDeliveryWorkerPermanentAndAuthStillRetainWithoutSkip(t *testing.T) {
 		if _, err := w.DeliverOnce(context.Background()); err == nil {
 			t.Fatalf("%v: expected delivery error", derr)
 		}
-		if q.Len() != 2 || len(q.deleted) != 0 {
-			t.Fatalf("%v: must retain all records without skip, len=%d deleted=%v", derr, q.Len(), q.deleted)
+		if q.Len() != 2 || len(q.committed) != 0 {
+			t.Fatalf("%v: must retain all records without skip, len=%d committed=%v", derr, q.Len(), q.committed)
 		}
 	}
 }
