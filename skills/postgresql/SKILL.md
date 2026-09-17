@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/postgresql/SKILL.md sha256:997b1b9e2041c785a328e86437408c3f86f77bd4a436e3a42ecb599391035c3f -->
-
 ---
 name: postgresql
 description: PostgreSQL control-state schema, transactions, tenant isolation and backup/restore of authoritative data.
 ---
+
+<!-- generated from project_agents/skills/postgresql/SKILL.md sha256:997b1b9e2041c785a328e86437408c3f86f77bd4a436e3a42ecb599391035c3f -->
 
 # postgresql
 

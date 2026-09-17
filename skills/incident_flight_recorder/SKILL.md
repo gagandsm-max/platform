@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/incident_flight_recorder/SKILL.md sha256:681ebafdb26b1008ba459ee061af9b26b19498d9fbdb00804755c3012cd52b02 -->
-
 ---
 name: incident_flight_recorder
 description: Incident Flight Recorder and Similar Incident Memory: bounded, tenant-scoped, advisory historical evidence.
 ---
+
+<!-- generated from project_agents/skills/incident_flight_recorder/SKILL.md sha256:681ebafdb26b1008ba459ee061af9b26b19498d9fbdb00804755c3012cd52b02 -->
 
 # incident_flight_recorder
 

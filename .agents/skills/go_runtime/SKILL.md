@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/go_runtime/SKILL.md sha256:13791a924ff0434503598b69a1d570109369663c8b689816249dc95f7115e402 -->
-
 ---
 name: go_runtime
 description: Go Sensor/Agent implementation: context/cancellation, bounded concurrency, durable files, and fail-closed ack/offset behavior.
 ---
+
+<!-- generated from project_agents/skills/go_runtime/SKILL.md sha256:13791a924ff0434503598b69a1d570109369663c8b689816249dc95f7115e402 -->
 
 # go_runtime
 

@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/temporal_operational_graph/SKILL.md sha256:f4584cd4941f188d4e156e9abb25880cf2f519149da976549f6f5df23f502770 -->
-
 ---
 name: temporal_operational_graph
 description: Temporal operational graph, topology provenance/confidence and relationship history.
 ---
+
+<!-- generated from project_agents/skills/temporal_operational_graph/SKILL.md sha256:f4584cd4941f188d4e156e9abb25880cf2f519149da976549f6f5df23f502770 -->
 
 # temporal_operational_graph
 

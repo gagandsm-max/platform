@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/capacity_performance/SKILL.md sha256:ede1584fda29862715edf198446c1e9d1616a0c39e81cdae68b05c26f770de03 -->
-
 ---
 name: capacity_performance
 description: Hot-path capacity, latency, lag, cardinality and resource-budget evidence for Core, Sensor, UI and storage protection.
 ---
+
+<!-- generated from project_agents/skills/capacity_performance/SKILL.md sha256:ede1584fda29862715edf198446c1e9d1616a0c39e81cdae68b05c26f770de03 -->
 
 # capacity_performance
 

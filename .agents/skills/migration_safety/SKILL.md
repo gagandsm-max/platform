@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/migration_safety/SKILL.md sha256:1ab7b6b49731c5cb6451deadef957e2bfd371f820617a17b09a62964dd786633 -->
-
 ---
 name: migration_safety
 description: Protect schema/data migrations with compatibility, rollback, idempotency, tenant isolation and failure-path evidence.
 ---
+
+<!-- generated from project_agents/skills/migration_safety/SKILL.md sha256:1ab7b6b49731c5cb6451deadef957e2bfd371f820617a17b09a62964dd786633 -->
 
 # migration_safety
 

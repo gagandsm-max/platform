@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/tenant_isolation/SKILL.md sha256:abd3e839c945ba20042fe9513949d8de06bc36d9e3738dfb27c882a763f56e7e -->
-
 ---
 name: tenant_isolation
 description: Server-side tenant isolation, RBAC/resource scope and cross-tenant negative cases.
 ---
+
+<!-- generated from project_agents/skills/tenant_isolation/SKILL.md sha256:abd3e839c945ba20042fe9513949d8de06bc36d9e3738dfb27c882a763f56e7e -->
 
 # tenant_isolation
 

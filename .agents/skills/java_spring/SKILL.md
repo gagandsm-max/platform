@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/java_spring/SKILL.md sha256:879063e25ab9aeb8e3ae2aa42ebf999a0a7ff2e2f54055fb647cf92e8947adfc -->
-
 ---
 name: java_spring
 description: Java 21 / Spring Core implementation: transactions, validation, actuator boundaries, and fail-closed consumers.
 ---
+
+<!-- generated from project_agents/skills/java_spring/SKILL.md sha256:879063e25ab9aeb8e3ae2aa42ebf999a0a7ff2e2f54055fb647cf92e8947adfc -->
 
 # java_spring
 

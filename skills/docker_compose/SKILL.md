@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/docker_compose/SKILL.md sha256:6aa1d6ca409a826d8e7925ac8e41e479af892c31d13d1d3b042b64a903cf5b98 -->
-
 ---
 name: docker_compose
 description: Docker Compose development/test hygiene: named volumes, healthchecks, no destructive prune, reboot-safe local stack.
 ---
+
+<!-- generated from project_agents/skills/docker_compose/SKILL.md sha256:6aa1d6ca409a826d8e7925ac8e41e479af892c31d13d1d3b042b64a903cf5b98 -->
 
 # docker_compose
 

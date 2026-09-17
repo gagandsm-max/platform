@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/sbom_provenance/SKILL.md sha256:9e54cc95006eca3ce40759aff1493cc5f09034a9bd063643223fea0a3c13c5e7 -->
-
 ---
 name: sbom_provenance
 description: SBOM, provenance, CVE/licence review and supply-chain evidence before new OSS.
 ---
+
+<!-- generated from project_agents/skills/sbom_provenance/SKILL.md sha256:9e54cc95006eca3ce40759aff1493cc5f09034a9bd063643223fea0a3c13c5e7 -->
 
 # sbom_provenance
 

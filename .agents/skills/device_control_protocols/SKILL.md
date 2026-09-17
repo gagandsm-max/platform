@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/device_control_protocols/SKILL.md sha256:d3e91ace11989303e4d1b22665ebda377164961e7f8da7f8cfb7b79da595ae03 -->
-
 ---
 name: device_control_protocols
 description: SSH/CLI, NETCONF/YANG and gNMI/gRPC device control/telemetry with credential, timeout and blast-radius constraints.
 ---
+
+<!-- generated from project_agents/skills/device_control_protocols/SKILL.md sha256:d3e91ace11989303e4d1b22665ebda377164961e7f8da7f8cfb7b79da595ae03 -->
 
 # device_control_protocols
 

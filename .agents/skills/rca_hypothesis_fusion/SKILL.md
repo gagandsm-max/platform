@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/rca_hypothesis_fusion/SKILL.md sha256:f816b8768681c9f9d13776c7ab4066211c068aaae22706c94166ed10b3f6633e -->
-
 ---
 name: rca_hypothesis_fusion
 description: RCA hypothesis fusion: observed facts, likely cause, confidence, contradictions, missing evidence and INCONCLUSIVE.
 ---
+
+<!-- generated from project_agents/skills/rca_hypothesis_fusion/SKILL.md sha256:f816b8768681c9f9d13776c7ab4066211c068aaae22706c94166ed10b3f6633e -->
 
 # rca_hypothesis_fusion
 

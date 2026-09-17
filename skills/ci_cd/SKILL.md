@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/ci_cd/SKILL.md sha256:297e93916ad4d60b693170657ede95eaae98ed13116a2e4ee6e06639f026398a -->
-
 ---
 name: ci_cd
 description: GitHub Actions/CI wiring, exact-head evidence, and no test weakening to obtain green.
 ---
+
+<!-- generated from project_agents/skills/ci_cd/SKILL.md sha256:297e93916ad4d60b693170657ede95eaae98ed13116a2e4ee6e06639f026398a -->
 
 # ci_cd
 

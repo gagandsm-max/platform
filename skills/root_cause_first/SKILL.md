@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/root_cause_first/SKILL.md sha256:e384bbd07444b5572d24511220b818c4517d417136206c84949204182cffcee2 -->
-
 ---
 name: root_cause_first
 description: Establish the evidenced failure mechanism before implementation; reject symptom-only patches and unsupported assumptions.
 ---
+
+<!-- generated from project_agents/skills/root_cause_first/SKILL.md sha256:e384bbd07444b5572d24511220b818c4517d417136206c84949204182cffcee2 -->
 
 # root_cause_first
 
