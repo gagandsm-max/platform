@@ -7,9 +7,13 @@ import (
 
 const (
 	CurrentSchemaVersion  = 1
-	DefaultMaxBodyBytes   = 2 * 1024 * 1024 // 2 MB
+	// DefaultMaxBodyBytes matches Core AgentIngestionValidator.MAX_RECORD_BYTES.
+	// One Agent envelope is persisted as one Sensor Agent-spool record and drained
+	// as one Core agent-ingress record. Accepting a larger body would ACK data
+	// Core rejects with ERR_RECORD_TOO_LARGE (HTTP 413).
+	DefaultMaxBodyBytes   = 512 * 1024
 	DefaultMaxRecords     = 100
-	DefaultMaxRecordBytes = 1024 * 1024 // 1 MB
+	DefaultMaxRecordBytes = 512 * 1024
 )
 
 // Standard stable error codes for agent receiver

@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/linux_systems/SKILL.md sha256:add2d9121a9473b5d90b8b123a21f4d5ebebd712230db29ecbd72fd4ffb70e8e -->
-
 ---
 name: linux_systems
 description: Linux OS, systemd, process, disk, and host-path semantics for Core/Sensor/Agent packaging and monitoring targets.
 ---
+
+<!-- generated from project_agents/skills/linux_systems/SKILL.md sha256:add2d9121a9473b5d90b8b123a21f4d5ebebd712230db29ecbd72fd4ffb70e8e -->
 
 # linux_systems
 

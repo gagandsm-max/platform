@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/web_interface_quality/SKILL.md sha256:118ed47aebb55e2cf11725f7cb89fa605127ae4cfc8d2a55ca470d7c07531a0f -->
-
 ---
 name: web_interface_quality
 description: Platform web implementation quality: existing design-system use, component consistency, responsive behaviour, state completeness, runtime/visual validation and frontend performance.
 ---
+
+<!-- generated from project_agents/skills/web_interface_quality/SKILL.md sha256:118ed47aebb55e2cf11725f7cb89fa605127ae4cfc8d2a55ca470d7c07531a0f -->
 
 # web_interface_quality
 

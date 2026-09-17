@@ -76,7 +76,7 @@ func NewWorker(
 		maxBatchRecords = 100
 	}
 	if maxBatchBytes <= 0 {
-		maxBatchBytes = 1024 * 1024
+		maxBatchBytes = 384 * 1024
 	}
 	if retryBase <= 0 {
 		retryBase = time.Second
@@ -129,6 +129,20 @@ func (w *Worker) runLoop(ctx context.Context) {
 
 		delivered, err := w.DeliverOnce(ctx)
 		if err != nil {
+			failClass := client.Classify(err)
+			if failClass == client.FailureOversized {
+				w.logger.Error("oversized Agent batch is not retryable without configuration change; queue retained",
+					"code", w.Stats().LastErrorCode,
+					"error", err,
+				)
+				select {
+				case <-w.stopCh:
+					return
+				case <-ctx.Done():
+					return
+				}
+			}
+
 			w.mu.Lock()
 			attempt := w.stats.RetryAttempt
 			w.mu.Unlock()
@@ -297,7 +311,9 @@ func (w *Worker) recordFailure(class client.FailureClass, code string) {
 	}
 	w.stats.LastFailureClass = class
 	w.stats.LastErrorCode = code
-	w.stats.ReceiverAvailable = w.transport.Available()
+	// Last delivery failed: do not report the Sensor receiver as available
+	// merely because the HTTPS client was constructed.
+	w.stats.ReceiverAvailable = false
 }
 
 func randomJitter() float64 {

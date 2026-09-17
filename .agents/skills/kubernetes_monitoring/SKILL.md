@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/kubernetes_monitoring/SKILL.md sha256:9b47ebe62d00afc6a322f64d180581379c212da9eb469bb7a7c8187e2529cbf7 -->
-
 ---
 name: kubernetes_monitoring
 description: Kubernetes/container target monitoring, workload identity and collector-health separation.
 ---
+
+<!-- generated from project_agents/skills/kubernetes_monitoring/SKILL.md sha256:9b47ebe62d00afc6a322f64d180581379c212da9eb469bb7a7c8187e2529cbf7 -->
 
 # kubernetes_monitoring
 

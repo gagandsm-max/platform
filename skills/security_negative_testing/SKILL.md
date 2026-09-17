@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/security_negative_testing/SKILL.md sha256:2689755d091b38d5cfba567595c92d53503de76506c8571d0206fb9c647989bc -->
-
 ---
 name: security_negative_testing
 description: Prove security boundaries with adversarial and negative cases rather than success-path evidence alone.
 ---
+
+<!-- generated from project_agents/skills/security_negative_testing/SKILL.md sha256:2689755d091b38d5cfba567595c92d53503de76506c8571d0206fb9c647989bc -->
 
 # security_negative_testing
 

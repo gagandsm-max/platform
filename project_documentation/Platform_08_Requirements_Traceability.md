@@ -1,9 +1,10 @@
 
 # Platform — Requirements Traceability & Completeness Matrix
 
-**Document ID:** PLATFORM-RTM-001  
-**Version:** 3.2.1  
+**Document ID:** PLATFORM-RTM-001
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Completeness Control**
+**Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master RTM supplements including `Platform_23`
 
 ## 1. Purpose
 
@@ -304,6 +305,18 @@ A release/major architecture change cannot be declared fully documented until:
 7. capacity/storage/HA/DR impact is evaluated;
 8. UI/admin surface is defined for customer-configurable behavior.
 
+Documentation mapping is not implementation evidence. Implementation is not validation. Validation is not certification. Certification is not deployment.
+
+v3.2.2 specialized-master RTM supplements live in their owning masters and are not copied into this base catalogue:
+
+- OIV: `PRD-OIV-*` / `REQ-OIV-*` in `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`
+- ONB: `PRD-ONB-*` / `REQ-ONB-*` in `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
+- EGC: `PRD-EGC-*` / `REQ-EGC-*` in `Platform_21_Enterprise_Gap_Closure_Master.md`
+- MIA: `PRD-MIA-*` / `REQ-MIA-*` in `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`
+- EMC: `PRD-EMC-001` through `PRD-EMC-018` and `REQ-EMC-001` through `REQ-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
+
+Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack completeness control and are supplemented, not replaced, by Capability Pack certification requirements in `Platform_23`.
+
 
 ## 4. Supporting master coverage
 
@@ -312,6 +325,17 @@ A release/major architecture change cannot be declared fully documented until:
 - Sizing/MWU/Sensor count/storage lifecycle contract: `Platform_11_Sizing_Capacity_Storage_Master.md`.
 - Decision provenance/no-assumption control: `Platform_12_Decision_Source_Register.md`.
 - Full OSS license/use/restriction catalogue: `Platform_07_OSS_Catalog.md`.
+- Engineering/development/Docker standards: `Platform_13_Engineering_Development_and_Docker_Standards.md`.
+- Test/performance/release-quality contract: `Platform_14_Test_Performance_and_Release_Quality.md`.
+- CI/CD/packaging/distribution contract: `Platform_15_CI_CD_Packaging_and_Distribution.md`.
+- Installation/upgrade/rollback/operations contract: `Platform_16_Installation_Upgrade_Rollback_and_Operations.md`.
+- API/event/data-model contract: `Platform_17_API_Event_and_Data_Model_Contracts.md`.
+- Security threat model: `Platform_18_Security_Threat_Model.md`.
+- OIV specialized-master RTM supplement: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`.
+- Discovery/onboarding/identity/notification specialized-master RTM supplement: `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`.
+- Enterprise gap-closure specialized-master RTM supplement: `Platform_21_Enterprise_Gap_Closure_Master.md`.
+- Monitoring-intelligence/alert-quality/AI-assurance specialized-master RTM supplement: `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`.
+- Enterprise monitoring coverage / Capability Pack certification specialized-master RTM supplement: `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`.
 
 ### Development, packaging, service supervision and diagnostics — v3.1
 

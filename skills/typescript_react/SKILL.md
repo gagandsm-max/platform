@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/typescript_react/SKILL.md sha256:cb47dae018b8d627cc210d7d417397cb38c34852062f1bb28fc15cbad23a99a5 -->
-
 ---
 name: typescript_react
 description: TypeScript/React UI: role-aware operational screens, server-driven state, accessibility and no generic dashboard filler.
 ---
+
+<!-- generated from project_agents/skills/typescript_react/SKILL.md sha256:cb47dae018b8d627cc210d7d417397cb38c34852062f1bb28fc15cbad23a99a5 -->
 
 # typescript_react
 

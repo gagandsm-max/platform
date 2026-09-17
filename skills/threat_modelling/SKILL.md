@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/threat_modelling/SKILL.md sha256:9d44ffeb4203b20d194c76dc7408cc55b38f5a79a146d148071f14736de47cd8 -->
-
 ---
 name: threat_modelling
 description: Threat-model trust boundaries, privileged actions, Device Packs, AI tools and update channels before implementation.
 ---
+
+<!-- generated from project_agents/skills/threat_modelling/SKILL.md sha256:9d44ffeb4203b20d194c76dc7408cc55b38f5a79a146d148071f14736de47cd8 -->
 
 # threat_modelling
 

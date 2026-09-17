@@ -1,0 +1,124 @@
+# Test-only overlay for Issue #46 / PR #47.
+# Enables Sensor Agent Receiver on sensor-infra without changing compose.yaml defaults.
+#
+# This Compose version resolves relative bind/build paths from the project directory
+# (the first compose file: repository root), not from this overlay file.
+#
+# Usage:
+#   docker compose -f compose.yaml -f tests/agent-runtime-e2e/compose.override.yaml up -d
+
+name: platform
+
+volumes:
+  platform_sensor_infra_agent_spool:
+    name: ${PLATFORM_SENSOR_INFRA_AGENT_SPOOL_VOLUME:-platform_sensor_infra_agent_spool}
+  platform_agent_e2e_state:
+    name: ${PLATFORM_AGENT_E2E_STATE_VOLUME:-platform_agent_e2e_state}
+
+services:
+  sensor-agent-spool-init:
+    image: alpine:3.24
+    container_name: platform-sensor-agent-spool-init
+    user: "0:0"
+    volumes:
+      - platform_sensor_infra_agent_spool:/var/lib/platform/sensor/agent-spool
+    command:
+      - sh
+      - -c
+      - |
+        install -d -m 0700 -o 100 -g 101 /var/lib/platform/sensor/agent-spool
+        chown -R 100:101 /var/lib/platform/sensor/agent-spool
+        chmod 0700 /var/lib/platform/sensor/agent-spool
+    networks:
+      - platform_net
+    restart: "no"
+
+  sensor-infra:
+    depends_on:
+      sensor-agent-spool-init:
+        condition: service_completed_successfully
+    environment:
+      SENSOR_AGENT_RECEIVER_ENABLED: "true"
+      SENSOR_AGENT_RECEIVER_LISTEN_ADDR: ":8444"
+      SENSOR_AGENT_SERVER_CERT_FILE: /certs/sensor-infra-agent-server.crt
+      SENSOR_AGENT_SERVER_KEY_FILE: /certs/sensor-infra-agent-server.key
+      SENSOR_AGENT_CLIENT_CA_FILE: /certs/ca.crt
+      SENSOR_AGENT_SPOOL_DIR: /var/lib/platform/sensor/agent-spool
+      SENSOR_AGENT_DRAIN_IDLE_INTERVAL_SECONDS: "1"
+      SENSOR_AGENT_DRAIN_INITIAL_BACKOFF_SECONDS: "1"
+      SENSOR_AGENT_DRAIN_MAX_BACKOFF_SECONDS: "8"
+    ports:
+      - "127.0.0.1:${PLATFORM_SENSOR_AGENT_RECEIVER_HOST_PORT:-28444}:8444"
+    volumes:
+      - platform_sensor_infra_agent_spool:/var/lib/platform/sensor/agent-spool
+      - ./tests/agent-runtime-e2e/certs/sensor-infra-agent-server.crt:/certs/sensor-infra-agent-server.crt:ro
+      - ./tests/agent-runtime-e2e/certs/sensor-infra-agent-server.key:/certs/sensor-infra-agent-server.key:ro
+
+  agent-runtime-init:
+    image: alpine:3.24
+    container_name: platform-agent-e2e-init
+    user: "0:0"
+    volumes:
+      - platform_agent_e2e_state:/var/lib/platform/agent
+      - ./tests/agent-runtime-e2e/identity.json:/seed/identity.json:ro
+      - ./deploy/docker/certs/ca.crt:/seed/ca.crt:ro
+      - ./tests/agent-runtime-e2e/certs/agent-e2e.crt:/seed/agent-e2e.crt:ro
+      - ./tests/agent-runtime-e2e/certs/agent-e2e.key:/seed/agent-e2e.key:ro
+    command:
+      - sh
+      - -c
+      - |
+        install -d -m 0700 -o 100 -g 100 /var/lib/platform/agent /var/lib/platform/agent/queue /var/lib/platform/agent/tls
+        cp /seed/identity.json /var/lib/platform/agent/identity.json
+        cp /seed/ca.crt /var/lib/platform/agent/tls/ca.crt
+        cp /seed/agent-e2e.crt /var/lib/platform/agent/tls/agent-e2e.crt
+        cp /seed/agent-e2e.key /var/lib/platform/agent/tls/agent-e2e.key
+        chown -R 100:100 /var/lib/platform/agent
+        chmod 0700 /var/lib/platform/agent /var/lib/platform/agent/queue /var/lib/platform/agent/tls
+        chmod 0600 /var/lib/platform/agent/identity.json /var/lib/platform/agent/tls/agent-e2e.key
+        chmod 0644 /var/lib/platform/agent/tls/ca.crt /var/lib/platform/agent/tls/agent-e2e.crt
+    networks:
+      - platform_net
+    restart: "no"
+
+  agent-runtime:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    image: platform-agent:e2e
+    container_name: platform-agent-e2e
+    restart: "no"
+    depends_on:
+      agent-runtime-init:
+        condition: service_completed_successfully
+      sensor-infra:
+        condition: service_healthy
+    environment:
+      PLATFORM_AGENT_TENANT_ID: "018f0e0a-0000-7000-8000-000000000001"
+      PLATFORM_AGENT_ID: agent-e2e-01
+      PLATFORM_AGENT_SENSOR_URL: https://sensor-infra:8444
+      PLATFORM_AGENT_CA_FILE: /var/lib/platform/agent/tls/ca.crt
+      PLATFORM_AGENT_CERT_FILE: /var/lib/platform/agent/tls/agent-e2e.crt
+      PLATFORM_AGENT_KEY_FILE: /var/lib/platform/agent/tls/agent-e2e.key
+      PLATFORM_AGENT_STATE_DIR: /var/lib/platform/agent
+      PLATFORM_AGENT_HEALTH_ADDRESS: 127.0.0.1:8089
+      PLATFORM_AGENT_COLLECTION_INTERVAL: 15s
+      PLATFORM_AGENT_COLLECTION_TIMEOUT: 2s
+      PLATFORM_AGENT_RETRY_BASE: 200ms
+      PLATFORM_AGENT_RETRY_MAX: 4s
+      PLATFORM_AGENT_MAX_BATCH_RECORDS: "8"
+      PLATFORM_AGENT_MAX_FILESYSTEMS: "4"
+      # Keep one Agent envelope under Core AgentIngestionValidator.MAX_RECORD_BYTES (512KiB).
+      PLATFORM_AGENT_MAX_BATCH_BYTES: "393216"
+      PLATFORM_LOG_LEVEL: INFO
+    volumes:
+      - platform_agent_e2e_state:/var/lib/platform/agent
+    networks:
+      - platform_net
+    cpus: 0.5
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

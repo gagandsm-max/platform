@@ -14,7 +14,7 @@ This avoids requirement drift caused by repeating the same normative text across
 
 ## 2. Mother-reference control updates completed
 
-- `Platform_00_Document_Index.md` advances the set to v3.2.2 / 21 files and defines OIV precedence and completeness treatment.
+- `Platform_00_Document_Index.md` records OIV precedence and completeness treatment. The authoritative current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; this checklist must not maintain a duplicated hard-coded file count.
 - `Platform_12_Decision_Source_Register.md` records approved OIV scope as `USER-FIXED` and packaging/implementation choices as `ARCH-DELEGATED`.
 - `AGENTS.md` requires `Platform_19` preflight for OIV implementation and enforces packet/remediation/value safeguards.
 - `Platform_19` names the base mother files it supplements and contains the full logical-layer contract.

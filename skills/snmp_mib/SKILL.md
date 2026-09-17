@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/snmp_mib/SKILL.md sha256:c09055536d04ef62bd1e90f82d0697c09d749a5a96d59647f2f1b02cbce18d54 -->
-
 ---
 name: snmp_mib
 description: SNMP/MIB collection, SNMPv3 security, counter semantics and Device Pack mapping without declaring device-down from SNMP alone.
 ---
+
+<!-- generated from project_agents/skills/snmp_mib/SKILL.md sha256:c09055536d04ef62bd1e90f82d0697c09d749a5a96d59647f2f1b02cbce18d54 -->
 
 # snmp_mib
 

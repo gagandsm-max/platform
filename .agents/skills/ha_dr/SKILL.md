@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/ha_dr/SKILL.md sha256:cd54c12a8b6cd1191d8be512b66f5e70cf7f684fb6738f21895afd68bd5120d4 -->
-
 ---
 name: ha_dr
 description: Exactly-two-Core Active/Standby HA/DR operability, failover evidence and Sensor continue-to-collect behavior without inventing unresolved replication designs.
 ---
+
+<!-- generated from project_agents/skills/ha_dr/SKILL.md sha256:cd54c12a8b6cd1191d8be512b66f5e70cf7f684fb6738f21895afd68bd5120d4 -->
 
 # ha_dr
 

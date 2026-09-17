@@ -1,0 +1,33 @@
+[Unit]
+Description=Platform Linux Agent
+Documentation=file:///usr/share/doc/platform-agent/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# platform-agent user/group are created by the Linux package, not by this unit.
+User=platform-agent
+Group=platform-agent
+# Missing env file fails the unit (fail-closed). Do not restore the '-' prefix.
+EnvironmentFile=/etc/platform/agent.env
+ExecStart=/usr/local/bin/platform-agent-linux
+WorkingDirectory=/var/lib/platform/agent
+StateDirectory=platform/agent
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=20
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/platform/agent
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=platform-agent
+KillSignal=SIGTERM
+SendSIGKILL=yes
+
+[Install]
+WantedBy=multi-user.target

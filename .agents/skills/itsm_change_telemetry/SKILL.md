@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/itsm_change_telemetry/SKILL.md sha256:e48c40bb990fb05e358d76d2e0772cec18d220cf12f7843dea859713094ecc36 -->
-
 ---
 name: itsm_change_telemetry
 description: ITSM/notification/change-telemetry connectors as supporting evidence, not causal proof.
 ---
+
+<!-- generated from project_agents/skills/itsm_change_telemetry/SKILL.md sha256:e48c40bb990fb05e358d76d2e0772cec18d220cf12f7843dea859713094ecc36 -->
 
 # itsm_change_telemetry
 

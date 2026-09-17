@@ -225,6 +225,17 @@ func (s *DiskSpool) Stats() (Stats, error) {
 	return out, nil
 }
 
+// AckedThrough returns the durable acknowledged spool watermark. Sequences at
+// or below this value have been removed from the pending set.
+func (s *DiskSpool) AckedThrough() (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return 0, newError(CodeClosed, "spool is closed", nil)
+	}
+	return s.state.AckedThrough, nil
+}
+
 func (s *DiskSpool) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

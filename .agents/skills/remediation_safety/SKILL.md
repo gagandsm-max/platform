@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/remediation_safety/SKILL.md sha256:c22487a7956626b943a21ad9aa585fd3a54862464d24803a99a6aafa40196a4f -->
-
 ---
 name: remediation_safety
 description: Controlled remediation: deterministic actions, maker-checker, blast-radius, rollback and no LLM privileged execution.
 ---
+
+<!-- generated from project_agents/skills/remediation_safety/SKILL.md sha256:c22487a7956626b943a21ad9aa585fd3a54862464d24803a99a6aafa40196a4f -->
 
 # remediation_safety
 

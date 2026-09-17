@@ -3,7 +3,7 @@ name: platform-integration-connector-engineer
 description: Connector framework and SaaS/ITSM/webhooks/carrier/change telemetry including auth, rate limiting, retry, idempotency, outbound durability and certification.
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-integration-connector-engineer.md sha256:100b0a2e567889a6613e8acc7f3f8db7aef9e68e097199ba1bbebbcf77a2fe21 -->
+<!-- generated from project_agents/canonical/p1/platform-integration-connector-engineer.md sha256:3157decb9af407bb10deb5c0d7350d41e7728acbbbe15dcab529e9a59cf547b0 -->
 
 # Platform Integration Connector Engineer
 
@@ -64,6 +64,7 @@ Own connector framework and SaaS/ITSM/webhooks/carrier/change telemetry includin
 - `project_documentation/Platform_21_Enterprise_Gap_Closure_Master.md`
 - `project_documentation/Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`
 - `project_documentation/Platform_10_Protocol_Security_Connector_Master.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Responsibilities
 1. Normalize vendor payloads into Platform-owned contracts.

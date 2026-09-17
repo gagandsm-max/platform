@@ -21,6 +21,16 @@ import (
 	"platform/agent/common/queue"
 )
 
+const (
+	// SensorReceiverMaxBodyBytes matches sensor agentreceiver.DefaultMaxBodyBytes.
+	SensorReceiverMaxBodyBytes  = 512 * 1024
+	errCodeRequestTooLarge      = "ERR_REQUEST_TOO_LARGE"
+	errCodeRecordTooLarge       = "ERR_RECORD_TOO_LARGE"
+	errCodeBatchTooLarge        = "ERR_BATCH_TOO_LARGE"
+	errDeliveryEnvelopeTooLarge = "DELIVERY_ENVELOPE_TOO_LARGE"
+	errDeliveryRequestTooLarge  = "DELIVERY_REQUEST_TOO_LARGE"
+)
+
 // Wire models matching the authoritative Sensor Agent receiver contract
 type DeliveryRecord struct {
 	Sequence  uint64          `json:"sequence"`
@@ -176,6 +186,7 @@ func newHTTPSTransport(cfg HTTPSConfig, tlsConfig *tls.Config) (*HTTPSTransport,
 	}
 
 	transport := &http.Transport{
+		Proxy:                 noProxy,
 		TLSClientConfig:       tlsConfig,
 		ResponseHeaderTimeout: cfg.Timeout,
 		IdleConnTimeout:       90 * time.Second,
@@ -184,8 +195,9 @@ func newHTTPSTransport(cfg HTTPSConfig, tlsConfig *tls.Config) (*HTTPSTransport,
 	}
 
 	httpClient := &http.Client{
-		Transport: transport,
-		Timeout:   cfg.Timeout + (2 * time.Second),
+		Transport:     transport,
+		Timeout:       cfg.Timeout + (2 * time.Second),
+		CheckRedirect: denyHTTPRedirect,
 	}
 
 	endpoint := strings.TrimRight(cfg.SensorURL, "/") + "/api/v1/agent/telemetry"
@@ -196,6 +208,16 @@ func newHTTPSTransport(cfg HTTPSConfig, tlsConfig *tls.Config) (*HTTPSTransport,
 		endpoint:   endpoint,
 		logger:     cfg.Logger.With("component", "agent-https-transport", "sensor_url", cfg.SensorURL),
 	}, nil
+}
+
+var errRedirectForbidden = errors.New("DELIVERY_REDIRECT_FORBIDDEN: agent telemetry POST must not follow HTTP redirects")
+
+func noProxy(*http.Request) (*url.URL, error) {
+	return nil, nil
+}
+
+func denyHTTPRedirect(*http.Request, []*http.Request) error {
+	return errRedirectForbidden
 }
 
 // enforceTLSConstraints clones cfg and rejects insecure or incomplete TLS material.
@@ -315,6 +337,13 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 	if err != nil {
 		return Ack{}, &DeliveryError{Code: "DELIVERY_SERIALIZE_FAILED", Class: FailurePermanent, Err: err}
 	}
+	if int64(len(bodyBytes)) > SensorReceiverMaxBodyBytes {
+		return Ack{}, &DeliveryError{
+			Code:  errDeliveryEnvelopeTooLarge,
+			Class: FailureOversized,
+			Err:   fmt.Errorf("serialized Agent envelope is %d bytes; Sensor receiver maximum is %d", len(bodyBytes), SensorReceiverMaxBodyBytes),
+		}
+	}
 
 	// 2. Formulate HTTP POST Request
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.endpoint, bytes.NewReader(bodyBytes))
@@ -330,6 +359,9 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 		// Classify context cancellation / deadline vs network error
 		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return Ack{}, &DeliveryError{Code: "DELIVERY_CONTEXT_ABORTED", Class: FailureTemporary, Err: ctx.Err()}
+		}
+		if errors.Is(err, errRedirectForbidden) {
+			return Ack{}, &DeliveryError{Code: "DELIVERY_REDIRECT_FORBIDDEN", Class: FailurePermanent, Err: err}
 		}
 		return Ack{}, &DeliveryError{Code: "DELIVERY_NETWORK_ERROR", Class: FailureTemporary, Err: err}
 	}
@@ -436,6 +468,24 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 			Code:  code,
 			Class: FailurePermanent,
 			Err:   fmt.Errorf("sensor rejected delivery as invalid (HTTP %d): %s", resp.StatusCode, errResp.Message),
+		}
+
+	case resp.StatusCode == http.StatusRequestEntityTooLarge:
+		var errResp ErrorResponse
+		_ = json.Unmarshal(respBytes, &errResp)
+		code := errDeliveryRequestTooLarge
+		if errResp.Code != "" {
+			code = errResp.Code
+		}
+		class := FailureOversized
+		switch code {
+		case errCodeRequestTooLarge, errCodeRecordTooLarge, errCodeBatchTooLarge, errDeliveryRequestTooLarge:
+			class = FailureOversized
+		}
+		return Ack{}, &DeliveryError{
+			Code:  code,
+			Class: class,
+			Err:   fmt.Errorf("sensor rejected oversized delivery (HTTP 413): %s", errResp.Message),
 		}
 
 	case resp.StatusCode >= 500:

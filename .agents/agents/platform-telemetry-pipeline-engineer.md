@@ -12,7 +12,7 @@ model: inherit
 commandExecutionPolicy: sandbox
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-telemetry-pipeline-engineer.md sha256:53917e8cd901f1c0c5efad7e5e9b0ca28c50aee999543e166a0154a52417964d -->
+<!-- generated from project_agents/canonical/p1/platform-telemetry-pipeline-engineer.md sha256:e53e1ba3b45a16d85c88f6346f10714dda4ca3073f14808839a8aa2b9e114fad -->
 
 # Platform Telemetry Pipeline Engineer
 
@@ -73,6 +73,7 @@ Own end-to-end streaming semantics after acceptance: normalization, Kafka intera
 - `project_documentation/Platform_06_Dataflow.md`
 - `project_documentation/Platform_17_API_Event_and_Data_Model_Contracts.md`
 - `project_documentation/Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Responsibilities
 1. Keep Kafka internal; fail-closed ACK/offset and poison parking.
