@@ -183,6 +183,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		status = "DEGRADED"
 		reasons = append(reasons, "QUEUE_QUARANTINE_UNCERTAIN")
 	}
+	if qStats.MetaUncertain {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_META_UNCERTAIN")
+	}
 	if qStats.QuarantineAtCapacity {
 		status = "DEGRADED"
 		reasons = append(reasons, "QUEUE_QUARANTINE_FULL")
@@ -214,6 +218,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"delivery_blocked":       qStats.DeliveryBlocked,
 			"unknown_sequence_block": qStats.UnknownSequenceBlock,
 			"location_uncertain":     qStats.LocationUncertain,
+			"meta_uncertain":         qStats.MetaUncertain,
 		},
 		"delivery": map[string]any{
 			"attempts":           dStats.Attempts,

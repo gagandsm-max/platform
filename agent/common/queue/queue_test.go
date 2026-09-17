@@ -2459,3 +2459,390 @@ func TestDurableQueueLegacyMetaLoadsWithoutAcceptedBoundary(t *testing.T) {
 		t.Fatalf("legacy meta load failed: %+v", q.Stats())
 	}
 }
+
+func readSequenceMetaFile(t *testing.T, root string) sequenceMeta {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, sequenceMetaFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta sequenceMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatal(err)
+	}
+	return meta
+}
+
+// A: after ACK meta durable + delete fail, same-seq replacement must not be deleted on restart.
+func TestDurableQueueRestartSameSeqReplacementFailsClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := q.Enqueue([]byte("original-A"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("keep-later")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) < 1 {
+		t.Fatalf("expected batch, got %+v err=%v", batch, err)
+	}
+	q.removeHook = func(path string) error {
+		if strings.Contains(path, string(filepath.Separator)+"active"+string(filepath.Separator)) && strings.HasSuffix(path, ".json") {
+			return errors.New("injected active delete fail")
+		}
+		return nil
+	}
+	if err := q.CommitAccepted(batch[:1], rec.Sequence); err == nil {
+		t.Fatal("expected post-meta delete failure")
+	}
+	if q.Stats().AcceptedThrough != rec.Sequence {
+		t.Fatalf("acceptedThrough must be durable, got %d", q.Stats().AcceptedThrough)
+	}
+	originalPath := activeRecordPath(t, tempDir, rec.Sequence)
+	if err := os.Remove(originalPath); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, rec.Sequence, "rec-replacement-B", []byte("replacement-B"))
+
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !recordPresent(t, tempDir, "active", rec.Sequence) {
+		t.Fatal("same-seq replacement must not be deleted on restart")
+	}
+	entries, err := os.ReadDir(filepath.Join(tempDir, "active"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundReplacement := false
+	for _, e := range entries {
+		if e.Name() == recordFileName(rec.Sequence, "rec-replacement-B") {
+			foundReplacement = true
+		}
+	}
+	if !foundReplacement {
+		t.Fatal("replacement record B must remain")
+	}
+	if q2.Stats().AcceptedThrough != rec.Sequence {
+		t.Fatalf("acceptedThrough must remain %d, got %d", rec.Sequence, q2.Stats().AcceptedThrough)
+	}
+}
+
+// B: lower-sequence insert between Read and Commit is rejected before meta advance.
+func TestDurableQueueLowerSeqInsertBeforeCommitFailsClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, 5, "rec-five", []byte("five"))
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(`{"highestSequence":5}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 1 || batch[0].Sequence != 5 {
+		t.Fatalf("expected seq 5, got %+v err=%v", batch, err)
+	}
+	writeActiveRecord(t, tempDir, 3, "rec-lower-insert", []byte("lower"))
+
+	if err := q.CommitAccepted(batch, 5); err == nil {
+		t.Fatal("expected commit rejection for lower-seq insert not in ACK prefix")
+	}
+	if q.Stats().AcceptedThrough != 0 {
+		t.Fatalf("acceptedThrough must not advance, got %d", q.Stats().AcceptedThrough)
+	}
+	if !recordPresent(t, tempDir, "active", 5) || !recordPresent(t, tempDir, "active", 3) {
+		t.Fatal("commit must delete nothing on rejection")
+	}
+
+	// Also when acceptedThrough was already nonzero.
+	tempDir2 := t.TempDir()
+	q2, err := NewDurableQueue(tempDir2, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"a", "b", "c"} {
+		if _, err := q2.Enqueue([]byte(p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 3 {
+		t.Fatalf("expected 3, got %+v err=%v", batch, err)
+	}
+	if err := q2.CommitAccepted(batch[:1], 1); err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) < 1 {
+		t.Fatalf("expected next batch, got %+v err=%v", batch, err)
+	}
+	writeActiveRecord(t, tempDir2, 1, "rec-post-ack-intruder", []byte("sneak"))
+	if err := q2.CommitAccepted(batch[:1], batch[0].Sequence); err == nil {
+		t.Fatal("expected rejection of active seq <= proposed acceptedThrough not in prefix")
+	}
+	if q2.Stats().AcceptedThrough != 1 {
+		t.Fatalf("acceptedThrough must stay at 1, got %d", q2.Stats().AcceptedThrough)
+	}
+	if recordPresent(t, tempDir2, "active", 2) == false {
+		t.Fatal("unacked records must remain after rejected commit")
+	}
+}
+
+// C: meta dirsync failure after rename is QUEUE_META_UNCERTAIN; no stale overwrite.
+func TestDurableQueueMetaDirSyncAfterRenameFailsClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("b")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.syncHook = func(phase, target string) error {
+		if phase == syncPhaseMetaDir {
+			return errors.New("injected meta dir sync fail")
+		}
+		return nil
+	}
+	err = q.CommitAccepted(batch[:1], 1)
+	if err == nil || !errors.Is(err, ErrMetaUncertain) {
+		t.Fatalf("expected QUEUE_META_UNCERTAIN, got %v", err)
+	}
+	if !q.Stats().MetaUncertain || !q.Stats().DeliveryBlocked {
+		t.Fatalf("stats must report meta uncertain / delivery blocked: %+v", q.Stats())
+	}
+	if q.Stats().AcceptedThrough != 1 {
+		t.Fatalf("in-memory acceptedThrough must adopt durable/intended value, got %d", q.Stats().AcceptedThrough)
+	}
+	if _, err := q.Enqueue([]byte("c")); !errors.Is(err, ErrMetaUncertain) {
+		t.Fatalf("Enqueue must fail closed while meta uncertain, got %v", err)
+	}
+	if _, err := q.ReadBatch(10, 1024*1024); !errors.Is(err, ErrMetaUncertain) {
+		t.Fatalf("ReadBatch must fail closed while meta uncertain, got %v", err)
+	}
+	if err := q.CommitAccepted(batch[:1], 1); !errors.Is(err, ErrMetaUncertain) {
+		t.Fatalf("CommitAccepted must fail closed while meta uncertain, got %v", err)
+	}
+	// Disk meta must not be overwritten with a regressing acceptedThrough.
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.AcceptedThrough != 1 {
+		t.Fatalf("disk acceptedThrough must remain 1, got %d", meta.AcceptedThrough)
+	}
+}
+
+// D: missing entire unacked tail is QUEUE_SEQUENCE_GAP (empty active with hole).
+func TestDurableQueueMissingUnackedTailIsSequenceGap(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"a", "b", "c"} {
+		if _, err := q.Enqueue([]byte(p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 3 {
+		t.Fatalf("expected 3, got %+v err=%v", batch, err)
+	}
+	if err := q.CommitAccepted(batch[:1], 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, seq := range []uint64{2, 3} {
+		if err := os.Remove(activeRecordPath(t, tempDir, seq)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrSequenceGap) || len(batch) != 0 {
+		t.Fatalf("empty active with unacked highestSequence must be QUEUE_SEQUENCE_GAP, got %+v err=%v", batch, err)
+	}
+	if !q2.Stats().SequenceGapBlock || !q2.Stats().DeliveryBlocked {
+		t.Fatalf("stats must report gap block: %+v", q2.Stats())
+	}
+	if q2.Stats().LastSequence != 3 || q2.Stats().AcceptedThrough != 1 {
+		t.Fatalf("lineage must remain highest=3 accepted=1, got %+v", q2.Stats())
+	}
+}
+
+// E: authorized leftover exact ID deletes on restart.
+func TestDurableQueueAuthorizedLeftoverExactIDDeletesOnRestart(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"a", "b", "c"} {
+		if _, err := q.Enqueue([]byte(p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 3 {
+		t.Fatalf("expected 3, got %+v err=%v", batch, err)
+	}
+	authorizedID := batch[0].ID
+	q.removeHook = func(path string) error {
+		if strings.Contains(path, string(filepath.Separator)+"active"+string(filepath.Separator)) && strings.HasSuffix(path, ".json") {
+			return errors.New("injected active delete fail")
+		}
+		return nil
+	}
+	if err := q.CommitAccepted(batch[:1], 1); err == nil {
+		t.Fatal("expected delete failure after meta")
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 1 || meta.AcceptedRecords[0].ID != authorizedID || meta.AcceptedRecords[0].Sequence != 1 {
+		t.Fatalf("meta must retain exact ACK auth leftover, got %+v", meta.AcceptedRecords)
+	}
+
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recordPresent(t, tempDir, "active", 1) {
+		t.Fatal("exact authorized leftover must be deleted on restart")
+	}
+	if !recordPresent(t, tempDir, "active", 2) || !recordPresent(t, tempDir, "active", 3) {
+		t.Fatal("unacked records must remain")
+	}
+	meta = readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 0 {
+		t.Fatalf("acceptedRecords must clear after successful restart reconcile, got %+v", meta.AcceptedRecords)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 2 || batch[0].Sequence != 2 {
+		t.Fatalf("expected seq 2..3 after reconcile, got %+v err=%v", batch, err)
+	}
+}
+
+// F: auth list cleared after successful commit.
+func TestDurableQueueAcceptedRecordsClearedAfterSuccess(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("only")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 1 {
+		t.Fatalf("expected 1, got %+v err=%v", batch, err)
+	}
+	if err := q.CommitAccepted(batch, 1); err != nil {
+		t.Fatal(err)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.AcceptedThrough != 1 {
+		t.Fatalf("acceptedThrough=%d", meta.AcceptedThrough)
+	}
+	if len(meta.AcceptedRecords) != 0 {
+		t.Fatalf("acceptedRecords must be empty after successful delete, got %+v", meta.AcceptedRecords)
+	}
+	if q.Len() != 0 {
+		t.Fatalf("queue must be empty, len=%d", q.Len())
+	}
+}
+
+// G: legacy meta (covered also by TestDurableQueueLegacyMetaLoadsWithoutAcceptedBoundary).
+func TestDurableQueueLegacyMetaAcceptedRecordsAbsent(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, 9, "legacy-only", []byte("legacy-payload"))
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(`{"highestSequence":9}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Stats().AcceptedThrough != 0 || q.Stats().LastSequence != 9 {
+		t.Fatalf("legacy meta load failed: %+v", q.Stats())
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 1 || batch[0].Sequence != 9 {
+		t.Fatalf("legacy queue must deliver seq 9, got %+v err=%v", batch, err)
+	}
+}
+
+// H: acceptedThrough never regresses across meta uncertain / subsequent writes.
+func TestDurableQueueAcceptedThroughNeverRegresses(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("b")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.CommitAccepted(batch[:1], 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.persistSequenceMetaLocked(q.lastSeq, 0, nil); err == nil {
+		t.Fatal("persist must reject acceptedThrough regression")
+	}
+	if q.Stats().AcceptedThrough != 1 {
+		t.Fatalf("acceptedThrough must stay 1, got %d", q.Stats().AcceptedThrough)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.AcceptedThrough != 1 {
+		t.Fatalf("disk acceptedThrough must stay 1, got %d", meta.AcceptedThrough)
+	}
+
+	q.syncHook = func(phase, target string) error {
+		if phase == syncPhaseMetaDir {
+			return errors.New("injected meta dir sync fail")
+		}
+		return nil
+	}
+	batch, err = q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = q.CommitAccepted(batch[:1], 2)
+	if q.Stats().AcceptedThrough < 1 {
+		t.Fatalf("acceptedThrough must never regress below 1, got %d", q.Stats().AcceptedThrough)
+	}
+	meta = readSequenceMetaFile(t, tempDir)
+	if meta.AcceptedThrough < 1 {
+		t.Fatalf("disk acceptedThrough must never regress below 1, got %d", meta.AcceptedThrough)
+	}
+}

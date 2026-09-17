@@ -112,6 +112,9 @@ func Classify(err error) FailureClass {
 	if errors.Is(err, queue.ErrSequenceConflict) {
 		return FailureBlocked
 	}
+	if errors.Is(err, queue.ErrMetaUncertain) {
+		return FailureBlocked
+	}
 	var de *DeliveryError
 	if errors.As(err, &de) && de.Class != "" {
 		return de.Class
