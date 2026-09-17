@@ -32,7 +32,7 @@ Agent telemetry is persisted before delivery using:
 - SHA-256 integrity over sequence, ID, createdAt, and payload;
 - restart recovery with content validation;
 - strict ACK-before-delete behavior (application ACK only; transport/auth/permanent errors retain records);
-- corruption quarantine with fail-closed rename handling (destination directory durability before source deletion durability; no silent loss on quarantine failure);
+- corruption quarantine with fail-closed rename handling: durable queue-local transition intent (`quarantine.transition`) before active→quarantine rename, then destination directory durability before source deletion durability; intent cleared only after the final filesystem state is durable; restart reconciliation stays blocked on ambiguous intent/copy state (no silent loss on quarantine failure);
 - bounded quarantine storage (same record/byte caps as the active buffer) with `QUEUE_QUARANTINE_FULL` fail-closed retain (no oldest-record deletion);
 - quarantined sequences block later delivery (no invented sequence skip/tombstone); later records remain intact;
 - unknown/noncanonical `rec_*.json` names fail-closed with a global delivery block and are retained in `active/`;

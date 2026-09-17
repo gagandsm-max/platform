@@ -185,7 +185,7 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 	if err != nil {
 		failClass := client.Classify(err)
 		code := queueFailureCode(err)
-		w.recordFailure(failClass, code)
+		w.recordQueueFailure(failClass, code)
 		w.logger.Error("Failed to read batch from queue", "class", failClass, "code", code, "error", err)
 		return false, err
 	}
@@ -247,7 +247,7 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 	}
 
 	if err := w.q.DeleteThrough(ack.AcceptedThrough); err != nil {
-		w.recordFailure(client.FailureTemporary, "DELIVERY_DELETE_FAILED")
+		w.recordQueueFailure(client.FailureTemporary, "DELIVERY_DELETE_FAILED")
 		w.logger.Error("Failed to delete acknowledged records from queue", "through", ack.AcceptedThrough, "error", err)
 		return false, err
 	}
@@ -318,6 +318,17 @@ func (w *Worker) recordFailure(class client.FailureClass, code string) {
 	// Last delivery failed: do not report the Sensor receiver as available
 	// merely because the HTTPS client was constructed.
 	w.stats.ReceiverAvailable = false
+}
+
+func (w *Worker) recordQueueFailure(class client.FailureClass, code string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.stats.RetryAttempt < math.MaxInt-1 {
+		w.stats.RetryAttempt++
+	}
+	w.stats.LastFailureClass = class
+	w.stats.LastErrorCode = code
+	// Local queue failure: do not mutate ReceiverAvailable.
 }
 
 func queueFailureCode(err error) string {

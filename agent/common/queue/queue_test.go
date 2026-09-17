@@ -1189,3 +1189,861 @@ func TestDurableQueueNoncanonicalWidthFailsClosed(t *testing.T) {
 		t.Fatal("canonical records must remain")
 	}
 }
+
+func TestDurableQueueIntentFailureBeforeRenameFailsClosed(t *testing.T) {
+	assertNoRename := func(t *testing.T, tempDir string, q *DurableQueue) {
+		t.Helper()
+		if !recordPresent(t, tempDir, "active", 1) {
+			t.Fatal("active record 1 must remain in active/ after intent failure")
+		}
+		if recordPresent(t, tempDir, "quarantine", 1) {
+			t.Fatal("record 1 must NOT be in quarantine/ after intent failure")
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("stats must reflect uncertain and blocked: %+v", q.Stats())
+		}
+		batch2, err2 := q.ReadBatch(10, 1024*1024)
+		if !errors.Is(err2, ErrQuarantineUncertain) || len(batch2) != 0 {
+			t.Fatalf("record 2 must not be delivered when queue is uncertain, got batch=%+v err=%v", batch2, err2)
+		}
+	}
+
+	t.Run("intent creation failure before rename", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("record-1")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("record-2")); err != nil {
+			t.Fatal(err)
+		}
+		corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+
+		// Force OpenFile of quarantine.transition to fail before any rename.
+		if err := os.Mkdir(filepath.Join(tempDir, transitionIntentFile), 0700); err != nil {
+			t.Fatal(err)
+		}
+
+		batch, err := q.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+			t.Fatalf("expected ErrQuarantineUncertain and empty batch, got batch=%+v err=%v", batch, err)
+		}
+		assertNoRename(t, tempDir, q)
+	})
+
+	t.Run("intent file sync failure before rename", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("record-1")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("record-2")); err != nil {
+			t.Fatal(err)
+		}
+		corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+
+		q.syncHook = func(phase, target string) error {
+			if phase == syncPhaseIntentFile {
+				return errors.New("simulated intent sync failure")
+			}
+			return nil
+		}
+
+		batch, err := q.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+			t.Fatalf("expected ErrQuarantineUncertain and empty batch, got batch=%+v err=%v", batch, err)
+		}
+		assertNoRename(t, tempDir, q)
+	})
+
+	t.Run("intent parent-dir sync failure before rename", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("record-1")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("record-2")); err != nil {
+			t.Fatal(err)
+		}
+		corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+
+		q.syncHook = func(phase, target string) error {
+			if phase == syncPhaseIntentDir {
+				return errors.New("simulated intent dir sync failure")
+			}
+			return nil
+		}
+
+		batch, err := q.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+			t.Fatalf("expected ErrQuarantineUncertain and empty batch, got batch=%+v err=%v", batch, err)
+		}
+		assertNoRename(t, tempDir, q)
+		if _, err := os.Lstat(filepath.Join(tempDir, transitionIntentFile)); err != nil {
+			t.Fatalf("intent file should exist after write+file-sync even when parent dir sync fails: %v", err)
+		}
+	})
+}
+
+func TestDurableQueueSuccessfulIntentAndClear(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("record-1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("record-2")); err != nil {
+		t.Fatal(err)
+	}
+
+	var sawIntentFile, sawIntentDir, sawIntentClearDir bool
+	var intentPresentDuringRename bool
+	var intentMissingBeforeDirSync, intentMissingDuringRename bool
+	q.syncHook = func(phase, target string) error {
+		switch phase {
+		case syncPhaseIntentFile:
+			sawIntentFile = true
+		case syncPhaseIntentDir:
+			sawIntentDir = true
+			if _, err := os.Lstat(filepath.Join(tempDir, transitionIntentFile)); err != nil {
+				intentMissingBeforeDirSync = true
+			}
+		case syncPhaseQuarantineDest:
+			if _, err := os.Lstat(filepath.Join(tempDir, transitionIntentFile)); err != nil {
+				intentMissingDuringRename = true
+			} else {
+				intentPresentDuringRename = true
+			}
+		case syncPhaseIntentClearDir:
+			sawIntentClearDir = true
+		}
+		return nil
+	}
+
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrDeliveryBlocked) || len(batch) != 0 {
+		t.Fatalf("successful quarantine must block later delivery: batch=%+v err=%v", batch, err)
+	}
+	if intentMissingBeforeDirSync || intentMissingDuringRename {
+		t.Fatal("intent must remain durable from create through quarantine rename")
+	}
+	if !sawIntentFile || !sawIntentDir || !intentPresentDuringRename || !sawIntentClearDir {
+		t.Fatalf("expected durable intent create/sync/clear phases; file=%v dir=%v duringRename=%v clearDir=%v",
+			sawIntentFile, sawIntentDir, intentPresentDuringRename, sawIntentClearDir)
+	}
+	if _, err := os.Lstat(filepath.Join(tempDir, transitionIntentFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("intent must be cleared after durable quarantine, err=%v", err)
+	}
+	if !recordPresent(t, tempDir, "quarantine", 1) {
+		t.Fatal("record 1 must be quarantined")
+	}
+	if recordPresent(t, tempDir, "active", 1) {
+		t.Fatal("record 1 must leave active after successful quarantine")
+	}
+	if !q.Stats().DeliveryBlocked || q.Stats().BlockedFromSequence != 1 {
+		t.Fatalf("successful quarantine must block from sequence 1: %+v", q.Stats())
+	}
+}
+
+func TestDurableQueueIntentClearFailureLeavesFailClosed(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("record-1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("record-2")); err != nil {
+		t.Fatal(err)
+	}
+
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+
+	// Inject failure when clearing the transition intent
+	q.removeHook = func(path string) error {
+		if strings.HasSuffix(path, transitionIntentFile) {
+			return errors.New("simulated remove intent failure")
+		}
+		return nil
+	}
+
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+		t.Fatalf("expected ErrQuarantineUncertain when clearing intent fails, batch=%+v err=%v", batch, err)
+	}
+
+	// Record is in quarantine/
+	if !recordPresent(t, tempDir, "quarantine", 1) {
+		t.Fatal("record 1 must be quarantined")
+	}
+	// Intent file must still exist
+	intentPath := filepath.Join(tempDir, transitionIntentFile)
+	if _, err := os.Stat(intentPath); err != nil {
+		t.Fatalf("intent file must remain after failed clear: %v", err)
+	}
+	if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+		t.Fatalf("stats must reflect uncertain and blocked: %+v", q.Stats())
+	}
+
+	// Restart: queue must recover intent and remain blocked
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !q2.Stats().DeliveryBlocked {
+		t.Fatalf("restart must remain delivery blocked: %+v", q2.Stats())
+	}
+	batch2, err2 := q2.ReadBatch(10, 1024*1024)
+	if err2 == nil || len(batch2) != 0 {
+		t.Fatalf("restarted queue must not deliver records: batch=%+v err=%v", batch2, err2)
+	}
+}
+
+func TestDurableQueueRollbackDestSourceClearFailures(t *testing.T) {
+	t.Run("rollback dest sync failure is uncertain", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("record-1")); err != nil {
+			t.Fatal(err)
+		}
+		corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+
+		q.syncHook = func(phase, target string) error {
+			if phase == syncPhaseQuarantineDest {
+				return errors.New("dest sync fail")
+			}
+			if phase == syncPhaseRollbackDest {
+				return errors.New("rollback dest sync fail")
+			}
+			return nil
+		}
+
+		batch, err := q.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+			t.Fatalf("expected ErrQuarantineUncertain, got batch=%+v err=%v", batch, err)
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("queue must be uncertain and delivery blocked: %+v", q.Stats())
+		}
+		if _, err := os.Lstat(filepath.Join(tempDir, transitionIntentFile)); err != nil {
+			t.Fatalf("intent must remain until rollback durability is proven: %v", err)
+		}
+	})
+
+	t.Run("rollback source sync failure sets location uncertain", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("record-1")); err != nil {
+			t.Fatal(err)
+		}
+		corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+
+		q.syncHook = func(phase, target string) error {
+			if phase == syncPhaseQuarantineDest {
+				return errors.New("dest sync fail")
+			}
+			if phase == syncPhaseRollbackSource {
+				return errors.New("rollback source sync fail")
+			}
+			return nil
+		}
+
+		batch, err := q.ReadBatch(10, 1024*1024)
+		if err == nil || len(batch) != 0 {
+			t.Fatalf("expected error and empty batch, got batch=%+v err=%v", batch, err)
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("queue must be uncertain and delivery blocked: %+v", q.Stats())
+		}
+		if _, err := os.Lstat(filepath.Join(tempDir, transitionIntentFile)); err != nil {
+			t.Fatalf("intent must remain when rollback source sync fails: %v", err)
+		}
+		if !recordPresent(t, tempDir, "active", 1) {
+			t.Fatal("rollback dest durability must leave record in active/")
+		}
+	})
+
+	t.Run("successful rollback clears intent after durability", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("record-1")); err != nil {
+			t.Fatal(err)
+		}
+		corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+
+		var sawRollbackDest, sawRollbackSource, sawClearDir bool
+		q.syncHook = func(phase, target string) error {
+			switch phase {
+			case syncPhaseQuarantineDest:
+				return errors.New("dest sync fail")
+			case syncPhaseRollbackDest:
+				sawRollbackDest = true
+			case syncPhaseRollbackSource:
+				sawRollbackSource = true
+			case syncPhaseIntentClearDir:
+				sawClearDir = true
+			}
+			return nil
+		}
+
+		batch, err := q.ReadBatch(10, 1024*1024)
+		if err == nil || len(batch) != 0 {
+			t.Fatalf("expected dest-sync failure after durable rollback, batch=%+v err=%v", batch, err)
+		}
+		if !sawRollbackDest || !sawRollbackSource || !sawClearDir {
+			t.Fatalf("rollback durability phases missing: dest=%v source=%v clear=%v", sawRollbackDest, sawRollbackSource, sawClearDir)
+		}
+		if _, err := os.Lstat(filepath.Join(tempDir, transitionIntentFile)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("intent must clear after durable rollback, err=%v", err)
+		}
+		if !recordPresent(t, tempDir, "active", 1) || recordPresent(t, tempDir, "quarantine", 1) {
+			t.Fatal("durable rollback must restore active-only copy")
+		}
+		if q.Stats().LocationUncertain {
+			t.Fatalf("successful rollback must not leave location uncertain: %+v", q.Stats())
+		}
+	})
+
+	t.Run("rollback clear intent failure sets location uncertain", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("record-1")); err != nil {
+			t.Fatal(err)
+		}
+		corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+
+		q.syncHook = func(phase, target string) error {
+			if phase == syncPhaseQuarantineDest {
+				return errors.New("dest sync fail")
+			}
+			return nil
+		}
+		q.removeHook = func(path string) error {
+			if strings.HasSuffix(path, transitionIntentFile) {
+				return errors.New("remove intent after rollback fail")
+			}
+			return nil
+		}
+
+		batch, err := q.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+			t.Fatalf("expected ErrQuarantineUncertain, got batch=%+v err=%v", batch, err)
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("queue must be uncertain and delivery blocked: %+v", q.Stats())
+		}
+		if _, err := os.Lstat(filepath.Join(tempDir, transitionIntentFile)); err != nil {
+			t.Fatalf("intent must remain after clear failure: %v", err)
+		}
+	})
+}
+
+func TestDurableQueueRecoverTransitionIntentMatrix(t *testing.T) {
+	writeIntent := func(dir, record string, seq uint64, code string) {
+		intent := transitionIntent{
+			Version:  1,
+			Record:   record,
+			Sequence: seq,
+			Code:     code,
+		}
+		data, _ := json.Marshal(intent)
+		_ = os.WriteFile(filepath.Join(dir, transitionIntentFile), data, 0600)
+	}
+
+	t.Run("Case A: intent and quarantine only -> quarantine authoritative, blocked", func(t *testing.T) {
+		dir := t.TempDir()
+		q1, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q1.Enqueue([]byte("rec-1")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q1.Enqueue([]byte("rec-2")); err != nil {
+			t.Fatal(err)
+		}
+
+		rec1Path := activeRecordPath(t, dir, 1)
+		rec1Name := filepath.Base(rec1Path)
+		// Move rec1 to quarantine manually
+		data, _ := os.ReadFile(rec1Path)
+		_ = os.WriteFile(filepath.Join(dir, "quarantine", rec1Name), data, 0600)
+		_ = os.Remove(rec1Path)
+		writeIntent(dir, rec1Name, 1, "QUEUE_RECORD_CORRUPT")
+
+		q2, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q2.Stats().DeliveryBlocked || q2.Stats().BlockedFromSequence != 1 {
+			t.Fatalf("expected sequence 1 blocked, got stats: %+v", q2.Stats())
+		}
+		batch, err := q2.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrDeliveryBlocked) || len(batch) != 0 {
+			t.Fatalf("expected ErrDeliveryBlocked and empty batch, got batch=%+v err=%v", batch, err)
+		}
+	})
+
+	t.Run("Case B: intent and active only -> active retained, sequence blocked", func(t *testing.T) {
+		dir := t.TempDir()
+		q1, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q1.Enqueue([]byte("rec-1")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q1.Enqueue([]byte("rec-2")); err != nil {
+			t.Fatal(err)
+		}
+
+		rec1Path := activeRecordPath(t, dir, 1)
+		rec1Name := filepath.Base(rec1Path)
+		writeIntent(dir, rec1Name, 1, "QUEUE_RECORD_CORRUPT")
+
+		q2, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q2.Stats().DeliveryBlocked || q2.Stats().BlockedFromSequence != 1 {
+			t.Fatalf("expected sequence 1 blocked, got stats: %+v", q2.Stats())
+		}
+		batch, err := q2.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrDeliveryBlocked) || len(batch) != 0 {
+			t.Fatalf("expected ErrDeliveryBlocked, got batch=%+v err=%v", batch, err)
+		}
+		if !recordPresent(t, dir, "active", 1) {
+			t.Fatal("active record must be retained")
+		}
+	})
+
+	t.Run("Case C: intent and both exist identical -> quarantine authoritative, active duplicate never delivered", func(t *testing.T) {
+		dir := t.TempDir()
+		q1, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q1.Enqueue([]byte("rec-1")); err != nil {
+			t.Fatal(err)
+		}
+		rec1Path := activeRecordPath(t, dir, 1)
+		rec1Name := filepath.Base(rec1Path)
+		data, _ := os.ReadFile(rec1Path)
+		_ = os.WriteFile(filepath.Join(dir, "quarantine", rec1Name), data, 0600)
+		writeIntent(dir, rec1Name, 1, "QUEUE_RECORD_CORRUPT")
+
+		q2, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q2.Stats().DeliveryBlocked {
+			t.Fatalf("expected delivery blocked, stats: %+v", q2.Stats())
+		}
+		batch, err := q2.ReadBatch(10, 1024*1024)
+		if err == nil {
+			for _, r := range batch {
+				if r.Sequence == 1 {
+					t.Fatal("active duplicate must never be delivered")
+				}
+			}
+		}
+		if !errors.Is(err, ErrDeliveryBlocked) && !errors.Is(err, ErrQuarantineUncertain) {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("Case D: intent and both exist conflicting -> location uncertain", func(t *testing.T) {
+		dir := t.TempDir()
+		q1, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q1.Enqueue([]byte("rec-1")); err != nil {
+			t.Fatal(err)
+		}
+		rec1Path := activeRecordPath(t, dir, 1)
+		rec1Name := filepath.Base(rec1Path)
+		_ = os.WriteFile(filepath.Join(dir, "quarantine", rec1Name), []byte(`{"conflicting":true}`), 0600)
+		writeIntent(dir, rec1Name, 1, "QUEUE_RECORD_CORRUPT")
+
+		q2, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q2.Stats().LocationUncertain || !q2.Stats().DeliveryBlocked {
+			t.Fatalf("conflicting copies must enter location uncertain: %+v", q2.Stats())
+		}
+		batch, err := q2.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+			t.Fatalf("expected ErrQuarantineUncertain, got batch=%+v err=%v", batch, err)
+		}
+	})
+
+	t.Run("Case E: intent and neither exists -> location uncertain", func(t *testing.T) {
+		dir := t.TempDir()
+		writeIntent(dir, "rec_0000000000000000001_missing.json", 1, "QUEUE_RECORD_CORRUPT")
+
+		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("missing both copies must enter location uncertain: %+v", q.Stats())
+		}
+		batch, err := q.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+			t.Fatalf("expected ErrQuarantineUncertain, got batch=%+v err=%v", batch, err)
+		}
+	})
+
+	t.Run("corrupt intent JSON -> location uncertain", func(t *testing.T) {
+		dir := t.TempDir()
+		_ = os.WriteFile(filepath.Join(dir, transitionIntentFile), []byte(`{not valid json`), 0600)
+		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("corrupt intent must enter location uncertain: %+v", q.Stats())
+		}
+	})
+
+	t.Run("oversized intent JSON -> location uncertain", func(t *testing.T) {
+		dir := t.TempDir()
+		oversized := make([]byte, 5000)
+		_ = os.WriteFile(filepath.Join(dir, transitionIntentFile), oversized, 0600)
+		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("oversized intent must enter location uncertain: %+v", q.Stats())
+		}
+	})
+
+	t.Run("empty intent JSON -> location uncertain", func(t *testing.T) {
+		dir := t.TempDir()
+		_ = os.WriteFile(filepath.Join(dir, transitionIntentFile), []byte{}, 0600)
+		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("empty intent must enter location uncertain: %+v", q.Stats())
+		}
+	})
+
+	t.Run("symlink intent file -> location uncertain", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "target.json")
+		_ = os.WriteFile(target, []byte(`{"version":1,"record":"rec_0000000000000000001_a.json","sequence":1}`), 0600)
+		_ = os.Symlink(target, filepath.Join(dir, transitionIntentFile))
+		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("symlink intent must enter location uncertain: %+v", q.Stats())
+		}
+	})
+
+	t.Run("intent sequence mismatch -> location uncertain", func(t *testing.T) {
+		dir := t.TempDir()
+		writeIntent(dir, "rec_0000000000000000001_test.json", 99, "QUEUE_RECORD_CORRUPT")
+		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("sequence mismatch must enter location uncertain: %+v", q.Stats())
+		}
+	})
+
+	t.Run("intent path traversal -> location uncertain", func(t *testing.T) {
+		dir := t.TempDir()
+		writeIntent(dir, "../outside.json", 1, "QUEUE_RECORD_CORRUPT")
+		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
+			t.Fatalf("path traversal in intent must enter location uncertain: %+v", q.Stats())
+		}
+	})
+}
+
+func TestDurableQueueFilesystemAmbiguityFailClosed(t *testing.T) {
+	t.Run("hasActiveAfterBlockedLocked directory scan failure fails closed", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("rec-1")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("rec-2")); err != nil {
+			t.Fatal(err)
+		}
+		corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+
+		// Trigger quarantine of record 1
+		_, _ = q.ReadBatch(10, 1024*1024)
+
+		// Inject readDir error
+		q.readDirHook = func(dir string) error {
+			return errors.New("simulated dir read error")
+		}
+
+		if !q.Stats().DeliveryBlocked {
+			t.Fatalf("Stats.DeliveryBlocked must be true on dir scan error: %+v", q.Stats())
+		}
+		batch, err := q.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
+			t.Fatalf("expected ErrQuarantineUncertain on dir scan error, got batch=%+v err=%v", batch, err)
+		}
+	})
+
+	t.Run("reconcileDuplicatesLocked lstat error fails closed", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("rec-1")); err != nil {
+			t.Fatal(err)
+		}
+		// Inject lstat error on quarantine check during duplicate reconciliation
+		q.lstatHook = func(path string) error {
+			if strings.Contains(path, "quarantine") {
+				return os.ErrPermission
+			}
+			return nil
+		}
+		err = q.reconcileDuplicatesLocked()
+		if err == nil {
+			t.Fatal("reconcileDuplicatesLocked must fail closed on non-ENOENT stat error")
+		}
+	})
+
+	t.Run("recoverTransitionIntent non-ENOENT lstat fails closed", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("rec-1")); err != nil {
+			t.Fatal(err)
+		}
+		rec1Path := activeRecordPath(t, tempDir, 1)
+		rec1Name := filepath.Base(rec1Path)
+		intent := transitionIntent{Version: 1, Record: rec1Name, Sequence: 1, Code: "QUEUE_RECORD_CORRUPT"}
+		data, _ := json.Marshal(intent)
+		if err := os.WriteFile(filepath.Join(tempDir, transitionIntentFile), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		q.lstatHook = func(path string) error {
+			if path == filepath.Join(tempDir, "active", rec1Name) {
+				return os.ErrPermission
+			}
+			return nil
+		}
+		seq, hasIntent, _ := q.recoverTransitionIntentLocked()
+		if !hasIntent || seq != 1 || !q.locationUncertain {
+			t.Fatalf("non-ENOENT active lstat must fail closed: seq=%d hasIntent=%v uncertain=%v", seq, hasIntent, q.locationUncertain)
+		}
+	})
+
+	t.Run("sole active record at blocked sequence blocks delivery", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Enqueue([]byte("rec-1")); err != nil {
+			t.Fatal(err)
+		}
+		rec1Path := activeRecordPath(t, tempDir, 1)
+		rec1Name := filepath.Base(rec1Path)
+		raw, _ := os.ReadFile(rec1Path)
+		// Put copy in quarantine
+		_ = os.WriteFile(filepath.Join(tempDir, "quarantine", rec1Name), raw, 0600)
+
+		// Reopen queue: record 1 exists in active AND quarantine, nothing else in active
+		q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !q2.Stats().DeliveryBlocked {
+			t.Fatalf("sole active record at blocked sequence must report DeliveryBlocked: %+v", q2.Stats())
+		}
+		batch, err := q2.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrDeliveryBlocked) || len(batch) != 0 {
+			t.Fatalf("expected ErrDeliveryBlocked and no records delivered, got batch=%+v err=%v", batch, err)
+		}
+	})
+}
+
+func TestDurableQueueSymlinkRejection(t *testing.T) {
+	t.Run("active duplicate symlink is rejected without reading target", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Create a regular record in quarantine
+		qRec := filepath.Join(tempDir, "quarantine", "rec_0000000000000000001_target.json")
+		_ = os.WriteFile(qRec, []byte(`{"dummy":1}`), 0600)
+
+		// Create a symlink in active/ pointing to some target file
+		targetFile := filepath.Join(tempDir, "sensitive.txt")
+		_ = os.WriteFile(targetFile, []byte("secret"), 0600)
+		aSym := filepath.Join(tempDir, "active", "rec_0000000000000000001_target.json")
+		_ = os.Symlink(targetFile, aSym)
+
+		_, dupErr := q.duplicateStateLocked("rec_0000000000000000001_target.json")
+		if dupErr == nil || !strings.Contains(dupErr.Error(), "SYMLINK_REJECTED") {
+			t.Fatalf("expected symlink rejection error, got %v", dupErr)
+		}
+	})
+
+	t.Run("quarantine duplicate symlink is rejected", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		targetFile := filepath.Join(tempDir, "sensitive.txt")
+		_ = os.WriteFile(targetFile, []byte("secret"), 0600)
+		qSym := filepath.Join(tempDir, "quarantine", "rec_0000000000000000001_target.json")
+		_ = os.Symlink(targetFile, qSym)
+
+		_, dupErr := q.duplicateStateLocked("rec_0000000000000000001_target.json")
+		if dupErr == nil || !strings.Contains(dupErr.Error(), "SYMLINK_REJECTED") {
+			t.Fatalf("expected symlink rejection error, got %v", dupErr)
+		}
+	})
+
+	t.Run("quarantineRecordLocked rejects active symlink", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		targetFile := filepath.Join(tempDir, "target.json")
+		_ = os.WriteFile(targetFile, []byte("test"), 0600)
+		symName := "rec_0000000000000000001_sym.json"
+		_ = os.Symlink(targetFile, filepath.Join(tempDir, "active", symName))
+
+		err = q.quarantineRecordLocked(symName, "QUEUE_RECORD_CORRUPT")
+		if err == nil || !strings.Contains(err.Error(), "SYMLINK_REJECTED") {
+			t.Fatalf("expected active symlink rejection, got %v", err)
+		}
+	})
+}
+
+func TestDurableQueueJSONMetadataValidity(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("record-1")); err != nil {
+		t.Fatal(err)
+	}
+
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+
+	// Trigger quarantine
+	_, _ = q.ReadBatch(10, 1024*1024)
+
+	// 1. Verify .reason sidecar is valid JSON
+	entries, _ := os.ReadDir(filepath.Join(tempDir, "quarantine"))
+	var reasonFound bool
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".reason") {
+			reasonFound = true
+			data, err := os.ReadFile(filepath.Join(tempDir, "quarantine", e.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var sidecar struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(data, &sidecar); err != nil {
+				t.Fatalf("reason sidecar must be valid JSON: %v, content=%s", err, string(data))
+			}
+			if sidecar.Code != "QUEUE_RECORD_CORRUPT" {
+				t.Fatalf("unexpected sidecar code: %s", sidecar.Code)
+			}
+		}
+	}
+	if !reasonFound {
+		t.Fatal("reason sidecar file not found")
+	}
+
+	// 2. Verify location.uncertain is valid JSON
+	if err := q.enterUncertainLocked(errors.New("test uncertainty")); err == nil {
+		t.Fatal("enterUncertainLocked should return error")
+	}
+	uncData, err := os.ReadFile(filepath.Join(tempDir, uncertainMarkerFile))
+	if err != nil {
+		t.Fatalf("location.uncertain marker must exist: %v", err)
+	}
+	var unc struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(uncData, &unc); err != nil {
+		t.Fatalf("location.uncertain must be valid JSON: %v, content=%s", err, string(uncData))
+	}
+	if unc.Code != "QUEUE_QUARANTINE_UNCERTAIN" {
+		t.Fatalf("unexpected uncertainty code: %s", unc.Code)
+	}
+
+	// 3. Verify quarantine.transition is valid JSON when written
+	if err := q.persistTransitionIntentLocked("rec_0000000000000000005_test.json", 5, "QUEUE_RECORD_CORRUPT"); err != nil {
+		t.Fatalf("persistTransitionIntentLocked failed: %v", err)
+	}
+	intentData, err := os.ReadFile(filepath.Join(tempDir, transitionIntentFile))
+	if err != nil {
+		t.Fatalf("intent file must exist: %v", err)
+	}
+	var intent struct {
+		Version  int    `json:"version"`
+		Record   string `json:"record"`
+		Sequence uint64 `json:"sequence"`
+		Code     string `json:"code"`
+	}
+	if err := json.Unmarshal(intentData, &intent); err != nil {
+		t.Fatalf("quarantine.transition must be valid JSON: %v, content=%s", err, string(intentData))
+	}
+	if intent.Version != 1 || intent.Sequence != 5 || intent.Record != "rec_0000000000000000005_test.json" || intent.Code != "QUEUE_RECORD_CORRUPT" {
+		t.Fatalf("unexpected intent content: %+v", intent)
+	}
+}

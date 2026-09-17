@@ -34,15 +34,38 @@ var (
 const (
 	recordSequenceWidth     = 19
 	uncertainMarkerFile     = "location.uncertain"
+	transitionIntentFile    = "quarantine.transition"
+	maxIntentBytes          = 4096
+	syncPhaseIntentFile     = "intent-file"
+	syncPhaseIntentDir      = "intent-dir"
 	syncPhaseQuarantineDest = "quarantine-dest"
 	syncPhaseActiveSource   = "active-source"
 	syncPhaseRollbackDest   = "rollback-dest"
 	syncPhaseRollbackSource = "rollback-source"
+	syncPhaseIntentClearDir = "intent-clear-dir"
 )
 
-// syncHookFunc is a per-queue test seam for directory fsync phases. Production
+// syncHookFunc is a per-queue test seam for directory and file fsync phases. Production
 // leaves this nil. Hooks must not be process-global mutable state.
-type syncHookFunc func(phase, dir string) error
+type syncHookFunc func(phase, target string) error
+
+// pathHookFunc is a per-queue test seam for path operations (e.g. ReadDir, Lstat, Remove).
+type pathHookFunc func(path string) error
+
+type quarantineReasonSidecar struct {
+	Code string `json:"code"`
+}
+
+type uncertainMarkerPayload struct {
+	Code string `json:"code"`
+}
+
+type transitionIntent struct {
+	Version  int    `json:"version"`
+	Record   string `json:"record"`
+	Sequence uint64 `json:"sequence"`
+	Code     string `json:"code,omitempty"`
+}
 
 type Record struct {
 	Sequence  uint64    `json:"sequence"`
@@ -91,6 +114,9 @@ type DurableQueue struct {
 	unknownSequenceBlock bool
 	locationUncertain    bool
 	syncHook             syncHookFunc
+	readDirHook          pathHookFunc
+	lstatHook            pathHookFunc
+	removeHook           pathHookFunc
 }
 
 const sequenceMetaFile = "sequence.meta"
@@ -189,12 +215,15 @@ func (q *DurableQueue) recoverState() error {
 
 	q.unknownSequenceBlock = false
 	q.locationUncertain = false
-	if err := q.loadUncertainMarkerLocked(); err != nil {
-		return err
-	}
 
 	qHigh, err := q.scanQuarantineLocked()
 	if err != nil {
+		return err
+	}
+
+	intentSeq, hasIntent, _ := q.recoverTransitionIntentLocked()
+
+	if err := q.loadUncertainMarkerLocked(); err != nil {
 		return err
 	}
 
@@ -208,6 +237,9 @@ func (q *DurableQueue) recoverState() error {
 	var highestSeq uint64
 	if qHigh > highestSeq {
 		highestSeq = qHigh
+	}
+	if hasIntent && intentSeq > highestSeq {
+		highestSeq = intentSeq
 	}
 
 	for _, e := range entries {
@@ -498,7 +530,7 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 			q.unknownSequenceBlock = true
 			return nil, ErrUnknownSequence
 		}
-		if blocked > 0 && fileSeq > blocked {
+		if blocked > 0 && fileSeq >= blocked {
 			break
 		}
 
@@ -675,19 +707,28 @@ func (q *DurableQueue) errIfDeliveryBlockedLocked(hasPrefix bool) error {
 	if hasPrefix || q.blockedFromSequence == 0 {
 		return nil
 	}
-	if q.hasActiveAfterBlockedLocked() {
+	hasActive, err := q.hasActiveAfterBlockedLocked()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrQuarantineUncertain, err)
+	}
+	if hasActive {
 		return ErrDeliveryBlocked
 	}
 	return nil
 }
 
-func (q *DurableQueue) hasActiveAfterBlockedLocked() bool {
+func (q *DurableQueue) hasActiveAfterBlockedLocked() (bool, error) {
 	if q.blockedFromSequence == 0 {
-		return false
+		return false, nil
+	}
+	if q.readDirHook != nil {
+		if err := q.readDirHook(q.activeDir); err != nil {
+			return true, fmt.Errorf("QUEUE_ACTIVE_DIR_SCAN_FAILED: %w", err)
+		}
 	}
 	entries, err := os.ReadDir(q.activeDir)
 	if err != nil {
-		return false
+		return true, fmt.Errorf("QUEUE_ACTIVE_DIR_SCAN_FAILED: %w", err)
 	}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasPrefix(e.Name(), "rec_") || !strings.HasSuffix(e.Name(), ".json") {
@@ -697,11 +738,11 @@ func (q *DurableQueue) hasActiveAfterBlockedLocked() bool {
 		if err != nil {
 			continue
 		}
-		if seq > q.blockedFromSequence {
-			return true
+		if seq >= q.blockedFromSequence {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (q *DurableQueue) quarantineCapacityLocked(additionalBytes int64) error {
@@ -741,7 +782,10 @@ func (q *DurableQueue) writeQuarantineReason(recordName, code string) {
 		return
 	}
 	path := filepath.Join(q.quarantineDir, reasonName)
-	payload := []byte(`{"code":"` + sanitizeQuarantineCode(code) + `"}`)
+	payload, err := json.Marshal(quarantineReasonSidecar{Code: sanitizeQuarantineCode(code)})
+	if err != nil {
+		return
+	}
 	tmp, err := os.CreateTemp(q.quarantineDir, "reason.*.tmp")
 	if err != nil {
 		return
@@ -763,14 +807,21 @@ func (q *DurableQueue) writeQuarantineReason(recordName, code string) {
 	if err := tmp.Close(); err != nil {
 		return
 	}
-	_ = os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return
+	}
+	_ = syncDir(q.quarantineDir)
 }
 
 func (q *DurableQueue) quarantineRecordLocked(name, code string) error {
+	if q.locationUncertain {
+		return ErrQuarantineUncertain
+	}
+
 	oldPath := filepath.Join(q.activeDir, name)
 	newPath := filepath.Join(q.quarantineDir, name)
 
-	fi, err := os.Lstat(oldPath)
+	fi, err := q.lstatFile(oldPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -780,8 +831,11 @@ func (q *DurableQueue) quarantineRecordLocked(name, code string) error {
 	if fi.Mode()&os.ModeSymlink != 0 {
 		return errors.New("QUEUE_QUARANTINE_SYMLINK_REJECTED: active record path is a symlink")
 	}
+	if !fi.Mode().IsRegular() {
+		return errors.New("QUEUE_QUARANTINE_RECORD_NOT_REGULAR: active record path is not a regular file")
+	}
 
-	destInfo, destErr := os.Lstat(newPath)
+	destInfo, destErr := q.lstatFile(newPath)
 	if destErr == nil {
 		if destInfo.Mode()&os.ModeSymlink != 0 {
 			return errors.New("QUEUE_QUARANTINE_SYMLINK_REJECTED: quarantine record path is a symlink")
@@ -803,22 +857,42 @@ func (q *DurableQueue) quarantineRecordLocked(name, code string) error {
 		return ErrUnknownSequence
 	}
 
-	if err := os.Rename(oldPath, newPath); err != nil {
-		return fmt.Errorf("QUEUE_QUARANTINE_FAILED: %w", err)
+	// 1. Establish durable PRE-TRANSITION INTENT before any rename
+	if err := q.persistTransitionIntentLocked(name, fileSeq, code); err != nil {
+		q.locationUncertain = true
+		return fmt.Errorf("%w: transition intent failed: %v", ErrQuarantineUncertain, err)
 	}
 
-	if err := q.syncPhase(syncPhaseQuarantineDest, q.quarantineDir); err != nil {
+	// 2. Perform active -> quarantine rename
+	if err := os.Rename(oldPath, newPath); err != nil {
+		q.locationUncertain = true
+		return fmt.Errorf("%w: quarantine rename failed: %v", ErrQuarantineUncertain, err)
+	}
+
+	// 3. Sync quarantine destination directory
+	if err := q.syncDirPhase(syncPhaseQuarantineDest, q.quarantineDir); err != nil {
 		return q.rollbackQuarantineMoveLocked(name, err)
 	}
-	if err := q.syncPhase(syncPhaseActiveSource, q.activeDir); err != nil {
+
+	// 4. Sync active source directory
+	if err := q.syncDirPhase(syncPhaseActiveSource, q.activeDir); err != nil {
 		// Destination directory entry is durable. Do not reverse: a rollback
 		// could drop the only durable copy. Quarantine is authoritative.
 		q.applyQuarantineCountersLocked(size, fileSeq)
+		q.locationUncertain = true
 		return fmt.Errorf("%w: %v", ErrQuarantineSourceSyncFailed, err)
 	}
 
+	// 5. Final quarantine state is durably established
 	q.applyQuarantineCountersLocked(size, fileSeq)
 	q.writeQuarantineReason(name, code)
+
+	// 6. Clear transition intent durably
+	if err := q.clearTransitionIntentLocked(); err != nil {
+		q.locationUncertain = true
+		return fmt.Errorf("%w: clear transition intent failed: %v", ErrQuarantineUncertain, err)
+	}
+
 	return nil
 }
 
@@ -839,20 +913,34 @@ func (q *DurableQueue) applyQuarantineCountersLocked(size int64, fileSeq uint64)
 func (q *DurableQueue) rollbackQuarantineMoveLocked(name string, destSyncErr error) error {
 	activePath := filepath.Join(q.activeDir, name)
 	quarantinePath := filepath.Join(q.quarantineDir, name)
+
+	// Attempt rollback rename: quarantine -> active
 	if err := os.Rename(quarantinePath, activePath); err != nil {
 		return q.enterUncertainLocked(fmt.Errorf("rollback rename failed: %w", err))
 	}
-	if err := q.syncPhase(syncPhaseRollbackDest, q.activeDir); err != nil {
+
+	// Step 1: Sync rollback destination (active directory)
+	if err := q.syncDirPhase(syncPhaseRollbackDest, q.activeDir); err != nil {
 		return q.enterUncertainLocked(fmt.Errorf("rollback dest sync failed: %w", err))
 	}
-	if err := q.syncPhase(syncPhaseRollbackSource, q.quarantineDir); err != nil {
+
+	// Step 2: Sync rollback source (quarantine directory)
+	if err := q.syncDirPhase(syncPhaseRollbackSource, q.quarantineDir); err != nil {
 		// Rollback destination (active/) is durable. Do not reverse again.
+		q.locationUncertain = true
 		return fmt.Errorf("QUEUE_QUARANTINE_DIR_SYNC_FAILED: %w", destSyncErr)
 	}
+
+	// Rollback durability established: attempt to clear transition intent
+	if err := q.clearTransitionIntentLocked(); err != nil {
+		q.locationUncertain = true
+		return fmt.Errorf("%w: clear transition intent after rollback failed: %v", ErrQuarantineUncertain, err)
+	}
+
 	return fmt.Errorf("QUEUE_QUARANTINE_DIR_SYNC_FAILED: %w", destSyncErr)
 }
 
-func (q *DurableQueue) syncPhase(phase, dir string) error {
+func (q *DurableQueue) syncDirPhase(phase, dir string) error {
 	if q.syncHook != nil {
 		if err := q.syncHook(phase, dir); err != nil {
 			return err
@@ -861,15 +949,222 @@ func (q *DurableQueue) syncPhase(phase, dir string) error {
 	return syncDir(dir)
 }
 
+func (q *DurableQueue) syncFilePhase(phase string, f *os.File) error {
+	if q.syncHook != nil {
+		if err := q.syncHook(phase, f.Name()); err != nil {
+			return err
+		}
+	}
+	return f.Sync()
+}
+
+func (q *DurableQueue) lstatFile(path string) (os.FileInfo, error) {
+	if q.lstatHook != nil {
+		if err := q.lstatHook(path); err != nil {
+			return nil, err
+		}
+	}
+	return os.Lstat(path)
+}
+
+func (q *DurableQueue) persistTransitionIntentLocked(recordName string, seq uint64, code string) error {
+	intent := transitionIntent{
+		Version:  1,
+		Record:   recordName,
+		Sequence: seq,
+		Code:     sanitizeQuarantineCode(code),
+	}
+	data, err := json.Marshal(intent)
+	if err != nil {
+		return fmt.Errorf("QUEUE_INTENT_MARSHAL_FAILED: %w", err)
+	}
+
+	intentPath := filepath.Join(q.dir, transitionIntentFile)
+	f, err := os.OpenFile(intentPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("QUEUE_INTENT_OPEN_FAILED: %w", err)
+	}
+	if err := f.Chmod(0600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("QUEUE_INTENT_CHMOD_FAILED: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("QUEUE_INTENT_WRITE_FAILED: %w", err)
+	}
+	if err := q.syncFilePhase(syncPhaseIntentFile, f); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("QUEUE_INTENT_SYNC_FAILED: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("QUEUE_INTENT_CLOSE_FAILED: %w", err)
+	}
+	if err := q.syncDirPhase(syncPhaseIntentDir, q.dir); err != nil {
+		return fmt.Errorf("QUEUE_INTENT_DIR_SYNC_FAILED: %w", err)
+	}
+	return nil
+}
+
+func (q *DurableQueue) clearTransitionIntentLocked() error {
+	intentPath := filepath.Join(q.dir, transitionIntentFile)
+	if q.removeHook != nil {
+		if err := q.removeHook(intentPath); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(intentPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("QUEUE_INTENT_REMOVE_FAILED: %w", err)
+	}
+	if err := q.syncDirPhase(syncPhaseIntentClearDir, q.dir); err != nil {
+		return fmt.Errorf("QUEUE_INTENT_CLEAR_DIR_SYNC_FAILED: %w", err)
+	}
+	return nil
+}
+
+func (q *DurableQueue) recoverTransitionIntentLocked() (uint64, bool, error) {
+	intentPath := filepath.Join(q.dir, transitionIntentFile)
+	fi, err := q.lstatFile(intentPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		q.locationUncertain = true
+		return 0, true, nil
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		q.locationUncertain = true
+		return 0, true, nil
+	}
+	if !fi.Mode().IsRegular() {
+		q.locationUncertain = true
+		return 0, true, nil
+	}
+	if fi.Size() == 0 || fi.Size() > maxIntentBytes {
+		q.locationUncertain = true
+		return 0, true, nil
+	}
+
+	data, err := os.ReadFile(intentPath)
+	if err != nil {
+		q.locationUncertain = true
+		return 0, true, nil
+	}
+	var intent transitionIntent
+	if err := json.Unmarshal(data, &intent); err != nil {
+		q.locationUncertain = true
+		return 0, true, nil
+	}
+
+	if intent.Version != 1 || filepath.Base(intent.Record) != intent.Record || strings.Contains(intent.Record, "..") {
+		q.locationUncertain = true
+		return 0, true, nil
+	}
+
+	fileSeq, _, parseErr := parseRecordFileName(intent.Record)
+	if parseErr != nil || fileSeq == 0 || fileSeq != intent.Sequence {
+		q.locationUncertain = true
+		return 0, true, nil
+	}
+
+	aPath := filepath.Join(q.activeDir, intent.Record)
+	qPath := filepath.Join(q.quarantineDir, intent.Record)
+
+	aInfo, aErr := q.lstatFile(aPath)
+	if aErr != nil && !errors.Is(aErr, os.ErrNotExist) {
+		q.locationUncertain = true
+		return intent.Sequence, true, nil
+	}
+	if aErr == nil {
+		if aInfo.Mode()&os.ModeSymlink != 0 || !aInfo.Mode().IsRegular() {
+			q.locationUncertain = true
+			return intent.Sequence, true, nil
+		}
+	}
+
+	qInfo, qErr := q.lstatFile(qPath)
+	if qErr != nil && !errors.Is(qErr, os.ErrNotExist) {
+		q.locationUncertain = true
+		return intent.Sequence, true, nil
+	}
+	if qErr == nil {
+		if qInfo.Mode()&os.ModeSymlink != 0 || !qInfo.Mode().IsRegular() {
+			q.locationUncertain = true
+			return intent.Sequence, true, nil
+		}
+	}
+
+	hasActive := (aErr == nil)
+	hasQuarantine := (qErr == nil)
+
+	switch {
+	case !hasActive && !hasQuarantine:
+		// Case E: intent + neither active nor quarantine -> QUEUE_QUARANTINE_UNCERTAIN
+		q.noteBlockedLocked(intent.Sequence)
+		q.locationUncertain = true
+		return intent.Sequence, true, nil
+
+	case !hasActive && hasQuarantine:
+		// Case A: intent + quarantine only
+		// Quarantine is authoritative. Record is blocked.
+		// Later records cannot be delivered.
+		q.noteBlockedLocked(intent.Sequence)
+		return intent.Sequence, true, nil
+
+	case hasActive && !hasQuarantine:
+		// Case B: intent + active only
+		// Active record retained. Fail closed / reconciliation required. No later delivery.
+		q.noteBlockedLocked(intent.Sequence)
+		return intent.Sequence, true, nil
+
+	case hasActive && hasQuarantine:
+		// Both exist: check identical vs conflicting bytes
+		aData, err := os.ReadFile(aPath)
+		if err != nil {
+			q.noteBlockedLocked(intent.Sequence)
+			q.locationUncertain = true
+			return intent.Sequence, true, nil
+		}
+		qData, err := os.ReadFile(qPath)
+		if err != nil {
+			q.noteBlockedLocked(intent.Sequence)
+			q.locationUncertain = true
+			return intent.Sequence, true, nil
+		}
+
+		if bytes.Equal(aData, qData) {
+			// Case C: intent + active + quarantine with identical bytes
+			// Quarantine authoritative. Active duplicate must NEVER be delivered.
+			// Fail closed / blocked until reconciliation.
+			q.noteBlockedLocked(intent.Sequence)
+			return intent.Sequence, true, nil
+		}
+
+		// Case D: intent + active + quarantine with conflicting bytes -> QUEUE_QUARANTINE_UNCERTAIN
+		q.noteBlockedLocked(intent.Sequence)
+		q.locationUncertain = true
+		return intent.Sequence, true, nil
+	}
+
+	return intent.Sequence, true, nil
+}
+
 func (q *DurableQueue) enterUncertainLocked(cause error) error {
 	q.locationUncertain = true
-	_ = q.persistUncertainMarkerLocked()
+	if err := q.persistUncertainMarkerLocked(); err != nil {
+		return fmt.Errorf("%w: marker persistence failed (%v) after cause: %v", ErrQuarantineUncertain, err, cause)
+	}
 	return fmt.Errorf("%w: %v", ErrQuarantineUncertain, cause)
 }
 
 func (q *DurableQueue) persistUncertainMarkerLocked() error {
 	path := filepath.Join(q.dir, uncertainMarkerFile)
-	payload := []byte(`{"code":"QUEUE_QUARANTINE_UNCERTAIN"}`)
+	payload, err := json.Marshal(uncertainMarkerPayload{Code: "QUEUE_QUARANTINE_UNCERTAIN"})
+	if err != nil {
+		return fmt.Errorf("QUEUE_UNCERTAIN_MARSHAL_FAILED: %w", err)
+	}
 	tmp, err := os.CreateTemp(q.dir, "uncertain.*.tmp")
 	if err != nil {
 		return err
@@ -899,23 +1194,31 @@ func (q *DurableQueue) persistUncertainMarkerLocked() error {
 
 func (q *DurableQueue) loadUncertainMarkerLocked() error {
 	path := filepath.Join(q.dir, uncertainMarkerFile)
-	data, err := os.ReadFile(path)
+	fi, err := q.lstatFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
+		return fmt.Errorf("QUEUE_UNCERTAIN_MARKER_STAT_FAILED: %w", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		q.locationUncertain = true
+		return errors.New("QUEUE_UNCERTAIN_MARKER_SYMLINK: uncertain marker is a symlink")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return fmt.Errorf("QUEUE_UNCERTAIN_MARKER_READ_FAILED: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
 		q.locationUncertain = true
 		return nil
 	}
-	var meta map[string]string
+	var meta uncertainMarkerPayload
 	if err := json.Unmarshal(data, &meta); err != nil {
 		q.locationUncertain = true
 		return nil
 	}
-	if meta["code"] != "QUEUE_QUARANTINE_UNCERTAIN" {
+	if meta.Code != "QUEUE_QUARANTINE_UNCERTAIN" {
 		q.locationUncertain = true
 		return nil
 	}
@@ -925,7 +1228,7 @@ func (q *DurableQueue) loadUncertainMarkerLocked() error {
 
 func (q *DurableQueue) duplicateStateLocked(name string) (bool, error) {
 	qPath := filepath.Join(q.quarantineDir, name)
-	qInfo, err := os.Lstat(qPath)
+	qInfo, err := q.lstatFile(qPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
@@ -935,7 +1238,25 @@ func (q *DurableQueue) duplicateStateLocked(name string) (bool, error) {
 	if qInfo.Mode()&os.ModeSymlink != 0 {
 		return false, errors.New("QUEUE_QUARANTINE_SYMLINK_REJECTED: quarantine record path is a symlink")
 	}
+	if !qInfo.Mode().IsRegular() {
+		return false, errors.New("QUEUE_QUARANTINE_RECORD_NOT_REGULAR: quarantine record path is not a regular file")
+	}
+
 	aPath := filepath.Join(q.activeDir, name)
+	aInfo, err := q.lstatFile(aPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("QUEUE_DUPLICATE_ACTIVE_STAT_FAILED: %w", err)
+	}
+	if aInfo.Mode()&os.ModeSymlink != 0 {
+		return false, errors.New("QUEUE_ACTIVE_SYMLINK_REJECTED: active record path is a symlink")
+	}
+	if !aInfo.Mode().IsRegular() {
+		return false, errors.New("QUEUE_ACTIVE_RECORD_NOT_REGULAR: active record path is not a regular file")
+	}
+
 	aData, err := os.ReadFile(aPath)
 	if err != nil {
 		return false, fmt.Errorf("QUEUE_DUPLICATE_ACTIVE_READ_FAILED: %w", err)
@@ -959,9 +1280,21 @@ func (q *DurableQueue) reconcileDuplicatesLocked() error {
 		if e.IsDir() || !isRecordJSON(e.Name()) {
 			continue
 		}
-		if _, destErr := os.Lstat(filepath.Join(q.quarantineDir, e.Name())); destErr != nil {
-			continue
+		destPath := filepath.Join(q.quarantineDir, e.Name())
+		destInfo, destErr := q.lstatFile(destPath)
+		if destErr != nil {
+			if errors.Is(destErr, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("QUEUE_RECONCILE_DEST_STAT_FAILED: %w", destErr)
 		}
+		if destInfo.Mode()&os.ModeSymlink != 0 {
+			return errors.New("QUEUE_QUARANTINE_SYMLINK_REJECTED: quarantine record path is a symlink")
+		}
+		if !destInfo.Mode().IsRegular() {
+			return errors.New("QUEUE_QUARANTINE_RECORD_NOT_REGULAR: quarantine record path is not a regular file")
+		}
+
 		dup, dupErr := q.duplicateStateLocked(e.Name())
 		if dupErr != nil {
 			if errors.Is(dupErr, ErrQuarantineUncertain) {
@@ -1062,6 +1395,7 @@ func (q *DurableQueue) Stats() QueueStats {
 
 	atCapacity := q.activeCount >= q.maxRecords || q.activeBytes >= q.maxBytes
 	quarantineAtCapacity := q.quarantineCount >= q.maxQuarantineRecords || q.quarantineBytes >= q.maxQuarantineBytes
+	hasActiveBlocked, hasActiveErr := q.hasActiveAfterBlockedLocked()
 	return QueueStats{
 		ActiveCount:          q.activeCount,
 		ActiveBytes:          q.activeBytes,
@@ -1076,7 +1410,7 @@ func (q *DurableQueue) Stats() QueueStats {
 		AtCapacity:           atCapacity,
 		QuarantineAtCapacity: quarantineAtCapacity,
 		BlockedFromSequence:  q.blockedFromSequence,
-		DeliveryBlocked:      q.unknownSequenceBlock || q.locationUncertain || q.hasActiveAfterBlockedLocked(),
+		DeliveryBlocked:      q.unknownSequenceBlock || q.locationUncertain || hasActiveBlocked || hasActiveErr != nil,
 		UnknownSequenceBlock: q.unknownSequenceBlock,
 		LocationUncertain:    q.locationUncertain,
 	}

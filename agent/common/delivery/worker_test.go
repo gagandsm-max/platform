@@ -592,3 +592,63 @@ func TestDeliveryWorkerDestExistsDoesNotRetry(t *testing.T) {
 		t.Fatal("destination-exists must not count as success")
 	}
 }
+
+func TestDeliveryWorkerLocalQueueBlockDoesNotClearReceiverAvailable(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{queue.ErrDeliveryBlocked, "QUEUE_DELIVERY_BLOCKED"},
+		{queue.ErrQuarantineUncertain, "QUEUE_QUARANTINE_UNCERTAIN"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			q := &mockQueue{
+				records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("ok")}},
+			}
+			tr := &mockTransport{
+				available: true,
+				echoID:    true,
+				ack:       client.Ack{AcceptedThrough: 1},
+			}
+			w, err := NewWorker(q, tr, "agent-1", 10, 1024, time.Millisecond, time.Millisecond, time.Second, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// 1. Establish ReceiverAvailable=true through a successful delivery
+			delivered, err := w.DeliverOnce(context.Background())
+			if err != nil || !delivered {
+				t.Fatalf("expected successful initial delivery: delivered=%v err=%v", delivered, err)
+			}
+			if !w.Stats().ReceiverAvailable {
+				t.Fatal("expected ReceiverAvailable=true after successful delivery")
+			}
+
+			// 2. Produce local queue error on next ReadBatch
+			q.mu.Lock()
+			q.readErr = tc.err
+			q.mu.Unlock()
+
+			delivered, err = w.DeliverOnce(context.Background())
+			if err == nil || delivered {
+				t.Fatalf("expected delivery error for %v", tc.err)
+			}
+
+			// 3. Verify ReceiverAvailable remains true
+			stats := w.Stats()
+			if !stats.ReceiverAvailable {
+				t.Fatalf("ReceiverAvailable must remain true on local queue failure (%v), got false", tc.err)
+			}
+
+			// 4. Verify LastFailureClass == BLOCKED
+			if stats.LastFailureClass != client.FailureBlocked {
+				t.Fatalf("expected FailureBlocked, got %s", stats.LastFailureClass)
+			}
+
+			// 5. Verify correct queue error code
+			if stats.LastErrorCode != tc.code {
+				t.Fatalf("expected code %s, got %s", tc.code, stats.LastErrorCode)
+			}
+		})
+	}
+}
