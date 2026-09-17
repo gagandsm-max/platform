@@ -358,6 +358,8 @@ func queueFailureCode(err error) string {
 		return "QUEUE_META_UNCERTAIN"
 	case errors.Is(err, queue.ErrAckRecoveryConflict):
 		return "QUEUE_ACK_RECOVERY_CONFLICT"
+	case errors.Is(err, queue.ErrPendingAckCleanup):
+		return "QUEUE_PENDING_ACK_CLEANUP"
 	default:
 		return "QUEUE_READ_FAILED"
 	}

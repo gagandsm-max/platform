@@ -33,6 +33,7 @@ var (
 	ErrSequenceConflict           = errors.New("QUEUE_SEQUENCE_CONFLICT: multiple active records share a sequence")
 	ErrMetaUncertain              = errors.New("QUEUE_META_UNCERTAIN: durable sequence metadata state cannot be confirmed")
 	ErrAckRecoveryConflict        = errors.New("QUEUE_ACK_RECOVERY_CONFLICT: unauthorized or conflicting record at or below acceptedThrough")
+	ErrPendingAckCleanup          = errors.New("QUEUE_PENDING_ACK_CLEANUP: prior ACK cleanup not yet durable")
 )
 
 const (
@@ -639,6 +640,23 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 	}
 	if q.locationUncertain {
 		return nil, ErrQuarantineUncertain
+	}
+
+	// Resolve pending ACK cleanup before delivering later records.
+	if len(q.acceptedRecords) > 0 {
+		if err := q.reconcileAcceptedLeftoversLocked(); err != nil {
+			return nil, err
+		}
+		if len(q.acceptedRecords) > 0 {
+			// Conflict retains auth and blocks cleanup; do not mask as temporary pending.
+			if q.ackRecoveryConflictBlock {
+				return nil, ErrAckRecoveryConflict
+			}
+			if q.sequenceConflictBlock {
+				return nil, ErrSequenceConflict
+			}
+			return nil, ErrPendingAckCleanup
+		}
 	}
 
 	entries, err := os.ReadDir(q.activeDir)
@@ -1607,10 +1625,29 @@ func (q *DurableQueue) refreshSequenceIntegrityLocked() error {
 				}
 			}
 		} else {
-			// acceptedThrough == 0: arbitrary first sequence remains legal when records
-			// exist, but an empty active with claimed highestSequence is not healthy.
+			// acceptedThrough == 0: arbitrary initial sequence remains legal, but once any
+			// durable disposition exists, continuity from the lowest known sequence through
+			// highestSequence is required. Quarantine covers only its own sequence.
+			if q.lastSeq == 0 {
+				return nil
+			}
 			if len(covered) == 0 {
 				q.sequenceGapBlock = true
+				return nil
+			}
+			var lowest uint64
+			first := true
+			for seq := range covered {
+				if first || seq < lowest {
+					lowest = seq
+					first = false
+				}
+			}
+			for seq := lowest; seq <= q.lastSeq; seq++ {
+				if _, ok := covered[seq]; !ok {
+					q.sequenceGapBlock = true
+					break
+				}
 			}
 		}
 	}
@@ -1631,6 +1668,9 @@ func (q *DurableQueue) reconcileAcceptedLeftoversLocked() error {
 	if q.ackRecoveryConflictBlock {
 		// Unauthorized / ID-mismatched leftovers at or below acceptedThrough:
 		// retain records, retain acceptedRecords, do not treat as healthy skip.
+		return nil
+	}
+	if len(q.acceptedRecords) == 0 {
 		return nil
 	}
 
@@ -1672,9 +1712,6 @@ func (q *DurableQueue) reconcileAcceptedLeftoversLocked() error {
 		}
 		deletes = append(deletes, leftoverDelete{name: e.Name(), size: fi.Size()})
 	}
-	if len(deletes) == 0 && len(q.acceptedRecords) == 0 {
-		return q.refreshSequenceIntegrityLocked()
-	}
 
 	for _, d := range deletes {
 		filePath := filepath.Join(q.activeDir, d.name)
@@ -1690,21 +1727,21 @@ func (q *DurableQueue) reconcileAcceptedLeftoversLocked() error {
 	if q.activeBytes < 0 {
 		q.activeBytes = 0
 	}
-	if len(deletes) > 0 {
-		if err := syncDir(q.activeDir); err != nil {
-			return fmt.Errorf("QUEUE_RECOVER_LEFTOVER_DIR_SYNC_FAILED: %w", err)
-		}
+
+	// Pending acceptedRecords requires active-dir fsync before auth may be cleared,
+	// even when authorized files are already absent (unlink may not have been durable).
+	if err := q.syncDirPhase(syncPhaseActiveCommit, q.activeDir); err != nil {
+		return fmt.Errorf("QUEUE_RECOVER_LEFTOVER_DIR_SYNC_FAILED: %w", err)
 	}
-	if len(q.acceptedRecords) > 0 {
-		highest := q.lastSeq
-		if q.acceptedThrough > highest {
-			highest = q.acceptedThrough
-		}
-		if err := q.persistSequenceMetaLocked(highest, q.acceptedThrough, nil); err != nil {
-			return err
-		}
-		q.acceptedRecords = nil
+
+	highest := q.lastSeq
+	if q.acceptedThrough > highest {
+		highest = q.acceptedThrough
 	}
+	if err := q.persistSequenceMetaLocked(highest, q.acceptedThrough, nil); err != nil {
+		return err
+	}
+	q.acceptedRecords = nil
 	return q.refreshSequenceIntegrityLocked()
 }
 
@@ -1725,6 +1762,23 @@ func (q *DurableQueue) CommitAccepted(records []Record, acceptedThrough uint64) 
 	}
 	if len(records) == 0 {
 		return errors.New("QUEUE_COMMIT_EMPTY_BATCH: ACK without submitted records")
+	}
+
+	// Pending acceptedRecords is a durable cleanup barrier: reconcile it fully
+	// before any later ACK may overwrite authorization metadata.
+	if len(q.acceptedRecords) > 0 {
+		if err := q.reconcileAcceptedLeftoversLocked(); err != nil {
+			return err
+		}
+		if len(q.acceptedRecords) > 0 {
+			if q.ackRecoveryConflictBlock {
+				return ErrAckRecoveryConflict
+			}
+			if q.sequenceConflictBlock {
+				return ErrSequenceConflict
+			}
+			return ErrPendingAckCleanup
+		}
 	}
 
 	var prefix []Record

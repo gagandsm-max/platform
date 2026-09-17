@@ -50,6 +50,7 @@ func TestClassify(t *testing.T) {
 		{queue.ErrSequenceConflict, FailureBlocked},
 		{queue.ErrMetaUncertain, FailureBlocked},
 		{queue.ErrAckRecoveryConflict, FailureBlocked},
+		{queue.ErrPendingAckCleanup, FailureTemporary},
 	}
 	for _, tc := range cases {
 		if got := Classify(tc.err); got != tc.want {

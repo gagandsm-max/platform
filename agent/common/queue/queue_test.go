@@ -2923,3 +2923,357 @@ func TestDurableQueueAcceptedThroughNeverRegresses(t *testing.T) {
 		t.Fatalf("disk acceptedThrough must never regress below 1, got %d", meta.AcceptedThrough)
 	}
 }
+
+func TestDurableQueueQuarantineMustNotMaskMissingTail(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"one", "two", "three"} {
+		if _, err := q.Enqueue([]byte(p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	corruptRecordFile(t, activeRecordPath(t, tempDir, 1))
+	if _, err := q.ReadBatch(10, 1024*1024); err != nil && !errors.Is(err, ErrDeliveryBlocked) && !errors.Is(err, ErrSequenceGap) {
+		// quarantine of seq1 may leave later actives blocked or readable depending on path
+		if q.Stats().QuarantineCount == 0 {
+			t.Fatalf("expected sequence 1 quarantined, err=%v stats=%+v", err, q.Stats())
+		}
+	}
+	if q.Stats().QuarantineCount != 1 {
+		t.Fatalf("expected sequence 1 quarantined, stats=%+v", q.Stats())
+	}
+	if err := os.Remove(activeRecordPath(t, tempDir, 2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(activeRecordPath(t, tempDir, 3)); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 2; i++ {
+		qi, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatalf("reopen %d: %v", i, err)
+		}
+		batch, err := qi.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrSequenceGap) || len(batch) != 0 {
+			t.Fatalf("reopen %d: expected QUEUE_SEQUENCE_GAP empty batch, got batch=%+v err=%v", i, batch, err)
+		}
+		stats := qi.Stats()
+		if !stats.SequenceGapBlock || !stats.DeliveryBlocked {
+			t.Fatalf("reopen %d: must be gap-blocked, stats=%+v", i, stats)
+		}
+		if stats.QuarantineCount != 1 || !recordPresent(t, tempDir, "quarantine", 1) {
+			t.Fatalf("reopen %d: sequence 1 quarantine must remain", i)
+		}
+		if stats.AcceptedThrough != 0 {
+			t.Fatalf("reopen %d: acceptedThrough must stay 0, got %d", i, stats.AcceptedThrough)
+		}
+	}
+}
+
+func TestDurableQueueArbitraryInitialLineageValid(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, 42, "rec-42", []byte("start"))
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(`{"highestSequence":42}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 1 || batch[0].Sequence != 42 {
+		t.Fatalf("seq 42 alone must be valid, got %+v err=%v", batch, err)
+	}
+
+	tempDir2 := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir2, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir2, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, seq := range []uint64{42, 43, 44} {
+		writeActiveRecord(t, tempDir2, seq, fmt.Sprintf("rec-%d", seq), []byte("x"))
+	}
+	if err := os.WriteFile(filepath.Join(tempDir2, sequenceMetaFile), []byte(`{"highestSequence":44}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q2, err := NewDurableQueue(tempDir2, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 3 || batch[0].Sequence != 42 {
+		t.Fatalf("contiguous 42..44 must be valid, got %+v err=%v", batch, err)
+	}
+}
+
+func TestDurableQueueInitialLineageInteriorGap(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, 42, "rec-42", []byte("a"))
+	writeActiveRecord(t, tempDir, 44, "rec-44", []byte("c"))
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(`{"highestSequence":44}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrSequenceGap) || len(batch) != 0 {
+		t.Fatalf("missing 43 must QUEUE_SEQUENCE_GAP, got batch=%+v err=%v", batch, err)
+	}
+	if !q.Stats().SequenceGapBlock || !q.Stats().DeliveryBlocked {
+		t.Fatalf("stats must report gap block: %+v", q.Stats())
+	}
+}
+
+func TestDurableQueueActiveDirSyncFailurePreservesOldAuthorization(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 2 {
+		t.Fatalf("expected 2, got %+v err=%v", batch, err)
+	}
+	authID := batch[0].ID
+	q.syncHook = func(phase, target string) error {
+		if phase == syncPhaseActiveCommit {
+			return errors.New("injected active commit sync fail")
+		}
+		return nil
+	}
+	if err := q.CommitAccepted(batch[:1], 1); err == nil {
+		t.Fatal("expected active dirsync failure")
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.AcceptedThrough != 1 || len(meta.AcceptedRecords) != 1 || meta.AcceptedRecords[0].ID != authID {
+		t.Fatalf("seq1 auth must remain pending after dirsync failure, got %+v", meta)
+	}
+
+	batch2, err := q.ReadBatch(10, 1024*1024)
+	if err == nil {
+		// If ReadBatch hit pending cleanup fsync fail, err is set; otherwise empty conflict.
+		_ = batch2
+	}
+	if err := q.CommitAccepted([]Record{{Sequence: 2, ID: batch[1].ID, Payload: []byte("two"), Checksum: batch[1].Checksum, CreatedAt: batch[1].CreatedAt}}, 2); err == nil {
+		t.Fatal("seq2 ACK must not succeed while seq1 cleanup pending and dirsync still failing")
+	}
+	meta = readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 1 || meta.AcceptedRecords[0].Sequence != 1 || meta.AcceptedRecords[0].ID != authID {
+		t.Fatalf("seq2 must not overwrite seq1 auth, got %+v", meta.AcceptedRecords)
+	}
+	if meta.AcceptedThrough != 1 {
+		t.Fatalf("acceptedThrough must stay 1, got %d", meta.AcceptedThrough)
+	}
+}
+
+func TestDurableQueueRetryAfterActiveDirSyncFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 2 {
+		t.Fatalf("expected 2, got %+v err=%v", batch, err)
+	}
+	auth1 := batch[0].ID
+	failActive := true
+	clearedSeq1 := false
+	q.syncHook = func(phase, target string) error {
+		if phase == syncPhaseActiveCommit && failActive {
+			return errors.New("injected active commit sync fail")
+		}
+		return nil
+	}
+	if err := q.CommitAccepted(batch[:1], 1); err == nil {
+		t.Fatal("expected first commit dirsync failure")
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 1 || meta.AcceptedRecords[0].ID != auth1 {
+		t.Fatalf("pending seq1 auth required, got %+v", meta.AcceptedRecords)
+	}
+
+	failActive = false
+	q.syncHook = func(phase, target string) error {
+		if phase == syncPhaseActiveCommit {
+			// After pending cleanup clears seq1, meta clear happens; then seq2 commit will sync again.
+			return nil
+		}
+		if phase == syncPhaseMetaFile || phase == syncPhaseMetaDir {
+			m := readSequenceMetaFile(t, tempDir)
+			if len(m.AcceptedRecords) == 0 && m.AcceptedThrough >= 1 {
+				clearedSeq1 = true
+			}
+		}
+		return nil
+	}
+	batch2, err := q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta = readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 0 {
+		t.Fatalf("seq1 pending auth must clear before later delivery, got %+v", meta.AcceptedRecords)
+	}
+	if len(batch2) == 0 || batch2[0].Sequence != 2 {
+		t.Fatalf("expected seq2 after cleanup, got %+v", batch2)
+	}
+	if err := q.CommitAccepted(batch2[:1], 2); err != nil {
+		t.Fatal(err)
+	}
+	meta = readSequenceMetaFile(t, tempDir)
+	if meta.AcceptedThrough != 2 {
+		t.Fatalf("acceptedThrough must advance to 2, got %d", meta.AcceptedThrough)
+	}
+	if len(meta.AcceptedRecords) != 0 {
+		t.Fatalf("seq2 auth must clear after successful commit, got %+v", meta.AcceptedRecords)
+	}
+	_ = clearedSeq1
+}
+
+func TestDurableQueueAbsentAuthorizedFileRequiresActiveDirSync(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 2 {
+		t.Fatalf("expected 2, got %+v err=%v", batch, err)
+	}
+	authID := batch[0].ID
+	q.removeHook = func(path string) error {
+		if strings.Contains(path, string(filepath.Separator)+"active"+string(filepath.Separator)) && strings.HasSuffix(path, ".json") {
+			return errors.New("injected delete fail")
+		}
+		return nil
+	}
+	if err := q.CommitAccepted(batch[:1], 1); err == nil {
+		t.Fatal("expected delete failure")
+	}
+	if err := os.Remove(activeRecordPath(t, tempDir, 1)); err != nil {
+		t.Fatal(err)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 1 || meta.AcceptedRecords[0].ID != authID {
+		t.Fatalf("pending auth required, got %+v", meta.AcceptedRecords)
+	}
+
+	fsyncSeen := 0
+	failSync := true
+	q.removeHook = nil
+	q.syncHook = func(phase, target string) error {
+		if phase == syncPhaseActiveCommit {
+			fsyncSeen++
+			if failSync {
+				return errors.New("injected recover active sync fail")
+			}
+		}
+		return nil
+	}
+	if _, err := q.ReadBatch(10, 1024*1024); !errors.Is(err, ErrPendingAckCleanup) && err == nil {
+		// reconcile returns wrapped fsync error
+		if err == nil {
+			t.Fatal("expected pending cleanup failure while active fsync fails")
+		}
+	}
+	meta = readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 1 {
+		t.Fatalf("acceptedRecords must not clear without durable active fsync, got %+v", meta.AcceptedRecords)
+	}
+	if fsyncSeen == 0 {
+		t.Fatal("active dir fsync must be attempted even when authorized file is absent")
+	}
+
+	failSync = false
+	fsyncSeen = 0
+	batch2, err := q.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fsyncSeen == 0 {
+		t.Fatal("successful recovery must fsync active dir with zero deletions")
+	}
+	meta = readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 0 {
+		t.Fatalf("acceptedRecords must clear after durable fsync, got %+v", meta.AcceptedRecords)
+	}
+	if len(batch2) == 0 || batch2[0].Sequence != 2 {
+		t.Fatalf("later delivery may continue, got %+v", batch2)
+	}
+}
+
+func TestDurableQueueTwoConsecutiveFailedCleanupsPreserveAuth(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 2 {
+		t.Fatalf("expected 2, got %+v err=%v", batch, err)
+	}
+	authID := batch[0].ID
+	q.syncHook = func(phase, target string) error {
+		if phase == syncPhaseActiveCommit {
+			return errors.New("injected active commit sync fail")
+		}
+		return nil
+	}
+	if err := q.CommitAccepted(batch[:1], 1); err == nil {
+		t.Fatal("expected first cleanup fsync failure")
+	}
+	for i := 0; i < 2; i++ {
+		if err := q.CommitAccepted([]Record{batch[1]}, 2); err == nil {
+			t.Fatalf("attempt %d: seq2 ACK must fail while seq1 cleanup pending", i)
+		}
+		meta := readSequenceMetaFile(t, tempDir)
+		if meta.AcceptedThrough != 1 || len(meta.AcceptedRecords) != 1 || meta.AcceptedRecords[0].ID != authID || meta.AcceptedRecords[0].Sequence != 1 {
+			t.Fatalf("attempt %d: auth must remain exactly seq1, got through=%d records=%+v", i, meta.AcceptedThrough, meta.AcceptedRecords)
+		}
+	}
+}

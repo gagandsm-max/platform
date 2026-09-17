@@ -118,6 +118,9 @@ func Classify(err error) FailureClass {
 	if errors.Is(err, queue.ErrAckRecoveryConflict) {
 		return FailureBlocked
 	}
+	if errors.Is(err, queue.ErrPendingAckCleanup) {
+		return FailureTemporary
+	}
 	var de *DeliveryError
 	if errors.As(err, &de) && de.Class != "" {
 		return de.Class
