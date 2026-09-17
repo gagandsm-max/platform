@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/topology_routing/SKILL.md sha256:fb2454fb10f1cef5089f33ad6458c1c80ec649d555d9f9cf0b7dd7d8a51a38fb -->
-
 ---
 name: topology_routing
 description: Routing/topology discovery, network-service dependencies (DNS/DHCP/NTP/AAA) and provenance/confidence on graph edges.
 ---
+
+<!-- generated from project_agents/skills/topology_routing/SKILL.md sha256:fb2454fb10f1cef5089f33ad6458c1c80ec649d555d9f9cf0b7dd7d8a51a38fb -->
 
 # topology_routing
 

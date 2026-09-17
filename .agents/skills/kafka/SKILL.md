@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/kafka/SKILL.md sha256:43bc23de4acf109d0e813a2757e6d9cf0f74e198fcae8f1e2f42f964cb13ca6b -->
-
 ---
 name: kafka
 description: Internal Kafka transport, consumer fail-closed ACK/offset, poison parking and lag evidence.
 ---
+
+<!-- generated from project_agents/skills/kafka/SKILL.md sha256:43bc23de4acf109d0e813a2757e6d9cf0f74e198fcae8f1e2f42f964cb13ca6b -->
 
 # kafka
 

@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/exact_head_merge_gate/SKILL.md sha256:2995cf42fd6a5fd9f72b8824ebdc4cb2210a5fe9417a485e631dfdeff214be64 -->
-
 ---
 name: exact_head_merge_gate
 description: Gate review and merge claims on the exact current head, complete required CI/evidence and independent verification; drift invalidates stale evidence.
 ---
+
+<!-- generated from project_agents/skills/exact_head_merge_gate/SKILL.md sha256:2995cf42fd6a5fd9f72b8824ebdc4cb2210a5fe9417a485e631dfdeff214be64 -->
 
 # exact_head_merge_gate
 

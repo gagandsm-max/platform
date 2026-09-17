@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/customer_value_mttr/SKILL.md sha256:db2c1a84c1e2068e16830203bee5429b0f482882b28f0191362d1feb1cc60860 -->
-
 ---
 name: customer_value_mttr
 description: MTTR/value analytics with cohort methodology, data quality and no fabricated savings percentages.
 ---
+
+<!-- generated from project_agents/skills/customer_value_mttr/SKILL.md sha256:db2c1a84c1e2068e16830203bee5429b0f482882b28f0191362d1feb1cc60860 -->
 
 # customer_value_mttr
 

@@ -162,6 +162,7 @@ class CapabilityPackInventoryTests(unittest.TestCase):
                 REPO_ROOT / "project_agents" / "skills" / name / "SKILL.md"
             ).read_text(encoding="utf-8")
             expected = agent_pack.render_generated_skill(name, canonical)
+            self.assertTrue(expected.startswith("---\n"), name)
             for generated in (
                 REPO_ROOT / ".agents" / "skills" / name / "SKILL.md",
                 REPO_ROOT / "skills" / name / "SKILL.md",
@@ -175,6 +176,53 @@ class CapabilityPackInventoryTests(unittest.TestCase):
             expected_files = agent_pack.expected_adapter_map(REPO_ROOT, entry, body, sha, canonical)
             for path, content in expected_files.items():
                 self.assertEqual(path.read_text(encoding="utf-8"), content)
+
+    def test_render_generated_skill_frontmatter_precedes_provenance(self) -> None:
+        canonical = (
+            "---\n"
+            "name: demo_skill\n"
+            "description: Fixture skill\n"
+            "---\n\n"
+            "# demo_skill\n"
+        )
+        rendered = agent_pack.render_generated_skill("demo_skill", canonical)
+        self.assertTrue(rendered.startswith("---\n"))
+        meta, rest = agent_pack.parse_frontmatter(rendered, "rendered-demo")
+        self.assertEqual(meta["name"], "demo_skill")
+        self.assertEqual(meta["description"], "Fixture skill")
+        self.assertRegex(
+            rest,
+            r"(?s)^\n<!-- generated from project_agents/skills/demo_skill/SKILL\.md sha256:[0-9a-f]{64} -->\n",
+        )
+        closing = rendered.find("\n---\n", 4)
+        self.assertGreaterEqual(closing, 0)
+        after = rendered[closing + 5 :]
+        self.assertRegex(
+            after,
+            r"<!-- generated from project_agents/skills/demo_skill/SKILL\.md sha256:[0-9a-f]{64} -->",
+        )
+        self.assertFalse(rendered.startswith("<!--"))
+
+    def test_generated_skill_comment_before_frontmatter_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _build_fixture(root)
+            agent_pack.sync_agent_pack(root)
+            native = root / ".agents" / "skills" / "demo_skill" / "SKILL.md"
+            canonical = (
+                root / "project_agents" / "skills" / "demo_skill" / "SKILL.md"
+            ).read_text(encoding="utf-8")
+            sha = agent_pack.sha256_text(canonical)
+            malformed = (
+                f"<!-- generated from project_agents/skills/demo_skill/SKILL.md sha256:{sha} -->\n\n"
+                f"{canonical}"
+            )
+            native.write_text(malformed, encoding="utf-8")
+            errors = agent_pack.validate_agent_pack(root)
+            self.assertTrue(
+                any("must begin with YAML frontmatter at byte 0" in item for item in errors),
+                errors,
+            )
 
 
 class CapabilityPackSafetyTests(unittest.TestCase):

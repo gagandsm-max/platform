@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/api_event_contracts/SKILL.md sha256:ac80065c7d2a9210d33b395097dc80ec56ce8137afabe53a9fdee21e2968d5e2 -->
-
 ---
 name: api_event_contracts
 description: HTTPS/gRPC/REST and Kafka event contracts, compatibility, error codes and correlation IDs.
 ---
+
+<!-- generated from project_agents/skills/api_event_contracts/SKILL.md sha256:ac80065c7d2a9210d33b395097dc80ec56ce8137afabe53a9fdee21e2968d5e2 -->
 
 # api_event_contracts
 

@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/agent_architecture/SKILL.md sha256:93213c99e29ee2c3ff4e6dd7721b4acbca3e426e5d0a8eb7093810124622ab5c -->
-
 ---
 name: agent_architecture
 description: Endpoint Agent identity, enrollment/mTLS, durable local collection and privacy-bounded operational telemetry.
 ---
+
+<!-- generated from project_agents/skills/agent_architecture/SKILL.md sha256:93213c99e29ee2c3ff4e6dd7721b4acbca3e426e5d0a8eb7093810124622ab5c -->
 
 # agent_architecture
 

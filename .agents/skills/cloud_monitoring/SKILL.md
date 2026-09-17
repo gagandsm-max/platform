@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/cloud_monitoring/SKILL.md sha256:89d1b437b2a6c8e410062a14f03888339318c2d49d57235dbb5dcf4671cb38a8 -->
-
 ---
 name: cloud_monitoring
 description: Cloud-account/target monitoring, OpenTelemetry import boundaries and vendor-ID normalization.
 ---
+
+<!-- generated from project_agents/skills/cloud_monitoring/SKILL.md sha256:89d1b437b2a6c8e410062a14f03888339318c2d49d57235dbb5dcf4671cb38a8 -->
 
 # cloud_monitoring
 

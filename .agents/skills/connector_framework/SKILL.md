@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/connector_framework/SKILL.md sha256:8b397b1e8ec5e2a95523bd3807d55c870492a996c038d64a8f42478f27952881 -->
-
 ---
 name: connector_framework
 description: Outbound connector framework: auth, rate limit, retry, idempotency, durable outbound and certification.
 ---
+
+<!-- generated from project_agents/skills/connector_framework/SKILL.md sha256:8b397b1e8ec5e2a95523bd3807d55c870492a996c038d64a8f42478f27952881 -->
 
 # connector_framework
 

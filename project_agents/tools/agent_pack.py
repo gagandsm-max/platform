@@ -155,14 +155,30 @@ def render_codex(entry: dict[str, Any], body: str, sha: str, canonical: Path, re
 
 
 def render_generated_skill(name: str, body: str) -> str:
+    """Project a canonical skill into generated mirrors.
+
+    Codex skill discovery requires YAML frontmatter at byte 0 of SKILL.md.
+    Provenance is therefore inserted immediately after the closing frontmatter
+    delimiter, never before it.
+    """
     sha = sha256_text(body)
-    return f"<!-- generated from project_agents/skills/{name}/SKILL.md sha256:{sha} -->\n\n{body}"
+    marker = f"<!-- generated from project_agents/skills/{name}/SKILL.md sha256:{sha} -->"
+    if not body.startswith("---\n"):
+        raise AgentPackError(f"canonical skill {name} missing YAML frontmatter at byte 0")
+    end = body.find("\n---\n", 4)
+    if end < 0:
+        raise AgentPackError(f"canonical skill {name} frontmatter is not terminated")
+    front = body[: end + 5]
+    rest = body[end + 5 :]
+    return f"{front}\n{marker}\n{rest}"
 
 
 render_root_skill = render_generated_skill
 
 
 def parse_frontmatter(text: str, label: str) -> tuple[dict[str, str], str]:
+    if text.startswith("\ufeff"):
+        raise AgentPackError(f"{label} YAML frontmatter must start at byte 0 (BOM present)")
     if not text.startswith("---\n"):
         raise AgentPackError(f"{label} missing YAML frontmatter")
     end = text.find("\n---\n", 4)
@@ -186,6 +202,41 @@ def parse_frontmatter(text: str, label: str) -> tuple[dict[str, str], str]:
         raise AgentPackError(f"{label} frontmatter missing {missing}")
     body = text[end + 5 :]
     return data, body
+
+
+def validate_generated_skill_mirror(
+    rel: str,
+    name: str,
+    text: str,
+    canonical_meta: dict[str, str],
+) -> list[str]:
+    """Independent Codex-compatible checks for a generated skill projection.
+
+    Must not rely solely on equality with render_generated_skill(); a broken
+    renderer could otherwise certify its own wrong output.
+    """
+    errors: list[str] = []
+    if text.startswith("\ufeff") or not text.startswith("---\n"):
+        errors.append(f"generated skill must begin with YAML frontmatter at byte 0: {rel}")
+        return errors
+    try:
+        meta, _rest = parse_frontmatter(text, rel)
+    except AgentPackError as exc:
+        errors.append(str(exc))
+        return errors
+    if meta.get("name") != name:
+        errors.append(f"generated skill name mismatch for {rel}: {meta.get('name')!r} != {name!r}")
+    if meta.get("description") != canonical_meta.get("description"):
+        errors.append(f"generated skill description drift: {rel}")
+    if meta.get("name") != canonical_meta.get("name"):
+        errors.append(f"generated skill name drift vs canonical: {rel}")
+    end = text.find("\n---\n", 4)
+    after = text[end + 5 :] if end >= 0 else ""
+    if not SKILL_MARK_RE.search(text):
+        errors.append(f"generated skill missing provenance marker: {rel}")
+    elif not SKILL_MARK_RE.search(after):
+        errors.append(f"generated skill provenance must follow closing frontmatter: {rel}")
+    return errors
 
 
 def policy_scan(path: Path, text: str) -> list[str]:
@@ -548,8 +599,20 @@ def validate_agent_pack(repo: Path) -> list[str]:
                 if not generated_skill.is_file():
                     errors.append(f"generated skill missing SKILL.md: {rel}")
                     continue
-                expected = render_generated_skill(name, canonical_skill.read_text(encoding="utf-8"))
-                if generated_skill.read_text(encoding="utf-8") != expected:
+                canonical_text = canonical_skill.read_text(encoding="utf-8")
+                try:
+                    canonical_meta, _canonical_rest = parse_frontmatter(
+                        canonical_text, f"project_agents/skills/{name}/SKILL.md"
+                    )
+                except AgentPackError as exc:
+                    errors.append(str(exc))
+                    continue
+                generated_text = generated_skill.read_text(encoding="utf-8")
+                errors.extend(
+                    validate_generated_skill_mirror(rel, name, generated_text, canonical_meta)
+                )
+                expected = render_generated_skill(name, canonical_text)
+                if generated_text != expected:
                     errors.append(f"generated skill drift: {rel}")
 
         matrix_path = pa / "skills" / "agent_skill_matrix.json"
