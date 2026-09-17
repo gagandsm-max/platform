@@ -1,9 +1,9 @@
 # Platform — Enterprise Monitoring Coverage, Capability Packs and Real-Customer Certification Master
 
-**Document ID:** PLATFORM-EMC-001  
-**Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — Specialized Master**  
-**Product:** Platform  
+**Document ID:** PLATFORM-EMC-001
+**Version:** 3.2.2
+**Status:** **Authoritative Mother Reference — Specialized Master**
+**Product:** Platform
 **Change class:** Additive v3.2.2 product/engineering requirements; EMC-0 specification only. No runtime implementation, vendor-pack shipment, certification achievement or contractual guarantee is claimed by this document.
 
 ---
