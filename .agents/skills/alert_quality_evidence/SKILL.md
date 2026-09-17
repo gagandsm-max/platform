@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/alert_quality_evidence/SKILL.md sha256:f5331db52b8fa46a987fc25758c39599701d6eb2546212f33f5b508b59d7aaf8 -->
-
 ---
 name: alert_quality_evidence
 description: Evaluate alert evidence quality, telemetry trust, false-alert controls, severity/confidence separation and INCONCLUSIVE behavior.
 ---
+
+<!-- generated from project_agents/skills/alert_quality_evidence/SKILL.md sha256:f5331db52b8fa46a987fc25758c39599701d6eb2546212f33f5b508b59d7aaf8 -->
 
 # alert_quality_evidence
 

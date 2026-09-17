@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/install_upgrade/SKILL.md sha256:6bcd3dcaa25dac38929c3571ef88b53b1862b15cf183438f1876dd5432bb8ad1 -->
-
 ---
 name: install_upgrade
 description: deb/rpm/MSI packaging, systemd lifecycle, upgrade/rollback and reboot auto-start evidence.
 ---
+
+<!-- generated from project_agents/skills/install_upgrade/SKILL.md sha256:6bcd3dcaa25dac38929c3571ef88b53b1862b15cf183438f1876dd5432bb8ad1 -->
 
 # install_upgrade
 

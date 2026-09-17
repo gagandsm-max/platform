@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/ux_operational_design/SKILL.md sha256:6df7a2964e3f46fe7eaf095969a1982e5e6149942f6c5ebac742195c0457c617 -->
-
 ---
 name: ux_operational_design
 description: Operational UX for Platform NOC/admin screens: job-to-be-done, hierarchy, dense-data presentation, microcopy intent and implementation-ready design handoff.
 ---
+
+<!-- generated from project_agents/skills/ux_operational_design/SKILL.md sha256:6df7a2964e3f46fe7eaf095969a1982e5e6149942f6c5ebac742195c0457c617 -->
 
 # ux_operational_design
 

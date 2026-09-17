@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/clickhouse/SKILL.md sha256:167df7f30dd6451e2e09495c8a308b689755e6a9317976f1b37965830c10a228 -->
-
 ---
 name: clickhouse
 description: ClickHouse historical analytics, insert idempotency, retention and lag without treating CH as control state.
 ---
+
+<!-- generated from project_agents/skills/clickhouse/SKILL.md sha256:167df7f30dd6451e2e09495c8a308b689755e6a9317976f1b37965830c10a228 -->
 
 # clickhouse
 

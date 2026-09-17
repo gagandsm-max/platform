@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/virtualization_storage/SKILL.md sha256:ac27beeabfab85877add4a8c5281e20d7295e9797d44fad13b03a8ca21c69e2f -->
-
 ---
 name: virtualization_storage
 description: Virtualization, datastore and storage-target monitoring without turning Platform into DCIM/BMS.
 ---
+
+<!-- generated from project_agents/skills/virtualization_storage/SKILL.md sha256:ac27beeabfab85877add4a8c5281e20d7295e9797d44fad13b03a8ca21c69e2f -->
 
 # virtualization_storage
 

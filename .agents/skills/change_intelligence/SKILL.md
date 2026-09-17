@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/change_intelligence/SKILL.md sha256:c50b9bbe76a89f219c3f336411a56322177e4008b1131388ff06260c387a8e6f -->
-
 ---
 name: change_intelligence
 description: Change Intelligence: external/provider/change evidence as supporting context with explicit non-causality.
 ---
+
+<!-- generated from project_agents/skills/change_intelligence/SKILL.md sha256:c50b9bbe76a89f219c3f336411a56322177e4008b1131388ff06260c387a8e6f -->
 
 # change_intelligence
 

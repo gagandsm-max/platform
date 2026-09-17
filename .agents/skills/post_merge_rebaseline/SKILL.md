@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/post_merge_rebaseline/SKILL.md sha256:ac3f2e94b043bfb1f620c751cca2b0e55b4a29c06e80ebe45e657f0e0f09cb04 -->
-
 ---
 name: post_merge_rebaseline
 description: After an authorized merge, re-fetch main and dependent heads, invalidate stale stack assumptions and reconcile downstream work before continuing.
 ---
+
+<!-- generated from project_agents/skills/post_merge_rebaseline/SKILL.md sha256:ac3f2e94b043bfb1f620c751cca2b0e55b4a29c06e80ebe45e657f0e0f09cb04 -->
 
 # post_merge_rebaseline
 

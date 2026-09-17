@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/sensor_edge/SKILL.md sha256:5be0eed6baed0c413d0413bff53f7bb205edb93c762b6fb37b40608d0e81232a -->
-
 ---
 name: sensor_edge
 description: Sensor process/runtime mechanics: scheduling, worker pools, leases/fencing, durable spool, uploader/replay, resource lifecycle and Sensor self-observability.
 ---
+
+<!-- generated from project_agents/skills/sensor_edge/SKILL.md sha256:5be0eed6baed0c413d0413bff53f7bb205edb93c762b6fb37b40608d0e81232a -->
 
 # sensor_edge
 

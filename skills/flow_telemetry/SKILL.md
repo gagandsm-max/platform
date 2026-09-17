@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/flow_telemetry/SKILL.md sha256:527fd84fb1659cbea004fd325444cf0df021aaff42ac6cf004027c29ff365ac3 -->
-
 ---
 name: flow_telemetry
 description: Flow export collection, template/replay/drop counters, cardinality control and Sensor isolation from flow floods.
 ---
+
+<!-- generated from project_agents/skills/flow_telemetry/SKILL.md sha256:527fd84fb1659cbea004fd325444cf0df021aaff42ac6cf004027c29ff365ac3 -->
 
 # flow_telemetry
 

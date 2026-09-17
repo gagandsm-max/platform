@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/pki_mtls/SKILL.md sha256:2c74c86ffd0c49a946bf447828a8c62224c4c2bfd39029355658d5656dd46a17 -->
-
 ---
 name: pki_mtls
 description: PKI, mTLS enrollment, certificate identity and untrusted-cert rejection.
 ---
+
+<!-- generated from project_agents/skills/pki_mtls/SKILL.md sha256:2c74c86ffd0c49a946bf447828a8c62224c4c2bfd39029355658d5656dd46a17 -->
 
 # pki_mtls
 

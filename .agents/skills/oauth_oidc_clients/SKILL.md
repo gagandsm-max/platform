@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/oauth_oidc_clients/SKILL.md sha256:b8ee3f270e40254a500da8ae60cbde66793884e299d7aa8b51eb8cb818bbf4b9 -->
-
 ---
 name: oauth_oidc_clients
 description: OAuth/OIDC client integrations, token handling, redirect safety and secret storage.
 ---
+
+<!-- generated from project_agents/skills/oauth_oidc_clients/SKILL.md sha256:b8ee3f270e40254a500da8ae60cbde66793884e299d7aa8b51eb8cb818bbf4b9 -->
 
 # oauth_oidc_clients
 

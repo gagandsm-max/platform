@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/distributed_systems/SKILL.md sha256:6806eb734954ce413d2503e47e70cbaa525df5e8c1a4e57ab1575d80c8de0607 -->
-
 ---
 name: distributed_systems
 description: Design and change Core/Sensor distributed behavior: queues, backpressure, timeouts, consistency, failover and split-brain avoidance without reopening two-Core P0 designs.
 ---
+
+<!-- generated from project_agents/skills/distributed_systems/SKILL.md sha256:6806eb734954ce413d2503e47e70cbaa525df5e8c1a4e57ab1575d80c8de0607 -->
 
 # distributed_systems
 

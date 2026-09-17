@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/python_runtime/SKILL.md sha256:b33d6793df25f143386ee1ea305781b1c8c6163a30b4b25b3eea137af849064b -->
-
 ---
 name: python_runtime
 description: Approved Python use for AI/analytics/NCM workers: isolation, no silent host installs, and catalogue-constrained dependencies.
 ---
+
+<!-- generated from project_agents/skills/python_runtime/SKILL.md sha256:b33d6793df25f143386ee1ea305781b1c8c6163a30b4b25b3eea137af849064b -->
 
 # python_runtime
 
