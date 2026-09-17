@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/monitoring_work_units/SKILL.md sha256:03cb3b465024141c8fb0b2824fb1190c1c3a250d3d1cba1a18f71c40f3c11ddc -->
-
 ---
 name: monitoring_work_units
 description: Monitoring work-unit placement, Sensor assignment, capacity impact and locality constraints.
 ---
+
+<!-- generated from project_agents/skills/monitoring_work_units/SKILL.md sha256:03cb3b465024141c8fb0b2824fb1190c1c3a250d3d1cba1a18f71c40f3c11ddc -->
 
 # monitoring_work_units
 

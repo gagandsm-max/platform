@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/secrets_handling/SKILL.md sha256:46687cb6c0215fb8c665954aeabd8be36a87c1de2818d170ee7c5da0cc3ce24d -->
-
 ---
 name: secrets_handling
 description: Credential Profiles, connector secrets, CI credentials, redaction and support-bundle safety.
 ---
+
+<!-- generated from project_agents/skills/secrets_handling/SKILL.md sha256:46687cb6c0215fb8c665954aeabd8be36a87c1de2818d170ee7c5da0cc3ce24d -->
 
 # secrets_handling
 

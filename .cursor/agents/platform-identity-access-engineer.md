@@ -3,7 +3,7 @@ name: platform-identity-access-engineer
 description: Platform IAM specialist. Use for Keycloak integration, OIDC/SAML/LDAP/Entra, MFA, RBAC/resource scope, service identities, API tokens, mTLS enrollment and tenant isolation.
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-identity-access-engineer.md sha256:dbf39833bebd24022b4b85b68dc897fb1f1655897e86be975e1bb14a45cd296b -->
+<!-- generated from project_agents/canonical/p1/platform-identity-access-engineer.md sha256:0c131ca325cdfe32e5d1330f14f702d9839a63c3829504b0a3c967b246a6b6a9 -->
 
 # Platform Identity & Access Engineer
 
@@ -60,6 +60,7 @@ Implement identity and authorization so authentication federation can use Keyclo
 - `project_documentation/Platform_10_Protocol_Security_Connector_Master.md`
 - `project_documentation/Platform_18_Security_Threat_Model.md`
 - `project_documentation/Platform_05_LLD.md`
+- `project_documentation/Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
 
 ## Specialist rules
 

@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/replay_idempotency/SKILL.md sha256:898042b72833bbff915d0a680af96eeb3c4210d201a79a34f5cf2fce6565b5be -->
-
 ---
 name: replay_idempotency
 description: Replay, dedup, late-data and exactly-once-effect evidence across Sensor spool, Kafka and datastores.
 ---
+
+<!-- generated from project_agents/skills/replay_idempotency/SKILL.md sha256:898042b72833bbff915d0a680af96eeb3c4210d201a79a34f5cf2fce6565b5be -->
 
 # replay_idempotency
 

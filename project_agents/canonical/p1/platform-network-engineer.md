@@ -54,6 +54,8 @@ Implement network collection and diagnostics for protocol/domain semantics: SNMP
 - `project_documentation/Platform_10_Protocol_Security_Connector_Master.md`
 - `project_documentation/Platform_11_Sizing_Capacity_Storage_Master.md`
 - `project_documentation/Platform_05_LLD.md`
+- `project_documentation/Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Specialist rules
 

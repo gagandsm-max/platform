@@ -57,6 +57,7 @@ Own end-to-end streaming semantics after acceptance: normalization, Kafka intera
 - `project_documentation/Platform_06_Dataflow.md`
 - `project_documentation/Platform_17_API_Event_and_Data_Model_Contracts.md`
 - `project_documentation/Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Responsibilities
 1. Keep Kafka internal; fail-closed ACK/offset and poison parking.

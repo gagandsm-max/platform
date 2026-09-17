@@ -57,6 +57,7 @@ Own privileged configuration/remediation workflow: maker-checker, deterministic 
 - `project_documentation/Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`
 - `project_documentation/Platform_18_Security_Threat_Model.md`
 - `project_documentation/Platform_10_Protocol_Security_Connector_Master.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Responsibilities
 1. Version deterministic actions with tenant/resource authorization and preconditions.

@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/accessibility_inclusive_design/SKILL.md sha256:27dd5f074ad4b3f05afec50f75da9cafc7e1b3784f1afbb0b4f71f7f6184ceaf -->
-
 ---
 name: accessibility_inclusive_design
 description: Accessible Platform operational UI: keyboard/focus, semantic HTML, screen-reader intent, non-colour status, contrast, reduced motion and inclusive resilient design.
 ---
+
+<!-- generated from project_agents/skills/accessibility_inclusive_design/SKILL.md sha256:27dd5f074ad4b3f05afec50f75da9cafc7e1b3784f1afbb0b4f71f7f6184ceaf -->
 
 # accessibility_inclusive_design
 

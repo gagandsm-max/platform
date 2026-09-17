@@ -137,7 +137,7 @@
     "source": "engineering/engineering-network-engineer.md",
     "description": "Network monitoring and Sensor specialist. Use for SNMP, ICMP, flow, syslog, gNMI, NETCONF, SSH, routing/topology, discovery, Device Pack collection and Sensor worker behavior.",
     "canonical_path": "canonical/p1/platform-network-engineer.md",
-    "sha256": "c02fa93ce5ffaa04d21f26b99faab0baa3d3eacca525a244e8e324d7b70ac930"
+    "sha256": "ed0fe4806dbfab2bcf077d100caebf3267bc5b9427d5477f1bdd2d1a02636369"
   },
   {
     "name": "platform-database-reliability-engineer",
@@ -167,7 +167,7 @@
     "source": "engineering/engineering-identity-access-engineer.md",
     "description": "Platform IAM specialist. Use for Keycloak integration, OIDC/SAML/LDAP/Entra, MFA, RBAC/resource scope, service identities, API tokens, mTLS enrollment and tenant isolation.",
     "canonical_path": "canonical/p1/platform-identity-access-engineer.md",
-    "sha256": "dbf39833bebd24022b4b85b68dc897fb1f1655897e86be975e1bb14a45cd296b"
+    "sha256": "0c131ca325cdfe32e5d1330f14f702d9839a63c3829504b0a3c967b246a6b6a9"
   },
   {
     "name": "platform-knowledge-graph-engineer",
@@ -227,7 +227,7 @@
     "source": "specialized/specialized-workflow-architect.md",
     "description": "Read-only workflow/state-machine architect for Platform. Use before complex provisioning, alert, incident, RCA, NCM, upgrade, HA, integration or remediation flows to map actors, states, handoffs, failures and cleanup.",
     "canonical_path": "canonical/p1/platform-workflow-architect.md",
-    "sha256": "2342b39a28397fff7b3cd0271d2aaa4e227e319a2d68b030de8044982e869379"
+    "sha256": "7e2d70b1bcc6aab6758e453888c45585979198fedf84ba8e84029cd489e0e20f"
   },
   {
     "name": "platform-frontend-developer",
@@ -287,7 +287,7 @@
     "source": "capability-pack-v1.2",
     "description": "Monitored-target specialist for OS, virtualization, storage, Kubernetes, cloud and infrastructure dependencies.",
     "canonical_path": "canonical/p1/platform-infrastructure-cloud-engineer.md",
-    "sha256": "9d517743e24aa5fd1e2cbe7885174f2585d0855a52e594389e2987fe83706523"
+    "sha256": "f6cdd16a495925cd8b9eb7e3ca0c8fa20a26d1b01f87ddd5e1909a34fa151271"
   },
   {
     "name": "platform-telemetry-pipeline-engineer",
@@ -297,7 +297,7 @@
     "source": "capability-pack-v1.2",
     "description": "Streaming specialist after acceptance: normalization, Kafka, replay/idempotency, event time, backpressure, lag and reconciliation.",
     "canonical_path": "canonical/p1/platform-telemetry-pipeline-engineer.md",
-    "sha256": "53917e8cd901f1c0c5efad7e5e9b0ca28c50aee999543e166a0154a52417964d"
+    "sha256": "e53e1ba3b45a16d85c88f6346f10714dda4ca3073f14808839a8aa2b9e114fad"
   },
   {
     "name": "platform-device-pack-engineer",
@@ -307,7 +307,7 @@
     "source": "capability-pack-v1.2",
     "description": "Device Pack schema, identification, mappings, versioning, certification/provenance and test-lab semantics.",
     "canonical_path": "canonical/p1/platform-device-pack-engineer.md",
-    "sha256": "b412683e11a30c2aa72680600f9ff08cbafb03f6847d8fa3e9d507c37743e612"
+    "sha256": "86cc30e8aaab8469b7ca26cf6fe0301d813d39402ea4cc8c73aa768eb2e99b23"
   },
   {
     "name": "platform-ncm-remediation-engineer",
@@ -317,7 +317,7 @@
     "source": "capability-pack-v1.2",
     "description": "Privileged configuration/remediation workflow: maker-checker, deterministic execution, rollback, blast-radius and evidence. No direct LLM privileged execution.",
     "canonical_path": "canonical/p1/platform-ncm-remediation-engineer.md",
-    "sha256": "6258388c1ffa23754498b7e94c170b85c3d183fd9251fe895c84698068839737"
+    "sha256": "11f6befbef8451d78343d7bb0d5d35f2f176a0cc340edd28daed4efbf43a7173"
   },
   {
     "name": "platform-integration-connector-engineer",
@@ -327,7 +327,7 @@
     "source": "capability-pack-v1.2",
     "description": "Connector framework and SaaS/ITSM/webhooks/carrier/change telemetry including auth, rate limiting, retry, idempotency, outbound durability and certification.",
     "canonical_path": "canonical/p1/platform-integration-connector-engineer.md",
-    "sha256": "100b0a2e567889a6613e8acc7f3f8db7aef9e68e097199ba1bbebbcf77a2fe21"
+    "sha256": "3157decb9af407bb10deb5c0d7350d41e7728acbbbe15dcab529e9a59cf547b0"
   },
   {
     "name": "platform-product-ui-designer",
@@ -337,6 +337,6 @@
     "source": "capability-pack-v1.2",
     "description": "Converts requirements, operator jobs and Platform UI architecture into implementation-ready screen/interaction specifications. Does not own React implementation, accessibility certification or final UI finish.",
     "canonical_path": "canonical/p1/platform-product-ui-designer.md",
-    "sha256": "8d3a491686677eba23a4c72856b07b6953f0a2c50118ac25b351d9cfeed79254"
+    "sha256": "4eda00059b4c74b0497b3e3427446b34833839c52bb193f4294ceacd7b1a9f3d"
   }
 ]

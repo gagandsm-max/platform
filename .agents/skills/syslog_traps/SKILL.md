@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/syslog_traps/SKILL.md sha256:0a510b254136c67e5c2cb7e80e026531393bb85c0be4662704322e0e999d6394 -->
-
 ---
 name: syslog_traps
 description: Syslog and SNMP trap ingestion, source attribution, storm control and evidence-quality parsing.
 ---
+
+<!-- generated from project_agents/skills/syslog_traps/SKILL.md sha256:0a510b254136c67e5c2cb7e80e026531393bb85c0be4662704322e0e999d6394 -->
 
 # syslog_traps
 

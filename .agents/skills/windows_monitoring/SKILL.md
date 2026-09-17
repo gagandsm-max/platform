@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/windows_monitoring/SKILL.md sha256:0c43ce22d155f97de0358b0b5aff61eeb9f015b724016bdf9632c8529deefefa -->
-
 ---
 name: windows_monitoring
 description: Windows Agent service, MSI/BAT install, event/perf evidence and privacy-bounded endpoint collection.
 ---
+
+<!-- generated from project_agents/skills/windows_monitoring/SKILL.md sha256:0c43ce22d155f97de0358b0b5aff61eeb9f015b724016bdf9632c8529deefefa -->
 
 # windows_monitoring
 

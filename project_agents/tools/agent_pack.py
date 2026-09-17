@@ -155,14 +155,30 @@ def render_codex(entry: dict[str, Any], body: str, sha: str, canonical: Path, re
 
 
 def render_generated_skill(name: str, body: str) -> str:
+    """Project a canonical skill into generated mirrors.
+
+    Codex skill discovery requires YAML frontmatter at byte 0 of SKILL.md.
+    Provenance is therefore inserted immediately after the closing frontmatter
+    delimiter, never before it.
+    """
     sha = sha256_text(body)
-    return f"<!-- generated from project_agents/skills/{name}/SKILL.md sha256:{sha} -->\n\n{body}"
+    marker = f"<!-- generated from project_agents/skills/{name}/SKILL.md sha256:{sha} -->"
+    if not body.startswith("---\n"):
+        raise AgentPackError(f"canonical skill {name} missing YAML frontmatter at byte 0")
+    end = body.find("\n---\n", 4)
+    if end < 0:
+        raise AgentPackError(f"canonical skill {name} frontmatter is not terminated")
+    front = body[: end + 5]
+    rest = body[end + 5 :]
+    return f"{front}\n{marker}\n{rest}"
 
 
 render_root_skill = render_generated_skill
 
 
 def parse_frontmatter(text: str, label: str) -> tuple[dict[str, str], str]:
+    if text.startswith("\ufeff"):
+        raise AgentPackError(f"{label} YAML frontmatter must start at byte 0 (BOM present)")
     if not text.startswith("---\n"):
         raise AgentPackError(f"{label} missing YAML frontmatter")
     end = text.find("\n---\n", 4)
@@ -186,6 +202,41 @@ def parse_frontmatter(text: str, label: str) -> tuple[dict[str, str], str]:
         raise AgentPackError(f"{label} frontmatter missing {missing}")
     body = text[end + 5 :]
     return data, body
+
+
+def validate_generated_skill_mirror(
+    rel: str,
+    name: str,
+    text: str,
+    canonical_meta: dict[str, str],
+) -> list[str]:
+    """Independent Codex-compatible checks for a generated skill projection.
+
+    Must not rely solely on equality with render_generated_skill(); a broken
+    renderer could otherwise certify its own wrong output.
+    """
+    errors: list[str] = []
+    if text.startswith("\ufeff") or not text.startswith("---\n"):
+        errors.append(f"generated skill must begin with YAML frontmatter at byte 0: {rel}")
+        return errors
+    try:
+        meta, _rest = parse_frontmatter(text, rel)
+    except AgentPackError as exc:
+        errors.append(str(exc))
+        return errors
+    if meta.get("name") != name:
+        errors.append(f"generated skill name mismatch for {rel}: {meta.get('name')!r} != {name!r}")
+    if meta.get("description") != canonical_meta.get("description"):
+        errors.append(f"generated skill description drift: {rel}")
+    if meta.get("name") != canonical_meta.get("name"):
+        errors.append(f"generated skill name drift vs canonical: {rel}")
+    end = text.find("\n---\n", 4)
+    after = text[end + 5 :] if end >= 0 else ""
+    if not SKILL_MARK_RE.search(text):
+        errors.append(f"generated skill missing provenance marker: {rel}")
+    elif not SKILL_MARK_RE.search(after):
+        errors.append(f"generated skill provenance must follow closing frontmatter: {rel}")
+    return errors
 
 
 def policy_scan(path: Path, text: str) -> list[str]:
@@ -548,8 +599,20 @@ def validate_agent_pack(repo: Path) -> list[str]:
                 if not generated_skill.is_file():
                     errors.append(f"generated skill missing SKILL.md: {rel}")
                     continue
-                expected = render_generated_skill(name, canonical_skill.read_text(encoding="utf-8"))
-                if generated_skill.read_text(encoding="utf-8") != expected:
+                canonical_text = canonical_skill.read_text(encoding="utf-8")
+                try:
+                    canonical_meta, _canonical_rest = parse_frontmatter(
+                        canonical_text, f"project_agents/skills/{name}/SKILL.md"
+                    )
+                except AgentPackError as exc:
+                    errors.append(str(exc))
+                    continue
+                generated_text = generated_skill.read_text(encoding="utf-8")
+                errors.extend(
+                    validate_generated_skill_mirror(rel, name, generated_text, canonical_meta)
+                )
+                expected = render_generated_skill(name, canonical_text)
+                if generated_text != expected:
                     errors.append(f"generated skill drift: {rel}")
 
         matrix_path = pa / "skills" / "agent_skill_matrix.json"
@@ -607,5 +670,108 @@ def validate_agent_pack(repo: Path) -> list[str]:
             errors.append(str(exc))
         except OSError as exc:
             errors.append(f"control-plane schema/state-machine check failed: {exc}")
+
+    errors.extend(validate_mother_reference_coverage(repo, pa, manifest))
+
+    return errors
+
+
+MOTHER_INDEX_SECTION_RE = re.compile(
+    r"^## 3\. Exact \d+-file mother-reference set\s*\n(?P<body>.*?)(?=^## |\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+MOTHER_INDEX_ROW_RE = re.compile(r"^\|\s*\d+\s*\|\s*`([^`]+)`\s*\|", re.MULTILINE)
+
+
+def parse_platform_00_mother_reference_files(index_text: str) -> list[str]:
+    match = MOTHER_INDEX_SECTION_RE.search(index_text)
+    if match is None:
+        raise AgentPackError("Platform_00 §3 mother-reference table was not found")
+    files = MOTHER_INDEX_ROW_RE.findall(match.group("body"))
+    if not files:
+        raise AgentPackError("Platform_00 §3 mother-reference table has no file rows")
+    return files
+
+
+def validate_mother_reference_coverage(repo: Path, pa: Path, manifest: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    coverage_path = pa / "mother_reference_coverage.json"
+    index_path = repo / "project_documentation" / "Platform_00_Document_Index.md"
+    if not index_path.is_file():
+        return errors
+    if not coverage_path.is_file():
+        errors.append("missing project_agents/mother_reference_coverage.json")
+        return errors
+
+    try:
+        coverage = load_json(coverage_path)
+    except (OSError, json.JSONDecodeError, AgentPackError) as exc:
+        errors.append(f"mother-reference coverage is not valid JSON: {exc}")
+        return errors
+    if not isinstance(coverage, dict):
+        errors.append("mother-reference coverage must be an object")
+        return errors
+    if coverage.get("schemaVersion") != 1:
+        errors.append("mother-reference coverage schemaVersion must be 1")
+
+    mappings = coverage.get("mappings")
+    if not isinstance(mappings, list) or not mappings:
+        errors.append("mother-reference coverage mappings must be a non-empty array")
+        return errors
+
+    try:
+        index_files = parse_platform_00_mother_reference_files(index_path.read_text(encoding="utf-8"))
+    except (OSError, AgentPackError) as exc:
+        errors.append(str(exc))
+        return errors
+
+    for filename in index_files:
+        path = repo / "project_documentation" / filename
+        if not path.is_file():
+            errors.append(f"mother-reference file missing: project_documentation/{filename}")
+
+    agent_names = {str(entry.get("name")) for entry in manifest if entry.get("name")}
+    mapped_files: list[str] = []
+    seen_files: set[str] = set()
+    for index, mapping in enumerate(mappings):
+        prefix = f"mother-reference coverage mapping[{index}]"
+        if not isinstance(mapping, dict):
+            errors.append(f"{prefix} must be an object")
+            continue
+        filename = mapping.get("file")
+        if not isinstance(filename, str) or not filename.strip() or "/" in filename or "\\" in filename:
+            errors.append(f"{prefix} file must be a repository-local basename")
+            continue
+        filename = filename.strip()
+        if filename in seen_files:
+            errors.append(f"{prefix} duplicates file {filename}")
+        seen_files.add(filename)
+        mapped_files.append(filename)
+        owners = mapping.get("owners")
+        supporters = mapping.get("supporters") or []
+        if not isinstance(owners, list) or not owners:
+            errors.append(f"{prefix} {filename} must declare at least one owner")
+            owners = []
+        if not isinstance(supporters, list):
+            errors.append(f"{prefix} {filename} supporters must be an array")
+            supporters = []
+        for role, names in (("owner", owners), ("supporter", supporters)):
+            for name in names:
+                if not isinstance(name, str) or not AGENT_NAME_RE.match(name):
+                    errors.append(f"{prefix} {filename} has invalid {role} name {name!r}")
+                    continue
+                if name not in agent_names:
+                    errors.append(f"{prefix} {filename} maps unknown {role} {name}")
+
+    index_set = set(index_files)
+    mapped_set = set(mapped_files)
+    missing = sorted(index_set - mapped_set)
+    extra = sorted(mapped_set - index_set)
+    if missing:
+        errors.append(f"mother-reference coverage missing files: {', '.join(missing)}")
+    if extra:
+        errors.append(f"mother-reference coverage has stale files: {', '.join(extra)}")
+    if len(index_files) != len(index_set):
+        errors.append("Platform_00 §3 contains duplicate mother-reference filenames")
 
     return errors

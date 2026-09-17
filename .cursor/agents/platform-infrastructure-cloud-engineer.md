@@ -3,7 +3,7 @@ name: platform-infrastructure-cloud-engineer
 description: Monitored-target specialist for OS, virtualization, storage, Kubernetes, cloud and infrastructure dependencies.
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-infrastructure-cloud-engineer.md sha256:9d517743e24aa5fd1e2cbe7885174f2585d0855a52e594389e2987fe83706523 -->
+<!-- generated from project_agents/canonical/p1/platform-infrastructure-cloud-engineer.md sha256:f6cdd16a495925cd8b9eb7e3ca0c8fa20a26d1b01f87ddd5e1909a34fa151271 -->
 
 # Platform Infrastructure and Cloud Engineer
 
@@ -64,6 +64,7 @@ Own monitored-target implementation across OS, virtualization, storage, Kubernet
 - `project_documentation/Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
 - `project_documentation/Platform_21_Enterprise_Gap_Closure_Master.md`
 - `project_documentation/Platform_11_Sizing_Capacity_Storage_Master.md`
+- `project_documentation/Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 ## Responsibilities
 1. Normalize vendor identifiers into Platform-owned entities; vendor IDs never override tenant/entity authority.

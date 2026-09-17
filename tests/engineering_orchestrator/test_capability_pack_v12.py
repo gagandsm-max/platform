@@ -105,6 +105,45 @@ def _matrix() -> dict:
     )
 
 
+def _write_mother_reference_fixture(
+    root: Path,
+    *,
+    index_files: list[str],
+    disk_files: list[str] | None = None,
+    mapped_files: list[str] | None = None,
+    owner: str = "demo-agent",
+) -> Path:
+    if disk_files is None:
+        disk_files = list(index_files)
+    if mapped_files is None:
+        mapped_files = list(index_files)
+    docs = root / "project_documentation"
+    docs.mkdir(parents=True, exist_ok=True)
+    for name in disk_files:
+        (docs / name).write_text(f"# {name}\n", encoding="utf-8")
+    rows = "\n".join(f"| {i} | `{name}` | purpose |" for i, name in enumerate(index_files, 1))
+    (docs / "Platform_00_Document_Index.md").write_text(
+        (
+            "# Platform_00 fixture\n\n"
+            f"## 3. Exact {len(index_files)}-file mother-reference set\n\n"
+            "| # | File | Governing scope |\n|---:|---|---|\n"
+            f"{rows}\n\n"
+            "## 4. After index\n"
+        ),
+        encoding="utf-8",
+    )
+    pa = root / "project_agents"
+    pa.mkdir(parents=True, exist_ok=True)
+    coverage = {
+        "schemaVersion": 1,
+        "mappings": [{"file": name, "owners": [owner]} for name in mapped_files],
+    }
+    (pa / "mother_reference_coverage.json").write_text(
+        json.dumps(coverage, indent=2) + "\n", encoding="utf-8"
+    )
+    return pa
+
+
 class CapabilityPackInventoryTests(unittest.TestCase):
     def test_v12_manifest_snapshot_is_manifest_derived(self) -> None:
         manifest = _manifest()
@@ -128,6 +167,46 @@ class CapabilityPackInventoryTests(unittest.TestCase):
         self.assertNotIn("expected_agent_count = 33", source)
         self.assertNotIn("len(manifest) == 34", source)
         self.assertNotIn("expected_agent_count = 34", source)
+
+    def test_mother_reference_coverage_matches_platform_00(self) -> None:
+        index = (REPO_ROOT / "project_documentation" / "Platform_00_Document_Index.md").read_text(
+            encoding="utf-8"
+        )
+        files = agent_pack.parse_platform_00_mother_reference_files(index)
+        self.assertEqual(
+            files.count(
+                "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md"
+            ),
+            1,
+        )
+        self.assertIn(
+            "Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md",
+            files,
+        )
+        coverage = json.loads(
+            (REPO_ROOT / "project_agents" / "mother_reference_coverage.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        mapped = [row["file"] for row in coverage["mappings"]]
+        self.assertEqual(set(mapped), set(files))
+        owners = {row["file"]: row["owners"] for row in coverage["mappings"]}
+        self.assertTrue(
+            owners["Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md"]
+        )
+        self.assertTrue(
+            owners["Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md"]
+        )
+        validator_src = (TOOLS / "agent_pack.py").read_text(encoding="utf-8")
+        self.assertNotIn("len(index_files) == 25", validator_src)
+        self.assertNotIn("expected_mother_count", validator_src)
+        docs = REPO_ROOT / "project_documentation"
+        for filename in files:
+            self.assertTrue((docs / filename).is_file(), filename)
+        errors = agent_pack.validate_mother_reference_coverage(
+            REPO_ROOT, REPO_ROOT / "project_agents", _manifest()
+        )
+        self.assertEqual(errors, [], errors)
 
     def test_every_agent_has_bounded_required_skills(self) -> None:
         manifest_names = {entry["name"] for entry in _manifest()}
@@ -162,6 +241,7 @@ class CapabilityPackInventoryTests(unittest.TestCase):
                 REPO_ROOT / "project_agents" / "skills" / name / "SKILL.md"
             ).read_text(encoding="utf-8")
             expected = agent_pack.render_generated_skill(name, canonical)
+            self.assertTrue(expected.startswith("---\n"), name)
             for generated in (
                 REPO_ROOT / ".agents" / "skills" / name / "SKILL.md",
                 REPO_ROOT / "skills" / name / "SKILL.md",
@@ -175,6 +255,53 @@ class CapabilityPackInventoryTests(unittest.TestCase):
             expected_files = agent_pack.expected_adapter_map(REPO_ROOT, entry, body, sha, canonical)
             for path, content in expected_files.items():
                 self.assertEqual(path.read_text(encoding="utf-8"), content)
+
+    def test_render_generated_skill_frontmatter_precedes_provenance(self) -> None:
+        canonical = (
+            "---\n"
+            "name: demo_skill\n"
+            "description: Fixture skill\n"
+            "---\n\n"
+            "# demo_skill\n"
+        )
+        rendered = agent_pack.render_generated_skill("demo_skill", canonical)
+        self.assertTrue(rendered.startswith("---\n"))
+        meta, rest = agent_pack.parse_frontmatter(rendered, "rendered-demo")
+        self.assertEqual(meta["name"], "demo_skill")
+        self.assertEqual(meta["description"], "Fixture skill")
+        self.assertRegex(
+            rest,
+            r"(?s)^\n<!-- generated from project_agents/skills/demo_skill/SKILL\.md sha256:[0-9a-f]{64} -->\n",
+        )
+        closing = rendered.find("\n---\n", 4)
+        self.assertGreaterEqual(closing, 0)
+        after = rendered[closing + 5 :]
+        self.assertRegex(
+            after,
+            r"<!-- generated from project_agents/skills/demo_skill/SKILL\.md sha256:[0-9a-f]{64} -->",
+        )
+        self.assertFalse(rendered.startswith("<!--"))
+
+    def test_generated_skill_comment_before_frontmatter_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _build_fixture(root)
+            agent_pack.sync_agent_pack(root)
+            native = root / ".agents" / "skills" / "demo_skill" / "SKILL.md"
+            canonical = (
+                root / "project_agents" / "skills" / "demo_skill" / "SKILL.md"
+            ).read_text(encoding="utf-8")
+            sha = agent_pack.sha256_text(canonical)
+            malformed = (
+                f"<!-- generated from project_agents/skills/demo_skill/SKILL.md sha256:{sha} -->\n\n"
+                f"{canonical}"
+            )
+            native.write_text(malformed, encoding="utf-8")
+            errors = agent_pack.validate_agent_pack(root)
+            self.assertTrue(
+                any("must begin with YAML frontmatter at byte 0" in item for item in errors),
+                errors,
+            )
 
 
 class CapabilityPackSafetyTests(unittest.TestCase):
@@ -651,6 +778,76 @@ class CapabilityPackSecurityAuthorityDeltaTests(unittest.TestCase):
         validator = (TOOLS / "validate_agents.py").read_text(encoding="utf-8")
         self.assertNotIn("34 agents", validator)
         self.assertNotIn("expected_agent_count", validator)
+
+
+class MotherReferenceCoverageValidationTests(unittest.TestCase):
+    def test_nonexistent_mother_reference_filename_fails_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pa = _write_mother_reference_fixture(
+                root,
+                index_files=["AGENTS.md", "Missing_Mother_Reference.md"],
+                disk_files=["AGENTS.md"],
+            )
+            errors = agent_pack.validate_mother_reference_coverage(
+                root, pa, [{"name": "demo-agent"}]
+            )
+            self.assertIn(
+                "mother-reference file missing: project_documentation/Missing_Mother_Reference.md",
+                errors,
+            )
+
+    def test_missing_mapping_fails_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pa = _write_mother_reference_fixture(
+                root,
+                index_files=["AGENTS.md", "Platform_00_Document_Index.md"],
+                mapped_files=["AGENTS.md"],
+            )
+            errors = agent_pack.validate_mother_reference_coverage(
+                root, pa, [{"name": "demo-agent"}]
+            )
+            self.assertIn(
+                "mother-reference coverage missing files: Platform_00_Document_Index.md",
+                errors,
+            )
+            self.assertFalse(
+                any(e.startswith("mother-reference file missing:") for e in errors)
+            )
+
+    def test_stale_extra_mapping_fails_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pa = _write_mother_reference_fixture(
+                root,
+                index_files=["AGENTS.md"],
+                mapped_files=["AGENTS.md", "Extra_Stale.md"],
+            )
+            errors = agent_pack.validate_mother_reference_coverage(
+                root, pa, [{"name": "demo-agent"}]
+            )
+            self.assertIn(
+                "mother-reference coverage has stale files: Extra_Stale.md",
+                errors,
+            )
+
+    def test_unknown_mapped_agent_fails_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pa = _write_mother_reference_fixture(
+                root,
+                index_files=["AGENTS.md"],
+                owner="not-in-manifest",
+            )
+            errors = agent_pack.validate_mother_reference_coverage(
+                root, pa, [{"name": "demo-agent"}]
+            )
+            joined = "\n".join(errors)
+            self.assertIn("AGENTS.md maps unknown owner not-in-manifest", joined)
+            self.assertFalse(
+                any(e.startswith("mother-reference file missing:") for e in errors)
+            )
 
 
 if __name__ == "__main__":

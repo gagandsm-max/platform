@@ -1,9 +1,9 @@
-<!-- generated from project_agents/skills/icmp_path/SKILL.md sha256:8aa102c28bb1764e1e90a575bf6e5f4df4d66e72bd9902673792a8456e941be5 -->
-
 ---
 name: icmp_path
 description: ICMP/path reachability, RTT/loss/timeout evidence and path diagnostics as corroboration, not sole identity.
 ---
+
+<!-- generated from project_agents/skills/icmp_path/SKILL.md sha256:8aa102c28bb1764e1e90a575bf6e5f4df4d66e72bd9902673792a8456e941be5 -->
 
 # icmp_path
 
