@@ -2,9 +2,9 @@
 # Platform — Requirements Traceability & Completeness Matrix
 
 **Document ID:** PLATFORM-RTM-001
-**Version:** 3.2.2
+**Version:** 3.2.3
 **Status:** **Authoritative Mother Reference — Completeness Control**
-**Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master RTM supplements including `Platform_23`
+**Last reconciliation:** 2026-09-18 — v3.2.3 UI/UX interaction architecture traceability supplement
 
 ## 1. Purpose
 
@@ -349,3 +349,34 @@ Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack complete
 | SVC-RECOVERY-001 | Recoverable crashes trigger supervised restart; persistent crash loops remain visible/diagnosable | §21.3 | PRD-SVC-001 | §34.4 | §35.4 | §71.3/71.4 | DF-091/092 |
 | LOG-STRUCT-001 | All components maintain structured lifecycle/failure/health logs with correlation IDs and secret redaction | §21.4 | PRD-LOG-001 | §34.5 | §35.4 | §71.5/71.6 | DF-090..093 |
 | DEV-WIN-CERT-001 | Windows-specific service/MSI/reboot certification uses isolated Windows runner/VM despite Docker-first development | §21.1/21.2 | PRD-PKG-001 | §34.6 | §35.5 | §71.4 | DF-092/093 |
+
+---
+
+## v3.2.3 UI interaction traceability supplement
+
+Existing `REQ-UI-001`–`REQ-UI-014` remain authoritative. The following requirements add the shared interaction architecture needed to implement the 98 workspaces consistently.
+
+| ID | Requirement | PRD | Architecture | HLD | LLD | Dataflow | UI Master | API/Data | Threat | Quality / Specialized |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| REQ-UI-015 | Persistent shared tenant/resource/time context across compatible navigation and drill-down | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-016 | Declarative dashboard definition with draft/validate/publish and immutable version history | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-017 | Visual no-code query builder emits versioned typed Query AST | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-018 | Raw query mode is expert-only, read-only, RBAC/tenant/budget constrained and server validated | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-019 | Cascading typed variables plus master time/timezone/refresh/Pause controls | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-020 | Independent panel cancellation/error/freshness boundaries and stale-response suppression | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-021 | Server-side query budgets, aggregation/downsampling, pagination and cardinality protection | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-022 | Governed native panel library: time series/stat/gauge/table/matrix/topology/flow/map/stream | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-023 | Accessible semantic status; no color-only operational meaning | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-024 | Unified self-service provisioning framework with real preflight evidence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_20 |
+| REQ-UI-025 | Credential selection/use without plaintext reveal; secret references only in UI documents | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_10/20 |
+| REQ-UI-026 | Typed global omnibar/entity search with backend-pluggable index | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-027 | Multi-layer topology, interface inspector and time-aware network operations UX | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-028 | Shared incident/RCA investigation layout and cross-telemetry temporal synchronization | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_19 |
+| REQ-UI-029 | Calibrated RCA confidence only; evidence/provenance and INCONCLUSIVE preserved | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_19 |
+| REQ-UI-030 | High-contrast NOC wallboard mode with reduced animation and no authorization change | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-031 | Distinct dashboard/provisioning read/edit/share/delete/manage permissions enforced server-side | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-032 | Safe schema-validated dashboard blueprint import/export and tenant-aware remapping | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-033 | Bounded client transformations; expensive work off-main-thread/server-side | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-034 | Browser terminal and ZTP remain gated by bastion/NCM audit, approval and rollback controls | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_10 |
+| REQ-UI-035 | UI/search/rendering dependency choice requires formal OSS admission and benchmark | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_07/14 |
+| REQ-UI-036 | Notification channel manager and later kiosk/snapshot features reuse shared dashboard/security contracts | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_19/20 |

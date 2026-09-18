@@ -1,7 +1,7 @@
 # Platform — UI/UX, Navigation & Out-of-Box Dashboard Master
 
 **Document ID:** PLATFORM-UIUX-001
-**Version:** 3.2.2
+**Version:** 3.2.3
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
 **Product:** Platform
 **Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master UI amendment for Notification Center and Discovery Review
@@ -6915,3 +6915,221 @@ Required UI behavior:
 - audit trail.
 
 Capability Pack / dimensional-certification operator views, when later specified, are supplements governed by `Platform_23` and must not be invented as a parallel screen catalogue here.
+
+---
+
+## v3.2.3 Shared Interaction, Dashboard, Provisioning and NOC Architecture
+
+This section is the detailed UI authority for the v3.2.3 reconciliation. It refines existing workspace definitions without changing the canonical count or inventing independent interaction frameworks per workspace.
+
+### 1. Shared shell and context
+
+- Desktop navigation is collapsible to an icon rail; mobile uses a drawer. The authoritative primary product navigation remains role-aware.
+- A monitoring-domain switcher MAY accelerate Network, Flow, Infrastructure, Synthetics, API and Database navigation but does not replace primary navigation.
+- The shell owns persistent tenant, site, entity, service, tag, time, timezone, comparison, refresh/pause and compatible dashboard-variable context.
+- Context survives deep links, drill-downs, browser back/forward, saved views, Studio preview, drawers and NOC mode where semantically valid.
+- Non-applicable dimensions remain preserved/inactive rather than silently discarded or reinterpreted.
+- Global Quick Actions include, subject to permission, Add Entity, Bulk Import and Start Discovery.
+- Inventory empty state and Inventory navigation expose Provisioning & Discovery directly.
+
+### 2. Native no-code Dashboard Studio
+
+Platform provides an in-house governed dashboard experience; third-party dashboard products are not embedded as the primary customer UI.
+
+**Canvas**
+- 24-column logical responsive grid with breakpoint-aware compaction;
+- drag/drop, edge/corner resize, snap, deterministic collision shifting;
+- row/group collapse;
+- desktop and NOC/wallboard layout variants;
+- stable panel IDs and `x/y/w/h` plus min/max constraints.
+
+**Panel editor**
+- right-side drawer or responsive split view;
+- live preview separated from the active dashboard DOM;
+- tabs for Data, Visualization, Threshold/Policy, Overrides and Links;
+- debounced preview queries, AbortController cancellation and stale-response suppression.
+
+**Lifecycle**
+- DRAFT → VALIDATE → PUBLISH;
+- published versions are immutable and attributed;
+- rollback produces a new version from prior history;
+- duplicate/copy/fullscreen/delete/link actions reuse stable server APIs;
+- destructive actions require explicit confirmation;
+- localStorage may cache unsaved recovery only; backend state is authoritative.
+
+**Blueprints**
+- JSON import/export is schema validated;
+- data-source/entity references are remapped only through an explicit tenant-aware mapping step;
+- unknown executable content fails closed;
+- importing cannot grant permissions or cross tenant boundaries.
+
+### 3. Visual query builder
+
+The builder presents:
+`Source → Namespace → Entity → Metric → Aggregation → Group By → Time Bucket`
+
+Supported aggregations include source-appropriate Avg/Sum/Min/Max/Rate and approved percentiles. The output is a versioned Query AST.
+
+Variables:
+- typed and parameterized;
+- support multi-select and All semantics;
+- parent variable changes cascade to dependent variable options;
+- variables are never string-concatenated into privileged SQL.
+
+Expert raw mode:
+- only for sources with a safe read-only grammar/policy;
+- explicit permission;
+- server-side tenant/resource predicates and query budgets remain mandatory;
+- no unrestricted mutation statements or browser-direct database credentials.
+
+### 4. Master time/refresh controller
+
+- quick ranges including 5m/15m/1h/24h/7d plus absolute selection;
+- timezone selection including UTC/local/customer policy;
+- configurable auto-refresh with server minimums and query budgets;
+- manual refresh;
+- Pause/Play to freeze background refresh during triage while preserving the selected investigation window;
+- shared zoom/reset/back behavior through the Temporal Interaction Bus.
+
+### 5. Panel runtime and performance
+
+Every panel owns an independent cancellation/error/freshness boundary. One failing panel must not prevent others from rendering or refreshing.
+
+- server determines safe time resolution/downsampling from requested time range, panel width, source characteristics and query budget;
+- pixel width is a planning signal, not a literal one-point-per-pixel invariant;
+- bounded oversampling is allowed for visual fidelity;
+- large joins/pivots/aggregations execute server-side;
+- bounded expensive client transformations run in Web Workers or equivalent off-main-thread execution;
+- trivial formatting need not use a worker;
+- streaming panels enforce bounded buffers/backpressure;
+- tables use server pagination/filtering and viewport virtualization.
+
+### 6. Native visualization families
+
+Mandatory governed panel families:
+
+1. **Time Series** — line/area/stacked/step, multi-series, optional dual axes, unified tooltip/crosshair, box zoom, policy overlays.
+2. **Stat + Sparkline** — unit-aware callout plus historical context.
+3. **Gauge / Progress** — raw value, min/max and semantic policy thresholds.
+4. **Virtualized Table** — sort/reorder/search, sticky header/identity column, governed export.
+5. **Health Matrix** — high-density square/hex/tile representation with accessible status cues and entity drawer.
+6. **Topology** — force/hierarchical/manual-pinned layouts and interaction events.
+7. **Flow/Sankey** — source/application/destination distribution with aggregation of low-volume flows.
+8. **Geo Map** — site/branch/datacenter assets with clustering and health semantics.
+9. **Event/Log Stream** — escaped monospaced bounded stream with pause/scroll behavior.
+
+Status uses semantic design tokens and text/icon/shape; green/amber/red alone is prohibited.
+
+A UI threshold must not silently contradict effective monitoring policy. Where backend policy exists, overlays render the effective policy/baseline plus provenance.
+
+### 7. Provisioning Studio
+
+Normal onboarding shall not require backend scripts.
+
+**Device wizard**
+1. target: IP/FQDN/CIDR;
+2. protocol: SNMPv2c/v3, gNMI, NETCONF, SSH, REST as supported;
+3. credential reference;
+4. Test Connection;
+5. site/tags/criticality;
+6. monitoring/capability/pack/policy preview;
+7. governed submit/review/activation.
+
+Test Connection returns real evidence such as reachability, handshake/auth result, protocol root access where applicable, latency and actionable remediation code.
+
+**Database connector studio**
+- connector catalogue and connector-specific bounded fields;
+- TLS/mTLS references;
+- connection test;
+- secrets masked and non-recoverable without explicit reveal authority where reveal is allowed at all.
+
+**REST/GraphQL connector studio**
+- safe method/URL/header/auth configuration;
+- bounded polling frequency;
+- escaped JSON response tree;
+- click-to-select JSON path for mapping;
+- raw secrets never returned after save.
+
+**Credential manager**
+- reusable SNMP community/v3, SSH and API credential profiles;
+- USE is distinct from REVEAL;
+- provisioning documents store references only.
+
+**Provisioning inventory**
+- unified view of registered devices/data sources/APIs;
+- lifecycle and collection health, last poll and safe diagnostic codes;
+- bounded bulk actions;
+- Force Poll and Maintenance actions only through authorized backend operations.
+
+CIDR discovery scheduling and a declarative payload mapper are accepted. Zero-touch configuration deployment is deferred until NCM validation/approval/rollback controls are production-ready.
+
+### 8. Network operations interaction
+
+**Topology**
+- L2, L3, VLAN, routing and underlay/overlay views as evidence permits;
+- traffic/health-aware edges;
+- edge click opens supporting evidence;
+- pinned/manual layouts persist;
+- historical comparison/time-aware state integrates with shared context.
+
+**Interface/port inspector**
+- faceplate/density view where model data allows;
+- admin/oper state, speed/duplex, errors/discards and utilization;
+- click opens an entity/interface drawer with synchronized time-series evidence.
+
+**Global omnibar**
+- Ctrl/Cmd+K;
+- typed results for IP, MAC, hostname, interface alias, VLAN, VRF, ASN and other canonical identifiers;
+- search backend is architecture-selected and may start with existing PostgreSQL/index facilities before adding a search cluster.
+
+**Time travel**
+- later capability using governed historical state snapshots/temporal graph evidence;
+- never reconstruct an unbounded raw historical state in the browser.
+
+Config diff and BGP/routing peering matrix are accepted with the NCM/routing backends.
+
+Browser SSH is deferred until a dedicated bastion/session broker provides authorization, command policy, recording/audit, secret isolation and appropriate approval controls.
+
+### 9. Incident / AIOps workbench
+
+- Incident feed compresses duplicate/symptom events without destroying evidence.
+- Investigation uses a reusable three-pane pattern: incident/list → evidence/timeline → context/actions.
+- RCA displays causal path, evidence provenance, contradictions/missing evidence and affected scope.
+- `INCONCLUSIVE` remains explicit.
+- Numeric confidence is displayed only for calibrated scores with documented meaning; LLM prose is never converted into pseudo-precision.
+- Time-series anomaly corridors visualize backend-computed baselines; algorithm choice remains backend policy.
+- Selecting a metric/event time aligns compatible logs, flow, changes, alerts and RCA evidence through shared context.
+- Human-in-the-loop runbook actions require authorization, impact/blast-radius preview, approval where policy requires, audit, validation and rollback/escalation.
+- Predictive capacity/runway cards are accepted only with evidence-quality and uncertainty.
+- Collaborative CRDT/war-room editing is deferred until incident workflow, authorization and audit semantics are mature.
+
+### 10. NOC, governance and accessibility
+
+- distinct permissions for dashboard view/edit/share/delete and provisioning read/manage;
+- UI visibility does not grant authority;
+- high-contrast NOC wallboard mode increases distance readability, hides editing/navigation chrome and reduces non-essential animation;
+- NOC playlist rotation is a later feature using the same dashboard definitions;
+- notification-channel management supports policy-driven Email/Webhook/Teams/Slack/PagerDuty-class connectors subject to integration security/rate limits;
+- scheduled dashboard PDF/snapshot export is a later reporting capability reusing Report Studio/export infrastructure.
+
+### 11. Dependency and implementation rules
+
+This document does not select ECharts, uPlot, Cytoscape, G6, MapLibre/Mapbox, OpenSearch/Elasticsearch, Jinja2, Puppeteer, Playwright or any equivalent dependency. Production selection requires `Platform_07` admission and benchmark/security evidence.
+
+### 12. Implementation order
+
+Broad workspace implementation follows:
+
+1. Shared Shell + persistent context + navigation;
+2. Provisioning & Discovery;
+3. Dashboard schema, Query AST, panel registry and version lifecycle;
+4. Temporal interaction and panel isolation/cancellation;
+5. Global Operations / NOC;
+6. Alert / Incident / RCA investigation;
+7. Network + Flow;
+8. Infrastructure / Cloud / Kubernetes;
+9. Synthetics + API;
+10. Database;
+11. remaining Studios, Administration and OOB workspaces.
+
+The 98 canonical workspaces must reuse shared primitives rather than create separate interaction frameworks.

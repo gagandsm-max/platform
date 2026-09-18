@@ -1,7 +1,7 @@
 # Platform — High-Level Design (HLD)
 
 **Document ID:** PLATFORM-HLD-001  
-**Version:** 3.2.1  
+**Version:** 3.2.3  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD, PRD, Master Architecture  
 
@@ -1208,3 +1208,39 @@ Each deployment unit shall implement a common health/logging contract. Logs flow
 ### 35.5 Windows Agent deployment unit
 
 The Windows Agent is one compiled service executable plus configuration/certificate state and an installer. BAT wrappers are convenience automation; they are not the Agent runtime itself. GA packaging uses MSI and code signing.
+
+---
+
+## v3.2.3 UI/dashboard/provisioning HLD supplement
+
+### Shared UI subsystem boundaries
+
+1. **Shell & Context**
+   - owns route/navigation state, persistent time/scope context, NOC mode, breadcrumbs and command/search entry;
+   - never substitutes presentation permissions for Core authorization.
+
+2. **Dashboard Definition Service**
+   - owns draft/published definitions, immutable versions, attribution and rollback lineage;
+   - validates schema and panel references before publish.
+
+3. **Panel Query Service**
+   - accepts a versioned Query AST plus authenticated scope/context;
+   - applies RBAC, tenant filters, query budgets, time/cardinality limits, source routing, aggregation/downsampling and safe errors;
+   - never accepts unrestricted mutation statements.
+
+4. **Panel Runtime**
+   - one independent cancellation/error/freshness boundary per panel;
+   - shared Temporal Interaction Bus for compatible hover/zoom/selection;
+   - bounded rendering and streaming buffers.
+
+5. **Provisioning Studio**
+   - shares wizard, credential-reference, preflight, review and job-status components;
+   - protocol/connector-specific forms delegate to existing Core/Sensor protocol contracts.
+
+6. **Investigation Workbench**
+   - shared three-pane interaction model for incident/alert/entity/RCA workflows;
+   - time/entity/evidence context propagates through links and drill-downs.
+
+### Failure isolation
+
+A failed query, import, panel renderer, connector test or transformation must remain isolated to its bounded operation. The shell and unrelated panels/workspaces remain usable, with explicit degraded/error state rather than blank-page failure.

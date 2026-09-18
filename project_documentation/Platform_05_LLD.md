@@ -1,7 +1,7 @@
 # Platform — Low-Level Design (LLD)
 
 **Document ID:** PLATFORM-LLD-001  
-**Version:** 3.2.1  
+**Version:** 3.2.3  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD → PRD → Architecture → HLD  
 
@@ -2362,3 +2362,58 @@ Logs shall be bounded. Linux packages integrate with journald/logrotate policy; 
 ### 71.7 Package scripts
 
 `.deb`/`.rpm` install/upgrade/uninstall scripts must be idempotent, must not destroy customer data on package removal unless an explicit purge operation is requested, and must preserve configuration/state across in-place upgrade. Package scripts must record failures with actionable error codes.
+
+---
+
+## v3.2.3 UI interaction LLD supplement
+
+### Dashboard definition contract
+
+A dashboard is a schema-versioned declarative document. At minimum it contains:
+
+```json
+{
+  "schemaVersion": "1.x",
+  "dashboardId": "<stable-id>",
+  "title": "...",
+  "layout": {"columns": 24, "breakpoints": {}},
+  "variables": [],
+  "panels": [],
+  "links": [],
+  "permissions": {},
+  "contextDefaults": {}
+}
+```
+
+Each panel carries a stable panel ID, approved panel type, grid coordinates `x/y/w/h`, min/max constraints, query references/AST, visual options, thresholds/policy bindings, overrides and drill-down links. Definitions contain data/source references, never plaintext credentials or executable customer code.
+
+Published versions are immutable. Rollback creates a new version based on a previous definition rather than mutating history in place.
+
+### Query AST
+
+The visual builder emits a versioned AST rather than privileged SQL text. The logical model includes:
+- source/data-domain;
+- namespace;
+- entity/resource selector;
+- metric/field;
+- aggregation/function;
+- group-by dimensions;
+- time bucket/resolution;
+- bounded filters/order/limit;
+- optional approved transformation references.
+
+Variable substitution is typed and parameterized. Server compilation is responsible for tenant/resource predicates and source-specific syntax.
+
+Raw-query mode, when enabled for a source, is a separately authorized expert contract with read-only grammar/policy enforcement, maximum range/rows/scan/concurrency and audit.
+
+### Shared context
+
+`DashboardContext`/workspace context carries authenticated tenant, resource scope, time range, timezone, refresh/pause state, comparison window, entity/service/site/tag selections and typed dashboard variables. Non-applicable dimensions are preserved as inactive context where practical; they are not silently reinterpreted.
+
+### Panel runtime
+
+Every panel owns an AbortController/cancellation scope, stale-response fence, independent loading/error/freshness state, bounded client data and an error boundary. Bounded expensive client work may use a worker.
+
+### Security
+
+Dashboard import and connector response inspection must reject executable HTML/script, unsafe raw payload rendering and unknown schema content where required. SQL/JSON/log text is rendered escaped. Mutable actions require click/select/confirmation surfaces and server authorization; hover is informational only.

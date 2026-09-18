@@ -2,7 +2,7 @@
 # Platform — Authoritative Open-Source Software Catalogue
 
 **Document ID:** PLATFORM-OSS-001  
-**Version:** 3.2.1  
+**Version:** 3.2.3  
 **Status:** **Authoritative Mother Reference — Dependency Allow-List Baseline**  
 **Verification date:** 2026-09-06 (v3.2.1 bootstrap UI/build/logging admissions)  
 **Important:** This is an engineering/licensing governance baseline, not legal advice. Exact pinned versions and their complete transitive/bundled licenses must be scanned before release.
@@ -233,3 +233,15 @@ Tooling-only status does not mean licensing can be ignored; it means the tool is
 ### 10.1 Podman decision
 
 Podman compatibility is **not** a v1 engineering requirement. Adding a second local container runtime would increase variance in Compose compatibility, networking, volume behavior, rootless operation and support burden. The project will standardize on Docker Compose until a customer/developer requirement justifies another runtime.
+
+---
+
+## v3.2.3 UI/UX dependency-governance clarification
+
+UI/UX design recommendations may name technologies for illustration. Mention does **not** equal approval.
+
+The following names have appeared in reference/recommendation material and remain **UNSELECTED / CANDIDATE ONLY** unless this catalogue is deliberately updated with exact version, licence, CVE/supply-chain review, SBOM/air-gap packaging evidence and benchmark results: Apache ECharts, uPlot, Cytoscape, G6/AntV graph libraries, Mapbox/MapLibre, OpenSearch/Elasticsearch, Jinja2, Puppeteer, Playwright and equivalent chart/graph/map/search/template/headless-browser frameworks.
+
+Engineering may benchmark candidates in disposable spikes. Production code must not add one merely because a UX document mentions it.
+
+Selection criteria include bundle/runtime footprint, rendering density, accessibility, deterministic testing, offline packaging, maintainership, security posture, licence/notice obligations and compatibility with the Platform resource envelope.

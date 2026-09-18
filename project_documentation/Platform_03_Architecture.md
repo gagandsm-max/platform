@@ -1,7 +1,7 @@
 # Platform — Master Architecture Document
 
 **Document ID:** PLATFORM-ARC-001  
-**Version:** 3.2.1  
+**Version:** 3.2.3  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Business requirements:** `Platform_01_BRD.md`  
 **Product requirements:** `Platform_02_PRD.md`  
@@ -1223,3 +1223,30 @@ Platform self-observability is mandatory. Every deployment unit emits structured
 ### 34.6 Windows certification exception
 
 Windows Agent source can be cross-compiled and most functional tests can run in containerized CI, but GA certification of Windows Service installation, reboot auto-start, SCM recovery, MSI behavior and Windows-specific permissions requires an isolated Windows runner/VM. This is an OS-compatibility test environment, not permission to install Platform development dependencies directly on the primary developer laptop.
+
+---
+
+## v3.2.3 Shared UI platform architecture
+
+The UI is a governed product subsystem rather than a collection of independent pages.
+
+### Logical UI components
+
+- **Application Shell** — primary navigation, tenant/resource scope, breadcrumbs, command/omnibar, notification entry, NOC mode and persistent context.
+- **Workspace Runtime** — renders the 98 canonical workspaces from shared navigation, authorization, context and error-boundary primitives.
+- **Dashboard Runtime** — renders versioned declarative dashboard definitions and isolated panel instances.
+- **Dashboard Authoring** — governed grid/canvas, panel editor, variables, links, version lifecycle and blueprint import/export.
+- **Query Gateway/Planner** — accepts versioned typed query ASTs, authorizes tenant/resource scope, enforces budgets and compiles source-specific queries. Browser code is not a database authority.
+- **Dashboard Context / Temporal Interaction Bus** — carries time range, timezone, comparison state, shared hover/selection/zoom and semantically compatible entity/scope variables.
+- **Panel Registry** — approved visualization/interaction types and their versioned configuration schemas.
+- **Provisioning Studio Framework** — shared wizard/preflight/job/inventory primitives for network, database and API onboarding.
+- **Investigation Workbench** — reusable list/evidence/context model for alerts, incidents, entities and RCA.
+- **Search/Command Surface** — typed entity/action lookup; backend implementation remains pluggable.
+
+### Data and authority boundaries
+
+- PostgreSQL owns authoritative dashboard definitions/versions, saved views, provisioning configuration metadata and permissions.
+- ClickHouse/high-volume stores remain query sources for historical telemetry; browsers do not bypass Core/query authorization.
+- Browser local storage may cache ephemeral unsaved draft/recovery state only and is never the authoritative shared configuration store.
+- Large aggregation/transformation remains server-side. Bounded client transformations may execute off-main-thread.
+- UI dependencies remain subject to `Platform_07` admission; no proposal-named library is selected by this architecture section.

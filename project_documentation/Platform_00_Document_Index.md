@@ -1,15 +1,19 @@
 # Platform — Mother Reference Documentation Set
 
 **Document ID:** PLATFORM-INDEX-001  
-**Version:** 3.2.2  
+**Version:** 3.2.3  
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-13 — v3.2.2 enterprise monitoring coverage / Capability Pack certification specialized-master addition
+**Last reconciliation:** 2026-09-18 — v3.2.3 UI/UX interaction, dashboard, provisioning and NOC architecture reconciliation
 
 ## 1. Authority
 
-**v3.2.2 supersedes v3.2.1 as the authoritative Platform mother-reference set after merge to the canonical GitHub `main`.**
+**v3.2.3 supersedes v3.2.2 as the authoritative Platform mother-reference set after merge to the canonical GitHub `main`.**
+
+v3.2.3 is an additive UI/UX interaction-architecture reconciliation across the existing 25-file set. It formalizes shared dashboard, query, provisioning, investigation, NOC, accessibility, security and performance contracts without adding a new master document or weakening the v3.2.2 Capability Pack/monitoring scope.
+
+v3.2.2 superseded v3.2.1 as the prior authoritative set.
 
 v3.2.2 is an additive product/engineering scope revision. It includes five specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value; `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center; `Platform_21_Enterprise_Gap_Closure_Master.md` for enterprise adoption gaps such as normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, tamper-evident audit, governed offboarding/data portability and connector families; `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` for evidence-qualified alerting, monitoring-state semantics, RCA/AI assurance, bounded AI assistance and related shared-service evidence; and `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` for enterprise monitoring-domain coverage, the single Capability Pack architecture, dimensional certification and Real Customer Requirements normalization. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement. Existence of `Platform_23` is EMC-0 specification only and does not imply pack runtime, vendor certification or contractual coverage.
 
@@ -245,3 +249,28 @@ Such changes require deliberate change control, cross-document reconciliation, D
 For ChatGPT Project use, these **25 Markdown mother-reference files** are sufficient as the authoritative source set.
 For code-agent enforcement, `AGENTS.md` should also be available at repository root (`~/nms/AGENTS.md` in a working clone), preferably as the existing symlink to `project_documentation/AGENTS.md`, so tools that auto-discover root instructions see the same content.
 Authority of the clone follows §12 after merge to the canonical GitHub repository.
+
+---
+
+## 4.3 v3.2.2 → v3.2.3 UI/UX interaction reconciliation
+
+v3.2.3 is an additive change-control revision of the same 25-file Mother Reference set. It does not add a new master file and does not weaken any v3.2.2 requirement.
+
+The revision formalizes the accepted enterprise UI/UX interaction architecture across the existing governing layers:
+
+- `Platform_02` carries customer-visible dashboard, provisioning, investigation, NOC and interaction requirements;
+- `Platform_03`–`Platform_06` carry the shared UI runtime, dashboard/query/context architecture, HLD/LLD contracts and end-to-end flows;
+- `Platform_07` makes clear that named UI/search/rendering libraries from design proposals are not automatically approved dependencies;
+- `Platform_08` adds traceable `REQ-UI-015` through `REQ-UI-036`;
+- `Platform_09` is the primary detailed authority for the shared shell, no-code Dashboard Studio, query builder, visualization system, provisioning UX, network operations UX, incident/RCA workbench and NOC ergonomics;
+- `Platform_10` clarifies credential-use/non-reveal and safe provisioning preflight behavior;
+- `Platform_12` records the architecture decisions and deferrals;
+- `Platform_14` adds UI performance, accessibility, panel-isolation, query-budget and security release gates;
+- `Platform_17` defines dashboard/query/context/saved-view/provisioning API and data contracts;
+- `Platform_18` adds dashboard/import/raw-query/query-amplification/secret-exfiltration/browser-execution threats and mitigations;
+- `Platform_19` adds incident/RCA interaction requirements without weakening evidence-before-AI or `INCONCLUSIVE`;
+- `Platform_20` adds provisioning/discovery discoverability and self-service onboarding UX while preserving governed activation.
+
+The change source is the product-owner-approved UI/UX reconciliation recorded in GitHub issue #56 and subsequent architecture review. Named libraries in reference recommendations remain candidates only until formally admitted through the OSS catalogue.
+
+Broad implementation of the 98 workspaces SHALL NOT precede the common UI foundations defined by v3.2.3.

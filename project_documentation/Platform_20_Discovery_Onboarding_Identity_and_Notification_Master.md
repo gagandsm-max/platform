@@ -1,7 +1,7 @@
 # Platform — Discovery, Onboarding, Identity & Notification Master
 
 **Document ID:** PLATFORM-ONBOARDING-001
-**Version:** 3.2.2
+**Version:** 3.2.3
 **Status:** **Authoritative Mother Reference — Discovery / Onboarding / Identity / Notification**
 **Product:** Platform
 **Change class:** Additive approved product scope clarification; does not remove or weaken any v3.2.1/v3.2.2 requirement
@@ -639,3 +639,46 @@ Operational self-monitoring includes candidate queue depth/age, review backlog, 
 ### 13.1 Definition of done
 
 Implementation of this capability family is not complete until the applicable requirements above have code, tests, observability, security/tenant-isolation coverage, upgrade/migration behavior where state is introduced, UI states, audit evidence and operational runbooks. A UI-only queue or bell without server-side scope, lifecycle and durable identity semantics is non-conformant.
+
+---
+
+## 14. v3.2.3 Provisioning Studio and discoverability supplement
+
+The governed onboarding lifecycle in this master remains authoritative. v3.2.3 improves discoverability and operator ergonomics without turning discovery into automatic activation.
+
+### Discoverability
+
+- Primary navigation exposes **Provisioning & Discovery**.
+- Inventory empty states provide Add Entity / Start Discovery entry points.
+- Authorized global Quick Actions include Add Entity, Bulk Import and Start Discovery.
+- Discovery candidates always link into the governed review queue.
+
+### Shared provisioning framework
+
+Normal customer administration uses a shared wizard framework:
+
+1. target/source definition;
+2. protocol/connector selection;
+3. authorized credential reference;
+4. real Test Connection/preflight;
+5. site/tags/criticality and grouping;
+6. effective monitoring profile/policy/Capability Pack/Sensor/capacity preview;
+7. governed submit/review/activation.
+
+Device, database and REST/GraphQL onboarding reuse these primitives rather than invent separate lifecycle semantics.
+
+### Preflight evidence
+
+Preflight returns structured reachability, authentication/handshake, protocol/root-access and latency checks where applicable, with safe technical/remediation codes. A successful browser form validation is never treated as proof of connectivity.
+
+### Credentials
+
+Operators may select authorized reusable credential profiles without revealing plaintext. Candidate/provisioning records retain references only. Secret values are not copied into notification, audit, saved-view or dashboard content.
+
+### Connector response mapping
+
+REST/GraphQL response inspection uses escaped bounded JSON trees. A user may select a JSON path to create a declarative field mapping; mappings remain schema validated and non-executable.
+
+### Deferred automation
+
+CIDR scheduling/review is in scope under existing discovery controls. Zero-touch device configuration is not activated by this UI revision and remains dependent on production-ready NCM template validation, approval, staged diff, execution guardrails and rollback.

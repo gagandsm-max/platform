@@ -1,7 +1,7 @@
 # Platform — Test, Performance, Benchmark & Release Quality Master
 
 **Document ID:** PLATFORM-QUALITY-001
-**Version:** 3.2.2
+**Version:** 3.2.3
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
 **Consolidation rule:** This document preserves the normative content of the listed v3.1 source documents (via v3.2/v3.2.1). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement. v3.2.2 adds specialized-master quality supplements in §6 without rewriting the base gates.
@@ -145,3 +145,25 @@ Customer Acceptance Profile results must be evidence-backed. A technology listed
 Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certified ≠ deployed.
 
 OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively.
+
+---
+
+## 7. v3.2.3 UI/UX quality and performance gates
+
+The following are release-quality gates for implemented v3.2.3 UI capabilities:
+
+- **Panel isolation:** a timed-out, cancelled, malformed or failing panel query must not stop unrelated panels or the shell.
+- **Cancellation correctness:** superseded preview/panel requests must be cancelled or fenced so stale responses cannot overwrite newer state.
+- **Tenant/query security:** Query AST, raw-query, saved-view, dashboard-import and provisioning APIs require tenant-isolation and authorization negative tests.
+- **Query budgets:** time range, rows, scanned data, series/cardinality, concurrency and export limits require boundary and abuse tests.
+- **Rendering scale:** certify representative time-series, virtualized table, health-matrix, topology and NOC workloads; do not claim fixed 2,000-point or 5,000-object targets without benchmark evidence.
+- **Downsampling fidelity:** server aggregation/downsampling must preserve operationally significant spikes/states according to metric semantics.
+- **Main-thread responsiveness:** benchmark expensive client parsing/transformation separately; long-running transformations must not freeze navigation/triage.
+- **Accessibility:** keyboard navigation, focus management, semantic labels, high contrast and no color-only status are release gates.
+- **NOC endurance:** wallboard mode is soak-tested for long-lived refresh, memory growth, GPU/CPU usage and reconnect behavior.
+- **Dashboard lifecycle:** concurrent edit/publish/version rollback/import validation and permission boundaries require deterministic tests.
+- **Provisioning:** credential non-reveal, preflight evidence, safe error/redaction and stale/bulk action behavior require E2E coverage.
+- **Investigation context:** cross-telemetry time/entity synchronization must not silently change scope or expose data from another tenant.
+- **Dependency admission:** any new visualization/search/map/headless-browser dependency must have exact-version licence/CVE/SBOM/offline-packaging and resource benchmark evidence before GA.
+
+Exact GA UI latency/render SLOs remain evidence-driven and shall be frozen only after representative benchmark runs.

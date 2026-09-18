@@ -1,7 +1,7 @@
 # Platform — Protocol, Security, Credential & Connector Master
 
 **Document ID:** PLATFORM-PROTOCOL-001  
-**Version:** 3.2.1  
+**Version:** 3.2.3  
 **Status:** **Authoritative Mother Reference — Protocol/Security/Connector Contract**  
 **Product:** Platform
 
@@ -103,3 +103,17 @@ The Connector framework supports reusable, versioned connectors with: authentica
 - All protocol failures preserve raw technical reason internally while presenting safe actionable customer text.
 - Certificates, keys and trust stores have lifecycle/expiry/rotation UI.
 - Every security-sensitive action is audited with actor, tenant, object, result, reason/ticket and request/session context.
+
+---
+
+## v3.2.3 Provisioning and credential UX security clarification
+
+UI-driven provisioning is a presentation layer over the existing protocol/security contracts; it does not weaken them.
+
+- Protocol selection must expose only supported/certified options and their actual security posture.
+- "Test Connection" is a bounded real preflight through Core/Sensor/connector execution and returns safe evidence/remediation codes; the browser does not perform privileged network probing directly.
+- Credential profiles are referenced by opaque tenant-scoped IDs. Operators with USE authority may select a profile without receiving its plaintext.
+- Secrets, private keys, community strings, bearer/API tokens and passwords must not be embedded in dashboard definitions, saved views, URLs, logs, audit details or connector JSON blueprints.
+- API/REST response inspectors escape content and apply size/time/redaction bounds.
+- Browser terminal/SSH is not authorized by this UX change. It remains governed by the privileged CLI/NCM Session Broker requirements, including JIT/approval/command policy/session audit and secret non-disclosure.
+- Zero-touch configuration deployment remains deferred until template validation, authorization, staged diff, execution guardrails and rollback are implemented.

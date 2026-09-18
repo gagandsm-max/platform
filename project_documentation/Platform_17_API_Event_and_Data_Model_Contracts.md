@@ -1,7 +1,7 @@
 # Platform — API, Event, Data Model & Schema Contracts
 
 **Document ID:** PLATFORM-CONTRACTDATA-001
-**Version:** 3.2.1
+**Version:** 3.2.3
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
 **Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
@@ -64,3 +64,42 @@ Raw, rollup, incident, audit, configuration and protected/legal-hold classes use
 ## 5. Data integrity
 
 Ingestion records support deduplication/idempotency and late/out-of-order data handling. Pipeline reconciliation detects produced/accepted/normalized/inserted/rejected discrepancies.
+
+---
+
+## 5. v3.2.3 UI/dashboard/query contract supplement
+
+### Dashboard definition/version contract
+
+Dashboard APIs operate on tenant-scoped, schema-versioned declarative definitions. Published versions are immutable and include dashboard ID, version/revision, actor, timestamp, optional change note and integrity metadata. Draft and publish operations are separate authorization decisions. Rollback creates a new published version derived from a prior one.
+
+Definitions may reference approved panel types, Query ASTs, variables, links, layout and presentation options. They must not contain plaintext credentials, executable customer code or cross-tenant object references.
+
+### Query request contract
+
+A panel/query request carries:
+- query schema version;
+- source/data domain;
+- namespace/resource selectors;
+- metric/field;
+- aggregation/group/time bucket;
+- typed filters/variables;
+- requested time range/timezone/comparison context;
+- bounded output hints such as panel width/resolution;
+- correlation/request ID.
+
+Server derives authoritative tenant/resource scope from authentication and permissions, not from client claims. Query services enforce budgets and may choose a coarser safe resolution.
+
+Raw-query APIs, where present, are separate expert contracts with read-only source-specific validation and all normal tenant/budget controls.
+
+### Shared context and saved views
+
+Saved views/context serialization may persist compatible tenant-safe filters, time preferences, entity/service/site/tag selections, layout and visualization state. Context payloads cannot grant authority. Resource IDs are re-authorized on use.
+
+### Provisioning/preflight
+
+Provisioning APIs use credential-reference IDs, not secrets. Preflight is an asynchronous or bounded synchronous job returning structured checks, evidence status and remediation codes. The browser never receives reusable secret material from preflight responses.
+
+### Error/data safety
+
+Dashboard, query, import and connector APIs return stable safe error codes. SQL text, stack traces, credentials, private data-source URLs and unredacted raw payloads are not returned merely for debugging. Large raw response inspection is bounded and escaped.

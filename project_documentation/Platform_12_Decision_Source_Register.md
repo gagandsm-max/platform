@@ -1,7 +1,7 @@
 # Platform — Decision, Source & Assumption-Control Register
 
 **Document ID:** PLATFORM-DECISION-001  
-**Version:** 3.2.2  
+**Version:** 3.2.3  
 **Status:** **Authoritative Mother Reference — Decision Provenance**
 
 ## 1. Purpose
@@ -211,3 +211,29 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Real-customer requirements normalization | USER-FIXED | Recurring enterprise ITOM/AIOps needs are normalized as Real Customer Enterprise Benchmark — Automotive / ITOM-AIOps with classification A–G. Confidential customer names, inventories, locations, quantities, commercial clauses, penalties, unique SLAs and contract language must not be embedded in Mother References. |
 | Enterprise-monitoring-coverage product scope | USER-FIXED | `PRD-EMC-001` through `PRD-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` are approved additive v3.2.2 product requirements/targets. They are EMC-0 specification only and do not claim runtime, pack certification or contractual coverage. |
 | Enterprise-monitoring-coverage packaging | ARCH-DELEGATED | `Platform_23` is the consolidated authoritative v3.2.2 specialized master for this family. `REQ-EMC-001` through `REQ-EMC-018` are the RTM supplement. It does not replace Platform_10, 19, 20, 21 or 22 outside its assigned scope. |
+
+---
+
+## v3.2.3 UI/UX architecture decisions
+
+Source: product-owner UI/UX enhancement requests reconciled by the delegated CTO/architecture authority and tracked through GitHub issue #56.
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Shared UI primitives before workspace breadth | ARCH-DELEGATED | The 98 workspaces reuse common shell/context/query/panel/investigation/provisioning primitives; do not implement 98 separate interaction frameworks. |
+| Native Dashboard Studio | ARCH-DELEGATED | Platform owns the no-code dashboard/canvas experience; third-party dashboard products are not embedded as the primary customer UI. |
+| Dashboard persistence | ARCH-DELEGATED | Published/shared dashboard definitions and versions are backend authoritative; localStorage is limited to ephemeral draft/recovery caching. |
+| Dashboard lifecycle | ARCH-DELEGATED | Declarative schema with DRAFT → VALIDATE → PUBLISH, immutable published versions and auditable rollback-as-new-version. |
+| Query architecture | ARCH-DELEGATED | Visual builder emits a typed versioned Query AST; Core/query services authorize, tenant-scope, budget and compile it. |
+| Raw query mode | ARCH-DELEGATED | Expert-only, read-only, RBAC-controlled, tenant-scoped and server validated; never unrestricted browser-to-database access. |
+| Temporal context | ARCH-DELEGATED | Persistent time/scope context and a shared Temporal Interaction Bus synchronize compatible panels/workspaces and preserve incompatible dimensions without silent reinterpretation. |
+| Panel failure isolation | ARCH-DELEGATED | Each panel has independent cancellation/error/freshness state; one failing query cannot block a dashboard. |
+| Transformation placement | ARCH-DELEGATED | Large/expensive transformations are server-side; bounded expensive client transforms may use workers; trivial work stays simple. |
+| Visualization dependency | TBD/P0-SPIKE | ECharts/uPlot/Cytoscape/G6/MapLibre and equivalent libraries are candidates only pending OSS/security/performance admission. |
+| Search backend | TBD/P0-SPIKE | Omnibar is required; OpenSearch/Elasticsearch is not mandatory. Select simplest backend meeting measured scale/SLOs. |
+| Credential UX | ARCH-DELEGATED | USE without REVEAL is the default operator model; dashboard/provisioning definitions store secret references only. |
+| Browser terminal | ARCH-DELEGATED | Deferred until a secure audited bastion/session-broker implementation satisfies NCM/security requirements. |
+| ZTP | ARCH-DELEGATED | Deferred until NCM authorization, validation, approval, execution and rollback are production-ready. |
+| RCA confidence | ARCH-DELEGATED | Numeric confidence is shown only when calibrated/documented; evidence/provenance and INCONCLUSIVE remain authoritative. |
+| Status semantics | ARCH-DELEGATED | Operational status is semantic and accessible; no color-only meaning and no UI-local threshold silently overriding effective monitoring policy. |
+| UI implementation order | ARCH-DELEGATED | Shell/context → Provisioning → Dashboard platform → shared interaction → NOC → Incident/RCA → Network/Flow → Infra/Cloud/K8s → Synthetics/API → Database → remaining workspaces. |

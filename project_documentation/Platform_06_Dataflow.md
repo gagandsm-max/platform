@@ -1,7 +1,7 @@
 # Platform — End-to-End Dataflow & Sequence Documentation
 
 **Document ID:** PLATFORM-DF-001  
-**Version:** 3.2.1  
+**Version:** 3.2.3  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD, PRD, Architecture, HLD, LLD  
 
@@ -1903,3 +1903,38 @@ No production claim is made until this architecture is implemented and validated
 6. Service restarts automatically.
 7. Health/compatibility checks execute.
 8. On failure, rollback path is invoked where supported and incident/support evidence is retained.
+
+---
+
+## v3.2.3 UI interaction dataflows
+
+### Dashboard render
+
+1. Browser loads authenticated shell and authoritative saved/dashboard definition.
+2. Shell restores compatible tenant/resource/time context.
+3. Each visible panel independently submits a versioned Query AST plus context to Core.
+4. Core authorizes tenant/resource scope, applies query budgets and compiles the source query.
+5. Data service selects suitable aggregation/downsampling for time range and panel resolution.
+6. Each panel renders independently; cancellation or failure affects that panel only.
+7. Hover/zoom/selection emits semantic events on the Temporal Interaction Bus; compatible panels update while incompatible dimensions remain inactive rather than being silently remapped.
+
+### Dashboard edit/publish
+
+1. Editor works on isolated draft state; preview queries are debounced/cancellable.
+2. Draft schema, query ASTs, references and permissions are validated.
+3. Publish requires server authorization and creates an immutable attributed version.
+4. Other users continue on the prior published version until the new publish commits.
+5. Rollback creates a new version from selected history and is auditable.
+
+### Provisioning preflight
+
+1. Operator selects target/protocol/connector and an authorized credential reference.
+2. Core validates scope and creates a bounded preflight job.
+3. Sensor/connector executes permitted reachability/handshake/root-access tests.
+4. Results return as a granular evidence matrix with remediation codes.
+5. Operator reviews site/tags/policy/pack/capacity impact before governed activation.
+6. Secrets never round-trip back to the browser.
+
+### Investigation synchronization
+
+A time/entity selection in an incident or chart becomes shared investigation context. Metrics, logs, flow, events, changes and RCA evidence query the same bounded temporal window and compatible entity identifiers, preserving provenance and source-specific uncertainty.
