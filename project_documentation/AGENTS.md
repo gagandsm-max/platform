@@ -2,7 +2,7 @@
 
 This file should be available at the repository root of a working clone (commonly `~/nms/AGENTS.md`). For ChatGPT Project/source management it may also be stored in `project_documentation`; the preferred repository setup is a root copy or symlink to this authoritative file. It is a navigation and enforcement file, not a replacement for the mother-reference documents.
 
-**Mother-reference version:** 3.2.2  
+**Mother-reference version:** 3.2.3  
 **Canonical repository (USER-FIXED):** https://github.com/gagandsm-max/platform  
 
 Local clones (including `~/nms`) are working copies. Changes become authoritative only after push and merge into the canonical GitHub repository.
@@ -176,3 +176,16 @@ Do not paste the agent or Skill catalogue here. Resolve it from manifests.
 - Evidence: typed claims, exact-head current-base CI, no writer self-certification
 
 Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.2.2. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
+
+## v3.2.3 UI/UX architecture gate
+
+For any UI, dashboard, provisioning, investigation, NOC, topology or visualization work, read `Platform_09_UI_UX_Master.md` plus the corresponding API/security contracts in `Platform_17_API_Event_and_Data_Model_Contracts.md` and `Platform_18_Security_Threat_Model.md` before editing.
+
+Non-negotiable:
+- reuse the shared shell, persistent context, Query AST, panel runtime, Temporal Interaction Bus, provisioning and investigation primitives; do not build independent interaction frameworks per workspace;
+- published/shared dashboard and provisioning state is Core-authoritative; browser storage is draft/recovery cache only;
+- raw query capability is expert-only, read-only, RBAC-controlled, tenant-scoped, bounded and server-validated;
+- no arbitrary customer JavaScript/React/eval in dashboard or transformation definitions;
+- no new chart/graph/map/search/template/headless-browser dependency merely because a UX reference names one; production admission follows `Platform_07_OSS_Catalog.md`;
+- secrets are references; USE is distinct from REVEAL; UI hiding is never authorization;
+- browser terminal and ZTP remain gated by the NCM/security contracts until their audit, approval and rollback controls are production-ready.
