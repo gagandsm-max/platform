@@ -1,7 +1,7 @@
 # Platform — Operational Intelligence, MTTR Reduction & Customer Value Master
 
 **Document ID:** PLATFORM-INTELVALUE-001  
-**Version:** 3.2.3  
+**Version:** 3.2.3
 **Status:** **Authoritative Mother Reference — Operational Intelligence / MTTR / Customer Value**  
 **Product:** Platform  
 **Change class:** Additive approved product scope; does not remove or weaken any v3.2.1 requirement

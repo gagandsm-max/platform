@@ -1,7 +1,7 @@
 # Platform — Mother Reference Documentation Set
 
 **Document ID:** PLATFORM-INDEX-001  
-**Version:** 3.2.3  
+**Version:** 3.2.3
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  

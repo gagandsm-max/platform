@@ -1,7 +1,7 @@
 # Platform — Low-Level Design (LLD)
 
 **Document ID:** PLATFORM-LLD-001  
-**Version:** 3.2.3  
+**Version:** 3.2.3
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD → PRD → Architecture → HLD  
 

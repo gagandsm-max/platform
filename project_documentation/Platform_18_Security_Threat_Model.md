@@ -1,7 +1,7 @@
 # Platform — Security Threat Model
 
 **Document ID:** PLATFORM-THREAT-001  
-**Version:** 3.2.3  
+**Version:** 3.2.3
 **Status:** Authoritative Mother Reference
 
 ## 1. Assets

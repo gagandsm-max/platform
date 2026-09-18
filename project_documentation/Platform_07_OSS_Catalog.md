@@ -2,7 +2,7 @@
 # Platform — Authoritative Open-Source Software Catalogue
 
 **Document ID:** PLATFORM-OSS-001  
-**Version:** 3.2.3  
+**Version:** 3.2.3
 **Status:** **Authoritative Mother Reference — Dependency Allow-List Baseline**  
 **Verification date:** 2026-09-06 (v3.2.1 bootstrap UI/build/logging admissions)  
 **Important:** This is an engineering/licensing governance baseline, not legal advice. Exact pinned versions and their complete transitive/bundled licenses must be scanned before release.
