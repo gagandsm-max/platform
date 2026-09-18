@@ -9,12 +9,12 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 
-final class CapabilityPackTestSupport {
+public final class CapabilityPackTestSupport {
 
     private CapabilityPackTestSupport() {
     }
 
-    static byte[] resourceBytes(String classpathResource) {
+    public static byte[] resourceBytes(String classpathResource) {
         try (InputStream in = CapabilityPackTestSupport.class.getClassLoader().getResourceAsStream(classpathResource)) {
             if (in == null) {
                 throw new IllegalStateException("Missing test resource: " + classpathResource);
@@ -25,7 +25,7 @@ final class CapabilityPackTestSupport {
         }
     }
 
-    static String sha256(byte[] bytes) {
+    public static String sha256(byte[] bytes) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
         } catch (Exception ex) {
@@ -33,7 +33,7 @@ final class CapabilityPackTestSupport {
         }
     }
 
-    static byte[] minimalManifestBytes(String packId, String packVersion, String product) {
+    public static byte[] minimalManifestBytes(String packId, String packVersion, String product) {
         String json = """
                 {
                   "schemaVersion": "1.0.0",
@@ -69,11 +69,11 @@ final class CapabilityPackTestSupport {
         return json.getBytes(StandardCharsets.UTF_8);
     }
 
-    static CapabilityPackDescriptor loadMinimal(String packId, String packVersion, String product) {
+    public static CapabilityPackDescriptor loadMinimal(String packId, String packVersion, String product) {
         return new CapabilityPackLoader().load(minimalManifestBytes(packId, packVersion, product));
     }
 
-    static CapabilityPackDescriptor withDependency(
+    public static byte[] dependentManifestBytes(
             String packId, String packVersion, String product, String depPackId, String depVersion) {
         String json = """
                 {
@@ -107,10 +107,16 @@ final class CapabilityPackTestSupport {
                   ]
                 }
                 """.formatted(packId, packVersion, product, depPackId, depVersion);
-        return new CapabilityPackLoader().load(json.getBytes(StandardCharsets.UTF_8));
+        return json.getBytes(StandardCharsets.UTF_8);
     }
 
-    static CapabilityPackDescriptor withMatchRules(
+    public static CapabilityPackDescriptor withDependency(
+            String packId, String packVersion, String product, String depPackId, String depVersion) {
+        return new CapabilityPackLoader().load(
+                dependentManifestBytes(packId, packVersion, product, depPackId, depVersion));
+    }
+
+    public static CapabilityPackDescriptor withMatchRules(
             String packId, String packVersion, String name, List<MatchRule> matchRules) {
         CapabilityPackDescriptor base = loadMinimal(packId, packVersion, name);
         return new CapabilityPackDescriptor(
@@ -133,7 +139,7 @@ final class CapabilityPackTestSupport {
         );
     }
 
-    static CapabilityPackDescriptor unsupportedProfileDescriptor() {
+    public static CapabilityPackDescriptor unsupportedProfileDescriptor() {
         // Construct via loader then wrap is not possible for other classes; build a synthetic descriptor.
         CapabilityPackDescriptor base = loadMinimal("fixture.fictional.unsupported", "1.0.0", "Unsupported");
         return new CapabilityPackDescriptor(
@@ -156,7 +162,7 @@ final class CapabilityPackTestSupport {
         );
     }
 
-    static Optional<String> empty() {
+    public static Optional<String> empty() {
         return Optional.empty();
     }
 }

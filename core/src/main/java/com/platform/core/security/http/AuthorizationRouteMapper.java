@@ -173,6 +173,15 @@ public class AuthorizationRouteMapper {
             }
             return null;
         }
+        if (remainder.startsWith("/capability-packs")) {
+            if (isGet) {
+                return PlatformPermissions.CAPABILITY_PACK_READ;
+            }
+            if (isPut || HttpMethod.DELETE.matches(method)) {
+                return PlatformPermissions.CAPABILITY_PACK_MANAGE;
+            }
+            return null;
+        }
         return null;
     }
 
