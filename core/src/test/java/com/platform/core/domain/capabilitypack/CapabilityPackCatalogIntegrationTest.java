@@ -290,6 +290,239 @@ class CapabilityPackCatalogIntegrationTest {
         assertEquals(1L, catalog.requireActive(tenantB.tenantId(), BASE).generation());
     }
 
+    @Test
+    void reactivationAfterDeactivateUsesMonotonicHistoricalGeneration() {
+        byte[] bytes = CapabilityPackTestSupport.minimalManifestBytes(BASE, "1.0.0", "BaseProduct");
+        catalog.register(tenantA.tenantId(), BASE, "1.0.0", bytes);
+
+        CapabilityPackActivation gen1 = tx.execute(status ->
+                catalog.activate(tenantA.tenantId(), BASE, "1.0.0", 0L));
+        assertEquals(1L, gen1.generation());
+
+        tx.executeWithoutResult(status -> catalog.deactivate(tenantA.tenantId(), BASE, 1L));
+        assertTrue(catalog.findActive(tenantA.tenantId(), BASE).isEmpty());
+
+        CapabilityPackActivation gen2 = tx.execute(status ->
+                catalog.activate(tenantA.tenantId(), BASE, "1.0.0", 0L));
+        assertEquals(2L, gen2.generation());
+        assertEquals(CapabilityPackActivation.STATUS_ACTIVE, gen2.status());
+
+        List<MapRow> history = jdbc.query("""
+                SELECT generation, status FROM platform.tenant_capability_pack_activation
+                 WHERE tenant_id=? AND pack_id=?
+                 ORDER BY generation ASC
+                """,
+                (rs, rowNum) -> new MapRow(rs.getLong("generation"), rs.getString("status")),
+                tenantA.tenantId(), BASE);
+        assertEquals(2, history.size());
+        assertEquals(1L, history.get(0).generation());
+        assertEquals("REVOKED", history.get(0).status());
+        assertEquals(2L, history.get(1).generation());
+        assertEquals("ACTIVE", history.get(1).status());
+    }
+
+    @Test
+    void multiLifecycleActivationsProduceMonotonicGenerations() {
+        byte[] bytes = CapabilityPackTestSupport.minimalManifestBytes(BASE, "1.0.0", "BaseProduct");
+        catalog.register(tenantA.tenantId(), BASE, "1.0.0", bytes);
+
+        tx.executeWithoutResult(status -> catalog.activate(tenantA.tenantId(), BASE, "1.0.0", 0L));
+        tx.executeWithoutResult(status -> catalog.deactivate(tenantA.tenantId(), BASE, 1L));
+        tx.executeWithoutResult(status -> catalog.activate(tenantA.tenantId(), BASE, "1.0.0", 0L));
+        tx.executeWithoutResult(status -> catalog.deactivate(tenantA.tenantId(), BASE, 2L));
+        CapabilityPackActivation third = tx.execute(status ->
+                catalog.activate(tenantA.tenantId(), BASE, "1.0.0", 0L));
+        assertEquals(3L, third.generation());
+
+        List<Long> generations = jdbc.queryForList("""
+                SELECT generation FROM platform.tenant_capability_pack_activation
+                 WHERE tenant_id=? AND pack_id=?
+                 ORDER BY generation ASC
+                """, Long.class, tenantA.tenantId(), BASE);
+        assertEquals(List.of(1L, 2L, 3L), generations);
+
+        Integer activeCount = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.tenant_capability_pack_activation
+                 WHERE tenant_id=? AND pack_id=? AND status='ACTIVE'
+                """, Integer.class, tenantA.tenantId(), BASE);
+        assertEquals(1, activeCount);
+        assertEquals(3L, catalog.requireActive(tenantA.tenantId(), BASE).generation());
+    }
+
+    @Test
+    void staleExpectedGenerationAfterHistoryDoesNotMutate() {
+        byte[] bytes = CapabilityPackTestSupport.minimalManifestBytes(BASE, "1.0.0", "BaseProduct");
+        catalog.register(tenantA.tenantId(), BASE, "1.0.0", bytes);
+        tx.executeWithoutResult(status -> catalog.activate(tenantA.tenantId(), BASE, "1.0.0", 0L));
+        tx.executeWithoutResult(status -> catalog.deactivate(tenantA.tenantId(), BASE, 1L));
+        CapabilityPackActivation gen2 = tx.execute(status ->
+                catalog.activate(tenantA.tenantId(), BASE, "1.0.0", 0L));
+        assertEquals(2L, gen2.generation());
+
+        Integer before = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.tenant_capability_pack_activation
+                 WHERE tenant_id=? AND pack_id=?
+                """, Integer.class, tenantA.tenantId(), BASE);
+
+        DomainException stale = assertThrows(DomainException.class, () ->
+                tx.executeWithoutResult(status -> catalog.activate(tenantA.tenantId(), BASE, "1.0.0", 1L)));
+        assertEquals(CapabilityPackCatalogService.ERR_GENERATION_CONFLICT, stale.getCode());
+
+        Integer after = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.tenant_capability_pack_activation
+                 WHERE tenant_id=? AND pack_id=?
+                """, Integer.class, tenantA.tenantId(), BASE);
+        assertEquals(before, after);
+        assertEquals(2L, catalog.requireActive(tenantA.tenantId(), BASE).generation());
+        assertEquals("ACTIVE", jdbc.queryForObject("""
+                SELECT status FROM platform.tenant_capability_pack_activation
+                 WHERE tenant_id=? AND pack_id=? AND generation=2
+                """, String.class, tenantA.tenantId(), BASE));
+    }
+
+    @Test
+    void concurrentSameIdentitySameBytesRegistersIdempotently() throws Exception {
+        byte[] bytes = CapabilityPackTestSupport.minimalManifestBytes(BASE, "1.0.0", "BaseProduct");
+        int threads = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger created = new AtomicInteger();
+        AtomicInteger idempotent = new AtomicInteger();
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            final int idx = i;
+            futures.add(pool.submit(() -> {
+                authenticateAs("reg-actor-" + idx);
+                ready.countDown();
+                start.await();
+                CapabilityPackRegistrationResult result =
+                        catalog.register(tenantA.tenantId(), BASE, "1.0.0", bytes);
+                if (result.created()) {
+                    created.incrementAndGet();
+                } else {
+                    idempotent.incrementAndGet();
+                }
+                return null;
+            }));
+        }
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        start.countDown();
+        for (Future<?> future : futures) {
+            future.get(30, TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+        assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+
+        assertEquals(1, created.get());
+        assertEquals(threads - 1, idempotent.get());
+        Integer artifactRows = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.tenant_capability_pack
+                 WHERE tenant_id=? AND pack_id=? AND pack_version=?
+                """, Integer.class, tenantA.tenantId(), BASE, "1.0.0");
+        assertEquals(1, artifactRows);
+        assertArrayEquals(bytes, catalog.get(tenantA.tenantId(), BASE, "1.0.0").manifestBytes());
+    }
+
+    @Test
+    void concurrentSameIdentityDifferentBytesOneWinner() throws Exception {
+        byte[] bytesA = CapabilityPackTestSupport.minimalManifestBytes(BASE, "1.0.0", "WinnerProduct");
+        byte[] bytesB = CapabilityPackTestSupport.minimalManifestBytes(BASE, "1.0.0", "LoserProduct");
+        int threads = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger created = new AtomicInteger();
+        AtomicInteger conflicts = new AtomicInteger();
+        AtomicInteger sameShaIdempotent = new AtomicInteger();
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            final int idx = i;
+            final byte[] payload = (i % 2 == 0) ? bytesA : bytesB;
+            futures.add(pool.submit(() -> {
+                authenticateAs("conflict-actor-" + idx);
+                ready.countDown();
+                start.await();
+                try {
+                    CapabilityPackRegistrationResult result =
+                            catalog.register(tenantA.tenantId(), BASE, "1.0.0", payload);
+                    if (result.created()) {
+                        created.incrementAndGet();
+                    } else {
+                        sameShaIdempotent.incrementAndGet();
+                    }
+                } catch (DomainException ex) {
+                    if (CapabilityPackCatalogService.ERR_IDENTITY_CONFLICT.equals(ex.getCode())) {
+                        conflicts.incrementAndGet();
+                    } else {
+                        throw ex;
+                    }
+                }
+                return null;
+            }));
+        }
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        start.countDown();
+        for (Future<?> future : futures) {
+            future.get(30, TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+        assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+
+        assertEquals(1, created.get());
+        assertTrue(conflicts.get() >= 1, "at least one different-bytes loser must conflict");
+        assertEquals(threads, created.get() + conflicts.get() + sameShaIdempotent.get());
+        byte[] stored = catalog.get(tenantA.tenantId(), BASE, "1.0.0").manifestBytes();
+        assertTrue(
+                java.util.Arrays.equals(stored, bytesA) || java.util.Arrays.equals(stored, bytesB),
+                "stored bytes must equal the single winner payload");
+        Integer artifactRows = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.tenant_capability_pack
+                 WHERE tenant_id=? AND pack_id=? AND pack_version=?
+                """, Integer.class, tenantA.tenantId(), BASE, "1.0.0");
+        assertEquals(1, artifactRows);
+    }
+
+    @Test
+    void concurrentRegistrationDifferentTenantsIndependent() throws Exception {
+        byte[] bytes = CapabilityPackTestSupport.minimalManifestBytes(BASE, "1.0.0", "BaseProduct");
+        int threads = 4;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger createdA = new AtomicInteger();
+        AtomicInteger createdB = new AtomicInteger();
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            final int idx = i;
+            final UUID tenantId = (i % 2 == 0) ? tenantA.tenantId() : tenantB.tenantId();
+            final AtomicInteger counter = (i % 2 == 0) ? createdA : createdB;
+            futures.add(pool.submit(() -> {
+                authenticateAs("tenant-actor-" + idx);
+                ready.countDown();
+                start.await();
+                CapabilityPackRegistrationResult result =
+                        catalog.register(tenantId, BASE, "1.0.0", bytes);
+                if (result.created()) {
+                    counter.incrementAndGet();
+                }
+                return null;
+            }));
+        }
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        start.countDown();
+        for (Future<?> future : futures) {
+            future.get(30, TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+        assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+
+        assertEquals(1, createdA.get());
+        assertEquals(1, createdB.get());
+        assertTrue(packRepo.findPack(tenantA.tenantId(), BASE, "1.0.0").isPresent());
+        assertTrue(packRepo.findPack(tenantB.tenantId(), BASE, "1.0.0").isPresent());
+    }
+
     private void registerAndActivate(UUID tenantId, String packId, String version, String product) {
         byte[] bytes = CapabilityPackTestSupport.minimalManifestBytes(packId, version, product);
         catalog.register(tenantId, packId, version, bytes);
@@ -322,5 +555,8 @@ class CapabilityPackCatalogIntegrationTest {
                         principal
                 )
         );
+    }
+
+    private record MapRow(long generation, String status) {
     }
 }

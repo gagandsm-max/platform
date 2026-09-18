@@ -76,8 +76,11 @@ public class CapabilityPackRepository {
         return !rows.isEmpty();
     }
 
-    public void insertPack(StoredCapabilityPack pack) {
-        jdbc.update("""
+    /**
+     * Inserts a pack artifact if absent. Returns 1 when inserted, 0 when the identity already exists.
+     */
+    public int insertPackIfAbsent(StoredCapabilityPack pack) {
+        return jdbc.update("""
                 INSERT INTO platform.tenant_capability_pack
                     (tenant_id, pack_id, pack_version, schema_version, pack_class, name,
                      publisher_type, publisher_name, certification, manifest_sha256,
@@ -86,7 +89,24 @@ public class CapabilityPackRepository {
                     (:tenantId, :packId, :packVersion, :schemaVersion, :packClass, :name,
                      :publisherType, :publisherName, :certification, :manifestSha256,
                      :manifestBytes, :createdBy, :createdAt)
+                ON CONFLICT (tenant_id, pack_id, pack_version) DO NOTHING
                 """, packParams(pack));
+    }
+
+    /**
+     * Max historical activation generation for tenant+pack (includes REVOKED). 0 when none exist.
+     * Callers must hold the tenant FOR UPDATE lock before relying on this for CAS allocation.
+     */
+    public long maxActivationGeneration(UUID tenantId, String packId) {
+        Long max = jdbc.queryForObject("""
+                SELECT COALESCE(MAX(generation), 0)
+                  FROM platform.tenant_capability_pack_activation
+                 WHERE tenant_id = :tenantId
+                   AND pack_id = :packId
+                """,
+                Map.of("tenantId", tenantId, "packId", packId),
+                Long.class);
+        return max == null ? 0L : max;
     }
 
     public Optional<StoredCapabilityPack> findPack(UUID tenantId, String packId, String packVersion) {

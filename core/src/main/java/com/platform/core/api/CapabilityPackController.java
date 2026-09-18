@@ -115,6 +115,9 @@ public class CapabilityPackController {
         if (request == null || request.packVersion() == null || request.packVersion().isBlank()) {
             throw new DomainException("VALIDATION_FAILED", "packVersion is required");
         }
+        if (request.expectedGeneration() == null) {
+            throw new DomainException("VALIDATION_FAILED", "expectedGeneration is required");
+        }
         CapabilityPackActivation active = catalog.activate(
                 tenantId, packId, request.packVersion(), request.expectedGeneration());
         return new ActiveVersionResponse(

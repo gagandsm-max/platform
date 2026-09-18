@@ -24,8 +24,11 @@ import java.util.UUID;
 
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -137,7 +140,7 @@ class CapabilityPackApiTest {
 
         mockMvc.perform(put("/api/v1/tenants/" + TENANT + "/capability-packs/" + PACK_ID + "/active-version")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(new CapabilityPackDtos.ActivateRequest("1.0.0", 0))))
+                        .content(mapper.writeValueAsString(new CapabilityPackDtos.ActivateRequest("1.0.0", 0L))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.generation").value(1))
                 .andExpect(jsonPath("$.packVersion").value("1.0.0"));
@@ -146,6 +149,63 @@ class CapabilityPackApiTest {
                         .param("expectedGeneration", "1"))
                 .andExpect(status().isNoContent());
         verify(catalog).deactivate(TENANT, PACK_ID, 1L);
+    }
+
+    @Test
+    void activateRejectsMissingExpectedGenerationWithoutInvokingCatalog() throws Exception {
+        mockMvc.perform(put("/api/v1/tenants/" + TENANT + "/capability-packs/" + PACK_ID + "/active-version")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"packVersion\":\"1.0.0\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        verify(catalog, never()).activate(any(), anyString(), anyString(), anyLong());
+    }
+
+    @Test
+    void activateAcceptsExplicitZeroExpectedGeneration() throws Exception {
+        CapabilityPackActivation active = new CapabilityPackActivation(
+                UUID.fromString("018f0e0a-0000-7000-8000-0000000000f2"),
+                TENANT,
+                PACK_ID,
+                "1.0.0",
+                1L,
+                CapabilityPackActivation.STATUS_ACTIVE,
+                "actor",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                null,
+                null,
+                "corr"
+        );
+        when(catalog.activate(TENANT, PACK_ID, "1.0.0", 0L)).thenReturn(active);
+
+        mockMvc.perform(put("/api/v1/tenants/" + TENANT + "/capability-packs/" + PACK_ID + "/active-version")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"packVersion\":\"1.0.0\",\"expectedGeneration\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.generation").value(1));
+        verify(catalog).activate(TENANT, PACK_ID, "1.0.0", 0L);
+    }
+
+    @Test
+    void activateRejectsExplicitNullExpectedGenerationWithoutInvokingCatalog() throws Exception {
+        mockMvc.perform(put("/api/v1/tenants/" + TENANT + "/capability-packs/" + PACK_ID + "/active-version")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"packVersion\":\"1.0.0\",\"expectedGeneration\":null}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        verify(catalog, never()).activate(any(), anyString(), anyString(), anyLong());
+    }
+
+    @Test
+    void activateRejectsNegativeExpectedGenerationWithoutMutation() throws Exception {
+        when(catalog.activate(TENANT, PACK_ID, "1.0.0", -1L))
+                .thenThrow(new DomainException("VALIDATION_FAILED", "expectedGeneration must be >= 0"));
+
+        mockMvc.perform(put("/api/v1/tenants/" + TENANT + "/capability-packs/" + PACK_ID + "/active-version")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"packVersion\":\"1.0.0\",\"expectedGeneration\":-1}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
 
     @Test

@@ -6,7 +6,7 @@ public final class CapabilityPackDtos {
     private CapabilityPackDtos() {
     }
 
-    public record ActivateRequest(String packVersion, long expectedGeneration) {
+    public record ActivateRequest(String packVersion, Long expectedGeneration) {
     }
 
     public record PackVersionResponse(

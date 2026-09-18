@@ -7,7 +7,6 @@ import com.platform.core.logging.CorrelationIdFilter;
 import com.platform.core.persistence.CapabilityPackRepository;
 import com.platform.core.security.http.PlatformSecurityContext;
 import org.slf4j.MDC;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -74,18 +73,6 @@ public class CapabilityPackCatalogService {
             );
         }
 
-        Optional<StoredCapabilityPack> existing = repository.findPack(tenantId, packId, packVersion);
-        if (existing.isPresent()) {
-            StoredCapabilityPack row = existing.get();
-            if (row.manifestSha256().equals(descriptor.manifestSha256())) {
-                return new CapabilityPackRegistrationResult(row, false);
-            }
-            throw new DomainException(
-                    ERR_IDENTITY_CONFLICT,
-                    "A different manifest is already registered for this pack identity"
-            );
-        }
-
         String actor = PlatformSecurityContext.requirePrincipal().subjectId();
         Instant now = Instant.now();
         StoredCapabilityPack pack = new StoredCapabilityPack(
@@ -103,19 +90,21 @@ public class CapabilityPackCatalogService {
                 actor,
                 now
         );
-        try {
-            repository.insertPack(pack);
-        } catch (DuplicateKeyException ex) {
-            Optional<StoredCapabilityPack> raced = repository.findPack(tenantId, packId, packVersion);
-            if (raced.isPresent() && raced.get().manifestSha256().equals(descriptor.manifestSha256())) {
-                return new CapabilityPackRegistrationResult(raced.get(), false);
-            }
-            throw new DomainException(
-                    ERR_IDENTITY_CONFLICT,
-                    "A different manifest is already registered for this pack identity"
-            );
+        int inserted = repository.insertPackIfAbsent(pack);
+        if (inserted == 1) {
+            return new CapabilityPackRegistrationResult(pack, true);
         }
-        return new CapabilityPackRegistrationResult(pack, true);
+        StoredCapabilityPack existing = repository.findPack(tenantId, packId, packVersion)
+                .orElseThrow(() -> new DomainException(
+                        "DATABASE_UNAVAILABLE",
+                        "Capability pack registration could not be completed"));
+        if (existing.manifestSha256().equals(descriptor.manifestSha256())) {
+            return new CapabilityPackRegistrationResult(existing, false);
+        }
+        throw new DomainException(
+                ERR_IDENTITY_CONFLICT,
+                "A different manifest is already registered for this pack identity"
+        );
     }
 
     public PageResult<StoredCapabilityPack> list(UUID tenantId, int page, int limit) {
@@ -184,7 +173,7 @@ public class CapabilityPackCatalogService {
             }
         }
 
-        long nextGeneration = currentGeneration + 1L;
+        long nextGeneration = repository.maxActivationGeneration(tenantId, packId) + 1L;
         CapabilityPackActivation created = new CapabilityPackActivation(
                 UuidV7.generate(),
                 tenantId,
