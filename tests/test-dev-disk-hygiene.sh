@@ -117,18 +117,18 @@ classify_level() {
 [[ "$(classify_level 89)" == "CLEANUP_REQUIRED" ]] || fail "89 must be CLEANUP_REQUIRED"
 [[ "$(classify_level 90)" == "CRITICAL" ]] || fail "90 must be CRITICAL"
 out69="$(PLATFORM_DISK_PCT_OVERRIDE=69 bash scripts/dev-disk-check.sh)"
-echo "${out69}" | grep -q 'level=NORMAL' || fail "disk-check 69 not NORMAL"
+grep -q 'level=NORMAL' <<<"${out69}" || fail "disk-check 69 not NORMAL"
 out70="$(PLATFORM_DISK_PCT_OVERRIDE=70 bash scripts/dev-disk-check.sh)"
-echo "${out70}" | grep -q 'level=WARNING' || fail "disk-check 70 not WARNING"
+grep -q 'level=WARNING' <<<"${out70}" || fail "disk-check 70 not WARNING"
 set +e
 out80="$(PLATFORM_DISK_PCT_OVERRIDE=80 bash scripts/dev-disk-check.sh)"; ec80=$?
 set -e
-echo "${out80}" | grep -q 'level=CLEANUP_REQUIRED' || fail "disk-check 80 not CLEANUP_REQUIRED"
+grep -q 'level=CLEANUP_REQUIRED' <<<"${out80}" || fail "disk-check 80 not CLEANUP_REQUIRED"
 [[ "${ec80}" -eq 1 ]] || fail "disk-check 80 exit must be 1 (got ${ec80})"
 set +e
 out90="$(PLATFORM_DISK_PCT_OVERRIDE=90 bash scripts/dev-disk-check.sh)"; ec90=$?
 set -e
-echo "${out90}" | grep -q 'level=CRITICAL' || fail "disk-check 90 not CRITICAL"
+grep -q 'level=CRITICAL' <<<"${out90}" || fail "disk-check 90 not CRITICAL"
 [[ "${ec90}" -eq 2 ]] || fail "disk-check 90 exit must be 2 (got ${ec90})"
 pass "threshold classification <70 NORMAL, >=70 WARNING, >=80 CLEANUP_REQUIRED, >=90 CRITICAL"
 
@@ -147,7 +147,7 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   tmpfs_json="$(docker inspect --format '{{json .HostConfig.Tmpfs}}' "${probe}")"
   docker rm -fv "${probe}" >/dev/null
   after="$(docker volume ls -q | grep -Ec '^[a-f0-9]{64}$' || true)"
-  echo "${tmpfs_json}" | grep -q '/var/lib/postgresql/data' \
+  grep -q '/var/lib/postgresql/data' <<<"${tmpfs_json}" \
     || fail "probe missing HostConfig.Tmpfs for PG data: ${tmpfs_json}"
   [[ "${before}" == "${after}" ]] || fail "tmpfs probe changed anon volume count ${before} -> ${after}"
   pass "live tmpfs probe leaves anonymous volume count unchanged (${after})"
@@ -177,20 +177,20 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   docker stop "${refc}" >/dev/null
 
   dry="$(PLATFORM_HYGIENE_DRY_RUN=1 bash scripts/dev-hygiene.sh 2>&1 || true)"
-  echo "${dry}" | grep -q "DRY-RUN would remove labeled ephemeral volume: ${vol_dual_ok}" \
+  grep -q "DRY-RUN would remove labeled ephemeral volume: ${vol_dual_ok}" <<<"${dry}" \
     || fail "dual-labeled unreferenced volume not eligible: ${vol_dual_ok}"
-  echo "${dry}" | grep -q "SKIP referenced volume: ${vol_dual_ref}" \
+  grep -q "SKIP referenced volume: ${vol_dual_ref}" <<<"${dry}" \
     || fail "referenced ephemeral volume must be skipped"
-  if echo "${dry}" | grep -Fq "${vol_unlabeled}"; then
+  if grep -Fq "${vol_unlabeled}" <<<"${dry}"; then
     fail "unlabeled volume must never be hygiene candidate"
   fi
-  if echo "${dry}" | grep -Fq "${vol_one_label}"; then
+  if grep -Fq "${vol_one_label}" <<<"${dry}"; then
     fail "one-label-only volume must never be hygiene candidate"
   fi
-  if echo "${dry}" | grep -Fq "REMOVE labeled ephemeral volume: ${vol_keep}"; then
+  if grep -Fq "REMOVE labeled ephemeral volume: ${vol_keep}" <<<"${dry}"; then
     fail "named Platform volume must never be removed"
   fi
-  if echo "${dry}" | grep -Fq "DRY-RUN would remove labeled ephemeral volume: ${vol_keep}"; then
+  if grep -Fq "DRY-RUN would remove labeled ephemeral volume: ${vol_keep}" <<<"${dry}"; then
     fail "named Platform volume must never be dry-removed"
   fi
   # Persistent named volumes must remain if present (dev laptop with stack).
