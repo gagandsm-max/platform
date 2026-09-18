@@ -32,7 +32,7 @@ class CapabilityPackBackwardCompatTest {
         assertEquals(2, registry.size());
 
         CapabilityPackMatchResult result = registry.match(new CapabilityPackIdentity(
-                null, null, "Fictional Device", null, null, null, null, null, null));
+                "Other Networks", null, "Fictional Device", null, null, null, null, null, null));
         assertEquals(CapabilityPackMatchOutcome.MATCH, result.outcome());
         assertEquals("example.fictional.minimal", result.packId().orElseThrow());
         assertTrue(result.candidates().stream().noneMatch(c -> c.packId().contains("password")));

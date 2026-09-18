@@ -123,9 +123,10 @@ class CapabilityPackLoaderTest {
         CapabilityPackValidationException ex = assertThrows(
                 CapabilityPackValidationException.class,
                 () -> loader.load(json.getBytes(StandardCharsets.UTF_8)));
-        assertTrue(
-                "DUPLICATE_KEY".equals(ex.getCode()) || "JSON_PARSE_ERROR".equals(ex.getCode()),
-                () -> "Unexpected code: " + ex.getCode() + " msg=" + ex.getMessage());
+        assertEquals("DUPLICATE_KEY", ex.getCode());
+        assertEquals("Manifest JSON contains duplicate object keys.", ex.getMessage());
+        assertTrue(ex.getIssues().stream().allMatch(i ->
+                "Manifest JSON contains duplicate object keys.".equals(i.message())));
     }
 
     @Test
@@ -134,5 +135,136 @@ class CapabilityPackLoaderTest {
                 CapabilityPackValidationException.class,
                 () -> loader.load("{not-json".getBytes(StandardCharsets.UTF_8)));
         assertEquals("JSON_PARSE_ERROR", ex.getCode());
+        assertEquals("Manifest JSON is malformed.", ex.getMessage());
+    }
+
+    @Test
+    void rejectsNonStringContractFields() {
+        assertTrue(loadFailsWithInvalidType("""
+                {
+                  "schemaVersion": "1.0.0",
+                  "packId": 12345,
+                  "packVersion": "1.0.0",
+                  "name": "Numeric PackId",
+                  "publisher": {"type": "CUSTOMER", "name": "Fictional"},
+                  "certification": "EXPERIMENTAL",
+                  "matchRules": [
+                    {"ruleId": "r", "priority": 1, "conditions": [
+                      {"field": "product", "operator": "EXACT", "value": "X", "caseSensitive": false}
+                    ]}
+                  ],
+                  "capabilities": [], "protocols": [], "references": [], "normalization": [], "dependencies": [],
+                  "provenance": [{"id": "p", "sourceType": "CUSTOMER_SUPPLIED", "sourceReference": "x", "redistribution": "RESTRICTED"}]
+                }
+                """));
+
+        assertTrue(loadFailsWithInvalidType("""
+                {
+                  "schemaVersion": "1.0.0",
+                  "packId": "fixture.fictional.bool-name",
+                  "packVersion": "1.0.0",
+                  "name": true,
+                  "publisher": {"type": "CUSTOMER", "name": "Fictional"},
+                  "certification": "EXPERIMENTAL",
+                  "matchRules": [
+                    {"ruleId": "r", "priority": 1, "conditions": [
+                      {"field": "product", "operator": "EXACT", "value": "X", "caseSensitive": false}
+                    ]}
+                  ],
+                  "capabilities": [], "protocols": [], "references": [], "normalization": [], "dependencies": [],
+                  "provenance": [{"id": "p", "sourceType": "CUSTOMER_SUPPLIED", "sourceReference": "x", "redistribution": "RESTRICTED"}]
+                }
+                """));
+
+        assertTrue(loadFailsWithInvalidType("""
+                {
+                  "schemaVersion": "1.0.0",
+                  "packId": "fixture.fictional.num-publisher",
+                  "packVersion": "1.0.0",
+                  "name": "Pub",
+                  "publisher": {"type": "CUSTOMER", "name": 99},
+                  "certification": "EXPERIMENTAL",
+                  "matchRules": [
+                    {"ruleId": "r", "priority": 1, "conditions": [
+                      {"field": "product", "operator": "EXACT", "value": "X", "caseSensitive": false}
+                    ]}
+                  ],
+                  "capabilities": [], "protocols": [], "references": [], "normalization": [], "dependencies": [],
+                  "provenance": [{"id": "p", "sourceType": "CUSTOMER_SUPPLIED", "sourceReference": "x", "redistribution": "RESTRICTED"}]
+                }
+                """));
+
+        assertTrue(loadFailsWithInvalidType("""
+                {
+                  "schemaVersion": "1.0.0",
+                  "packId": "fixture.fictional.num-match-value",
+                  "packVersion": "1.0.0",
+                  "name": "Match",
+                  "publisher": {"type": "CUSTOMER", "name": "Fictional"},
+                  "certification": "EXPERIMENTAL",
+                  "matchRules": [
+                    {"ruleId": "r", "priority": 1, "conditions": [
+                      {"field": "product", "operator": "EXACT", "value": 42, "caseSensitive": false}
+                    ]}
+                  ],
+                  "capabilities": [], "protocols": [], "references": [], "normalization": [], "dependencies": [],
+                  "provenance": [{"id": "p", "sourceType": "CUSTOMER_SUPPLIED", "sourceReference": "x", "redistribution": "RESTRICTED"}]
+                }
+                """));
+    }
+
+    @Test
+    void rejectsStringWhereBooleanOrIntegerExpected() {
+        CapabilityPackValidationException boolEx = assertThrows(
+                CapabilityPackValidationException.class,
+                () -> loader.load("""
+                        {
+                          "schemaVersion": "1.0.0",
+                          "packId": "fixture.fictional.string-bool",
+                          "packVersion": "1.0.0",
+                          "name": "Bool",
+                          "publisher": {"type": "CUSTOMER", "name": "Fictional"},
+                          "certification": "EXPERIMENTAL",
+                          "matchRules": [
+                            {"ruleId": "r", "priority": 1, "conditions": [
+                              {"field": "product", "operator": "EXACT", "value": "X", "caseSensitive": "false"}
+                            ]}
+                          ],
+                          "capabilities": [], "protocols": [], "references": [], "normalization": [], "dependencies": [],
+                          "provenance": [{"id": "p", "sourceType": "CUSTOMER_SUPPLIED", "sourceReference": "x", "redistribution": "RESTRICTED"}]
+                        }
+                        """.getBytes(StandardCharsets.UTF_8)));
+        assertTrue(boolEx.getIssues().stream().anyMatch(i ->
+                "INVALID_TYPE".equals(i.code()) && i.path().contains("caseSensitive")));
+
+        CapabilityPackValidationException intEx = assertThrows(
+                CapabilityPackValidationException.class,
+                () -> loader.load("""
+                        {
+                          "schemaVersion": "1.0.0",
+                          "packId": "fixture.fictional.string-int",
+                          "packVersion": "1.0.0",
+                          "name": "Int",
+                          "publisher": {"type": "CUSTOMER", "name": "Fictional"},
+                          "certification": "EXPERIMENTAL",
+                          "matchRules": [
+                            {"ruleId": "r", "priority": "1", "conditions": [
+                              {"field": "product", "operator": "EXACT", "value": "X", "caseSensitive": false}
+                            ]}
+                          ],
+                          "capabilities": [], "protocols": [], "references": [], "normalization": [], "dependencies": [],
+                          "provenance": [{"id": "p", "sourceType": "CUSTOMER_SUPPLIED", "sourceReference": "x", "redistribution": "RESTRICTED"}]
+                        }
+                        """.getBytes(StandardCharsets.UTF_8)));
+        assertTrue(intEx.getIssues().stream().anyMatch(i ->
+                "INVALID_MATCH_PRIORITY".equals(i.code()) || "INVALID_TYPE".equals(i.code())));
+    }
+
+    private boolean loadFailsWithInvalidType(String json) {
+        CapabilityPackValidationException ex = assertThrows(
+                CapabilityPackValidationException.class,
+                () -> loader.load(json.getBytes(StandardCharsets.UTF_8)));
+        return ex.getIssues().stream().anyMatch(i ->
+                "INVALID_TYPE".equals(i.code()) || "INVALID_PACK_ID".equals(i.code()));
     }
 }

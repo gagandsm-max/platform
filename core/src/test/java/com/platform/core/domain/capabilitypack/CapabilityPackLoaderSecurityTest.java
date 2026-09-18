@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -236,5 +237,18 @@ class CapabilityPackLoaderSecurityTest {
         CapabilityPackDescriptor descriptor = loader.load(json.getBytes(StandardCharsets.UTF_8));
         assertEquals(1, descriptor.protocols().size());
         assertTrue(descriptor.protocols().get(0).legacy());
+    }
+
+    @Test
+    void malformedJsonDoesNotEchoSecretSentinel() {
+        String sentinel = "SUPER_SECRET_SENTINEL_123";
+        byte[] payload = ("{ \"packId\": \"" + sentinel + "\", ").getBytes(StandardCharsets.UTF_8);
+        CapabilityPackValidationException ex = assertThrows(
+                CapabilityPackValidationException.class,
+                () -> loader.load(payload));
+        assertEquals("JSON_PARSE_ERROR", ex.getCode());
+        assertEquals("Manifest JSON is malformed.", ex.getMessage());
+        assertFalse(ex.getMessage().contains(sentinel));
+        assertTrue(ex.getIssues().stream().noneMatch(i -> i.message().contains(sentinel)));
     }
 }

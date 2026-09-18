@@ -99,11 +99,7 @@ public final class CapabilityPackLoader {
     private final ObjectMapper mapper;
 
     public CapabilityPackLoader() {
-        this(createStrictMapper());
-    }
-
-    public CapabilityPackLoader(ObjectMapper mapper) {
-        this.mapper = mapper == null ? createStrictMapper() : mapper;
+        this.mapper = createStrictMapper();
     }
 
     static ObjectMapper createStrictMapper() {
@@ -133,16 +129,18 @@ public final class CapabilityPackLoader {
             throw ex;
         } catch (JsonProcessingException ex) {
             String code = messageIndicatesDuplicate(ex) ? "DUPLICATE_KEY" : "JSON_PARSE_ERROR";
+            String safe = fixedParseMessage(code);
             throw new CapabilityPackValidationException(
                     code,
-                    "Manifest JSON is malformed: " + safeMessage(ex),
-                    List.of(new CapabilityPackValidationException.Issue(code, "$", safeMessage(ex)))
+                    safe,
+                    List.of(new CapabilityPackValidationException.Issue(code, "$", safe))
             );
         } catch (Exception ex) {
+            String safe = fixedParseMessage("JSON_PARSE_ERROR");
             throw new CapabilityPackValidationException(
                     "JSON_PARSE_ERROR",
-                    "Manifest JSON is malformed: " + safeMessage(ex),
-                    List.of(new CapabilityPackValidationException.Issue("JSON_PARSE_ERROR", "$", safeMessage(ex)))
+                    safe,
+                    List.of(new CapabilityPackValidationException.Issue("JSON_PARSE_ERROR", "$", safe))
             );
         }
 
@@ -406,7 +404,7 @@ public final class CapabilityPackLoader {
             if (conds != null && conds.isArray()) {
                 for (JsonNode c : conds) {
                     parts.add(textOrNull(c.get("field")) + "|" + textOrNull(c.get("operator"))
-                            + "|" + textOrNull(c.get("caseSensitive")) + "|" + textOrNull(c.get("value")));
+                            + "|" + diagnosticText(c.get("caseSensitive")) + "|" + textOrNull(c.get("value")));
                 }
             }
             parts.sort(String::compareTo);
@@ -1176,14 +1174,23 @@ public final class CapabilityPackLoader {
         return key.toLowerCase(Locale.ROOT).replace("_", "").replace("-", "").replace(".", "");
     }
 
+    /**
+     * STRING contract fields accept JSON text nodes only. Boolean/number coercion is rejected
+     * (callers treat null as an invalid-type / validation failure).
+     */
     private static String textOrNull(JsonNode node) {
+        if (node == null || node.isNull() || !node.isTextual()) {
+            return null;
+        }
+        return node.asText();
+    }
+
+    /** Diagnostic-only stringification; must not be used for STRING contract acceptance. */
+    private static String diagnosticText(JsonNode node) {
         if (node == null || node.isNull()) {
             return null;
         }
-        if (node.isTextual()) {
-            return node.asText();
-        }
-        if (node.isBoolean() || node.isNumber()) {
+        if (node.isTextual() || node.isNumber() || node.isBoolean()) {
             return node.asText();
         }
         return null;
@@ -1207,13 +1214,11 @@ public final class CapabilityPackLoader {
         );
     }
 
-    private static String safeMessage(Exception ex) {
-        String message = ex.getMessage();
-        if (message == null || message.isBlank()) {
-            return ex.getClass().getSimpleName();
+    private static String fixedParseMessage(String code) {
+        if ("DUPLICATE_KEY".equals(code)) {
+            return "Manifest JSON contains duplicate object keys.";
         }
-        // Avoid leaking large payloads; truncate diagnostics.
-        return message.length() > 240 ? message.substring(0, 240) : message;
+        return "Manifest JSON is malformed.";
     }
 
     private static boolean messageIndicatesDuplicate(Exception ex) {

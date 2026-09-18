@@ -12,6 +12,9 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>{@link #replaceAll(List)} validates the entire candidate snapshot first. On any failure the
  * previous snapshot is retained (no partial update, no last-wins).
+ *
+ * <p>An active snapshot admits at most one version per {@code packId}. Dependencies and cycle
+ * detection use exact {@code packId@packVersion} identity keys.
  */
 public final class CapabilityPackRegistry {
 
@@ -100,7 +103,15 @@ public final class CapabilityPackRegistry {
             } else {
                 byIdentity.put(identity, pack);
             }
-            byPackId.putIfAbsent(pack.packId(), pack);
+
+            if (byPackId.containsKey(pack.packId())) {
+                issues.add(new CapabilityPackValidationException.Issue(
+                        "DUPLICATE_PACK_ID",
+                        "$[" + i + "]",
+                        "Active snapshot admits only one version per packId: " + pack.packId() + "."));
+            } else {
+                byPackId.put(pack.packId(), pack);
+            }
         }
 
         for (int i = 0; i < packs.size(); i++) {
@@ -118,9 +129,7 @@ public final class CapabilityPackRegistry {
                             "A pack cannot depend on itself."));
                     continue;
                 }
-                CapabilityPackDescriptor target = byIdentity.get(dep.identityKey());
-                if (target == null) {
-                    // Allow same packId different version only when exact identity present.
+                if (!byIdentity.containsKey(dep.identityKey())) {
                     issues.add(new CapabilityPackValidationException.Issue(
                             "DEPENDENCY_NOT_FOUND",
                             "$[" + i + "].dependencies[" + d + "]",
@@ -147,52 +156,49 @@ public final class CapabilityPackRegistry {
         Map<String, Integer> state = new HashMap<>();
         List<String> stack = new ArrayList<>();
 
-        // Cycle detection is by packId graph edges when the exact dependency identity is present.
-        Map<String, CapabilityPackDescriptor> byPackId = new HashMap<>();
-        for (CapabilityPackDescriptor pack : byIdentity.values()) {
-            byPackId.put(pack.packId(), pack);
-        }
-
-        for (String packId : byPackId.keySet()) {
-            visit(packId, byPackId, byIdentity, state, stack, issues);
+        for (String identityKey : byIdentity.keySet()) {
+            visit(identityKey, byIdentity, state, stack, issues);
         }
         return issues;
     }
 
+    /**
+     * DFS cycle detection over exact pack identities ({@code packId@packVersion}).
+     */
     private static void visit(
-            String packId,
-            Map<String, CapabilityPackDescriptor> byPackId,
+            String identityKey,
             Map<String, CapabilityPackDescriptor> byIdentity,
             Map<String, Integer> state,
             List<String> stack,
             List<CapabilityPackValidationException.Issue> issues
     ) {
-        int current = state.getOrDefault(packId, 0);
+        int current = state.getOrDefault(identityKey, 0);
         if (current == 2) {
             return;
         }
         if (current == 1) {
-            int start = stack.indexOf(packId);
+            int start = stack.indexOf(identityKey);
             List<String> cycle = new ArrayList<>(stack.subList(Math.max(start, 0), stack.size()));
-            cycle.add(packId);
+            cycle.add(identityKey);
             issues.add(new CapabilityPackValidationException.Issue(
                     "DEPENDENCY_CYCLE",
                     "$.dependencies",
                     "Dependency cycle: " + String.join(" -> ", cycle) + "."));
             return;
         }
-        state.put(packId, 1);
-        stack.add(packId);
-        CapabilityPackDescriptor entry = byPackId.get(packId);
+        state.put(identityKey, 1);
+        stack.add(identityKey);
+        CapabilityPackDescriptor entry = byIdentity.get(identityKey);
         if (entry != null) {
             for (PackDependency dep : entry.dependencies()) {
-                if (byIdentity.containsKey(dep.identityKey()) && byPackId.containsKey(dep.packId())) {
-                    visit(dep.packId(), byPackId, byIdentity, state, stack, issues);
+                String depIdentity = dep.identityKey();
+                if (byIdentity.containsKey(depIdentity)) {
+                    visit(depIdentity, byIdentity, state, stack, issues);
                 }
             }
         }
         stack.remove(stack.size() - 1);
-        state.put(packId, 2);
+        state.put(identityKey, 2);
     }
 
     record Snapshot(List<CapabilityPackDescriptor> packs, Map<String, CapabilityPackDescriptor> byIdentity) {

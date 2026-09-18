@@ -11,7 +11,11 @@ import java.util.regex.Pattern;
  * Deterministic Capability Pack matching.
  *
  * <p>Rank within a rule and across packs: (1) lower priority wins, (2) greater EXACT count,
- * (3) greater total conditions. Equal-strength survivors yield {@link CapabilityPackMatchOutcome#AMBIGUOUS}.
+ * (3) greater total conditions. Lexical pack identity is diagnostic-only and never a semantic winner.
+ *
+ * <p>Ranked {@code UNKNOWN} candidates are retained. An unresolved UNKNOWN that can outrank or tie
+ * the strongest actual MATCH forces {@link CapabilityPackMatchOutcome#UNKNOWN} rather than an
+ * arbitrary MATCH/AMBIGUOUS winner.
  */
 public final class CapabilityPackMatcher {
 
@@ -44,45 +48,66 @@ public final class CapabilityPackMatcher {
             );
         }
 
-        List<RankedCandidate> candidates = new ArrayList<>();
-        boolean sawUnknown = false;
+        List<RankedCandidate> matchCandidates = new ArrayList<>();
+        List<RankedCandidate> unknownCandidates = new ArrayList<>();
 
         for (CapabilityPackDescriptor pack : packs) {
             for (MatchRule rule : pack.matchRules()) {
                 RuleEval eval = evaluateRule(rule, identity);
+                RankedCandidate ranked = new RankedCandidate(
+                        pack.packId(),
+                        pack.packVersion(),
+                        rule.ruleId(),
+                        rule.priority(),
+                        rule.exactCount(),
+                        rule.conditions().size()
+                );
                 if (eval == RuleEval.UNKNOWN) {
-                    sawUnknown = true;
+                    unknownCandidates.add(ranked);
                 } else if (eval == RuleEval.MATCH) {
-                    candidates.add(new RankedCandidate(
-                            pack.packId(),
-                            pack.packVersion(),
-                            rule.ruleId(),
-                            rule.priority(),
-                            rule.exactCount(),
-                            rule.conditions().size()
-                    ));
+                    matchCandidates.add(ranked);
                 }
             }
         }
 
-        List<CapabilityPackMatchResult.CandidateDiagnostic> diagnostics = candidates.stream()
-                .map(c -> new CapabilityPackMatchResult.CandidateDiagnostic(
-                        c.packId, c.packVersion, c.ruleId, c.priority, c.exactCount, c.conditionCount))
-                .toList();
-
-        if (candidates.isEmpty()) {
-            CapabilityPackMatchOutcome outcome = sawUnknown
-                    ? CapabilityPackMatchOutcome.UNKNOWN
-                    : CapabilityPackMatchOutcome.NO_MATCH;
-            return new CapabilityPackMatchResult(
-                    outcome, Optional.empty(), Optional.empty(), Optional.empty(), 0, 0, 0, diagnostics);
+        List<CapabilityPackMatchResult.CandidateDiagnostic> diagnostics = new ArrayList<>();
+        for (RankedCandidate c : matchCandidates) {
+            diagnostics.add(toDiagnostic(c));
+        }
+        for (RankedCandidate c : unknownCandidates) {
+            diagnostics.add(toDiagnostic(c));
         }
 
-        candidates.sort(RANK_ORDER);
-        RankedCandidate best = candidates.get(0);
+        if (matchCandidates.isEmpty()) {
+            CapabilityPackMatchOutcome outcome = unknownCandidates.isEmpty()
+                    ? CapabilityPackMatchOutcome.NO_MATCH
+                    : CapabilityPackMatchOutcome.UNKNOWN;
+            return new CapabilityPackMatchResult(
+                    outcome, Optional.empty(), Optional.empty(), Optional.empty(), 0, 0, 0, List.copyOf(diagnostics));
+        }
+
+        matchCandidates.sort(DIAGNOSTIC_ORDER);
+        RankedCandidate best = matchCandidates.get(0);
+
+        // Any UNKNOWN that can outrank or tie the strongest MATCH blocks an arbitrary winner.
+        for (RankedCandidate unknown : unknownCandidates) {
+            if (compareRank(unknown, best) <= 0) {
+                return new CapabilityPackMatchResult(
+                        CapabilityPackMatchOutcome.UNKNOWN,
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        best.priority,
+                        best.exactCount,
+                        best.conditionCount,
+                        List.copyOf(diagnostics)
+                );
+            }
+        }
+
         boolean ambiguous = false;
-        for (int i = 1; i < candidates.size(); i++) {
-            RankedCandidate other = candidates.get(i);
+        for (int i = 1; i < matchCandidates.size(); i++) {
+            RankedCandidate other = matchCandidates.get(i);
             if (sameRank(best, other)) {
                 ambiguous = true;
             } else {
@@ -91,10 +116,9 @@ public final class CapabilityPackMatcher {
         }
 
         if (ambiguous) {
-            List<CapabilityPackMatchResult.CandidateDiagnostic> tied = candidates.stream()
+            List<CapabilityPackMatchResult.CandidateDiagnostic> tied = matchCandidates.stream()
                     .filter(c -> sameRank(best, c))
-                    .map(c -> new CapabilityPackMatchResult.CandidateDiagnostic(
-                            c.packId, c.packVersion, c.ruleId, c.priority, c.exactCount, c.conditionCount))
+                    .map(CapabilityPackMatcher::toDiagnostic)
                     .toList();
             return new CapabilityPackMatchResult(
                     CapabilityPackMatchOutcome.AMBIGUOUS,
@@ -116,11 +140,25 @@ public final class CapabilityPackMatcher {
                 best.priority,
                 best.exactCount,
                 best.conditionCount,
-                diagnostics
+                List.copyOf(diagnostics)
         );
     }
 
-    private static final Comparator<RankedCandidate> RANK_ORDER = Comparator
+    /** Semantic rank only: priority asc, EXACT count desc, condition count desc. */
+    private static int compareRank(RankedCandidate a, RankedCandidate b) {
+        int byPriority = Integer.compare(a.priority, b.priority);
+        if (byPriority != 0) {
+            return byPriority;
+        }
+        int byExact = Integer.compare(b.exactCount, a.exactCount);
+        if (byExact != 0) {
+            return byExact;
+        }
+        return Integer.compare(b.conditionCount, a.conditionCount);
+    }
+
+    /** Diagnostic sort: semantic rank, then lexical identity for stable listing only. */
+    private static final Comparator<RankedCandidate> DIAGNOSTIC_ORDER = Comparator
             .comparingInt((RankedCandidate c) -> c.priority)
             .thenComparing(Comparator.comparingInt((RankedCandidate c) -> c.exactCount).reversed())
             .thenComparing(Comparator.comparingInt((RankedCandidate c) -> c.conditionCount).reversed())
@@ -129,9 +167,12 @@ public final class CapabilityPackMatcher {
             .thenComparing(c -> c.ruleId);
 
     private static boolean sameRank(RankedCandidate a, RankedCandidate b) {
-        return a.priority == b.priority
-                && a.exactCount == b.exactCount
-                && a.conditionCount == b.conditionCount;
+        return compareRank(a, b) == 0;
+    }
+
+    private static CapabilityPackMatchResult.CandidateDiagnostic toDiagnostic(RankedCandidate c) {
+        return new CapabilityPackMatchResult.CandidateDiagnostic(
+                c.packId, c.packVersion, c.ruleId, c.priority, c.exactCount, c.conditionCount);
     }
 
     private static RuleEval evaluateRule(MatchRule rule, CapabilityPackIdentity identity) {
