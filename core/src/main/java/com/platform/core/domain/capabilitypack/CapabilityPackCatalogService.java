@@ -7,6 +7,7 @@ import com.platform.core.logging.CorrelationIdFilter;
 import com.platform.core.persistence.CapabilityPackRepository;
 import com.platform.core.security.http.PlatformSecurityContext;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,13 +37,10 @@ public class CapabilityPackCatalogService {
     private final CapabilityPackRepository repository;
     private final CapabilityPackLoader loader;
 
+    @Autowired
     public CapabilityPackCatalogService(CapabilityPackRepository repository) {
-        this(repository, new CapabilityPackLoader());
-    }
-
-    CapabilityPackCatalogService(CapabilityPackRepository repository, CapabilityPackLoader loader) {
         this.repository = Objects.requireNonNull(repository, "repository");
-        this.loader = Objects.requireNonNull(loader, "loader");
+        this.loader = new CapabilityPackLoader();
     }
 
     @Transactional
