@@ -18,6 +18,7 @@ import (
 	"platform/sensor/internal/discovery"
 	"platform/sensor/internal/health"
 	"platform/sensor/internal/observation"
+	"platform/sensor/internal/packsync"
 	"platform/sensor/internal/spool"
 	"platform/sensor/internal/uploader"
 )
@@ -102,6 +103,32 @@ func main() {
 	discoveryService := discovery.NewService(cfg.SensorID, client, discoveryExecutor, cfg.PollInterval, logger)
 	discoveryService.Start(ctx)
 
+	var packSyncer *packsync.Syncer
+	packDir, packDirErr := packsync.ResolveCapabilityPackDir(cfg.CapabilityPackDir, cfg.SpoolDir)
+	if packDirErr != nil {
+		logger.Error("Failed to resolve Capability Pack staging directory",
+			"error_code", "SENSOR_PACK_INVALID_CONFIG", "error", packDirErr)
+		os.Exit(1)
+	}
+	if filepath.Clean(packDir) == filepath.Clean(cfg.SpoolDir) ||
+		(cfg.AgentSpoolDir != "" && filepath.Clean(packDir) == filepath.Clean(cfg.AgentSpoolDir)) {
+		logger.Error("Capability Pack directory must be distinct from telemetry/agent spool",
+			"error_code", "SENSOR_PACK_INVALID_CONFIG")
+		os.Exit(1)
+	}
+	packSyncer, err = packsync.New(packsync.Config{
+		Dir:          packDir,
+		PollInterval: cfg.PollInterval,
+		Logger:       logger,
+	}, client)
+	if err != nil {
+		logger.Error("Failed to initialize Capability Pack sync", "error", err, "error_code", "SENSOR_PACK_INVALID_CONFIG")
+		os.Exit(1)
+	}
+	healthServer.SetPackSync(packSyncer)
+	packSyncer.Start(ctx)
+	logger.Info("Capability Pack sync started", "capability_pack_dir", packDir)
+
 	var (
 		agentServer *agentreceiver.Server
 		agentSpool  *spool.DiskSpool
@@ -173,6 +200,13 @@ func main() {
 	}
 	discoveryService.Stop()
 	engine.Stop()
+	if packSyncer != nil {
+		packCtx, packCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer packCancel()
+		if err := packSyncer.Shutdown(packCtx); err != nil {
+			logger.Warn("Capability Pack sync shutdown error", "error", err)
+		}
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()

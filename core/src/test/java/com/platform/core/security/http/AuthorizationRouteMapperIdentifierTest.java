@@ -225,13 +225,18 @@ class AuthorizationRouteMapperIdentifierTest {
         assertAllowed(reader, "GET", base);
         assertAllowed(reader, "GET", base + "/fixture.fictional.base/versions/1.0.0");
         assertAllowed(reader, "GET", base + "/fixture.fictional.base/active-version");
+        assertAllowed(reader, "GET", base + "/assignments/sensors/sensor-01");
         assertDenied(reader, "PUT", base + "/fixture.fictional.base/versions/1.0.0");
         assertDenied(reader, "PUT", base + "/fixture.fictional.base/active-version");
         assertDenied(reader, "DELETE", base + "/fixture.fictional.base/active-version");
+        assertDenied(reader, "PUT", base + "/assignments/sensors/sensor-01/fixture.pack");
+        assertDenied(reader, "DELETE", base + "/assignments/sensors/sensor-01/fixture.pack");
 
         assertAllowed(manager, "PUT", base + "/fixture.fictional.base/versions/1.0.0");
         assertAllowed(manager, "PUT", base + "/fixture.fictional.base/active-version");
         assertAllowed(manager, "DELETE", base + "/fixture.fictional.base/active-version");
+        assertAllowed(manager, "PUT", base + "/assignments/sensors/sensor-01/fixture.pack");
+        assertAllowed(manager, "DELETE", base + "/assignments/sensors/sensor-01/fixture.pack");
         assertDenied(manager, "POST", base);
 
         assertDenied(wrongTenant, "PUT",

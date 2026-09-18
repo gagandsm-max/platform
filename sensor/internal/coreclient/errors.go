@@ -51,3 +51,8 @@ func IsTransient(err error) bool {
 	var api *CoreAPIError
 	return errors.As(err, &api) && api.transient
 }
+
+// ErrAuthenticationForTest returns a non-transient authentication error for unit tests.
+func ErrAuthenticationForTest() error {
+	return newError(CodeAuthentication, "Core rejected Sensor authentication", nil, false)
+}

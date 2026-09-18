@@ -36,5 +36,9 @@ public final class AuditActions {
     public static final AuditAction AGENT_REASSIGN = new AuditAction("agent.reassign");
     public static final AuditAction AGENT_ASSIGNMENT_REVOKE = new AuditAction("agent.assignment.revoke");
 
+    /** Capability Pack Sensor assignment (desired-state distribution; no manifest contents). */
+    public static final AuditAction CAPABILITY_PACK_SENSOR_ASSIGN = new AuditAction("capabilitypack.sensor.assign");
+    public static final AuditAction CAPABILITY_PACK_SENSOR_UNASSIGN = new AuditAction("capabilitypack.sensor.unassign");
+
     private AuditActions() {}
 }
