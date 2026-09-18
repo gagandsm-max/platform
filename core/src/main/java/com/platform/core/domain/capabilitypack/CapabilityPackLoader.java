@@ -186,8 +186,7 @@ public final class CapabilityPackLoader {
         }
         String certification = textOrNull(object.get("certification"));
         if (object.has("certification") && !CERTIFICATIONS.contains(certification)) {
-            issues.add(issue("UNKNOWN_CERTIFICATION", "$.certification",
-                    "Unsupported value: " + String.valueOf(certification) + "."));
+            issues.add(issue("UNKNOWN_CERTIFICATION", "$.certification", "Unsupported enum value."));
         }
 
         PackMetadata metadata = PackMetadata.empty();
@@ -269,7 +268,7 @@ public final class CapabilityPackLoader {
         }
         String type = textOrNull(value.get("type"));
         if (value.has("type") && !PUBLISHER_TYPES.contains(type)) {
-            issues.add(issue("UNKNOWN_ENUM", p + ".type", "Unsupported value: " + type + "."));
+            issues.add(issue("UNKNOWN_ENUM", p + ".type", "Unsupported enum value."));
         }
         String name = textOrNull(value.get("name"));
         if (value.has("name")) {
@@ -343,8 +342,7 @@ public final class CapabilityPackLoader {
                 MatchField matchField = null;
                 if (condition.has("field")) {
                     if (!MATCH_FIELDS.contains(field)) {
-                        issues.add(issue("UNKNOWN_MATCH_FIELD", cp + ".field",
-                                "Unsupported value: " + field + "."));
+                        issues.add(issue("UNKNOWN_MATCH_FIELD", cp + ".field", "Unsupported enum value."));
                     } else if (!seenFields.add(field)) {
                         issues.add(issue("DUPLICATE_MATCH_FIELD", cp + ".field",
                                 "A match rule may declare a selector field only once."));
@@ -356,8 +354,7 @@ public final class CapabilityPackLoader {
                 MatchOperator matchOperator = null;
                 if (condition.has("operator")) {
                     if (!MATCH_OPERATORS.contains(operator)) {
-                        issues.add(issue("UNKNOWN_MATCH_OPERATOR", cp + ".operator",
-                                "Unsupported value: " + operator + "."));
+                        issues.add(issue("UNKNOWN_MATCH_OPERATOR", cp + ".operator", "Unsupported enum value."));
                     } else {
                         matchOperator = MatchOperator.valueOf(operator);
                     }
@@ -453,7 +450,7 @@ public final class CapabilityPackLoader {
                         String family = textOrNull(req.get(j));
                         if (!PROTOCOLS.contains(family)) {
                             issues.add(issue("UNKNOWN_PROTOCOL", cp + ".requiresProtocols[" + j + "]",
-                                    "Unsupported value: " + family + "."));
+                                    "Unsupported enum value."));
                         } else {
                             requires.add(family);
                         }
@@ -487,7 +484,7 @@ public final class CapabilityPackLoader {
             }
             String family = textOrNull(protocol.get("family"));
             if (protocol.has("family") && !PROTOCOLS.contains(family)) {
-                issues.add(issue("UNKNOWN_PROTOCOL", pp + ".family", "Unsupported value: " + family + "."));
+                issues.add(issue("UNKNOWN_PROTOCOL", pp + ".family", "Unsupported enum value."));
             }
             String requirement = textOrNull(protocol.get("requirement"));
             if (protocol.has("requirement") && !"REQUIRED".equals(requirement) && !"OPTIONAL".equals(requirement)) {
@@ -505,11 +502,11 @@ public final class CapabilityPackLoader {
             if (family != null && LEGACY_PROTOCOLS.contains(family)) {
                 if (!Boolean.TRUE.equals(legacy)) {
                     issues.add(issue("LEGACY_PROTOCOL_NOT_FLAGGED", pp + ".legacy",
-                            family + " must be explicitly marked legacy."));
+                            "Legacy protocol must be explicitly marked legacy."));
                 }
                 if ("REQUIRED".equals(requirement)) {
                     issues.add(issue("LEGACY_PROTOCOL_CANNOT_BE_REQUIRED", pp + ".requirement",
-                            family + " cannot be required by a Device Pack."));
+                            "Legacy protocol cannot be required by a Device Pack."));
                 }
             }
             Optional<Integer> suggestedPort = Optional.empty();
@@ -530,7 +527,7 @@ public final class CapabilityPackLoader {
                 String cpt = textOrNull(protocol.get("credentialProfileType"));
                 if (!CREDENTIAL_TYPES.contains(cpt)) {
                     issues.add(issue("UNKNOWN_CREDENTIAL_PROFILE_TYPE", pp + ".credentialProfileType",
-                            "Unsupported value: " + cpt + "."));
+                            "Unsupported enum value."));
                 } else {
                     credentialProfileType = Optional.of(cpt);
                 }
@@ -581,7 +578,7 @@ public final class CapabilityPackLoader {
             }
             String kind = textOrNull(reference.get("kind"));
             if (reference.has("kind") && !REFERENCE_KINDS.contains(kind)) {
-                issues.add(issue("UNKNOWN_REFERENCE_KIND", rp + ".kind", "Unsupported value: " + kind + "."));
+                issues.add(issue("UNKNOWN_REFERENCE_KIND", rp + ".kind", "Unsupported enum value."));
             }
             Optional<String> version = optionalString(reference, "version", 1, 80, issues, rp);
             Optional<String> packagePath = Optional.empty();
@@ -646,7 +643,7 @@ public final class CapabilityPackLoader {
             }
             String valueType = textOrNull(mapping.get("valueType"));
             if (mapping.has("valueType") && !VALUE_TYPES.contains(valueType)) {
-                issues.add(issue("UNKNOWN_VALUE_TYPE", mp + ".valueType", "Unsupported value: " + valueType + "."));
+                issues.add(issue("UNKNOWN_VALUE_TYPE", mp + ".valueType", "Unsupported enum value."));
             }
             Optional<String> unit = optionalString(mapping, "unit", 1, 32, issues, mp);
             String qualityFallback = textOrNull(mapping.get("qualityFallback"));
@@ -666,7 +663,7 @@ public final class CapabilityPackLoader {
                 if (checkKeys(spNode, Set.of("protocol", "field", "referenceId"), Set.of("protocol", "field"), issues, sp)) {
                     String protocol = textOrNull(spNode.get("protocol"));
                     if (spNode.has("protocol") && !PROTOCOLS.contains(protocol)) {
-                        issues.add(issue("UNKNOWN_PROTOCOL", sp + ".protocol", "Unsupported value: " + protocol + "."));
+                        issues.add(issue("UNKNOWN_PROTOCOL", sp + ".protocol", "Unsupported enum value."));
                     }
                     String field = textOrNull(spNode.get("field"));
                     boolean fieldOk = spNode.has("field") && stringValue(field, 1, 256, issues, sp + ".field");
@@ -724,7 +721,7 @@ public final class CapabilityPackLoader {
         String type = textOrNull(value.get("type"));
         if (!value.has("type") || !TRANSFORM_TYPES.contains(type)) {
             if (value.has("type")) {
-                issues.add(issue("UNKNOWN_TRANSFORM", p + ".type", "Unsupported value: " + type + "."));
+                issues.add(issue("UNKNOWN_TRANSFORM", p + ".type", "Unsupported enum value."));
             }
             return null;
         }
@@ -782,7 +779,7 @@ public final class CapabilityPackLoader {
             if (depPackId != null && depVersion != null) {
                 String identity = depPackId + "@" + depVersion;
                 if (!seen.add(identity)) {
-                    issues.add(issue("DUPLICATE_DEPENDENCY", dp, "Duplicate dependency " + identity + "."));
+                    issues.add(issue("DUPLICATE_DEPENDENCY", dp, "Duplicate value."));
                 } else if (validPackId(depPackId) && validSemver(depVersion)) {
                     out.add(new PackDependency(depPackId, depVersion));
                 }
@@ -812,7 +809,7 @@ public final class CapabilityPackLoader {
             }
             String sourceType = textOrNull(entry.get("sourceType"));
             if (entry.has("sourceType") && !SOURCE_TYPES.contains(sourceType)) {
-                issues.add(issue("UNKNOWN_SOURCE_TYPE", ep + ".sourceType", "Unsupported value: " + sourceType + "."));
+                issues.add(issue("UNKNOWN_SOURCE_TYPE", ep + ".sourceType", "Unsupported enum value."));
             }
             String sourceReference = textOrNull(entry.get("sourceReference"));
             if (entry.has("sourceReference") && stringValue(sourceReference, 1, 512, issues, ep + ".sourceReference")) {
@@ -825,7 +822,7 @@ public final class CapabilityPackLoader {
             String redistribution = textOrNull(entry.get("redistribution"));
             if (entry.has("redistribution") && !REDISTRIBUTION.contains(redistribution)) {
                 issues.add(issue("UNKNOWN_REDISTRIBUTION", ep + ".redistribution",
-                        "Unsupported value: " + redistribution + "."));
+                        "Unsupported enum value."));
             }
             if (id != null && validShortId(id) && sourceType != null && SOURCE_TYPES.contains(sourceType)
                     && sourceReference != null && redistribution != null && REDISTRIBUTION.contains(redistribution)
@@ -887,7 +884,7 @@ public final class CapabilityPackLoader {
                     if (PROTOCOLS.contains(family) && !protocols.contains(family)) {
                         issues.add(issue("CAPABILITY_PROTOCOL_NOT_DECLARED",
                                 "$.capabilities[" + i + "].requiresProtocols[" + j + "]",
-                                "Protocol " + family + " is not declared."));
+                                "Referenced protocol is not declared."));
                     }
                 }
             }
@@ -906,7 +903,7 @@ public final class CapabilityPackLoader {
                     if (validSemanticKey(id) && !capabilities.contains(id)) {
                         issues.add(issue("CAPABILITY_REFERENCE_NOT_FOUND",
                                 "$.protocols[" + i + "].prerequisiteCapabilities[" + j + "]",
-                                "Capability " + id + " is not declared."));
+                                "Referenced capability is not declared."));
                     }
                 }
             }
@@ -919,7 +916,7 @@ public final class CapabilityPackLoader {
                 if (validShortId(provenanceId) && !provenance.contains(provenanceId)) {
                     issues.add(issue("PROVENANCE_REFERENCE_NOT_FOUND",
                             "$.references[" + i + "].provenanceId",
-                            "Provenance " + provenanceId + " is not declared."));
+                            "Referenced provenance is not declared."));
                 }
             }
         }
@@ -932,19 +929,19 @@ public final class CapabilityPackLoader {
                 if (PROTOCOLS.contains(protocol) && !protocols.contains(protocol)) {
                     issues.add(issue("NORMALIZATION_PROTOCOL_NOT_DECLARED",
                             "$.normalization[" + i + "].source.protocol",
-                            "Protocol " + protocol + " is not declared."));
+                            "Referenced protocol is not declared."));
                 }
                 String referenceId = textOrNull(mapping.path("source").get("referenceId"));
                 if (validShortId(referenceId) && !references.contains(referenceId)) {
                     issues.add(issue("REFERENCE_NOT_FOUND",
                             "$.normalization[" + i + "].source.referenceId",
-                            "Reference " + referenceId + " is not declared."));
+                            "Referenced reference is not declared."));
                 }
                 String provenanceId = textOrNull(mapping.get("provenanceId"));
                 if (validShortId(provenanceId) && !provenance.contains(provenanceId)) {
                     issues.add(issue("PROVENANCE_REFERENCE_NOT_FOUND",
                             "$.normalization[" + i + "].provenanceId",
-                            "Provenance " + provenanceId + " is not declared."));
+                            "Referenced provenance is not declared."));
                 }
             }
         }
@@ -1025,7 +1022,7 @@ public final class CapabilityPackLoader {
         for (int j = 0; j < array.size(); j++) {
             String v = textOrNull(array.get(j));
             if (!allowed.contains(v)) {
-                issues.add(issue(unknownCode, path + "[" + j + "]", "Unsupported value: " + v + "."));
+                issues.add(issue(unknownCode, path + "[" + j + "]", "Unsupported enum value."));
             } else {
                 out.add(v);
             }
@@ -1115,7 +1112,7 @@ public final class CapabilityPackLoader {
                 continue;
             }
             if (!seen.add(value)) {
-                issues.add(issue(code, jsonPath + "[" + i + "]", "Duplicate value: " + value + "."));
+                issues.add(issue(code, jsonPath + "[" + i + "]", "Duplicate value."));
             }
         }
     }

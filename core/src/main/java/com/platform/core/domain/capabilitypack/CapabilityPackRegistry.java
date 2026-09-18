@@ -1,6 +1,7 @@
 package com.platform.core.domain.capabilitypack;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -114,6 +115,8 @@ public final class CapabilityPackRegistry {
             }
         }
 
+        issues.addAll(detectAmbiguousMatchDefinitions(packs));
+
         for (int i = 0; i < packs.size(); i++) {
             CapabilityPackDescriptor pack = packs.get(i);
             if (pack == null) {
@@ -129,11 +132,16 @@ public final class CapabilityPackRegistry {
                             "A pack cannot depend on itself."));
                     continue;
                 }
-                if (!byIdentity.containsKey(dep.identityKey())) {
+                if (!byPackId.containsKey(dep.packId())) {
                     issues.add(new CapabilityPackValidationException.Issue(
                             "DEPENDENCY_NOT_FOUND",
                             "$[" + i + "].dependencies[" + d + "]",
-                            "Dependency " + dep.identityKey() + " is not present."));
+                            "Dependency is not present."));
+                } else if (!byIdentity.containsKey(dep.identityKey())) {
+                    issues.add(new CapabilityPackValidationException.Issue(
+                            "DEPENDENCY_VERSION_MISMATCH",
+                            "$[" + i + "].dependencies[" + d + "]",
+                            "Dependency version does not match the active pack version."));
                 }
             }
         }
@@ -148,6 +156,54 @@ public final class CapabilityPackRegistry {
         List<CapabilityPackDescriptor> immutable = List.copyOf(packs);
         Map<String, CapabilityPackDescriptor> identityCopy = Map.copyOf(byIdentity);
         return new Snapshot(immutable, identityCopy);
+    }
+
+    /**
+     * Rejects exact-equivalent match rules declared by different packIds.
+     * Signature mirrors {@code device-packs/tools/validate.mjs}: priority, exact/condition
+     * counts, and order-normalized condition field/operator/caseSensitive/value. Equal rank
+     * alone is not ambiguous when condition semantics differ.
+     */
+    private static List<CapabilityPackValidationException.Issue> detectAmbiguousMatchDefinitions(
+            List<CapabilityPackDescriptor> packs) {
+        List<CapabilityPackValidationException.Issue> issues = new ArrayList<>();
+        Map<String, String> definitions = new HashMap<>();
+        for (int i = 0; i < packs.size(); i++) {
+            CapabilityPackDescriptor pack = packs.get(i);
+            if (pack == null) {
+                continue;
+            }
+            for (MatchRule rule : pack.matchRules()) {
+                String key = matchDefinitionKey(rule);
+                String priorPackId = definitions.get(key);
+                if (priorPackId != null && !priorPackId.equals(pack.packId())) {
+                    issues.add(new CapabilityPackValidationException.Issue(
+                            "AMBIGUOUS_MATCH_DEFINITION",
+                            "$[" + i + "].matchRules",
+                            "Equivalent equal-strength match is also declared by " + priorPackId + "."));
+                } else {
+                    definitions.put(key, pack.packId());
+                }
+            }
+        }
+        return issues;
+    }
+
+    /** Deterministic, condition-order independent; packId/version/ruleId excluded. */
+    static String matchDefinitionKey(MatchRule rule) {
+        List<String> parts = new ArrayList<>(rule.conditions().size());
+        for (MatchCondition condition : rule.conditions()) {
+            parts.add(condition.field().name()
+                    + "|" + condition.operator().name()
+                    + "|" + condition.caseSensitive()
+                    + "|" + condition.value());
+        }
+        Collections.sort(parts);
+        return rule.priority()
+                + "|" + rule.exactCount()
+                + "|" + rule.conditions().size()
+                + "|" + rule.priority()
+                + "|" + String.join("::", parts);
     }
 
     private static List<CapabilityPackValidationException.Issue> detectDependencyCycles(

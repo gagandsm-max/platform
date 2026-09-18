@@ -76,7 +76,7 @@ class CapabilityPackRegistryTest {
     }
 
     @Test
-    void acceptsExactDependencyVersionAndRejectsWrongVersion() {
+    void acceptsExactDependencyVersionAndRejectsAbsentOrWrongVersion() {
         CapabilityPackRegistry registry = new CapabilityPackRegistry();
         CapabilityPackDescriptor base = CapabilityPackTestSupport.loadMinimal(
                 "fixture.fictional.base", "1.0.0", "Base");
@@ -85,13 +85,91 @@ class CapabilityPackRegistryTest {
         registry.replaceAll(List.of(base, dependent));
         assertEquals(2, registry.size());
 
+        CapabilityPackDescriptor absentPackId = CapabilityPackTestSupport.withDependency(
+                "fixture.fictional.child-absent", "1.0.0", "ChildAbsent",
+                "fixture.fictional.absent", "1.0.0");
+        CapabilityPackValidationException absentEx = assertThrows(
+                CapabilityPackValidationException.class,
+                () -> registry.replaceAll(List.of(base, absentPackId)));
+        assertEquals("DEPENDENCY_NOT_FOUND", absentEx.getCode());
+        assertEquals(2, registry.size());
+
         CapabilityPackDescriptor wrongVersion = CapabilityPackTestSupport.withDependency(
                 "fixture.fictional.child-bad", "1.0.0", "ChildBad", "fixture.fictional.base", "9.9.9");
-        CapabilityPackValidationException ex = assertThrows(
+        CapabilityPackValidationException mismatchEx = assertThrows(
                 CapabilityPackValidationException.class,
                 () -> registry.replaceAll(List.of(base, wrongVersion)));
-        assertEquals("DEPENDENCY_NOT_FOUND", ex.getCode());
+        assertEquals("DEPENDENCY_VERSION_MISMATCH", mismatchEx.getCode());
         assertEquals(2, registry.size());
+    }
+
+    @Test
+    void rejectsEquivalentMatchRulesAcrossDifferentPackIds() {
+        CapabilityPackRegistry registry = new CapabilityPackRegistry();
+        MatchRule shared = new MatchRule("primary", 10, List.of(
+                new MatchCondition(MatchField.product, MatchOperator.EXACT, "Shared", false)));
+        CapabilityPackDescriptor a = CapabilityPackTestSupport.withMatchRules(
+                "fixture.fictional.eq-a", "1.0.0", "EqA", List.of(shared));
+        CapabilityPackDescriptor b = CapabilityPackTestSupport.withMatchRules(
+                "fixture.fictional.eq-b", "1.0.0", "EqB", List.of(
+                        new MatchRule("other", 10, List.of(
+                                new MatchCondition(MatchField.product, MatchOperator.EXACT, "Shared", false)))));
+
+        CapabilityPackValidationException ex = assertThrows(
+                CapabilityPackValidationException.class,
+                () -> registry.replaceAll(List.of(a, b)));
+        assertEquals("AMBIGUOUS_MATCH_DEFINITION", ex.getCode());
+        assertEquals(0, registry.size());
+    }
+
+    @Test
+    void rejectsEquivalentMatchRulesWhenConditionsAreReordered() {
+        CapabilityPackRegistry registry = new CapabilityPackRegistry();
+        CapabilityPackDescriptor a = CapabilityPackTestSupport.withMatchRules(
+                "fixture.fictional.re-a", "1.0.0", "ReA", List.of(new MatchRule("a", 10, List.of(
+                        new MatchCondition(MatchField.product, MatchOperator.EXACT, "Shared", false),
+                        new MatchCondition(MatchField.vendor, MatchOperator.EXACT, "Labs", false)))));
+        CapabilityPackDescriptor b = CapabilityPackTestSupport.withMatchRules(
+                "fixture.fictional.re-b", "1.0.0", "ReB", List.of(new MatchRule("b", 10, List.of(
+                        new MatchCondition(MatchField.vendor, MatchOperator.EXACT, "Labs", false),
+                        new MatchCondition(MatchField.product, MatchOperator.EXACT, "Shared", false)))));
+
+        CapabilityPackValidationException ex = assertThrows(
+                CapabilityPackValidationException.class,
+                () -> registry.replaceAll(List.of(a, b)));
+        assertEquals("AMBIGUOUS_MATCH_DEFINITION", ex.getCode());
+        assertEquals(0, registry.size());
+    }
+
+    @Test
+    void acceptsEqualRankMatchRulesWithDifferentConditionValues() {
+        CapabilityPackRegistry registry = new CapabilityPackRegistry();
+        CapabilityPackDescriptor a = CapabilityPackTestSupport.withMatchRules(
+                "fixture.fictional.val-a", "1.0.0", "ValA", List.of(new MatchRule("a", 10, List.of(
+                        new MatchCondition(MatchField.product, MatchOperator.EXACT, "Shared", false)))));
+        CapabilityPackDescriptor b = CapabilityPackTestSupport.withMatchRules(
+                "fixture.fictional.val-b", "1.0.0", "ValB", List.of(new MatchRule("b", 10, List.of(
+                        new MatchCondition(MatchField.product, MatchOperator.EXACT, "Other", false)))));
+        registry.replaceAll(List.of(a, b));
+        assertEquals(2, registry.size());
+    }
+
+    @Test
+    void acceptsEqualRankMatchRulesWithDifferentFieldsAndRuntimeAmbiguous() {
+        CapabilityPackRegistry registry = new CapabilityPackRegistry();
+        CapabilityPackDescriptor a = CapabilityPackTestSupport.withMatchRules(
+                "fixture.fictional.field-a", "1.0.0", "FieldA", List.of(new MatchRule("a", 10, List.of(
+                        new MatchCondition(MatchField.product, MatchOperator.EXACT, "Shared", false)))));
+        CapabilityPackDescriptor b = CapabilityPackTestSupport.withMatchRules(
+                "fixture.fictional.field-b", "1.0.0", "FieldB", List.of(new MatchRule("b", 10, List.of(
+                        new MatchCondition(MatchField.vendor, MatchOperator.EXACT, "Labs", false)))));
+        registry.replaceAll(List.of(a, b));
+        assertEquals(2, registry.size());
+
+        CapabilityPackMatchResult result = registry.match(new CapabilityPackIdentity(
+                "Labs", null, "Shared", null, null, null, null, null, null));
+        assertEquals(CapabilityPackMatchOutcome.AMBIGUOUS, result.outcome());
+        assertEquals(2, result.candidates().size());
     }
 
     @Test

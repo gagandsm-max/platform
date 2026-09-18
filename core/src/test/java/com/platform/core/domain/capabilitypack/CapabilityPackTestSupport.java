@@ -6,6 +6,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 
 final class CapabilityPackTestSupport {
@@ -107,6 +108,29 @@ final class CapabilityPackTestSupport {
                 }
                 """.formatted(packId, packVersion, product, depPackId, depVersion);
         return new CapabilityPackLoader().load(json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static CapabilityPackDescriptor withMatchRules(
+            String packId, String packVersion, String name, List<MatchRule> matchRules) {
+        CapabilityPackDescriptor base = loadMinimal(packId, packVersion, name);
+        return new CapabilityPackDescriptor(
+                base.packId(),
+                base.packVersion(),
+                base.packClass(),
+                base.schemaVersion(),
+                base.name(),
+                base.publisher(),
+                base.certification(),
+                base.metadata(),
+                matchRules,
+                base.capabilities(),
+                base.protocols(),
+                base.references(),
+                base.normalization(),
+                base.dependencies(),
+                base.provenance(),
+                base.manifestSha256()
+        );
     }
 
     static CapabilityPackDescriptor unsupportedProfileDescriptor() {

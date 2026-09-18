@@ -251,4 +251,76 @@ class CapabilityPackLoaderSecurityTest {
         assertFalse(ex.getMessage().contains(sentinel));
         assertTrue(ex.getIssues().stream().noneMatch(i -> i.message().contains(sentinel)));
     }
+
+    @Test
+    void semanticValidationDoesNotEchoSecretSentinel() {
+        String sentinel = "SUPER_SECRET_SENTINEL_123";
+        String json = """
+                {
+                  "schemaVersion": "1.0.0",
+                  "packId": "fixture.fictional.sentinel",
+                  "packVersion": "1.0.0",
+                  "name": "Sentinel Fixture",
+                  "publisher": {"type": "%s", "name": "Fictional"},
+                  "certification": "%s",
+                  "matchRules": [
+                    {"ruleId": "r", "priority": 1, "conditions": [
+                      {"field": "product", "operator": "EXACT", "value": "X", "caseSensitive": false}
+                    ]}
+                  ],
+                  "capabilities": [
+                    {"id": "cap.reachability", "requiresProtocols": ["ICMP"]}
+                  ],
+                  "protocols": [
+                    {
+                      "family": "%s",
+                      "requirement": "OPTIONAL",
+                      "legacy": false,
+                      "transportModes": ["%s", "%s"]
+                    }
+                  ],
+                  "references": [
+                    {"id": "ref-a", "kind": "MIB", "packagePath": "refs/a.mib", "provenanceId": "missing-prov"}
+                  ],
+                  "normalization": [
+                    {
+                      "key": "device.metric",
+                      "valueType": "%s",
+                      "source": {"protocol": "ICMP", "field": "x", "referenceId": "missing-ref"},
+                      "target": {"entityType": "device"},
+                      "provenanceId": "missing-prov"
+                    }
+                  ],
+                  "dependencies": [],
+                  "provenance": [
+                    {"id": "p", "sourceType": "CUSTOMER_SUPPLIED", "sourceReference": "x", "redistribution": "RESTRICTED"}
+                  ]
+                }
+                """.formatted(sentinel, sentinel, sentinel, sentinel, sentinel, sentinel);
+
+        CapabilityPackValidationException ex = assertThrows(
+                CapabilityPackValidationException.class,
+                () -> loader.load(json.getBytes(StandardCharsets.UTF_8)));
+
+        assertFalse(ex.getMessage().contains(sentinel), () -> "message leaked: " + ex.getMessage());
+        assertTrue(ex.getIssues().stream().noneMatch(i -> i.message().contains(sentinel)),
+                () -> "issue message leaked: " + ex.getIssues());
+        assertTrue(ex.getFieldErrors().values().stream().noneMatch(v -> v != null && v.contains(sentinel)),
+                () -> "fieldErrors leaked: " + ex.getFieldErrors());
+        assertFalse(ex.toString().contains(sentinel), () -> "toString leaked: " + ex);
+
+        assertTrue(ex.getIssues().stream().anyMatch(i -> "UNKNOWN_CERTIFICATION".equals(i.code())));
+        assertTrue(ex.getIssues().stream().anyMatch(i -> "UNKNOWN_ENUM".equals(i.code())));
+        assertTrue(ex.getIssues().stream().anyMatch(i -> "UNKNOWN_PROTOCOL".equals(i.code())));
+        assertTrue(ex.getIssues().stream().anyMatch(i -> "UNKNOWN_VALUE_TYPE".equals(i.code())));
+        assertTrue(ex.getIssues().stream().anyMatch(i -> "DUPLICATE_TRANSPORT_MODE".equals(i.code())
+                || "DUPLICATE_VALUE".equals(i.code())
+                || i.message().equals("Duplicate value.")));
+        assertTrue(ex.getIssues().stream().anyMatch(i ->
+                "CAPABILITY_PROTOCOL_NOT_DECLARED".equals(i.code())
+                        || "REFERENCE_NOT_FOUND".equals(i.code())
+                        || "PROVENANCE_REFERENCE_NOT_FOUND".equals(i.code())
+                        || "NORMALIZATION_PROTOCOL_NOT_DECLARED".equals(i.code())
+                        || "INVALID_REFERENCE_ID".equals(i.code())));
+    }
 }
