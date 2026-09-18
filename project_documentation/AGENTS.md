@@ -175,7 +175,7 @@ Do not paste the agent or Skill catalogue here. Resolve it from manifests.
 - Writer isolation: one writer per checkout; parallel writes use separate branches/worktrees
 - Evidence: typed claims, exact-head current-base CI, no writer self-certification
 
-Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.2.2. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
+Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform Mother Reference version is v3.2.3; implementation/release versioning remains governed separately by the release process. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
 
 ## v3.2.3 UI/UX architecture gate
 

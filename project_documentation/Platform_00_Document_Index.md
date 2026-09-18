@@ -91,6 +91,30 @@ The 2026-09-13 enterprise-monitoring-coverage reconciliation adds `Platform_23_E
 
 The older files remain authoritative for their existing scope and are explicitly supplemented by specialized masters; they are not considered obsolete. This packaging choice is deliberate change control, not a waiver of traceability.
 
+
+## 4.3 v3.2.2 → v3.2.3 UI/UX interaction reconciliation
+
+v3.2.3 is an additive change-control revision of the same 25-file Mother Reference set. It does not add a new master file and does not weaken any v3.2.2 requirement.
+
+The revision formalizes the accepted enterprise UI/UX interaction architecture across the existing governing layers:
+
+- `Platform_02` carries customer-visible dashboard, provisioning, investigation, NOC and interaction requirements;
+- `Platform_03`–`Platform_06` carry the shared UI runtime, dashboard/query/context architecture, HLD/LLD contracts and end-to-end flows;
+- `Platform_07` makes clear that named UI/search/rendering libraries from design proposals are not automatically approved dependencies;
+- `Platform_08` adds traceable `REQ-UI-015` through `REQ-UI-036`;
+- `Platform_09` is the primary detailed authority for the shared shell, no-code Dashboard Studio, query builder, visualization system, provisioning UX, network operations UX, incident/RCA workbench and NOC ergonomics;
+- `Platform_10` clarifies credential-use/non-reveal and safe provisioning preflight behavior;
+- `Platform_12` records the architecture decisions and deferrals;
+- `Platform_14` adds UI performance, accessibility, panel-isolation, query-budget and security release gates;
+- `Platform_17` defines dashboard/query/context/saved-view/provisioning API and data contracts;
+- `Platform_18` adds dashboard/import/raw-query/query-amplification/secret-exfiltration/browser-execution threats and mitigations;
+- `Platform_19` adds incident/RCA interaction requirements without weakening evidence-before-AI or `INCONCLUSIVE`;
+- `Platform_20` adds provisioning/discovery discoverability and self-service onboarding UX while preserving governed activation.
+
+The change source is the product-owner-approved UI/UX reconciliation recorded in GitHub issue #56 and subsequent architecture review. Named libraries in reference recommendations remain candidates only until formally admitted through the OSS catalogue.
+
+Broad implementation of the 98 workspaces SHALL NOT precede the common UI foundations defined by v3.2.3.
+
 ## 5. Precedence
 
 When requirements appear to conflict:
@@ -251,26 +275,3 @@ For code-agent enforcement, `AGENTS.md` should also be available at repository r
 Authority of the clone follows §12 after merge to the canonical GitHub repository.
 
 ---
-
-## 4.3 v3.2.2 → v3.2.3 UI/UX interaction reconciliation
-
-v3.2.3 is an additive change-control revision of the same 25-file Mother Reference set. It does not add a new master file and does not weaken any v3.2.2 requirement.
-
-The revision formalizes the accepted enterprise UI/UX interaction architecture across the existing governing layers:
-
-- `Platform_02` carries customer-visible dashboard, provisioning, investigation, NOC and interaction requirements;
-- `Platform_03`–`Platform_06` carry the shared UI runtime, dashboard/query/context architecture, HLD/LLD contracts and end-to-end flows;
-- `Platform_07` makes clear that named UI/search/rendering libraries from design proposals are not automatically approved dependencies;
-- `Platform_08` adds traceable `REQ-UI-015` through `REQ-UI-036`;
-- `Platform_09` is the primary detailed authority for the shared shell, no-code Dashboard Studio, query builder, visualization system, provisioning UX, network operations UX, incident/RCA workbench and NOC ergonomics;
-- `Platform_10` clarifies credential-use/non-reveal and safe provisioning preflight behavior;
-- `Platform_12` records the architecture decisions and deferrals;
-- `Platform_14` adds UI performance, accessibility, panel-isolation, query-budget and security release gates;
-- `Platform_17` defines dashboard/query/context/saved-view/provisioning API and data contracts;
-- `Platform_18` adds dashboard/import/raw-query/query-amplification/secret-exfiltration/browser-execution threats and mitigations;
-- `Platform_19` adds incident/RCA interaction requirements without weakening evidence-before-AI or `INCONCLUSIVE`;
-- `Platform_20` adds provisioning/discovery discoverability and self-service onboarding UX while preserving governed activation.
-
-The change source is the product-owner-approved UI/UX reconciliation recorded in GitHub issue #56 and subsequent architecture review. Named libraries in reference recommendations remain candidates only until formally admitted through the OSS catalogue.
-
-Broad implementation of the 98 workspaces SHALL NOT precede the common UI foundations defined by v3.2.3.

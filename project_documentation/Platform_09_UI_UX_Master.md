@@ -4,7 +4,7 @@
 **Version:** 3.2.3
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
 **Product:** Platform
-**Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master UI amendment for Notification Center and Discovery Review
+**Last reconciliation:** 2026-09-18 — v3.2.3 shared interaction, Dashboard Studio, provisioning and NOC architecture reconciliation
 
 ## 1. Authority and no-assumption rule
 
@@ -20,6 +20,7 @@ The non-negotiable UX principles are: fast navigation; readable fonts; role-awar
 Home
 Dashboards
 Inventory
+Provisioning & Discovery
 Topology & Maps
 Alerts & Incidents
 RCA & Investigations
