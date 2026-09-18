@@ -1,8 +1,20 @@
 # Platform Device Pack Contract Foundation
 
-**Scope:** contract, deterministic packaging, static validation, and fictional fixtures only.
+**Scope:** contract, deterministic packaging, static validation, fictional fixtures, and EMC1.1 Core Capability Pack loader/registry foundation.
 **Mother Reference:** Platform v3.2.2.
 **Runtime/device certification:** not included.
+
+## 0. Capability Pack relationship (EMC1.1)
+
+A Device Pack is the **DEVICE_NETWORK** profile of the single Capability Pack architecture (`Platform_23`). Manifest `schemaVersion` `1.0.0` remains the Device Pack contract; this checkpoint does not introduce a second schema family.
+
+EMC1.1 adds Core Java runtime loader/registry foundation only (`com.platform.core.domain.capabilitypack`):
+
+- bytes → immutable descriptor (fail-closed validation mirroring `tools/validate.mjs` safety semantics);
+- atomic in-memory registry snapshot replace;
+- deterministic identity matching (`MATCH` / `NO_MATCH` / `UNKNOWN` / `AMBIGUOUS`).
+
+Explicitly **not** in EMC1.1: persistence, Core API, Sensor loading, Pack Studio, vendor packs, certification evidence, or Platform version-range fields (absent on schema `1.0.0` — not invented). Static validity is **not** certification.
 
 ## 1. What a Device Pack is
 

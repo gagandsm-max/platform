@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.0.0",
+  "packId": "example.fictional.minimal",
+  "packVersion": "1.0.0",
+  "name": "Fictional Minimal Device Pack",
+  "publisher": {
+    "type": "CUSTOMER",
+    "name": "Fictional Example Publisher"
+  },
+  "certification": "EXPERIMENTAL",
+  "metadata": {
+    "description": "Non-production contract example only. No real vendor compatibility is claimed."
+  },
+  "matchRules": [
+    {
+      "ruleId": "fictional-generic",
+      "priority": 100,
+      "conditions": [
+        {
+          "field": "product",
+          "operator": "EXACT",
+          "value": "Fictional Device",
+          "caseSensitive": false
+        }
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "monitoring.availability",
+      "description": "Fictional contract-only availability capability.",
+      "requiresProtocols": ["ICMP"]
+    }
+  ],
+  "protocols": [
+    {
+      "family": "ICMP",
+      "requirement": "REQUIRED",
+      "legacy": false,
+      "transportModes": ["IP"]
+    }
+  ],
+  "references": [],
+  "normalization": [],
+  "dependencies": [],
+  "provenance": [
+    {
+      "id": "fixture-source",
+      "sourceType": "CUSTOMER_SUPPLIED",
+      "sourceReference": "fictional-contract-example",
+      "redistribution": "RESTRICTED"
+    }
+  ]
+}
