@@ -1,7 +1,7 @@
 # Platform — Sizing, Capacity, Sensor Distribution & Storage Master
 
 **Document ID:** PLATFORM-SIZING-001  
-**Version:** 3.2.2  
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Engineering Sizing Model**  
 **Product:** Platform
 
