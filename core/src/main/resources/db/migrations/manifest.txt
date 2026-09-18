@@ -4,3 +4,4 @@ V003__discovery_foundation.sql|Discovery foundation requests targets evidence ca
 V004__sensor_control_authority.sql|Sensor control authority principal certificate bindings entity allowlist
 V005__agent_control_authority.sql|Agent control authority principal certificate bindings sensor assignment fence
 V006__agent_ingress_replay.sql|Agent ingress durable drain replay watermark state
+V007__capability_pack_registry.sql|Tenant capability pack registry artifacts and activation history

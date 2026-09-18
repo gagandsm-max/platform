@@ -125,10 +125,13 @@ public class ApiExceptionHandler {
 
     private static HttpStatus mapStatus(String code) {
         return switch (code) {
-            case "VALIDATION_FAILED", "QUERY_LIMIT_EXCEEDED" -> HttpStatus.BAD_REQUEST;
+            case "VALIDATION_FAILED", "QUERY_LIMIT_EXCEEDED",
+                 "CAPABILITY_PACK_PATH_IDENTITY_MISMATCH", "CAPABILITY_PACK_SNAPSHOT_INVALID",
+                 "CAPABILITY_PACK_DEPENDENCY_IN_USE", "MANIFEST_TOO_LARGE" -> HttpStatus.BAD_REQUEST;
             case "TENANT_NOT_FOUND", "SITE_NOT_FOUND", "GROUP_NOT_FOUND", "TAG_NOT_FOUND",
-                 "ENTITY_NOT_FOUND", "IDENTIFIER_NOT_FOUND" -> HttpStatus.NOT_FOUND;
-            case "IDENTIFIER_CONFLICT", "RESOURCE_CONFLICT", "HIERARCHY_CYCLE", "CROSS_TENANT_REFERENCE" ->
+                 "ENTITY_NOT_FOUND", "IDENTIFIER_NOT_FOUND", "CAPABILITY_PACK_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+            case "IDENTIFIER_CONFLICT", "RESOURCE_CONFLICT", "HIERARCHY_CYCLE", "CROSS_TENANT_REFERENCE",
+                 "CAPABILITY_PACK_IDENTITY_CONFLICT", "CAPABILITY_PACK_GENERATION_CONFLICT" ->
                     HttpStatus.CONFLICT;
             case "DATABASE_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
             default -> HttpStatus.BAD_REQUEST;

@@ -36,7 +36,9 @@ public final class PermissionResourceBindings {
             Map.entry(PlatformPermissions.ENTITY_TAG_REMOVE, ResourceType.ENTITY),
             Map.entry(PlatformPermissions.CREDENTIAL_USE, ResourceType.CREDENTIAL),
             Map.entry(PlatformPermissions.CREDENTIAL_EDIT, ResourceType.CREDENTIAL),
-            Map.entry(PlatformPermissions.CREDENTIAL_REVEAL, ResourceType.CREDENTIAL)
+            Map.entry(PlatformPermissions.CREDENTIAL_REVEAL, ResourceType.CREDENTIAL),
+            Map.entry(PlatformPermissions.CAPABILITY_PACK_READ, ResourceType.TENANT),
+            Map.entry(PlatformPermissions.CAPABILITY_PACK_MANAGE, ResourceType.TENANT)
     );
 
     private PermissionResourceBindings() {

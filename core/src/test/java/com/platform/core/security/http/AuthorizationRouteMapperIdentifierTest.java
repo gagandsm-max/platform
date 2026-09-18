@@ -186,6 +186,60 @@ class AuthorizationRouteMapperIdentifierTest {
                 "/api/v1/tenants/" + TENANT + "/discovery/" + requestId + "/cancel");
     }
 
+    @Test
+    void capabilityPackRoutesRequireDedicatedPermissions() {
+        PrincipalContext reader = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.CAPABILITY_PACK_READ,
+                        ResourceScope.tenantWide(ResourceType.TENANT)
+                )
+        );
+        PrincipalContext manager = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.CAPABILITY_PACK_MANAGE,
+                        ResourceScope.tenantWide(ResourceType.TENANT)
+                )
+        );
+        PrincipalContext wrongTenant = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.CAPABILITY_PACK_MANAGE,
+                        ResourceScope.tenantWide(ResourceType.TENANT)
+                )
+        );
+        PrincipalContext tenantPathOnly = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.TENANT_READ,
+                        ResourceScope.tenantWide(ResourceType.TENANT)
+                )
+        );
+
+        String base = "/api/v1/tenants/" + TENANT + "/capability-packs";
+        assertAllowed(reader, "GET", base);
+        assertAllowed(reader, "GET", base + "/fixture.fictional.base/versions/1.0.0");
+        assertAllowed(reader, "GET", base + "/fixture.fictional.base/active-version");
+        assertDenied(reader, "PUT", base + "/fixture.fictional.base/versions/1.0.0");
+        assertDenied(reader, "PUT", base + "/fixture.fictional.base/active-version");
+        assertDenied(reader, "DELETE", base + "/fixture.fictional.base/active-version");
+
+        assertAllowed(manager, "PUT", base + "/fixture.fictional.base/versions/1.0.0");
+        assertAllowed(manager, "PUT", base + "/fixture.fictional.base/active-version");
+        assertAllowed(manager, "DELETE", base + "/fixture.fictional.base/active-version");
+        assertDenied(manager, "POST", base);
+
+        assertDenied(wrongTenant, "PUT",
+                "/api/v1/tenants/" + OTHER_TENANT + "/capability-packs/fixture.fictional.base/versions/1.0.0");
+        assertDenied(tenantPathOnly, "GET", base);
+        assertDenied(tenantPathOnly, "PUT", base + "/fixture.fictional.base/versions/1.0.0");
+    }
+
     private static PrincipalContext principal(UUID tenantScope, PermissionGrant... grants) {
         return new PrincipalContext(
                 "subject",

@@ -40,6 +40,9 @@ public final class PlatformPermissions {
     public static final Permission CREDENTIAL_EDIT = Permission.of("credential.edit");
     public static final Permission CREDENTIAL_REVEAL = Permission.of("credential.reveal");
 
+    public static final Permission CAPABILITY_PACK_READ = Permission.of("capability_pack.read");
+    public static final Permission CAPABILITY_PACK_MANAGE = Permission.of("capability_pack.manage");
+
     private PlatformPermissions() {
     }
 }
