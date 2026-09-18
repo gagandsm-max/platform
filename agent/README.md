@@ -29,10 +29,15 @@ This checkpoint does not collect process command lines, environment variables, p
 Agent telemetry is persisted before delivery using:
 
 - stable sequence and record IDs;
+- durable `sequence.meta` watermarks for `highestSequence`, optional durable `lineageStart` (metadata `version` 2), and `acceptedThrough` (legacy meta with only `highestSequence` loads with no accepted boundary; next legitimate meta write upgrades to v2 and anchors `lineageStart`); ACK-authorized leftovers pending deletion are tracked as bounded `acceptedRecords` `{sequence,id}` so restart cleanup matches exact IDs only;
 - SHA-256 integrity over sequence, ID, createdAt, and payload;
-- restart recovery with content validation;
-- strict ACK-before-delete behavior (application ACK only; transport/auth/permanent errors retain records);
-- corruption quarantine with fail-closed rename handling (no silent loss on quarantine failure);
+- restart recovery with content validation (ACK meta is loaded before active mutate/quarantine so unauthorized or conflicting records at/below `acceptedThrough` fail closed as `QUEUE_ACK_RECOVERY_CONFLICT` rather than quarantine-hide);
+- strict ACK-before-delete behavior bound to the exact submitted record IDs (application ACK only; transport/auth/permanent errors retain records); `acceptedThrough` plus `acceptedRecords` are persisted before authorized active-file removal, then `acceptedRecords` is cleared after successful delete;
+- cross-batch continuity after the first successful ACK (`acceptedThrough+1` must be next) and same-sequence conflict fail-closed holds (`QUEUE_SEQUENCE_GAP` / `QUEUE_SEQUENCE_CONFLICT`); missing unacked lineage from durable `lineageStart` (or legacy lowest covered) through `highestSequence` is `QUEUE_SEQUENCE_GAP`; post-rename meta dirsync ambiguity is `QUEUE_META_UNCERTAIN` (fail-closed, never regress `acceptedThrough`, never adopt a later `lineageStart`);
+- corruption quarantine with fail-closed rename handling: durable queue-local transition intent (`quarantine.transition`) before active→quarantine rename, then destination directory durability before source deletion durability; intent cleared only after the final filesystem state is durable; restart reconciliation stays blocked on ambiguous intent/copy state (no silent loss on quarantine failure);
+- bounded quarantine storage (same record/byte caps as the active buffer) with `QUEUE_QUARANTINE_FULL` fail-closed retain (no oldest-record deletion);
+- quarantined sequences block later delivery (no invented sequence skip/tombstone); later records remain intact;
+- unknown/noncanonical `rec_*.json` names fail-closed with a global delivery block and are retained in `active/`;
 - hard capacity bounds with explicit `QUEUE_FULL` rejection (no automatic head-drop / eviction of oldest records);
 - symlink/path protections and `0700`/`0600` state permissions;
 - configured maximum record count, total serialized buffer bytes, and payload record size.

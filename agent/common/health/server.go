@@ -171,6 +171,30 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		status = "DEGRADED"
 		reasons = append(reasons, "QUEUE_QUARANTINE_PRESENT")
 	}
+	if qStats.DeliveryBlocked {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_DELIVERY_BLOCKED")
+	}
+	if qStats.UnknownSequenceBlock {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_UNKNOWN_SEQUENCE_BLOCK")
+	}
+	if qStats.LocationUncertain {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_QUARANTINE_UNCERTAIN")
+	}
+	if qStats.MetaUncertain {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_META_UNCERTAIN")
+	}
+	if qStats.AckRecoveryConflictBlock {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_ACK_RECOVERY_CONFLICT")
+	}
+	if qStats.QuarantineAtCapacity {
+		status = "DEGRADED"
+		reasons = append(reasons, "QUEUE_QUARANTINE_FULL")
+	}
 	if collectorErrors > 0 {
 		status = "DEGRADED"
 		reasons = append(reasons, "COLLECTOR_ERRORS")
@@ -186,12 +210,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"collector_errors": collectorErrors,
 		},
 		"queue": map[string]any{
-			"active_count":     qStats.ActiveCount,
-			"active_bytes":     qStats.ActiveBytes,
-			"quarantine_count": qStats.QuarantineCount,
-			"oldest_age_sec":   qStats.OldestAge.Seconds(),
-			"last_sequence":    qStats.LastSequence,
-			"at_capacity":      qStats.AtCapacity,
+			"active_count":           qStats.ActiveCount,
+			"active_bytes":           qStats.ActiveBytes,
+			"quarantine_count":       qStats.QuarantineCount,
+			"quarantine_bytes":       qStats.QuarantineBytes,
+			"oldest_age_sec":         qStats.OldestAge.Seconds(),
+			"last_sequence":          qStats.LastSequence,
+			"at_capacity":            qStats.AtCapacity,
+			"quarantine_at_capacity": qStats.QuarantineAtCapacity,
+			"blocked_from_sequence":  qStats.BlockedFromSequence,
+			"delivery_blocked":       qStats.DeliveryBlocked,
+			"unknown_sequence_block": qStats.UnknownSequenceBlock,
+			"location_uncertain":         qStats.LocationUncertain,
+			"meta_uncertain":             qStats.MetaUncertain,
+			"ack_recovery_conflict":      qStats.AckRecoveryConflictBlock,
 		},
 		"delivery": map[string]any{
 			"attempts":           dStats.Attempts,

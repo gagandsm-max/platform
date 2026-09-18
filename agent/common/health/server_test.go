@@ -14,6 +14,76 @@ import (
 	"platform/agent/common/queue"
 )
 
+func TestHealthDeliveryBlockedDegraded(t *testing.T) {
+	prov := &mockStatsProvider{receiverAvailable: true, deliveryBlocked: true, quarantine: 1}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wHealth := httptest.NewRecorder()
+	s.handleHealth(wHealth, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if wHealth.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected /health 503 when delivery blocked, got %d", wHealth.Code)
+	}
+	body := wHealth.Body.String()
+	if !strings.Contains(body, "QUEUE_DELIVERY_BLOCKED") {
+		t.Fatalf("expected QUEUE_DELIVERY_BLOCKED reason, got %s", body)
+	}
+	if !strings.Contains(body, "QUEUE_QUARANTINE_PRESENT") {
+		t.Fatalf("expected QUEUE_QUARANTINE_PRESENT reason, got %s", body)
+	}
+}
+
+func TestHealthAckRecoveryConflictDegraded(t *testing.T) {
+	prov := &mockStatsProvider{receiverAvailable: true, ackRecoveryConflict: true}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wHealth := httptest.NewRecorder()
+	s.handleHealth(wHealth, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if wHealth.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected /health 503 for ack recovery conflict, got %d", wHealth.Code)
+	}
+	body := wHealth.Body.String()
+	if !strings.Contains(body, "QUEUE_ACK_RECOVERY_CONFLICT") {
+		t.Fatalf("expected QUEUE_ACK_RECOVERY_CONFLICT, got %s", body)
+	}
+	if !strings.Contains(body, `"status":"DEGRADED"`) && !strings.Contains(body, `"status": "DEGRADED"`) {
+		// compact JSON encoder may omit spaces
+		var hMap map[string]any
+		if err := json.Unmarshal(wHealth.Body.Bytes(), &hMap); err != nil {
+			t.Fatal(err)
+		}
+		if hMap["status"] != "DEGRADED" {
+			t.Fatalf("expected DEGRADED status, got %v body=%s", hMap["status"], body)
+		}
+	}
+	if strings.Contains(body, "payload") || strings.Contains(body, "replacement") || strings.Contains(body, "secret") {
+		t.Fatalf("health must not include payload material: %s", body)
+	}
+}
+
+func TestHealthUnknownSequenceDegraded(t *testing.T) {
+	prov := &mockStatsProvider{receiverAvailable: true, unknownSequence: true}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wHealth := httptest.NewRecorder()
+	s.handleHealth(wHealth, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if wHealth.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected /health 503 for unknown-sequence block, got %d", wHealth.Code)
+	}
+	body := wHealth.Body.String()
+	if !strings.Contains(body, "QUEUE_UNKNOWN_SEQUENCE_BLOCK") {
+		t.Fatalf("expected QUEUE_UNKNOWN_SEQUENCE_BLOCK, got %s", body)
+	}
+	if strings.Contains(body, "payload") || strings.Contains(body, "secret") {
+		t.Fatalf("health must not include payload material: %s", body)
+	}
+}
+
 func TestHealthQueueFullDegraded(t *testing.T) {
 	prov := &mockStatsProvider{receiverAvailable: true, atCapacity: true}
 	s, err := NewServer("127.0.0.1:0", prov, nil)
@@ -29,16 +99,29 @@ func TestHealthQueueFullDegraded(t *testing.T) {
 }
 
 type mockStatsProvider struct {
-	receiverAvailable bool
-	atCapacity        bool
-	quarantine        int
-	collectorErrors   int
-	lastErrorCode     string
-	lastFailureClass  client.FailureClass
+	receiverAvailable    bool
+	atCapacity           bool
+	quarantine           int
+	collectorErrors      int
+	lastErrorCode        string
+	lastFailureClass     client.FailureClass
+	deliveryBlocked      bool
+	unknownSequence      bool
+	locationUncertain    bool
+	ackRecoveryConflict  bool
 }
 
 func (m *mockStatsProvider) QueueStats() queue.QueueStats {
-	return queue.QueueStats{ActiveCount: 5, ActiveBytes: 1024, AtCapacity: m.atCapacity, QuarantineCount: m.quarantine}
+	return queue.QueueStats{
+		ActiveCount:              5,
+		ActiveBytes:              1024,
+		AtCapacity:               m.atCapacity,
+		QuarantineCount:          m.quarantine,
+		DeliveryBlocked:          m.deliveryBlocked || m.unknownSequence || m.locationUncertain || m.ackRecoveryConflict,
+		UnknownSequenceBlock:     m.unknownSequence,
+		LocationUncertain:        m.locationUncertain,
+		AckRecoveryConflictBlock: m.ackRecoveryConflict,
+	}
 }
 
 func (m *mockStatsProvider) DeliveryStats() delivery.DeliveryStats {
