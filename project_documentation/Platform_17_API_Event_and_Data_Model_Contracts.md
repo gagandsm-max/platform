@@ -103,3 +103,23 @@ Provisioning APIs use credential-reference IDs, not secrets. Preflight is an asy
 ### Error/data safety
 
 Dashboard, query, import and connector APIs return stable safe error codes. SQL text, stack traces, credentials, private data-source URLs and unredacted raw payloads are not returned merely for debugging. Large raw response inspection is bounded and escaped.
+
+---
+
+## 6. v3.2.3 operational-view contract additions
+
+### Synthetic/API evidence
+
+Where a synthetic monitor captures phase timing, responses may expose structured bounded timing phases such as DNS, connect, TLS, first-byte and transfer plus assertion results and location identity. Raw/response inspection is separately authorized, size bounded, escaped and redacted. Authentication material and secret headers are never returned.
+
+### Database operational evidence
+
+Database query/workload responses use normalized query identity where possible and bounded samples. Query text, lock/session evidence and explain-plan payloads are tenant scoped, permission checked and redacted. Explain plans should expose a normalized tree when parser support exists and a bounded escaped raw representation otherwise.
+
+### Threshold provenance
+
+Panel definitions distinguish visualization/presentation thresholds from references to effective monitoring policy. A dashboard-definition write cannot mutate alert policy unless it calls the separate authorized policy API/workflow.
+
+### Faceplate metadata
+
+Physical faceplate coordinates/relationships are optional evidence supplied by certified device/hardware metadata. Clients must tolerate absence and fall back to logical interface lists/density representations rather than inventing physical placement.

@@ -1250,3 +1250,14 @@ The UI is a governed product subsystem rather than a collection of independent p
 - Browser local storage may cache ephemeral unsaved draft/recovery state only and is never the authoritative shared configuration store.
 - Large aggregation/transformation remains server-side. Bounded client transformations may execute off-main-thread.
 - UI dependencies remain subject to `Platform_07` admission; no proposal-named library is selected by this architecture section.
+
+---
+
+## v3.2.3 Operational-domain interaction architecture supplement
+
+The shared UI platform must support cross-domain composition without creating separate query/security models per domain. Network/Flow/Infrastructure/Cloud/Kubernetes/Synthetics/API/Database panels reuse the same tenant/time/scope context, Query Gateway, panel registry and authorization boundary.
+
+- Physical faceplate rendering is an evidence-backed specialization of entity/topology metadata; absence of trustworthy hardware relationships results in logical interface-density views, never invented physical placement.
+- Synthetic/API timing-waterfall data and Database slow-query/plan/pool evidence are domain-specific payloads carried through the same governed query/API layer.
+- Presentation thresholds are dashboard state; monitoring/alert policy remains a separate authoritative policy domain.
+- Pointer-centric advanced interactions require accessible equivalent commands; accessibility is a platform primitive, not a per-workspace afterthought.

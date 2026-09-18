@@ -2169,3 +2169,16 @@ The following requirements are additive and refine the existing UI/UX requiremen
 | `PRD-UI-024` | Monitoring-domain switching may accelerate Network, Flow, Infrastructure, Synthetics, API and Database navigation but shall not replace the authoritative primary product navigation. |
 
 Named charting, graph, map, search, template or rendering libraries in design references are implementation candidates only and do not become product requirements by mention.
+
+---
+
+## v3.2.3 UI/UX operational-domain requirement additions
+
+| PRD ID | Requirement |
+|---|---|
+| `PRD-UI-025` | Platform shall support cross-domain operational dashboards and context-preserving drill-down across compatible Network, Flow, Infrastructure, Cloud/Kubernetes, Synthetics/API and Database dimensions without silently reinterpreting incompatible context. |
+| `PRD-UI-026` | Network device views shall provide evidence-driven physical faceplate or logical interface-density visualization; physical placement shall not be fabricated when Device Pack/hardware inventory evidence is unavailable. |
+| `PRD-UI-027` | Synthetic/API workspaces shall provide timing waterfall, multi-location comparison, assertion evidence and a size-bounded escaped/redacted response inspector where source data supports them. |
+| `PRD-UI-028` | Database workspaces shall provide slow-query, connection-pool/session, lock/wait and normalized explain-plan interactions where supported, with escaped/redacted query evidence and safe raw-plan fallback. |
+| `PRD-UI-029` | Operational UI shall explicitly distinguish presentation/visualization thresholds from effective alert/monitoring policy; changing visual styling shall not silently mutate alert policy. |
+| `PRD-UI-030` | Drag/drop, resize, panel actions, topology and other pointer-centric interaction shall provide keyboard-accessible alternatives/equivalent commands and shall not rely on hover or color as the sole carrier of operational meaning. |

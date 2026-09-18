@@ -7021,14 +7021,18 @@ Mandatory governed panel families:
 
 Status uses semantic design tokens and text/icon/shape; green/amber/red alone is prohibited.
 
-A UI threshold must not silently contradict effective monitoring policy. Where backend policy exists, overlays render the effective policy/baseline plus provenance.
+The UI must explicitly distinguish **presentation/visualization thresholds** from **effective monitoring/alert policy thresholds**. Changing a gauge/chart color band never changes alert policy unless the user enters the separately authorized policy workflow. Where backend policy exists, overlays render the effective policy/baseline plus provenance.
 
 ### 7. Provisioning Studio
 
 Normal onboarding shall not require backend scripts.
 
-**Device wizard**
-1. target: IP/FQDN/CIDR;
+**Device wizard / discovery split**
+- **Add Entity** accepts a single IP address or FQDN.
+- **Auto Discovery** owns CIDR/range/subnet sweep definitions, scan budgets and review/approval; CIDR is not treated as a manual single-device field.
+
+For Add Entity:
+1. target: single IP/FQDN;
 2. protocol: SNMPv2c/v3, gNMI, NETCONF, SSH, REST as supported;
 3. credential reference;
 4. Test Connection;
@@ -7044,12 +7048,15 @@ Test Connection returns real evidence such as reachability, handshake/auth resul
 - connection test;
 - secrets masked and non-recoverable without explicit reveal authority where reveal is allowed at all.
 
-**REST/GraphQL connector studio**
+**REST/OpenAPI connector studio**
 - safe method/URL/header/auth configuration;
 - bounded polling frequency;
+- OpenAPI/Swagger/schema-assisted definition where available;
 - escaped JSON response tree;
 - click-to-select JSON path for mapping;
 - raw secrets never returned after save.
+
+GraphQL is not a mandatory v1 connector contract. It may be added later only after protocol/security/query-complexity review rather than silently expanding the REST/OpenAPI scope.
 
 **Credential manager**
 - reusable SNMP community/v3, SSH and API credential profiles;
@@ -7073,9 +7080,10 @@ CIDR discovery scheduling and a declarative payload mapper are accepted. Zero-to
 - pinned/manual layouts persist;
 - historical comparison/time-aware state integrates with shared context.
 
-**Interface/port inspector**
-- faceplate/density view where model data allows;
-- admin/oper state, speed/duplex, errors/discards and utilization;
+**Device faceplate / interface density inspector**
+- render a physical faceplate/density view only when Device Pack or hardware inventory evidence provides a trustworthy chassis/module/port relationship;
+- never fabricate physical port placement when hardware evidence is absent; fall back to a logical interface-density view;
+- expose admin/oper state, speed/duplex, errors/discards, utilization and freshness;
 - click opens an entity/interface drawer with synchronized time-series evidence.
 
 **Global omnibar**
@@ -7085,7 +7093,9 @@ CIDR discovery scheduling and a declarative payload mapper are accepted. Zero-to
 
 **Time travel**
 - later capability using governed historical state snapshots/temporal graph evidence;
-- never reconstruct an unbounded raw historical state in the browser.
+- never reconstruct an unbounded raw historical state in the browser;
+- playback controls appear on topology, incident/RCA, entity history, change-analysis and compare views where temporality matters rather than permanently consuming global shell space;
+- while playback is active, its time cursor may temporarily become shared global context.
 
 Config diff and BGP/routing peering matrix are accepted with the NCM/routing backends.
 
@@ -7115,22 +7125,62 @@ Browser SSH is deferred until a dedicated bastion/session broker provides author
 
 ### 11. Dependency and implementation rules
 
-This document does not select ECharts, uPlot, Cytoscape, G6, MapLibre/Mapbox, OpenSearch/Elasticsearch, Jinja2, Puppeteer, Playwright or any equivalent dependency. Production selection requires `Platform_07` admission and benchmark/security evidence.
+The authoritative dependency status comes from `Platform_07_OSS_Catalog.md`.
+
+Selected `USE` basis for the corresponding UI capabilities is Apache ECharts, TanStack Table, TanStack Query, react-grid-layout, Cytoscape.js and MapLibre GL JS. xterm.js is the selected terminal emulator component only when the privileged Session Broker/NCM security contract is satisfied.
+
+Do not add uPlot, G6, Mapbox SDK, a mandatory OpenSearch/Elasticsearch omnibar backend, Puppeteer/Playwright or equivalent competing dependencies merely because a design reference names them.
+
+Library approval does not make the surrounding feature production-ready. In particular, xterm.js availability does not authorize browser SSH until the Session Broker, command policy, recording/audit, credential isolation and approval controls are implemented.
 
 ### 12. Implementation order
 
 Broad workspace implementation follows:
 
-1. Shared Shell + persistent context + navigation;
-2. Provisioning & Discovery;
-3. Dashboard schema, Query AST, panel registry and version lifecycle;
-4. Temporal interaction and panel isolation/cancellation;
-5. Global Operations / NOC;
-6. Alert / Incident / RCA investigation;
-7. Network + Flow;
-8. Infrastructure / Cloud / Kubernetes;
-9. Synthetics + API;
-10. Database;
-11. remaining Studios, Administration and OOB workspaces.
+1. **UI-01 — Shell & Interaction Foundation**;
+2. **UI-02 — Provisioning / Discovery / Onboarding**;
+3. **UI-03 — Dashboard Runtime Contracts**: schema, Query AST, variables, authorization, version model, panel registry and context propagation;
+4. **UI-04 — Dashboard Studio**: canvas/editor built on the frozen runtime contracts;
+5. **UI-05 — Shared Chart / Time / Scope Interaction**;
+6. **UI-06 — Global Operations / NOC**;
+7. **UI-07 — Alerts / Incident / RCA Workbench**;
+8. **UI-08 — Network / Flow / Topology**;
+9. **UI-09 — Infrastructure / Cloud / Kubernetes**;
+10. **UI-10 — Synthetics / API**;
+11. **UI-11 — Database**;
+12. **UI-12+ — remaining Studios, Administration and canonical workspaces**.
 
-The 98 canonical workspaces must reuse shared primitives rather than create separate interaction frameworks.
+The 98 canonical workspaces must reuse shared primitives rather than create separate interaction frameworks. Dashboard Runtime contracts deliberately precede the drag-and-drop Dashboard Studio.
+
+## v3.2.3 Additional operational interaction requirements
+
+### Cross-domain composition and drill-down
+
+Custom operational dashboards may compose approved panels from Network, Flow, Infrastructure, Cloud/Kubernetes, Synthetics/API and Database domains under one shared tenant/time/scope context. Drill-down links preserve compatible variables and time context; incompatible dimensions remain visible as inactive/unmapped rather than being silently reinterpreted.
+
+### Synthetics / API
+
+Synthetic and API workspaces shall provide:
+- request/response timing waterfall for DNS, connect, TLS, time-to-first-byte and transfer phases where the monitor supplies those timings;
+- multi-location comparison and availability/latency/error trend views;
+- escaped, size-bounded response inspector with secrets/authorization headers redacted;
+- validation/assertion results with evidence and safe remediation context;
+- no unrestricted browser replay of privileged credentials.
+
+### Database operations
+
+Database workspaces shall provide, where the pack/source supports the data:
+- slow-query table with normalized query identity and bounded samples;
+- escaped SQL/query viewer;
+- connection-pool/session utilization and saturation views;
+- lock/wait/blocking context;
+- normalized explain-plan tree with a safe raw-text fallback;
+- tenant/RBAC-scoped and redacted plan/query evidence.
+
+### Accessibility parity
+
+Drag/drop, resize, panel actions, topology selection and other pointer-centric interactions require keyboard-accessible alternatives or equivalent commands. Topology/health status requires text/shape semantics and accessible labels; operational meaning must not be available only through hover or color.
+
+### RBAC templates
+
+Convenience templates such as Dashboard Viewer, Dashboard Editor, Device Provisioner and Platform Administrator MAY be provided, but they do not replace the canonical server-side resource/action/scope/condition authorization model.

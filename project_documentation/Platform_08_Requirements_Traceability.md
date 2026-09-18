@@ -380,3 +380,16 @@ Existing `REQ-UI-001`–`REQ-UI-014` remain authoritative. The following require
 | REQ-UI-034 | Browser terminal and ZTP remain gated by bastion/NCM audit, approval and rollback controls | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_10 |
 | REQ-UI-035 | UI/search/rendering dependency choice requires formal OSS admission and benchmark | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_07/14 |
 | REQ-UI-036 | Notification channel manager and later kiosk/snapshot features reuse shared dashboard/security contracts | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_19/20 |
+
+---
+
+## v3.2.3 UI operational-domain traceability additions
+
+| ID | Requirement | PRD | Architecture | HLD | LLD | Dataflow | UI Master | API/Data | Threat | Quality / Specialized |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| REQ-UI-037 | Cross-domain dashboard composition and context-preserving drill-down | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-038 | Evidence-driven device faceplate/interface-density visualization | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-039 | Synthetic/API timing waterfall, comparison and safe response inspector | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-040 | Database slow-query/plan/pool/lock interaction model | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-041 | Presentation thresholds explicitly distinguished from monitoring/alert policy | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-042 | Accessibility parity for drag/drop, panel actions and topology interaction | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |

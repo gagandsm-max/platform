@@ -167,3 +167,14 @@ The following are release-quality gates for implemented v3.2.3 UI capabilities:
 - **Dependency admission:** any new visualization/search/map/headless-browser dependency must have exact-version licence/CVE/SBOM/offline-packaging and resource benchmark evidence before GA.
 
 Exact GA UI latency/render SLOs remain evidence-driven and shall be frozen only after representative benchmark runs.
+
+---
+
+## 8. v3.2.3 operational-UX acceptance additions
+
+- **Faceplate evidence:** physical port/chassis layouts require validated hardware/Device Pack relationship evidence; fallback logical density views are tested for incomplete inventory.
+- **Synthetic inspector:** timing waterfall ordering, multi-location alignment, response-size bounds, escaping and credential/header redaction require negative tests.
+- **Database evidence:** slow-query samples, SQL/query text and explain-plan data are escaped/redacted; plan-tree normalization failure falls back safely without exposing secrets.
+- **Threshold provenance:** tests prove visualization-only threshold edits cannot mutate monitoring/alert policy and that effective policy provenance is visible where applicable.
+- **Accessibility parity:** keyboard-only tests cover dashboard panel actions, resize/reorder alternatives, topology selection and primary investigation actions.
+- **Dashboard sequencing:** Dashboard Studio release is blocked until versioned schema, Query AST, context, authorization, panel registry and version lifecycle contracts have passing contract tests.

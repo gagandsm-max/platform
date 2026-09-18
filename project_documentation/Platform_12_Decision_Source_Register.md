@@ -229,7 +229,7 @@ Source: product-owner UI/UX enhancement requests reconciled by the delegated CTO
 | Temporal context | ARCH-DELEGATED | Persistent time/scope context and a shared Temporal Interaction Bus synchronize compatible panels/workspaces and preserve incompatible dimensions without silent reinterpretation. |
 | Panel failure isolation | ARCH-DELEGATED | Each panel has independent cancellation/error/freshness state; one failing query cannot block a dashboard. |
 | Transformation placement | ARCH-DELEGATED | Large/expensive transformations are server-side; bounded expensive client transforms may use workers; trivial work stays simple. |
-| Visualization dependency | TBD/P0-SPIKE | ECharts/uPlot/Cytoscape/G6/MapLibre and equivalent libraries are candidates only pending OSS/security/performance admission. |
+| UI visualization/layout dependency basis | ARCH-DELEGATED | Use the existing `Platform_07` `USE` selections: Apache ECharts, TanStack Table/Query, react-grid-layout, Cytoscape.js and MapLibre GL JS for their assigned UI roles. Do not add uPlot/G6/Mapbox or competing libraries without new evidence/change control. |
 | Search backend | TBD/P0-SPIKE | Omnibar is required; OpenSearch/Elasticsearch is not mandatory. Select simplest backend meeting measured scale/SLOs. |
 | Credential UX | ARCH-DELEGATED | USE without REVEAL is the default operator model; dashboard/provisioning definitions store secret references only. |
 | Browser terminal | ARCH-DELEGATED | Deferred until a secure audited bastion/session-broker implementation satisfies NCM/security requirements. |
@@ -237,3 +237,7 @@ Source: product-owner UI/UX enhancement requests reconciled by the delegated CTO
 | RCA confidence | ARCH-DELEGATED | Numeric confidence is shown only when calibrated/documented; evidence/provenance and INCONCLUSIVE remain authoritative. |
 | Status semantics | ARCH-DELEGATED | Operational status is semantic and accessible; no color-only meaning and no UI-local threshold silently overriding effective monitoring policy. |
 | UI implementation order | ARCH-DELEGATED | Shell/context → Provisioning → Dashboard platform → shared interaction → NOC → Incident/RCA → Network/Flow → Infra/Cloud/K8s → Synthetics/API → Database → remaining workspaces. |
+| GraphQL connector scope | ARCH-DELEGATED | REST/OpenAPI remains the initial API Studio contract. GraphQL is a future connector candidate after protocol/security/query-complexity review. |
+| Device faceplate truthfulness | ARCH-DELEGATED | Render physical faceplates only from trustworthy Device Pack/hardware inventory relationships; otherwise use logical interface-density views. |
+| Presentation vs alert threshold | ARCH-DELEGATED | Visualization thresholds are presentation state; effective monitoring/alert policy is separately governed and must be visibly distinguishable. |
+| Dashboard runtime before Studio | ARCH-DELEGATED | Freeze schema/Query AST/context/version/authorization/panel-registry contracts before implementing the drag-and-drop Dashboard Studio. |

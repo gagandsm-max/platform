@@ -1938,3 +1938,33 @@ No production claim is made until this architecture is implemented and validated
 ### Investigation synchronization
 
 A time/entity selection in an incident or chart becomes shared investigation context. Metrics, logs, flow, events, changes and RCA evidence query the same bounded temporal window and compatible entity identifiers, preserving provenance and source-specific uncertainty.
+
+---
+
+## v3.2.3 Operational-domain interaction dataflow supplement
+
+### Cross-domain drill-down
+
+1. User selects an entity/datapoint in one domain.
+2. Shell/Temporal Interaction Bus preserves authenticated tenant, time window and compatible identifiers.
+3. Target workspace translates only dimensions it semantically understands.
+4. Unsupported dimensions remain inactive/unmapped and visible to the user where relevant.
+5. Core re-authorizes every target query.
+
+### Synthetic response inspection
+
+1. Browser requests bounded synthetic evidence.
+2. Core validates scope/permission and applies size/redaction policy.
+3. Only safe phase timings/assertions and escaped/redacted response evidence are returned.
+4. Secrets/auth headers are excluded.
+
+### Database plan/query inspection
+
+1. Browser requests bounded query/plan evidence by normalized query/entity/time scope.
+2. Core authorizes and redacts.
+3. Normalized plan tree is returned when available; otherwise bounded escaped raw plan text.
+4. UI renders evidence without executable interpretation.
+
+### Threshold edit
+
+Editing a panel visualization threshold updates dashboard definition/version state only. Changing alert/monitoring policy requires the separate policy workflow and authorization.

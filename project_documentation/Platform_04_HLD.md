@@ -1244,3 +1244,17 @@ The Windows Agent is one compiled service executable plus configuration/certific
 ### Failure isolation
 
 A failed query, import, panel renderer, connector test or transformation must remain isolated to its bounded operation. The shell and unrelated panels/workspaces remain usable, with explicit degraded/error state rather than blank-page failure.
+
+---
+
+## v3.2.3 Operational-domain UI HLD supplement
+
+Domain workspaces plug into the shared panel/query/context runtime.
+
+- **Network faceplate adapter:** consumes certified hardware/Device Pack port relationships when present and otherwise exposes logical interface-density data.
+- **Synthetic/API evidence adapter:** exposes bounded phase timing, assertion and redacted response-inspection data.
+- **Database evidence adapter:** exposes normalized query identity, bounded samples, pool/session/lock state and normalized explain-plan structures where supported.
+- **Policy provenance adapter:** lets panels display effective monitoring/alert policy separately from visualization styling.
+- **Accessibility adapter contract:** panel/topology/grid actions expose keyboard-operable commands/equivalents in addition to pointer interactions.
+
+These adapters are logical UI/query responsibilities and do not require new standalone microservices by default.

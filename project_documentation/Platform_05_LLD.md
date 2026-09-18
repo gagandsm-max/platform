@@ -2417,3 +2417,31 @@ Every panel owns an AbortController/cancellation scope, stale-response fence, in
 ### Security
 
 Dashboard import and connector response inspection must reject executable HTML/script, unsafe raw payload rendering and unknown schema content where required. SQL/JSON/log text is rendered escaped. Mutable actions require click/select/confirmation surfaces and server authorization; hover is informational only.
+
+---
+
+## v3.2.3 Operational-domain UI LLD supplement
+
+### Faceplate metadata
+
+A physical faceplate representation may use tenant-scoped entity/device metadata describing chassis/module/port relationships and optional stable display coordinates/order. The UI must treat this metadata as optional. Missing/incomplete evidence falls back to logical interface rows/tiles.
+
+### Synthetic timing evidence
+
+A synthetic result may expose an ordered array of supported timing phases, each with phase type, start/duration or duration, location/probe identity and freshness/provenance. Response-body/header inspection is a separate bounded/redacted field set and is never the source of credentials.
+
+### Database evidence
+
+Database operational views use normalized query identity where available. Query samples, explain plans, lock/wait/session evidence and pool metrics are bounded. Explain-plan normalized tree nodes retain source provenance; raw fallback text is escaped and size limited.
+
+### Threshold typing
+
+Panel configuration distinguishes:
+- `visualThresholds` — display-only styling bands/markers;
+- `monitoringPolicyRef` / effective-policy projection — authoritative alert/monitoring semantics.
+
+Saving `visualThresholds` cannot update policy state.
+
+### Accessibility commands
+
+Drag, resize, reorder, topology select/focus and equivalent pointer actions must have keyboard-command or menu equivalents where the action is operationally material.

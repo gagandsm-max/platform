@@ -117,3 +117,11 @@ UI-driven provisioning is a presentation layer over the existing protocol/securi
 - API/REST response inspectors escape content and apply size/time/redaction bounds.
 - Browser terminal/SSH is not authorized by this UX change. It remains governed by the privileged CLI/NCM Session Broker requirements, including JIT/approval/command policy/session audit and secret non-disclosure.
 - Zero-touch configuration deployment remains deferred until template validation, authorization, staged diff, execution guardrails and rollback are implemented.
+
+---
+
+## v3.2.3 API Studio scope clarification
+
+The initial governed API Studio contract remains REST/RESTCONF/OpenAPI/Swagger-oriented as defined by the existing extensibility requirements. GraphQL is not promoted to a v1 must-have by the UI/UX recommendations. It may be evaluated later as a connector profile after protocol/security/query-complexity review.
+
+Prometheus is treated as a metrics/integration source when supported, not as a relational/database connector solely for UI taxonomy.

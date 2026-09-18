@@ -55,3 +55,21 @@ Docker development networks are not trusted production boundaries. Test secrets 
 - semantic status plus evidence provenance;
 - calibrated confidence only and explicit `INCONCLUSIVE`;
 - privileged browser terminal/ZTP withheld until dedicated bastion/NCM authorization, audit, approval and rollback controls exist.
+
+---
+
+## 7. v3.2.3 Operational-view threat additions
+
+Additional abuse cases include:
+- fabricated/forged faceplate metadata misleading operators about physical interfaces;
+- synthetic response-inspector leakage of authorization headers, cookies, tokens or sensitive bodies;
+- database query/plan evidence leaking literals, credentials, PII or cross-tenant SQL text;
+- visualization-threshold edits being confused with or incorrectly wired to alert-policy mutation;
+- pointer-only operational actions creating inaccessible or unsafe alternate workflows.
+
+Mitigations:
+- faceplate rendering only from trusted tenant-scoped inventory/Device Pack evidence with logical fallback;
+- response-inspector size bounds, escaping, redaction and separate authorization;
+- query/plan normalization, tenant scope, bounded samples and redaction;
+- distinct API/data contracts for presentation thresholds versus monitoring policy;
+- keyboard/equivalent action paths using the same server authorization as pointer actions.
