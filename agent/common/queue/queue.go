@@ -84,23 +84,24 @@ type Record struct {
 }
 
 type QueueStats struct {
-	ActiveCount          int
-	ActiveBytes          int64
-	QuarantineCount      int
-	QuarantineBytes      int64
-	OldestAge            time.Duration
-	LastSequence         uint64
-	AcceptedThrough      uint64
-	MaxRecords           int
-	MaxBytes             int64
-	MaxQuarantineRecords int
-	MaxQuarantineBytes   int64
-	AtCapacity           bool
-	QuarantineAtCapacity bool
-	BlockedFromSequence   uint64
-	DeliveryBlocked       bool
-	UnknownSequenceBlock  bool
-	LocationUncertain     bool
+	ActiveCount              int
+	ActiveBytes              int64
+	QuarantineCount          int
+	QuarantineBytes          int64
+	OldestAge                time.Duration
+	LastSequence             uint64
+	LineageStart             uint64
+	AcceptedThrough          uint64
+	MaxRecords               int
+	MaxBytes                 int64
+	MaxQuarantineRecords     int
+	MaxQuarantineBytes       int64
+	AtCapacity               bool
+	QuarantineAtCapacity     bool
+	BlockedFromSequence      uint64
+	DeliveryBlocked          bool
+	UnknownSequenceBlock     bool
+	LocationUncertain        bool
 	MetaUncertain            bool
 	SequenceGapBlock         bool
 	SequenceConflictBlock    bool
@@ -119,6 +120,7 @@ type DurableQueue struct {
 	maxQuarantineBytes       int64
 	mu                       sync.Mutex
 	lastSeq                  uint64
+	lineageStart             uint64
 	acceptedThrough          uint64
 	acceptedRecords          []acceptedRecordRef
 	activeCount              int
@@ -138,7 +140,10 @@ type DurableQueue struct {
 	removeHook               pathHookFunc
 }
 
-const sequenceMetaFile = "sequence.meta"
+const (
+	sequenceMetaFile      = "sequence.meta"
+	sequenceMetaVersion2  = 2
+)
 
 func NewDurableQueue(dir string, maxRecords int, maxBytes int64, maxRecordBytes int) (*DurableQueue, error) {
 	if dir == "" {
@@ -228,24 +233,42 @@ func (q *DurableQueue) recoverState() error {
 			}
 		}
 	}
+	// 1. Clean temps
 	cleanTemp(q.dir)
 	cleanTemp(q.activeDir)
 	cleanTemp(q.quarantineDir)
 
 	q.unknownSequenceBlock = false
 	q.locationUncertain = false
+	q.ackRecoveryConflictBlock = false
 
-	qHigh, err := q.scanQuarantineLocked()
-	if err != nil {
-		return err
-	}
-
-	intentSeq, hasIntent, _ := q.recoverTransitionIntentLocked()
-
+	// 2. Load uncertain marker
 	if err := q.loadUncertainMarkerLocked(); err != nil {
 		return err
 	}
 
+	// 3. Read/validate sequence.meta FIRST so ACK context is known before mutating active.
+	meta, err := q.readSequenceMetaLocked()
+	if err != nil {
+		return err
+	}
+	q.lastSeq = meta.HighestSequence
+	q.acceptedThrough = meta.AcceptedThrough
+	q.acceptedRecords = cloneAcceptedRecords(meta.AcceptedRecords)
+	if meta.Version == sequenceMetaVersion2 {
+		q.lineageStart = meta.LineageStart
+	} else {
+		q.lineageStart = 0
+	}
+
+	// 4. Scan quarantine / recover transition intent (existing A-E)
+	qHigh, err := q.scanQuarantineLocked()
+	if err != nil {
+		return err
+	}
+	intentSeq, hasIntent, _ := q.recoverTransitionIntentLocked()
+
+	// 5. Scan active WITH ACK context known
 	entries, err := os.ReadDir(q.activeDir)
 	if err != nil {
 		return fmt.Errorf("QUEUE_SCAN_FAILED: %w", err)
@@ -261,6 +284,11 @@ func (q *DurableQueue) recoverState() error {
 		highestSeq = intentSeq
 	}
 
+	authBySeq := make(map[uint64]string, len(q.acceptedRecords))
+	for _, r := range q.acceptedRecords {
+		authBySeq[r.Sequence] = r.ID
+	}
+
 	for _, e := range entries {
 		if e.IsDir() || !isRecordJSON(e.Name()) {
 			continue
@@ -269,13 +297,30 @@ func (q *DurableQueue) recoverState() error {
 		if err != nil {
 			return fmt.Errorf("QUEUE_RECOVER_STAT_FAILED: %w", err)
 		}
-		fileSeq, _, nameErr := parseRecordFileName(e.Name())
+		fileSeq, fileID, nameErr := parseRecordFileName(e.Name())
 		if nameErr != nil {
 			q.unknownSequenceBlock = true
 			q.activeCount++
 			q.activeBytes += fi.Size()
 			continue
 		}
+		if fileSeq > highestSeq {
+			highestSeq = fileSeq
+		}
+
+		// ACK-bounded sequences: never quarantine/delete before ACK reconcile.
+		if q.acceptedThrough > 0 && fileSeq <= q.acceptedThrough {
+			authID, ok := authBySeq[fileSeq]
+			if !ok || fileID != authID || e.Name() != recordFileName(fileSeq, authID) {
+				q.ackRecoveryConflictBlock = true
+			}
+			// Exact-match leftovers are cleanup candidates; corrupt payload must not
+			// quarantine-hide them before reconcile. Retain all ACK-bounded actives.
+			q.activeCount++
+			q.activeBytes += fi.Size()
+			continue
+		}
+
 		filePath := filepath.Join(q.activeDir, e.Name())
 		data, err := os.ReadFile(filePath)
 		if err != nil {
@@ -286,9 +331,6 @@ func (q *DurableQueue) recoverState() error {
 			if _, destErr := os.Lstat(filepath.Join(q.quarantineDir, e.Name())); destErr == nil {
 				q.activeCount++
 				q.activeBytes += fi.Size()
-				if fileSeq > highestSeq {
-					highestSeq = fileSeq
-				}
 				continue
 			}
 			if qErr := q.quarantineRecordLocked(e.Name(), "QUEUE_RECORD_CORRUPT"); qErr != nil {
@@ -296,50 +338,35 @@ func (q *DurableQueue) recoverState() error {
 					q.activeCount++
 					q.activeBytes += fi.Size()
 				}
-				if fileSeq > highestSeq {
-					highestSeq = fileSeq
-				}
 				if isFailClosedQuarantineErr(qErr) {
 					continue
 				}
 				return qErr
-			}
-			if fileSeq > highestSeq {
-				highestSeq = fileSeq
 			}
 			continue
 		}
 		_ = rec
 		q.activeCount++
 		q.activeBytes += fi.Size()
-		if fileSeq > highestSeq {
-			highestSeq = fileSeq
-		}
-	}
-
-	if err := q.reconcileDuplicatesLocked(); err != nil {
-		return err
-	}
-
-	meta, err := q.readSequenceMetaLocked()
-	if err != nil {
-		return err
 	}
 
 	// lastSeq = max(file highest, durable watermark) so drained queues retain lineage.
-	q.lastSeq = highestSeq
-	if meta.HighestSequence > q.lastSeq {
-		q.lastSeq = meta.HighestSequence
+	if highestSeq > q.lastSeq {
+		q.lastSeq = highestSeq
 	}
-	q.acceptedThrough = meta.AcceptedThrough
-	q.acceptedRecords = cloneAcceptedRecords(meta.AcceptedRecords)
 	if q.acceptedThrough > q.lastSeq {
 		return errors.New("QUEUE_META_CORRUPT: acceptedThrough exceeds highestSequence lineage")
 	}
 
+	// 6. Reconcile duplicates
+	if err := q.reconcileDuplicatesLocked(); err != nil {
+		return err
+	}
+	// 7. Reconcile accepted leftovers
 	if err := q.reconcileAcceptedLeftoversLocked(); err != nil {
 		return err
 	}
+	// 8. Refresh integrity
 	if err := q.refreshSequenceIntegrityLocked(); err != nil {
 		return err
 	}
@@ -352,7 +379,9 @@ type acceptedRecordRef struct {
 }
 
 type sequenceMeta struct {
+	Version         uint                `json:"version,omitempty"`
 	HighestSequence uint64              `json:"highestSequence"`
+	LineageStart    uint64              `json:"lineageStart,omitempty"`
 	AcceptedThrough uint64              `json:"acceptedThrough,omitempty"`
 	AcceptedRecords []acceptedRecordRef `json:"acceptedRecords,omitempty"`
 }
@@ -408,8 +437,20 @@ func (q *DurableQueue) readSequenceMetaLocked() (sequenceMeta, error) {
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: trailing data in sequence metadata")
 	}
+	// version absent/0 = legacy; version 2 = new format; unknown nonzero = fail closed.
+	if meta.Version != 0 && meta.Version != sequenceMetaVersion2 {
+		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: unknown sequence metadata version")
+	}
 	if meta.AcceptedThrough > meta.HighestSequence {
 		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: acceptedThrough exceeds highestSequence")
+	}
+	if meta.LineageStart > meta.HighestSequence {
+		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: lineageStart exceeds highestSequence")
+	}
+	if meta.Version == sequenceMetaVersion2 && meta.HighestSequence > 0 && meta.AcceptedThrough == 0 {
+		if meta.LineageStart == 0 || meta.LineageStart > meta.HighestSequence {
+			return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: version 2 requires lineageStart when highestSequence is set without acceptedThrough")
+		}
 	}
 	if err := validateAcceptedRecords(meta.AcceptedThrough, meta.AcceptedRecords, q.maxRecords); err != nil {
 		return sequenceMeta{}, err
@@ -442,8 +483,25 @@ func (q *DurableQueue) persistSequenceMetaLocked(highest, accepted uint64, recor
 	if err := validateAcceptedRecords(accepted, records, q.maxRecords); err != nil {
 		return err
 	}
+
+	// lineageStart: once nonzero never move forward/change.
+	// Establish only when still unset and this write has no accepted boundary
+	// (first durable enqueue / watermark establish). Do not invent lineage from
+	// an ACK-only highest watermark.
+	lineageStart := q.lineageStart
+	if q.lineageStart != 0 {
+		lineageStart = q.lineageStart
+	} else if accepted == 0 && highest > 0 {
+		lineageStart = highest
+	}
+	if lineageStart > highest {
+		return errors.New("QUEUE_META_CORRUPT: lineageStart exceeds highestSequence")
+	}
+
 	meta := sequenceMeta{
+		Version:         sequenceMetaVersion2,
 		HighestSequence: highest,
+		LineageStart:    lineageStart,
 		AcceptedThrough: accepted,
 		AcceptedRecords: cloneAcceptedRecords(records),
 	}
@@ -479,16 +537,35 @@ func (q *DurableQueue) persistSequenceMetaLocked(highest, accepted uint64, recor
 	if err := q.syncDirPhase(syncPhaseMetaDir, q.dir); err != nil {
 		// Rename succeeded: durable meta may already be the new value. Fail closed —
 		// adopt disk/intended watermarks (never regress) and block further meta writes.
-		q.adoptMetaAfterUncertainLocked(highest, accepted, records)
+		q.adoptMetaAfterUncertainLocked(highest, accepted, records, lineageStart)
 		q.metaUncertain = true
 		return fmt.Errorf("%w: %v", ErrMetaUncertain, err)
+	}
+	if q.lineageStart == 0 {
+		q.lineageStart = lineageStart
 	}
 	return nil
 }
 
+// earliestNonzeroLineage returns the earliest nonzero lineage among candidates.
+// Zero means unset. Disagreeing nonzero values never pick the later/larger.
+func earliestNonzeroLineage(candidates ...uint64) uint64 {
+	var chosen uint64
+	for _, c := range candidates {
+		if c == 0 {
+			continue
+		}
+		if chosen == 0 || c < chosen {
+			chosen = c
+		}
+	}
+	return chosen
+}
+
 // adoptMetaAfterUncertainLocked raises in-memory watermarks to the max of current,
 // intended write, and a best-effort disk reread so a later write cannot regress.
-func (q *DurableQueue) adoptMetaAfterUncertainLocked(highest, accepted uint64, records []acceptedRecordRef) {
+// Lineage adopts the earliest nonzero among current/intended/disk (never later).
+func (q *DurableQueue) adoptMetaAfterUncertainLocked(highest, accepted uint64, records []acceptedRecordRef, intendedLineage uint64) {
 	if accepted > q.acceptedThrough {
 		q.acceptedThrough = accepted
 	}
@@ -498,20 +575,24 @@ func (q *DurableQueue) adoptMetaAfterUncertainLocked(highest, accepted uint64, r
 	// Intended records are the floor (including an explicit clear to nil).
 	q.acceptedRecords = cloneAcceptedRecords(records)
 	disk, err := q.readSequenceMetaLocked()
-	if err != nil {
-		return
+	diskLineage := uint64(0)
+	if err == nil {
+		if disk.AcceptedThrough > q.acceptedThrough {
+			q.acceptedThrough = disk.AcceptedThrough
+		}
+		if disk.HighestSequence > q.lastSeq {
+			q.lastSeq = disk.HighestSequence
+		}
+		// Only trust disk acceptedRecords when the reread reflects this write
+		// (or a later one). A stale lower acceptedThrough must not drop new auth.
+		if disk.AcceptedThrough >= accepted {
+			q.acceptedRecords = cloneAcceptedRecords(disk.AcceptedRecords)
+		}
+		if disk.Version == sequenceMetaVersion2 {
+			diskLineage = disk.LineageStart
+		}
 	}
-	if disk.AcceptedThrough > q.acceptedThrough {
-		q.acceptedThrough = disk.AcceptedThrough
-	}
-	if disk.HighestSequence > q.lastSeq {
-		q.lastSeq = disk.HighestSequence
-	}
-	// Only trust disk acceptedRecords when the reread reflects this write
-	// (or a later one). A stale lower acceptedThrough must not drop new auth.
-	if disk.AcceptedThrough >= accepted {
-		q.acceptedRecords = cloneAcceptedRecords(disk.AcceptedRecords)
-	}
+	q.lineageStart = earliestNonzeroLineage(q.lineageStart, intendedLineage, diskLineage)
 }
 
 func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
@@ -606,6 +687,8 @@ func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
 		return nil, fmt.Errorf("QUEUE_DIR_SYNC_FAILED: %w", err)
 	}
 
+	// First durable enqueue establishes lineageStart in the same meta write as
+	// highestSequence=seq. Once nonzero, lineageStart never moves forward.
 	if err := q.persistSequenceWatermarkLocked(seq); err != nil {
 		if errors.Is(err, ErrMetaUncertain) {
 			// Meta rename likely durable; retain the record so watermark and active agree.
@@ -1571,11 +1654,11 @@ func (q *DurableQueue) refreshSequenceIntegrityLocked() error {
 
 	// Any active record at sequence <= acceptedThrough must exactly match
 	// persisted acceptedRecords authorization, or the queue is blocked.
+	authBySeq := make(map[uint64]string, len(q.acceptedRecords))
+	for _, r := range q.acceptedRecords {
+		authBySeq[r.Sequence] = r.ID
+	}
 	if q.acceptedThrough > 0 {
-		authBySeq := make(map[uint64]string, len(q.acceptedRecords))
-		for _, r := range q.acceptedRecords {
-			authBySeq[r.Sequence] = r.ID
-		}
 		for fileSeq, names := range bySeq {
 			if fileSeq > q.acceptedThrough {
 				continue
@@ -1602,11 +1685,18 @@ func (q *DurableQueue) refreshSequenceIntegrityLocked() error {
 		if e.IsDir() || !isRecordJSON(e.Name()) {
 			continue
 		}
-		fileSeq, _, nameErr := parseRecordFileName(e.Name())
+		fileSeq, fileID, nameErr := parseRecordFileName(e.Name())
 		if nameErr != nil {
 			continue
 		}
 		covered[fileSeq] = struct{}{}
+		// Different-ID quarantine at/below acceptedThrough must not clear auth.
+		if q.acceptedThrough > 0 && fileSeq <= q.acceptedThrough {
+			authID, ok := authBySeq[fileSeq]
+			if !ok || fileID != authID || e.Name() != recordFileName(fileSeq, authID) {
+				q.ackRecoveryConflictBlock = true
+			}
+		}
 	}
 	// Intent / block holds cover the blocked sequence even when neither copy is present.
 	if q.blockedFromSequence > 0 {
@@ -1625,25 +1715,34 @@ func (q *DurableQueue) refreshSequenceIntegrityLocked() error {
 				}
 			}
 		} else {
-			// acceptedThrough == 0: arbitrary initial sequence remains legal, but once any
-			// durable disposition exists, continuity from the lowest known sequence through
-			// highestSequence is required. Quarantine covers only its own sequence.
+			// acceptedThrough == 0: continuity depends on durable or inferred lineage.
 			if q.lastSeq == 0 {
 				return nil
 			}
-			if len(covered) == 0 {
-				q.sequenceGapBlock = true
-				return nil
-			}
-			var lowest uint64
-			first := true
-			for seq := range covered {
-				if first || seq < lowest {
-					lowest = seq
-					first = false
+			var start uint64
+			if q.lineageStart > 0 {
+				// version 2 (or inferred): require disposition for lineageStart..lastSeq.
+				start = q.lineageStart
+			} else {
+				// Legacy (version 0): empty covered with lastSeq>0 is a gap.
+				// Otherwise use lowest covered as one-time in-memory lineage for gap
+				// check; next legitimate meta write persists it as v2 (do not write on open).
+				if len(covered) == 0 {
+					q.sequenceGapBlock = true
+					return nil
 				}
+				var lowest uint64
+				first := true
+				for seq := range covered {
+					if first || seq < lowest {
+						lowest = seq
+						first = false
+					}
+				}
+				start = lowest
+				q.lineageStart = lowest
 			}
-			for seq := lowest; seq <= q.lastSeq; seq++ {
+			for seq := start; seq <= q.lastSeq; seq++ {
 				if _, ok := covered[seq]; !ok {
 					q.sequenceGapBlock = true
 					break
@@ -1964,20 +2063,21 @@ func (q *DurableQueue) Stats() QueueStats {
 	quarantineAtCapacity := q.quarantineCount >= q.maxQuarantineRecords || q.quarantineBytes >= q.maxQuarantineBytes
 	hasActiveBlocked, hasActiveErr := q.hasActiveAfterBlockedLocked()
 	return QueueStats{
-		ActiveCount:           q.activeCount,
-		ActiveBytes:           q.activeBytes,
-		QuarantineCount:       q.quarantineCount,
-		QuarantineBytes:       q.quarantineBytes,
-		OldestAge:             oldestAge,
-		LastSequence:          q.lastSeq,
-		AcceptedThrough:       q.acceptedThrough,
-		MaxRecords:            q.maxRecords,
-		MaxBytes:              q.maxBytes,
-		MaxQuarantineRecords:  q.maxQuarantineRecords,
-		MaxQuarantineBytes:    q.maxQuarantineBytes,
-		AtCapacity:            atCapacity,
-		QuarantineAtCapacity:  quarantineAtCapacity,
-		BlockedFromSequence:   q.blockedFromSequence,
+		ActiveCount:              q.activeCount,
+		ActiveBytes:              q.activeBytes,
+		QuarantineCount:          q.quarantineCount,
+		QuarantineBytes:          q.quarantineBytes,
+		OldestAge:                oldestAge,
+		LastSequence:             q.lastSeq,
+		LineageStart:             q.lineageStart,
+		AcceptedThrough:          q.acceptedThrough,
+		MaxRecords:               q.maxRecords,
+		MaxBytes:                 q.maxBytes,
+		MaxQuarantineRecords:     q.maxQuarantineRecords,
+		MaxQuarantineBytes:       q.maxQuarantineBytes,
+		AtCapacity:               atCapacity,
+		QuarantineAtCapacity:     quarantineAtCapacity,
+		BlockedFromSequence:      q.blockedFromSequence,
 		DeliveryBlocked:          q.unknownSequenceBlock || q.locationUncertain || q.metaUncertain || q.sequenceGapBlock || q.sequenceConflictBlock || q.ackRecoveryConflictBlock || hasActiveBlocked || hasActiveErr != nil,
 		UnknownSequenceBlock:     q.unknownSequenceBlock,
 		LocationUncertain:        q.locationUncertain,

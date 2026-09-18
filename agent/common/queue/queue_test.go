@@ -3277,3 +3277,334 @@ func TestDurableQueueTwoConsecutiveFailedCleanupsPreserveAuth(t *testing.T) {
 		}
 	}
 }
+
+func writeQuarantineRecord(t *testing.T, root string, seq uint64, id string, payload []byte) string {
+	t.Helper()
+	now := time.Now().UTC()
+	checksum := computeChecksum(seq, id, now, payload)
+	rec := Record{
+		Sequence:  seq,
+		ID:        id,
+		CreatedAt: now,
+		Checksum:  checksum,
+		Payload:   payload,
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := recordFileName(seq, id)
+	path := filepath.Join(root, "quarantine", name)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
+
+func writeCorruptActiveNamed(t *testing.T, root string, seq uint64, id string) string {
+	t.Helper()
+	name := recordFileName(seq, id)
+	path := filepath.Join(root, "active", name)
+	// Valid filename encoding a different ID, but corrupt payload/checksum.
+	body := fmt.Sprintf(`{"sequence":%d,"id":%q,"checksum":"deadbeef","payload":"dGVzdA=="}`, seq, id)
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
+
+// A: first-record loss with durable lineageStart stays QUEUE_SEQUENCE_GAP across restarts.
+func TestDurableQueueFirstRecordLossBlocksWithLineageStart(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"one", "two", "three"} {
+		if _, err := q.Enqueue([]byte(p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.Version != sequenceMetaVersion2 || meta.LineageStart != 1 || meta.HighestSequence != 3 {
+		t.Fatalf("expected v2 lineageStart=1 highest=3, got %+v", meta)
+	}
+	if q.Stats().LineageStart != 1 {
+		t.Fatalf("stats lineageStart must be 1, got %d", q.Stats().LineageStart)
+	}
+	if err := os.Remove(activeRecordPath(t, tempDir, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 2; i++ {
+		qi, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatalf("reopen %d: %v", i, err)
+		}
+		batch, err := qi.ReadBatch(10, 1024*1024)
+		if !errors.Is(err, ErrSequenceGap) || len(batch) != 0 {
+			t.Fatalf("reopen %d: expected QUEUE_SEQUENCE_GAP, got batch=%+v err=%v", i, batch, err)
+		}
+		stats := qi.Stats()
+		if !stats.SequenceGapBlock || stats.LineageStart != 1 {
+			t.Fatalf("reopen %d: lineageStart must stay 1 and gap-blocked, stats=%+v", i, stats)
+		}
+		meta = readSequenceMetaFile(t, tempDir)
+		if meta.Version != sequenceMetaVersion2 || meta.LineageStart != 1 {
+			t.Fatalf("reopen %d: durable lineageStart must stay 1, got %+v", i, meta)
+		}
+	}
+}
+
+// B: v2 arbitrary start 42..44 valid; remove 42 => gap.
+func TestDurableQueueV2ArbitraryStartGapOnFirstLoss(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, seq := range []uint64{42, 43, 44} {
+		writeActiveRecord(t, tempDir, seq, fmt.Sprintf("rec-%d", seq), []byte("x"))
+	}
+	metaPayload := `{"version":2,"highestSequence":44,"lineageStart":42}`
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(metaPayload), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) != 3 || batch[0].Sequence != 42 {
+		t.Fatalf("contiguous v2 42..44 must be valid, got %+v err=%v", batch, err)
+	}
+	if err := os.Remove(activeRecordPath(t, tempDir, 42)); err != nil {
+		t.Fatal(err)
+	}
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrSequenceGap) || len(batch) != 0 {
+		t.Fatalf("missing lineageStart=42 must QUEUE_SEQUENCE_GAP, got batch=%+v err=%v", batch, err)
+	}
+	if q2.Stats().LineageStart != 42 {
+		t.Fatalf("lineageStart must remain 42, got %d", q2.Stats().LineageStart)
+	}
+}
+
+// C: v2 interior gap 42,44 => gap.
+func TestDurableQueueV2InteriorGap(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, 42, "rec-42", []byte("a"))
+	writeActiveRecord(t, tempDir, 44, "rec-44", []byte("c"))
+	metaPayload := `{"version":2,"highestSequence":44,"lineageStart":42}`
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(metaPayload), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrSequenceGap) || len(batch) != 0 {
+		t.Fatalf("missing 43 must QUEUE_SEQUENCE_GAP, got batch=%+v err=%v", batch, err)
+	}
+	if !q.Stats().SequenceGapBlock || q.Stats().LineageStart != 42 {
+		t.Fatalf("stats must report gap with lineageStart=42: %+v", q.Stats())
+	}
+}
+
+// E: legacy highest=41 empty then enqueue 42 => v2 lineageStart=42.
+func TestDurableQueueLegacyEmptyHighestEnqueuesNewLineage(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(`{"highestSequence":41}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Stats().LineageStart != 0 {
+		t.Fatalf("legacy empty must leave lineageStart unset until next enqueue, got %d", q.Stats().LineageStart)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrSequenceGap) || len(batch) != 0 {
+		t.Fatalf("empty active with legacy highest must gap, got batch=%+v err=%v", batch, err)
+	}
+	rec, err := q.Enqueue([]byte("fresh-lineage"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Sequence != 42 {
+		t.Fatalf("expected next sequence 42, got %d", rec.Sequence)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.Version != sequenceMetaVersion2 || meta.LineageStart != 42 || meta.HighestSequence != 42 {
+		t.Fatalf("enqueue must write v2 lineageStart=42 highest=42, got %+v", meta)
+	}
+	if q.Stats().LineageStart != 42 {
+		t.Fatalf("stats lineageStart must be 42, got %d", q.Stats().LineageStart)
+	}
+}
+
+// F: corrupt different-ID replacement after ACK delete fail => ACK conflict, auth retained, not quarantine-hidden.
+func TestDurableQueueCorruptDifferentIDReplacementAckConflict(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := q.Enqueue([]byte("original-A"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("keep-later")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) < 1 {
+		t.Fatalf("expected batch, got %+v err=%v", batch, err)
+	}
+	authorizedID := batch[0].ID
+	q.removeHook = func(path string) error {
+		if strings.Contains(path, string(filepath.Separator)+"active"+string(filepath.Separator)) && strings.HasSuffix(path, ".json") {
+			return errors.New("injected active delete fail")
+		}
+		return nil
+	}
+	if err := q.CommitAccepted(batch[:1], rec.Sequence); err == nil {
+		t.Fatal("expected post-meta delete failure")
+	}
+	originalPath := activeRecordPath(t, tempDir, rec.Sequence)
+	if err := os.Remove(originalPath); err != nil {
+		t.Fatal(err)
+	}
+	writeCorruptActiveNamed(t, tempDir, rec.Sequence, "rec-replacement-corrupt")
+
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !recordPresent(t, tempDir, "active", rec.Sequence) {
+		t.Fatal("corrupt different-ID replacement must remain in active")
+	}
+	if recordPresent(t, tempDir, "quarantine", rec.Sequence) {
+		t.Fatal("corrupt ACK-bounded replacement must not be quarantine-hidden")
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrAckRecoveryConflict) || len(batch) != 0 {
+		t.Fatalf("expected QUEUE_ACK_RECOVERY_CONFLICT, got batch=%+v err=%v", batch, err)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 1 || meta.AcceptedRecords[0].ID != authorizedID {
+		t.Fatalf("acceptedRecords auth must be retained, got %+v", meta.AcceptedRecords)
+	}
+	if !q2.Stats().AckRecoveryConflictBlock {
+		t.Fatalf("must report ack recovery conflict: %+v", q2.Stats())
+	}
+}
+
+// G: corrupt unauthorized old seq => ACK conflict not quarantine-first.
+func TestDurableQueueCorruptUnauthorizedOldSeqAckConflict(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeCorruptActiveNamed(t, tempDir, 1, "unexpected-old")
+	writeActiveRecord(t, tempDir, 2, "later", []byte("later"))
+	metaPayload := `{"version":2,"highestSequence":2,"lineageStart":1,"acceptedThrough":1}`
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(metaPayload), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !recordPresent(t, tempDir, "active", 1) {
+		t.Fatal("corrupt unauthorized old-sequence must be retained in active")
+	}
+	if recordPresent(t, tempDir, "quarantine", 1) {
+		t.Fatal("must not quarantine-first an ACK-bounded unauthorized seq")
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrAckRecoveryConflict) || len(batch) != 0 {
+		t.Fatalf("expected QUEUE_ACK_RECOVERY_CONFLICT, got batch=%+v err=%v", batch, err)
+	}
+	if !q.Stats().AckRecoveryConflictBlock || q.Stats().AcceptedThrough != 1 {
+		t.Fatalf("must fail closed with acceptedThrough unchanged: %+v", q.Stats())
+	}
+}
+
+// H: quarantine different-ID vs acceptedRecords => conflict, auth not cleared.
+func TestDurableQueueQuarantineDifferentIDVsAcceptedRecordsConflict(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := q.Enqueue([]byte("auth-one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q.ReadBatch(10, 1024*1024)
+	if err != nil || len(batch) < 1 {
+		t.Fatalf("expected batch, got %+v err=%v", batch, err)
+	}
+	authorizedID := batch[0].ID
+	q.removeHook = func(path string) error {
+		if strings.Contains(path, string(filepath.Separator)+"active"+string(filepath.Separator)) && strings.HasSuffix(path, ".json") {
+			return errors.New("injected active delete fail")
+		}
+		return nil
+	}
+	if err := q.CommitAccepted(batch[:1], rec.Sequence); err == nil {
+		t.Fatal("expected post-meta delete failure")
+	}
+	// Move authorized active aside and place a different-ID copy in quarantine.
+	if err := os.Remove(activeRecordPath(t, tempDir, rec.Sequence)); err != nil {
+		t.Fatal(err)
+	}
+	writeQuarantineRecord(t, tempDir, rec.Sequence, "rec-quarantine-other", []byte("other"))
+
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if !errors.Is(err, ErrAckRecoveryConflict) || len(batch) != 0 {
+		t.Fatalf("expected QUEUE_ACK_RECOVERY_CONFLICT, got batch=%+v err=%v", batch, err)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if len(meta.AcceptedRecords) != 1 || meta.AcceptedRecords[0].ID != authorizedID || meta.AcceptedRecords[0].Sequence != rec.Sequence {
+		t.Fatalf("acceptedRecords auth must not be cleared, got %+v", meta.AcceptedRecords)
+	}
+	if !recordPresent(t, tempDir, "quarantine", rec.Sequence) {
+		t.Fatal("conflicting quarantine record must be retained")
+	}
+	if !q2.Stats().AckRecoveryConflictBlock {
+		t.Fatalf("must report ack recovery conflict: %+v", q2.Stats())
+	}
+}
