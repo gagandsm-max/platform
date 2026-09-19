@@ -372,27 +372,40 @@ sequenceDiagram
 
 ---
 
-## 14. Flow DF-013 — Flow ingestion and enrichment
+## 14. Flow DF-013 — Flow ingestion, quality and temporal enrichment
 
 ```mermaid
 sequenceDiagram
   participant X as Flow Exporter
-  participant S as Streaming Sensor
-  participant INV as Local/Core context cache
+  participant S as Dedicated Flow Sensor
+  participant T as Exporter/Template/Sampling State
+  participant INV as Temporal Identity/Network Context
+  participant SP as Durable Flow Spool
   participant I as Ingestion
   participant K as Kafka
   participant CH as ClickHouse
+  participant Q as Flow Data Quality
 
-  X->>S: NetFlow/IPFIX/sFlow
-  S->>S: Decode templates/records
-  S->>INV: Resolve exporter/interface/site/IPAM/VRF/ASN context
-  INV-->>S: Enrichment metadata
-  S->>I: Batched normalized flows
+  X->>S: NetFlow/IPFIX/sFlow/J-Flow UDP
+  S->>S: Listener/source admission + bounded receive accounting
+  S->>T: Decode protocol + exporter/domain/template/sequence/sampling/time
+  T-->>S: Raw typed observation + quality/gap state
+  S->>INV: Resolve interface/entity/IPAM/DNS/session/site/ASN/cloud/app/geo by effective time
+  INV-->>S: Versioned enrichment + provenance/confidence
+  S->>SP: Durable canonical directional Flow + replay identity
+  S->>I: Batched normalized flows + quality/accounting
   I->>K: network.flow.v1
-  K->>CH: Flow insert/aggregates
+  K->>CH: Raw Flow + bounded rollups/aggregates
+  K->>Q: Exporter/template/sampling/sequence/pipeline quality
+  I-->>S: Durable acceptance watermark
+  S->>SP: Release acknowledged segment
 ```
 
-Every forced drop/template miss is counted and exposed through telemetry-quality/platform-health data.
+Pre-acceptance UDP remains best-effort. After durable local acceptance, generic Sensor replay/idempotency applies. Receiver/kernel/queue drops, unknown exporters, malformed records, template misses, sequence gaps, sampling unknowns, storage/downstream rejection and replay actions are separately counted.
+
+User attribution is only applied when time-bounded authenticated-session evidence exists. DNS/domain/application/public-GeoIP enrichment is provenance-bearing evidence; Flow does not infer full URL path/query or precise user location.
+
+Equivalent traffic observed at different exporters/interfaces remains valid multi-vantage evidence. Only replay of the same accepted source record is deduplicated.
 
 ---
 
@@ -400,7 +413,7 @@ Every forced drop/template miss is counted and exposed through telemetry-quality
 
 ```mermaid
 flowchart LR
-  D[Device/App] -->|UDP/TCP/TLS| S[Sensor Event Receiver]
+  D[Device/App] -->|UDP/TCP/TLS| S[Dedicated Log Sensor Receiver]
   S --> P[Parse PRI/timestamp/structured data]
   P --> M[Device Pack parser + sensitive data policy]
   M --> E[Entity correlation]
