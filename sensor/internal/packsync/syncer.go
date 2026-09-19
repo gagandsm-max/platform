@@ -100,9 +100,6 @@ type Syncer struct {
 
 	stop chan struct{}
 	done chan struct{}
-
-	// testingFailAppliedWrite forces writeAppliedDurable to fail. Unit tests only.
-	testingFailAppliedWrite bool
 }
 
 func New(cfg Config, client CorePackClient) (*Syncer, error) {
@@ -369,9 +366,6 @@ func (s *Syncer) writeArtifactDurable(sha string, data []byte) error {
 }
 
 func (s *Syncer) writeAppliedDurable(state AppliedState) error {
-	if s.testingFailAppliedWrite {
-		return fmt.Errorf("%s: injected durable write failure", ErrCodeDurableWrite)
-	}
 	path := filepath.Join(s.cfg.Dir, stateDirName, appliedStateFile)
 	payload, err := json.Marshal(state)
 	if err != nil {
@@ -708,23 +702,6 @@ func (s *Syncer) setError(code string, degraded bool) {
 	}
 	// Do not clear TrustedApplied or CoreAuthorityEstablished; transient/auth
 	// errors retain prior local trust and previously established Core authority.
-}
-
-// TestingSetError records a sync error without clearing TrustedApplied /
-// CoreAuthorityEstablished. Intended for readiness/health unit tests only.
-func (s *Syncer) TestingSetError(code string, degraded bool) {
-	s.setError(code, degraded)
-}
-
-// TestingSetSuccess marks a successful apply for readiness/health unit tests.
-func (s *Syncer) TestingSetSuccess(gen int64, packCount int) {
-	s.setSuccess(gen, packCount)
-}
-
-// TestingForceAppliedWriteFailure forces the next durable applied-state writes to
-// fail closed. Unit tests only; does not weaken production durability.
-func (s *Syncer) TestingForceAppliedWriteFailure(fail bool) {
-	s.testingFailAppliedWrite = fail
 }
 
 func errorCode(err error) string {

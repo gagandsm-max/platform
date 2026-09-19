@@ -1,23 +1,26 @@
 package health
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"platform/sensor/internal/coreclient"
 	"platform/sensor/internal/packsync"
 	"platform/sensor/internal/spool"
 )
 
-func newTestHealth(t *testing.T, syncer *packsync.Syncer) *HealthServer {
+type fakePackStatusProvider struct {
+	status packsync.Status
+}
+
+func (f *fakePackStatusProvider) Snapshot() packsync.Status {
+	return f.status
+}
+
+func newTestHealth(t *testing.T, syncer packSyncStatusProvider) *HealthServer {
 	t.Helper()
 	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
 	if err != nil {
@@ -31,8 +34,12 @@ func newTestHealth(t *testing.T, syncer *packsync.Syncer) *HealthServer {
 }
 
 func TestLivezOKWhenPackTrustMissing(t *testing.T) {
-	syncer := failClosedPackSyncer(t)
-	hs := newTestHealth(t, syncer)
+	hs := newTestHealth(t, &fakePackStatusProvider{
+		status: packsync.Status{
+			TrustedApplied:          false,
+			CoreAuthorityEstablished: false,
+		},
+	})
 
 	rr := httptest.NewRecorder()
 	hs.handleLive(rr, httptest.NewRequest(http.MethodGet, "/livez", nil))
@@ -49,8 +56,12 @@ func TestLivezOKWhenPackTrustMissing(t *testing.T) {
 }
 
 func TestReadyzFailClosedWhenPackTrustMissing(t *testing.T) {
-	syncer := failClosedPackSyncer(t)
-	hs := newTestHealth(t, syncer)
+	hs := newTestHealth(t, &fakePackStatusProvider{
+		status: packsync.Status{
+			TrustedApplied:          false,
+			CoreAuthorityEstablished: false,
+		},
+	})
 
 	rr := httptest.NewRecorder()
 	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -83,19 +94,17 @@ func TestReadyzFailClosedWhenPackTrustMissing(t *testing.T) {
 }
 
 func TestReadyzRemainsReadyOnTransientWithTrustedApplied(t *testing.T) {
-	dir := t.TempDir()
-	syncer, err := packsync.New(packsync.Config{Dir: dir, PollInterval: time.Hour}, stubPackClient{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Establish Core authority via successful gen0 desired-state sync.
-	syncer.TestingSetSuccess(0, 0)
-	if !syncer.Snapshot().TrustedApplied || !syncer.Snapshot().CoreAuthorityEstablished {
-		t.Fatal("test setup requires trusted local state and Core authority")
-	}
-	syncer.TestingSetError(packsync.ErrCodeSyncTransient, false)
+	hs := newTestHealth(t, &fakePackStatusProvider{
+		status: packsync.Status{
+			AppliedGeneration:        0,
+			DesiredGeneration:        0,
+			TrustedApplied:           true,
+			CoreAuthorityEstablished: true,
+			LastErrorCode:            packsync.ErrCodeSyncTransient,
+			Degraded:                 false,
+		},
+	})
 
-	hs := newTestHealth(t, syncer)
 	rr := httptest.NewRecorder()
 	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rr.Code != http.StatusOK {
@@ -118,16 +127,15 @@ func TestReadyzRemainsReadyOnTransientWithTrustedApplied(t *testing.T) {
 }
 
 func TestReadyzNotReadyFreshInstallBeforeCoreAuthority(t *testing.T) {
-	dir := t.TempDir()
-	syncer, err := packsync.New(packsync.Config{Dir: dir, PollInterval: time.Hour}, stubPackClient{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if syncer.Snapshot().CoreAuthorityEstablished || syncer.Snapshot().Ready() {
-		t.Fatal("fresh install must not be ready before Core authority")
-	}
+	hs := newTestHealth(t, &fakePackStatusProvider{
+		status: packsync.Status{
+			AppliedGeneration:        0,
+			DesiredGeneration:        0,
+			TrustedApplied:           true,
+			CoreAuthorityEstablished: false,
+		},
+	})
 
-	hs := newTestHealth(t, syncer)
 	rrLive := httptest.NewRecorder()
 	hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
 	if rrLive.Code != http.StatusOK {
@@ -153,15 +161,17 @@ func TestReadyzNotReadyFreshInstallBeforeCoreAuthority(t *testing.T) {
 }
 
 func TestReadyzAuthDegradedWithTrustedStaysReady(t *testing.T) {
-	dir := t.TempDir()
-	syncer, err := packsync.New(packsync.Config{Dir: dir, PollInterval: time.Hour}, stubPackClient{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	syncer.TestingSetSuccess(0, 0)
-	syncer.TestingSetError(packsync.ErrCodeAuthFailed, true)
+	hs := newTestHealth(t, &fakePackStatusProvider{
+		status: packsync.Status{
+			AppliedGeneration:        0,
+			DesiredGeneration:        0,
+			TrustedApplied:           true,
+			CoreAuthorityEstablished: true,
+			LastErrorCode:            packsync.ErrCodeAuthFailed,
+			Degraded:                 true,
+		},
+	})
 
-	hs := newTestHealth(t, syncer)
 	rr := httptest.NewRecorder()
 	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rr.Code != http.StatusOK {
@@ -177,8 +187,13 @@ func TestReadyzAuthDegradedWithTrustedStaysReady(t *testing.T) {
 }
 
 func TestReadyzRecoversAfterTrustedStateRestored(t *testing.T) {
-	syncer := failClosedPackSyncer(t)
-	hs := newTestHealth(t, syncer)
+	provider := &fakePackStatusProvider{
+		status: packsync.Status{
+			TrustedApplied:          false,
+			CoreAuthorityEstablished: false,
+		},
+	}
+	hs := newTestHealth(t, provider)
 
 	rr := httptest.NewRecorder()
 	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -186,7 +201,13 @@ func TestReadyzRecoversAfterTrustedStateRestored(t *testing.T) {
 		t.Fatalf("expected fail-closed before restore: %d", rr.Code)
 	}
 
-	syncer.TestingSetSuccess(1, 1)
+	provider.status = packsync.Status{
+		AppliedGeneration:        1,
+		DesiredGeneration:        1,
+		PackCount:                1,
+		TrustedApplied:           true,
+		CoreAuthorityEstablished: true,
+	}
 
 	rr2 := httptest.NewRecorder()
 	hs.handleReady(rr2, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -204,8 +225,12 @@ func TestReadyzRecoversAfterTrustedStateRestored(t *testing.T) {
 }
 
 func TestHealthAlsoFailClosedWhenPackTrustMissing(t *testing.T) {
-	syncer := failClosedPackSyncer(t)
-	hs := newTestHealth(t, syncer)
+	hs := newTestHealth(t, &fakePackStatusProvider{
+		status: packsync.Status{
+			TrustedApplied:          false,
+			CoreAuthorityEstablished: false,
+		},
+	})
 	rr := httptest.NewRecorder()
 	hs.handleHealth(rr, httptest.NewRequest(http.MethodGet, "/health", nil))
 	if rr.Code != http.StatusServiceUnavailable {
@@ -213,36 +238,10 @@ func TestHealthAlsoFailClosedWhenPackTrustMissing(t *testing.T) {
 	}
 }
 
-func failClosedPackSyncer(t *testing.T) *packsync.Syncer {
-	t.Helper()
-	dir := t.TempDir()
-	artDir := filepath.Join(dir, "artifacts")
-	stateDir := filepath.Join(dir, "state")
-	_ = os.MkdirAll(artDir, 0o700)
-	_ = os.MkdirAll(stateDir, 0o700)
-	if err := os.WriteFile(filepath.Join(stateDir, "applied.json"), []byte("{"), 0o600); err != nil {
-		t.Fatal(err)
+func TestHealthServerRealSyncerCompatibility(t *testing.T) {
+	var syncer *packsync.Syncer
+	hs := newTestHealth(t, syncer)
+	if hs.packSync != nil {
+		t.Fatal("expected nil packSync when passing nil syncer")
 	}
-	s, err := packsync.New(packsync.Config{Dir: dir, PollInterval: time.Hour}, stubPackClient{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.Snapshot().TrustedApplied {
-		t.Fatal("expected untrusted syncer")
-	}
-	return s
-}
-
-type stubPackClient struct{}
-
-func (stubPackClient) FetchCapabilityPackDesiredState(context.Context) (coreclient.CapabilityPackDesiredState, error) {
-	return coreclient.CapabilityPackDesiredState{}, nil
-}
-
-func (stubPackClient) FetchCapabilityPackArtifact(context.Context, string, string, int) (coreclient.CapabilityPackArtifact, error) {
-	return coreclient.CapabilityPackArtifact{}, nil
-}
-
-func (stubPackClient) AckCapabilityPackAppliedState(context.Context, int64, string) (coreclient.AppliedStateAck, error) {
-	return coreclient.AppliedStateAck{}, nil
 }

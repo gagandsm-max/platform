@@ -346,7 +346,7 @@ func TestPackSyncFailureKeepsPriorNoAck(t *testing.T) {
 
 func TestPackSyncAuthFailClosedRetainsApplied(t *testing.T) {
 	dir := t.TempDir()
-	authErr := coreclient.ErrAuthenticationForTest()
+	authErr := &coreclient.Error{Code: coreclient.CodeAuthentication, Message: "Core rejected Sensor authentication"}
 	s, err := New(Config{Dir: dir, PollInterval: time.Hour}, &fakeCore{fetchErr: authErr})
 	if err != nil {
 		t.Fatal(err)

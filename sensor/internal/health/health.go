@@ -13,11 +13,15 @@ import (
 	"platform/sensor/internal/spool"
 )
 
+type packSyncStatusProvider interface {
+	Snapshot() packsync.Status
+}
+
 type HealthServer struct {
 	server     *http.Server
 	spool      *spool.DiskSpool
 	agentSpool *spool.DiskSpool
-	packSync   *packsync.Syncer
+	packSync   packSyncStatusProvider
 	mu         sync.RWMutex
 	logger     *slog.Logger
 }
@@ -51,9 +55,13 @@ func (hs *HealthServer) SetAgentSpool(agentSpool *spool.DiskSpool) {
 }
 
 // SetPackSync optionally wires Capability Pack sync status (no secrets).
-func (hs *HealthServer) SetPackSync(syncer *packsync.Syncer) {
+func (hs *HealthServer) SetPackSync(syncer packSyncStatusProvider) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
+	if syncer == nil || syncer == (*packsync.Syncer)(nil) {
+		hs.packSync = nil
+		return
+	}
 	hs.packSync = syncer
 }
 

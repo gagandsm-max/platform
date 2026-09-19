@@ -33,7 +33,7 @@ func TestFreshSensorNotReadyBeforeFirstCoreSync(t *testing.T) {
 func TestFreshSensorAuthFailureKeepsNotReady(t *testing.T) {
 	dir := t.TempDir()
 	s, err := New(Config{Dir: dir, PollInterval: time.Hour}, &fakeCore{
-		fetchErr: coreclient.ErrAuthenticationForTest(),
+		fetchErr: &coreclient.Error{Code: coreclient.CodeAuthentication, Message: "Core rejected Sensor authentication"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestFreshSensorAuthFailureKeepsNotReady(t *testing.T) {
 func TestFreshSensorAuthorizationFailureKeepsNotReady(t *testing.T) {
 	dir := t.TempDir()
 	s, err := New(Config{Dir: dir, PollInterval: time.Hour}, &fakeCore{
-		fetchErr: coreclient.ErrAuthorizationForTest(),
+		fetchErr: &coreclient.Error{Code: coreclient.CodeAuthorization, Message: "Core denied Sensor operation"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestFreshSensorAuthorizationFailureKeepsNotReady(t *testing.T) {
 func TestFreshSensorTransientFailureKeepsNotReady(t *testing.T) {
 	dir := t.TempDir()
 	s, err := New(Config{Dir: dir, PollInterval: time.Hour}, &fakeCore{
-		fetchErr: coreclient.ErrTransientTransportForTest(),
+		fetchErr: &coreclient.Error{Code: coreclient.CodeTransport, Message: "Core transport unavailable"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +127,7 @@ func TestRestartAfterCoreConfirmedEmptyRemainsReady(t *testing.T) {
 	}
 
 	second, err := New(Config{Dir: dir, PollInterval: time.Hour}, &fakeCore{
-		fetchErr: coreclient.ErrTransientTransportForTest(),
+		fetchErr: &coreclient.Error{Code: coreclient.CodeTransport, Message: "Core transport unavailable"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +148,7 @@ func TestRestartAfterConfirmedEmptyWithCoreOutageReadyDegraded(t *testing.T) {
 	first.syncOnce(context.Background())
 
 	second, err := New(Config{Dir: dir, PollInterval: time.Hour}, &fakeCore{
-		fetchErr: coreclient.ErrTransientTransportForTest(),
+		fetchErr: &coreclient.Error{Code: coreclient.CodeTransport, Message: "Core transport unavailable"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestRestartAfterConfirmedNonEmptyWithCoreOutageRemainsReady(t *testing.T) {
 	}
 
 	second, err := New(Config{Dir: dir, PollInterval: time.Hour}, &fakeCore{
-		fetchErr: coreclient.ErrTransientTransportForTest(),
+		fetchErr: &coreclient.Error{Code: coreclient.CodeTransport, Message: "Core transport unavailable"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -273,7 +273,13 @@ func TestDurableAuthorityWriteFailureDoesNotPublishReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.TestingForceAppliedWriteFailure(true)
+	stateDir := filepath.Join(dir, stateDirName)
+	if err := os.RemoveAll(stateDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "nonexistent-target"), stateDir); err != nil {
+		t.Fatal(err)
+	}
 
 	s.syncOnce(context.Background())
 	snap := s.Snapshot()
