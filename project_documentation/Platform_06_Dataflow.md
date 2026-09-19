@@ -1,7 +1,7 @@
 # Platform — End-to-End Dataflow & Sequence Documentation
 
 **Document ID:** PLATFORM-DF-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD, PRD, Architecture, HLD, LLD  
 
@@ -711,6 +711,76 @@ sequenceDiagram
     B-->>UI: output
   end
 ```
+
+---
+
+## 28A. Flow DF-027A — Contextual on-demand diagnostic / multi-vantage verification
+
+```mermaid
+sequenceDiagram
+  actor U as NOC User
+  participant UI as Entity/Alert/Incident UI
+  participant D as Diagnostic Orchestrator
+  participant AUTH as RBAC/Scope/Policy
+  participant SC as Sensor Control
+  participant S1 as Assigned Sensor
+  participant S2 as Alternate Sensor/Agent optional
+  participant T as Target
+  participant E as Evidence/Investigation
+
+  U->>UI: Ping / Trace / SNMP / Verify Now
+  UI->>D: diagnostic(origin,target,type,params,vantage mode)
+  D->>AUTH: Authorize actor + target + action + parameters
+  AUTH-->>D: Allowed/denied + limits
+  D->>SC: Resolve eligible vantage(s) + capacity
+  SC-->>D: Assigned/eligible bounded execution set
+  par Assigned vantage
+    D->>S1: Execute bounded typed test
+    S1->>T: Protocol/network check
+    T-->>S1: Result/timeout/error
+    S1-->>D: Typed evidence + quality
+  and Optional independent vantage
+    D->>S2: Execute same bounded validation
+    S2->>T: Protocol/network check
+    T-->>S2: Result/timeout/error
+    S2-->>D: Typed evidence + quality
+  end
+  D->>E: Persist/audit result refs + correlation
+  D-->>UI: Per-vantage results + monitored-vs-live comparison
+```
+
+Contradictory vantage evidence is shown, not averaged into a false definitive state. Operator-triggered verification does not automatically rewrite continuously monitored state; qualification/evidence policy decides any state transition.
+
+---
+
+## 28B. Flow DF-027B — Investigation Session evidence capture
+
+```mermaid
+sequenceDiagram
+  actor U as Engineer
+  participant UI as Troubleshoot Workspace
+  participant INV as Investigation Service
+  participant DIAG as Diagnostics
+  participant CLI as CLI Broker
+  participant Q as Query/Graph/NCM/Flow
+  participant INC as Incident Service
+
+  U->>INV: Start Investigation(origin, reason)
+  INV-->>UI: investigation_session_id
+  U->>DIAG: Run diagnostic in investigation context
+  DIAG-->>INV: Attach typed result reference
+  U->>CLI: Open CLI in investigation context
+  CLI-->>INV: Attach session/command evidence reference
+  U->>Q: View/compare topology, config, flow, changes
+  Q-->>INV: Attach selected evidence/snapshot references
+  opt Incident exists or user links it
+    INV->>INC: Link investigation + evidence index
+  end
+  U->>INV: Close Investigation
+  INV-->>UI: Evidence summary + unresolved items
+```
+
+Investigation storage references authoritative evidence instead of copying entire telemetry datasets. Authorization is re-evaluated for each privileged action; being inside an investigation does not grant extra privilege.
 
 ---
 
