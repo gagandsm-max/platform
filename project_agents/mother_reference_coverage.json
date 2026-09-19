@@ -6,133 +6,304 @@
   "mappings": [
     {
       "file": "AGENTS.md",
-      "owners": ["platform-minimal-change-engineer"],
-      "supporters": ["platform-codebase-onboarding-engineer", "platform-git-workflow-master"]
+      "owners": [
+        "platform-minimal-change-engineer"
+      ],
+      "supporters": [
+        "platform-codebase-onboarding-engineer",
+        "platform-git-workflow-master"
+      ]
     },
     {
       "file": "Platform_00_Document_Index.md",
-      "owners": ["platform-minimal-change-engineer"],
-      "supporters": ["platform-codebase-onboarding-engineer", "platform-codebase-archaeologist"]
+      "owners": [
+        "platform-minimal-change-engineer"
+      ],
+      "supporters": [
+        "platform-codebase-onboarding-engineer",
+        "platform-codebase-archaeologist"
+      ]
     },
     {
       "file": "Platform_01_BRD.md",
-      "owners": ["platform-ux-architect"],
-      "supporters": ["platform-product-ui-designer", "platform-minimal-change-engineer"]
+      "owners": [
+        "platform-ux-architect"
+      ],
+      "supporters": [
+        "platform-product-ui-designer",
+        "platform-minimal-change-engineer"
+      ]
     },
     {
       "file": "Platform_02_PRD.md",
-      "owners": ["platform-ux-architect"],
-      "supporters": ["platform-product-ui-designer", "platform-frontend-developer"]
+      "owners": [
+        "platform-ux-architect"
+      ],
+      "supporters": [
+        "platform-product-ui-designer",
+        "platform-frontend-developer"
+      ]
     },
     {
       "file": "Platform_03_Architecture.md",
-      "owners": ["platform-security-architect"],
-      "supporters": ["platform-sre", "platform-api-platform-engineer"]
+      "owners": [
+        "platform-security-architect"
+      ],
+      "supporters": [
+        "platform-sre",
+        "platform-api-platform-engineer"
+      ]
     },
     {
       "file": "Platform_04_HLD.md",
-      "owners": ["platform-api-platform-engineer"],
-      "supporters": ["platform-sre", "platform-workflow-architect"]
+      "owners": [
+        "platform-api-platform-engineer"
+      ],
+      "supporters": [
+        "platform-sre",
+        "platform-workflow-architect"
+      ]
     },
     {
       "file": "Platform_05_LLD.md",
-      "owners": ["platform-api-platform-engineer"],
-      "supporters": ["platform-database-reliability-engineer", "platform-sensor-runtime-engineer"]
+      "owners": [
+        "platform-api-platform-engineer"
+      ],
+      "supporters": [
+        "platform-database-reliability-engineer",
+        "platform-sensor-runtime-engineer"
+      ]
     },
     {
       "file": "Platform_06_Dataflow.md",
-      "owners": ["platform-telemetry-pipeline-engineer"],
-      "supporters": ["platform-api-platform-engineer", "platform-database-reliability-engineer"]
+      "owners": [
+        "platform-telemetry-pipeline-engineer"
+      ],
+      "supporters": [
+        "platform-api-platform-engineer",
+        "platform-database-reliability-engineer"
+      ]
     },
     {
       "file": "Platform_07_OSS_Catalog.md",
-      "owners": ["platform-devops-automator"],
-      "supporters": ["platform-appsec-engineer", "platform-security-architect"]
+      "owners": [
+        "platform-devops-automator"
+      ],
+      "supporters": [
+        "platform-appsec-engineer",
+        "platform-security-architect"
+      ]
     },
     {
       "file": "Platform_08_Requirements_Traceability.md",
-      "owners": ["platform-test-automation-engineer"],
-      "supporters": ["platform-minimal-change-engineer", "platform-codebase-archaeologist"]
+      "owners": [
+        "platform-test-automation-engineer"
+      ],
+      "supporters": [
+        "platform-minimal-change-engineer",
+        "platform-codebase-archaeologist"
+      ]
     },
     {
       "file": "Platform_09_UI_UX_Master.md",
-      "owners": ["platform-ux-architect"],
-      "supporters": ["platform-product-ui-designer", "platform-frontend-developer", "platform-accessibility-auditor"]
+      "owners": [
+        "platform-ux-architect"
+      ],
+      "supporters": [
+        "platform-product-ui-designer",
+        "platform-frontend-developer",
+        "platform-accessibility-auditor"
+      ]
     },
     {
       "file": "Platform_10_Protocol_Security_Connector_Master.md",
-      "owners": ["platform-network-engineer"],
-      "supporters": ["platform-secrets-credential-engineer", "platform-integration-connector-engineer", "platform-security-architect"]
+      "owners": [
+        "platform-network-engineer"
+      ],
+      "supporters": [
+        "platform-secrets-credential-engineer",
+        "platform-integration-connector-engineer",
+        "platform-security-architect"
+      ]
     },
     {
       "file": "Platform_11_Sizing_Capacity_Storage_Master.md",
-      "owners": ["platform-performance-benchmarker"],
-      "supporters": ["platform-sre", "platform-database-reliability-engineer"]
+      "owners": [
+        "platform-performance-benchmarker"
+      ],
+      "supporters": [
+        "platform-sre",
+        "platform-database-reliability-engineer"
+      ]
     },
     {
       "file": "Platform_12_Decision_Source_Register.md",
-      "owners": ["platform-minimal-change-engineer"],
-      "supporters": ["platform-codebase-archaeologist", "platform-security-architect"]
+      "owners": [
+        "platform-minimal-change-engineer"
+      ],
+      "supporters": [
+        "platform-codebase-archaeologist",
+        "platform-security-architect"
+      ]
     },
     {
       "file": "Platform_13_Engineering_Development_and_Docker_Standards.md",
-      "owners": ["platform-devops-automator"],
-      "supporters": ["platform-sre", "platform-test-automation-engineer"]
+      "owners": [
+        "platform-devops-automator"
+      ],
+      "supporters": [
+        "platform-sre",
+        "platform-test-automation-engineer"
+      ]
     },
     {
       "file": "Platform_14_Test_Performance_and_Release_Quality.md",
-      "owners": ["platform-test-automation-engineer"],
-      "supporters": ["platform-performance-benchmarker", "platform-reality-checker"]
+      "owners": [
+        "platform-test-automation-engineer"
+      ],
+      "supporters": [
+        "platform-performance-benchmarker",
+        "platform-reality-checker"
+      ]
     },
     {
       "file": "Platform_15_CI_CD_Packaging_and_Distribution.md",
-      "owners": ["platform-devops-automator"],
-      "supporters": ["platform-sre", "platform-appsec-engineer"]
+      "owners": [
+        "platform-devops-automator"
+      ],
+      "supporters": [
+        "platform-sre",
+        "platform-appsec-engineer"
+      ]
     },
     {
       "file": "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
-      "owners": ["platform-sre"],
-      "supporters": ["platform-devops-automator", "platform-secrets-credential-engineer"]
+      "owners": [
+        "platform-sre"
+      ],
+      "supporters": [
+        "platform-devops-automator",
+        "platform-secrets-credential-engineer"
+      ]
     },
     {
       "file": "Platform_17_API_Event_and_Data_Model_Contracts.md",
-      "owners": ["platform-api-platform-engineer"],
-      "supporters": ["platform-database-reliability-engineer", "platform-telemetry-pipeline-engineer"]
+      "owners": [
+        "platform-api-platform-engineer"
+      ],
+      "supporters": [
+        "platform-database-reliability-engineer",
+        "platform-telemetry-pipeline-engineer"
+      ]
     },
     {
       "file": "Platform_18_Security_Threat_Model.md",
-      "owners": ["platform-security-architect"],
-      "supporters": ["platform-appsec-engineer", "platform-ai-code-security-auditor"]
+      "owners": [
+        "platform-security-architect"
+      ],
+      "supporters": [
+        "platform-appsec-engineer",
+        "platform-ai-code-security-auditor"
+      ]
     },
     {
       "file": "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md",
-      "owners": ["platform-ai-engineer"],
-      "supporters": ["platform-ncm-remediation-engineer", "platform-integration-connector-engineer", "platform-network-engineer", "platform-model-qa"]
+      "owners": [
+        "platform-ai-engineer"
+      ],
+      "supporters": [
+        "platform-ncm-remediation-engineer",
+        "platform-integration-connector-engineer",
+        "platform-network-engineer",
+        "platform-model-qa"
+      ]
     },
     {
       "file": "Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md",
-      "owners": ["platform-identity-access-engineer"],
-      "supporters": ["platform-workflow-architect", "platform-network-engineer", "platform-frontend-developer", "platform-ux-architect", "platform-product-ui-designer", "platform-security-architect", "platform-test-automation-engineer"]
+      "owners": [
+        "platform-identity-access-engineer"
+      ],
+      "supporters": [
+        "platform-workflow-architect",
+        "platform-network-engineer",
+        "platform-frontend-developer",
+        "platform-ux-architect",
+        "platform-product-ui-designer",
+        "platform-security-architect",
+        "platform-test-automation-engineer"
+      ]
     },
     {
       "file": "Platform_21_Enterprise_Gap_Closure_Master.md",
-      "owners": ["platform-integration-connector-engineer"],
-      "supporters": ["platform-infrastructure-cloud-engineer", "platform-identity-access-engineer", "platform-sre"]
+      "owners": [
+        "platform-integration-connector-engineer"
+      ],
+      "supporters": [
+        "platform-infrastructure-cloud-engineer",
+        "platform-identity-access-engineer",
+        "platform-sre"
+      ]
     },
     {
       "file": "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md",
-      "owners": ["platform-telemetry-pipeline-engineer"],
-      "supporters": ["platform-ai-engineer", "platform-model-qa", "platform-security-architect"]
+      "owners": [
+        "platform-telemetry-pipeline-engineer"
+      ],
+      "supporters": [
+        "platform-ai-engineer",
+        "platform-model-qa",
+        "platform-security-architect"
+      ]
     },
     {
       "file": "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md",
-      "owners": ["platform-device-pack-engineer"],
-      "supporters": ["platform-infrastructure-cloud-engineer", "platform-telemetry-pipeline-engineer", "platform-integration-connector-engineer", "platform-ncm-remediation-engineer", "platform-network-engineer", "platform-api-platform-engineer", "platform-security-architect", "platform-performance-benchmarker", "platform-test-automation-engineer", "platform-product-ui-designer", "platform-ux-architect"]
+      "owners": [
+        "platform-device-pack-engineer"
+      ],
+      "supporters": [
+        "platform-infrastructure-cloud-engineer",
+        "platform-telemetry-pipeline-engineer",
+        "platform-integration-connector-engineer",
+        "platform-ncm-remediation-engineer",
+        "platform-network-engineer",
+        "platform-api-platform-engineer",
+        "platform-security-architect",
+        "platform-performance-benchmarker",
+        "platform-test-automation-engineer",
+        "platform-product-ui-designer",
+        "platform-ux-architect"
+      ]
     },
     {
       "file": "Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md",
-      "owners": ["platform-api-platform-engineer"],
-      "supporters": ["platform-sensor-runtime-engineer", "platform-sre", "platform-identity-access-engineer", "platform-security-architect", "platform-test-automation-engineer", "platform-performance-benchmarker", "platform-telemetry-pipeline-engineer"]
+      "owners": [
+        "platform-api-platform-engineer"
+      ],
+      "supporters": [
+        "platform-sensor-runtime-engineer",
+        "platform-sre",
+        "platform-identity-access-engineer",
+        "platform-security-architect",
+        "platform-test-automation-engineer",
+        "platform-performance-benchmarker",
+        "platform-telemetry-pipeline-engineer"
+      ]
+    },
+    {
+      "file": "Platform_25_Sensor_Communication_Integrity_Resilience_and_Resource_Assurance_Master.md",
+      "owners": [
+        "platform-sensor-runtime-engineer"
+      ],
+      "supporters": [
+        "platform-network-engineer",
+        "platform-telemetry-pipeline-engineer",
+        "platform-sre",
+        "platform-api-platform-engineer",
+        "platform-database-reliability-engineer",
+        "platform-security-architect",
+        "platform-performance-benchmarker",
+        "platform-test-automation-engineer"
+      ]
     }
   ]
 }
