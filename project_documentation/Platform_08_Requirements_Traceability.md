@@ -4,7 +4,7 @@
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Completeness Control**
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 enterprise log/event and SIEM-forwarding reconciliation
 
 ## 1. Purpose
 
