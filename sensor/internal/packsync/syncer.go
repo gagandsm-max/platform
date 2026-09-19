@@ -29,12 +29,12 @@ const (
 	ErrCodeAuthFailed          = "SENSOR_PACK_AUTH_FAILED"
 	ErrCodeSyncTransient       = "SENSOR_PACK_SYNC_TRANSIENT"
 
-	appliedStateFile = "applied.json"
-	artifactsDirName = "artifacts"
-	stateDirName     = "state"
-	maxPackCount         = 256
-	maxAppliedStateBytes int64 = 512 * 1024
-	schemaVersion        = "1.0.0"
+	appliedStateFile            = "applied.json"
+	artifactsDirName            = "artifacts"
+	stateDirName                = "state"
+	maxPackCount                = 256
+	maxAppliedStateBytes  int64 = 512 * 1024
+	schemaVersion               = "1.0.0"
 )
 
 // CorePackClient is the narrow Core surface used by pack sync.
