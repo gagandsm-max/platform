@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
-**Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the approved v3.2.2 NOC troubleshooting API/event/data contracts. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
+**Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the approved v3.2.2 NOC troubleshooting plus enterprise-Flow/dedicated-Sensor API/event/data contracts. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 
 ## 1. Purpose
 
@@ -45,15 +45,39 @@ The versioned API surface shall expose typed resource families for **Diagnostic 
 
 All contracts are tenant/resource scoped server-side, use stable error codes/correlation IDs, and expose `DENIED`, `CAPACITY_LIMITED`, `TARGET_UNREACHABLE`, `CREDENTIAL_FAILURE`, `TIMEOUT`, `CANCELLED` and other protocol-specific normalized outcomes without leaking secrets.
 
+### 2.2 Flow and dedicated Sensor API contracts
+
+Versioned API resource families shall expose, as authorized:
+
+- Sensor role/capability/readiness and governed drain/change-role state;
+- Flow listeners and configured exporters/source mappings;
+- exporter health/data quality;
+- v9/IPFIX template inventory/diagnostics;
+- Flow search/query, Top-N, conversations, matrices and bounded Sankey data;
+- Flow Coverage evidence;
+- enrichment/provenance detail where permitted.
+
+Flow query APIs accept bounded tenant/time/scope plus filters such as exporter, observation domain, device/interface/site, source/destination IP/entity/FQDN/user, protocol/port/application, ASN, VRF/VLAN, QoS, sampling and quality. User-attribution fields require separate server-side permission; field-level omission is enforced before response serialization/export.
+
+Exporter configuration binds tenant, eligible FLOW Sensor/pool/listener, protocol/profile, source policy, canonical exporter entity and optional expected observation domains/rate/capacity metadata. Client-supplied packet fields never override this authority.
+
+Sensor role APIs expose effective role and allowed capabilities. A production role transition is a stateful drain/reassignment operation with explicit validation/results, not an immediate boolean toggle.
+
 ## 3. Sensor/Agent control contract
 
 Enrollment establishes identity/certificate. Subsequent sessions authenticate with mTLS. Core sends versioned desired configuration/assignment; endpoint acknowledges applied version/checksum. Telemetry ingestion is asynchronous and replay-safe.
 
 For on-demand diagnostics, Core sends an authorized bounded execution request containing job/correlation ID, canonical target, diagnostic type, effective parameters, timeout/cancellation/fencing context and no reusable secret material beyond the minimum execution reference/token required by the worker. Sensor/Agent returns a typed per-vantage result with timestamps, evidence quality and normalized error/result code. Expired/replayed/fenced diagnostic jobs are rejected.
 
+Sensor desired state also carries the effective production role/capability allowlist. A FLOW Sensor rejects Network/Log assignments/listeners; a LOG Sensor rejects Flow/Network assignments. Role-generation changes are applied only after the governed drain/reassignment preconditions are satisfied and are reported through desired/applied generation/checksum semantics.
+
 ## 4. Kafka event rules
 
 Kafka is internal. Events include schema version, tenant, source identity, event ID/sequence where required, event time, ingest time, quality/provenance and payload. Producers/consumers must tolerate compatible schema evolution.
+
+`network.flow.v1` logical events carry stable `flow_record_id`, tenant, FLOW Sensor/listener, configured exporter/canonical entity, protocol/version, observation-domain/engine identity where applicable, source sequence/record index, export/observed/ingest/start/end times with quality, directional 5-tuple/protocol fields, observed and separately estimated counters, sampling metadata, raw interface/VRF/VLAN/QoS/NAT/application/template fields, quality and bounded extensions. Enrichment may be embedded or referenced, but source/time/version/confidence/provenance remain explicit.
+
+Platform transport replay uses stable Flow record identity for deduplication. Records from different valid observation points are not deduplicated merely because 5-tuples/time overlap.
 
 Diagnostic/investigation event families, where carried internally, include job/session ID, origin reference, canonical target/evidence reference, source/vantage, state transition, timestamps, quality/provenance, normalized result/error code and correlation ID. **Secrets, one-time credentials, reusable credential material and terminal keystroke payloads are prohibited from general Kafka/audit/analytics events.** Browser/UI live updates use an authenticated Platform UI channel; Kafka is never exposed directly to the browser.
 
@@ -67,11 +91,15 @@ Breaking API/event changes require major contract version and migration window. 
 
 ## 1. Ownership
 
-PostgreSQL owns transactional/control state: tenants, users/RBAC metadata, inventory/current entity state, policies, credentials metadata/references, licensing, **diagnostic job metadata, Investigation Session state/evidence references**, other job metadata and configuration. ClickHouse owns high-volume historical metrics/flow/events/log/audit analytics and normalized diagnostic-result analytics where retention/query volume justifies it. Kafka transports events; Valkey stores cache/ephemeral state only. No separate diagnostics database is introduced.
+PostgreSQL owns transactional/control state: tenants, users/RBAC metadata, inventory/current entity state, policies, credentials metadata/references, licensing, **diagnostic job metadata, Investigation Session state/evidence references**, Sensor role/source assignment, Flow listener/exporter/profile configuration, saved Flow views/policies and current identity/session mapping metadata where applicable, other job metadata and configuration. ClickHouse owns high-volume historical metrics/flow/events/log/audit analytics, Flow raw/common observations, quality history and selected Flow conversation/Top-N/matrix/coverage rollups where retention/query volume justifies it. Kafka transports events; Valkey stores cache/ephemeral state only. No separate diagnostics, Flow or identity database is introduced.
 
 ## 2. Canonical identity
 
 Every monitored object maps to canonical tenant-scoped entity identity independent of protocol. IP is an attribute, not sole identity. Provenance and source protocol are retained.
+
+Flow enrichment resolves IP/address observations against temporal canonical identity. Historical endpoint/system/site/user/domain/Geo/cloud attribution records the applicable evidence time/version/source/confidence so current address ownership or directory state cannot silently rewrite old Flow.
+
+User identity is a subject/session attribution, not part of the Flow record's authorization boundary. Directory identity (AD/LDAP/Entra) may enrich a session only when time-bounded evidence connects the subject to the endpoint/network attachment. Shared/NAT/multi-user/conflicting evidence can remain unresolved.
 
 ## 3. Schema migration
 
@@ -84,5 +112,9 @@ Raw, rollup, incident, audit, configuration, **diagnostic/investigation evidence
 ## 5. Data integrity
 
 Ingestion records support deduplication/idempotency and late/out-of-order data handling. Pipeline reconciliation detects produced/accepted/normalized/inserted/rejected discrepancies.
+
+Flow integrity additionally distinguishes pre-accept UDP loss from post-accept durable Platform responsibility; tracks protocol-specific sequence/exporter reset, template/sampling quality and Sensor socket/queue/spool drops; and reconciles received datagrams/decoded records/accepted observations/published events/ClickHouse inserts. A missing template, unknown sampling or enrichment failure must not be silently represented as zero traffic or authoritative endpoint/user identity.
+
+Flow source replay deduplication and multi-observation-point correlation are distinct: identical-looking traffic at different exporters/interfaces can be valid separate evidence.
 
 Diagnostic/investigation integrity requires tenant-scoped canonical targets, immutable result/evidence provenance, per-vantage source identity, result/observed timestamps, correlation IDs and explicit state transitions. Evidence references must not silently retarget another tenant/entity after creation. Cancellation/timeout/partial results remain visible. No secret or one-time credential value may be persisted in diagnostic result, investigation evidence, audit, event or analytics rows.
