@@ -80,10 +80,12 @@ Do **not** invent a native ChatGPT filesystem subagent mechanism.
 
 ## CODEX
 
-- Preserve the existing generated compatibility projection under `.codex/agents/`.
-- Codex is **not** an active v1.2 certification gate: no Codex runtime/docs were
-  installed or verified on this Cloud VM (`codex` binary absent).
-- Do **not** invent a Codex skill path.
+- Preserve the generated compatibility projection under `.codex/agents/`.
+- Platform uses Codex CLI and GitHub Codex as an **independent exact-SHA adversarial audit/certification lane when explicitly invoked by ChatGPT**.
+- Codex is **not the routine implementation writer**. Normal fixes remain with the assigned Cursor writer unless ChatGPT explicitly creates an isolated Codex implementation branch/worktree.
+- A Codex review is stale immediately if authoritative `main` or the reviewed PR head moves.
+- Codex must not self-certify changes it wrote.
+- Do **not** invent a native Codex Skill loader/path. When a Codex task needs a canonical Skill, the task prompt directs Codex to read the required files under `project_agents/skills/`; `.codex/agents/` remains an agent compatibility projection, not a second Skill authority.
 
 ## Native binaries on this Cloud VM (2026-09-12)
 
