@@ -6957,6 +6957,7 @@ Platform provides an in-house governed dashboard experience; third-party dashboa
 - duplicate/copy/fullscreen/delete/link actions reuse stable server APIs;
 - destructive actions require explicit confirmation;
 - localStorage may cache unsaved recovery only; backend state is authoritative.
+- optimistic save is allowed only with server-authoritative expected revision/version; stale saves fail with an explicit conflict and preserve the operator's unsaved draft for merge/retry.
 
 **Blueprints**
 - JSON import/export is schema validated;
@@ -7010,14 +7011,14 @@ Every panel owns an independent cancellation/error/freshness boundary. One faili
 Mandatory governed panel families:
 
 1. **Time Series** — line/area/stacked/step, multi-series, optional dual axes, unified tooltip/crosshair, box zoom, policy overlays.
-2. **Stat + Sparkline** — unit-aware callout plus historical context.
+2. **Stat + Sparkline** — unit-aware callout plus historical context, SI/IEC formatting, data freshness, comparison delta and effective policy/threshold state.
 3. **Gauge / Progress** — raw value, min/max and semantic policy thresholds.
 4. **Virtualized Table** — sort/reorder/search, sticky header/identity column, governed export.
 5. **Health Matrix** — high-density square/hex/tile representation with accessible status cues and entity drawer.
 6. **Topology** — force/hierarchical/manual-pinned layouts and interaction events.
 7. **Flow/Sankey** — source/application/destination distribution with aggregation of low-volume flows.
 8. **Geo Map** — site/branch/datacenter assets with clustering and health semantics.
-9. **Event/Log Stream** — escaped monospaced bounded stream with pause/scroll behavior.
+9. **Event/Log Stream** — escaped monospaced bounded stream with pause/resume, search/filter, controlled download/export and auto-scroll behavior; client buffers remain bounded.
 
 Status uses semantic design tokens and text/icon/shape; green/amber/red alone is prohibited.
 
@@ -7065,7 +7066,7 @@ GraphQL is not a mandatory v1 connector contract. It may be added later only aft
 
 **Provisioning inventory**
 - unified view of registered devices/data sources/APIs;
-- lifecycle and collection health, last poll and safe diagnostic codes;
+- lifecycle and collection health, desired-vs-actual monitoring state, Sensor assignment, effective policy/profile, last telemetry/poll time and safe diagnostic codes;
 - bounded bulk actions;
 - Force Poll and Maintenance actions only through authorized backend operations.
 
@@ -7074,7 +7075,8 @@ CIDR discovery scheduling and a declarative payload mapper are accepted. Zero-to
 ### 8. Network operations interaction
 
 **Topology**
-- L2, L3, VLAN, routing and underlay/overlay views as evidence permits;
+- explicit layer toggles for physical/L1, L2 switching/VLAN/FDB, L3/routing, MPLS/VRF/LSP, VXLAN/EVPN/tunnels, SD-WAN, traffic, infrastructure and service-dependency views where evidence exists;
+- L2/L3/routing/overlay visibility is driven by authoritative graph evidence rather than cosmetic grouping;
 - traffic/health-aware edges;
 - edge click opens supporting evidence;
 - pinned/manual layouts persist;

@@ -2442,6 +2442,10 @@ Panel configuration distinguishes:
 
 Saving `visualThresholds` cannot update policy state.
 
+### Dashboard save concurrency
+
+Dashboard draft/save/publish operations use server-authoritative version/revision concurrency. Client optimistic updates may improve responsiveness, but every save carries the expected authoritative revision/version; a stale write fails with a stable conflict response and the UI preserves the unsaved draft for merge/retry. Browser cache/localStorage is never the conflict-resolution authority.
+
 ### Accessibility commands
 
 Drag, resize, reorder, topology select/focus and equivalent pointer actions must have keyboard-command or menu equivalents where the action is operationally material.

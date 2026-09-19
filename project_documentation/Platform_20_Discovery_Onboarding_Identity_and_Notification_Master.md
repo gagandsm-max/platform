@@ -665,7 +665,7 @@ Normal customer administration uses a shared wizard framework:
 6. effective monitoring profile/policy/Capability Pack/Sensor/capacity preview;
 7. governed submit/review/activation.
 
-Device, database and REST/GraphQL onboarding reuse these primitives rather than invent separate lifecycle semantics.
+Device, database and REST/OpenAPI onboarding reuse these primitives rather than invent separate lifecycle semantics. GraphQL remains a future connector candidate subject to protocol/security/query-complexity review.
 
 ### Preflight evidence
 
@@ -677,7 +677,11 @@ Operators may select authorized reusable credential profiles without revealing p
 
 ### Connector response mapping
 
-REST/GraphQL response inspection uses escaped bounded JSON trees. A user may select a JSON path to create a declarative field mapping; mappings remain schema validated and non-executable.
+REST/OpenAPI response inspection uses escaped bounded JSON trees. A user may select a JSON path to create a declarative field mapping; mappings remain schema validated and non-executable.
+
+### Provisioning inventory contract
+
+The unified provisioning inventory remains a view over canonical inventory/onboarding/control-plane state rather than a second source of truth. It exposes, where applicable: lifecycle, desired-vs-actual monitoring state, collection health, Sensor assignment, effective monitoring profile/policy, last telemetry/poll time, provisioning job state and safe diagnostic/remediation code.
 
 ### Deferred automation
 
