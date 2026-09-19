@@ -51,7 +51,7 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| REQ-S-001 | Universal Sensor Runtime with Network, Infrastructure, Combined, Streaming/Event, Synthetic and Cloud/API roles | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-001 | One Universal Sensor Runtime with governed Network, Infrastructure, Flow, Log, Synthetic, Cloud/API and other approved roles; no separate Flow/Log Sensor codebase | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-002 | Sensor locality-aware placement close to devices | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-003 | Capacity-aware placement; never overload Sensor for lower RTT | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-004 | Customer modes: Auto, Auto-with-approval, Manual, Sensor Pool | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -67,6 +67,8 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-S-014 | Windows/Linux Agent supports host metrics and edge network tests | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-015 | Branch→DC and DC→branch test support for asymmetric-path evidence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-016 | Agent enrolls with Core and Core assigns correct available Sensor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-017 | Production Flow and Log Sensor roles are exclusive major workloads; no mixed Flow+Log+Network monitoring on one production Sensor instance | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-018 | Production Sensor role conversion drains/reassigns workloads and durable backlog before role activation; combined/mixed role is non-production only | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Provisioning/Discovery
 
@@ -107,6 +109,44 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-NET-013 | Circuit/ISP inventory and SLA correlation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-014 | Path Analysis workspace | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-015 | IPv4/IPv6/dual-stack first-class support | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+### Enterprise Flow monitoring and traffic intelligence
+
+| ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| REQ-FLOW-001 | Dedicated exclusive production Flow Sensor role in common Sensor runtime | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-002 | NetFlow v5/v9, IPFIX, sFlow and certified vendor-flow protocol support | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-003 | Canonical exporter identity includes configured source/listener/protocol observation context; UDP source IP alone is insufficient | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-004 | Unknown/unmapped exporter reject/quarantine; packet fields never authorize tenant | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-005 | v9/IPFIX template/options-template lifecycle, scope, expiry/reuse/restart and explicit template-miss quality | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-006 | Bounded persisted template cache with validity/generation safeguards | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-007 | Sampling provenance and observed-versus-estimated traffic semantics | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-008 | Protocol-correct export/observation/ingest/start/end time semantics and timestamp quality | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-009 | Canonical IPv4/IPv6 Flow schema with interface/VRF/VLAN/ASN/NAT/QoS/application/template quality and bounded extensions | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-010 | Protocol-specific sequence/gap/duplicate/out-of-order/exporter-reset accounting | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-011 | End-to-end Flow Data Quality and explicit drop/reject/template/sampling/pipeline failure classes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-012 | No Flow Data never equals No Network Traffic without corroborating evidence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-013 | Bounded high-rate receiver, exporter/template/cardinality limits and per-exporter fairness | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-014 | Certified local durable acceptance boundary plus replay/idempotency; pre-accept UDP remains best-effort | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-015 | Temporal IP-to-entity/system/FQDN enrichment using canonical endpoint evidence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-016 | Time-bounded user/session attribution from Agent/AD/Entra/VPN/RADIUS/NAC/WLAN/firewall/proxy evidence with confidence/conflict | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-017 | Domain/FQDN/application/URL-host/full-URL semantics remain distinct; no inferred full URL from IP/DNS | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-018 | Internal site geography vs approximate public-IP Geo with provenance/accuracy/confidence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-019 | ASN/organization/cloud/SaaS/application enrichment with source/version/provenance | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-020 | Observation-point provenance; source replay dedup separate from multi-vantage traffic observations | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-021 | Derived bidirectional Conversation model preserves directional raw evidence | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-022 | NAT pre/post fields preserved only when supplied; no synthesized NAT evidence | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-023 | Historical enrichment is temporal/versioned and does not silently rewrite old Flow after identity/catalogue changes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-024 | Flow Coverage compares valid Flow with interface-counter evidence using sampling/direction/observation quality | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-025 | ClickHouse raw/rollup/incident retention classes; no new Flow/NTA database | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-026 | Bounded Top-N/matrix/Sankey/rollup queries; no unrestricted raw multi-year scans | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-027 | Flow Explorer plus Exporter/Data Quality and Template inspection/troubleshooting UX | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-028 | Interface/incident/change workflows deep-link to scoped Flow evidence without treating Flow as causal proof | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-029 | Operational Flow anomaly classes are bounded evidence, not automatic incident truth | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-030 | User/URL/Geo enrichment is privacy/RBAC/audit controlled and not employee web-content surveillance | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-031 | Exporter/collector redundancy is protocol/profile aware and certified; generic load balancing is not assumed | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-032 | Flow performance certification measures datagrams/records/bytes/templates/sampling/drops/enrichment/spool/downstream/query load; no invented throughput guarantee | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-033 | Future cloud-native flow logs normalize through the same canonical Flow model when semantics match | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Infrastructure/Cloud
 
@@ -318,6 +358,24 @@ Requirements `REQ-UI-015` through `REQ-UI-025` are additionally governed by the 
 - `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` — single Capability Pack ownership/certification of technology-specific diagnostics; no second diagnostic-pack framework.
 
 A NOC troubleshooting requirement is not complete merely because the BRD/PRD/HLD/LLD/Dataflow columns are checked; applicable supporting-master contracts above must also be satisfied.
+
+### Enterprise Flow supporting-master coverage
+
+Requirements `REQ-FLOW-001` through `REQ-FLOW-033` additionally require applicable contracts in:
+
+- `Platform_07` — GoFlow2 OSS/wrapper boundary;
+- `Platform_09` — Flow Explorer, exporter/template/data-quality and identity/privacy UX;
+- `Platform_10` — listener/source admission, protocol/security and identity-source connector rules;
+- `Platform_11` — dedicated Flow Sensor sizing/capacity/storage;
+- `Platform_14` — protocol/template/sampling/identity/privacy/performance certification;
+- `Platform_16` — Flow Sensor install/role/drain/upgrade/runbooks;
+- `Platform_17` — Flow API/event/data/replay/enrichment contracts;
+- `Platform_18` — Flow spoofing/cardinality/privacy/identity threats;
+- `Platform_20` — canonical endpoint/dynamic-address identity continuity;
+- `Platform_22` — telemetry-quality/Alert Evidence/RCA semantics;
+- `Platform_23` — NTA/Capability Pack dimensional certification.
+
+A Flow dashboard or decoder is not production readiness unless source trust, templates, sampling, data quality, durability, identity privacy and dedicated-role capacity are also proven.
 
 ## 3. Completeness gate
 
