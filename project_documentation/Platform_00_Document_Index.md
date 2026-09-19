@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC no-context-switch troubleshooting / contextual diagnostics reconciliation
+**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
 
 ## 1. Authority
 
@@ -94,6 +94,12 @@ This v3.2.2 reconciliation adds a first-class **no-context-switch NOC troublesho
 The approved scope includes persistent contextual action bars; a Troubleshoot drawer/workspace; embedded governed CLI; on-demand ICMP/traceroute/SNMP/TCP/DNS/SSH/API/domain tests; multi-vantage verification; deterministic `Verify Now`; Live Evidence distinguishing monitored state from fresh operator-triggered verification; `Why?`, `What Changed?` and `Compare`; Investigation Sessions; deterministic diagnostic packs; and risk-proportionate controls. Platform_22 remains authoritative for planner-selected Active Evidence Acquisition/AI investigation safety, and Platform_21 remains authoritative for the broader Incident Command Workspace.
 
 This reconciliation updates existing base/specialized masters and keeps the authoritative set at **25 files** and version **v3.2.2**.
+
+### 4.4 2026-09-19 NOC integration-audit closure
+
+A post-merge cross-layer audit of the NOC troubleshooting reconciliation identified four documentation-integration defects: the API/event/data-contract master did not yet define the diagnostic/investigation contracts; the sizing master did not explicitly account for interactive diagnostics and multi-vantage fan-out; Interface Detail and RCA/Investigation screen contracts retained weaker legacy action lists; and the phrase **diagnostic pack** could be misread as a second packaging framework beside the single Capability Pack architecture.
+
+This corrective reconciliation closes those defects without adding product scope, a new database, a new mandatory service, a new pack framework or a new dependency. `Platform_17` owns the versioned API/event/data contracts; `Platform_11` owns interactive-diagnostic capacity accounting; `Platform_09` owns explicit screen behavior; and `Platform_23` clarifies that a diagnostic workflow definition is not a second Capability Pack/registry/SDK.
 
 ## 5. Precedence
 

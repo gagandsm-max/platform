@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
 **Product:** Platform
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting / contextual diagnostics reconciliation
+**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
 
 ## 1. Authority and no-assumption rule
 
@@ -799,15 +799,23 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Contextual summary cards/panels rather than a mandatory primary table; any table must expose entity, state, time, site/owner and drill-down.
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
+- Persistent Interface Action Bar: Ping Peer; Trace Peer/Path; Flow; Errors; QoS; Config; Neighbor; Compare; Investigate; Open Device CLI
+- Open contextual entity/device/detail
 - Save view
 - Share permitted view
 - Export
 - Create/Schedule report
 - Add annotation where time-series context exists
-- Investigate
-- Ping
-- Traceroute/Path Analysis
+- Start/continue Investigation Session
+- On-demand Ping of applicable peer/endpoint with assigned/alternate/multi-vantage source where eligible
+- Traceroute/Path Analysis and healthy-path comparison
+- Open Flow scoped to the interface/circuit
+- View interface errors/discards, QoS and neighbor context
+- Why? / What Changed? / Compare
+- View Live Evidence
+- Verify Now where an interface/link diagnostic workflow applies
+- Open embedded parent-device CLI (RBAC)
+- Open relevant configuration/NCM context (RBAC)
 - Create maintenance
 - View topology
 - View alerts/incidents
@@ -4226,7 +4234,13 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Add annotation where time-series context exists
 - Acknowledge (RBAC)
 - Assign (RBAC)
-- Investigate
+- Start/continue Investigation Session
+- Open context-relevant Troubleshoot drawer
+- Verify Now where a deterministic diagnostic workflow applies
+- Run/select authorized next validation test
+- Why? / What Changed? / Compare
+- Open Live Evidence and Evidence Coverage
+- Attach/select diagnostic, CLI, topology, config, Flow, log/event and change evidence
 - Create/attach incident
 - Create maintenance/suppression (RBAC)
 - Open ITSM ticket/context

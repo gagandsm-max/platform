@@ -4,7 +4,7 @@
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Completeness Control**
-**Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master RTM supplements including `Platform_23`
+**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
 
 ## 1. Purpose
 
@@ -302,6 +302,22 @@ These are engineering-governance controls, not customer-facing product features.
 | GOV-DOC-001 | Mother documents are READ-MOSTLY; controlled correction is mandatory when errors/contradictions/decision changes/selected dependencies/resolved P0s/omissions/implementation conflicts occur | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | GOV-OSS-001 | Approved dependencies must match `Platform_07_OSS_Catalog.md` and implementation; catalogue omissions require change control before milestone/release | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
+
+### NOC troubleshooting supporting-master coverage
+
+Requirements `REQ-UI-015` through `REQ-UI-025` are additionally governed by the following specialized/base masters beyond the six logical design columns above:
+
+- `Platform_09_UI_UX_Master.md` — explicit action-bar/drawer/entity/incident/RCA screen behavior.
+- `Platform_10_Protocol_Security_Connector_Master.md` — protocol execution, credentials, target safety and diagnostic security contract.
+- `Platform_11_Sizing_Capacity_Storage_Master.md` — interactive diagnostic/CLI workload accounting, capacity reserve and no-starvation certification.
+- `Platform_14_Test_Performance_and_Release_Quality.md` — positive/negative/E2E/performance release evidence.
+- `Platform_17_API_Event_and_Data_Model_Contracts.md` — diagnostic job, Live Evidence, Investigation Session and CLI-session API/event/data contracts.
+- `Platform_18_Security_Threat_Model.md` — arbitrary-target, cross-tenant, credential/session and resource-exhaustion threats/mitigations.
+- `Platform_21_Enterprise_Gap_Closure_Master.md` — Incident Command Workspace projection when an Investigation Session links to an incident.
+- `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` — Active Evidence Acquisition, evidence trust and Suggested Next Test/Copilot constraints.
+- `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` — single Capability Pack ownership/certification of technology-specific diagnostics; no second diagnostic-pack framework.
+
+A NOC troubleshooting requirement is not complete merely because the BRD/PRD/HLD/LLD/Dataflow columns are checked; applicable supporting-master contracts above must also be satisfied.
 
 ## 3. Completeness gate
 
