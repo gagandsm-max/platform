@@ -382,9 +382,17 @@ LLMs must not be the authoritative calculator. Sizing/capacity numbers remain su
 
 ## 15. NTA / DPI boundary
 
-Native initial capability includes: NetFlow; IPFIX; sFlow; J-Flow/vendor flow; exported application classification; top talkers; conversations; site matrices; QoS analysis; trends; anomalies; capacity analysis.
+Native initial capability includes: NetFlow v5/v9; IPFIX; sFlow; J-Flow/vendor-compatible flow; exporter/template/sampling/sequence/time Data Quality; exported application classification; top talkers; conversations; site/interface/application/ASN/QoS matrices; bounded Sankey; trends; anomalies; capacity analysis; exporter administration and troubleshooting.
 
-Bounded Triggered Packet Evidence remains permitted under `Platform_19`. Always-on full DPI remains deferred. This master does not reopen full DPI.
+Flow/NTA certification is dimensional. A protocol/pack profile may independently certify exporter admission/identity, template/options behavior, sampling, sequence/reset, IPv4/IPv6, NAT, interface/VRF/QoS, application metadata, enrichment, exporter health, analytics and scale. Listing 'IPFIX' does not imply every enterprise IE/vendor behavior is certified.
+
+Capability Packs may declare bounded vendor Flow extensions such as enterprise information-element interpretation, exporter application/QoS/NAT fields, protocol/version compatibility, template quirks and semantic mappings. Packs do not create another Flow engine, database or Sensor role.
+
+Identity enrichment consumes existing canonical identity sources. Endpoint/system/hostname/site may use inventory/IPAM/DHCP/DNS/Agent evidence. User attribution requires time-bounded authenticated-session evidence from approved identity/network sources; AD/Entra directory existence alone is not a historical user-session proof. Domain/FQDN is distinct from URL, and public-IP GeoIP is approximate classification.
+
+Production Flow executes on a dedicated `FLOW_SENSOR`; production log/event workloads execute on a dedicated `LOG_SENSOR`. Both use the one Universal Sensor Runtime but are mutually exclusive high-rate roles. Mixed Flow+Log+polling is non-production lab/development only.
+
+Bounded Triggered Packet Evidence remains permitted under `Platform_19`. Always-on full DPI remains deferred. Flow metadata, DNS/domain correlation or exporter application classification does not reopen full DPI and shall not be marketed as arbitrary full-URL/L7 visibility.
 
 ---
 
