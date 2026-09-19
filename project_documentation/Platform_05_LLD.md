@@ -1,7 +1,7 @@
 # Platform — Low-Level Design (LLD)
 
 **Document ID:** PLATFORM-LLD-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD → PRD → Architecture → HLD  
 
@@ -1190,6 +1190,64 @@ NCM executor receives a short-lived signed job token referencing credentials, ne
 10. Session end writes summary and config-change evidence.
 
 ---
+
+## 30A. Operational diagnostics and investigation LLD
+
+Use existing PostgreSQL transactional state for bounded job/session metadata and existing ClickHouse/event/audit paths for historical result facts where appropriate. Do not add a diagnostics database.
+
+```text
+diagnostic_job
+  diagnostic_job_id
+  tenant_id
+  actor_id
+  origin_type ENTITY|INTERFACE|ALERT|INCIDENT|INVESTIGATION
+  origin_id
+  target_entity_id nullable
+  diagnostic_type PING|TRACEROUTE|SNMP|TCP|DNS|SSH_TEST|API_TEST|PATH|PACK|DOMAIN_SPECIFIC
+  requested_vantage_mode ASSIGNED|SELECTED|MULTI
+  requested_vantage_ids[]
+  parameters_json
+  state QUEUED|RUNNING|PARTIAL|SUCCEEDED|FAILED|CANCELLED|TIMED_OUT|DENIED
+  started_at
+  completed_at nullable
+  correlation_id
+  investigation_session_id nullable
+  incident_id nullable
+```
+
+Per-vantage result facts retain source identity, measured values, stable result/error code, quality, timestamps, evidence reference and provenance distinguishing `MONITORED` from `ON_DEMAND`.
+
+Execution sequence: normalize tenant-scoped canonical target → authorize action/target/parameters → enforce hard/policy bounds → select eligible Sensor/Agent → acquire bounded interactive worker budget → execute with timeout/cancellation → normalize per-vantage results without hiding contradictions → persist/audit evidence references → publish result to originating UI/investigation/incident → release capacity and emit self-observability.
+
+```text
+investigation_session
+  investigation_session_id
+  tenant_id
+  title
+  origin_type
+  origin_id
+  state OPEN|CLOSED
+  owner_user_id
+  incident_id nullable
+  started_at
+  closed_at nullable
+  reason nullable
+
+investigation_evidence_ref
+  investigation_session_id
+  evidence_type DIAGNOSTIC|CLI_SESSION|QUERY_SNAPSHOT|CONFIG_DIFF|TOPOLOGY|FLOW|LOG_EVENT|NOTE|RCA|CHANGE
+  evidence_id_or_ref
+  observed_at
+  attached_at
+  actor_id nullable
+  provenance
+```
+
+Evidence references point to authoritative existing records/artifacts where possible; do not duplicate full telemetry/config/packet payloads merely to populate an investigation.
+
+A diagnostic pack is a versioned deterministic definition of permitted checks, dependencies, bounds and result presentation. Packs may branch on typed results but may not execute arbitrary user/LLM code. AI may rank/explain next checks from the permitted catalogue; execution still passes normal authorization and bounds.
+
+Live Evidence returns monitored state and latest applicable on-demand verification separately with timestamps, vantage/source, quality and correlation reference. `Why?` returns evidence/policy inputs used to derive displayed state and must not fabricate causality.
 
 ## 31. IPAM LLD
 
