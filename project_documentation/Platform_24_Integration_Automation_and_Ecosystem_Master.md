@@ -145,6 +145,16 @@ The following are explicitly rejected:
 | `PRD-IAX-017` | Integration delivery shall use bounded durable asynchronous queues, connector-specific rate limits/backoff/circuit breaking and first-class health/lag/dead-letter telemetry. |
 | `PRD-IAX-018` | Connector credentials, inbound webhooks, mappings, payloads and automation execution shall satisfy tenant isolation, least privilege, replay protection, schema validation, egress minimization and audit requirements. |
 | `PRD-IAX-019` | Integration/automation resource use and lifecycle correctness shall be release-gated by race, failure, security, tenant-isolation and performance tests. |
+| `PRD-IAX-020` | A certified standard ITSM integration shall be configurable and supportable through Platform UI/API without source-code changes, direct database edits, hidden server-side file edits or customer-written executable code in the normal supported path. |
+| `PRD-IAX-021` | Platform shall provide a guided connector setup and readiness workflow that validates endpoint reachability, DNS/TLS/proxy/mTLS, authentication, API/product version, required permissions/scopes, rate limits, webhook prerequisites and connector capabilities before production enablement. |
+| `PRD-IAX-022` | Certified connectors shall provide versioned vendor quick-start templates and metadata discovery for remote fields, required fields, choice/state values, priorities, assignment groups/queues, CI/service identifiers and supported custom-field semantics where the remote API permits it. |
+| `PRD-IAX-023` | Platform shall provide a mapping assistant that detects missing required fields, incompatible types, invalid remote choices, unmapped mandatory lifecycle states and unsafe/oversized payloads, and shall preview mappings against representative real Platform objects before activation. |
+| `PRD-IAX-024` | Production enablement shall use a connector Readiness Gate that exercises all operations required by the configured delivery mode, including bidirectional/webhook paths when enabled, and returns an actionable pass/fail report with remediation rather than a generic connectivity result. |
+| `PRD-IAX-025` | Connector configuration shall support safe clone, version, export/import and controlled environment promotion workflows with semantic diff, validation and rollback; secrets shall never be exported in plaintext and must be rebound through governed Credential Profiles. |
+| `PRD-IAX-026` | Platform shall provide implementation-grade diagnostics with stable error codes, stage-specific evidence, sanitized remote responses, correlation IDs, permission/scope diagnosis and explicit recommended remediation; authorized support evidence shall preserve deeper technical detail without exposing secrets. |
+| `PRD-IAX-027` | Platform shall provide proactive connector lifecycle management for remote API/product-version drift, expiring credentials/certificates, deprecated capabilities and connector-pack upgrades, including compatibility checks and revalidation before unsafe activation. |
+| `PRD-IAX-028` | Platform shall provide operational self-service for integrations: health, queue/backlog, webhook health, rate-limit state, circuit state, last success, failed-item inspection, bounded retry/replay, pause/drain/disable, dead-letter handling and audit, all subject to RBAC. |
+| `PRD-IAX-029` | ITSM implementation usability shall be a release-certification dimension measured with reproducible first-time and experienced-implementer workflows; Platform shall track setup-step completion/failure evidence and shall not make a “world-class/easy integration” claim without benchmark evidence. |
 
 ---
 
@@ -921,6 +931,238 @@ Every connector has maximum payload/attachment limits and deterministic oversize
 
 ## 20. UI/UX requirements
 
+### 20.1 ITSM implementation experience contract
+
+For certified standard connectors, the supported implementation path must be **no-code/low-friction by default**:
+
+- no Platform source-code change;
+- no direct PostgreSQL/ClickHouse manipulation;
+- no undocumented environment-variable or server-file editing;
+- no requirement for customer-written JavaScript/Python;
+- no vendor-specific tribal knowledge that Platform could have discovered or validated itself;
+- no production activation before the required readiness checks are visible.
+
+A connector setup wizard shall use progressive disclosure and retain a resumable draft. The recommended flow is:
+
+```text
+Select Vendor/Product
+ -> Select Cloud / On-Prem + Product/API Version
+ -> Endpoint / Proxy / Trust / mTLS
+ -> Credential Profile / OAuth Authorization
+ -> Permission & Scope Preflight
+ -> Discover Capabilities / Remote Metadata
+ -> Choose Delivery Mode
+ -> Routing / Correlation Policy
+ -> CI / Service Mapping
+ -> Field / State / Priority Mapping
+ -> Data-Boundary Policy
+ -> Exact Payload Preview
+ -> End-to-End Lifecycle Tests
+ -> Readiness Report
+ -> Activate
+ -> Observe
+```
+
+Every step shows `PASS`, `WARNING`, `FAIL`, or `NOT_APPLICABLE`, with the exact reason and remediation path.
+
+### 20.2 Connection and permission preflight
+
+Before mapping work begins, Platform should automatically validate as applicable:
+
+- DNS resolution and selected egress path/Sensor/Core placement;
+- TCP/HTTPS reachability;
+- proxy configuration;
+- TLS chain, hostname, expiry and customer CA trust;
+- mTLS client certificate validity;
+- clock/skew issues relevant to signed requests;
+- OAuth/token/API-key authentication;
+- remote product/API version;
+- required API permissions/scopes/roles;
+- create/update/comment/resolve/reopen/read permissions for the configured mode;
+- webhook callback reachability/signature requirements where applicable;
+- remote rate-limit/quota information where exposed.
+
+The user receives an **Implementation Readiness Report** suitable for sharing with ITSM/customer administrators. It lists required endpoints, ports/proxy path, certificate/trust requirements, authentication method, scopes/roles, webhook callback requirements, tested capabilities, known limitations and failures. Secrets are excluded.
+
+### 20.3 Vendor quick starts and remote metadata discovery
+
+Certified Integration Packs should ship versioned vendor/product quick-start profiles covering safe defaults for supported object classes and workflows.
+
+Where APIs permit, Platform discovers and caches remote metadata including:
+
+- required/custom fields and data types;
+- choice lists/enumerations;
+- workflow/state values and legal transitions;
+- priority/urgency/impact values;
+- assignment groups/queues;
+- CI/service classes and identifiers;
+- attachment/payload limits;
+- supported API capabilities.
+
+Defaults accelerate setup but never silently override existing customer customization. Discovered metadata carries fetch time, product/API version and freshness.
+
+### 20.4 Mapping assistant
+
+The mapping experience must support:
+
+- searchable Platform and remote fields;
+- type-aware drag/select mapping;
+- lifecycle-specific mappings;
+- required-field completeness;
+- state/priority enumeration mapping;
+- conditional mappings through bounded safe expressions;
+- defaults/fallbacks with explicit precedence;
+- representative real Platform object preview;
+- exact post-egress-filter payload preview;
+- validation of length, enum, required, nullability and remote schema constraints;
+- detection of fields removed or changed after remote-version drift.
+
+AI may suggest mappings only as advisory assistance. Suggestions require deterministic validation and user confirmation and cannot access/reveal connector secrets.
+
+### 20.5 End-to-end Readiness Gate
+
+The connector cannot be marked `PRODUCTION_READY` until the operations required by the selected delivery mode pass or an explicitly authorized exception is recorded.
+
+The gate tests, where applicable:
+
+```text
+AUTHENTICATE
+DISCOVER_METADATA
+CREATE
+READ_BACK / FIND_BY_CORRELATION_KEY
+UPDATE
+COMMENT / WORKNOTE
+SEVERITY_OR_STATE_UPDATE
+CI / SERVICE LOOKUP
+RECOVERY
+RESOLVE / CLOSE
+REOPEN
+INBOUND WEBHOOK / POLLING
+DUPLICATE / IDEMPOTENCY BEHAVIOR
+CLEANUP TEST OBJECT
+```
+
+Test artifacts are clearly marked as Platform test objects when the remote system supports it and are cleaned up or linked for administrator cleanup. Platform shall never generate uncontrolled production ticket spam during testing.
+
+The final report answers:
+
+- what passed;
+- what failed;
+- exact failing stage;
+- expected versus observed behavior;
+- relevant sanitized remote status/error;
+- required customer-side remediation;
+- whether production activation is safe.
+
+### 20.6 Configuration portability and environment promotion
+
+Connector instances, mappings, policies and routes are versioned configuration objects.
+
+Platform supports:
+
+- clone connector configuration;
+- export/import a redacted, versioned configuration bundle;
+- semantic diff before import/apply;
+- validation against the destination connector/product/API version;
+- explicit Credential Profile rebinding;
+- controlled Dev/Test/UAT -> Production promotion where customers use separate environments;
+- rollback to the previous valid configuration version.
+
+Plaintext credentials, tokens, private keys and secret values are never exported.
+
+### 20.7 Troubleshooting and support experience
+
+Implementation teams must not need packet captures, database queries or source-code access for routine integration failures.
+
+For each failed stage Platform presents:
+
+```text
+stable_error_code
+human_summary
+failing_stage
+connector_instance
+remote_endpoint
+remote_status_code?
+sanitized_remote_error?
+correlation_id
+last_success_at?
+retryability
+likely_cause
+recommended_fix
+test_again_action
+support_evidence_ref
+```
+
+Authorized support users may access deeper sanitized protocol/request/response evidence subject to RBAC and data-boundary policy. Secrets remain redacted.
+
+A one-click support bundle for a connector contains version/capability metadata, health history, readiness results, recent sanitized errors, queue statistics, configuration checksums and relevant audit references — not credentials or unrestricted customer payloads.
+
+### 20.8 Lifecycle and upgrade assistance
+
+Platform proactively warns about:
+
+- expiring OAuth/token/certificate credentials where expiry is knowable;
+- remote API deprecation/version incompatibility;
+- connector-pack version drift;
+- remote metadata/schema drift;
+- newly required fields or permissions;
+- revoked webhook registration;
+- sustained rate limiting or quota exhaustion.
+
+Connector upgrades run compatibility/preflight tests against the existing instance before activation. Breaking mapping/capability changes require explicit review.
+
+### 20.9 Operational self-service
+
+Integration administrators can, subject to RBAC:
+
+- test connection/readiness;
+- inspect remote binding;
+- inspect/retry a failed item;
+- replay a bounded dead-letter selection;
+- pause new delivery;
+- drain existing queue;
+- disable connector;
+- rotate/rebind credentials;
+- refresh remote metadata;
+- compare configuration versions;
+- rollback connector configuration;
+- re-run certification/readiness;
+- generate a support bundle.
+
+Bulk retry/replay always shows scope/count/blast-radius and requires confirmation/policy.
+
+### 20.10 Usability and implementation-quality certification
+
+ITSM integration usability is a release-certification dimension, not an informal UX aspiration.
+
+Certification includes reproducible scenarios for:
+
+1. a first-time implementation engineer configuring a certified connector from documentation/UI only;
+2. an experienced engineer configuring the same connector;
+3. a wrong endpoint;
+4. TLS/customer-CA failure;
+5. bad credentials;
+6. insufficient remote permissions;
+7. required custom field missing;
+8. invalid state/priority mapping;
+9. webhook signature/reachability failure;
+10. remote rate limiting;
+11. API/version drift;
+12. migration of an integration configuration between environments;
+13. diagnosis and recovery from a failed queued lifecycle event.
+
+Measure at minimum:
+
+- setup completion rate;
+- time and step count to first successful end-to-end lifecycle test;
+- number of undocumented/manual interventions;
+- failed-step diagnostic accuracy;
+- remediation success without source/DB intervention;
+- configuration promotion success;
+- post-upgrade revalidation success.
+
+Numeric release targets must be frozen from usability benchmarking and pilot evidence rather than invented in advance. A connector cannot be called “easy”, “zero-touch” or “world-class” merely because a demo succeeds.
+
 Integrations workspace must expose:
 
 - connector instances;
@@ -1010,6 +1252,21 @@ Test cross-tenant binding/routing attempts, forged/replayed webhook, invalid/exp
 
 Test 401/403/409/429/5xx/timeouts, `Retry-After`, circuit open/recovery, queue saturation, dead-letter handling, remote outage while monitoring remains normal, and performance under certified connector workload.
 
+### 22.7 Implementation usability and supportability
+
+For each GA-certified ITSM connector/version, execute a clean-environment usability certification using the setup and failure scenarios in §20.10.
+
+The test must prove that the normal supported implementation, validation, activation and routine troubleshooting path does not require:
+
+- source changes;
+- direct database edits;
+- hidden configuration-file changes;
+- plaintext secret handling;
+- vendor-specific manual steps omitted from Platform;
+- support-only backend intervention for routine failures.
+
+The evidence bundle retains the setup path, test results, failures encountered, diagnostic output, remediation actions and final readiness report.
+
 A connector/version is not “certified” until its declared capabilities pass the applicable contract/integration/security suite.
 
 ---
@@ -1025,24 +1282,26 @@ This is a dependency sequence for this capability family, not permission to bypa
 3. define delivery-mode/routing/correlation/recovery/reopen/state-authority contracts;
 4. implement durable ordered delivery, idempotency, ambiguity reconciliation and connector health;
 5. implement safe mapping/data-boundary/preview/test foundation;
-6. implement tenant/security/audit controls and race/security tests.
+6. implement guided setup/preflight, remote metadata discovery, quick-start templates, Readiness Gate and implementation diagnostics;
+7. implement versioned configuration portability/promotion and connector lifecycle/upgrade checks;
+8. implement tenant/security/audit controls and race/security/usability tests.
 
 ### P1 — first operational integrations
 
-7. implement/certify a bounded initial ITSM connector set from the already governed baseline plus Generic REST/Webhook;
-8. implement CI/service mapping and bidirectional state/conflict rules;
-9. implement normalized automation executor/action/risk contract;
-10. integrate controlled-remediation validation/rollback with fresh monitoring evidence;
-11. ingest executor/IaC/ITSM change facts.
+9. implement/certify a bounded initial ITSM connector set from the already governed baseline plus Generic REST/Webhook using the full implementation-experience certification;
+10. implement CI/service mapping and bidirectional state/conflict rules;
+11. implement normalized automation executor/action/risk contract;
+12. integrate controlled-remediation validation/rollback with fresh monitoring evidence;
+13. ingest executor/IaC/ITSM change facts.
 
 ### P2 — ecosystem expansion
 
-12. expand ITSM/automation Integration Packs by measured customer demand;
-13. expose stable Monitoring-as-Code API/declarative resources;
-14. add Terraform provider after API lifecycle stability; verify OpenTofu compatibility;
-15. add external NetBox/NetOps interoperability where required;
-16. add optional OTel-export/Cribl packs when customer use cases justify them;
-17. add Pulumi/Crossplane integrations only when they avoid duplicated control-plane logic.
+14. expand ITSM/automation Integration Packs by measured customer demand;
+15. expose stable Monitoring-as-Code API/declarative resources;
+16. add Terraform provider after API lifecycle stability; verify OpenTofu compatibility;
+17. add external NetBox/NetOps interoperability where required;
+18. add optional OTel-export/Cribl packs when customer use cases justify them;
+19. add Pulumi/Crossplane integrations only when they avoid duplicated control-plane logic.
 
 ---
 
@@ -1069,6 +1328,16 @@ This is a dependency sequence for this capability family, not permission to bypa
 | `REQ-IAX-017` | `PRD-IAX-017` | §17 queue/health/rate/circuit |
 | `REQ-IAX-018` | `PRD-IAX-018` | §18 security/egress |
 | `REQ-IAX-019` | `PRD-IAX-019` | §21-22 resource/test gates |
+| `REQ-IAX-020` | `PRD-IAX-020` | §20.1 no-code supported implementation path |
+| `REQ-IAX-021` | `PRD-IAX-021` | §20.2 guided setup/readiness preflight |
+| `REQ-IAX-022` | `PRD-IAX-022` | §20.3 quick starts/metadata discovery |
+| `REQ-IAX-023` | `PRD-IAX-023` | §20.4 mapping assistant |
+| `REQ-IAX-024` | `PRD-IAX-024` | §20.5 end-to-end Readiness Gate |
+| `REQ-IAX-025` | `PRD-IAX-025` | §20.6 configuration portability/promotion |
+| `REQ-IAX-026` | `PRD-IAX-026` | §20.7 diagnostics/support experience |
+| `REQ-IAX-027` | `PRD-IAX-027` | §20.8 lifecycle/upgrade assistance |
+| `REQ-IAX-028` | `PRD-IAX-028` | §20.9 operational self-service |
+| `REQ-IAX-029` | `PRD-IAX-029` | §20.10 + §22.7 usability certification |
 
 ---
 
@@ -1079,5 +1348,7 @@ This master is specification/change-control evidence only.
 No capability in this document is implemented, production-ready or certified merely because the requirement exists.
 
 Implementation is complete only when applicable code, migrations, compatibility, tests, tenant isolation, security, observability, resource evidence, UI, upgrade/rollback behavior, runbooks, connector certification evidence and documentation are complete.
+
+For a certified standard ITSM connector, Definition of Done additionally requires guided setup, preflight/readiness reporting, metadata discovery where supported, safe mapping/preview, end-to-end lifecycle tests, implementation diagnostics, configuration portability, upgrade/revalidation behavior, self-service operations and usability-certification evidence. Routine supported integration must not require source changes, direct database edits or undocumented server-side configuration.
 
 Named candidate vendors/tools in this document are not support claims until their connector/version has passed the certification matrix and the release documentation explicitly lists them as supported.
