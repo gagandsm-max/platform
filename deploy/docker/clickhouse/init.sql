@@ -25,8 +25,8 @@ CREATE TABLE IF NOT EXISTS platform.metric_numeric (
     flags UInt32,
     sequence_id String,
     source_protocol LowCardinality(String)
-) ENGINE = MergeTree()
-ORDER BY (tenant_id, entity_id, metric_id, ts)
+) ENGINE = ReplacingMergeTree()
+ORDER BY (tenant_id, entity_id, metric_id, ts, sensor_id, sequence_id)
 SETTINGS non_replicated_deduplication_window = 10000;
 
 -- Initial health verification record
