@@ -34,10 +34,24 @@
 | TLS/certificate | TLS 1.2/1.3 checks; certificate/chain/hostname/expiry | target-specific | CA/trust, hostname, expected policy | Go `crypto/tls`, `x509` | expiry/chain/hostname/version/handshake monitoring |
 | SCP/SFTP | SSH secure transfer | TCP/22 default | credential/key and destination | SSH libraries | NCM/config transfer where needed |
 | TFTP/FTP | Legacy only if explicitly required | protocol default | explicit policy | Platform/OS adapter subject to review | disabled by default; warning/audit; no secret fallback |
-| Flow | NetFlow v5/v9, IPFIX, sFlow; J-Flow/vendor variants through compatible formats/packs | exporter/collector configurable | receiver port, template handling, source mapping | GoFlow2 | enrichment, de-dup/template cache, high-rate safeguards |
+| Flow | NetFlow v5/v9, IPFIX, sFlow; J-Flow/vendor variants through compatible formats/packs | exporter/collector configurable | dedicated Flow Sensor/listener, allowed/configured exporters, protocol/version, observation-domain/source mapping, sampling/template policy, rate/capacity limits | GoFlow2 | tenant-safe exporter admission, protocol-aware templates/sequence/sampling/time quality, bounded normalization/enrichment, replay identity, per-exporter fairness and high-rate safeguards |
 | CDP/LLDP/ARP/FDB | SNMP/CLI/API/gNMI derived | underlying protocol endpoints | discovery profile | GoSNMP/CLI/gNMI | topology provenance/confidence/history |
 | Routing/state | BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VRF/STP/HSRP/VRRP/LACP/QoS/multicast/SD-WAN via SNMP/gNMI/NETCONF/REST/CLI | vendor-specific | Device Pack/Monitoring Profile | protocol foundations above | canonical graph and RCA semantics, not a routing daemon |
 
+## 2.1 Flow source security and privacy supplement
+
+- Production Flow reception executes only on the `FLOW_SENSOR` role. Listener binding and exporter admission are centrally configured and audited.
+- NetFlow/IPFIX/sFlow over UDP is not cryptographically authenticated by default. Source address, observation domain, engine/source ID and record contents are evidence, not tenant authority. Platform tenant/source scope comes from configured listener/exporter policy.
+- Unknown exporters are rejected or quarantined according to policy; they never create tenant/entity authority simply by sending packets.
+- Bounds apply to datagram/record size, records/datagram, exporter count, observation domains, template count/churn, fields/template, enterprise IEs, variable-length values and rates. Per-exporter fairness protects shared Flow Sensor resources.
+- Public-IP GeoIP, DNS/domain, cloud/SaaS and application classification are enrichment evidence with source/version/time/confidence; they are not security identity.
+- User attribution requires time-bounded authenticated-session evidence. AD/LDAP directory membership alone is not sufficient to assert which user generated a Flow at a timestamp.
+- Domain/FQDN is distinct from URL. Full URL path/query is not inferred from Flow and, if supplied by another approved source, is sensitive content governed by minimization, RBAC, retention and egress policy. Credentials/tokens/query secrets must not be persisted as ordinary Flow dimensions.
+- User-attributed Flow access/export is separately authorized and audited; NTA shall not become employee browsing/content surveillance.
+
+## 2.2 Dedicated Sensor role security boundary
+
+`FLOW_SENSOR` and `LOG_SENSOR` are mutually exclusive production high-rate roles under the same Sensor software. Role configuration is centrally authorized/signed. A role change requires drain/unassignment and validation; a compromised/local operator cannot enable extra collection modules merely by changing a local file. Network polling/discovery/NCM modules remain disabled on Flow/Log role instances.
 ## 3. Infrastructure/cloud credential matrix
 
 | Domain | Authentication/security | OSS/SDK | Platform-owned layer |
