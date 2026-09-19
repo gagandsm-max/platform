@@ -1,7 +1,7 @@
 # Platform — Protocol, Security, Credential & Connector Master
 
 **Document ID:** PLATFORM-PROTOCOL-001  
-**Version:** 3.2.2  
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Protocol/Security/Connector Contract**  
 **Product:** Platform
 
