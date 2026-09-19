@@ -320,7 +320,7 @@ public class TelemetryPipelineIntegrationTest {
 
             consumer.consume(record, ack);
 
-            verify(clickHouseClient, times(1)).insertNumericBatch(List.of(obs));
+            verify(clickHouseClient, times(1)).insertNumericBatch(eq(List.of(obs)), anyString());
             verify(ack, times(1)).acknowledge();
             assertEquals(Status.UP, healthIndicator.health().getStatus());
         }
@@ -363,7 +363,7 @@ public class TelemetryPipelineIntegrationTest {
             ConsumerRecord<String, String> record = new ConsumerRecord<>("platform.telemetry.canonical", 0, 100L, entityId.toString(), jsonPayload);
 
             doThrow(new RuntimeException("ClickHouse connection refused"))
-                    .when(clickHouseClient).insertNumericBatch(anyList());
+                    .when(clickHouseClient).insertNumericBatch(anyList(), anyString());
 
             RuntimeException ex = assertThrows(RuntimeException.class, () ->
                     consumer.consume(record, ack)
