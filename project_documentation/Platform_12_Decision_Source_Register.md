@@ -234,3 +234,24 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Failure certification | USER-FIXED | Agent reliability production-readiness requires repeatable failure-injection, replay/idempotency, security/tenant, package/reboot/rollback and resource evidence for certified Linux/Windows profiles. |
 
 These decisions are additive and do not resolve the open two-Core Kafka, ClickHouse, PostgreSQL or HA-fencing P0 engineering spikes by declaration.
+
+
+## 14. v3.2.2 USER-FIXED / ARCH-DELEGATED Sensor communication reliability decisions — 2026-09-19
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Sensor communication product scope | USER-FIXED | PRD-SCR-001 through PRD-SCR-010 in Platform_25_Sensor_Communication_Integrity_Resilience_and_Resource_Assurance_Master.md are approved additive v3.2.2 requirements. |
+| Sensor communication traceability | ARCH-DELEGATED | REQ-SCR-001 through REQ-SCR-010 in Platform_25 §24 are the authoritative RTM supplement; existing REQ-S/REQ-NET/REQ-ALT/REQ-DATA requirements remain authoritative and are not duplicated. |
+| Preserve Sensor architecture | USER-FIXED | Go Sensor runtime, bounded worker pools, durable local spool, Core-authoritative policy, MWU placement, 80% Sensor storage protection, Pipeline Integrity and alert qualification remain the architecture. No heavyweight Sensor database/reliability microservice is introduced by this decision. |
+| Durable Core ACK remains P0 | USER-FIXED + ARCH-DELEGATED engineering spike | Platform_25 does not define ACK_DURABLE by declaration. The final Sensor deletion boundary depends on certified two-Core Kafka/ClickHouse/PostgreSQL/fencing failure evidence. No third full Core may be introduced silently. |
+| Partition-safe Sensor ownership | USER-FIXED + ARCH-DELEGATED implementation | Sensor ownership must balance bounded disconnected monitoring continuity with stale-owner fencing. Short hard leases that defeat temporary Core-outage continuity and unlimited stale ownership are both unacceptable; exact grace/lease mechanics require failure testing. |
+| Push-protocol HA | USER-FIXED + ARCH-DELEGATED implementation | Sensor reassignment alone is not push-receiver HA. Critical push telemetry uses supported source/deployment redundancy where practical, such as stable collector endpoint, multiple destinations or dual collectors. Anycast is not selected by declaration and standalone customers are not forced into HA. |
+| Fallback readiness | USER-FIXED | For HA-critical pull monitoring, fallback eligibility includes target-specific reachability/protocol/credential/security/capability evidence as well as Sensor capacity. Validation is lightweight, staggered and policy driven rather than duplicate full monitoring. |
+| Poll and retry storm control | USER-FIXED + ARCH-DELEGATED implementation | Periodic monitoring is de-synchronized without changing semantic cadence. Strong-evidence shared failure domains may reduce retry amplification while retaining bounded recovery probes; weak/speculative topology evidence may not suppress independent failures. |
+| Control/current/replay fairness | USER-FIXED | Identity/control/current telemetry must remain responsive during replay backlog; replay must still make bounded forward progress. Implementation may use priorities/budgets without a new service. |
+| Protocol continuity/loss truth | USER-FIXED | Platform exposes protocol-specific transport/auth/session/gap/drop evidence and does not claim guaranteed completeness for unacknowledged UDP/source delivery. Monitoring-path degradation remains distinct from resource-down state. |
+| Buffer horizon | USER-FIXED + ARCH-DELEGATED implementation | Sensor operations expose estimated remaining buffer duration and loss risk from sustained recent growth and usable capacity. Transient bursts alone do not permanently disqualify placement. |
+| Sensor resource certification | USER-FIXED | Reliability controls are certified against CPU/RAM/disk/network/FD/socket/goroutine/retry/replay metrics. Existing Sensor hardware targets are not raised without measured evidence and controlled change. |
+| Cost-aware HA | USER-FIXED | Standalone, pooled HA and critical-site redundancy remain policy/capability tiers. Maximum Sensor redundancy is not mandatory for every customer. |
+
+These decisions strengthen Sensor communication correctness while preserving existing Pipeline Integrity, alert-quality, Sensor sizing and storage-protection authority.
