@@ -1198,85 +1198,78 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 ### UI-017 — Network Flow / Traffic Analytics
 
 **Domain:** Network  
-**Primary roles:** Network engineer  
-**Purpose:** Top talkers/conversations/protocols/ports/sites/interfaces/ASN, traffic matrix, Sankey, time series and anomalies.
+**Primary roles:** Network engineer, capacity engineer; user-attribution views require additional permission  
+**Purpose:** Explain who/what is using network capacity, from which observation point, with explicit sampling/data-quality/provenance rather than only drawing Top Talker charts.
 
-**Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
+**Entry/navigation:** `Observe → Flow / Traffic` or equivalent, plus contextual `Investigate Traffic` from interface/device/site/path/alert/incident views. Role/tenant/resource scope is enforced server-side.
 
 **Default tabs/views:**
 - Overview
 - Conversations
+- Top Talkers
 - Sources
 - Destinations
-- Protocols
+- Applications
+- Protocols / Ports
 - Sites
 - Interfaces
 - ASN
+- QoS
 - Traffic Matrix
+- Sankey
+- Exporters
+- Data Quality
 
 **Default filters:**
-- Time range
-- Timezone
-- Auto-refresh
-- Tenant/Customer (only where user is authorized for multiple tenants)
-- Region
-- Country
-- Site
-- Business Unit
-- Group/Dynamic Group
-- Criticality
-- Environment
-- Tags
-- Device type
-- Vendor
-- Model
-- Technology
-- Sensor/Sensor Pool
-- Interface
-- Circuit/Provider where relevant
-- Status/Severity
-- Source IP/Subnet
-- Destination IP/Subnet
-- Protocol
-- Port
-- ASN
-- VRF
-- Interface
+- Time range / timezone / auto-refresh
+- Tenant/Customer where authorized
+- Region / country / site / subnet
+- Flow Sensor / exporter / listener / observation domain
+- Device / canonical entity / interface
+- Source IP / endpoint / subnet / site
+- Destination IP / endpoint / subnet / site
+- Hostname / FQDN / domain where resolved
+- User where separately authorized and attribution evidence exists
+- Protocol / source port / destination port
+- Application and application-classification source
+- ASN / organization / cloud/SaaS provider
+- VRF / VLAN
+- DSCP / QoS
+- direction / observation point
+- sampled vs unsampled / sampling rate
+- Flow protocol/version
+- quality / template / sequence-gap state
 
-**Primary table/list columns where applicable:**
-- Entity/Link
-- IP/Identifier
-- Site
-- Vendor/Model
-- Status
-- Availability
-- Primary KPI
-- Sensor
-- Active alerts
-- Last update
+**Primary result fields where applicable:**
+- time / duration
+- source and destination IP/port/protocol
+- canonical endpoint/device/system name where resolved
+- user attribution with source/confidence where authorized
+- domain/FQDN and application with classification provenance
+- observed bytes/packets and estimated bytes/packets separately
+- sampling rate/quality
+- exporter / observation domain / ingress-egress interface
+- site / internal geography
+- public-IP geography marked approximate with source/confidence
+- ASN / cloud/SaaS/provider
+- VRF/VLAN/QoS/NAT/TCP flags where supplied
+- template/protocol/quality indicators
 
-**Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
-- Investigate
-- Ping
-- Traceroute/Path Analysis
-- Create maintenance
-- View topology
-- View alerts/incidents
+**Conversation detail:** preserves raw directional observations and shows exporter/observation-point evidence, interfaces, sampling, application/domain provenance, NAT/QoS metadata, related topology/path/routing/change/incident evidence and Data Quality. A bidirectional conversation is a derived view; it never deletes source direction/provenance.
 
-**Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
+**Identity semantics:** IP is not permanent endpoint/user identity. Historical Flow uses temporal entity/IPAM/DHCP/DNS/Agent/session evidence. AD/Entra directory membership alone does not assert the user of an IP. Conflicting user/entity evidence is shown as conflicted/uncertain rather than silently selected.
 
-**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
+**Domain/URL semantics:** domain/FQDN is not displayed as a full URL. Flow does not infer URL path/query from IP/port traffic. URL detail appears only when an approved source actually supplies it and policy/RBAC allows it; query strings/secrets are minimized/redacted according to policy.
 
-**Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
+**Geo semantics:** internal Site/Region/Country comes from governed inventory/topology. Public-IP GeoIP is shown as approximate network geolocation with provider/database/version/confidence, never precise user physical location.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Data-quality behavior:** `No Flow Data` is not rendered as `No Traffic`. Show exporter last-seen, template state, sequence gaps, sampling-known state, clock quality, receiver/kernel/queue drops, rate limiting, spool/backlog and downstream pipeline degradation.
 
+**Flow Coverage:** when evidence permits, compare SNMP/interface traffic with normalized Flow for the same interface/time/direction/observation scope and show `GOOD | PARTIAL | LOW | UNKNOWN` or evidence-backed percentage/range. A naive bytes ratio is prohibited.
+
+**Actions:** save/share permitted view, bounded export, report, Investigate, open entity/interface/site, view topology/path/routing/change/incident, and `Investigate Traffic` context transfer. User-attributed exports require additional permission/audit.
+
+**Performance:** server-side queries use bounded time/rows/scan/concurrency. Top-N uses bounded Top-K/pre-aggregation where appropriate. Sankey defaults to Top-N plus `Other`; the browser does not render unbounded edges or scan unrestricted multi-year raw Flow.
 ---
 
 ### UI-018 — Site-to-Site Traffic
@@ -5286,6 +5279,17 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 ---
 
+### UI-073A — Sensor Role Provisioning and Isolation
+
+Sensor install/enrollment requires explicit role selection. Production choices include `NETWORK_SENSOR`, `INFRASTRUCTURE_SENSOR`, `FLOW_SENSOR`, `LOG_SENSOR` and other independently certified roles. The UI must make exclusivity visible before activation.
+
+For `FLOW_SENSOR`, show enabled Flow protocols and disabled Network polling/discovery/NCM/synthetics/log modules. For `LOG_SENSOR`, show enabled log/event modules and disabled Flow/Network polling/discovery/NCM/synthetics modules. Combined high-rate role is labelled **Development/Lab — Not Production Certified**.
+
+Role conversion uses a guided drain workflow: stop new assignments/sources, verify/handle durable spool, remove incompatible assignments, validate capacity/connectivity, apply role, restart/reconfigure, then run readiness checks. Direct local role-file editing is not the normal administrative path.
+
+Sensor Estate/Detail shall expose role-specific capacity and health. Flow Sensor detail adds exporters, datagrams/sec, records/sec, bytes/sec, templates/churn, sampling, socket/kernel drops, decode queues, Flow spool and replay/drain health. Log Sensor detail exposes its independent log workload metrics. Dedicated does not imply 100% resource use; headroom/risk is visible.
+
+---
 ### UI-074 — Sensor Detail
 
 **Domain:** Platform/Sensor/Data  
