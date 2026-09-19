@@ -103,7 +103,7 @@ public class DiscoveryRepository {
             JdbcTime.instant(rs.getTimestamp("created_at")), JdbcTime.instant(rs.getTimestamp("updated_at"))
     );
 
-    @Transactional
+    @Transactional("transactionManager")
     public void createRequest(DiscoveryRequest request, List<DiscoveryTarget> targets) {
         String methodsJson = toJson(request.requestedMethods().stream().map(Enum::name).toList());
         String summaryJson = toJson(request.summary() == null ? Map.of() : request.summary());
@@ -263,7 +263,7 @@ public class DiscoveryRepository {
                 """, params);
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public void recordEvidence(UUID tenantId, UUID requestId, List<DiscoveryEvidence> evidenceList) {
         if (evidenceList == null || evidenceList.isEmpty()) return;
         SqlParameterSource[] batchSources = new SqlParameterSource[evidenceList.size()];

@@ -38,7 +38,7 @@ public class DiscoveryService {
         this.tenantService = tenantService;
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public DiscoveryRequest createDiscovery(
             UUID tenantId,
             String name,
@@ -125,7 +125,7 @@ public class DiscoveryService {
      * First placement only (PENDING + unassigned). Concurrent losers receive
      * {@code DISCOVERY_PLACEMENT_CONFLICT}; does not overwrite an existing assignment.
      */
-    @Transactional
+    @Transactional("transactionManager")
     public DiscoveryRequest assignSensorFirstPlacementFromControlPlane(UUID tenantId, UUID requestId, String sensorId) {
         tenantService.get(tenantId);
         String sensor = boundedRequired(sensorId, 128, "Sensor identity");
@@ -144,7 +144,7 @@ public class DiscoveryService {
      * It is deliberately not exposed by the Discovery public API. The caller is responsible for supplying
      * an authoritative enrolled Sensor identity after normal Sensor eligibility/placement checks.
      */
-    @Transactional
+    @Transactional("transactionManager")
     public DiscoveryRequest assignSensorFromControlPlane(UUID tenantId, UUID requestId, String sensorId) {
         tenantService.get(tenantId);
         String sensor = boundedRequired(sensorId, 128, "Sensor identity");
@@ -157,7 +157,7 @@ public class DiscoveryService {
         return getRequest(tenantId, requestId);
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public DiscoveryRequest cancelRequest(UUID tenantId, UUID requestId) {
         tenantService.get(tenantId);
         DiscoveryRequest request = repository.findByIdForUpdate(tenantId, requestId)
@@ -183,7 +183,7 @@ public class DiscoveryService {
         return repository.listEvidence(tenantId, requestId, page, limit);
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public Optional<DiscoveryTaskPayload> fetchTaskForSensor(String authenticatedSensorId) {
         String sensorId = boundedRequired(authenticatedSensorId, 128, "Authenticated Sensor identity");
         Optional<AssignedRequest> claimed = repository.claimAssignedRequestForSensor(sensorId, Instant.now());
@@ -202,7 +202,7 @@ public class DiscoveryService {
         ));
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public ResultIngestOutcome ingestResultsFromSensor(
             String authenticatedSensorId,
             UUID requestId,

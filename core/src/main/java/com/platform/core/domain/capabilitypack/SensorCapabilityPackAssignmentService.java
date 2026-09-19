@@ -61,7 +61,7 @@ public class SensorCapabilityPackAssignmentService {
     ) {
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(value = "transactionManager", readOnly = true)
     public AssignmentView getAssignments(UUID tenantId, String sensorId) {
         requireTenant(tenantId);
         requireSensorExists(tenantId, sensorId);
@@ -79,7 +79,7 @@ public class SensorCapabilityPackAssignmentService {
         );
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public AssignmentView assign(
             UUID tenantId,
             String sensorId,
@@ -117,7 +117,7 @@ public class SensorCapabilityPackAssignmentService {
         return snapshot(tenantId, sensorId, next);
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public AssignmentView unassign(
             UUID tenantId,
             String sensorId,
@@ -147,7 +147,7 @@ public class SensorCapabilityPackAssignmentService {
         return snapshot(tenantId, sensorId, next);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(value = "transactionManager", readOnly = true)
     public SensorPackDesiredState getDesiredState(UUID tenantId, String sensorId) {
         SensorCapabilityPackState state = assignmentRepository.findState(tenantId, sensorId)
                 .orElse(SensorCapabilityPackState.neverMutated(tenantId, sensorId));
@@ -170,14 +170,14 @@ public class SensorCapabilityPackAssignmentService {
         );
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(value = "transactionManager", readOnly = true)
     public StoredCapabilityPack requireAssignedArtifact(
             UUID tenantId, String sensorId, String packId, String packVersion) {
         return assignmentRepository.findAssignedArtifact(tenantId, sensorId, packId, packVersion)
                 .orElseThrow(() -> new DomainException(ERR_ARTIFACT_NOT_FOUND, "Pack artifact not found"));
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public void ackAppliedState(
             UUID tenantId,
             String sensorId,

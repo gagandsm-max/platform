@@ -50,7 +50,7 @@ public class CapabilityPackCatalogService {
         this.assignmentRepository = Objects.requireNonNull(assignmentRepository, "assignmentRepository");
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public CapabilityPackRegistrationResult register(
             UUID tenantId,
             String packId,
@@ -142,7 +142,7 @@ public class CapabilityPackCatalogService {
                 .orElseThrow(() -> new DomainException(ERR_NOT_FOUND, "No active capability pack version"));
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public CapabilityPackActivation activate(UUID tenantId, String packId, String packVersion, long expectedGeneration) {
         lockTenant(tenantId);
         Objects.requireNonNull(packId, "packId");
@@ -203,7 +203,7 @@ public class CapabilityPackCatalogService {
         return created;
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public CapabilityPackActivation deactivate(UUID tenantId, String packId, long expectedGeneration) {
         lockTenant(tenantId);
         Objects.requireNonNull(packId, "packId");
