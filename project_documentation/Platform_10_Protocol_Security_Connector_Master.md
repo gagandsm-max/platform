@@ -34,9 +34,21 @@
 | TLS/certificate | TLS 1.2/1.3 checks; certificate/chain/hostname/expiry | target-specific | CA/trust, hostname, expected policy | Go `crypto/tls`, `x509` | expiry/chain/hostname/version/handshake monitoring |
 | SCP/SFTP | SSH secure transfer | TCP/22 default | credential/key and destination | SSH libraries | NCM/config transfer where needed |
 | TFTP/FTP | Legacy only if explicitly required | protocol default | explicit policy | Platform/OS adapter subject to review | disabled by default; warning/audit; no secret fallback |
-| Flow | NetFlow v5/v9, IPFIX, sFlow; J-Flow/vendor variants through compatible formats/packs | exporter/collector configurable | receiver port, template handling, source mapping | GoFlow2 | enrichment, de-dup/template cache, high-rate safeguards |
+| Flow | NetFlow v5/v9, IPFIX, sFlow; J-Flow/vendor variants through compatible formats/packs | exporter/collector configurable; UDP common | listener, configured exporter/source mapping, observation-domain/engine context, template/sampling policy, rate/resource policy | GoFlow2 | dedicated FLOW_SENSOR; source/tenant admission; exporter-scoped templates; sampling/sequence quality; replay-safe Platform acceptance; bounded high-rate safeguards; no URL/user/tenant invention from packet fields |
 | CDP/LLDP/ARP/FDB | SNMP/CLI/API/gNMI derived | underlying protocol endpoints | discovery profile | GoSNMP/CLI/gNMI | topology provenance/confidence/history |
 | Routing/state | BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VRF/STP/HSRP/VRRP/LACP/QoS/multicast/SD-WAN via SNMP/gNMI/NETCONF/REST/CLI | vendor-specific | Device Pack/Monitoring Profile | protocol foundations above | canonical graph and RCA semantics, not a routing daemon |
+
+## 2.1 Flow source-security and identity contract
+
+- Flow UDP transport is generally unauthenticated/best-effort before Platform acceptance. Source IP/observation-domain/engine fields are evidence, not tenant authority.
+- Each production listener is bound to governed tenant/Sensor/exporter policy. Unknown or disallowed exporters are rejected or quarantined with visible counters; a packet cannot self-register a tenant/exporter.
+- Exporter identity may combine canonical device/entity, configured source address, listener, protocol, observation domain/engine/source ID and generation. NAT/relay cases require explicit mapping rather than IP-only assumptions.
+- Per-exporter and global bounds apply to datagram size/rate, records/datagram, templates, observation domains, fields/template, enterprise IE/value size, template churn, decoder queue and memory.
+- Flow receivers run only on production `FLOW_SENSOR` instances. A Flow Sensor does not expose SNMP/NCM/discovery/log listeners merely because the common binary contains those modules.
+- IPv4 and IPv6 source/destination addressing are first-class.
+- User/endpoint enrichment is server-authorized and temporal. Directory/AD/LDAP/Entra records can enrich a known identity but do not independently prove the user associated with an IP at a historical timestamp.
+- Public-IP geolocation is approximate provider data with provenance/accuracy; it is not precise-person location.
+- Full URL path/query content is not inferred from basic Flow. Domain/application evidence may come from DNS/exporter/proxy/SWG/firewall/approved sources under separate privacy and retention policy.
 
 ## 3. Infrastructure/cloud credential matrix
 
