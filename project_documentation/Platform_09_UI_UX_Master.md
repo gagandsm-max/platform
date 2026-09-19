@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
 **Product:** Platform
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 endpoint diagnostic evidence reconciliation
 
 ## 1. Authority and no-assumption rule
 
@@ -2167,6 +2167,8 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Investigate
 - Ping/Traceroute where applicable
 - Agent/WinRM/SSH test
+- Request bounded Endpoint Diagnostic Snapshot where supported
+- View automatic/manual EDS history, status, trigger and missing evidence
 - Create maintenance
 - View processes/services
 - View RCA
@@ -2268,6 +2270,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Hardware
 - Logs
 - Events
+- Diagnostics / Evidence
 - RCA
 - Audit
 
@@ -2311,7 +2314,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
-**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
+**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion. The Diagnostics/Evidence view shows EDS status (`COMPLETE/PARTIAL/FAILED/SUPPRESSED`), trigger/policy provenance, source mode/vantage, capture age, evidence categories and explicit missing/denied evidence. Endpoint indicators are visually separated from Core RCA conclusions.
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
