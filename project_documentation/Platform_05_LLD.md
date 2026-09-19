@@ -2420,3 +2420,91 @@ Logs shall be bounded. Linux packages integrate with journald/logrotate policy; 
 ### 71.7 Package scripts
 
 `.deb`/`.rpm` install/upgrade/uninstall scripts must be idempotent, must not destroy customer data on package removal unless an explicit purge operation is requested, and must preserve configuration/state across in-place upgrade. Package scripts must record failures with actionable error codes.
+
+---
+
+## 72. Endpoint Diagnostic Snapshot implementation contract — v3.2.2 reconciliation
+
+### 72.1 Trigger state
+
+For each effective diagnostic trigger, the Agent or agentless monitoring authority retains bounded state sufficient to evaluate:
+
+```text
+policy_id
+policy_version
+entity_id
+metric_or_state_key
+NORMAL | SUSPECT | BREACHED | COOLDOWN
+breach_started_at
+last_observed_at
+last_capture_at
+cooldown_until
+recovery_candidate_since
+```
+
+Evaluation uses the same normalized monitoring observations already collected wherever possible. One sample crossing a threshold does not by itself require EDS when the effective policy specifies duration/qualification. Hysteresis/recovery semantics prevent rapid trigger oscillation.
+
+### 72.2 Linux Agent evidence collectors
+
+Linux EDS shall prefer bounded native reads/APIs such as `/proc`, `/sys`, stat/statfs and narrowly filtered journal/kernel evidence. Collector implementation shall be dependency-minimal and must not require spawning an unrestricted shell.
+
+Supported evidence families should include where available:
+
+- CPU user/system/iowait/steal, load/run queue and PSI;
+- memory/swap/page faults/pressure/OOM;
+- filesystem capacity/inodes;
+- block-device read/write/IOPS/queue/latency/error counters;
+- NIC throughput/errors/drops and bounded TCP/retransmission/socket state;
+- bounded Top-N process CPU/memory/I/O/state/start/restart information;
+- systemd service state/restart/failure information;
+- bounded kernel/filesystem/MCE/AER/thermal/fan evidence where exposed safely.
+
+### 72.3 Windows Agent evidence collectors
+
+Windows EDS shall use supported native Windows interfaces/APIs appropriate to the metric, including performance-counter/PDH, Service Control Manager, Event Log, IP Helper/network, storage and WHEA/system evidence where required. Recurring collection shall not depend on continuously spawning PowerShell.
+
+Evidence families normalize to the same Platform concepts as Linux while preserving Windows-specific provenance.
+
+### 72.4 Agentless query packs
+
+Agentless EDS executes only versioned Platform-controlled diagnostic query definitions.
+
+Each query definition declares:
+
+- OS/family/version compatibility;
+- operation identifier and normalized output schema;
+- required credential/privilege class;
+- executable/command/CIM/WMI operation allowlist;
+- parameter schema and escaping rules;
+- timeout and maximum output;
+- expected sensitive fields/redaction;
+- resource/safety classification;
+- parser/schema version;
+- failure/error mapping.
+
+Linux query packs execute through the approved SSH transport. Windows query packs execute through approved WinRM HTTPS/WMI/CIM transport. Neither path provides unrestricted generic remote command execution to normal monitoring/EDS workflows.
+
+### 72.5 Resource guard
+
+EDS runtime enforces:
+
+- bounded concurrent capture per endpoint/vantage;
+- bounded duration and cancellation;
+- bounded evidence bytes and Top-N/cardinality;
+- bounded log/Event Log lookback;
+- policy cooldown and duplicate coalescing;
+- tenant/site/estate storm budgets;
+- local pressure checks before and during capture.
+
+If collection would materially worsen endpoint or monitoring-path pressure, the capture is shortened, suppressed or returned `PARTIAL` with the reason.
+
+### 72.6 Endpoint classification boundary
+
+Endpoint code may emit deterministic observations/indicators such as `CPU_PRESSURE`, `MEMORY_PRESSURE`, `OOM_EVENT`, `FILESYSTEM_READ_ONLY`, `BLOCK_IO_PRESSURE`, `SERVICE_FAILED`, `PCIE_AER_EVENT` or `WHEA_HARDWARE_ERROR` only when directly supported by evidence.
+
+It must not convert an indicator into unsupported causal prose such as declaring hardware damage, thermal-paste failure, radio interference or a guaranteed repair. Causal fusion belongs to Core and may result in `INCONCLUSIVE`.
+
+### 72.7 Local intelligence runtime boundary
+
+No LLM/GNN/foundation-model runtime is packaged into normal Agent or Sensor EDS. Tier-0 endpoint intelligence is deterministic/bounded statistical logic in the existing runtime. Tier-1/2 intelligence follows `Platform_22` and `Platform_11` resource governance.
+
