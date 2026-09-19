@@ -95,6 +95,8 @@ Connectors may ingest vendor API/event/telemetry evidence and normalize service 
 
 The workspace is a projection over authoritative Incident, Alert, Change, topology/evidence, remediation and ITSM objects. It provides timeline, ownership, current hypothesis/evidence, actions/approvals and deep links. Messages remain in external collaboration tools except bounded integration metadata required for incident context.
 
+Base Platform no-context-switch troubleshooting and Investigation Sessions feed this workspace when linked to an incident. The Incident Command Workspace does not create a second diagnostic, CLI or evidence authority: it projects the same governed diagnostic results, CLI-session references, Live Evidence, comparisons and investigation evidence defined by the base PRD/UI and Platform_22. An Investigation Session may exist before an Incident and later be linked without changing its original evidence provenance.
+
 ### 4.11 Endpoint DEX privacy boundary
 
 DEX collection is opt-in/policy-controlled and limited to operational experience signals such as device resource pressure, boot/login timing where lawful/approved, application responsiveness/crash metadata, network reachability/latency and synthetic experience. Platform shall not capture keystrokes, message/document contents, screenshots, microphone/camera data, browsing content or productivity scoring for employee surveillance. Regional/legal requirements remain customer responsibility and must be supported by configurable minimization/retention controls.
