@@ -1216,3 +1216,53 @@ Each deployment unit shall implement a common health/logging contract. Logs flow
 ### 35.5 Windows Agent deployment unit
 
 The Windows Agent is one compiled service executable plus configuration/certificate state and an installer. BAT wrappers are convenience automation; they are not the Agent runtime itself. GA packaging uses MSI and code signing.
+
+---
+
+## 36. Endpoint Diagnostic Evidence subsystem — v3.2.2 reconciliation
+
+### 36.1 Agent responsibilities
+
+Windows/Linux Agent adds logical responsibilities within the existing Agent runtime:
+
+- effective diagnostic-policy cache/version acknowledgment;
+- deterministic threshold/state/hysteresis/cooldown evaluator;
+- bounded OS-specific EDS collector set;
+- evidence normalization;
+- local resource guard/cancellation;
+- durable queueing through the existing Agent -> Sensor transport.
+
+These responsibilities do not require a second endpoint daemon, Python runtime or model service.
+
+### 36.2 Infrastructure Sensor responsibilities
+
+Infrastructure Sensor owns:
+
+- Agent EDS receive/forward behavior with source/sequence provenance;
+- Linux SSH and Windows WinRM/WMI/CIM agentless query-pack execution;
+- per-target/per-tenant concurrency and storm budgets;
+- credential/security-profile binding;
+- timeout/output limits and cancellation;
+- normalization of remote evidence into the same EDS contract;
+- explicit collection-health/partial-evidence reporting.
+
+Sensor does not perform authoritative cross-domain RCA and does not host the local LLM for this capability.
+
+### 36.3 Core responsibilities
+
+Core owns:
+
+- authoritative effective policy and trigger definitions;
+- manual/incident-driven EDS requests;
+- global/site/tenant evidence-acquisition budgets;
+- dedup/coalescing of repeated evidence requests;
+- evidence storage/index/reference policy;
+- alert/incident/graph/change correlation;
+- deterministic RCA and confidence/contradiction handling;
+- optional ML/GNN/LLM assistance under `Platform_22`;
+- UI/API exposure of trigger, evidence, gaps and diagnostic status.
+
+### 36.4 Local/private inference provider boundary
+
+AI Gateway may target a separate local/private inference provider as an optional deployment component. It is an inference boundary only: no scheduling authority, no HA quorum role, no direct telemetry ingestion authority and no durable control-plane ownership.
+
