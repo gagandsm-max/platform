@@ -21,7 +21,9 @@ This document does **not** select a new OSS dependency, database, Core service, 
 | Owner | Retains authority for |
 |---|---|
 | `Platform_10` | Protocol mechanics, connector security, authentication, credential handling, transport/security mechanics |
+| `Platform_11` | Sensor/Core sizing, MWU, interactive diagnostic/CLI capacity budgets and no-starvation certification inputs |
 | `Platform_14` | Generic testing, performance and release-quality evidence |
+| `Platform_17` | Versioned API/event/data-model contracts for diagnostic jobs, Live Evidence, Investigation Sessions and CLI sessions |
 | `Platform_19` | SaaS operational intelligence and OIV/remediation/value capabilities |
 | `Platform_20` | Governed discovery, onboarding, identity continuity and Notification Center |
 | `Platform_21` | Existing enterprise gap-closure requirements (`PRD-EGC-*` / `REQ-EGC-*`) |
@@ -114,6 +116,7 @@ Certification is **dimensional**. Required dimensions at minimum:
 - Intelligence / L3
 - Topology
 - NCM where relevant
+- Diagnostics where relevant
 - Security
 - Version compatibility
 - Certification profile
@@ -489,7 +492,7 @@ Each `REQ-EMC-*` owns the corresponding `PRD-EMC-*`. Implementation status for a
 
 | REQ ID | Owning PRD | Affected logical layers | Required evidence |
 |---|---|---|---|
-| `REQ-EMC-001` | `PRD-EMC-001` | PRD, Architecture, Quality | Dimensional matrix per pack with independent Discovery/L1/L2/L3/Topology/NCM/Security/version states; no scalar collapse |
+| `REQ-EMC-001` | `PRD-EMC-001` | PRD, Architecture, Quality | Dimensional matrix per pack with independent Discovery/L1/L2/L3/Topology/NCM/Diagnostics/Security/version states; no scalar collapse |
 | `REQ-EMC-002` | `PRD-EMC-002` | Architecture, HLD, LLD | Single Capability Pack contract; Device Pack remains a classification; no second pack framework or extra Core service/database |
 | `REQ-EMC-003` | `PRD-EMC-003` | LLD, Quality, Operations | Machine-readable compatibility records, including diagnostics capability state where declared, plus version-range tests and evidence references |
 | `REQ-EMC-004` | `PRD-EMC-004` | PRD, Architecture, Quality | Middleware/application-platform packs with collector-health separation and no bytecode APM implication |
