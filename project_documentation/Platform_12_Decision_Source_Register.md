@@ -63,7 +63,7 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 | Sensor implementation language | Go for Universal Sensor Runtime; Rust only if benchmark proves a hot-spot need | Fixed architecture direction |
 | Sensor planning | 4C/16G/150GB ~800 normal network devices retained as safe planning baseline; 8C/16G ~2,000–2,500 target benchmark | Baseline + performance objective |
 | Sensor transport | Sensor/Agent → HTTPS/gRPC mTLS ingestion endpoint → Kafka internal | Fixed architecture direction |
-| High-rate events | Dedicated Streaming/Event Sensor when volume threatens polling | Fixed architecture direction |
+| High-rate Flow/Log roles | Production Flow Monitoring Sensor and Log Monitoring Sensor are dedicated exclusive Sensor instances using the common Sensor build; Flow and Log workloads are not mixed with each other or routine polling in production. Combined high-rate role is development/lab/test only unless separately certified. | USER-FIXED objective + ARCH-DELEGATED implementation |
 | Telemetry DB | ClickHouse, not Elasticsearch, as primary high-volume telemetry/analytics DB | Fixed architecture direction |
 | Optional search | OpenSearch only later if Lucene-class full-text need is proven | Optional |
 | Identity foundation | Keycloak with Platform-owned resource authorization | Selected subject to OSS scans |
@@ -212,3 +212,21 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Real-customer requirements normalization | USER-FIXED | Recurring enterprise ITOM/AIOps needs are normalized as Real Customer Enterprise Benchmark — Automotive / ITOM-AIOps with classification A–G. Confidential customer names, inventories, locations, quantities, commercial clauses, penalties, unique SLAs and contract language must not be embedded in Mother References. |
 | Enterprise-monitoring-coverage product scope | USER-FIXED | `PRD-EMC-001` through `PRD-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` are approved additive v3.2.2 product requirements/targets. They are EMC-0 specification only and do not claim runtime, pack certification or contractual coverage. |
 | Enterprise-monitoring-coverage packaging | ARCH-DELEGATED | `Platform_23` is the consolidated authoritative v3.2.2 specialized master for this family. `REQ-EMC-001` through `REQ-EMC-018` are the RTM supplement. It does not replace Platform_10, 19, 20, 21 or 22 outside its assigned scope. |
+
+## 13. v3.2.2 Flow/NTA and dedicated Sensor-role decisions — 2026-09-19
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Dedicated Flow Sensor | USER-FIXED | Flow Monitoring uses a dedicated production Sensor instance/role with its own worker/queue/spool/capacity budget and no SNMP polling, discovery, NCM, synthetics or Log collection. |
+| Dedicated Log Sensor | USER-FIXED | Log Monitoring uses a separate dedicated production Sensor instance/role and does not share the same Sensor instance with Flow, SNMP polling, discovery, NCM or synthetics. |
+| Common Sensor software | ARCH-DELEGATED | Flow/Log/Network role isolation is implemented by one common Sensor software/runtime with governed module activation, not separate source trees/installers that could drift. |
+| Combined high-rate role | ARCH-DELEGATED | Flow+Log combined operation may exist for development/lab/test but is not production-certified unless future change control and benchmarks explicitly approve it. |
+| Role conversion | ARCH-DELEGATED | Sensor role conversion requires drain/reassignment, spool/accounting completion, incompatible-assignment validation, reconfiguration/restart and health verification. |
+| Flow source authority | ARCH-DELEGATED | Packet/source fields do not determine tenant authority. Exporters are admitted through configured tenant/listener/exporter policy and canonical source mapping; unknown sources are rejected/quarantined according to policy. |
+| Sampling truth | ARCH-DELEGATED | Observed Flow values and sampling-derived estimates are distinct. Sampling rate/algorithm/provenance changes remain visible and estimated traffic is never represented as exact unsampled measurement. |
+| Temporal enrichment | ARCH-DELEGATED | Endpoint/hostname/DNS/domain/user/site/Geo/ASN/cloud/application enrichment is time-aware and provenance-bearing. IP is not durable endpoint/user identity and current mappings do not silently rewrite historical Flow. |
+| User attribution | ARCH-DELEGATED | AD/LDAP/Entra data may enrich identity but does not alone prove which user controlled an IP at a Flow timestamp; temporal session/auth/VPN/RADIUS/NAC/WLAN/firewall/proxy/Agent evidence is required for user attribution, with conflict/confidence retained. |
+| URL/privacy boundary | ARCH-DELEGATED | Basic Flow may correlate domain/FQDN/application evidence but does not fabricate full URL path/query data. User-attributed Flow is operational evidence subject to least-data, RBAC and audit and must not become employee-surveillance/browsing-history functionality. |
+| Geo semantics | ARCH-DELEGATED | Internal geography prefers authoritative Platform site/subnet mappings. Public-IP geolocation is approximate network-location evidence and is not a claim of precise physical user location. |
+| Flow store | ARCH-DELEGATED | ClickHouse remains the high-volume Flow/analytics store; PostgreSQL owns exporter/policy/control state; Kafka transports canonical Flow; no new NTA database is selected. |
+| Flow absence semantics | ARCH-DELEGATED | Missing/degraded Flow is telemetry-quality evidence, not proof of zero traffic/link/device failure. Compatible SNMP/interface counters may provide Flow Coverage/consistency evidence. |
