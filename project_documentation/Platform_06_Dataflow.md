@@ -372,27 +372,90 @@ sequenceDiagram
 
 ---
 
-## 14. Flow DF-013 — Flow ingestion and enrichment
+## 14. Flow DF-013 — Dedicated Flow Sensor ingestion, quality and temporal enrichment
 
 ```mermaid
 sequenceDiagram
   participant X as Flow Exporter
-  participant S as Streaming Sensor
-  participant INV as Local/Core context cache
-  participant I as Ingestion
+  participant S as FLOW_SENSOR
+  participant A as Source Admission / Exporter State
+  participant T as Template/Sampling/Sequence State
+  participant E as Local Temporal Enrichment Cache
+  participant SP as Dedicated Flow Spool
+  participant I as Core Ingestion
   participant K as Kafka
   participant CH as ClickHouse
+  participant Q as Query/Analytics/RCA
 
-  X->>S: NetFlow/IPFIX/sFlow
-  S->>S: Decode templates/records
-  S->>INV: Resolve exporter/interface/site/IPAM/VRF/ASN context
-  INV-->>S: Enrichment metadata
-  S->>I: Batched normalized flows
-  I->>K: network.flow.v1
-  K->>CH: Flow insert/aggregates
+  X->>S: NetFlow v5/v9 / IPFIX / sFlow / compatible vendor Flow
+  S->>A: Validate listener/source/tenant/exporter policy + bounds
+  alt Unknown or disallowed exporter
+    A-->>S: reject/quarantine + quality/audit counters
+  else admitted exporter
+    A->>T: protocol + observation-domain/engine/source context
+    S->>T: template/options/sampling/sequence records
+    T-->>S: decode context + generation + quality
+    S->>S: decode canonical directional observation
+    S->>E: resolve temporal entity/interface/site/IPAM/DNS/session/ASN/Geo/cloud/app evidence
+    E-->>S: bounded enrichment + provenance/confidence
+    S->>SP: durable accepted Flow record + stable ingestion identity
+    S->>I: replay-safe batched canonical Flow
+    I->>K: network.flow.v1
+    K->>CH: canonical record + bounded rollups
+    K->>Q: quality/analytics/evidence consumers
+  end
 ```
 
-Every forced drop/template miss is counted and exposed through telemetry-quality/platform-health data.
+Protocol correctness rules:
+
+1. UDP delivery before certified local durable acceptance is best-effort.
+2. Template IDs are scoped by exporter/observation-domain/protocol generation; missing or invalid templates create explicit quality evidence rather than invented traffic.
+3. Sampling is preserved as source evidence. Observed packets/bytes and estimated normalized traffic remain distinct.
+4. Sequence/gap/reset semantics are protocol-specific. Sequence gaps, socket/queue drops, malformed records, template gaps and Platform downstream losses are separately counted.
+5. sFlow packet/counter samples retain their record kind; Platform does not fabricate NetFlow start/end semantics that the source did not provide.
+6. A Flow observation gets stable Platform ingestion identity at durable acceptance so Sensor→Core retry is idempotent/replay-safe.
+7. Enrichment cannot override trusted tenant/exporter authority or mutate raw source evidence.
+
+### 14.1 Flow identity and user/domain/Geo enrichment
+
+```text
+src/dst IP + timestamp + tenant
+ -> temporal IPAM/DHCP/entity ownership
+ -> endpoint/system name + FQDN/DNS evidence
+ -> Agent/session/auth/VPN/RADIUS/NAC/WLAN/firewall/proxy user evidence
+ -> AD/LDAP/Entra directory enrichment
+ -> site/region/internal geography
+ -> ASN/BGP
+ -> external GeoIP approximation
+ -> cloud/SaaS catalogue
+ -> exporter application classification
+```
+
+Every enrichment retains source/effective time/version/confidence. AD/directory membership without time-bound session evidence does not establish current user attribution. Conflicting identity evidence remains visible. Domain/FQDN/application may be known while URL remains `UNKNOWN`; Platform does not infer full URL paths/query strings from Flow.
+
+### 14.2 Flow observation-point and conversation semantics
+
+The same packet/conversation observed at branch router, firewall and WAN edge represents multiple valid observation points. Source-record replay/dedup is performed only within stable exporter/source identity; separate observation points are not globally collapsed by five-tuple.
+
+Bidirectional conversation/site/application analytics are derived views. They link back to directional source observations so direction, sampling and exporter/interface evidence remain explainable.
+
+### 14.3 Flow coverage / cross-signal consistency
+
+Where observation point, direction and sampling semantics are compatible:
+
+```text
+SNMP/interface octet rate
+        +
+normalized Flow estimated/observed volume
+        ↓
+Flow Coverage / Consistency quality
+```
+
+Coverage exposes a categorical/qualified state such as `GOOD|PARTIAL|LOW|UNKNOWN` plus supporting evidence. A naive exact percentage is not authoritative when sampling, mirrored observation, asymmetric routing or exporter scope makes comparison ambiguous.
+
+### 14.4 Dedicated role isolation
+
+`FLOW_SENSOR` and `LOG_SENSOR` are separate production instances. Flow receiver/template bursts cannot consume a Network Sensor or Log Sensor worker/spool budget. Log storms cannot consume Flow Sensor capacity. Combined Flow+Log operation is development/lab/test only unless later separately certified.
 
 ---
 
