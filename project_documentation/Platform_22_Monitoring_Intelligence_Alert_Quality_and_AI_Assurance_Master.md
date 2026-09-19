@@ -103,6 +103,10 @@ The following classes require explicit contracts before production activation:
 
 No contract may encode a universal “two signals always required” rule. Required evidence depends on alert class and available authoritative signals.
 
+**Flow/NTA evidence rule.** Flow volume, Flow absence and traffic anomaly are evidence inputs, not authoritative device/link/service state by themselves. A Flow exporter/template/Sensor/sampling/sequence failure can create `MONITORING_DEGRADED`, `UNKNOWN` or reduced Evidence Coverage without asserting that network traffic stopped. Congestion/link-impact contracts may use Flow to identify consumers and traffic shifts while interface counters, discards/queues, latency/loss, topology/routing and other suitable evidence determine the operational assertion.
+
+Where compatible SNMP/interface counters and Flow observations cover the same interface/direction/window, Flow Coverage/consistency may influence evidence trust. Sampling/observation-point ambiguity can force `UNKNOWN`; an apparent mismatch is a data-quality hypothesis before it is an incident cause.
+
 ---
 
 ## 5. Telemetry quality, evidence coverage and semantic state
