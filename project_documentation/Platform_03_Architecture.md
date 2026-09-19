@@ -100,20 +100,23 @@ flowchart TB
     subgraph EDGE[Distributed Edge]
       NS[Network Sensor Pool]
       IS[Infrastructure Sensor Pool]
-      SS[Streaming/Event Sensor Pool]
+      FS[Flow Sensor Pool]
+      LS[Log Sensor Pool]
       SP[Synthetic Probe]
       AG[Windows/Linux Agents]
     end
 
     NS -->|mTLS HTTPS/gRPC| ING
     IS -->|mTLS HTTPS/gRPC| ING
-    SS -->|mTLS HTTPS/gRPC| ING
+    FS -->|mTLS HTTPS/gRPC| ING
+    LS -->|mTLS HTTPS/gRPC| ING
     SP -->|mTLS HTTPS/gRPC| ING
     AG --> IS
 
     DEV[Network / Infra / DB / Cloud / K8s Targets] --> NS
     DEV --> IS
-    DEV --> SS
+    DEV --> FS
+    DEV --> LS
     DEV --> SP
 ```
 
@@ -303,21 +306,17 @@ Rust may be introduced only for benchmark-proven hotspots, not as a blanket requ
 
 ### 8.2 Internal Sensor worker pools
 
-Sensor isolates workloads into bounded worker pools:
+Sensor uses one common runtime/binary, but production instances activate an explicit role with role-scoped worker pools:
 
-- ICMP/traceroute;
-- SNMP;
-- SSH/NETCONF/CLI;
-- REST/API;
-- gNMI/streaming;
-- discovery/topology;
-- NCM execution;
-- flow/event receivers;
-- Agent ingress;
-- local spool/uploader;
-- diagnostics/health.
+- `NETWORK_SENSOR`: ICMP/traceroute, SNMP, SSH/NETCONF/CLI, REST/gNMI, discovery/topology, NCM and authorized diagnostics;
+- `INFRASTRUCTURE_SENSOR`: infrastructure/API/Agent-ingress workloads as certified;
+- `FLOW_SENSOR`: Flow UDP/listener, exporter/template/sequence/sampling state, decoder/normalizer/enrichment, Flow spool/uploader and Flow health only;
+- `LOG_SENSOR`: Syslog/log/event/assigned OTLP-log receivers, parser/normalizer, log spool/forwarding and log health only;
+- common control/mTLS/configuration/health/upgrade/spool machinery required by every role.
 
-A high-rate Flow workload must not starve SNMP polling or NCM safety tasks.
+`FLOW_SENSOR` and `LOG_SENSOR` are production-exclusive high-rate roles. They do not share an instance with one another or with Network polling/discovery/NCM/synthetics. Combined high-rate roles are non-production lab/development profiles only.
+
+Role exclusivity is a resource-isolation mechanism, not a licence to run without headroom. Each role has bounded queues/workers/state and certified CPU/RAM/disk/network reserve.
 
 ### 8.3 Sensor local storage
 
@@ -353,6 +352,30 @@ sequenceDiagram
 ```
 
 Exact acknowledgment semantics must ensure data is not silently lost when Core fails after accepting a batch; LLD defines the sequence/replay contract.
+
+### 8.5 Flow Sensor trust, enrichment and observation architecture
+
+Flow uses a dedicated receive/normalize data plane:
+
+```text
+Exporter UDP/source
+ -> configured listener + tenant/exporter admission
+ -> NetFlow/IPFIX/sFlow/vendor decoder
+ -> exporter/observation-domain generation state
+ -> template/options state
+ -> protocol-specific sequence/sampling/time quality
+ -> canonical directional Flow Observation
+ -> bounded temporal enrichment
+ -> durable local Flow spool
+ -> Core ingestion/Kafka
+ -> ClickHouse raw/rollup analytics
+```
+
+Exporter/source identity is derived from configured Platform context plus protocol-appropriate exporter/domain/engine/generation evidence; packet payloads do not authorize tenant scope. A missing template, unknown exporter, sequence gap, unknown sampling, clock problem or receiver drop is telemetry-quality evidence rather than "no traffic."
+
+Flow enrichment is time-aware and provenance-preserving. Endpoint/system identity may use canonical entity/IPAM/DHCP/DNS/Agent evidence. User identity requires a time-bounded authenticated session source (for example Agent login/session, AD/Entra authentication evidence, VPN, RADIUS/802.1X, NAC, WLAN or firewall/proxy user mapping); directory membership alone does not prove who used an IP at a historical timestamp. Internal Site/Region/Country metadata is distinct from approximate public-IP geolocation. Domain/FQDN is distinct from full URL; URL path/query is not inferred from ordinary Flow.
+
+Raw directional observations remain distinct at different observation points. Replay deduplication applies to the same accepted source record, not to legitimate multi-vantage observations of the same conversation.
 
 ---
 
