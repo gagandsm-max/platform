@@ -27,10 +27,16 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class ClickHouseTelemetryConsumerTest {
@@ -125,6 +131,7 @@ class ClickHouseTelemetryConsumerTest {
         String topic = "telemetry.numeric.v1";
         int partition = 0;
         long offset = 101L;
+        TopicPartition topicPartition = new TopicPartition(topic, partition);
         ConsumerRecord<String, String> record = new ConsumerRecord<>(
                 topic, partition, offset, "key-bad", poisonPayload
         );
@@ -154,7 +161,9 @@ class ClickHouseTelemetryConsumerTest {
                     consumer.consumeBatch(List.of(record), ack));
             assertEquals("ERR_KAFKA_POISON_EVENT", ex.getCode());
 
+            // Primary fail-closed proofs (not log-wording dependent):
             verify(ack, never()).acknowledge();
+            verifyNoInteractions(clickHouseClient);
             assertTrue(metrics.isConsumerDegraded());
             assertEquals(1, metrics.getConsumerPoisonEvents());
 
@@ -202,37 +211,67 @@ class ClickHouseTelemetryConsumerTest {
                                 + "; halting partition progression",
                         exception
                 );
-            }, new FixedBackOff(0L, 0L));
+            }, new FixedBackOff(0L, 1L));
             errorHandler.setAckAfterHandle(false);
+
+            AtomicInteger fullBatchRedeliveryInvocations = new AtomicInteger();
+            errorHandler.setRetryListeners((recordFromRetry, exFromRetry, deliveryAttempt) ->
+                    fullBatchRedeliveryInvocations.incrementAndGet());
 
             ListenerExecutionFailedException listenerFailed = new ListenerExecutionFailedException(
                     "Listener method threw exception", ex);
             @SuppressWarnings("unchecked")
             Consumer<String, String> kafkaConsumer = mock(Consumer.class);
+            when(kafkaConsumer.assignment()).thenReturn(Set.of(topicPartition));
+            when(kafkaConsumer.poll(any())).thenReturn(ConsumerRecords.empty());
             MessageListenerContainer container = mock(MessageListenerContainer.class);
             when(container.getListenerId()).thenReturn("telemetry-test-listener");
+            when(container.isPauseRequested()).thenReturn(false);
+            when(container.isRunning()).thenReturn(true);
             ConsumerRecords<String, String> batch = new ConsumerRecords<>(
-                    Map.of(new TopicPartition(topic, partition), List.of(record))
+                    Map.of(topicPartition, List.of(record))
             );
 
-            try {
-                errorHandler.handleBatch(
-                        listenerFailed,
-                        batch,
-                        kafkaConsumer,
-                        container,
-                        () -> { throw listenerFailed; }
-                );
-            } catch (RuntimeException expectedFailClosed) {
-                // Fallback/recoverer must remain fail-closed (no silent skip / no ack).
-            }
+            RuntimeException failClosed = assertThrows(RuntimeException.class, () ->
+                    errorHandler.handleBatch(
+                            listenerFailed,
+                            batch,
+                            kafkaConsumer,
+                            container,
+                            () -> {
+                                throw listenerFailed;
+                            }
+                    )
+            );
 
+            // Full-batch fallback path: retry listener invoked and/or seek back to batch start.
+            // Do not require a specific recoverer RuntimeException type — seek/redelivery/no-commit
+            // is the fail-closed contract under MANUAL_IMMEDIATE + ackAfterHandle=false.
+            verify(kafkaConsumer, atLeastOnce()).seek(eq(topicPartition), eq(offset));
+            verify(kafkaConsumer, never()).commitSync();
+            verify(kafkaConsumer, never()).commitSync(any(java.time.Duration.class));
+            verify(kafkaConsumer, never()).commitSync(anyMap());
+            verify(kafkaConsumer, never()).commitSync(anyMap(), any(java.time.Duration.class));
+            verify(kafkaConsumer, never()).commitAsync();
+            verify(kafkaConsumer, never()).commitAsync(any());
+            verify(kafkaConsumer, never()).commitAsync(anyMap(), any());
+            assertTrue(
+                    fullBatchRedeliveryInvocations.get() >= 1
+                            || failClosed.getMessage() != null
+                            && failClosed.getMessage().contains("Seek to current after exception"),
+                    "full-batch redelivery/seek path must be exercised; retries="
+                            + fullBatchRedeliveryInvocations.get()
+                            + " failClosed=" + failClosed
+            );
+            // Still assert the diagnostic log when present, but Mockito seek/commit proofs above
+            // are authoritative — do not treat a single log string as the only gate.
             String errorHandlerLogs = loggingEventsIncludingThrowables(appenders.get(1));
             assertTrue(
-                    errorHandlerLogs.contains(
-                            "Expected a BatchListenerFailedException; re-delivering full batch"),
-                    "DefaultErrorHandler must exercise full-batch redelivery for plain batch "
-                            + "listener exceptions; got: " + errorHandlerLogs
+                    errorHandlerLogs.contains("re-delivering full batch")
+                            || errorHandlerLogs.contains("Seek to current after exception")
+                            || errorHandlerLogs.contains("Recoverer threw an exception"),
+                    "DefaultErrorHandler full-batch fallback diagnostics expected; got: "
+                            + errorHandlerLogs
             );
             assertFalse(errorHandlerLogs.contains(SUPER_SECRET_SENTINEL_DO_NOT_LOG),
                     "sentinel must not appear in DefaultErrorHandler recovery logs: " + errorHandlerLogs);
@@ -258,6 +297,10 @@ class ClickHouseTelemetryConsumerTest {
                     "sentinel must not appear in any captured logger throwable chain");
             assertFalse(allLogsIncludingThrowables.contains(poisonPayload),
                     "raw poison payload must not appear in any captured logger throwable chain");
+
+            // Listener ack + ClickHouse remain untouched after error-handler path.
+            verify(ack, never()).acknowledge();
+            verifyNoInteractions(clickHouseClient);
         } finally {
             for (int i = 0; i < capturedLoggers.size(); i++) {
                 capturedLoggers.get(i).detachAppender(appenders.get(i));
