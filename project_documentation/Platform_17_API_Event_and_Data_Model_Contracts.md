@@ -86,3 +86,96 @@ Raw, rollup, incident, audit, configuration, **diagnostic/investigation evidence
 Ingestion records support deduplication/idempotency and late/out-of-order data handling. Pipeline reconciliation detects produced/accepted/normalized/inserted/rejected discrepancies.
 
 Diagnostic/investigation integrity requires tenant-scoped canonical targets, immutable result/evidence provenance, per-vantage source identity, result/observed timestamps, correlation IDs and explicit state transitions. Evidence references must not silently retarget another tenant/entity after creation. Cancellation/timeout/partial results remain visible. No secret or one-time credential value may be persisted in diagnostic result, investigation evidence, audit, event or analytics rows.
+
+---
+
+## 6. Endpoint Diagnostic Snapshot contracts — v3.2.2 reconciliation
+
+EDS is a versioned typed evidence contract. Free-form script stdout is not the canonical interface.
+
+### 6.1 EndpointDiagnosticRequest
+
+Minimum logical fields:
+
+```text
+schema_version
+diagnostic_id
+tenant_id
+entity_id
+request_source            AUTO_POLICY | OPERATOR | INCIDENT | RCA
+requested_at
+expires_at
+definition_id
+definition_version
+idempotency_key
+correlation_id
+trigger:
+  policy_id
+  policy_version
+  metric_or_state_key
+  qualifying_state
+  qualified_at
+  observed_value/unit     optional
+  threshold/context       policy-safe normalized representation
+budget:
+  deadline_ms
+  max_evidence_bytes
+  max_items
+  max_log_window
+  priority
+parent_alert_id            optional
+parent_incident_id         optional
+```
+
+The receiving Agent/Sensor validates tenant/entity/assignment authority, expiry, supported definition/version, idempotency and local resource policy before execution.
+
+### 6.2 EndpointDiagnosticResult
+
+Minimum logical fields:
+
+```text
+schema_version
+diagnostic_id
+tenant_id
+entity_id
+source_mode               AGENT | SSH | WINRM_WMI_CIM
+agent_id                  optional
+sensor_id
+vantage_id
+definition_id
+definition_version
+started_at
+completed_at
+duration_ms
+status                    COMPLETE | PARTIAL | FAILED | SUPPRESSED
+trigger_provenance
+evidence_items[]
+missing_evidence[]
+collector_errors[]
+resource_observation
+correlation_id
+parent_alert_id            optional
+parent_incident_id         optional
+```
+
+Each evidence item includes a stable evidence type/key, typed value/state, unit where applicable, labels/dimensions within cardinality limits, observed time, source/provenance, quality and optional raw-artifact reference only where separately permitted.
+
+`missing_evidence` identifies expected evidence that could not be obtained and the reason (`UNSUPPORTED|PRIVILEGE_DENIED|TIMEOUT|RESOURCE_GUARD|COLLECTOR_ERROR|POLICY_DENIED|NOT_AVAILABLE` or compatible versioned code).
+
+### 6.3 EDS lifecycle events
+
+Canonical lifecycle event family:
+
+- `endpoint.diagnostic.requested`
+- `endpoint.diagnostic.started`
+- `endpoint.diagnostic.completed`
+- `endpoint.diagnostic.partial`
+- `endpoint.diagnostic.failed`
+- `endpoint.diagnostic.suppressed`
+
+Events carry normal tenant/entity/correlation/schema/timestamp fields plus diagnostic/definition/policy provenance. Replayed duplicate requests/results are idempotently recognized and do not create duplicate authoritative evidence.
+
+### 6.4 Causal boundary
+
+EDS evidence may contain deterministic indicators but not an authoritative root-cause declaration. Core RCA references EDS evidence IDs alongside topology, telemetry, changes, dependency and contradiction evidence. AI/LLM narrative output is a separate derived artifact with its own provenance and cannot mutate EDS facts.
+
