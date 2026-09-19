@@ -4,7 +4,7 @@
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Completeness Control**
-**Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master RTM supplements including `Platform_23`
+**Last reconciliation:** 2026-09-19 — v3.2.2 specialized-master RTM supplements including `Platform_24`
 
 ## 1. Purpose
 
@@ -314,6 +314,7 @@ v3.2.2 specialized-master RTM supplements live in their owning masters and are n
 - EGC: `PRD-EGC-*` / `REQ-EGC-*` in `Platform_21_Enterprise_Gap_Closure_Master.md`
 - MIA: `PRD-MIA-*` / `REQ-MIA-*` in `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`
 - EMC: `PRD-EMC-001` through `PRD-EMC-018` and `REQ-EMC-001` through `REQ-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
+- ARF: `PRD-ARF-001` through `PRD-ARF-018` and `REQ-ARF-001` through `REQ-ARF-018` in `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md`
 
 Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack completeness control and are supplemented, not replaced, by Capability Pack certification requirements in `Platform_23`.
 
@@ -336,6 +337,7 @@ Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack complete
 - Enterprise gap-closure specialized-master RTM supplement: `Platform_21_Enterprise_Gap_Closure_Master.md`.
 - Monitoring-intelligence/alert-quality/AI-assurance specialized-master RTM supplement: `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`.
 - Enterprise monitoring coverage / Capability Pack certification specialized-master RTM supplement: `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`.
+- Agent reliability / failover / durability / resource-assurance specialized-master RTM supplement: `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md`.
 
 ### Development, packaging, service supervision and diagnostics — v3.1
 
