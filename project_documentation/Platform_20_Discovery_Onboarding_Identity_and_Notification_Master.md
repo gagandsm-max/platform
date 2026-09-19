@@ -71,6 +71,7 @@ The following IDs are authoritative PRD supplements for v3.2.2.
 | `PRD-ONB-012` | Operational Alerts/Incidents and Platform/workflow notifications are distinct domain objects. The Notification Center may surface both, but shall preserve source/type, priority/severity, acknowledgement/read state and links to the underlying object. |
 | `PRD-ONB-013` | Material discovery drift such as a new entity, sustained disappearance, identity conflict, unexpected site/ownership movement or a newly observed critical relationship may notify according to policy; routine rediscovery churn, transient dynamic-IP changes and high-volume scan/reconnect storms shall be deduplicated/rate-limited. |
 | `PRD-ONB-014` | Discovery/enrollment workflows shall enforce credential scope, probe/rate bounds, tenant isolation, enrollment-token controls, unique Agent mTLS identity, audit, and safe handling of unauthorized/rogue candidates. |
+| `PRD-ONB-015` | For an explicitly approved cloud/Kubernetes parent scope, short-lived child resources such as Pods, Jobs, task/container instances, function executions and autoscaling members may inherit governed monitoring/identity policy and reconcile automatically without per-child manual approval. Parent-scope approval, tenant identity, provenance, policy and audit remain authoritative; persistent scope changes and identity conflicts remain governed review events. |
 
 ### 3.1 Supported candidate sources
 
@@ -81,6 +82,8 @@ The unified onboarding/review model applies first to:
 - Linux Agent enrollment.
 
 It also applies to candidate-producing Cloud, virtualization, storage, database, Kubernetes and API/connector discovery as those sources expose candidate managed entities. A source-specific workflow may collect different evidence, but it may not invent a separate lifecycle that bypasses the common identity, review, audit and activation contract.
+
+**Cloud-native ephemeral child rule:** an administrator may approve a durable parent scope (for example an AWS account/tag scope, Azure subscription/resource-group scope, GCP project scope, OCI compartment scope, Kubernetes cluster/namespace/workload scope or equivalent) with an explicit monitoring policy. Ephemeral children created inside that authorized scope may then be discovered, correlated and monitored automatically under the inherited policy without creating a manual onboarding candidate for every Pod, Job, function execution, task/container instance or autoscaling member. This is not an ungoverned bypass: the approved parent scope is the activation authority, every child retains tenant/source/provenance, exclusions still apply, and scope/identity conflicts or unexpected durable resources can enter review according to policy. Platform_24 owns the cloud-specific UI and coverage behavior.
 
 ### 3.2 Candidate decisions
 
@@ -635,6 +638,7 @@ Operational self-monitoring includes candidate queue depth/age, review backlog, 
 | `REQ-ONB-011` | Alerts/Incidents remain distinct from Platform/workflow notifications | `PRD-ONB-012` | §§4–7 | §8 |
 | `REQ-ONB-012` | Material discovery drift notifications are policy-driven and storm-bounded | `PRD-ONB-013` | §§4–7 | §§8,11,12 |
 | `REQ-ONB-013` | Discovery/enrollment credential scope, bounds, rogue-candidate protection, audit and tenant isolation | `PRD-ONB-014` | §§4–7 | §§9–11 |
+| `REQ-ONB-014` | Approved cloud/Kubernetes parent scopes can govern automatic ephemeral-child monitoring/reconciliation without per-child approval storms, while preserving tenant authority, provenance, exclusions and conflict review | `PRD-ONB-015` | §§3–7 + Platform_24 | §§8–12 + Platform_24 |
 
 ### 13.1 Definition of done
 
