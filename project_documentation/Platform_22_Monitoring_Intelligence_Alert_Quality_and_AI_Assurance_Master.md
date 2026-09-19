@@ -12,6 +12,8 @@
 
 This document is the consolidated specialized master for monitoring intelligence, alert quality, evidence qualification, RCA confidence, AI/ML assurance and safe Incident Copilot behavior. `Platform_21_Enterprise_Gap_Closure_Master.md` owns the separate enterprise-gap capability family and must not be duplicated here.
 
+**AI observability authority clarification:** the AI observability requirements in this master govern Platform's own AI/ML/GNN/LLM execution, evaluation, resource use, provenance and safety. P1 observability of **customer-operated AI/LLM applications** is a separate monitored-workload capability governed by `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`. Customer GenAI telemetry is ordinary tenant-scoped evidence and gains no privileged tool/remediation authority from model content.
+
 `Platform_00_Document_Index.md` defines precedence. This master supplements existing v3.2.2 requirements and must not silently override a higher-precedence explicit requirement. Contradictions require change control before implementation.
 
 Nothing in this document selects a commercial model/provider, vector database, mandatory microservice, commercial SKU, price, compliance certification or vendor commitment. Runtime/library candidates named below remain subject to `Platform_07_OSS_Catalog.md`, exact-version security/licence review and benchmark admission before shipment. Capability statements and sizing values are requirements/engineering targets, not implementation or production-readiness claims.
