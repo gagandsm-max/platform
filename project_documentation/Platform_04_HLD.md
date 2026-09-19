@@ -1066,7 +1066,7 @@ Engineering design review shall not approve HLD implementation plans unless they
 4. PostgreSQL sync mode after benchmark/RPO definition.
 5. Exact GNN framework and runtime profile.
 6. DR topology/RPO/RTO.
-7. Numeric thresholds for dedicated Streaming Sensor recommendation.
+7. Certified safe operating envelopes and HA/redundancy profiles for dedicated FLOW and LOG Sensors.
 8. Final SNWP-2500-v1 workload constants.
 
 ---
@@ -1162,20 +1162,32 @@ The following cross-cutting capabilities are mandatory where applicable and must
 | Analytics/RCA workers | Python + Polars/NumPy/scikit-learn; GNN candidate PyTorch/PyG | isolated worker boundary with resource quotas and no direct secret access |
 | OSS compliance | ORT/Syft/Trivy/ScanCode | CI/release, not runtime customer workflow |
 
-### Network/Streaming Sensor
+### Network Sensor
 
 | Worker family | OSS foundation | Platform worker responsibilities |
 |---|---|---|
 | SNMP | GoSNMP | scheduling, credential ref, bulk planning, normalized metrics, retry/qualification |
 | MIB | gosmi | compiled Device Pack metadata; runtime avoids reparsing MIB for every poll |
-| Flow | GoFlow2 | parser + canonical flow publication |
 | ICMP/path | x/net/icmp | probe scheduling and measurements |
-| DNS | miekg/dns | synthetic DNS worker |
+| DNS | miekg/dns | synthetic/diagnostic DNS where assigned by role policy |
 | SSH | x/crypto/ssh / scrapligo | discovery/diagnostics/CLI/NCM execution |
 | gNMI | OpenConfig gNMI | subscription lifecycle/backpressure |
 | YANG | goyang/ygot | model validation/mapping |
 | REST/OpenAPI | Go HTTP + kin-openapi | auth/pagination/rate-limit/chained endpoint execution |
-| Syslog/log | native receiver and/or Fluent Bit integration | parse, normalize, cardinality and upload |
+
+### Dedicated FLOW Sensor
+
+| Worker family | OSS foundation | Platform worker responsibilities |
+|---|---|---|
+| Flow | GoFlow2 | source admission, exporter/template/sampling/sequence state, bounded decoding, canonical directional Flow/quality publication, role-local spool/health |
+| Flow enrichment cache/client | Platform code | bounded temporal entity/interface/site/IPAM/DNS/session/ASN/Geo/cloud context; provenance/confidence retained |
+
+### Dedicated LOG Sensor
+
+| Worker family | OSS foundation | Platform worker responsibilities |
+|---|---|---|
+| Syslog/log | native receiver and/or governed Fluent Bit integration | receive/parse/multiline/redact/fingerprint/data-quality, role-local spool/upload/forwarding |
+
 
 ### Infrastructure Sensor / Agent
 
