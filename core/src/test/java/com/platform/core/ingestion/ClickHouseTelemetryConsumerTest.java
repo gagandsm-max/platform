@@ -10,6 +10,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -24,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -185,9 +188,9 @@ class ClickHouseTelemetryConsumerTest {
                     "payload byte length must be logged"
             );
 
-            // Mirror IngestionKafkaConfiguration DefaultErrorHandler setup exactly, then force
-            // immediate recovery via setBackOffFunction so handleOne invokes the recoverer without
-            // multi-attempt seeks (production uses FixedBackOff(500L, 3L) on the handler itself).
+            // Mirror the production batch DefaultErrorHandler path. A plain listener exception
+            // means the complete batch is retried/redelivered; we never assert that preceding
+            // records were durably processed.
             DefaultErrorHandler errorHandler = new DefaultErrorHandler((rec, exception) -> {
                 throw new KafkaException(
                         "Exhausted retries for record at topic=" + rec.topic()
@@ -196,9 +199,8 @@ class ClickHouseTelemetryConsumerTest {
                                 + "; halting partition progression",
                         exception
                 );
-            }, new FixedBackOff(500L, 3L));
+            }, new FixedBackOff(0L, 0L));
             errorHandler.setAckAfterHandle(false);
-            errorHandler.setBackOffFunction((rec, exception) -> new FixedBackOff(0L, 0L));
 
             ListenerExecutionFailedException listenerFailed = new ListenerExecutionFailedException(
                     "Listener method threw exception", ex);
@@ -206,11 +208,21 @@ class ClickHouseTelemetryConsumerTest {
             Consumer<String, String> kafkaConsumer = mock(Consumer.class);
             MessageListenerContainer container = mock(MessageListenerContainer.class);
             when(container.getListenerId()).thenReturn("telemetry-test-listener");
+            ConsumerRecords<String, String> batch = new ConsumerRecords<>(
+                    Map.of(new TopicPartition(topic, partition), List.of(record))
+            );
 
-            // Recoverer throws KafkaException; DefaultErrorHandler catches, logs the failure chain,
-            // and returns without rethrowing. Capture that log path (same recoverer as production).
-            boolean remaining = errorHandler.handleOne(listenerFailed, record, kafkaConsumer, container);
-            assertFalse(remaining, "poison recovery must not treat the record as successfully handled");
+            try {
+                errorHandler.handleBatch(
+                        listenerFailed,
+                        batch,
+                        kafkaConsumer,
+                        container,
+                        () -> { throw listenerFailed; }
+                );
+            } catch (RuntimeException expectedFailClosed) {
+                // The production recoverer intentionally refuses to skip the poisoned record.
+            }
 
             String errorHandlerLogs = loggingEventsIncludingThrowables(appenders.get(1));
             assertTrue(
@@ -352,12 +364,14 @@ class ClickHouseTelemetryConsumerTest {
         );
         Acknowledgment ack = mock(Acknowledgment.class);
 
-        doThrow(new RuntimeException("ClickHouse connection refused"))
+        doThrow(new RuntimeException("ClickHouse rejected row containing " + SUPER_SECRET_SENTINEL_DO_NOT_LOG))
                 .when(clickHouseClient).insertNumericBatch(anyList(), anyString());
 
         RuntimeException ex = assertThrows(RuntimeException.class, () ->
                 consumer.consume(record, ack));
         assertTrue(ex.getMessage().contains("ClickHouse persistence unavailable"));
+        assertFalse(ex.getMessage().contains(SUPER_SECRET_SENTINEL_DO_NOT_LOG));
+        assertNull(ex.getCause(), "downstream ClickHouse diagnostics must not cross the Kafka framework boundary");
 
         verify(clickHouseClient, times(3)).insertNumericBatch(anyList(), anyString());
         verify(ack, never()).acknowledge();
