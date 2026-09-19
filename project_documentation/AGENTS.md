@@ -87,6 +87,8 @@ No implementation may permanently diverge from mother-reference truth. If implem
 - External provider/change evidence is supporting evidence; provider text or temporal proximity alone is not causal proof.
 - Controlled remediation requires versioned deterministic actions, tenant/resource authorization, preconditions, blast-radius controls, approval/policy, audit, post-action validation and rollback/fail-safe behavior. LLM output may not directly execute privileged actions.
 - Platform Value/MTTR metrics must expose data quality, cohort/sample methodology and assumptions. Do not fabricate generic customer savings or causal percentages.
+- NOC troubleshooting is a first-class UI workflow: preserve device/interface/alert/incident context while authorized users launch bounded on-demand diagnostics, multi-vantage verification, browser CLI and investigation evidence capture. Low-risk diagnostics must be fast; privileged/configuration actions require proportionate RBAC/JIT/MFA/reason/approval controls.
+- On-demand diagnostics must run through Platform-controlled Core/Sensor/Agent paths, not direct browser-to-device networking; arbitrary cross-tenant targets, unbounded continuous tests and browser exposure of reusable credentials are prohibited.
 
 ## Definition of done
 
