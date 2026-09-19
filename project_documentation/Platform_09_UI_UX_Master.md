@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
 **Product:** Platform
-**Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master UI amendment for Notification Center and Discovery Review
+**Last reconciliation:** 2026-09-19 — v3.2.2 Sensor communication-integrity operational UI reconciliation
 
 ## 1. Authority and no-assumption rule
 
