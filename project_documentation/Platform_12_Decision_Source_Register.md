@@ -216,6 +216,8 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 
 | Decision | Classification | Governing statement |
 |---|---|---|
+| Agent reliability product scope | USER-FIXED | `PRD-ARF-001` through `PRD-ARF-018` in `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` are approved additive v3.2.2 product requirements. |
+| Agent reliability traceability | ARCH-DELEGATED | `REQ-ARF-001` through `REQ-ARF-018` in `Platform_24` §27 are the authoritative RTM supplement for this capability family. |
 | Agent reliability specialized master | USER-FIXED + ARCH-DELEGATED packaging | `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` is the authoritative v3.2.2 specialized master for Linux/Windows Agent durability, failover, fencing, operational state, replay/idempotency, lifecycle transactions, pipeline integrity and resource/failure certification. |
 | Enhance, do not replace Agent architecture | USER-FIXED | Existing Go Agent, shared `agent/common`, Core Sensor Control, Agent identity/mTLS, durable Agent queue and Sensor durable spool are preserved. This approval does not authorize a parallel control plane, identity system or queue implementation. |
 | Agent deletion boundary | USER-FIXED + ARCH-DELEGATED implementation | Agent records may be removed only after a valid Agent/batch/range-bound application ACK proving authorized Sensor durable acceptance. `CORE_DURABLE` is not declared the current Agent deletion boundary while two-Core Kafka/ClickHouse/fencing P0 items remain unresolved. |
