@@ -108,6 +108,54 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-NET-014 | Path Analysis workspace | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-015 | IPv4/IPv6/dual-stack first-class support | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
+### Dedicated Sensor-role isolation
+
+| ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| REQ-SENSOR-001 | One common Sensor build/runtime with governed role activation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SENSOR-002 | Production FLOW_SENSOR is dedicated to Flow and excludes SNMP/discovery/NCM/log/synthetics | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SENSOR-003 | Production LOG_SENSOR is dedicated to Logs and excludes Flow/SNMP/discovery/NCM/synthetics | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SENSOR-004 | Role conversion requires drain/reassignment/spool accounting/revalidation; combined high-rate role is lab/dev only unless separately certified | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+### Enterprise Flow/NTA correctness and identity enrichment
+
+| ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| REQ-FLOW-001 | Canonical exporter identity is scoped beyond UDP source IP | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-002 | Configured tenant/listener/exporter admission; unknown sources reject/quarantine | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-003 | Exporter/observation-domain template lifecycle including update/expiry/withdrawal/reuse | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-004 | Persisted template cache has restart/generation validity guards | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-005 | Sampling observed-vs-estimated truth and rate/provenance history | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-006 | Flow/export/observed/ingest time semantics with quality; no fabricated start/end | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-007 | Protocol-specific sequence gap/duplicate/replay/reset/out-of-order semantics | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-008 | IPv4/IPv6 canonical Flow schema with observation point, sampling, interface, routing/QoS/NAT/app provenance | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-009 | Typed common fields + bounded enterprise/vendor extensions; no dynamic-column explosion | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-010 | Best-effort pre-accept UDP; stable replay/idempotency after certified durable local acceptance | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-011 | First-class Flow Data Quality for templates/sampling/sequence/socket/queue/spool/downstream health | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-012 | Temporal entity/system/FQDN/DNS/site/ASN/cloud/app identity enrichment with provenance/confidence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-013 | Temporal user attribution from session/auth evidence; AD/directory alone is insufficient; conflicts explicit | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-014 | Domain/application/URL are distinct; no fabricated full URL; explicit privacy boundary | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-015 | Internal site geography vs approximate public-IP geolocation semantics | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-016 | Historical Flow enrichment remains temporally correct as identities/mappings change | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-017 | Source replay dedup is distinct from valid multi-observation-point evidence | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-018 | Conversation/site/application matrices are derived views linked to directional source records | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-019 | NAT/QoS/TCP/ICMP/application metadata retain explicit source/provenance and are not synthesized | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-020 | Flow correlates with topology/interface/VRF/routing/change evidence without claiming path/causal proof | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-021 | Qualified SNMP-interface vs Flow Coverage/consistency signal | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-022 | Bounded Flow Explorer + exporter/source/template/data-quality operational UX | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-023 | Separate raw/rollup/incident retention and bounded top-N/matrix/Sankey queries | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-024 | Operational traffic-anomaly classes are evidence, not automatic device/link/root-cause assertions | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-025 | Bounded receiver/template/cardinality resources and per-exporter fairness | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-026 | Multidimensional Flow Sensor/performance certification; no invented universal records/sec | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-027 | Exporter/collector redundancy is protocol/capability certified; no universal LB assumption | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-028 | Future cloud-native flow logs normalize into the same model; no second NTA product | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-029 | User-attributed Flow is least-data, RBAC/audit scoped and not employee-surveillance/browsing-history | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-FLOW-030 | No Flow / degraded Flow / anomaly does not by itself prove no traffic, link/device failure or root cause | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+A dash in the BRD column is deliberate where the row is an engineering mechanism refining a broader business requirement rather than a separately stated BRD mechanism. Do not add artificial BRD text solely to turn those cells into checkmarks.
+
+Supporting authority for `REQ-FLOW-*` additionally includes `Platform_07` (GoFlow2 boundary), `Platform_09` (Flow/Exporter/Data Quality UX), `Platform_10` (source/security), `Platform_11` (dedicated role sizing), `Platform_14` (certification), `Platform_16` (install/operations), `Platform_17` (API/event/data/replay), `Platform_18` (threats), `Platform_19` (Incident Flight Recorder), `Platform_20` (temporal endpoint identity), `Platform_22` (Alert Evidence/telemetry quality) and `Platform_23` (NTA/Capability Pack boundary).
+
 ### Infrastructure/Cloud
 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
