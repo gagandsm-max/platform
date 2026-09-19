@@ -63,7 +63,7 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 | Sensor implementation language | Go for Universal Sensor Runtime; Rust only if benchmark proves a hot-spot need | Fixed architecture direction |
 | Sensor planning | 4C/16G/150GB ~800 normal network devices retained as safe planning baseline; 8C/16G ~2,000–2,500 target benchmark | Baseline + performance objective |
 | Sensor transport | Sensor/Agent → HTTPS/gRPC mTLS ingestion endpoint → Kafka internal | Fixed architecture direction |
-| High-rate events | Dedicated Streaming/Event Sensor when volume threatens polling | Fixed architecture direction |
+| High-rate events | Production Flow and Log use dedicated exclusive roles per §13; exact implementation/capacity details remain delegated | Superseded/refined by §13 USER-FIXED role decision |
 | Telemetry DB | ClickHouse, not Elasticsearch, as primary high-volume telemetry/analytics DB | Fixed architecture direction |
 | Optional search | OpenSearch only later if Lucene-class full-text need is proven | Optional |
 | Identity foundation | Keycloak with Platform-owned resource authorization | Selected subject to OSS scans |
@@ -101,7 +101,7 @@ The following must remain visibly unresolved until engineering evidence exists:
 - exact Core service fencing/VIP implementation and failure matrix;
 - final contractual DR RPO/RTO and data-loss objectives;
 - final SNWP-2500-v1 metric/interface/event mix and certified performance results;
-- Streaming Sensor certified Flow records/sec and Syslog EPS;
+- Dedicated Flow Sensor certified datagrams/records/bytes/sec and Dedicated Log Sensor certified EPS/bytes/sec;
 - exact GNN model architecture, training labels, inference latency, CPU/GPU footprint and production enablement threshold;
 - final compliance certification program/scope and achieved certifications;
 - exact product SKUs/licensing quantities beyond the agreed behavioral rules.
