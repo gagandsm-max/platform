@@ -321,7 +321,7 @@ sequenceDiagram
   end
 ```
 
-Assignment/fencing version prevents obsolete Sensor from continuing a superseded job after it sees the new epoch.
+Assignment/fencing version prevents obsolete Sensor from continuing a superseded job after it sees the new epoch. For HA-critical targets, the candidate Sensor is eligible only when cached/current readiness evidence shows target reachability, applicable protocol/TLS/credential usability, security-zone eligibility and capacity; a merely healthy Sensor host is insufficient.
 
 ---
 
@@ -967,15 +967,83 @@ sequenceDiagram
   participant D as Devices
 
   S1--xC: Heartbeats stop
-  C->>C: Lease expiry + capacity/locality evaluation
-  C->>S2: Issue newer assignment/fencing versions
+  C->>C: Evaluate outage duration, ownership state, target readiness and policy
+  C->>S2: Validate/confirm eligible fallback path where required
+  C->>S2: Issue newer assignment/fencing versions only when takeover is justified
   S2->>D: Begin polling reassigned targets
   S2-->>C: First observations
   opt S1 returns
     S1->>C: Rejoin with stale assignment versions
-    C-->>S1: New state; do not resume superseded jobs
+    C-->>S1: Reconcile new state; do not resume superseded jobs
   end
 ```
+
+A short Core/Sensor communication interruption is not by itself proof that the original Sensor lost target reachability. Exact disconnected-grace/reassignment hold-off/fencing behavior remains the P0 ownership spike.
+
+### Flow DF-039A — Sensor/Core partition while original Sensor still reaches target
+
+```mermaid
+sequenceDiagram
+  participant S1 as Sensor-A
+  participant C as Core Sensor Control
+  participant S2 as Sensor-B
+  participant D as Device-X
+
+  S1--xC: Core path lost
+  S1->>D: Continue bounded disconnected polling under last valid assignment
+  C->>C: Enter reassignment evaluation; do not immediately create duplicate authority
+  C->>S2: Check fallback target/protocol/credential readiness
+  alt takeover positively justified under certified policy
+    C->>S2: Issue newer assignment/fencing version
+    S2->>D: Begin polling
+    S1->>C: Reconnect later
+    C-->>S1: Reconcile; stale assignment is fenced
+  else ambiguity remains
+    C->>C: Hold reassignment / expose monitoring redundancy degradation
+  end
+```
+
+### Flow DF-039B — Push receiver failure
+
+```mermaid
+sequenceDiagram
+  participant D as Device/Exporter
+  participant R1 as Receiver Sensor-A
+  participant R2 as Receiver Sensor-B
+  participant C as Core
+
+  D->>R1: Trap/Syslog/Flow push
+  R1--xC: Receiver/Sensor failure detected
+  C->>C: Determine configured push-HA capability
+  alt source supports redundant destination or stable collector endpoint
+    D->>R2: Delivery continues/fails over per source/deployment configuration
+  else source has only failed destination
+    C->>C: Record receiver continuity gap / REDUNDANCY_LOST or MONITORING_DEGRADED
+  end
+```
+
+Core assignment changes alone do not redirect a device/exporter that is configured to send to a failed physical Sensor address.
+
+### Flow DF-039C — Core recovery and backlog replay
+
+```mermaid
+sequenceDiagram
+  participant S as Sensor
+  participant C as Core
+  participant SP as Durable Spool
+
+  C-->>S: Core endpoint/control restored
+  S->>C: Identity/heartbeat/assignment reconciliation
+  S->>C: Current critical/current telemetry within protected upload budget
+  loop bounded replay
+    SP->>S: Oldest eligible unacknowledged batch
+    S->>C: Replay batch
+    C-->>S: Durable accepted-through watermark
+    S->>SP: Advance acknowledged watermark
+  end
+```
+
+Replay scheduling must prove that control/current traffic is not starved and that old backlog still makes forward progress.
 
 ---
 
