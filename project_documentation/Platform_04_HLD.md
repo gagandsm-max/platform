@@ -169,7 +169,10 @@ Owns:
 - rebalancing;
 - Sensor drain/maintenance;
 - update rollout;
-- Agent→Sensor assignment.
+- Agent→Sensor assignment;
+- assignment-version/lease/fencing policy, including disconnected-grace and reconnect reconciliation once the P0 ownership spike is resolved;
+- failover-candidate readiness evidence for target/protocol/credential/security-zone compatibility where HA policy requires it;
+- push-receiver HA deployment state/policy where the source protocol supports redundant destinations.
 
 ### 4.7 Credential Service
 
@@ -250,7 +253,7 @@ Owns retention policies, rollup status, archive, storage forecasting, 80% waterm
 
 ### 4.20 Platform Operations Service
 
-Owns Core/Sensor/data-service health, support bundle orchestration, backup/restore status, upgrades, certificates, licence warnings and internal housekeeping dashboards.
+Owns Core/Sensor/data-service health, support bundle orchestration, backup/restore status, upgrades, certificates, licence warnings and internal housekeeping dashboards. Sensor communication observability includes buffer horizon, oldest unacknowledged telemetry, replay progress, retry amplification, receiver/decoder/drop evidence, failover readiness state and `PIPELINE_INTEGRITY_GAP` conditions without misclassifying communication degradation as monitored-resource failure.
 
 ---
 
@@ -306,6 +309,10 @@ Spool responsibilities:
 - preserve ordering per source/entity where required;
 - compact/delete acknowledged segments;
 - enforce 80% disk-protection policy.
+
+### 5.4 Uploader/replay arbitration
+
+The Sensor may share one secure Core transport while maintaining logical scheduling classes/budgets. Identity/PKI and control-plane traffic cannot be starved by replay. Current critical/current telemetry receives bounded service ahead of old backlog, while replay retains guaranteed forward progress. Batch formation remains bounded by record count, encoded bytes and maximum batch age; further adaptive behavior is benchmark-driven rather than mandatory architectural complexity.
 
 ---
 
@@ -1042,7 +1049,7 @@ Aggregates RCA feedback, ground-truth benchmark results, qualification outcomes,
 
 ### 34.7 Pipeline Integrity Service
 
-Reconciles sequence/watermark counters across Sensor spool, Ingestion Gateway, Kafka consumer groups and ClickHouse insert acknowledgements. It creates internal alerts when unexplained gaps exceed configured tolerance.
+Reconciles compact sequence/watermark/counter evidence across Sensor produced/durable/acknowledged state, Ingestion Gateway acceptance, Kafka publication/consumer progress and ClickHouse insert acknowledgements. It accounts explicitly for duplicates, rejections, late data and intentional drops. Any discrepancy that cannot be explained by certified stream transformation/tolerance rules creates an internal `PIPELINE_INTEGRITY_GAP` with affected scope and investigation evidence; the service does not persist duplicate copies of every observation solely for reconciliation.
 
 
 ---
