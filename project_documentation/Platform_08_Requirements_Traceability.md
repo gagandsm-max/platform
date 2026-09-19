@@ -4,7 +4,7 @@
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Completeness Control**
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 enterprise Flow/NTA and dedicated Sensor-role reconciliation
 
 ## 1. Purpose
 
@@ -107,6 +107,49 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-NET-013 | Circuit/ISP inventory and SLA correlation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-014 | Path Analysis workspace | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-015 | IPv4/IPv6/dual-stack first-class support | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+### Enterprise Flow/NTA correctness, enrichment and dedicated-role requirements
+
+`✓` in BRD is used only where `Platform_01` states the business/product outcome. `—` means the item is a delegated engineering mechanism traced from PRD downward; no BRD wording is manufactured merely to fill the matrix.
+
+| ID | Governing PRD | BRD | Architecture/HLD/LLD/Dataflow | Supporting masters / acceptance |
+|---|---|:---:|---|---|
+| `REQ-FLOW-001` | `PRD-FLOW-001` | ✓ | 03/04/06 | 09/10/11/14/16 — production-exclusive Flow Sensor role |
+| `REQ-FLOW-002` | `PRD-FLOW-002` | ✓ | 03/04/05/06 | 07/10/14/23 — protocol/version certification evidence |
+| `REQ-FLOW-003` | `PRD-FLOW-003` | — | 03/04/05/06 | 10/17/18 — tenant-safe exporter/observation-domain identity |
+| `REQ-FLOW-004` | `PRD-FLOW-004` | — | 03/04/05/06 | 09/10/18 — unknown exporter reject/quarantine |
+| `REQ-FLOW-005` | `PRD-FLOW-005` | — | 04/05/06 | 10/14/17 — template/options lifecycle |
+| `REQ-FLOW-006` | `PRD-FLOW-006` | — | 04/05/06 | 14/16/17 — restart-safe bounded template persistence/invalidation |
+| `REQ-FLOW-007` | `PRD-FLOW-007` | — | 03/05/06 | 09/14/17 — observed vs estimated sampling truth |
+| `REQ-FLOW-008` | `PRD-FLOW-008` | — | 05/06 | 09/14/17 — temporal sampling epochs |
+| `REQ-FLOW-009` | `PRD-FLOW-009` | — | 04/05/06 | 09/14/17 — protocol-aware sequence/gap/reset semantics |
+| `REQ-FLOW-010` | `PRD-FLOW-010` | — | 05/06 | 09/14/17 — start/end/export/observed/ingest time quality |
+| `REQ-FLOW-011` | `PRD-FLOW-011` | — | 03/05/06 | 09/17/22 — observation-point provenance; no cross-vantage false dedup |
+| `REQ-FLOW-012` | `PRD-FLOW-012` | — | 03/05/06 | 14/17 — post-acceptance replay/idempotency |
+| `REQ-FLOW-013` | `PRD-FLOW-013` | ✓ | 03/05/06 | 11/14/17 — honest UDP/durable-boundary/gap accounting |
+| `REQ-FLOW-014` | `PRD-FLOW-014` | ✓ | 03/04/05/06 | 09/11/14/17/22 — Flow Data Quality; no-flow != no-traffic |
+| `REQ-FLOW-015` | `PRD-FLOW-015` | ✓ | 03/04/05 | 10/11/14/18 — bounded receiver and exporter fairness |
+| `REQ-FLOW-016` | `PRD-FLOW-016` | ✓ | 03/05/06 | 09/14/17/23 — IPv4/IPv6/NAT/VRF/QoS/etc. only when sourced |
+| `REQ-FLOW-017` | `PRD-FLOW-017` | — | 04/05 | 14/17/23 — bounded common schema + controlled enterprise IEs |
+| `REQ-FLOW-018` | `PRD-FLOW-018` | ✓ | 03/05/06 | 09/17/20 — temporal IP/entity/hostname/site mapping |
+| `REQ-FLOW-019` | `PRD-FLOW-019` | ✓ | 03/05/06 | 09/10/17/18/20 — time-bounded authenticated user/session attribution |
+| `REQ-FLOW-020` | `PRD-FLOW-020` | ✓ | 03/05/06 | 09/17/18/20 — enrichment source/time/version/confidence + conflict |
+| `REQ-FLOW-021` | `PRD-FLOW-021` | ✓ | 03/05/06 | 09/10/17/18 — domain/FQDN/application provenance; no URL inference |
+| `REQ-FLOW-022` | `PRD-FLOW-022` | ✓ | 03/05 | 09/10/17/18 — separately governed sensitive URL content |
+| `REQ-FLOW-023` | `PRD-FLOW-023` | ✓ | 03/05/06 | 09/17/18 — internal site geography vs approximate public GeoIP |
+| `REQ-FLOW-024` | `PRD-FLOW-024` | ✓ | 03/05/06 | 09/17/23 — ASN/BGP/cloud/SaaS classification provenance |
+| `REQ-FLOW-025` | `PRD-FLOW-025` | ✓ | 03/05 | 09/17/23 — exporter/security-device application vs inference |
+| `REQ-FLOW-026` | `PRD-FLOW-026` | ✓ | 03/05/06 | 09/11/14/17 — raw directional evidence vs derived conversations |
+| `REQ-FLOW-027` | `PRD-FLOW-027` | ✓ | 03/04/05 | 09/11/14/17 — raw/rollup/incident retention classes |
+| `REQ-FLOW-028` | `PRD-FLOW-028` | ✓ | 03/04/05 | 09/11/14 — bounded Flow Explorer/Top-N/Sankey/Data Quality |
+| `REQ-FLOW-029` | `PRD-FLOW-029` | ✓ | 04/05/06 | 09/10/11/14/16 — exporter/template administration and quarantine |
+| `REQ-FLOW-030` | `PRD-FLOW-030` | ✓ | 03/05/06 | 09/22 — no-context-switch Investigate Traffic |
+| `REQ-FLOW-031` | `PRD-FLOW-031` | — | 03/05/06 | 09/14/17/22 — SNMP-vs-Flow coverage with sampling/observation scope |
+| `REQ-FLOW-032` | `PRD-FLOW-032` | ✓ | 03/05/06 | 09/19/22/23 — topology/routing/change correlation, no causal overclaim |
+| `REQ-FLOW-033` | `PRD-FLOW-033` | ✓ | 03/05/06 | 19/22 — bounded Flight Recorder Flow evidence |
+| `REQ-FLOW-034` | `PRD-FLOW-034` | ✓ | 03/05/06 | 09/14/19/22 — operational Flow anomaly classes, not failure authority |
+| `REQ-FLOW-035` | `PRD-FLOW-035` | ✓ | 03/05 | 09/10/17/18 — separate user-attribution RBAC/privacy/audit |
+| `REQ-FLOW-036` | `PRD-FLOW-036` | ✓ | 03/04/05 | 11/14 — benchmark dimensions and safety headroom; no invented throughput |
 
 ### Infrastructure/Cloud
 
