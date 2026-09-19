@@ -88,8 +88,10 @@ func TestReadyzRemainsReadyOnTransientWithTrustedApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !syncer.Snapshot().TrustedApplied {
-		t.Fatal("empty install must be trusted")
+	// Establish Core authority via successful gen0 desired-state sync.
+	syncer.TestingSetSuccess(0, 0)
+	if !syncer.Snapshot().TrustedApplied || !syncer.Snapshot().CoreAuthorityEstablished {
+		t.Fatal("test setup requires trusted local state and Core authority")
 	}
 	syncer.TestingSetError(packsync.ErrCodeSyncTransient, false)
 
@@ -107,8 +109,46 @@ func TestReadyzRemainsReadyOnTransientWithTrustedApplied(t *testing.T) {
 	if pack["trusted_applied"] != true {
 		t.Fatalf("expected trusted_applied true: %v", pack)
 	}
+	if pack["core_authority_established"] != true {
+		t.Fatalf("expected core_authority_established true: %v", pack)
+	}
 	if pack["last_error_code"] != packsync.ErrCodeSyncTransient {
 		t.Fatalf("expected transient error code retained: %v", pack)
+	}
+}
+
+func TestReadyzNotReadyFreshInstallBeforeCoreAuthority(t *testing.T) {
+	dir := t.TempDir()
+	syncer, err := packsync.New(packsync.Config{Dir: dir, PollInterval: time.Hour}, stubPackClient{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if syncer.Snapshot().CoreAuthorityEstablished || syncer.Snapshot().Ready() {
+		t.Fatal("fresh install must not be ready before Core authority")
+	}
+
+	hs := newTestHealth(t, syncer)
+	rrLive := httptest.NewRecorder()
+	hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
+	if rrLive.Code != http.StatusOK {
+		t.Fatalf("livez must stay UP: %d", rrLive.Code)
+	}
+
+	rr := httptest.NewRecorder()
+	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readyz must be non-2xx before Core authority: %d %s", rr.Code, rr.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "PACK_CORE_AUTHORITY_NOT_ESTABLISHED" {
+		t.Fatalf("expected PACK_CORE_AUTHORITY_NOT_ESTABLISHED, got %v", body["status"])
+	}
+	pack := body["capability_pack_sync"].(map[string]any)
+	if pack["trusted_applied"] != true || pack["core_authority_established"] != false {
+		t.Fatalf("expected local trust without Core authority: %v", pack)
 	}
 }
 
@@ -118,6 +158,7 @@ func TestReadyzAuthDegradedWithTrustedStaysReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	syncer.TestingSetSuccess(0, 0)
 	syncer.TestingSetError(packsync.ErrCodeAuthFailed, true)
 
 	hs := newTestHealth(t, syncer)

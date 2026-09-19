@@ -102,6 +102,9 @@ func TestPackSyncApplyAckAndIdempotent(t *testing.T) {
 	if applied.Generation != 1 || applied.Checksum != checksum {
 		t.Fatalf("unexpected applied %+v", applied)
 	}
+	if !applied.CoreAuthorityEstablished {
+		t.Fatal("apply must persist coreAuthorityEstablished")
+	}
 	artPath := filepath.Join(dir, artifactsDirName, sha+".json")
 	got, err := os.ReadFile(artPath)
 	if err != nil {
@@ -142,12 +145,15 @@ func TestPackSyncLostAckRetriesWithoutRedownload(t *testing.T) {
 	}
 
 	s.syncOnce(context.Background())
-	applied, err := s.loadApplied()
+	applied, _, err := s.loadApplied()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if applied.Generation != 1 || applied.Checksum != checksum {
 		t.Fatalf("durable applied state missing after lost ACK: %+v", applied)
+	}
+	if !applied.CoreAuthorityEstablished {
+		t.Fatal("apply must persist coreAuthorityEstablished before ACK")
 	}
 	if core.artifactFetches != 1 {
 		t.Fatalf("expected one artifact fetch, got %d", core.artifactFetches)
@@ -280,6 +286,9 @@ func TestPackSyncGenerationZeroDoesNotAck(t *testing.T) {
 	if len(core.acks) != 0 {
 		t.Fatalf("generation zero must not emit ACK, got %d", len(core.acks))
 	}
+	if !s.Snapshot().Ready() || !s.Snapshot().CoreAuthorityEstablished {
+		t.Fatalf("gen0 Core confirmation must still establish authority: %+v", s.Snapshot())
+	}
 }
 
 func TestPackSyncRegressionAndConflict(t *testing.T) {
@@ -350,7 +359,7 @@ func TestPackSyncAuthFailClosedRetainsApplied(t *testing.T) {
 	if snap.LastErrorCode != ErrCodeAuthFailed || !snap.Degraded {
 		t.Fatalf("expected auth fail-closed degraded, got %+v", snap)
 	}
-	applied, err := s.loadApplied()
+	applied, _, err := s.loadApplied()
 	if err != nil || applied.Generation != 5 {
 		t.Fatalf("applied must be retained: %+v %v", applied, err)
 	}
@@ -393,7 +402,7 @@ func TestLoadAppliedRejectsSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Syncer{cfg: Config{Dir: dir}}
-	if _, err := s.loadApplied(); err == nil || !strings.Contains(err.Error(), ErrCodeRestartFailClosed) {
+	if _, _, err := s.loadApplied(); err == nil || !strings.Contains(err.Error(), ErrCodeRestartFailClosed) {
 		t.Fatalf("expected fail-closed symlink rejection, got %v", err)
 	}
 }
@@ -405,7 +414,7 @@ func TestLoadAppliedRejectsNonRegularFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Syncer{cfg: Config{Dir: dir}}
-	if _, err := s.loadApplied(); err == nil || !strings.Contains(err.Error(), ErrCodeRestartFailClosed) {
+	if _, _, err := s.loadApplied(); err == nil || !strings.Contains(err.Error(), ErrCodeRestartFailClosed) {
 		t.Fatalf("expected fail-closed non-regular rejection, got %v", err)
 	}
 }
@@ -421,7 +430,7 @@ func TestLoadAppliedRejectsOversizedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Syncer{cfg: Config{Dir: dir}}
-	if _, err := s.loadApplied(); err == nil || !strings.Contains(err.Error(), ErrCodeRestartFailClosed) {
+	if _, _, err := s.loadApplied(); err == nil || !strings.Contains(err.Error(), ErrCodeRestartFailClosed) {
 		t.Fatalf("expected fail-closed oversized state rejection, got %v", err)
 	}
 }
@@ -462,8 +471,11 @@ func TestRestartRecoversValidAppliedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := s.Snapshot()
-	if snap.Degraded || snap.LastErrorCode != "" || snap.AppliedGeneration != 1 || snap.PackCount != 1 || !snap.TrustedApplied {
+	if snap.Degraded || snap.LastErrorCode != "" || snap.AppliedGeneration != 1 || snap.PackCount != 1 || !snap.TrustedApplied || !snap.CoreAuthorityEstablished {
 		t.Fatalf("valid restart state did not recover cleanly: %+v", snap)
+	}
+	if !snap.Ready() {
+		t.Fatal("legacy gen>0 durable applied state must establish Core authority")
 	}
 }
 

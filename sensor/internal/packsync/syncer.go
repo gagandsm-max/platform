@@ -52,9 +52,14 @@ type Config struct {
 }
 
 type AppliedState struct {
-	Generation int64             `json:"generation"`
-	Checksum   string            `json:"checksum,omitempty"`
-	Packs      []AppliedPackRef  `json:"packs"`
+	Generation int64            `json:"generation"`
+	Checksum   string           `json:"checksum,omitempty"`
+	Packs      []AppliedPackRef `json:"packs"`
+	// CoreAuthorityEstablished is durable evidence that authorized Core desired
+	// state was successfully reconciled at least once. Generation 0 alone is
+	// insufficient: Core legitimately uses generation 0 / empty packs for a
+	// never-mutated desired set, which must not be confused with "never synced".
+	CoreAuthorityEstablished bool `json:"coreAuthorityEstablished,omitempty"`
 }
 
 type AppliedPackRef struct {
@@ -70,10 +75,21 @@ type Status struct {
 	LastSuccessfulSync time.Time
 	LastErrorCode      string
 	Degraded           bool
-	// TrustedApplied is true only after successful recoverOnStart (empty gen0 or
-	// fully validated applied state) or successful setSuccess after apply.
+	// TrustedApplied is true when local applied state / empty install passes
+	// structural, checksum and artifact validation (local integrity).
 	// False when recovery fail-closed; transient sync errors do not clear it.
 	TrustedApplied bool
+	// CoreAuthorityEstablished is true only after durable evidence of at least
+	// one successful authorized Core desired-state reconciliation (including a
+	// Core-confirmed generation-0 empty set). Missing applied.json never
+	// implies Core authority. Transient/auth errors do not clear it once set.
+	CoreAuthorityEstablished bool
+}
+
+// Ready reports whether local pack state is trusted and Core authority has been
+// durably established. Used by Sensor readiness probes.
+func (s Status) Ready() bool {
+	return s.TrustedApplied && s.CoreAuthorityEstablished
 }
 
 type Syncer struct {
@@ -84,6 +100,9 @@ type Syncer struct {
 
 	stop chan struct{}
 	done chan struct{}
+
+	// testingFailAppliedWrite forces writeAppliedDurable to fail. Unit tests only.
+	testingFailAppliedWrite bool
 }
 
 func New(cfg Config, client CorePackClient) (*Syncer, error) {
@@ -169,7 +188,7 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 		return
 	}
 
-	applied, appliedErr := s.loadApplied()
+	applied, appliedPresent, appliedErr := s.loadApplied()
 	if appliedErr != nil {
 		s.setError(ErrCodeRestartFailClosed, true)
 		return
@@ -209,6 +228,14 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 					"error_code", errorCode(err), "generation", desired.Generation, "error", err)
 				return
 			}
+		}
+		// Persist Core-authority evidence before advertising readiness. Generation 0
+		// empty desired state is a legitimate Core confirmation and must be durable.
+		if err := s.persistCoreAuthority(applied, appliedPresent); err != nil {
+			s.setError(ErrCodeDurableWrite, true)
+			s.cfg.Logger.Error("capability pack core-authority durable write failed",
+				"error_code", ErrCodeDurableWrite, "error", err)
+			return
 		}
 		s.setSuccess(desired.Generation, len(desired.Packs))
 		return
@@ -285,9 +312,10 @@ func (s *Syncer) applyDesired(ctx context.Context, desired coreclient.Capability
 	}
 
 	next := AppliedState{
-		Generation: desired.Generation,
-		Checksum:   desired.Checksum,
-		Packs:      staging,
+		Generation:               desired.Generation,
+		Checksum:                 desired.Checksum,
+		Packs:                    staging,
+		CoreAuthorityEstablished: true,
 	}
 	if err := s.writeAppliedDurable(next); err != nil {
 		return err
@@ -341,6 +369,9 @@ func (s *Syncer) writeArtifactDurable(sha string, data []byte) error {
 }
 
 func (s *Syncer) writeAppliedDurable(state AppliedState) error {
+	if s.testingFailAppliedWrite {
+		return fmt.Errorf("%s: injected durable write failure", ErrCodeDurableWrite)
+	}
 	path := filepath.Join(s.cfg.Dir, stateDirName, appliedStateFile)
 	payload, err := json.Marshal(state)
 	if err != nil {
@@ -399,49 +430,52 @@ func syncDir(dir string) error {
 	return nil
 }
 
-func (s *Syncer) loadApplied() (AppliedState, error) {
+func (s *Syncer) loadApplied() (AppliedState, bool, error) {
 	path := filepath.Join(s.cfg.Dir, stateDirName, appliedStateFile)
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return AppliedState{Generation: 0, Packs: []AppliedPackRef{}}, nil
+		return AppliedState{Generation: 0, Packs: []AppliedPackRef{}}, false, nil
 	}
 	if err != nil {
-		return AppliedState{}, err
+		return AppliedState{}, false, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return AppliedState{}, fmt.Errorf("%s: applied.json must be a regular non-symlink file", ErrCodeRestartFailClosed)
+		return AppliedState{}, false, fmt.Errorf("%s: applied.json must be a regular non-symlink file", ErrCodeRestartFailClosed)
 	}
 	if info.Size() < 0 || info.Size() > maxAppliedStateBytes {
-		return AppliedState{}, fmt.Errorf("%s: applied.json exceeds size limit", ErrCodeRestartFailClosed)
+		return AppliedState{}, false, fmt.Errorf("%s: applied.json exceeds size limit", ErrCodeRestartFailClosed)
 	}
 
 	file, err := os.Open(path)
 	if err != nil {
-		return AppliedState{}, err
+		return AppliedState{}, false, err
 	}
 	defer file.Close()
 
 	openedInfo, err := file.Stat()
 	if err != nil {
-		return AppliedState{}, err
+		return AppliedState{}, false, err
 	}
 	if !openedInfo.Mode().IsRegular() || openedInfo.Size() < 0 || openedInfo.Size() > maxAppliedStateBytes {
-		return AppliedState{}, fmt.Errorf("%s: applied.json changed or exceeds size limit", ErrCodeRestartFailClosed)
+		return AppliedState{}, false, fmt.Errorf("%s: applied.json changed or exceeds size limit", ErrCodeRestartFailClosed)
 	}
 
 	data, err := io.ReadAll(io.LimitReader(file, maxAppliedStateBytes+1))
 	if err != nil {
-		return AppliedState{}, err
+		return AppliedState{}, false, err
 	}
 	if int64(len(data)) > maxAppliedStateBytes {
-		return AppliedState{}, fmt.Errorf("%s: applied.json exceeds size limit", ErrCodeRestartFailClosed)
+		return AppliedState{}, false, fmt.Errorf("%s: applied.json exceeds size limit", ErrCodeRestartFailClosed)
 	}
 
 	var state AppliedState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return AppliedState{}, fmt.Errorf("%s: malformed applied.json", ErrCodeRestartFailClosed)
+		return AppliedState{}, false, fmt.Errorf("%s: malformed applied.json", ErrCodeRestartFailClosed)
 	}
-	return state, nil
+	if state.Packs == nil {
+		state.Packs = []AppliedPackRef{}
+	}
+	return state, true, nil
 }
 
 func (s *Syncer) ackApplied(ctx context.Context, generation int64, checksum string) error {
@@ -453,28 +487,60 @@ func (s *Syncer) ackApplied(ctx context.Context, generation int64, checksum stri
 }
 
 func (s *Syncer) recoverOnStart() error {
-	state, err := s.loadApplied()
+	state, present, err := s.loadApplied()
 	if err != nil {
 		return err
 	}
-	return s.trustAppliedState(state)
+	return s.trustAppliedState(state, present)
 }
 
 // trustAppliedState validates applied.json invariants and on-disk artifacts, then
-// publishes AppliedGeneration / PackCount / TrustedApplied. Used by recoverOnStart.
-func (s *Syncer) trustAppliedState(state AppliedState) error {
+// publishes AppliedGeneration / PackCount / TrustedApplied. Core authority is
+// published only when durable evidence proves a prior Core confirmation.
+func (s *Syncer) trustAppliedState(state AppliedState, present bool) error {
 	if err := validateAppliedInvariants(state); err != nil {
 		return err
 	}
 	if err := s.verifyAppliedArtifacts(state); err != nil {
 		return err
 	}
+	authority := durableCoreAuthority(state, present)
 	s.mu.Lock()
 	s.status.AppliedGeneration = state.Generation
 	s.status.PackCount = len(state.Packs)
 	s.status.TrustedApplied = true
+	s.status.CoreAuthorityEstablished = authority
 	s.mu.Unlock()
 	return nil
+}
+
+// durableCoreAuthority reports whether durable applied state proves prior Core
+// confirmation. Missing applied.json is never authority. Generation 0 without an
+// explicit coreAuthorityEstablished flag is never authority (Core uses gen0 for
+// empty desired sets). Generation > 0 without the flag is accepted as legacy
+// Core-applied durable state from earlier builds that lacked the explicit field.
+func durableCoreAuthority(state AppliedState, present bool) bool {
+	if !present {
+		return false
+	}
+	if state.CoreAuthorityEstablished {
+		return true
+	}
+	return state.Generation > 0
+}
+
+// persistCoreAuthority durably records Core confirmation before readiness.
+// Fail-closed: callers must not publish CoreAuthorityEstablished / Ready on error.
+func (s *Syncer) persistCoreAuthority(applied AppliedState, present bool) error {
+	if present && applied.CoreAuthorityEstablished {
+		return nil
+	}
+	next := applied
+	next.CoreAuthorityEstablished = true
+	if next.Packs == nil {
+		next.Packs = []AppliedPackRef{}
+	}
+	return s.writeAppliedDurable(next)
 }
 
 // verifyAppliedArtifacts confirms every applied pack ref has a readable regular
@@ -630,6 +696,7 @@ func (s *Syncer) setSuccess(gen int64, packCount int) {
 	s.status.LastErrorCode = ""
 	s.status.Degraded = false
 	s.status.TrustedApplied = true
+	s.status.CoreAuthorityEstablished = true
 }
 
 func (s *Syncer) setError(code string, degraded bool) {
@@ -639,11 +706,12 @@ func (s *Syncer) setError(code string, degraded bool) {
 	if degraded {
 		s.status.Degraded = true
 	}
-	// Do not set TrustedApplied; transient/auth errors retain prior trust.
+	// Do not clear TrustedApplied or CoreAuthorityEstablished; transient/auth
+	// errors retain prior local trust and previously established Core authority.
 }
 
-// TestingSetError records a sync error without clearing TrustedApplied.
-// Intended for readiness/health unit tests only.
+// TestingSetError records a sync error without clearing TrustedApplied /
+// CoreAuthorityEstablished. Intended for readiness/health unit tests only.
 func (s *Syncer) TestingSetError(code string, degraded bool) {
 	s.setError(code, degraded)
 }
@@ -651,6 +719,12 @@ func (s *Syncer) TestingSetError(code string, degraded bool) {
 // TestingSetSuccess marks a successful apply for readiness/health unit tests.
 func (s *Syncer) TestingSetSuccess(gen int64, packCount int) {
 	s.setSuccess(gen, packCount)
+}
+
+// TestingForceAppliedWriteFailure forces the next durable applied-state writes to
+// fail closed. Unit tests only; does not weaken production durability.
+func (s *Syncer) TestingForceAppliedWriteFailure(fail bool) {
+	s.testingFailAppliedWrite = fail
 }
 
 func errorCode(err error) string {

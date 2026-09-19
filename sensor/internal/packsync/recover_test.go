@@ -259,7 +259,7 @@ func TestRecoverRejectsCorruptArtifact(t *testing.T) {
 	}
 }
 
-func TestRecoverEmptyInstallTrusted(t *testing.T) {
+func TestRecoverEmptyInstallLocalTrustedWithoutCoreAuthority(t *testing.T) {
 	dir := t.TempDir()
 	s, err := New(Config{Dir: dir, PollInterval: time.Hour}, &fakeCore{})
 	if err != nil {
@@ -267,7 +267,10 @@ func TestRecoverEmptyInstallTrusted(t *testing.T) {
 	}
 	snap := s.Snapshot()
 	if !snap.TrustedApplied || snap.Degraded || snap.AppliedGeneration != 0 {
-		t.Fatalf("fresh empty install must be trusted: %+v", snap)
+		t.Fatalf("fresh empty install must be locally trusted: %+v", snap)
+	}
+	if snap.CoreAuthorityEstablished || snap.Ready() {
+		t.Fatalf("fresh empty install must not claim Core authority or readiness: %+v", snap)
 	}
 }
 
