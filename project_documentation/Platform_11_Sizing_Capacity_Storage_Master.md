@@ -220,18 +220,20 @@ Docker volumes and container logs are included in workstation disk monitoring gu
 
 ### 15.1 Endpoint EDS resource contract
 
-EDS is event-driven evidence acquisition, not continuous duplicate monitoring.
+EDS is event-driven Diagnostic Job profile evidence acquisition on the existing Agent → Sensor → Core durability path, not continuous duplicate monitoring and not a second transport/queue product.
 
 Resource rules:
 
-- trigger evaluation reuses normal Agent/Sensor observations wherever possible;
+- capture-eligibility evaluation reuses normal Agent/Sensor observations wherever possible;
 - no separate always-on RCA interpreter/process is required on the endpoint;
 - one or another small bounded number of concurrent captures is permitted only according to certified endpoint profile;
 - capture duration, evidence bytes, Top-N cardinality, log/Event Log lookback and retry frequency have hard policy/implementation ceilings;
-- repeated equivalent breaches are coalesced and cooldown-governed;
+- repeated equivalent capture-eligible conditions are coalesced and cooldown-governed;
 - site/tenant/estate storm budgets prevent simultaneous threshold events from producing an evidence-upload storm;
-- endpoint pressure checks can shorten/suppress capture; a `PARTIAL` result is preferable to worsening the incident;
-- EDS queue/upload remains lower priority than protected endpoint workload and lower priority on Sensor/Core than routine collection/ingestion durability.
+- endpoint pressure checks can shorten/suppress capture; a `PARTIAL`/`SUPPRESSED` result with explicit reason is preferable to worsening the incident;
+- logical priority/fairness protects, in order: authority/control/assignment → current monitoring correctness → normal telemetry durability → critical event evidence → diagnostic evidence → old/bulk replay per existing replay policy;
+- EDS queue/upload remains lower priority than protected endpoint workload and lower priority on Sensor/Core than routine collection/ingestion durability;
+- suppressed/shortened/dropped/expired/shed diagnostic evidence must be explicit, observable and auditable; diagnostic protection must never silently destroy routine telemetry durability.
 
 A literal zero-CPU promise is prohibited. Certification instead measures **incremental idle overhead** and **bounded transient capture overhead** for representative Linux/Windows endpoint classes.
 
@@ -250,7 +252,7 @@ When the Infrastructure Sensor lacks headroom, diagnostics queue/defer/reject ex
 
 ### 15.3 Optional dedicated local/private inference provider
 
-A dedicated inference provider is a separately sized optional component for customers that do not want LLM/embedding bursts on Core.
+A dedicated inference provider is a separately sized **conditional** optional component for customers that do not want LLM/embedding bursts on Core. **If** that mode is supported/enabled, the isolation/security/non-authority requirements below are mandatory. It is **not required** for Linux/Windows monitoring, agentless SSH/WinRM/WMI/CIM, EDS, deterministic Core RCA or base Platform operation. Core-resident LLM remains optional. All-AI-disabled remains supported.
 
 It:
 
@@ -259,7 +261,7 @@ It:
 - is not part of Core HA quorum/fencing;
 - may be CPU-only or use an optional accelerator according to its own certified profile;
 - receives bounded context from AI Gateway rather than raw unrestricted telemetry;
-- can be stopped/unavailable without affecting deterministic monitoring/RCA.
+- can be stopped/unavailable without affecting deterministic monitoring/RCA;
+- is not an EDS release prerequisite.
 
 Exact CPU/RAM/GPU/model combinations are release-certified profiles, not universal minimums. No dedicated inference hardware is required for Platform base operation.
-

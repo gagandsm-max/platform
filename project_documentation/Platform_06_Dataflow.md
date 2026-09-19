@@ -1976,44 +1976,46 @@ No production claim is made until this architecture is implemented and validated
 
 ---
 
-## DF-094 — Qualified endpoint breach to EDS evidence
+## DF-094 — Capture-eligible endpoint condition to EDS Diagnostic Job evidence
 
 ```text
 normal Agent sample
  -> normalize/persist under existing Agent telemetry flow
- -> local effective-policy evaluator
- -> NORMAL/SUSPECT
- -> policy duration/hysteresis qualifies BREACHED
- -> local resource/storm/cooldown gate
- -> create diagnostic_id + trigger provenance
+ -> local capture-eligibility evaluator (INELIGIBLE|QUALIFYING|CAPTURE_ELIGIBLE|COOLDOWN)
+ -> CAPTURE_ELIGIBLE after policy duration/hysteresis
+ -> validate current Core-issued assignment/policy/control generation
+ -> local resource/storm/cooldown gate (monitoring durability wins over EDS)
+ -> create Diagnostic Job profile ENDPOINT_DIAGNOSTIC_SNAPSHOT (diagnostic_job_id)
  -> run bounded OS-specific EDS collectors
- -> normalize typed evidence + missing/partial reasons
- -> durable Agent queue
+ -> normalize typed evidence + missing/partial/suppressed reasons
+ -> durable Agent queue (same Agent->Sensor->Core path; no second EDS transport)
  -> assigned Infrastructure Sensor Agent receiver
  -> Sensor durable path / Core ingest
- -> evidence association with entity/alert/incident window
+ -> Live Evidence / Investigation association
  -> deterministic Core RCA/correlation
  -> optional bounded ML/GNN/LLM assistance
- -> recovery/cooldown state
+ -> COOLDOWN / recovery eligibility
 ```
 
-Agent transport/ACK/replay semantics remain the existing authoritative Agent -> Sensor -> Core contract. EDS does not bypass durable delivery.
+Capture-eligibility states are not authoritative host-health states. Agent transport/ACK/replay semantics remain the existing authoritative Agent -> Sensor -> Core contract. EDS does not bypass durable delivery. Incomplete/suppressed/shed diagnostic evidence is explicit; routine telemetry durability is never silently sacrificed for EDS.
 
 ## DF-095 — Agentless infrastructure EDS
 
 ```text
-scheduled monitor or authorized investigation
+scheduled monitor or authorized investigation Diagnostic Job
+ -> Core validates current authority/generation/fencing
  -> Core/Sensor policy decides diagnostic eligibility
  -> eligible Infrastructure Sensor
  -> credential/security-profile resolution
  -> signed/versioned SSH or WinRM/WMI/CIM query pack
+    (fixed operation + structured parameters; no arbitrary shell/PowerShell)
  -> timeout/output/resource gate
  -> target execution
  -> parser/normalization
- -> COMPLETE/PARTIAL/FAILED evidence with source/vantage
+ -> Diagnostic Job state + capture_status COMPLETE/PARTIAL/FAILED/SUPPRESSED
  -> Sensor durable spool
  -> Core ingest
- -> evidence/incident/RCA correlation
+ -> Live Evidence / Investigation / RCA correlation
 ```
 
 A remote collection/auth/path failure is stored as monitoring-quality evidence and does not by itself become proof that the target host/service failed.
@@ -2023,12 +2025,11 @@ A remote collection/auth/path failure is stored as monitoring-quality evidence a
 ```text
 Core evidence/RCA context
  -> deterministic authorization + redaction + context builder
- -> AI Gateway
+ -> AI Gateway (optional; all-AI-disabled remains supported)
  -> certified on-Core inference OR optional dedicated local/private inference provider
  -> bounded model response
  -> schema/evidence/tool-policy validation
  -> assistance result
 ```
 
-The optional inference provider has no direct Agent/Sensor/device credential path and owns no authoritative Platform state. Its outage returns AI unavailable/degraded state while deterministic monitoring/RCA continues.
-
+**If** the dedicated inference provider is supported/enabled, it has no direct Agent/Sensor/device credential path and owns no authoritative Platform state. Its outage returns AI unavailable/degraded state while deterministic monitoring/RCA continues. The provider is not required for EDS or base monitoring.

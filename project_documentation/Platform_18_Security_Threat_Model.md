@@ -32,14 +32,14 @@ Additional threats and mandatory controls:
 
 | Threat | Required control |
 |---|---|
-| Malicious/modified diagnostic definition becomes remote-code execution | Signed/versioned Platform-controlled definitions, allowlisted operations, schema/parameter validation, exact compatibility checks and audit |
+| Malicious/modified diagnostic definition becomes remote-code execution | Signed/versioned Platform-controlled definitions, allowlisted fixed operations + structured parameters, schema/parameter validation, exact compatibility checks and audit; no `sh -c`/`bash -c`/arbitrary PowerShell facility for routine monitoring/EDS |
 | Agent EDS used for local privilege escalation | Least-privilege Agent identity, no arbitrary shell/script upload, explicit privilege requirements, fail/partial rather than silent elevation |
 | WinRM/SSH diagnostics become generic administrative backdoor | Security-profile scoped credentials, read-only query packs, host/certificate validation, operation allowlists, timeout/output bounds and no browser exposure of reusable credentials |
-| Diagnostic storm worsens an outage | Per-endpoint/site/tenant concurrency/rate budgets, cooldown/coalescing, resource guard, cancellation and lower scheduling priority than routine monitoring |
+| Stale/revoked/expired/replayed diagnostic authority executes | Core-issued assignment/policy/control generation fencing; fail closed on obsolete authority; provenance retains authorizing generation |
+| Diagnostic storm worsens an outage or starves routine telemetry | Per-endpoint/site/tenant concurrency/rate budgets, cooldown/coalescing, resource guard, cancellation, explicit incomplete/suppressed evidence and lower scheduling priority than routine monitoring/telemetry durability |
 | Sensitive endpoint data leaks through evidence | Data minimization, default exclusion of environment/user content/arbitrary files/packet payloads/unrestricted command lines, bounded logs and redaction |
 | Fabricated/replayed EDS evidence poisons RCA | mTLS identity, assignment authority, idempotency/replay protection, schema validation, source/vantage provenance, immutable/auditable evidence references |
-| Endpoint indicator is promoted to false causal truth | Typed factual evidence only; Core contradiction/causal evaluation; `INCONCLUSIVE` support; no unsupported free-form cause/fix emitted as fact |
+| Endpoint capture-eligibility/indicator is promoted to false causal truth | Capture-eligibility is not host-health authority; typed factual evidence only; Core contradiction/causal evaluation; `INCONCLUSIVE` support; no unsupported free-form cause/fix emitted as fact |
 | Local/private LLM reaches device credentials or control plane | AI Gateway mediation, bounded authorized context, no credential forwarding, deterministic tool firewall, no direct Agent/Sensor/device network authority |
-| Optional inference node becomes hidden third Core/state authority | No authoritative database/quorum/fencing role, stateless inference boundary, explicit failure isolation and authentication only through approved AI Gateway contract |
+| Optional inference node becomes hidden third Core/state authority | No authoritative database/quorum/fencing role, stateless inference boundary, explicit failure isolation and authentication only through approved AI Gateway contract; mode is conditional and not required for EDS/base monitoring |
 | Model/runtime compromise affects monitoring | Model/runtime supply-chain validation, sandbox/resource limits, optional-service isolation, no mandatory dependency for deterministic monitoring/RCA |
-

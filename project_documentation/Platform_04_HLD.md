@@ -1221,16 +1221,18 @@ The Windows Agent is one compiled service executable plus configuration/certific
 
 ## 36. Endpoint Diagnostic Evidence subsystem — v3.2.2 reconciliation
 
+EDS is a specialized Diagnostic Job profile (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`) within the existing Troubleshoot / Live Evidence / Investigation architecture. It does not create a second diagnostic registry, scheduler, investigation state machine or evidence store.
+
 ### 36.1 Agent responsibilities
 
 Windows/Linux Agent adds logical responsibilities within the existing Agent runtime:
 
-- effective diagnostic-policy cache/version acknowledgment;
-- deterministic threshold/state/hysteresis/cooldown evaluator;
+- effective diagnostic-policy cache/version and Core-issued authority/generation acknowledgment;
+- deterministic capture-eligibility evaluator (`INELIGIBLE|QUALIFYING|CAPTURE_ELIGIBLE|COOLDOWN`) that is not host-health authority;
 - bounded OS-specific EDS collector set;
 - evidence normalization;
-- local resource guard/cancellation;
-- durable queueing through the existing Agent -> Sensor transport.
+- local resource guard/cancellation with monitoring durability priority;
+- durable queueing through the existing Agent -> Sensor transport (no second EDS transport).
 
 These responsibilities do not require a second endpoint daemon, Python runtime or model service.
 
@@ -1239,12 +1241,12 @@ These responsibilities do not require a second endpoint daemon, Python runtime o
 Infrastructure Sensor owns:
 
 - Agent EDS receive/forward behavior with source/sequence provenance;
-- Linux SSH and Windows WinRM/WMI/CIM agentless query-pack execution;
+- Linux SSH and Windows WinRM/WMI/CIM agentless query-pack execution as fixed operations with structured parameters (no generic remote shell/PowerShell facility);
 - per-target/per-tenant concurrency and storm budgets;
 - credential/security-profile binding;
 - timeout/output limits and cancellation;
-- normalization of remote evidence into the same EDS contract;
-- explicit collection-health/partial-evidence reporting.
+- normalization of remote evidence into the same Diagnostic Job / Live Evidence EDS profile;
+- explicit collection-health/partial/suppressed-evidence reporting.
 
 Sensor does not perform authoritative cross-domain RCA and does not host the local LLM for this capability.
 
@@ -1252,17 +1254,16 @@ Sensor does not perform authoritative cross-domain RCA and does not host the loc
 
 Core owns:
 
-- authoritative effective policy and trigger definitions;
-- manual/incident-driven EDS requests;
+- authoritative effective policy, trigger/eligibility definitions and generation fencing;
+- manual/incident-driven EDS Diagnostic Jobs;
 - global/site/tenant evidence-acquisition budgets;
 - dedup/coalescing of repeated evidence requests;
-- evidence storage/index/reference policy;
+- evidence storage/index/reference policy via existing Live Evidence / Investigation contracts;
 - alert/incident/graph/change correlation;
 - deterministic RCA and confidence/contradiction handling;
 - optional ML/GNN/LLM assistance under `Platform_22`;
-- UI/API exposure of trigger, evidence, gaps and diagnostic status.
+- UI/API exposure of eligibility, evidence, gaps and diagnostic status, visually distinct from Core RCA conclusions.
 
 ### 36.4 Local/private inference provider boundary
 
-AI Gateway may target a separate local/private inference provider as an optional deployment component. It is an inference boundary only: no scheduling authority, no HA quorum role, no direct telemetry ingestion authority and no durable control-plane ownership.
-
+**If** AI Gateway targets a separate local/private inference provider, that mode is an optional/conditional inference boundary only: no scheduling authority, no HA quorum role, no direct telemetry ingestion authority and no durable control-plane ownership. It is not required for EDS or base monitoring. All-AI-disabled remains supported.

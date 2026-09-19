@@ -1246,26 +1246,29 @@ Windows Agent source can be cross-compiled and most functional tests can run in 
 
 ### 35.1 Placement
 
+EDS is a specialized **Diagnostic Job profile** (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`) executed through existing Agent/Sensor/Core paths. It is not a parallel diagnostics product or microservice.
+
 ```text
 Windows/Linux Agent
   normal collectors
-  -> deterministic trigger evaluator
-  -> bounded EDS evidence capture
-  -> durable local queue
+  -> local capture-eligibility evaluator (not host-health authority)
+  -> Diagnostic Job profile ENDPOINT_DIAGNOSTIC_SNAPSHOT
+  -> bounded EDS evidence capture under current Core-issued authority/generation
+  -> durable local queue (shared Agent durability path; no second EDS transport)
   -> assigned Infrastructure Sensor
-  -> Core evidence/incident/RCA
+  -> Core Live Evidence / Investigation / RCA
 
 Agentless Linux/Windows
-  Core monitoring policy/job
+  Core Diagnostic Job / monitoring policy
   -> eligible Infrastructure Sensor
   -> signed/versioned SSH or WinRM/WMI/CIM query workflow
   -> normalized EDS evidence
-  -> Core evidence/incident/RCA
+  -> Core Live Evidence / Investigation / RCA
 
 Core
   deterministic qualification/correlation/RCA
-  -> bounded statistical/ML assistance
-  -> AI Gateway
+  -> bounded statistical/ML assistance (optional)
+  -> AI Gateway (optional)
        -> certified on-Core local runtime OR optional dedicated local/private inference provider
 ```
 
@@ -1275,26 +1278,32 @@ Agents and Sensors remain collection/evidence executors. They do not become inde
 
 Linux/Windows monitoring shall normalize comparable host/process/service/evidence concepts while retaining source-specific provenance and capability gaps. Agent-based collection may legitimately expose richer evidence than SSH/WinRM agentless collection.
 
-Agentless execution uses Platform-controlled, versioned, bounded query definitions. A generic arbitrary remote-shell/PowerShell facility is not introduced by infrastructure monitoring or EDS.
+Agentless execution uses Platform-controlled, versioned, bounded query definitions. Prefer fixed approved executable/operation + structured argv/typed parameters (Linux) and structured CIM/WMI/WinRM operations (Windows). A generic arbitrary remote-shell/`sh -c`/`bash -c`/PowerShell facility is not introduced by infrastructure monitoring or EDS.
 
-### 35.3 EDS resource and failure boundary
+### 35.3 Capture eligibility versus host operational state
 
-EDS reuses continuous observations for qualification, then performs only bounded event-driven evidence capture. Steady-state design objective is near-zero incremental overhead beyond normal monitoring; a literal zero-compute requirement is invalid.
+Local states used to decide whether an automatic EDS capture may run (`INELIGIBLE`, `QUALIFYING`, `CAPTURE_ELIGIBLE`, `COOLDOWN`) are **diagnostic capture-eligibility states only**. They do not determine authoritative host health, replace semantic monitoring state, create an endpoint Alert Engine, assert device/service DOWN, or independently assert incident severity/root cause. Normal monitoring, Alert Engine and Core remain authoritative.
 
-EDS execution is subordinate to endpoint workload safety and to Sensor/Core routine monitoring. It has explicit cancellation, deadline, evidence-size, Top-N, frequency/cooldown and storm/backpressure controls. Missing privilege or collection failure yields partial/degraded evidence, not confirmation of the suspected cause.
+### 35.4 Authority fencing
 
-### 35.4 Optional dedicated local/private inference provider
+Automatic Agent/Sensor EDS executes only under currently valid Core-issued assignment/policy/control generation. Policy ID/version alone is insufficient. Stale assignments, revoked definitions, expired authority, superseded Sensor ownership and replay of obsolete authority must fail closed. Capture/result provenance preserves the authority context that authorized the job.
 
-Where customers require AI compute isolation from Core, AI Gateway may invoke an approved dedicated local/private inference provider.
+### 35.5 EDS resource and failure boundary
 
-That provider:
+EDS reuses continuous observations for eligibility, then performs only bounded event-driven evidence capture on the existing Agent → Sensor → Core durability path. Steady-state design objective is near-zero incremental overhead beyond normal monitoring; a literal zero-compute requirement is invalid.
+
+Logical priority/fairness protects, in order: (1) authority/control/assignment, (2) current monitoring correctness, (3) normal telemetry durability, (4) critical event evidence, (5) diagnostic evidence, (6) old/bulk replay per existing replay policy. EDS remains bounded in concurrency, queue occupancy, stored bytes, upload bandwidth, evidence size, frequency and estate storm budget. Suppressed/shortened/dropped/expired/shed diagnostic evidence is explicit and auditable. Diagnostic protection must never silently destroy routine telemetry durability.
+
+### 35.6 Optional dedicated local/private inference provider
+
+**If** a dedicated local/private inference provider is supported/enabled, AI Gateway may invoke it for compute isolation. That mode is **not required** for Linux/Windows monitoring, agentless SSH/WinRM/WMI/CIM, EDS, deterministic Core RCA or base Platform operation. Core-resident LLM remains optional. All-AI-disabled remains supported.
+
+When enabled, that provider:
 
 - owns no authoritative tenant/inventory/incident/telemetry database;
 - receives only bounded, authorized, redacted context through AI Gateway;
 - has no direct device/Agent/Sensor credential authority;
-- is outside the exactly-two-Core HA authority model;
-- may fail, restart or be removed without disabling deterministic monitoring/RCA;
-- requires normal OSS/model/security/sizing certification before supported use.
+- is not a third Core/HA quorum/fencing participant;
+- may fail or be absent without impairing collection, alerting, incidents or deterministic RCA.
 
 On-Core local inference remains allowed only when the exact profile passes `Platform_11` non-interference certification.
-

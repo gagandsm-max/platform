@@ -103,14 +103,15 @@ This corrective reconciliation closes those defects without adding product scope
 
 ### 4.5 2026-09-19 endpoint diagnostics and local-intelligence reconciliation
 
-This v3.2.2 reconciliation formalizes comprehensive Windows/Linux infrastructure monitoring and a bounded **Endpoint Diagnostic Snapshot (EDS)** without adding a new Mother Reference file, mandatory endpoint interpreter, mandatory AI appliance or new causal authority.
+This v3.2.2 reconciliation formalizes comprehensive Windows/Linux infrastructure monitoring and a bounded **Endpoint Diagnostic Snapshot (EDS)** without adding a new Mother Reference file, mandatory endpoint interpreter, mandatory AI appliance, new causal authority or second diagnostics framework.
 
-`Platform_23` owns separate Agent-based versus agentless/remote infrastructure coverage and certification, including CPU/resource pressure, memory/swap, filesystem/inode, block I/O, NIC, process, service and applicable OS/event/hardware evidence. `Platform_22` owns EDS trigger/evidence semantics and tiered local intelligence: deterministic/model-free endpoint logic, bounded Core analytics and optional LLM/embedding assistance behind AI Gateway. No LLM/GNN/foundation-model runtime is placed on normal monitored Agents or Sensors for EDS.
+EDS is the product-facing name for a specialized diagnostic type/profile (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`) of the existing Diagnostic Job / Live Evidence / Investigation Session architecture. It does not create a second diagnostic registry, scheduler, authorization system, investigation state machine or evidence store.
 
-An optional dedicated local/private inference provider is approved as a compute-isolation boundary when customers do not want local LLM/embedding bursts on Core. It is not a third Core, owns no authoritative Platform state and may fail or be absent without affecting deterministic monitoring/RCA. Existing on-Core local inference remains allowed only inside the certified `Platform_11` non-interference envelope.
+`Platform_23` owns separate Agent-based versus agentless/remote infrastructure coverage and certification, including CPU/resource pressure, memory/swap, filesystem/inode, block I/O, NIC, process, service and applicable OS/event/hardware evidence. `Platform_22` owns EDS capture-eligibility/evidence semantics and tiered local intelligence: deterministic/model-free endpoint logic, bounded Core analytics and optional LLM/embedding assistance behind AI Gateway. No LLM/GNN/foundation-model runtime is placed on normal monitored Agents or Sensors for EDS.
 
-This reconciliation updates existing base/specialized masters and keeps the authoritative set at **25 files** and version **v3.2.2**.
+An optional dedicated local/private inference provider is a **conditional** compute-isolation boundary: **if** that provider mode is supported/enabled, its isolation/security/non-authority requirements are mandatory. It is not required to deliver Linux/Windows monitoring, SSH/WinRM/WMI/CIM, EDS, deterministic Core RCA or normal Platform operation. It is not a third Core, owns no authoritative Platform state and may fail or be absent without affecting deterministic monitoring/RCA. Existing on-Core local inference remains optional and allowed only inside the certified `Platform_11` non-interference envelope. All-AI-disabled remains a supported deterministic mode.
 
+This reconciliation updates existing base/specialized masters and keeps the authoritative set at **25 files** and version **v3.2.2**. No `Platform_24` / `Platform_25` document is introduced.
 ## 5. Precedence
 
 When requirements appear to conflict:

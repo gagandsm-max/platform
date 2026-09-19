@@ -124,9 +124,9 @@ The Connector framework supports reusable, versioned connectors with: authentica
 
 ### 9.1 Agent-based diagnostics
 
-Linux/Windows Agent EDS executes through the existing authenticated Agent runtime and identity. It uses native read-only evidence paths under least privilege. EDS does not authorize an arbitrary local-shell, PowerShell, script-upload or customer-code execution interface.
+Linux/Windows Agent EDS executes as Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` through the existing authenticated Agent runtime and identity. It uses native read-only evidence paths under least privilege. EDS does not authorize an arbitrary local-shell, PowerShell, script-upload or customer-code execution interface.
 
-A diagnostic request from Core/Sensor must be authenticated, tenant/entity scoped, versioned, time bounded and replay/idempotency protected. Agent applies only a supported diagnostic definition and reports unsupported/denied/expired requests explicitly.
+A diagnostic request from Core/Sensor must be authenticated, tenant/entity scoped, versioned, generation/authority fenced, time bounded and replay/idempotency protected. Agent applies only a supported diagnostic definition under currently valid Core-issued authority and reports unsupported/denied/expired/stale requests explicitly.
 
 ### 9.2 Linux SSH agentless diagnostics
 
@@ -137,20 +137,21 @@ Infrastructure Sensor SSH diagnostics require:
 - security-profile/credential binding;
 - public-key authentication preferred where applicable;
 - least-privilege account;
-- controlled sudo only for explicitly approved read-only operations;
-- allowlisted/versioned query pack;
-- parameter validation/escaping;
+- controlled sudo only for explicitly certified read-only operations (never generic privilege escalation);
+- allowlisted/versioned query pack as **fixed approved executable/operation + structured argv + typed constrained parameters**;
+- parameter schema validation with no unchecked interpolation;
+- prohibition of routine `sh -c` / `bash -c` / arbitrary command strings from users, API clients or model output;
 - command timeout, output-byte limit and concurrency budget;
 - secret/redaction controls;
-- audit of query definition/version, target, actor/job and result code.
+- audit of query definition/version, target, actor/`diagnostic_job_id` and result code.
 
 Generic unrestricted shell execution is not part of routine monitoring/EDS.
 
 ### 9.3 Windows agentless diagnostics
 
-WinRM/WMI/CIM diagnostics require HTTPS/TLS where supported by the selected transport policy, credential/profile scoping, certificate validation and bounded versioned query definitions. Recurring monitoring/EDS shall prefer structured CIM/WMI/performance/service/Event Log operations over arbitrary PowerShell.
+WinRM/WMI/CIM diagnostics require HTTPS/TLS where supported by the selected transport policy, credential/profile scoping, certificate validation and bounded versioned query definitions. Recurring monitoring/EDS shall prefer structured CIM/WMI/performance/service/Event Log/WinRM operations over PowerShell.
 
-Where PowerShell is unavoidable for a certified query, the exact script/command template is Platform-owned/versioned, parameter constrained, read-only by declared policy and separately security tested.
+Where a certified PowerShell fallback is unavoidable, the exact script/command template is Platform-owned, fixed, versioned, read-only by declared policy, exact-operation scoped, typed-parameter constrained, output/timeout bounded, audited and separately security-certified. No generic PowerShell facility and no model/user-supplied arbitrary PowerShell are permitted for routine monitoring/EDS.
 
 ### 9.4 Evidence privacy
 
@@ -158,5 +159,4 @@ Default EDS excludes environment variables, arbitrary file content, packet paylo
 
 ### 9.5 AI boundary
 
-Agent/Sensor credentials, reusable secrets and unrestricted device-control capability are never provided to a local/private LLM provider. AI Gateway receives only bounded authorized evidence context and all tool/action authority remains deterministic Platform policy.
-
+Agent/Sensor credentials, reusable secrets and unrestricted device-control capability are never provided to a local/private LLM provider. AI Gateway receives only bounded authorized evidence context and all tool/action authority remains deterministic Platform policy. Dedicated local/private inference, when supported, is conditional and not required for EDS or base monitoring.

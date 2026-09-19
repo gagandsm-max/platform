@@ -74,7 +74,7 @@ Existing Device Pack contracts remain valid. They are classifications/profiles u
 | `PRD-EMC-019` | Windows/Linux infrastructure monitoring shall support and certify **Agent-based** and **agentless/remote** collection as separate capability dimensions while normalizing equivalent host/process/service/evidence semantics where technically available. |
 | `PRD-EMC-020` | Certified server monitoring shall cover host CPU/scheduler pressure, memory/swap/paging pressure, filesystem/inode capacity, block I/O, network/NIC quality, OS/uptime, bounded process/service health and applicable hardware/event evidence rather than CPU/memory/disk-capacity gauges alone. |
 | `PRD-EMC-021` | Linux Agent, Windows Agent, SSH and WinRM/WMI/CIM monitoring shall expose explicit capability/privilege gaps; unsupported or failed collection shall be represented as missing/degraded monitoring evidence rather than target failure. |
-| `PRD-EMC-022` | Infrastructure Capability Packs shall declare continuous-monitoring collectors and bounded diagnostic/EDS workflows separately, including supported OS/version, privilege, evidence fields, resource budget and dimensional certification state. |
+| `PRD-EMC-022` | Infrastructure Capability Packs shall declare continuous-monitoring collectors and bounded EDS diagnostics separately. EDS is Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` within the existing Troubleshoot / Live Evidence architecture (not a second diagnostics framework). Packs shall declare supported OS/version, privilege, evidence fields, resource budget and dimensional certification state. |
 
 ---
 
@@ -228,7 +228,7 @@ Certification **must** separately record:
 - continuous host-metric coverage;
 - process/service coverage;
 - OS/event/hardware evidence coverage where supported;
-- Endpoint Diagnostic Snapshot (EDS) / investigation coverage;
+- Endpoint Diagnostic Snapshot (EDS) as Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` / investigation coverage (not a second diagnostics framework);
 - resource-overhead and least-privilege certification.
 
 Minimum normalized server evidence targets, subject to OS/version/privilege capability, are:
@@ -536,7 +536,7 @@ Each `REQ-EMC-*` owns the corresponding `PRD-EMC-*`. Implementation status for a
 | `REQ-EMC-019` | `PRD-EMC-019` | PRD, Architecture, HLD, Quality | Separate Agent/agentless certification evidence for Linux/Windows with normalized semantic mapping and explicit coverage differences |
 | `REQ-EMC-020` | `PRD-EMC-020` | PRD, HLD, LLD, Quality | Server fixtures prove CPU/pressure, memory/swap, filesystem/inodes, block I/O, NIC, process, service, OS and applicable event/hardware coverage |
 | `REQ-EMC-021` | `PRD-EMC-021` | Architecture, Security, Quality | Privilege/credential/path/collector failures map to missing/degraded evidence; negative tests prevent false host/service-down assertion |
-| `REQ-EMC-022` | `PRD-EMC-022` | Architecture, LLD, Quality, Capacity | Capability Pack manifest/certification distinguishes continuous collectors from EDS diagnostics and records version/privilege/evidence/resource support |
+| `REQ-EMC-022` | `PRD-EMC-022` | Architecture, LLD, Quality, Capacity | Capability Pack manifest/certification distinguishes continuous collectors from EDS Diagnostic Job profile diagnostics and records version/privilege/evidence/resource support; no second diagnostics framework |
 
 ---
 

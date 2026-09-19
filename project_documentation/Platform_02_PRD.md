@@ -2165,31 +2165,31 @@ Collection, credential, privilege or path failure is **monitoring-health evidenc
 
 ### 67.2 Endpoint Diagnostic Snapshot
 
-Platform shall provide a bounded **Endpoint Diagnostic Snapshot (EDS)** for Windows/Linux infrastructure. EDS may start automatically after a centrally governed threshold/state breach qualifies, or from an authorized investigation request.
+Platform shall provide a bounded **Endpoint Diagnostic Snapshot (EDS)** for Windows/Linux infrastructure as a specialized profile of the existing Diagnostic Job / Live Evidence / Investigation architecture (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`). EDS may start automatically after a centrally governed threshold/state condition becomes **capture-eligible**, or from an authorized investigation request. Capture-eligibility is not authoritative host-health state.
 
 EDS shall:
 
-- reuse existing normal observations for trigger evaluation wherever possible;
+- reuse existing normal observations for capture-eligibility evaluation wherever possible;
 - use policy-defined duration, hysteresis, recovery and cooldown rather than one-sample triggering;
-- collect a short-lived typed diagnostic evidence bundle appropriate to the breached resource class;
-- report `COMPLETE`, `PARTIAL`, `FAILED` or `SUPPRESSED` rather than inventing missing evidence;
-- preserve policy/version, trigger, entity, source/vantage, time and evidence provenance;
-- feed the authoritative Core incident/RCA workflow through the existing Agent/Sensor paths;
-- stop, suppress or degrade before creating material additional pressure on an already stressed endpoint or monitoring path.
+- execute only under currently valid Core-issued assignment/policy/control generation (policy ID/version alone is insufficient);
+- collect a short-lived typed diagnostic evidence bundle appropriate to the capture-eligible resource class;
+- report Diagnostic Job state plus capture completeness `COMPLETE`, `PARTIAL`, `FAILED` or `SUPPRESSED` rather than inventing missing evidence;
+- preserve policy/version, authority generation, trigger, entity, source/vantage, time and evidence provenance;
+- feed the authoritative Core incident/RCA workflow through the existing Agent/Sensor durability paths (no second EDS transport);
+- stop, suppress or degrade with explicit observable reason before creating material additional pressure on an already stressed endpoint or silently destroying routine telemetry durability.
 
-EDS is evidence acquisition, **not endpoint-authoritative RCA**. Core remains responsible for cross-domain causal analysis because endpoint-local evidence cannot by itself observe all network, hypervisor, storage, database, cloud, shared-service or change dependencies.
+EDS is evidence acquisition, **not endpoint-authoritative RCA** and not a second diagnostics framework. Core remains responsible for cross-domain causal analysis because endpoint-local evidence cannot by itself observe all network, hypervisor, storage, database, cloud, shared-service or change dependencies.
 
-No universal customer CPU/memory/disk threshold is fixed here. Effective values remain governed policy.
+No universal customer CPU/memory/disk threshold is fixed here. Effective values remain governed policy. This section is target architecture/requirements; specified ≠ implemented ≠ tested ≠ certified ≠ deployed.
 
 ### 67.3 Lightweight/local AI placement
 
 Local intelligence uses three deployment tiers:
 
-1. **Tier 0 — endpoint deterministic intelligence:** threshold/state qualification, hysteresis, bounded rolling/statistical checks and EDS trigger/evidence logic. No LLM/GNN/foundation-model runtime is required or permitted on normal monitored Agents/Sensors for EDS.
+1. **Tier 0 — endpoint deterministic intelligence:** capture-eligibility evaluation, hysteresis, bounded rolling/statistical checks and EDS evidence logic. No LLM/GNN/foundation-model runtime is required or permitted on normal monitored Agents/Sensors for EDS.
 2. **Tier 1 — Core bounded analytics:** statistical/ML, anomaly, forecast, similarity and optional GNN work executes only within certified cold/bounded resource controls and yields to protected monitoring.
 3. **Tier 2 — language/embedding assistance:** LLM/embedding functions run behind AI Gateway either in a certified on-Core profile or through an optional dedicated local/private inference provider.
 
-A dedicated local/private inference provider is optional and stateless with respect to authoritative Platform state. It is not a third Core/HA node and may be unavailable without impairing deterministic collection, alerting, incident handling or RCA.
+**If** a dedicated local/private inference provider is supported/enabled, it is optional and must remain stateless with respect to authoritative Platform state. It is not required for Linux/Windows monitoring, EDS, deterministic RCA or base Platform operation; it is not a third Core/HA node; and it may be unavailable without impairing deterministic collection, alerting, incident handling or RCA. Core-resident LLM remains optional. All-AI-disabled remains supported.
 
 Detailed evidence, security, resource and release contracts are authoritative in `Platform_22`, `Platform_23`, `Platform_10`, `Platform_11`, `Platform_14`, `Platform_17` and `Platform_18`.
-

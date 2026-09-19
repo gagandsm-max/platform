@@ -2425,28 +2425,33 @@ Logs shall be bounded. Linux packages integrate with journald/logrotate policy; 
 
 ## 72. Endpoint Diagnostic Snapshot implementation contract — v3.2.2 reconciliation
 
-### 72.1 Trigger state
+EDS is implemented as Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` on the existing diagnostic/Live Evidence architecture. It does not add a second scheduler, registry, evidence database or transport.
 
-For each effective diagnostic trigger, the Agent or agentless monitoring authority retains bounded state sufficient to evaluate:
+### 72.1 Capture-eligibility state
+
+For each effective diagnostic trigger, the Agent or agentless monitoring authority retains bounded **capture-eligibility** state sufficient to evaluate whether an automatic EDS Diagnostic Job may be created. This state is **not** authoritative host/operational health:
 
 ```text
 policy_id
 policy_version
+authority_generation      Core-issued assignment/policy/control generation
 entity_id
 metric_or_state_key
-NORMAL | SUSPECT | BREACHED | COOLDOWN
-breach_started_at
+INELIGIBLE | QUALIFYING | CAPTURE_ELIGIBLE | COOLDOWN
+eligibility_started_at
 last_observed_at
 last_capture_at
 cooldown_until
 recovery_candidate_since
 ```
 
-Evaluation uses the same normalized monitoring observations already collected wherever possible. One sample crossing a threshold does not by itself require EDS when the effective policy specifies duration/qualification. Hysteresis/recovery semantics prevent rapid trigger oscillation.
+Evaluation uses the same normalized monitoring observations already collected wherever possible. One sample crossing a threshold does not by itself require EDS when the effective policy specifies duration/qualification. Hysteresis/recovery semantics prevent rapid capture oscillation. Eligibility must never replace Alert Engine/Core semantic monitoring state or assert device/service DOWN.
+
+Automatic capture executes only under currently valid Core-issued authority/generation. Stale, revoked, expired, reassigned or replayed authority fails closed.
 
 ### 72.2 Linux Agent evidence collectors
 
-Linux EDS shall prefer bounded native reads/APIs such as `/proc`, `/sys`, stat/statfs and narrowly filtered journal/kernel evidence. Collector implementation shall be dependency-minimal and must not require spawning an unrestricted shell.
+Linux EDS shall prefer bounded native reads/APIs such as `/proc`, `/sys`, stat/statfs and narrowly filtered journal/kernel evidence. Collector implementation shall be dependency-minimal and must not require spawning an unrestricted shell, `sh -c`, `bash -c` or arbitrary command strings from users/API/model output.
 
 Supported evidence families should include where available:
 
@@ -2461,28 +2466,28 @@ Supported evidence families should include where available:
 
 ### 72.3 Windows Agent evidence collectors
 
-Windows EDS shall use supported native Windows interfaces/APIs appropriate to the metric, including performance-counter/PDH, Service Control Manager, Event Log, IP Helper/network, storage and WHEA/system evidence where required. Recurring collection shall not depend on continuously spawning PowerShell.
+Windows EDS shall use supported native Windows interfaces/APIs appropriate to the metric, including performance-counter/PDH, Service Control Manager, Event Log, IP Helper/network, storage and WHEA/system evidence where required. Recurring collection shall not depend on continuously spawning PowerShell or on arbitrary PowerShell from users/API/model output.
 
 Evidence families normalize to the same Platform concepts as Linux while preserving Windows-specific provenance.
 
 ### 72.4 Agentless query packs
 
-Agentless EDS executes only versioned Platform-controlled diagnostic query definitions.
+Agentless EDS executes only versioned Platform-controlled diagnostic query definitions as Diagnostic Job parameters.
 
 Each query definition declares:
 
 - OS/family/version compatibility;
 - operation identifier and normalized output schema;
 - required credential/privilege class;
-- executable/command/CIM/WMI operation allowlist;
-- parameter schema and escaping rules;
+- preferred execution form: fixed approved executable/operation + structured argv / typed CIM/WMI/WinRM operation;
+- parameter schema and escaping rules (no unchecked interpolation; no generic `sh -c`/`bash -c`/arbitrary command string);
 - timeout and maximum output;
 - expected sensitive fields/redaction;
 - resource/safety classification;
 - parser/schema version;
 - failure/error mapping.
 
-Linux query packs execute through the approved SSH transport. Windows query packs execute through approved WinRM HTTPS/WMI/CIM transport. Neither path provides unrestricted generic remote command execution to normal monitoring/EDS workflows.
+Linux query packs execute through the approved SSH transport as fixed operations with structured parameters. Windows query packs execute through approved WinRM HTTPS/WMI/CIM structured operations. Where a certified PowerShell fallback is unavoidable, the exact Platform-owned versioned template is read-only, typed-parameter constrained, output/timeout bounded, audited and separately security-certified. Neither path provides unrestricted generic remote command execution to normal monitoring/EDS workflows. Controlled sudo may exist only for explicitly certified read-only operations.
 
 ### 72.5 Resource guard
 
@@ -2494,9 +2499,10 @@ EDS runtime enforces:
 - bounded log/Event Log lookback;
 - policy cooldown and duplicate coalescing;
 - tenant/site/estate storm budgets;
-- local pressure checks before and during capture.
+- local pressure checks before and during capture;
+- logical priority that keeps routine monitoring/telemetry durability ahead of diagnostic evidence.
 
-If collection would materially worsen endpoint or monitoring-path pressure, the capture is shortened, suppressed or returned `PARTIAL` with the reason.
+If collection would materially worsen endpoint or monitoring-path pressure, the capture is shortened, suppressed or returned `PARTIAL`/`SUPPRESSED` with an explicit reason. Incomplete diagnostic evidence must be observable; routine telemetry durability must not be silently destroyed to protect EDS.
 
 ### 72.6 Endpoint classification boundary
 
@@ -2506,5 +2512,4 @@ It must not convert an indicator into unsupported causal prose such as declaring
 
 ### 72.7 Local intelligence runtime boundary
 
-No LLM/GNN/foundation-model runtime is packaged into normal Agent or Sensor EDS. Tier-0 endpoint intelligence is deterministic/bounded statistical logic in the existing runtime. Tier-1/2 intelligence follows `Platform_22` and `Platform_11` resource governance.
-
+No LLM/GNN/foundation-model runtime is packaged into normal Agent or Sensor EDS. Tier-0 endpoint intelligence is deterministic/bounded statistical capture-eligibility and evidence logic in the existing runtime. Tier-1/2 intelligence follows `Platform_22` and `Platform_11` resource governance and remains optional; a dedicated inference provider is not an EDS release prerequisite.

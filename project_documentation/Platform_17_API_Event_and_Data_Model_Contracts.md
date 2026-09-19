@@ -91,15 +91,23 @@ Diagnostic/investigation integrity requires tenant-scoped canonical targets, imm
 
 ## 6. Endpoint Diagnostic Snapshot contracts — v3.2.2 reconciliation
 
-EDS is a versioned typed evidence contract. Free-form script stdout is not the canonical interface.
+**EDS is a specialized diagnostic type/profile of the existing Diagnostic Job architecture**, not a second diagnostics framework, registry, scheduler, authorization system, investigation state machine or evidence store. Product-facing language may continue to use **Endpoint Diagnostic Snapshot (EDS)**; the authoritative API/event/data identity remains the Diagnostic Job contract in §1 with:
 
-### 6.1 EndpointDiagnosticRequest
+```text
+diagnostic_type / profile = ENDPOINT_DIAGNOSTIC_SNAPSHOT
+execution_mode            = AGENT | SSH | WINRM_WMI_CIM
+```
 
-Minimum logical fields:
+EDS create/request/result/cancellation/expiry/idempotency/fencing reuse the existing Diagnostic Job, Live Evidence and Investigation Session contracts. Free-form script stdout is not the canonical interface.
+
+### 6.1 Diagnostic Job profile extension for EDS
+
+An EDS request is a Diagnostic Job create whose typed parameters extend the existing job contract. Minimum EDS-profile fields (in addition to canonical `diagnostic_job_id`, tenant, target entity, vantage, authorization, correlation/idempotency, timeout/expiry and investigation/incident association):
 
 ```text
 schema_version
-diagnostic_id
+diagnostic_job_id
+diagnostic_type           ENDPOINT_DIAGNOSTIC_SNAPSHOT
 tenant_id
 entity_id
 request_source            AUTO_POLICY | OPERATOR | INCIDENT | RCA
@@ -107,35 +115,53 @@ requested_at
 expires_at
 definition_id
 definition_version
+authority:
+  assignment_generation     and/or equivalent Core-issued control generation
+  effective_policy_id
+  effective_policy_version
+  sensor_ownership_generation optional where Sensor assignment fences execution
 idempotency_key
 correlation_id
-trigger:
+trigger:                    local capture-eligibility provenance only
   policy_id
   policy_version
   metric_or_state_key
-  qualifying_state
+  capture_eligibility_state INELIGIBLE | QUALIFYING | CAPTURE_ELIGIBLE | COOLDOWN
   qualified_at
-  observed_value/unit     optional
-  threshold/context       policy-safe normalized representation
+  observed_value/unit       optional
+  threshold/context         policy-safe normalized representation
 budget:
   deadline_ms
   max_evidence_bytes
   max_items
   max_log_window
   priority
-parent_alert_id            optional
-parent_incident_id         optional
+parent_alert_id             optional
+parent_incident_id          optional
+investigation_session_id    optional
 ```
 
-The receiving Agent/Sensor validates tenant/entity/assignment authority, expiry, supported definition/version, idempotency and local resource policy before execution.
+The receiving Agent/Sensor validates tenant/entity/assignment authority, **current Core-issued generation/fencing**, expiry, supported definition/version, idempotency and local resource policy before execution. Stale, revoked, expired, replayed or superseded authority must fail closed and must not publish evidence under obsolete authority.
 
-### 6.2 EndpointDiagnosticResult
+### 6.2 EDS capture result as subordinate Diagnostic Job evidence
 
-Minimum logical fields:
+EDS capture outcome is reported through the existing Diagnostic Job response/state and Live Evidence association. The job retains the canonical authorization/result vocabulary:
+
+```text
+QUEUED | RUNNING | PARTIAL | SUCCEEDED | FAILED | CANCELLED | TIMED_OUT | DENIED
+```
+
+Capture completeness detail is a subordinate typed field on the EDS profile result (not a competing lifecycle vocabulary):
+
+```text
+capture_status            COMPLETE | PARTIAL | FAILED | SUPPRESSED
+```
+
+Minimum EDS-profile result fields (in addition to canonical Diagnostic Job / Live Evidence provenance):
 
 ```text
 schema_version
-diagnostic_id
+diagnostic_job_id
 tenant_id
 entity_id
 source_mode               AGENT | SSH | WINRM_WMI_CIM
@@ -144,38 +170,41 @@ sensor_id
 vantage_id
 definition_id
 definition_version
+authority_context         generation/policy/assignment identity that authorized capture
 started_at
 completed_at
 duration_ms
-status                    COMPLETE | PARTIAL | FAILED | SUPPRESSED
+job_state                 canonical Diagnostic Job state
+capture_status            COMPLETE | PARTIAL | FAILED | SUPPRESSED
 trigger_provenance
 evidence_items[]
 missing_evidence[]
 collector_errors[]
 resource_observation
+loss_or_shed_reason       optional explicit incomplete/suppressed/expired/shed evidence
 correlation_id
-parent_alert_id            optional
-parent_incident_id         optional
+parent_alert_id           optional
+parent_incident_id        optional
+investigation_session_id  optional
 ```
 
 Each evidence item includes a stable evidence type/key, typed value/state, unit where applicable, labels/dimensions within cardinality limits, observed time, source/provenance, quality and optional raw-artifact reference only where separately permitted.
 
-`missing_evidence` identifies expected evidence that could not be obtained and the reason (`UNSUPPORTED|PRIVILEGE_DENIED|TIMEOUT|RESOURCE_GUARD|COLLECTOR_ERROR|POLICY_DENIED|NOT_AVAILABLE` or compatible versioned code).
+`missing_evidence` identifies expected evidence that could not be obtained and the reason (`UNSUPPORTED|PRIVILEGE_DENIED|TIMEOUT|RESOURCE_GUARD|COLLECTOR_ERROR|POLICY_DENIED|NOT_AVAILABLE` or compatible versioned code). Suppressed, shortened, dropped, expired or storage-shed diagnostic evidence must remain explicit, observable and auditable; diagnostic protection must never silently destroy routine telemetry durability.
 
 ### 6.3 EDS lifecycle events
 
-Canonical lifecycle event family:
+EDS does not invent a second event family for job lifecycle. Canonical Diagnostic Job / Live Evidence / Investigation events remain authoritative. EDS-profile events are profile annotations or compatible extensions of that family and carry `diagnostic_job_id`, tenant/entity/correlation/schema/timestamp fields plus definition/policy/authority provenance. Compatible names may include:
 
-- `endpoint.diagnostic.requested`
-- `endpoint.diagnostic.started`
-- `endpoint.diagnostic.completed`
-- `endpoint.diagnostic.partial`
-- `endpoint.diagnostic.failed`
-- `endpoint.diagnostic.suppressed`
+- `diagnostic.job.requested` / `endpoint.diagnostic.requested` (alias)
+- `diagnostic.job.started` / `endpoint.diagnostic.started` (alias)
+- `diagnostic.job.completed` / `endpoint.diagnostic.completed` (alias)
+- `diagnostic.job.partial` / `endpoint.diagnostic.partial` (alias)
+- `diagnostic.job.failed` / `endpoint.diagnostic.failed` (alias)
+- `diagnostic.job.suppressed` / `endpoint.diagnostic.suppressed` (alias)
 
-Events carry normal tenant/entity/correlation/schema/timestamp fields plus diagnostic/definition/policy provenance. Replayed duplicate requests/results are idempotently recognized and do not create duplicate authoritative evidence.
+Replayed duplicate requests/results are idempotently recognized and do not create duplicate authoritative evidence. New aliases must not fork an incompatible status machine.
 
 ### 6.4 Causal boundary
 
-EDS evidence may contain deterministic indicators but not an authoritative root-cause declaration. Core RCA references EDS evidence IDs alongside topology, telemetry, changes, dependency and contradiction evidence. AI/LLM narrative output is a separate derived artifact with its own provenance and cannot mutate EDS facts.
-
+EDS evidence may contain deterministic indicators but not an authoritative root-cause declaration. Core RCA references Diagnostic Job / Live Evidence IDs for EDS captures alongside topology, telemetry, changes, dependency and contradiction evidence. AI/LLM narrative output is a separate derived artifact with its own provenance and cannot mutate EDS facts.
