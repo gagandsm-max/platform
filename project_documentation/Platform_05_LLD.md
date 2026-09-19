@@ -494,9 +494,9 @@ priority
 
 ### 7.2 Ack semantics
 
-A Sensor deletes a local segment only after Core returns a durable acceptance acknowledgment consistent with the certified HA design.
+A Sensor deletes a local segment only after Core returns a durable acceptance acknowledgment consistent with the certified HA design. Receipt of that acknowledgement is permission to advance the local acknowledged watermark and eventually reclaim the covered spool records.
 
-Because Kafka is internal and the two-Core Kafka mechanism is still a P0 spike, `ACK_DURABLE` must be defined only after failure testing proves where the durable boundary is.
+Because Kafka is internal and the exact two-Core Kafka/ClickHouse/PostgreSQL recovery/fencing mechanism is still a P0 spike, `ACK_DURABLE` must be defined only after failure testing proves where the recoverable boundary is. The contract does **not** require waiting for every downstream analytical consumer/ClickHouse insert unless the P0 spike proves that is necessary for recoverability; downstream persistence gaps remain subject to Pipeline Integrity reconciliation.
 
 Until then, design target:
 
@@ -507,7 +507,7 @@ Until then, design target:
 5. Sensor marks/deletes acknowledged segments.
 6. Duplicate replay is tolerated using observation/batch IDs.
 
-No component may acknowledge and then silently lose data without a documented replay source.
+No component may acknowledge and then silently lose data without a documented replay source. Crash-window certification must include at least: Kafka commit before PostgreSQL watermark commit, PostgreSQL commit before ACK transmission, ACK response loss, Active-Core loss immediately after ACK, Standby takeover and duplicate replay.
 
 ### 7.3 Duplicate handling
 
@@ -516,6 +516,20 @@ Consumers must be idempotent where practical. ClickHouse ingestion may use repla
 ### 7.4 Late data
 
 Late observations retain original `eventTime`. Query/RCA pipelines distinguish event time from ingest time. Late data can amend historical facts but must not incorrectly reopen old incidents unless policy explicitly permits.
+
+### 7.5 Uploader priority and batching
+
+Logical priority is required even when one HTTPS/gRPC transport is used:
+
+1. identity/PKI/fencing/control;
+2. heartbeat/assignment/lease;
+3. current critical state/events;
+4. current normal telemetry;
+5. replay backlog.
+
+Implementations may use weighted queues, stream scheduling or uploader budgets, but must prove that backlog recovery cannot starve control/current monitoring and that replay cannot starve forever.
+
+Telemetry batches are bounded by record count, encoded bytes/request bytes and maximum batch age. Fixed certified defaults are preferred initially; adaptive batching/compression is added only when benchmarks prove a material benefit without violating latency/resource limits.
 
 ---
 
@@ -557,6 +571,29 @@ Core returns:
 ### 8.3 Fencing tokens for jobs
 
 Every poll/NCM job lease includes monotonically increasing assignment/fencing version. A Sensor must refuse a superseded lease once it has observed a newer version. This reduces duplicate polling during reassignment.
+
+### 8.4 Disconnected ownership and reconciliation — P0 engineering spike
+
+The existing assignment version + lease model remains the baseline; additional metadata is introduced only if the spike proves it necessary.
+
+Required behavior:
+
+- loss of Core connectivity does not immediately stop safe polling while certified local capacity remains;
+- disconnected autonomy is bounded and visible;
+- Core does not reassign solely on a short heartbeat miss when that would predictably create duplicate authority;
+- when failover/reassignment is justified, a newer authoritative assignment/fencing version prevents stale work once observed;
+- a reconnecting Sensor reconciles assignment state before resuming superseded jobs;
+- exact disconnected-grace, reassignment hold-off, takeover evidence and any extra epoch/token fields remain **TBD/P0-SPIKE** until partition tests prove the simplest safe contract.
+
+### 8.5 Failover readiness evidence
+
+For an HA-enabled target, candidate readiness is a typed record derived from capacity plus target/network/protocol/TLS/credential/security-zone/role/version compatibility evidence. Critical-target readiness may be refreshed by lightweight staggered probes and change-triggered validation. Full duplicate monitoring is prohibited as the default readiness mechanism.
+
+### 8.6 Poll distribution and retry-domain control
+
+Recurring polling is deterministically phase-distributed across its configured interval, with bounded jitter where appropriate, so common intervals do not synchronize large estates into bursts while preserving the requested cadence.
+
+Retries remain bounded/exponential/jittered. When strong evidence identifies a shared failure domain (for example site/WAN, credential profile, protocol service or Sensor interface), Platform may suppress per-target retry amplification and retain bounded recovery probes. Weak/speculative topology evidence must not suppress independent failures.
 
 ---
 
@@ -2050,22 +2087,25 @@ Recommendations are advisory and require review before changing policy.
 
 ## 69. Pipeline integrity LLD
 
-Maintain watermarks/counters:
+Maintain compact watermarks/counters sufficient to reconcile the certified path:
 
 ```text
 sensor_produced_seq
+sensor_durable_seq
 sensor_acked_seq
 ingestion_accepted_seq
-kafka_produced_count
-consumer_processed_count
-clickhouse_inserted_count
-rejected_count
+kafka_produced_count_or_offset
+consumer_processed_count_or_offset
+clickhouse_inserted_count_or_watermark
+rejected_count_with_reason
 duplicate_count
 late_count
 dropped_count_with_reason
 ```
 
-Perfect one-to-one counts may not exist for transformed/aggregated streams, so reconciliation is defined per stream stage/schema. Any unexplained loss must create a data-quality/internal Platform event.
+Perfect one-to-one counts may not exist for transformed/aggregated streams, so reconciliation is defined per stream stage/schema and transformation contract. The reconciler must be able to classify the observed difference as accepted/persisted, duplicate, rejected, late or intentionally dropped. Any remaining unexplained discrepancy outside certified tolerance creates `PIPELINE_INTEGRITY_GAP` with tenant/Sensor/topic/data-class scope and audit evidence.
+
+Do not persist per-stage copies of every observation solely for integrity accounting. Sequence ranges, offsets, compact watermarks and counters are preferred unless a specific stream proves that stronger evidence is required.
 
 ## 70. Shift handover / PIR / Runbook records
 
