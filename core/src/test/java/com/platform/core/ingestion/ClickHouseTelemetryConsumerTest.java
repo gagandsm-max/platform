@@ -148,7 +148,7 @@ class ClickHouseTelemetryConsumerTest {
 
         try {
             IngestionException ex = assertThrows(IngestionException.class, () ->
-                    consumer.consume(record, ack));
+                    consumer.consumeBatch(List.of(record), ack));
             assertEquals("ERR_KAFKA_POISON_EVENT", ex.getCode());
 
             verify(ack, never()).acknowledge();
@@ -287,6 +287,32 @@ class ClickHouseTelemetryConsumerTest {
             }
         }
         return sb.toString();
+    }
+
+    @Test
+    void testPoisonRecordInBatchPreventsPartialPersistenceAndAck() throws Exception {
+        CanonicalObservation valid = new CanonicalObservation(
+                "tenant-1", "entity-1", "metric.cpu", "sensor-net-01",
+                Instant.parse("2026-09-19T07:00:00Z"), 10.0, 1, 0, "100", "snmp"
+        );
+        ConsumerRecord<String, String> good = new ConsumerRecord<>(
+                "telemetry.numeric.v1", 0, 200L, "good", objectMapper.writeValueAsString(valid)
+        );
+        ConsumerRecord<String, String> poison = new ConsumerRecord<>(
+                "telemetry.numeric.v1", 0, 201L, "bad",
+                "{\"secret\":\"" + SUPER_SECRET_SENTINEL_DO_NOT_LOG + "\",not-json"
+        );
+        Acknowledgment ack = mock(Acknowledgment.class);
+
+        IngestionException ex = assertThrows(
+                IngestionException.class,
+                () -> consumer.consumeBatch(List.of(good, poison), ack)
+        );
+
+        assertEquals("ERR_KAFKA_POISON_EVENT", ex.getCode());
+        verifyNoInteractions(clickHouseClient);
+        verify(ack, never()).acknowledge();
+        assertTrue(metrics.isConsumerDegraded());
     }
 
     @Test
