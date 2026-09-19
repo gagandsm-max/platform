@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -51,8 +52,16 @@ public class ClickHouseClient {
     }
 
     public void insertNumericBatch(List<CanonicalObservation> observations) throws Exception {
+        insertNumericBatch(observations, null);
+    }
+
+    public void insertNumericBatch(List<CanonicalObservation> observations, String deduplicationToken) throws Exception {
         if (observations == null || observations.isEmpty()) {
             return;
+        }
+        if (deduplicationToken != null
+                && (!deduplicationToken.matches("[A-Za-z0-9._:-]{1,128}"))) {
+            throw new IllegalArgumentException("ClickHouse deduplication token has invalid format");
         }
 
         long startTime = System.currentTimeMillis();
@@ -81,7 +90,15 @@ public class ClickHouseClient {
             body.append(objectMapper.writeValueAsString(row)).append("\n");
         }
 
-        URI uri = URI.create(baseUrl + "/?query=INSERT+INTO+platform.metric_numeric+FORMAT+JSONEachRow");
+        String query = "INSERT INTO platform.metric_numeric FORMAT JSONEachRow";
+        StringBuilder endpoint = new StringBuilder(baseUrl)
+                .append("/?query=")
+                .append(URLEncoder.encode(query, StandardCharsets.UTF_8));
+        if (deduplicationToken != null && !deduplicationToken.isBlank()) {
+            endpoint.append("&insert_deduplication_token=")
+                    .append(URLEncoder.encode(deduplicationToken, StandardCharsets.UTF_8));
+        }
+        URI uri = URI.create(endpoint.toString());
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(uri)
                 .timeout(Duration.ofSeconds(10))
