@@ -1,7 +1,7 @@
 # Platform — API, Event, Data Model & Schema Contracts
 
 **Document ID:** PLATFORM-CONTRACTDATA-001
-**Version:** 3.2.1
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
 **Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
@@ -33,6 +33,16 @@ Versioned paths/contracts, server-side RBAC/tenant enforcement, idempotency keys
 
 Enrollment establishes identity/certificate. Subsequent sessions authenticate with mTLS. Core sends versioned desired configuration/assignment; endpoint acknowledges applied version/checksum. Telemetry ingestion is asynchronous and replay-safe.
 
+Sensor assignment/control contracts carry a monotonically advancing assignment/fencing version and lease validity. A Sensor rejects work superseded by a newer version it has observed. The exact disconnected-grace, reassignment hold-off and any extra epoch/token metadata remain a P0 engineering spike so transient Core loss does not automatically stop polling and stale disconnected ownership cannot persist indefinitely.
+
+### 3.1 Durable telemetry acknowledgement contract
+
+Each replayable Sensor stream/batch carries deterministic source identity, sequence/range identity and checksum/idempotency metadata sufficient to detect gaps, regressions, duplicates and conflicting replay.
+
+Core durable acknowledgement exposes an accepted-through watermark. Sensor may advance its durable acknowledged watermark and reclaim covered spool data only after a valid acknowledgement consistent with the certified HA recoverability boundary. Missing, malformed, out-of-range or unsupported acknowledgement semantics fail closed and retain spool data.
+
+The exact `ACK_DURABLE` recoverability boundary across the two-Core Kafka/PostgreSQL/ClickHouse failure model is **TBD/P0-SPIKE** until crash/failover tests prove it. Cross-system distributed 2PC/XA is not assumed by declaration. At-least-once transport is acceptable when duplicate authoritative effects are prevented by deterministic identity/idempotency.
+
 ## 4. Kafka event rules
 
 Kafka is internal. Events include schema version, tenant, source identity, event ID/sequence where required, event time, ingest time, quality/provenance and payload. Producers/consumers must tolerate compatible schema evolution.
@@ -63,4 +73,6 @@ Raw, rollup, incident, audit, configuration and protected/legal-hold classes use
 
 ## 5. Data integrity
 
-Ingestion records support deduplication/idempotency and late/out-of-order data handling. Pipeline reconciliation detects produced/accepted/normalized/inserted/rejected discrepancies.
+Ingestion records support deduplication/idempotency and late/out-of-order data handling. Pipeline reconciliation detects produced/Sensor-durable/Sensor-acknowledged/Core-accepted/Kafka-produced/consumer-processed/storage-inserted discrepancies and explicitly accounts for rejected, duplicate, late and intentionally dropped records.
+
+Reconciliation may use sequence ranges, offsets, compact watermarks and counters appropriate to each stream/transformation; it does not require duplicate per-stage storage of every observation solely for accounting. Any residual unexplained discrepancy outside the certified tolerance/transform contract emits `PIPELINE_INTEGRITY_GAP` with affected scope and audit evidence.
