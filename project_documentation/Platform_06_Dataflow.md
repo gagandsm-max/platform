@@ -463,7 +463,7 @@ Coverage exposes a categorical/qualified state such as `GOOD|PARTIAL|LOW|UNKNOWN
 
 ```mermaid
 flowchart LR
-  D[Device/App] -->|UDP/TCP/TLS| S[Sensor Event Receiver]
+  D[Device/App] -->|UDP/TCP/TLS| S[LOG_SENSOR Event Receiver]
   S --> P[Parse PRI/timestamp/structured data]
   P --> M[Device Pack parser + sensitive data policy]
   M --> E[Entity correlation]
