@@ -94,6 +94,8 @@ Platform shall provide, directly or through approved extensibility frameworks:
 - SNMP v1/v2c/v3 monitoring and traps/informs.
 - ICMP and traceroute.
 - NetFlow, IPFIX, sFlow and vendor-compatible flow ingestion.
+- Flow/NTA shall associate traffic with canonical devices/interfaces/sites and, when trustworthy evidence exists, temporal endpoint/system name, DNS/FQDN/domain, authenticated user/session identity, AD/Entra/RADIUS/VPN/NAC/firewall identity context, ASN/cloud/SaaS and geography. Every derived identity/classification must preserve source/time/confidence; Flow must not fabricate usernames, URLs or physical location.
+- Full URL path/query capture is not an initial Flow/NTA requirement and must not be inferred from IP/port traffic. Domain/FQDN or application identity may be correlated from DNS/exporter/proxy/security-device evidence where available and authorized.
 - Syslog/event ingestion.
 - NETCONF, RESTCONF, gNMI/gRPC and streaming telemetry.
 - SSH/CLI operations with privileged session governance.
@@ -111,6 +113,7 @@ Platform shall provide, directly or through approved extensibility frameworks:
 - Synthetic ICMP/TCP/DNS/HTTP/HTTPS/API/TLS tests.
 - DNS/DHCP/NTP monitoring.
 - Identity infrastructure monitoring such as AD/LDAP/DC replication/Kerberos/RADIUS/TACACS+ where supported by secure probes/APIs.
+- Identity integrations may enrich operational Flow attribution through time-bounded session evidence, but Platform shall not turn NTA into employee browsing/content surveillance. User-attributed Flow requires tenant/RBAC/privacy controls and auditable access.
 - UPS/PDU/environment/power/cooling monitoring.
 - IPAM with IPv4/IPv6, subnet hierarchy, VRF/VLAN context, DNS/DHCP integration, utilization, conflicts, history and forecasting.
 - Flexible topology and maps: physical, L2, L3, routing, MPLS, VXLAN/EVPN, SD-WAN, traffic, infrastructure, service, causal and geographic.
@@ -210,9 +213,10 @@ In HA deployments, Sensors and Agents should use the stable **Core HA endpoint**
 
 ## 8. Sensor and Agent business requirements
 
-- Platform uses one Universal Sensor Runtime with selectable roles.
-- Primary customer-facing roles: Network Sensor, Infrastructure Sensor, Combined Sensor.
-- Specialized roles: Streaming/Event Sensor, Synthetic Probe, Cloud/API Sensor and Edge Sensor Lite profile.
+- Platform uses one Universal Sensor Runtime with selectable roles; role specialization must not create separate Sensor codebases/installers.
+- Production customer-facing roles include Network Sensor, Infrastructure Sensor, **Flow Sensor** and **Log Sensor**, plus Synthetic Probe, Cloud/API Sensor and Edge Sensor Lite where applicable.
+- **Flow Sensor and Log Sensor are production-exclusive high-rate roles.** A Flow Sensor does not run SNMP/network polling, discovery, NCM, synthetics or log ingestion; a Log Sensor does not run Flow, SNMP/network polling, discovery, NCM or synthetics. Both retain only mandatory common Sensor control, mTLS, configuration, health, upgrade and bounded durable-spool functions.
+- A mixed/Combined high-rate Flow+Log+polling profile may exist for development, CI, demo or explicitly non-production lab use but is not a production-certified deployment profile.
 - Sensor placement must prefer network locality while also respecting reachability, capacity, HA, protocol access and policy.
 - Customers may choose automatic placement, recommendation/approval, manual placement or Sensor Pool assignment.
 - Sensor capacity must be represented by workload, not device count alone.
