@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 26-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-13 — v3.2.2 enterprise monitoring coverage / Capability Pack certification specialized-master addition
+**Last reconciliation:** 2026-09-19 — v3.2.2 Agent reliability/failover/durability/resource-assurance specialized-master addition
 
 ## 1. Authority
 
