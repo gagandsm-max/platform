@@ -44,6 +44,14 @@ selectedAgents: [platform-codebase-onboarding-engineer, platform-network-enginee
 selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, bounded_implementation, snmp_mib, sensor_edge, device_pack_authoring, evidence_bundle]
 ```
 
+### Build or harden Linux/Windows Agent reliability
+
+```text
+Read Platform_24 first. Reconcile the current Agent/Sensor/Core implementation before writing. Preserve the existing Agent queue, identity and Sensor Control authority unless evidence requires a controlled architecture change. Route transport/ACK/idempotency contracts to platform-api-platform-engineer, Sensor durability/failover to platform-sensor-runtime-engineer, operational recovery to platform-sre, failure automation to platform-test-automation-engineer and resource certification to platform-performance-benchmarker. Finish with independent code review and evidence collection.
+selectedAgents: [platform-codebase-onboarding-engineer, platform-api-platform-engineer, platform-sensor-runtime-engineer, platform-sre, platform-test-automation-engineer, platform-performance-benchmarker, platform-code-reviewer, platform-evidence-collector]
+selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, bounded_implementation, sensor_edge, replay_idempotency, runtime_failure_injection, install_upgrade, evidence_bundle]
+```
+
 ### Privileged NCM / connector / telemetry pipeline
 
 ```text
