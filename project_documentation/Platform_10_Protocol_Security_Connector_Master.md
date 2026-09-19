@@ -24,6 +24,7 @@
 | SNMPv3 privacy | DES legacy opt-in; AES variants where library/device supports | SNMP endpoint | privacy algorithm/key and security level | GoSNMP + Platform wrapper | compatibility test before provisioning |
 | Traps/Informs | SNMP v1/v2c/v3 | UDP/162 default; configurable | listener, source allowlist, v3 security | GoSNMP receiver/Platform event service | decode via MIB, normalize, correlate, rate protect |
 | Syslog | UDP/TCP Syslog, Syslog over TLS | 514 / 6514 defaults | transport, TLS, source rules, parser/profile | Platform receiver; Fluent Bit integration candidate | normalization, cardinality/rate limits, retention, correlation |
+| Log/SIEM forwarding | RFC5424/RFC3164 legacy, CEF/LEEF/JSON, OTLP Logs or target-native HTTPS/API as certified | destination-defined/configurable | destination, TLS/auth, format, route/filter, egress-data policy, rate/buffer | Connector framework + Capability/Integration Packs | independent bounded destination queues, retry/backoff, delivery-state truth, dead-letter/replay, loop prevention, tenant isolation |
 | SSH/CLI | SSHv2 password/public-key/keyboard-interactive; privilege/enable patterns by Device Pack | TCP/22 default | credential, key, host-key policy, privilege policy, command controls | `x/crypto/ssh`, scrapligo/scrapli for selected roles | CLI broker, NCM, audit, no browser credentials |
 | Telnet | Legacy only | TCP/23 default | explicit enable at tenant/device policy | small Platform adapter | disabled by default; never automatic fallback; warning/audit |
 | NETCONF | NETCONF over SSH | TCP/830 default | credential, host key/TLS as vendor supports, capabilities | scrapligo / selected NETCONF library | capability discovery, normalized config/state |
@@ -108,6 +109,8 @@ Provisioning and Readiness Test must generate a customer-exportable matrix conta
 ## 7. Connector framework
 
 The Connector framework supports reusable, versioned connectors with: authentication profile, endpoint, field mapping, retries/timeouts/backoff, idempotency/correlation ID, rate limit, durable outbound queue, health, test sandbox and audit. ITSM targets include ServiceNow, BMC Helix/Remedy, ServiceDesk Plus, SummitAI, Freshservice/Freshworks, Jira Service Management and Generic REST. Notification targets include email, Teams, Slack, WhatsApp Business/provider API, webhook, SMS and PagerDuty where customer supplies the approved service/account.
+
+For log/SIEM destinations, `Platform_24` adds route/source scope, raw/normalized/enriched mapping, sensitive-data egress policy, per-destination failure isolation, bounded replay/dead-letter and accurate acknowledgement semantics. SIEM targets are Integration Pack classifications under `Platform_23`; connector credentials remain encrypted/referenced and tenant-scoped. High-rate execution may be delegated to an eligible Streaming/Event Sensor while Core remains policy/audit authority.
 
 ## 8. Security acceptance gates
 
