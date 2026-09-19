@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 enterprise Flow/NTA correctness, identity enrichment and dedicated Sensor-role reconciliation
 
 ## 1. Authority
 
@@ -101,6 +101,14 @@ A post-merge cross-layer audit of the NOC troubleshooting reconciliation identif
 
 This corrective reconciliation closes those defects without adding product scope, a new database, a new mandatory service, a new pack framework or a new dependency. `Platform_17` owns the versioned API/event/data contracts; `Platform_11` owns interactive-diagnostic capacity accounting; `Platform_09` owns explicit screen behavior; and `Platform_23` clarifies that a diagnostic workflow definition is not a second Capability Pack/registry/SDK.
 
+### 4.5 2026-09-19 enterprise Flow/NTA correctness and dedicated Sensor-role reconciliation
+
+This v3.2.2 reconciliation strengthens existing Flow/NTA and Sensor-role requirements **without adding a new Mother Reference file, datastore, microservice, second Sensor codebase, NTA product fork or new OSS selection**. It formalizes trustworthy exporter/template/sampling/sequence semantics; exact source/observation provenance; temporal identity and user/domain/geo enrichment; Flow quality/coverage; bounded high-rate collection; operational Flow UX; and production isolation of high-rate Flow and Log workloads.
+
+The production packaging rule is one common Platform Sensor build/runtime with an explicitly selected role. **Flow Monitoring Sensor and Log Monitoring Sensor are production-exclusive high-rate roles**: a Flow Sensor does not run SNMP/discovery/NCM/log collection, and a Log Sensor does not run Flow/SNMP/discovery/NCM. Both retain only common control-plane identity, mTLS, configuration, health, upgrade and their own bounded durable spool/uploader functions. A combined high-rate Flow+Log role is permitted only for development/lab/test and is not production-certified.
+
+The authoritative Mother Reference count remains **25 files** and document version remains **v3.2.2**. Specification does not imply Flow collector implementation or certification.
+
 ## 5. Precedence
 
 When requirements appear to conflict:
@@ -143,6 +151,8 @@ Conflicts require documented change control; implementation must not silently ch
 - Graph-grounded hybrid RCA; GNN is an augmenting scorer, not causal proof; `INCONCLUSIVE` is required.
 - Native Platform dashboard/UI; no embedded Grafana.
 - Core and Sensor managed-storage 80% protection watermark is mandatory.
+- Production Flow and Log workloads use dedicated Sensor instances/roles so high-rate traffic cannot consume the worker, memory, queue, spool or disk budget of routine polling/other monitoring. One common Sensor software build is retained; role isolation is configuration/runtime activation, not separate products.
+- Flow identity/enrichment is evidence-based and temporal: IP is not durable endpoint/user identity; hostname/domain/user/geo/application associations carry source, observed/effective time and confidence/provenance. Flow does not fabricate URLs or precise physical-user location from IP addresses.
 - Customer controls raw retention, rollups, archive and allowed purge priority.
 - DR capability required in v1.0; contractual RPO/RTO remain TBD until frozen.
 - Gemini through AI Gateway initially; deterministic/causal RCA remains independent.
