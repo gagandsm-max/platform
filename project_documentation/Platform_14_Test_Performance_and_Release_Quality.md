@@ -71,7 +71,7 @@ The applicable production/HA profile is blocked until evidence proves:
 3. Sensor overload/drop/storage pressure is explicit rather than silent;
 4. Core outage does not stop polling solely because Core is unavailable while certified local buffer/autonomy remains valid;
 5. recovery replay cannot starve control/current telemetry;
-6. spool data is not reclaimed before the certified durable ACK boundary permits it;
+6. normal acknowledgement-driven spool reclamation does not occur before the certified durable ACK boundary permits it; any unavoidable 80% emergency shedding is separately evidenced as explicit unacknowledged data loss and never advances the acknowledged watermark;
 7. duplicate replay does not duplicate authoritative alerts/incidents or distort metrics;
 8. configured pull-workload failover is partition/fencing safe and target-ready;
 9. push-protocol HA/loss behavior is documented/tested according to source capability;
