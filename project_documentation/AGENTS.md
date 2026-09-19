@@ -29,6 +29,8 @@ For work involving alert qualification/evidence contracts, telemetry-quality tru
 
 For work involving enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph versus governed-CMDB semantics, or coverage measurement, **`Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
+For work involving AWS/Azure/GCP/OCI cloud monitoring, Cloud Service Packs, OpenTelemetry traces, Prometheus/OpenMetrics interoperability, service graphs, cross-signal investigation, deep Kubernetes/serverless, cloud-network observability, cloud changes/quotas/autoscaling, cloud UI onboarding, connector/rate-budget health, coverage/blind spots, or P1 RUM/profiling/eBPF/FinOps/customer-AI/GPU observability, **`Platform_24_Cloud_and_Full_Stack_Observability_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
+
 For work involving NOC no-context-switch troubleshooting, contextual action bars/drawers, embedded CLI, on-demand or multi-vantage diagnostics, `Verify Now`, Live Evidence, Investigation Sessions, or diagnostic workflow definitions, mandatory preflight reading includes **`Platform_09_UI_UX_Master.md`, `Platform_10_Protocol_Security_Connector_Master.md`, `Platform_11_Sizing_Capacity_Storage_Master.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`, `Platform_18_Security_Threat_Model.md` and `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`**. Read `Platform_23` as well when technology/Capability Pack diagnostics are involved.
 
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
@@ -114,6 +116,8 @@ For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`,
 
 For enterprise-monitoring-coverage / Capability Pack capabilities governed by `Platform_23`, Definition of Done also includes dimensional certification evidence, pack compatibility/version evidence, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior and the formal `REQ-EMC-*` acceptance evidence. Specification of a technology family is not certification.
 
+For cloud/full-stack observability capabilities governed by `Platform_24`, Definition of Done also includes the applicable `REQ-CLOBS-*` evidence, cross-signal canonical identity, tenant isolation, cloud credential/permission negative cases, provider throttling/reconciliation, cardinality/sampling controls, connector self-health, partial/stale UI states, data-retention/storage impact and dimensional Cloud Service Pack certification. A listed cloud service is not “ready” until the required pack/runtime and certification evidence exist.
+
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
 - Network auto-discovery and Agent enrollment feed a governed onboarding/review lifecycle. Newly found/enrolled entities do not silently become licensed/actively monitored unless an explicit authorized trusted auto-approval policy applies.
@@ -157,7 +161,18 @@ For enterprise-monitoring-coverage / Capability Pack capabilities governed by `P
 - Named products in `Platform_23` are certification targets, not Core hard-coding, shipped packs or achieved certification.
 - Coverage metrics remain distinct (architecture/specification/implementation/pack/certification/integration). Specified is not implemented; tested is not certified; certified is not deployed.
 - OEM/customer extensions use supported pack/SDK mechanisms. Core forks are prohibited.
-- Always-on full DPI, unrestricted SIEM replacement, full bytecode APM, broad BMS/DCIM and uncontrolled automated NCM remain excluded or deferred as recorded in `Platform_23`.
+- Always-on full DPI, unrestricted SIEM replacement, broad BMS/DCIM and uncontrolled automated NCM remain excluded or deferred as recorded in `Platform_23`. Mandatory proprietary full-bytecode APM agents are not P0, while OTel-native traces/service graphs are P0 under `Platform_24`.
+
+## v3.2.2 cloud & full-stack observability safeguards
+
+- P0 observability signals are metrics, logs, traces, events, topology, changes and synthetics. Trace IDs or provider IDs never grant tenant authority.
+- AWS, Azure, GCP and OCI are mandatory Cloud Observability GA provider roots. Do not claim implementation/certification from specification alone; certification remains dimensional under Platform_23.
+- Provider/service integration uses the single Capability Pack architecture. Do not invent a second Cloud Pack runtime, provider-specific Core fork or mandatory new database.
+- Cloud provider/credential/API degradation produces explicit partial/degraded/stale connector state and must not automatically assert managed-resource DOWN.
+- Approved durable cloud/Kubernetes parent scope may govern ephemeral child monitoring; do not create manual approval storms for every pod/function/task while preserving tenant/provenance/conflict controls.
+- PostgreSQL remains cloud/control-current-state authority; ClickHouse takes high-volume spans/logs/cloud events/flows/history; Kafka remains internal transport; Valkey remains reconstructable/ephemeral.
+- P1 RUM/profiling/eBPF/FinOps/customer-AI/GPU observability inherits privacy, security, resource and tenant boundaries and must not be pulled into P0 release scope silently.
+- Session replay remains deferred unless separate privacy/security/storage change control approves it.
 
 ## Cursor Cloud specific instructions
 
