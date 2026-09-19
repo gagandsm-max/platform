@@ -11,7 +11,12 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 
 @Component
@@ -54,10 +59,84 @@ public class ClickHouseTelemetryConsumer {
             autoStartup = "${platform.telemetry.consumer.enabled:false}",
             containerFactory = "telemetryKafkaListenerContainerFactory"
     )
-    public void consume(ConsumerRecord<String, String> record, Acknowledgment acknowledgment) {
-        CanonicalObservation obs;
+    public void consumeBatch(List<ConsumerRecord<String, String>> records, Acknowledgment acknowledgment) {
+        consumeRecords(records, acknowledgment);
+    }
+
+    // Package-visible compatibility seam for focused unit tests and direct callers.
+    void consume(ConsumerRecord<String, String> record, Acknowledgment acknowledgment) {
+        consumeRecords(List.of(record), acknowledgment);
+    }
+
+    private void consumeRecords(List<ConsumerRecord<String, String>> records, Acknowledgment acknowledgment) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+
+        List<CanonicalObservation> observations = new ArrayList<>(records.size());
+        for (ConsumerRecord<String, String> record : records) {
+            observations.add(parseObservation(record));
+        }
+
+        String deduplicationToken = deduplicationToken(records);
+        ConsumerRecord<String, String> firstRecord = records.get(0);
+
+        // Bounded retry and backoff against ClickHouse. The deterministic insert token makes
+        // retry of the same Kafka poll idempotent within ClickHouse's configured dedup window.
+        Exception lastException = null;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                clickHouseClient.insertNumericBatch(observations, deduplicationToken);
+                // Persistence succeeded: commit offsets for the complete poll batch.
+                if (acknowledgment != null) {
+                    acknowledgment.acknowledge();
+                }
+                metrics.recordConsumerHealthy();
+                return;
+            } catch (Exception e) {
+                lastException = e;
+                log.warn(
+                        "ClickHouse batch insert attempt {}/{} failed batchSize={} firstTopic={} firstPartition={} firstOffset={} failureClass={}",
+                        attempt,
+                        maxRetries,
+                        records.size(),
+                        firstRecord.topic(),
+                        firstRecord.partition(),
+                        firstRecord.offset(),
+                        e.getClass().getSimpleName()
+                );
+                if (attempt < maxRetries) {
+                    try {
+                        Thread.sleep(backoffMs * (1L << (attempt - 1)));
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Consumer retry interrupted", ie);
+                    }
+                }
+            }
+        }
+
+        String failureClass = lastException == null ? "Unknown" : lastException.getClass().getSimpleName();
+        String failureReason = "ClickHouse unavailable after " + maxRetries + " attempts: " + failureClass;
+        metrics.recordConsumerDegraded(failureReason);
+        log.error(
+                "ClickHouse retries exhausted batchSize={} firstTopic={} firstPartition={} firstOffset={}. Offsets will NOT progress. failureClass={}",
+                records.size(),
+                firstRecord.topic(),
+                firstRecord.partition(),
+                firstRecord.offset(),
+                failureClass
+        );
+        throw new RuntimeException(
+                "ClickHouse persistence unavailable; stopping offset progression for batch starting at offset "
+                        + firstRecord.offset(),
+                lastException
+        );
+    }
+
+    private CanonicalObservation parseObservation(ConsumerRecord<String, String> record) {
         try {
-            obs = objectMapper.readValue(record.value(), CanonicalObservation.class);
+            return objectMapper.readValue(record.value(), CanonicalObservation.class);
         } catch (Exception e) {
             String failureClass = e.getClass().getSimpleName();
             int payloadBytes = record.value() == null
@@ -74,47 +153,27 @@ public class ClickHouseTelemetryConsumer {
                     ERR_KAFKA_POISON_EVENT
             );
             metrics.recordConsumerPoisonEvent(record.topic(), record.offset(), failureClass);
-            // Malformed/poison event must not silently disappear.
-            // Do NOT acknowledge; throw exception so offset does not progress past poison event.
-            // Do NOT attach parser/Jackson cause: DefaultErrorHandler may log the full cause chain.
             throw new IngestionException(
                     org.springframework.http.HttpStatus.BAD_REQUEST,
                     ERR_KAFKA_POISON_EVENT,
                     "Malformed Kafka telemetry message at offset " + record.offset()
             );
         }
-
-        // Bounded retry and backoff against ClickHouse
-        Exception lastException = null;
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                clickHouseClient.insertNumericBatch(List.of(obs));
-                // Insertion succeeded: commit offset and update health
-                if (acknowledgment != null) {
-                    acknowledgment.acknowledge();
-                }
-                metrics.recordConsumerHealthy();
-                return;
-            } catch (Exception e) {
-                lastException = e;
-                log.warn("ClickHouse insert attempt {}/{} failed for topic={} partition={} offset={}: {}",
-                        attempt, maxRetries, record.topic(), record.partition(), record.offset(), e.getMessage());
-                if (attempt < maxRetries) {
-                    try {
-                        Thread.sleep(backoffMs * (1L << (attempt - 1)));
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new RuntimeException("Consumer retry interrupted", ie);
-                    }
-                }
-            }
-        }
-
-        // Retries exhausted: do NOT acknowledge offset. Surface degraded state.
-        String failureReason = "ClickHouse unavailable after " + maxRetries + " attempts: " + lastException.getMessage();
-        metrics.recordConsumerDegraded(failureReason);
-        log.error("ClickHouse retries exhausted for topic={} partition={} offset={}. Offset will NOT progress.",
-                record.topic(), record.partition(), record.offset(), lastException);
-        throw new RuntimeException("ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset(), lastException);
     }
+
+    static String deduplicationToken(List<ConsumerRecord<String, String>> records) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (ConsumerRecord<String, String> record : records) {
+                digest.update(record.topic().getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+                digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(record.partition()).array());
+                digest.update(ByteBuffer.allocate(Long.BYTES).putLong(record.offset()).array());
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable for ClickHouse deduplication token", e);
+        }
+    }
+
 }
