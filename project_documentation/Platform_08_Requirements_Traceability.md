@@ -4,7 +4,7 @@
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Completeness Control**
-**Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master RTM supplements including `Platform_23`
+**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
 
 ## 1. Purpose
 
@@ -189,7 +189,7 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| REQ-UI-001 | Native Grafana-like Dashboard Studio; no embedded Grafana | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-001 | Native Platform Dashboard Studio with flexible composable dashboards; Grafana may inspire interaction patterns but is not copied/embedded | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-002 | Create/group/folder/clone/import/export/share dashboards | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-003 | Drag/drop/resizable panels and broad chart/table/topology/map/Sankey types | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-004 | Light/dark theme, readable fonts, density options | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -203,6 +203,17 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-UI-012 | Mobile incident/dashboard experience; desktop for full admin/studios | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-013 | Query protection: timeout/row/scan/concurrency/async export | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-014 | Fast UI with caching/preaggregation/virtualization/lazy loading/query cancellation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-015 | No-context-switch NOC troubleshooting from entity/alert/incident context | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-016 | Persistent contextual action bar + Troubleshoot drawer/workspace | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-017 | On-demand bounded ICMP/traceroute/SNMP/TCP/DNS/SSH/API tests through eligible Sensor/Agent | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-018 | Multi-vantage verification with contradictory evidence preserved | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-019 | Verify Now deterministic diagnostic bundles/packs | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-020 | Live Evidence distinguishes monitored state from fresh operator-triggered verification | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-021 | Why/What Changed/Compare contextual investigation actions | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-022 | Investigation Session preserves diagnostic/CLI/config/topology/flow evidence references and can link to incident | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-023 | Risk-proportionate action friction; CLI supports stored/personal/one-time credentials without browser exposure of reusable secrets | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-024 | Diagnostic jobs bounded by tenant/scope/target/rate/concurrency/timeout/cancellation and isolated from routine monitoring capacity | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-025 | AI may explain/suggest permitted next tests but cannot fabricate results or bypass authorization/execution controls | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Data lifecycle
 
@@ -291,6 +302,22 @@ These are engineering-governance controls, not customer-facing product features.
 | GOV-DOC-001 | Mother documents are READ-MOSTLY; controlled correction is mandatory when errors/contradictions/decision changes/selected dependencies/resolved P0s/omissions/implementation conflicts occur | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | GOV-OSS-001 | Approved dependencies must match `Platform_07_OSS_Catalog.md` and implementation; catalogue omissions require change control before milestone/release | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
+
+### NOC troubleshooting supporting-master coverage
+
+Requirements `REQ-UI-015` through `REQ-UI-025` are additionally governed by the following specialized/base masters beyond the six logical design columns above:
+
+- `Platform_09_UI_UX_Master.md` — explicit action-bar/drawer/entity/incident/RCA screen behavior.
+- `Platform_10_Protocol_Security_Connector_Master.md` — protocol execution, credentials, target safety and diagnostic security contract.
+- `Platform_11_Sizing_Capacity_Storage_Master.md` — interactive diagnostic/CLI workload accounting, capacity reserve and no-starvation certification.
+- `Platform_14_Test_Performance_and_Release_Quality.md` — positive/negative/E2E/performance release evidence.
+- `Platform_17_API_Event_and_Data_Model_Contracts.md` — diagnostic job, Live Evidence, Investigation Session and CLI-session API/event/data contracts.
+- `Platform_18_Security_Threat_Model.md` — arbitrary-target, cross-tenant, credential/session and resource-exhaustion threats/mitigations.
+- `Platform_21_Enterprise_Gap_Closure_Master.md` — Incident Command Workspace projection when an Investigation Session links to an incident.
+- `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` — Active Evidence Acquisition, evidence trust and Suggested Next Test/Copilot constraints.
+- `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` — single Capability Pack ownership/certification of technology-specific diagnostics; no second diagnostic-pack framework.
+
+A NOC troubleshooting requirement is not complete merely because the BRD/PRD/HLD/LLD/Dataflow columns are checked; applicable supporting-master contracts above must also be satisfied.
 
 ## 3. Completeness gate
 

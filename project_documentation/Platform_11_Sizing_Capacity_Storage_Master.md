@@ -7,7 +7,7 @@
 
 ## 1. Governing rule
 
-Device count is a commercial/planning input, not the only engineering load measure. Platform must size and operate using measured workload: poll operations/sec, metrics/sec, interfaces/entities, polling interval, protocol cost, RTT/timeouts, Flow/log rates, streaming subscriptions, NCM jobs, synthetic tests, concurrent users, query/report/RCA demand and retention.
+Device count is a commercial/planning input, not the only engineering load measure. Platform must size and operate using measured workload: poll operations/sec, metrics/sec, interfaces/entities, polling interval, protocol cost, RTT/timeouts, Flow/log rates, streaming subscriptions, NCM jobs, synthetic tests, **interactive/on-demand diagnostics and CLI sessions**, concurrent users, query/report/RCA demand and retention.
 
 All numbers below are **engineering planning targets until benchmark-certified**. They are not contractual scale claims merely because incumbent products publish similar densities.
 
@@ -123,10 +123,23 @@ Platform must compute a workload score using at least:
 - Syslog/events/sec;
 - agent/agentless collection cost;
 - NCM/CLI scheduled/concurrent jobs;
+- interactive/on-demand diagnostic jobs, multi-vantage fan-out, bounded continuous tests and concurrent CLI sessions;
 - discovery/adaptive-polling burst;
 - local spool/backlog and CPU/RAM/disk headroom.
 
 UI shows both simple device count and calculated workload/capacity. Placement never assigns a device to the lowest-RTT Sensor if doing so would overload it.
+
+### 6.1 Interactive diagnostics and CLI capacity reserve
+
+Interactive troubleshooting is an explicit workload class, not free capacity. Routine scheduled monitoring, ingestion durability and recovery work retain priority over ad-hoc operator diagnostics.
+
+- Sensors/Agents maintain bounded concurrency/worker budgets for on-demand Ping/traceroute/SNMP/TCP/DNS/SSH/API/domain tests and browser CLI.
+- Multi-vantage execution consumes capacity independently at every selected vantage; fan-out is limited by tenant policy, action policy and current headroom.
+- Bounded continuous tests consume an ongoing interactive budget and must have maximum duration plus cancellation.
+- When interactive capacity is exhausted, Platform queues, limits or rejects diagnostics with an explicit reason rather than starving routine monitoring.
+- Sensor/vantage eligibility for an on-demand action considers current MWU, interactive-job load, CPU/RAM, queue/backlog, role, locality, security boundary and maintenance/drain state.
+- UI capacity/health surfaces expose active/queued diagnostic jobs, interactive utilization/rejections and whether a requested vantage is unavailable because of capacity or policy.
+- No fixed reserve percentage is invented here; release certification establishes safe concurrency for each certified Sensor profile.
 
 ## 7. Sensor Placement Engine
 
@@ -149,7 +162,7 @@ raw metric bytes/day
 + state/event bytes/day
 + Flow bytes/day
 + syslog/log bytes/day
-+ audit/incident/NCM bytes/day
++ audit/incident/NCM/diagnostic-investigation evidence bytes/day
 + Kafka operational retention
 + PostgreSQL control growth
 + ClickHouse merge/working headroom
@@ -187,7 +200,7 @@ Incident/investigation legal holds protect selected time windows/entities/eviden
 
 ## 12. Performance/resource certification
 
-Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, Flow records/sec, syslog EPS, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, compression, retention cleanup and failure recovery. Regressions beyond approved tolerance fail certification or require documented exception.
+Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, Flow records/sec, syslog EPS, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, **interactive diagnostic/CLI concurrency, multi-vantage fan-out, bounded continuous-test load and diagnostic latency under simultaneous certified monitoring load**, compression, retention cleanup and failure recovery. Certification must prove that interactive troubleshooting cannot starve scheduled monitoring/ingestion. Regressions beyond approved tolerance fail certification or require documented exception.
 
 For releases enabling Local AI/ML/LLM, certification additionally records per-module normal/peak CPU and RAM, inference latency, local LLM concurrency/context, model load/unload behavior, queue/backpressure, GNN/embedding workload, AI artifact disk footprint and the effect of AI load on ingestion, alert qualification, query latency and failover. The supported local-intelligence profile must pass inside the same certified Core tier; it does not create a hidden higher minimum hardware requirement.
 

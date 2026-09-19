@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-13 — v3.2.2 enterprise monitoring coverage / Capability Pack certification specialized-master addition
+**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
 
 ## 1. Authority
 
@@ -86,6 +86,20 @@ The 2026-09-12 monitoring-intelligence reconciliation adds `Platform_22_Monitori
 The 2026-09-13 enterprise-monitoring-coverage reconciliation adds `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` under the same pattern. Its `PRD-EMC-*` and `REQ-EMC-*` requirements govern the Capability Pack architecture, dimensional certification, enterprise technology coverage and Customer Acceptance Profiles. Technology Monitoring Pack, Device / Network Pack, SaaS Monitoring Pack, Integration Pack and optional Customer Extension Pack are classifications/profiles of Capability Pack, not a competing framework. This remains **v3.2.2**; no v3.2.3 product-version number is created. `Platform_23` does not replace Device Pack contracts, `Platform_10` connector/security mechanics, `Platform_19` OIV, `Platform_20` onboarding, `Platform_21` enterprise-gap or `Platform_22` alert/AI-assurance authority.
 
 The older files remain authoritative for their existing scope and are explicitly supplemented by specialized masters; they are not considered obsolete. This packaging choice is deliberate change control, not a waiver of traceability.
+
+### 4.3 2026-09-19 NOC troubleshooting reconciliation
+
+This v3.2.2 reconciliation adds a first-class **no-context-switch NOC troubleshooting experience** without adding a new Mother Reference file, mandatory database, mandatory standalone microservice or nested monitoring product. Existing browser CLI, Sensor/Agent diagnostics, Alert Evidence/Active Evidence Acquisition, NCM, Query/Graph/RCA and incident capabilities are composed into one governed operator workflow.
+
+The approved scope includes persistent contextual action bars; a Troubleshoot drawer/workspace; embedded governed CLI; on-demand ICMP/traceroute/SNMP/TCP/DNS/SSH/API/domain tests; multi-vantage verification; deterministic `Verify Now`; Live Evidence distinguishing monitored state from fresh operator-triggered verification; `Why?`, `What Changed?` and `Compare`; Investigation Sessions; deterministic diagnostic packs; and risk-proportionate controls. Platform_22 remains authoritative for planner-selected Active Evidence Acquisition/AI investigation safety, and Platform_21 remains authoritative for the broader Incident Command Workspace.
+
+This reconciliation updates existing base/specialized masters and keeps the authoritative set at **25 files** and version **v3.2.2**.
+
+### 4.4 2026-09-19 NOC integration-audit closure
+
+A post-merge cross-layer audit of the NOC troubleshooting reconciliation identified four documentation-integration defects: the API/event/data-contract master did not yet define the diagnostic/investigation contracts; the sizing master did not explicitly account for interactive diagnostics and multi-vantage fan-out; Interface Detail and RCA/Investigation screen contracts retained weaker legacy action lists; and the phrase **diagnostic pack** could be misread as a second packaging framework beside the single Capability Pack architecture.
+
+This corrective reconciliation closes those defects without adding product scope, a new database, a new mandatory service, a new pack framework or a new dependency. `Platform_17` owns the versioned API/event/data contracts; `Platform_11` owns interactive-diagnostic capacity accounting; `Platform_09` owns explicit screen behavior; and `Platform_23` clarifies that a diagnostic workflow definition is not a second Capability Pack/registry/SDK.
 
 ## 5. Precedence
 

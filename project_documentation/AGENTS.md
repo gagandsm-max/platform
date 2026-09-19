@@ -29,6 +29,8 @@ For work involving alert qualification/evidence contracts, telemetry-quality tru
 
 For work involving enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph versus governed-CMDB semantics, or coverage measurement, **`Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
+For work involving NOC no-context-switch troubleshooting, contextual action bars/drawers, embedded CLI, on-demand or multi-vantage diagnostics, `Verify Now`, Live Evidence, Investigation Sessions, or diagnostic workflow definitions, mandatory preflight reading includes **`Platform_09_UI_UX_Master.md`, `Platform_10_Protocol_Security_Connector_Master.md`, `Platform_11_Sizing_Capacity_Storage_Master.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`, `Platform_18_Security_Threat_Model.md` and `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`**. Read `Platform_23` as well when technology/Capability Pack diagnostics are involved.
+
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
 ## Canonical GitHub governance (USER-FIXED)
@@ -39,6 +41,16 @@ If documents conflict, stop and resolve through the precedence defined in `Platf
 - Do not force-push shared/default branches.
 - Commits must be traceable to the change being made; preserve decision provenance in history.
 - Selecting GitHub does **not** freeze a CI provider. GitHub Actions is not a fixed architecture decision unless separately approved.
+
+## Tool authority model
+
+- **ChatGPT + GitHub is the Platform control plane.** It owns source-truth rebaselining, architecture/technical decisions, task sequencing, PR integration, merge authority, progress accounting and final technical acceptance.
+- **Cursor CLI / Cursor Cloud are the primary implementation writers.** They operate only on explicitly assigned branches/worktrees and bounded scope. A Cursor writer never self-certifies merge readiness.
+- **Antigravity CLI is verifier-first and read-only/adversarial by default.** Write authority is exceptional, explicit and isolated to a dedicated branch/worktree; Antigravity must not become a second writer on an active Cursor branch.
+- **Codex CLI / GitHub Codex is an independent exact-SHA adversarial auditor and certification gate when explicitly invoked.** It is not a routine developer/fixer and must not write production changes unless ChatGPT explicitly assigns an isolated implementation lane.
+- **One writer per branch/worktree.** Parallelism is for independent review/evidence by default; parallel writes require isolated branches/worktrees and later controlled integration.
+- Every tool must re-fetch authoritative `main` and exact task/PR head before acting. Main/head drift invalidates stale review.
+- No writer may close `REALITY_GATE`, `MERGE_READY`, `POST_MERGE_VERIFY` or `COMPLETE` for its own work.
 
 ## Mother-document change control (READ-MOSTLY)
 
@@ -87,6 +99,8 @@ No implementation may permanently diverge from mother-reference truth. If implem
 - External provider/change evidence is supporting evidence; provider text or temporal proximity alone is not causal proof.
 - Controlled remediation requires versioned deterministic actions, tenant/resource authorization, preconditions, blast-radius controls, approval/policy, audit, post-action validation and rollback/fail-safe behavior. LLM output may not directly execute privileged actions.
 - Platform Value/MTTR metrics must expose data quality, cohort/sample methodology and assumptions. Do not fabricate generic customer savings or causal percentages.
+- NOC troubleshooting is a first-class UI workflow: preserve device/interface/alert/incident context while authorized users launch bounded on-demand diagnostics, multi-vantage verification, browser CLI and investigation evidence capture. Low-risk diagnostics must be fast; privileged/configuration actions require proportionate RBAC/JIT/MFA/reason/approval controls.
+- On-demand diagnostics must run through Platform-controlled Core/Sensor/Agent paths, not direct browser-to-device networking; arbitrary cross-tenant targets, unbounded continuous tests and browser exposure of reusable credentials are prohibited.
 
 ## Definition of done
 

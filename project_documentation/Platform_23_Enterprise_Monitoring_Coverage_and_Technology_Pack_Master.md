@@ -21,7 +21,9 @@ This document does **not** select a new OSS dependency, database, Core service, 
 | Owner | Retains authority for |
 |---|---|
 | `Platform_10` | Protocol mechanics, connector security, authentication, credential handling, transport/security mechanics |
+| `Platform_11` | Sensor/Core sizing, MWU, interactive diagnostic/CLI capacity budgets and no-starvation certification inputs |
 | `Platform_14` | Generic testing, performance and release-quality evidence |
+| `Platform_17` | Versioned API/event/data-model contracts for diagnostic jobs, Live Evidence, Investigation Sessions and CLI sessions |
 | `Platform_19` | SaaS operational intelligence and OIV/remediation/value capabilities |
 | `Platform_20` | Governed discovery, onboarding, identity continuity and Notification Center |
 | `Platform_21` | Existing enterprise gap-closure requirements (`PRD-EGC-*` / `REQ-EGC-*`) |
@@ -114,6 +116,7 @@ Certification is **dimensional**. Required dimensions at minimum:
 - Intelligence / L3
 - Topology
 - NCM where relevant
+- Diagnostics where relevant
 - Security
 - Version compatibility
 - Certification profile
@@ -164,6 +167,8 @@ A Capability Pack, where applicable, declares:
 
 Device / Network Packs continue to satisfy existing Device Pack identification, mapping, provenance and test-lab contracts. They gain the Capability Pack identity/lifecycle/certification envelope without a second schema family.
 
+The UI/product phrase **diagnostic pack** or **diagnostic workflow** does **not** create another package type, SDK, registry or deployment unit. It means a versioned deterministic troubleshooting workflow that references Platform-native checks and, where technology-specific behavior is required, diagnostics declared by the applicable Capability Pack. A Capability Pack diagnostic declaration includes at minimum action identity, supported entity/technology/version scope, read-only/privilege class, protocol/command/API mapping, bounded input schema, expected typed result/error schema, credential/role requirements, safety/rate/resource cost metadata and certification evidence. Arbitrary scripts or LLM-generated commands are not diagnostic declarations.
+
 No pack class may fork Core, add a dedicated database, or bypass RBAC, tenant scope, credential vault, audit or `Platform_10` connector/security mechanics.
 
 ---
@@ -184,6 +189,7 @@ Required fields:
 - L3 state
 - topology state
 - NCM state
+- diagnostics state
 - agentless state
 - agent state
 - integration state
@@ -468,6 +474,8 @@ Certification evidence requirements (family-specific gates; generic test strateg
 
 **Security:** minimum privileges; credential handling; secret protection; TLS; tenant isolation.
 
+**Diagnostics:** each declared diagnostic action/workflow proves target scoping, supported-version behavior, safe/read-only versus privileged classification, parameter bounds, normalized result/error mapping, timeout/cancellation, credential handling, audit, resource budget and negative cases. Multi-vantage-capable diagnostics prove independent source provenance and contradiction preservation. A technology is not certified for a diagnostic merely because the generic Platform diagnostic engine exists.
+
 **Failure:** timeout; malformed response; API rate limit; partial response; stale telemetry; expired/invalid credentials.
 
 **Upgrade:** supported versions; API schema change; migration; rollback/deprecation handling.
@@ -484,9 +492,9 @@ Each `REQ-EMC-*` owns the corresponding `PRD-EMC-*`. Implementation status for a
 
 | REQ ID | Owning PRD | Affected logical layers | Required evidence |
 |---|---|---|---|
-| `REQ-EMC-001` | `PRD-EMC-001` | PRD, Architecture, Quality | Dimensional matrix per pack with independent Discovery/L1/L2/L3/Topology/NCM/Security/version states; no scalar collapse |
+| `REQ-EMC-001` | `PRD-EMC-001` | PRD, Architecture, Quality | Dimensional matrix per pack with independent Discovery/L1/L2/L3/Topology/NCM/Diagnostics/Security/version states; no scalar collapse |
 | `REQ-EMC-002` | `PRD-EMC-002` | Architecture, HLD, LLD | Single Capability Pack contract; Device Pack remains a classification; no second pack framework or extra Core service/database |
-| `REQ-EMC-003` | `PRD-EMC-003` | LLD, Quality, Operations | Machine-readable compatibility records plus version-range tests and evidence references |
+| `REQ-EMC-003` | `PRD-EMC-003` | LLD, Quality, Operations | Machine-readable compatibility records, including diagnostics capability state where declared, plus version-range tests and evidence references |
 | `REQ-EMC-004` | `PRD-EMC-004` | PRD, Architecture, Quality | Middleware/application-platform packs with collector-health separation and no bytecode APM implication |
 | `REQ-EMC-005` | `PRD-EMC-005` | PRD, Architecture, Quality | Relational and NoSQL/data-platform packs with canonical entities and dimensional certification |
 | `REQ-EMC-006` | `PRD-EMC-006` | PRD, Architecture, Quality | Backup/data-protection family with canonical job states and restore-test evidence distinct from job success |

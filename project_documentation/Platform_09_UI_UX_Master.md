@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
 **Product:** Platform
-**Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master UI amendment for Notification Center and Discovery Review
+**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
 
 ## 1. Authority and no-assumption rule
 
@@ -72,6 +72,32 @@ Every screen/panel must explicitly design: Loading, Empty, Partial Data, Stale D
 ### 3.3 Accessibility/readability
 
 Support Light/Dark/System theme; Compact/Comfortable/Large density; keyboard navigation; scalable typography; accessible contrast; status icon/text in addition to color; and NOC TV/full-screen layouts. Full admin/studios are desktop-first; mobile/tablet supports dashboards, alerts, incidents, acknowledgement and investigation summaries.
+
+### 3.4 NOC Operational Troubleshooting Experience
+
+Platform shall optimize NOC workflow around **observe → verify → diagnose → act → preserve evidence**. Routine troubleshooting should not require an operator to leave Platform for external ping, traceroute, SSH terminal, SNMP tester, flow explorer or configuration-comparison tools. This does not remove safety controls; friction increases with action risk.
+
+**Contextual Action Bar.** Applicable entity, interface, alert and incident pages expose a persistent permission-aware action bar. Network-device defaults are **CLI, Ping, Trace/Path, SNMP Test, Flow, Config, Compare, Investigate, Maintenance**; alert/incident contexts additionally expose **Verify Now** where a deterministic pack exists. Entity types adapt actions to their domain.
+
+**Troubleshoot Drawer / Workspace.** Actions open a resizable drawer/workspace while the originating dashboard remains visible. Entity, tenant, time range, filters and incident/investigation context are preserved. The drawer contains applicable tests, recent results and investigation history and supports cancellation of bounded live operations.
+
+**On-demand ICMP.** Ping is one-click for authorized users with safe defaults and exposes source/vantage, target, packet count/size, timeout, transmitted/received, loss, min/avg/max RTT and jitter. `Run Again`, bounded `Continuous Test`, `Compare` and `Add to Investigation/Incident` are supported where authorized. Default source is the assigned eligible Sensor; alternate Sensor/Agent and Multi-Vantage choices appear only when eligible/authorized.
+
+**Multi-Vantage Verification.** Independent results are displayed by source/vantage so operators can distinguish target failure from path/locality/Sensor failure. Contradictory evidence is explicit and may yield Path/Monitoring Degraded or Inconclusive rather than a manufactured definitive result.
+
+**Verify Now.** For supported alerts/incidents, a deterministic bounded diagnostic pack runs technology/failure-class checks and shows each check, result, duration, source/vantage, quality and any skipped/denied check.
+
+**Live Evidence Bar.** Important entity pages show continuously monitored state separately from latest applicable on-demand verification, with source/vantage and age. Fresh on-demand evidence does not silently rewrite historical monitoring observations.
+
+**Why? / What Changed? / Compare.** `Why?` explains evidence/policy/quality inputs behind displayed state. `What Changed?` opens relevant NCM/configuration/routing/topology/maintenance/Platform/external changes without asserting causality solely from time proximity. `Compare` supports previous period, baseline, peer entity/interface/site, pre-incident and pre-change views where data permits.
+
+**Investigation Session.** `Start Investigation` creates an auditable context. Diagnostics, CLI sessions/commands, selected graph/config/flow/log snapshots, notes, RCA/change evidence and comparisons may be attached automatically or explicitly and linked to an Incident. Starting an investigation grants no additional privilege.
+
+**Suggested Next Test / Diagnostic Packs.** The workspace may show deterministic next checks from approved packs such as Device Unreachable, WAN Degradation, BGP/Routing, Wireless Client and Service Reachability. AI may explain/prioritize permitted next checks but must not fabricate results or execute privileged actions directly.
+
+**CLI interaction.** CLI opens inside Platform without losing dashboard context. Launch options may include an authorized stored Credential Profile, a policy-permitted personal credential, or one-time session credentials. One-time credentials are ephemeral. Privileged/configuration modes may require step-up MFA, reason/ticket, approval and stronger command policy.
+
+**Safety and capacity.** Every on-demand action is tenant/resource scoped, audited and bounded by timeout/rate/concurrency/cancellation. Browser clients do not directly open device sockets. Interactive worker budgets cannot starve routine polling.
 
 ## 4. Dashboard Studio
 
@@ -621,19 +647,24 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Last update
 
 **Actions (subject to RBAC, scope and entitlement):**
+- Persistent Action Bar: CLI; Ping; Trace/Path; SNMP Test; Flow; Config; Compare; Investigate; Maintenance
 - Open contextual entity/detail
 - Save view
 - Share permitted view
 - Export
 - Create/Schedule report
 - Add annotation where time-series context exists
-- Investigate
-- Ping
-- Traceroute/Path Analysis
+- Start/continue Investigation Session
+- On-demand Ping with assigned/alternate/multi-vantage source where eligible
+- Traceroute/Path Analysis and healthy-path comparison
+- SNMP/monitoring protocol verification
+- Verify Now diagnostic pack where applicable
+- Why? / What Changed? / Compare
+- View Live Evidence
 - Create maintenance
 - View topology
 - View alerts/incidents
-- Open CLI (RBAC)
+- Open embedded CLI (RBAC; stored/personal/one-time credential modes per policy)
 - View/backup configuration (RBAC)
 - Run monitoring test/poll now (RBAC)
 
@@ -694,19 +725,24 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Contextual summary cards/panels rather than a mandatory primary table; any table must expose entity, state, time, site/owner and drill-down.
 
 **Actions (subject to RBAC, scope and entitlement):**
+- Persistent Action Bar: CLI; Ping; Trace/Path; SNMP Test; Flow; Config; Compare; Investigate; Maintenance
 - Open contextual entity/detail
 - Save view
 - Share permitted view
 - Export
 - Create/Schedule report
 - Add annotation where time-series context exists
-- Investigate
-- Ping
-- Traceroute/Path Analysis
+- Start/continue Investigation Session
+- On-demand Ping with assigned/alternate/multi-vantage source where eligible
+- Traceroute/Path Analysis and healthy-path comparison
+- SNMP/monitoring protocol verification
+- Verify Now diagnostic pack where applicable
+- Why? / What Changed? / Compare
+- View Live Evidence
 - Create maintenance
 - View topology
 - View alerts/incidents
-- Open CLI (RBAC)
+- Open embedded CLI (RBAC; stored/personal/one-time credential modes per policy)
 - View/backup configuration (RBAC)
 - Run monitoring test/poll now (RBAC)
 
@@ -763,15 +799,23 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Contextual summary cards/panels rather than a mandatory primary table; any table must expose entity, state, time, site/owner and drill-down.
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
+- Persistent Interface Action Bar: Ping Peer; Trace Peer/Path; Flow; Errors; QoS; Config; Neighbor; Compare; Investigate; Open Device CLI
+- Open contextual entity/device/detail
 - Save view
 - Share permitted view
 - Export
 - Create/Schedule report
 - Add annotation where time-series context exists
-- Investigate
-- Ping
-- Traceroute/Path Analysis
+- Start/continue Investigation Session
+- On-demand Ping of applicable peer/endpoint with assigned/alternate/multi-vantage source where eligible
+- Traceroute/Path Analysis and healthy-path comparison
+- Open Flow scoped to the interface/circuit
+- View interface errors/discards, QoS and neighbor context
+- Why? / What Changed? / Compare
+- View Live Evidence
+- Verify Now where an interface/link diagnostic workflow applies
+- Open embedded parent-device CLI (RBAC)
+- Open relevant configuration/NCM context (RBAC)
 - Create maintenance
 - View topology
 - View alerts/incidents
@@ -3958,7 +4002,10 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Add annotation where time-series context exists
 - Acknowledge (RBAC)
 - Assign (RBAC)
-- Investigate
+- Investigate / Start Investigation Session
+- Verify Now where a deterministic diagnostic pack applies
+- Why? / What Changed? / Compare
+- Open Live Evidence and context-relevant Troubleshoot drawer
 - Create/attach incident
 - Create maintenance/suppression (RBAC)
 - Open ITSM ticket/context
@@ -4033,7 +4080,10 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Add annotation where time-series context exists
 - Acknowledge (RBAC)
 - Assign (RBAC)
-- Investigate
+- Investigate / Start Investigation Session
+- Verify Now where a deterministic diagnostic pack applies
+- Why? / What Changed? / Compare
+- Open Live Evidence and context-relevant Troubleshoot drawer
 - Create/attach incident
 - Create maintenance/suppression (RBAC)
 - Open ITSM ticket/context
@@ -4104,7 +4154,10 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Add annotation where time-series context exists
 - Acknowledge (RBAC)
 - Assign (RBAC)
-- Investigate
+- Investigate / Start Investigation Session
+- Verify Now where a deterministic diagnostic pack applies
+- Why? / What Changed? / Compare
+- Open Live Evidence and context-relevant Troubleshoot drawer
 - Create/attach incident
 - Create maintenance/suppression (RBAC)
 - Open ITSM ticket/context
@@ -4181,7 +4234,13 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Add annotation where time-series context exists
 - Acknowledge (RBAC)
 - Assign (RBAC)
-- Investigate
+- Start/continue Investigation Session
+- Open context-relevant Troubleshoot drawer
+- Verify Now where a deterministic diagnostic workflow applies
+- Run/select authorized next validation test
+- Why? / What Changed? / Compare
+- Open Live Evidence and Evidence Coverage
+- Attach/select diagnostic, CLI, topology, config, Flow, log/event and change evidence
 - Create/attach incident
 - Create maintenance/suppression (RBAC)
 - Open ITSM ticket/context

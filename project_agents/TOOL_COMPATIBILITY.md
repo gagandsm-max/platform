@@ -4,11 +4,8 @@ Record of **verified** mechanisms only. Unverified surfaces are labelled as such
 Do not treat this file as permission to invent CLI flags, skill paths, or
 subagent loaders.
 
-**Verification date:** 2026-09-12
-**Verified against repository HEAD at write time on branch**
-`feature/engineering-capability-pack-v1-2`, after fetching `origin/main`
-`a8ddda794ac50368c4d917e0ae3d51703b79124e` (Platform CI run `34687320630`,
-workflow run name “Platform CI”, conclusion SUCCESS).
+**Verification date:** 2026-09-19
+**Governance rebaseline:** canonical GitHub `main` was `3b9f669b5b4603cd378c567f31f829e3180a761a` when this tool-authority section was refreshed. CLI flag support below remains limited to mechanisms previously verified in the Platform programme; this refresh changes authority/routing, not unverified CLI syntax.
 
 ## Shared Platform contract (all tools)
 
@@ -83,10 +80,12 @@ Do **not** invent a native ChatGPT filesystem subagent mechanism.
 
 ## CODEX
 
-- Preserve the existing generated compatibility projection under `.codex/agents/`.
-- Codex is **not** an active v1.2 certification gate: no Codex runtime/docs were
-  installed or verified on this Cloud VM (`codex` binary absent).
-- Do **not** invent a Codex skill path.
+- Preserve the generated compatibility projection under `.codex/agents/`.
+- Platform uses Codex CLI and GitHub Codex as an **independent exact-SHA adversarial audit/certification lane when explicitly invoked by ChatGPT**.
+- Codex is **not the routine implementation writer**. Normal fixes remain with the assigned Cursor writer unless ChatGPT explicitly creates an isolated Codex implementation branch/worktree.
+- A Codex review is stale immediately if authoritative `main` or the reviewed PR head moves.
+- Codex must not self-certify changes it wrote.
+- Do **not** invent a native Codex Skill loader/path. When a Codex task needs a canonical Skill, the task prompt directs Codex to read the required files under `project_agents/skills/`; `.codex/agents/` remains an agent compatibility projection, not a second Skill authority.
 
 ## Native binaries on this Cloud VM (2026-09-12)
 

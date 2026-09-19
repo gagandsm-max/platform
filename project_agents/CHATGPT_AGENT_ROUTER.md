@@ -49,7 +49,7 @@ First map the actual implementation with platform-codebase-onboarding-engineer. 
 - ChatGPT+GitHub coordinates repository truth, GitHub writes, PR state and CI evidence; it does not claim local Cursor/Antigravity execution and has no native filesystem subagent loader.
 - Cursor Cloud uses `.cursor/agents/` and shared `.agents/skills/`. Cursor CLI uses the same paths plus the proven flags in `TOOL_COMPATIBILITY.md`. Do not invent `--agent`.
 - Antigravity uses `.agents/agents/` and `.agents/skills/`. `--agent` is supported. Default Platform posture is read-only/adversarial; write mode requires explicit authority.
-- Codex compatibility projection remains `.codex/agents/` and is not a v1.2 certification gate. Do not invent a Codex skill path.
+- Codex compatibility projection remains `.codex/agents/`. Codex CLI/GitHub Codex is an independent exact-SHA adversarial auditor/certification lane when explicitly invoked by ChatGPT; it is not the routine writer. Do not invent a native Codex Skill path—task prompts may direct Codex to the canonical `project_agents/skills/` files that apply.
 - Never use destructive generic Docker cleanup such as broad prune or `down -v` as an orchestration shortcut.
 
 ## Routing chain

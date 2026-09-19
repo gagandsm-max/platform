@@ -1,7 +1,7 @@
 # Platform — Master Architecture Document
 
 **Document ID:** PLATFORM-ARC-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Business requirements:** `Platform_01_BRD.md`  
 **Product requirements:** `Platform_02_PRD.md`  
@@ -52,6 +52,7 @@ The architecture is governed by the following constraints already decided:
 | ARC-P13 | API-first implementation, UI-first experience | All normal customer workflows use UI backed by stable APIs. |
 | ARC-P14 | Security by default | HTTPS/mTLS, least privilege, auditing, secret protection and signed artifacts are baseline. |
 | ARC-P15 | Clean-room + approved OSS | Reuse commodity permissive OSS; own differentiated Platform logic. |
+| ARC-P16 | Operational context to action | Preserve entity/alert/incident context from observation through bounded verification, CLI, investigation and evidence capture; low-risk diagnostics are immediate while privilege-changing/destructive operations retain stronger controls. |
 
 ---
 
@@ -627,6 +628,21 @@ sequenceDiagram
 Bulk NCM work has separate concurrency/rate limits from monitoring.
 
 ---
+
+## 18.1 Operational troubleshooting architecture
+
+The UI uses Platform APIs/control paths rather than direct browser-to-target network access. Contextual actions create bounded diagnostic/investigation jobs in Core; Core authorizes tenant/resource scope, selects an eligible Sensor/Agent/vantage, and routes execution to the appropriate existing worker/domain. Results return as typed evidence with source/vantage, event/result time, quality and correlation identifiers.
+
+Architectural rules:
+
+- extend the modular Core/Sensor/Agent domains first; no new mandatory standalone diagnostics microservice or database is introduced by this capability;
+- browsers do not gain arbitrary target-network reachability or reusable device secrets;
+- target selection is canonical-entity/resource scoped by default; ad-hoc targets, if separately permitted, are bounded and protected against cross-tenant/arbitrary-network abuse;
+- on-demand diagnostics and continuous tests have timeout/rate/concurrency/cancellation limits so NOC actions cannot starve scheduled monitoring;
+- multi-vantage execution uses Sensor/Agent eligibility and capacity rules and preserves contradictory results;
+- monitored observations and fresh operator-triggered verification remain distinguishable while sharing a common evidence model;
+- Investigation Sessions reference existing telemetry/config/topology/flow/audit evidence rather than indiscriminately duplicating it;
+- deterministic diagnostic packs define checks and safety bounds; AI may explain evidence or suggest the next authorized check but is not execution authority.
 
 ## 19. Browser CLI architecture
 

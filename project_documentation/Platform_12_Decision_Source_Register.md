@@ -52,6 +52,7 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 | Controlled remediation | USER-FIXED | Add controlled remediation using diagnose → recommend → precondition → impact/blast-radius preview → authorization/approval → execute → validate → rollback/escalate. No direct LLM privileged execution. |
 | Platform Value / MTTR Engine | USER-FIXED | Add evidence-backed MTTD/MTTA/time-to-root-candidate/MTTR measurement, matched-cohort comparisons and per-incident Platform contribution evidence. Unsupported causal or financial claims are prohibited. |
 | Four-layer customer value dashboard | USER-FIXED | Show operational noise reduction, diagnosis effectiveness, incident/MTTR improvement and evidence-supported operational/economic benefit with assumptions, sample sizes and methodology. |
+| NOC no-context-switch troubleshooting | USER-FIXED | Make Platform the primary NOC troubleshooting workspace: persistent contextual action bar/Troubleshoot drawer; embedded governed CLI; on-demand and multi-vantage protocol verification; Verify Now; Live Evidence; Why/What Changed/Compare; Investigation Sessions; deterministic diagnostic packs and risk-proportionate controls. Grafana is inspiration for dashboard flexibility only, not a product/UI to copy. |
 
 ## 3. ARCH-DELEGATED decisions
 
