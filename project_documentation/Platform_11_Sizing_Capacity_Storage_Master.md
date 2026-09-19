@@ -213,3 +213,29 @@ Stateful service containers must have bounded development defaults and named vol
 ## 14. Local log/disk protection
 
 Docker volumes and container logs are included in workstation disk monitoring guidance. Development instructions shall include commands to identify large images/volumes, safely prune disposable build artifacts and retain named volumes that contain intentional development state. Automated scripts must never indiscriminately prune all Docker data on a shared development laptop.
+
+## 15. Cloud & full-stack observability sizing supplement — Platform_24
+
+Cloud/full-stack workloads are not safely sized by resource count alone. Capacity planning and certification shall additionally model:
+
+- provider organizations/tenants/accounts/subscriptions/projects/compartments and enabled regions;
+- cloud resources by service family and discovery/reconciliation churn;
+- provider API calls/minute, page/cursor behavior, rate-limit/throttle budget and response size;
+- metric samples/sec and high-cardinality label/attribute dimensions;
+- log events/sec and encoded bytes/sec;
+- trace spans/sec, attributes/events per span, sampling policy and retained-span rate;
+- cloud audit/control-plane/change events/sec;
+- cloud-network flow records/sec and enrichment cardinality;
+- Kubernetes object/event churn, controller count and ephemeral workload rate;
+- serverless invocation/request rate and concurrency;
+- number of SLOs, evaluation windows and burn-rate calculations;
+- concurrent Trace/Log/Service-graph/Coverage queries;
+- connector reconciliation backlog and recovery time;
+- signal-specific retention, rollup and Incident Flight Recorder pinning;
+- P1 RUM events, profile samples/aggregates and cloud-cost/usage facts where enabled.
+
+Cloud/API Sensor planning must reserve capacity for provider API collection/reconciliation without starving network/infrastructure monitoring on Combined Sensors. High-rate OTel/log/trace/cloud-flow workloads may require Streaming/Event Sensor role separation based on benchmarked MWU rather than a hard-coded universal count.
+
+Storage sizing shall include trace spans, cloud audit/change evidence, provider-health/quota/autoscaling history and cloud-network flow facts in addition to the existing metric/log/flow model. Sampling/retention/cardinality policy must be represented in the sizing calculator. P1 RUM/profile/cost data is an independent optional workload class.
+
+No numeric cloud-resource-per-Sensor, spans/sec, logs/sec or API-call density is declared by this master without benchmark evidence. Cloud Observability GA certification must publish the tested workload profile and prove 80% storage protection, replay/catch-up behavior, tenant isolation and acceptable query/ingestion performance under the certified P0 signal mix.
