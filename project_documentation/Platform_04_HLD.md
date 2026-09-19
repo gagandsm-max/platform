@@ -236,6 +236,21 @@ Owns: contextual action authorization and typed diagnostic-job lifecycle; source
 
 Sensors/Agents execute interactive diagnostics under bounded worker budgets so operator activity cannot starve routine monitoring. Results are normalized evidence, not free-form claims.
 
+### 4.14B Flow Enrichment & Analytics responsibility
+
+This is a logical responsibility inside the existing modular Core/query/analytics architecture, not a new mandatory microservice. It owns or coordinates:
+
+- canonical Flow query/rollup semantics;
+- temporal source/destination entity/IPAM/site/DNS/identity enrichment resolution;
+- ASN/BGP/cloud/SaaS/application enrichment provenance;
+- derived conversation/site-pair/application/QoS views;
+- Flow Coverage comparison with compatible interface-counter evidence;
+- bounded top-N/matrix/Sankey query planning;
+- exporter/data-quality query surfaces;
+- Flow evidence references for Investigation/Incident Flight Recorder.
+
+High-rate protocol decode/template/sampling/sequence state remains on the dedicated Flow Sensor. Core analytics never changes exporter-source truth retroactively without temporal/versioned provenance.
+
 ### 4.15 IPAM Service
 
 Owns address spaces, prefixes, VRF/VLAN context, address assignments/reservations, DNS/DHCP integration metadata, conflicts, discovery reconciliation and forecast APIs.
@@ -264,6 +279,16 @@ Owns Core/Sensor/data-service health, support bundle orchestration, backup/resto
 
 ## 5. Sensor service decomposition
 
+### 5.0 Production Sensor-role activation
+
+The same Sensor package/runtime is installed for all roles, but production role activation is exclusive for high-rate Flow and Log workloads:
+
+- `FLOW_SENSOR`: Flow receiver/state/normalization/spool/uploader/health only plus common control-plane functions;
+- `LOG_SENSOR`: Log/event receiver/parser/spool/uploader/health only plus common control-plane functions;
+- Network/Infrastructure/Synthetic/Cloud roles retain their governed workers and do not inherit Flow/Log workers merely because the binary contains the modules.
+
+Role conversion is a drain/reassignment/restart/revalidation lifecycle, not a live toggle while incompatible workloads remain assigned. Combined high-rate Flow+Log is lab/development only unless separately certified.
+
 ```mermaid
 flowchart TB
   CTRL[Core Control / Policies] --> CLIENT[Sensor Control Client]
@@ -274,15 +299,20 @@ flowchart TB
   JOB --> API[REST/gNMI Pool]
   JOB --> INFRA[Infra Worker Pool]
   JOB --> NCM[NCM Worker Pool]
-  FLOW[Flow/Syslog/Event Receivers] --> NORM[Normalizer]
-  ICMP --> NORM
+  FLOW[FLOW_SENSOR: Flow Receiver + Exporter/Template/Sampling State] --> FNORM[Flow Normalizer / Enrichment]
+  LOG[LOG_SENSOR: Log/Event Receivers] --> LNORM[Log Normalizer / Parser]
+  ICMP --> NORM[Network/Infra Normalizer]
   SNMP --> NORM
   SSH --> NORM
   API --> NORM
   INFRA --> NORM
   NCM --> NORM
-  NORM --> SPOOL[Durable Local Spool]
-  SPOOL --> UP[Uploader mTLS HTTPS/gRPC]
+  FNORM --> FSPOOL[Dedicated Flow Spool]
+  LNORM --> LSPOOL[Dedicated Log Spool]
+  NORM --> SPOOL[Network/Infra Durable Spool]
+  FSPOOL --> UP[Uploader mTLS HTTPS/gRPC]
+  LSPOOL --> UP
+  SPOOL --> UP
   CAP[Capacity/Health Monitor] --> CLIENT
   DISC[Discovery/Topology Workers] --> NORM
 ```
@@ -417,7 +447,8 @@ Synchronous vs asynchronous commit policy is an engineering benchmark/availabili
 
 - `metric_numeric`
 - `metric_state`
-- `network_flow`
+- `network_flow` (directional, observation-point-specific canonical Flow records with sampling/template/sequence/quality/provenance);
+- bounded Flow rollup/materialized aggregate families selected by benchmarked query patterns
 - `event_raw`
 - `syslog_event`
 - `trap_event`
@@ -453,7 +484,7 @@ Logical topics include:
 
 - `telemetry.numeric.v1`
 - `telemetry.state.v1`
-- `network.flow.v1`
+- `network.flow.v1` — logical canonical Flow family carrying source/exporter identity, observation point, protocol/version, sampling/template/sequence/timestamp quality and bounded enrichment provenance
 - `event.syslog.v1`
 - `event.trap.v1`
 - `event.generic.v1`
@@ -467,6 +498,8 @@ Logical topics include:
 - `telemetry.quality.v1`
 
 Exact partition counts are sizing-dependent.
+
+For Flow, the logical event family does not freeze a physical partitioning or topic-per-protocol design. Partition keys must preserve tenant isolation and the ordering/state needs of exporter/observation-domain processing without creating pathological cardinality. Dedicated Flow topics/tables beyond `network.flow.v1` require benchmark or consumer-isolation evidence.
 
 ### 10.2 Message schema
 
