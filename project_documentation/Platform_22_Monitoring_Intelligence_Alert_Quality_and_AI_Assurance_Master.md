@@ -2,8 +2,9 @@
 
 **Document ID:** PLATFORM-MIA-001
 **Version:** 3.2.2
-**Status:** **Authoritative Mother Reference — Monitoring Intelligence / Alert Quality / AI Assurance (after merge)**
+**Status:** **Authoritative Mother Reference — Monitoring Intelligence / Alert Quality / AI Assurance**
 **Product:** Platform
+**Last reconciliation:** 2026-09-19 — v3.2.2 consolidated Mother Reference metadata alignment
 **Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation, commercial provider commitment or readiness claim
 
 ---
