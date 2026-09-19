@@ -71,6 +71,10 @@ Existing Device Pack contracts remain valid. They are classifications/profiles u
 | `PRD-EMC-016` | Pack lifecycle/compatibility shall be defined across Platform upgrades, including deprecation and EOL. |
 | `PRD-EMC-017` | OEM/customer extensions shall use supported pack/SDK mechanisms rather than Core forks. |
 | `PRD-EMC-018` | Monitoring-coverage completeness shall be measurable by scope, domain, technology and certification dimension. |
+| `PRD-EMC-019` | Windows/Linux infrastructure monitoring shall support and certify **Agent-based** and **agentless/remote** collection as separate capability dimensions while normalizing equivalent host/process/service/evidence semantics where technically available. |
+| `PRD-EMC-020` | Certified server monitoring shall cover host CPU/scheduler pressure, memory/swap/paging pressure, filesystem/inode capacity, block I/O, network/NIC quality, OS/uptime, bounded process/service health and applicable hardware/event evidence rather than CPU/memory/disk-capacity gauges alone. |
+| `PRD-EMC-021` | Linux Agent, Windows Agent, SSH and WinRM/WMI/CIM monitoring shall expose explicit capability/privilege gaps; unsupported or failed collection shall be represented as missing/degraded monitoring evidence rather than target failure. |
+| `PRD-EMC-022` | Infrastructure Capability Packs shall declare continuous-monitoring collectors and bounded diagnostic/EDS workflows separately, including supported OS/version, privilege, evidence fields, resource budget and dimensional certification state. |
 
 ---
 
@@ -219,8 +223,27 @@ Windows; RHEL; Ubuntu; SLES; Oracle Linux; AIX; other certified Unix/Linux.
 
 Certification **must** separately record:
 
-- agentless/remote monitoring certification
-- Agent-based certification
+- agentless/remote monitoring certification;
+- Agent-based certification;
+- continuous host-metric coverage;
+- process/service coverage;
+- OS/event/hardware evidence coverage where supported;
+- Endpoint Diagnostic Snapshot (EDS) / investigation coverage;
+- resource-overhead and least-privilege certification.
+
+Minimum normalized server evidence targets, subject to OS/version/privilege capability, are:
+
+- CPU aggregate and useful scheduler breakdown, load/run-queue or platform equivalent;
+- Linux PSI or equivalent resource-pressure evidence where available;
+- memory available/used/commit, swap/page activity and OOM/resource-exhaustion evidence;
+- filesystem capacity and inode state plus block I/O throughput/IOPS/queue/latency/error evidence;
+- NIC state/throughput/errors/drops plus bounded transport-quality counters such as retransmissions where available;
+- bounded Top-N process CPU/memory/I/O/state/restart evidence;
+- Linux systemd and Windows Service Control Manager service state/restart/failure evidence;
+- OS version/boot/uptime/time-quality facts and selected bounded operational/kernel/Event Log evidence;
+- hardware/thermal/power evidence only through safe native or approved out-of-band mechanisms.
+
+Agent collection may provide richer/local evidence than remote collection. Product/UI/API shall disclose these differences rather than falsely claim identical raw coverage. Agentless Linux shall use governed SSH query packs; agentless Windows shall use governed WinRM/WMI/CIM query packs. Collection/credential/path failure is monitoring-health evidence and shall not automatically assert host/service failure.
 
 Legacy systems must never weaken Core security defaults.
 
@@ -510,6 +533,10 @@ Each `REQ-EMC-*` owns the corresponding `PRD-EMC-*`. Implementation status for a
 | `REQ-EMC-016` | `PRD-EMC-016` | Architecture, Quality, Operations | Pack version range, upgrade/migration, rollback, deprecation and EOL evidence |
 | `REQ-EMC-017` | `PRD-EMC-017` | Architecture, Security | OEM/customer extensions via pack/SDK only; Core forks prohibited |
 | `REQ-EMC-018` | `PRD-EMC-018` | Quality, Operations | Distinct Architecture/Specification/Implementation/Pack/Certification/Integration coverage metrics |
+| `REQ-EMC-019` | `PRD-EMC-019` | PRD, Architecture, HLD, Quality | Separate Agent/agentless certification evidence for Linux/Windows with normalized semantic mapping and explicit coverage differences |
+| `REQ-EMC-020` | `PRD-EMC-020` | PRD, HLD, LLD, Quality | Server fixtures prove CPU/pressure, memory/swap, filesystem/inodes, block I/O, NIC, process, service, OS and applicable event/hardware coverage |
+| `REQ-EMC-021` | `PRD-EMC-021` | Architecture, Security, Quality | Privilege/credential/path/collector failures map to missing/degraded evidence; negative tests prevent false host/service-down assertion |
+| `REQ-EMC-022` | `PRD-EMC-022` | Architecture, LLD, Quality, Capacity | Capability Pack manifest/certification distinguishes continuous collectors from EDS diagnostics and records version/privilege/evidence/resource support |
 
 ---
 
