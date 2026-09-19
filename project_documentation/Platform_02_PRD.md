@@ -212,7 +212,7 @@ Infrastructure Sensor shall support:
 - storage APIs;
 - database monitoring;
 - Kubernetes/container APIs;
-- OpenTelemetry;
+- OpenTelemetry metrics/infrastructure telemetry according to the governing OTel authority; production high-rate OTLP Log workloads use the dedicated Log Monitoring Sensor;
 - REST/API connectors.
 
 ### 6.4 Dedicated Flow and Log Sensors
