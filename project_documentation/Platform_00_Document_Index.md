@@ -213,7 +213,7 @@ Authoritative list is `Platform_12_Decision_Source_Register.md` §5. Restated he
 - exact Core service fencing/VIP implementation and failure matrix;
 - final contractual DR RPO/RTO and data-loss objectives;
 - final SNWP-2500-v1 metric/interface/event mix and certified performance results;
-- Streaming Sensor certified Flow records/sec and Syslog EPS;
+- Dedicated Flow Sensor certified datagrams/records/bytes/sec and Dedicated Log Sensor certified EPS/bytes/sec;
 - exact GNN model architecture, training labels, inference latency, CPU/GPU footprint and production enablement threshold;
 - final compliance certification program/scope and achieved certifications;
 - exact product SKUs/licensing quantities beyond the agreed behavioral rules.
