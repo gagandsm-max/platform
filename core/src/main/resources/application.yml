@@ -49,6 +49,8 @@ spring:
     consumer:
       group-id: platform-core-group
       auto-offset-reset: earliest
+      enable-auto-commit: false
+      isolation-level: read_committed
       max-poll-records: ${PLATFORM_TELEMETRY_CONSUMER_MAX_BATCH_RECORDS:2000}
       properties:
         fetch.min.bytes: ${PLATFORM_TELEMETRY_CONSUMER_FETCH_MIN_BYTES:65536}
