@@ -353,6 +353,16 @@ sequenceDiagram
 
 Exact acknowledgment semantics must ensure data is not silently lost when Core fails after accepting a batch; LLD defines the sequence/replay contract.
 
+### 8.5 Sensor communication-integrity invariants
+
+1. **Durable-before-delete:** Sensor spool deletion is gated by a durable Core acknowledgement whose exact recoverability boundary is certified against the two-Core HA design. The final `ACK_DURABLE` boundary remains a P0 engineering spike until crash/failover evidence resolves it.
+2. **At-least-once transport, duplicate-safe effect:** replay and retry may redeliver observations; deterministic identities/watermarks and downstream idempotency prevent duplicate authoritative effects.
+3. **Continuity without stale authority:** a transient Core partition must not immediately terminate useful polling, but disconnected autonomy is bounded. Reassignment requires fencing/reconciliation semantics that prevent two Sensors from remaining authoritative indefinitely. Exact grace/hold-off/fencing timing is a P0 engineering spike, not guessed here.
+4. **Control/current traffic protection:** backlog recovery cannot starve PKI/identity, heartbeat, assignment/fencing or current critical telemetry. Historical replay remains lower priority but cannot be starved forever.
+5. **Push protocols are destination-bound:** Core reassignment alone cannot recover traps/Syslog/Flow sent to a failed Sensor address. HA-critical deployments use source-supported redundant receiver patterns; Standalone mode retains standalone availability characteristics.
+6. **Compact integrity evidence:** pipeline reconciliation uses sequence/watermark/counter evidence and explicit drop/gap reasons; it does not create a second full telemetry store on Sensor.
+7. **Low-footprint default:** no Sensor PostgreSQL/ClickHouse/Kafka/Valkey/JVM/reliability microservice is introduced without measured proof that the existing Go runtime cannot meet the certified contract.
+
 ---
 
 ## 9. Device/Agent placement architecture
@@ -1161,7 +1171,7 @@ Platform's canonical tenant/entity/data-class model must carry a placement/juris
 
 ## ARCH-X2 — Data pipeline integrity
 
-The ingestion architecture must prove continuity across Sensor produced → ingestion accepted → Kafka persisted → normalization processed → ClickHouse inserted. Counters for rejected, duplicate, late, replayed and intentionally dropped records are first-class. Pipeline loss is an operational incident under **No Silent Failure**; missing evidence reduces RCA confidence.
+The ingestion architecture must prove continuity across Sensor produced/durable → Core accepted/acknowledged → Kafka persisted → consumer/normalization processed → ClickHouse inserted. Counters/watermarks for rejected, duplicate, late, replayed and intentionally dropped records are first-class. Reconciliation is defined per stream/schema where one-to-one counts do not apply. An unexplained discrepancy creates `PIPELINE_INTEGRITY_GAP` and is an operational Platform fault under **No Silent Failure**; missing evidence reduces RCA confidence. Integrity accounting should remain compact and must not require per-stage copies of every observation solely for reconciliation.
 
 ## 34. Development, packaging and service-runtime architecture — v3.1
 
