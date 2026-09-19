@@ -50,11 +50,18 @@
 | Hyper-V | WinRM/WMI | masterzen/winrm/native APIs | entity graph/metrics |
 | Proxmox/Nutanix/storage | HTTPS REST/API/SNMP/SSH per pack | Go HTTP/GoSNMP | API Studio/Device Pack normalization |
 | Databases | engine-specific username/password, TLS, certificate, integrated auth where driver supports | approved driver per engine | query packs, secret management, normalization; driver license review |
-| AWS | IAM roles/keys/session credentials as deployment permits | AWS SDK for Go v2 | account/region/resource normalization |
-| Azure | service principal/managed identity/OAuth as deployment permits | Azure SDK for Go | subscription/resource normalization |
-| GCP | service account/workload identity/OAuth as deployment permits | Google Cloud Go | project/resource normalization |
+| AWS | delegated/cross-account IAM role and short-lived STS preferred; scoped keys/session credentials only where required | AWS SDK for Go v2 | organization/OU/account/region/resource normalization, permission preflight, rate-budget and Cloud Service Pack scope |
+| Azure | managed identity/workload identity or Entra application/service principal OAuth under least privilege | Azure SDK for Go | tenant/management-group/subscription/resource normalization, permission preflight, rate-budget and Cloud Service Pack scope |
+| GCP | workload identity federation/service-account impersonation preferred; scoped service-account/OAuth credentials only where required | Google Cloud Go | organization/folder/project/resource normalization, permission preflight, rate-budget and Cloud Service Pack scope |
+| OCI | instance/resource/workload-principal style identity where available; protected API-signing credentials only where required | Go HTTP plus an OCI SDK/client only after exact-version Platform_07 admission | tenancy/compartment/resource normalization, permission preflight, rate-budget and Cloud Service Pack scope |
 | Kubernetes | kubeconfig/service-account/client cert/bearer token under least privilege | client-go | discovery/entity graph/RBAC safe use |
-| OpenTelemetry | OTLP gRPC/HTTP secured with TLS/mTLS/token as configured | OTel Collector/libraries | tenant/entity mapping, quotas, schema |
+| OpenTelemetry | OTLP gRPC/HTTP secured with TLS/mTLS/token as configured; approved Prometheus/OpenMetrics receivers where applicable | OTel Collector/libraries | tenant/resource/service mapping, metrics/logs/traces, quotas/cardinality, schema and sampling |
+
+### 3.1 Cloud onboarding and preflight security
+
+Normal customer cloud onboarding is UI-driven through **Administration → Integrations → Cloud → Add Cloud Environment** as governed by `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`. Before activation the selected Cloud/API Sensor path shall test provider identity, required/optional permissions, DNS/TLS/proxy/API reachability, hierarchy discovery, selected service-pack prerequisites, provider rate/quota visibility and material unsupported signals. Permission gaps are explicit and actionable; a partial permission set does not silently become full coverage.
+
+Provider-native short-lived/delegated identity is preferred over reusable static credentials. Reusable secret material is never returned to the browser after creation, must remain tenant/scope constrained, and is subject to rotation/last-verified/audit controls. Cloud connector/API failure produces connector-health degradation and freshness loss; it must not by itself assert that managed resources are DOWN.
 
 ## 4. Platform identity and UI security
 
