@@ -47,6 +47,38 @@ Platform targets banks, defence and large enterprises; testing therefore validat
 
 Wrong SNMP community/v3 user/auth/privacy, SNMP disabled, ACL/firewall drop, unreachable host, wrong API token, TLS failure, expired certificate, DNS failure, Kafka unavailable, ClickHouse unavailable, PostgreSQL failover, sensor disk pressure, Core loss, duplicate/replayed telemetry, malformed bulk import, high-cardinality explosion and clock skew.
 
+### 3.1 Sensor communication-integrity failure certification
+
+The Sensor/Core communication path cannot be certified from happy-path tests alone. Release evidence shall inject representative failures at the device/source, Sensor and Core/data-service boundaries, including at minimum:
+
+- packet loss/burst loss/high latency/jitter, DNS/route/ACL/port/MTU failures;
+- SNMP timeout/auth/privacy/partial/`tooBig`/GETBULK incompatibility;
+- REST 401/403/429/5xx/timeout/token expiry/schema/partial response;
+- SSH host-key/auth/session-limit failures and gNMI disconnect/reconnect/subscription gap;
+- trap/Syslog/Flow bursts, template miss and receiver/queue saturation;
+- Sensor process/host restart, CPU/RAM/FD/disk pressure, spool corruption/read-only filesystem, worker/queue/retry storms;
+- Primary Sensor loss, fallback unreachable/firewall/credential failure, stale ownership and reassignment race;
+- Core unreachable, TLS/certificate failure/rotation, Kafka unavailable/lag, ClickHouse unavailable, Core failover, ACK response loss, duplicate/out-of-order replay and large backlog recovery.
+
+Each case records whether safe polling/current monitoring continued, whether data loss was avoidable/unavoidable and explicitly measured, whether duplicates were harmless, whether resource/retry amplification remained bounded, whether the target was falsely declared DOWN, whether the actual failure domain was represented truthfully, whether recovery was automatic where safe and whether the transition/recovery was auditable.
+
+### 3.2 Communication release blockers
+
+The applicable production/HA profile is blocked until evidence proves:
+
+1. one failed primary poll cannot by itself create false device-down;
+2. shared-path failure cannot create uncontrolled retry storms;
+3. Sensor overload/drop/storage pressure is explicit rather than silent;
+4. Core outage does not stop polling solely because Core is unavailable while certified local buffer/autonomy remains valid;
+5. recovery replay cannot starve control/current telemetry;
+6. spool data is not reclaimed before the certified durable ACK boundary permits it;
+7. duplicate replay does not duplicate authoritative alerts/incidents or distort metrics;
+8. configured pull-workload failover is partition/fencing safe and target-ready;
+9. push-protocol HA/loss behavior is documented/tested according to source capability;
+10. streaming/UDP continuity gaps are explicit where completeness cannot be proven;
+11. resource consumption remains within the certified Sensor profile;
+12. no heavyweight Sensor dependency is added merely to solve coordination.
+
 ## 4. False-alert quality
 
 Qualification tests must prove that SNMP failure alone does not automatically declare device-down where secondary evidence shows device reachability. Flapping/storm/dependency correlation and recovery qualification require regression suites.
@@ -70,6 +102,8 @@ No release promotion with failing P0/P1 tests, unresolved critical/high security
 ## 2. Sensor targets
 
 Planning baseline 4 vCPU/16 GB/150 GB ≈800 normal network devices. Benchmark objective: 8 vCPU/16 GB class approaching 2,000–2,500 comparable normal devices where workload permits. Streaming/Event Sensor benchmarked separately by records/events per second.
+
+Communication/resource certification additionally records CPU/RAM per MWU, poll operations/sec/core, metrics/sec/core, Flow records/sec/core, Syslog EPS/core, network and disk bytes/observation, spool write amplification/compression, replay throughput, retry amplification, goroutine/thread and FD/socket counts and GC overhead under healthy, WAN-loss/site-failure/credential-failure/Core-outage/replay/failover/burst profiles.
 
 ## 3. Benchmark dimensions
 
@@ -114,6 +148,8 @@ Full regression, performance certification, HA/DR evidence, migration/upgrade ma
 - missing SBOM/notices/provenance;
 - HA failover violating agreed <60s target under certified test profile;
 - unsupported silent data loss in certified normal failure scenarios;
+- unresolved durable-ACK or Sensor ownership/fencing P0 semantics for any HA profile being declared production-ready;
+- unexplained pipeline-integrity gaps or unbounded replay/retry amplification in the certified profile;
 - unresolved RED OSS dependency.
 
 ## 5. Evidence
