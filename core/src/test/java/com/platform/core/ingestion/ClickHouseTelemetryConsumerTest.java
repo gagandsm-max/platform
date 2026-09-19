@@ -61,9 +61,59 @@ class ClickHouseTelemetryConsumerTest {
 
         consumer.consume(record, ack);
 
-        verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
+        verify(clickHouseClient, times(1)).insertNumericBatch(anyList(), anyString());
         verify(ack, times(1)).acknowledge();
         assertFalse(metrics.isConsumerDegraded());
+    }
+
+    @Test
+    void testBatchConsumesOneClickHouseInsertAndOneAck() throws Exception {
+        List<ConsumerRecord<String, String>> records = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            CanonicalObservation obs = new CanonicalObservation(
+                    "tenant-1", "entity-" + i, "metric.cpu", "sensor-net-01",
+                    Instant.parse("2026-09-19T07:00:00Z").plusSeconds(i),
+                    10.0 + i, 1, 0, String.valueOf(100 + i), "snmp"
+            );
+            records.add(new ConsumerRecord<>(
+                    "telemetry.numeric.v1", 0, 100L + i, "key-" + i,
+                    objectMapper.writeValueAsString(obs)
+            ));
+        }
+        Acknowledgment ack = mock(Acknowledgment.class);
+
+        consumer.consumeBatch(records, ack);
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<CanonicalObservation>> batchCaptor =
+                org.mockito.ArgumentCaptor.forClass(List.class);
+        org.mockito.ArgumentCaptor<String> tokenCaptor =
+                org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(clickHouseClient, times(1)).insertNumericBatch(batchCaptor.capture(), tokenCaptor.capture());
+        assertEquals(3, batchCaptor.getValue().size());
+        assertTrue(tokenCaptor.getValue().matches("[0-9a-f]{64}"));
+        verify(ack, times(1)).acknowledge();
+        assertFalse(metrics.isConsumerDegraded());
+    }
+
+    @Test
+    void testDeduplicationTokenStableForSameKafkaCoordinates() {
+        List<ConsumerRecord<String, String>> first = List.of(
+                new ConsumerRecord<>("telemetry.numeric.v1", 0, 10L, "a", "payload-a"),
+                new ConsumerRecord<>("telemetry.numeric.v1", 0, 11L, "b", "payload-b")
+        );
+        List<ConsumerRecord<String, String>> sameCoordinatesDifferentPayload = List.of(
+                new ConsumerRecord<>("telemetry.numeric.v1", 0, 10L, "x", "different"),
+                new ConsumerRecord<>("telemetry.numeric.v1", 0, 11L, "y", "different-again")
+        );
+        List<ConsumerRecord<String, String>> nextOffset = List.of(
+                new ConsumerRecord<>("telemetry.numeric.v1", 0, 10L, "a", "payload-a"),
+                new ConsumerRecord<>("telemetry.numeric.v1", 0, 12L, "b", "payload-b")
+        );
+
+        String token = ClickHouseTelemetryConsumer.deduplicationToken(first);
+        assertEquals(token, ClickHouseTelemetryConsumer.deduplicationToken(sameCoordinatesDifferentPayload));
+        assertNotEquals(token, ClickHouseTelemetryConsumer.deduplicationToken(nextOffset));
     }
 
     @Test
@@ -255,11 +305,11 @@ class ClickHouseTelemetryConsumerTest {
         doThrow(new RuntimeException("ClickHouse 503"))
                 .doThrow(new RuntimeException("ClickHouse timeout"))
                 .doNothing()
-                .when(clickHouseClient).insertNumericBatch(anyList());
+                .when(clickHouseClient).insertNumericBatch(anyList(), anyString());
 
         assertDoesNotThrow(() -> consumer.consume(record, ack));
 
-        verify(clickHouseClient, times(3)).insertNumericBatch(anyList());
+        verify(clickHouseClient, times(3)).insertNumericBatch(anyList(), anyString());
         verify(ack, times(1)).acknowledge();
         assertFalse(metrics.isConsumerDegraded());
     }
@@ -277,13 +327,13 @@ class ClickHouseTelemetryConsumerTest {
         Acknowledgment ack = mock(Acknowledgment.class);
 
         doThrow(new RuntimeException("ClickHouse connection refused"))
-                .when(clickHouseClient).insertNumericBatch(anyList());
+                .when(clickHouseClient).insertNumericBatch(anyList(), anyString());
 
         RuntimeException ex = assertThrows(RuntimeException.class, () ->
                 consumer.consume(record, ack));
         assertTrue(ex.getMessage().contains("ClickHouse persistence unavailable"));
 
-        verify(clickHouseClient, times(3)).insertNumericBatch(anyList());
+        verify(clickHouseClient, times(3)).insertNumericBatch(anyList(), anyString());
         verify(ack, never()).acknowledge();
         assertTrue(metrics.isConsumerDegraded());
     }
