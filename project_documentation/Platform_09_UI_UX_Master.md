@@ -3184,19 +3184,27 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Cloud/Containers  
 **Primary roles:** Cloud ops  
-**Purpose:** AWS/Azure/GCP accounts, regions, compute, storage, DB, network, K8s/LB, health and capacity.
+**Purpose:** AWS/Azure/GCP/OCI organizations/accounts/subscriptions/projects/compartments, regions, services, compute, storage, databases, network, Kubernetes/serverless, SLOs, changes, quotas, observability coverage, connector health and capacity.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
 **Default tabs/views:**
 - Overview
-- Accounts
+- Providers
+- Organizations / Accounts
 - Regions
+- Services
 - Compute
 - Network
 - Storage
 - Databases
 - Kubernetes
+- Serverless
+- SLOs
+- Changes
+- Quotas
+- Coverage
+- Connector Health
 
 **Default filters:**
 - Time range
@@ -3212,7 +3220,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Environment
 - Tags
 - Cloud provider
-- Account/Subscription/Project
+- Account/Subscription/Project/Compartment
 - Region/Zone
 - Cluster
 - Namespace
@@ -3253,21 +3261,45 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 ---
 
+### Cloud & Full-Stack Observability UI supplement — Platform_24
+
+The Cloud/Containers workspace shall expose the Platform_24 P0 model without forcing users into separate products:
+
+- **Cloud Integration Administration:** Administration → Integrations → Cloud lists AWS/Azure/GCP/OCI connections with provider scope, auth mode, Sensor pool, selected Cloud Service Packs, state, last verification/reconciliation, API-budget/throttle health and coverage. **Add Cloud Environment** runs the governed provider → scope → authentication → permission preflight → hierarchy discovery → service-pack selection → collection plan → Sensor placement → rate/capacity preview → ownership/policy mapping → ephemeral-resource policy → discovery preview → activate → verify workflow.
+- **Cloud Provider Workspace:** every day-one provider root (AWS, Azure, GCP, OCI) exposes hierarchy, regions, service-family health, incidents, SLO impact, quota risk, connector health, changes and coverage gaps. Existing UI-045/046/047 are provider presets; OCI is mandatory through the same provider-workspace contract even though the legacy base catalogue has no dedicated numeric slot.
+- **Service Overview:** request rate/error/latency, SLO/error budget, traces, logs, metrics, dependencies, runtime instances, cloud resources, network path, deployments/changes, incidents and RCA.
+- **Trace Explorer:** search/filter by service/environment/version/operation/status/duration/cloud/Kubernetes attributes with trace waterfall/span tree, related logs/metrics/events, canonical resource identity, changes and service-graph pivots.
+- **Serverless:** functions/services, versions/revisions, invocation/request rate, latency, errors, throttles, concurrency, cold-start indicators where exposed, triggers/dependencies, logs, traces, changes, quotas and SLO.
+- **Cloud Network:** provider network graph, routes, load balancer/target relationships, NAT/transit/private connectivity, flow analytics, DNS, synthetics and on-prem path correlation.
+- **Observability Coverage:** signal availability/freshness, ownership, SLO, connector/credential state, unsupported signals, blind spots and the evidence gaps limiting RCA confidence.
+- **P1 surfaces:** RUM, Mobile Experience, Profiling, Cloud Cost/FinOps, customer AI/LLM Observability and GPU/Accelerator observability use the same global service/resource identity and navigation rather than independent products.
+
+Cloud integration/status UI uses at least `CONNECTED`, `PARTIAL`, `AUTHORIZATION_DEGRADED`, `THROTTLED`, `STALE`, `RECONCILING`, `MISCONFIGURED`, `DISCONNECTED` and `SUSPENDED`. Missing/partial provider telemetry never becomes a generic resource-down state.
+
+---
+
 ### UI-045 — AWS Overview
 
 **Domain:** Cloud/Containers  
 **Primary roles:** AWS ops  
-**Purpose:** EC2/RDS/network/LB/storage/CloudWatch/regions/alerts.
+**Purpose:** AWS organization/account/region and P0 Cloud Service Pack operations across compute, network, storage, database, containers, serverless, messaging/streaming, edge/DNS, CloudWatch/CloudTrail/Health, quotas, changes, coverage and alerts.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
 **Default tabs/views:**
-- EC2
-- RDS
+- Overview
+- Accounts / Regions
+- Compute
 - Network
-- Load Balancers
 - Storage
-- Regions
+- Databases
+- Containers
+- Serverless
+- Messaging / Streaming
+- Edge / DNS
+- Changes / Health
+- Quotas
+- Coverage
 - Alerts
 
 **Default filters:**
@@ -3284,7 +3316,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Environment
 - Tags
 - Cloud provider
-- Account/Subscription/Project
+- Account/Subscription/Project/Compartment
 - Region/Zone
 - Cluster
 - Namespace
@@ -3329,17 +3361,24 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Cloud/Containers  
 **Primary roles:** Azure ops  
-**Purpose:** VMs, Azure Monitor, VNet, SQL, storage, LB and AKS.
+**Purpose:** Azure tenant/management-group/subscription and P0 Cloud Service Pack operations across compute, network, storage, databases, AKS/containers, Functions/App Service, messaging, edge/DNS, Azure Monitor/Activity/Service Health, quotas, changes, coverage and alerts.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
 **Default tabs/views:**
-- VMs
+- Overview
+- Management Groups / Subscriptions
+- Compute
 - Network
-- SQL
 - Storage
-- Load Balancers
-- AKS
+- Databases
+- AKS / Containers
+- Functions / App Services
+- Messaging / Events
+- Edge / DNS
+- Changes / Health
+- Quotas
+- Coverage
 - Alerts
 
 **Default filters:**
@@ -3356,7 +3395,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Environment
 - Tags
 - Cloud provider
-- Account/Subscription/Project
+- Account/Subscription/Project/Compartment
 - Region/Zone
 - Cluster
 - Namespace
@@ -3401,16 +3440,24 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Cloud/Containers  
 **Primary roles:** GCP ops  
-**Purpose:** Compute, networking, storage, GKE, DB and monitoring.
+**Purpose:** GCP organization/folder/project and P0 Cloud Service Pack operations across compute, network, storage, databases, GKE, Cloud Run/Functions, Pub/Sub/data services, edge/DNS, Monitoring/Logging/Audit, quotas, changes, coverage and alerts.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
 **Default tabs/views:**
+- Overview
+- Organizations / Projects
 - Compute
 - Network
 - Storage
-- GKE
 - Databases
+- GKE / Containers
+- Cloud Run / Functions
+- Messaging / Data Services
+- Edge / DNS
+- Changes / Health
+- Quotas
+- Coverage
 - Alerts
 
 **Default filters:**
@@ -3427,7 +3474,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Environment
 - Tags
 - Cloud provider
-- Account/Subscription/Project
+- Account/Subscription/Project/Compartment
 - Region/Zone
 - Cluster
 - Namespace
@@ -3472,7 +3519,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Cloud/Containers  
 **Primary roles:** Platform/K8s ops  
-**Purpose:** Cluster/node/namespace/workload/pod/container/service/ingress health, events, restarts and capacity.
+**Purpose:** Cluster/node/namespace/controller/workload/pod/container/service/ingress/storage/autoscaling health, scheduling and rollout state, events, SLOs, changes, coverage and capacity.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
@@ -3480,12 +3527,18 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Overview
 - Nodes
 - Namespaces
+- Controllers
 - Workloads
 - Pods
 - Containers
 - Services
 - Ingress
+- Storage
+- Autoscaling
 - Events
+- Changes
+- SLO
+- Coverage
 - Capacity
 
 **Default filters:**
@@ -3502,7 +3555,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Environment
 - Tags
 - Cloud provider
-- Account/Subscription/Project
+- Account/Subscription/Project/Compartment
 - Region/Zone
 - Cluster
 - Namespace
