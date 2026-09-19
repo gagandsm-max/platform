@@ -59,6 +59,8 @@ func (f *fakeCore) AckCapabilityPackAppliedState(ctx context.Context, generation
 		return coreclient.AppliedStateAck{}, f.ackErr
 	}
 	f.acks = append(f.acks, ackCall{Generation: generation, Checksum: checksum})
+	f.desired.AppliedGeneration = generation
+	f.desired.AppliedChecksum = checksum
 	return coreclient.AppliedStateAck{Status: "ACCEPTED", Generation: generation, Checksum: checksum}, nil
 }
 
@@ -210,6 +212,56 @@ func TestPackSyncRestartReAcksDurableAppliedState(t *testing.T) {
 	}
 	if core.artifactFetches != 1 {
 		t.Fatalf("restart ACK recovery must not re-download artifact, fetches=%d", core.artifactFetches)
+	}
+}
+
+func TestPackSyncCoreAppliedStateRegressionReconcilesWithoutRedownload(t *testing.T) {
+	dir := t.TempDir()
+	manifest := minimalManifest("fixture.pack", "1.0.0")
+	sha := shaOf(manifest)
+	checksum := "bd" + sha[:62]
+	core := &fakeCore{
+		desired: coreclient.CapabilityPackDesiredState{
+			Generation: 1,
+			Checksum:   checksum,
+			Packs: []coreclient.DesiredPackEntry{{
+				PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
+			}},
+		},
+		arts: map[string]coreclient.CapabilityPackArtifact{
+			"fixture.pack@1.0.0": {PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, Bytes: manifest},
+		},
+	}
+	s, err := New(Config{Dir: dir, PollInterval: time.Hour}, core)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.syncOnce(context.Background())
+	if len(core.acks) != 1 || core.artifactFetches != 1 {
+		t.Fatalf("initial apply/ACK mismatch: acks=%d fetches=%d", len(core.acks), core.artifactFetches)
+	}
+
+	// Simulate Core restoring desired state but losing its durable applied-state row.
+	core.mu.Lock()
+	core.desired.AppliedGeneration = 0
+	core.desired.AppliedChecksum = ""
+	core.mu.Unlock()
+
+	s.syncOnce(context.Background())
+
+	if len(core.acks) != 2 {
+		t.Fatalf("Core applied-state regression must trigger idempotent reconciliation ACK, got %d ACKs", len(core.acks))
+	}
+	if core.artifactFetches != 1 {
+		t.Fatalf("Core applied-state reconciliation must not re-download artifacts, fetches=%d", core.artifactFetches)
+	}
+	core.mu.Lock()
+	appliedGeneration := core.desired.AppliedGeneration
+	appliedChecksum := core.desired.AppliedChecksum
+	core.mu.Unlock()
+	if appliedGeneration != 1 || appliedChecksum != checksum {
+		t.Fatalf("Core applied state did not reconverge: generation=%d checksum=%q", appliedGeneration, appliedChecksum)
 	}
 }
 
