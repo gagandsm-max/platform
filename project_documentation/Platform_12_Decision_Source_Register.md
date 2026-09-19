@@ -98,6 +98,8 @@ The following must remain visibly unresolved until engineering evidence exists:
 - exact two-Core ClickHouse replication/promotion/fencing design;
 - exact PostgreSQL two-Core failover/fencing/rewind mechanics;
 - exact Core service fencing/VIP implementation and failure matrix;
+- exact recoverable `ACK_DURABLE` boundary across the certified two-Core Kafka/PostgreSQL/ClickHouse failure model, including crash immediately after acceptance/acknowledgement;
+- exact Sensor disconnected-grace/reassignment hold-off/fencing/reconciliation behavior that preserves useful Core-disconnected polling without allowing stale duplicate Sensor authority;
 - final contractual DR RPO/RTO and data-loss objectives;
 - final SNWP-2500-v1 metric/interface/event mix and certified performance results;
 - Streaming Sensor certified Flow records/sec and Syslog EPS;
@@ -211,3 +213,20 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Real-customer requirements normalization | USER-FIXED | Recurring enterprise ITOM/AIOps needs are normalized as Real Customer Enterprise Benchmark — Automotive / ITOM-AIOps with classification A–G. Confidential customer names, inventories, locations, quantities, commercial clauses, penalties, unique SLAs and contract language must not be embedded in Mother References. |
 | Enterprise-monitoring-coverage product scope | USER-FIXED | `PRD-EMC-001` through `PRD-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` are approved additive v3.2.2 product requirements/targets. They are EMC-0 specification only and do not claim runtime, pack certification or contractual coverage. |
 | Enterprise-monitoring-coverage packaging | ARCH-DELEGATED | `Platform_23` is the consolidated authoritative v3.2.2 specialized master for this family. `REQ-EMC-001` through `REQ-EMC-018` are the RTM supplement. It does not replace Platform_10, 19, 20, 21 or 22 outside its assigned scope. |
+
+## 13. v3.2.2 ARCH-DELEGATED Sensor communication-integrity decisions — 2026-09-19
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Preserve Universal Sensor architecture | ARCH-DELEGATED | Keep the Go Universal Sensor Runtime, bounded worker pools, durable local spool, Core-authoritative placement/policy, mTLS transport, MWU capacity model and horizontal Sensor scale. Do not add Sensor PostgreSQL/ClickHouse/Kafka/Valkey/JVM or a mandatory reliability microservice without benchmark-backed architecture change control. |
+| Communication-integrity product promise | ARCH-DELEGATED | Platform targets zero unexplained telemetry loss within certified Platform durability boundaries, explicit visibility of observable source/network loss, deterministic replay/deduplication and truthful monitoring state. It does not claim zero physical packet loss for external/unacknowledged protocols. |
+| Durable Core acknowledgement | TBD/P0-SPIKE | Sensor spool reclamation is gated by durable accepted-through acknowledgement. The exact recoverable `ACK_DURABLE` boundary must be proven against two-Core crash/failover behavior before GA; it is not guessed and does not automatically mean “wait for ClickHouse” unless evidence requires that boundary. |
+| Partition-safe Sensor ownership | TBD/P0-SPIKE | Current assignment version/lease/fencing remains the baseline. Exact disconnected grace, reassignment hold-off, takeover evidence and any additional epoch/token metadata must be proven by partition tests so Core-disconnected polling can continue safely without indefinite duplicate authority. |
+| Fallback Sensor readiness | ARCH-DELEGATED | HA failover eligibility is target-specific: capacity plus network/protocol/TLS/credential/security-zone/version-role compatibility. Critical readiness validation is lightweight, staggered/cached/change-triggered; always-on full duplicate polling is rejected. |
+| Push-protocol HA | ARCH-DELEGATED | Critical push telemetry uses source/deployment-supported receiver redundancy (stable VIP/FQDN, multiple destinations, dual collectors or another certified pattern) when required by profile. Anycast and N+1 are not mandatory universal defaults; Standalone retains standalone availability. |
+| Pipeline integrity | ARCH-DELEGATED | Reconcile compact sequence/watermark/counter evidence from Sensor through ingestion/Kafka/consumers/storage. Duplicates/rejections/late/intentional drops are explained; residual discrepancy raises `PIPELINE_INTEGRITY_GAP`. Do not store duplicate per-stage copies solely for reconciliation. |
+| Poll/retry load control | ARCH-DELEGATED | Recurring polls are deterministically phase-distributed; retry remains bounded/backed off/jittered and may be suppressed by strongly evidenced shared failure domain while retaining recovery probes. Weak topology inference cannot suppress independent failures. |
+| Replay/current traffic priority | ARCH-DELEGATED | Identity/PKI/control and current critical/current telemetry cannot be starved by old backlog; replay must still make forward progress. Exact queue implementation is delegated and no separate service is implied. |
+| Uploader batching | ARCH-DELEGATED | Batches are bounded by records, encoded bytes/request bytes and maximum age. Fixed benchmark-certified defaults are preferred first; adaptive batching/compression is optional only when measurement proves value. |
+| Sensor hardware envelope | ARCH-DELEGATED | Communication-integrity hardening does not by declaration raise existing Sensor sizing targets. Any hardware increase requires reproducible performance evidence and explicit sizing change control. |
+
