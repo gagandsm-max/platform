@@ -45,14 +45,14 @@ Core-resident local intelligence is an **optional certified execution profile** 
 
 Planning envelopes below are hard design targets until benchmark certification:
 
-| Per-Core target | Local-intelligence peak budget | Default local LLM class | Concurrent local LLM requests | Notes |
+| Per-Core target | Core-resident local-intelligence peak budget (if enabled) | Core-resident LLM class (if enabled) | Concurrent local LLM requests | Notes |
 |---|---:|---|---:|---|
 | **8 vCPU / 16 GB** | **≤2 vCPU burst / ≤3 GB RAM peak** | **0.5B–1.5B parameter, 4-bit quantized** | **1** | Standard smallest Core. A model above 1.5B is not assumed; up to ~3B may be admitted only if SNWP certification proves no monitoring regression. |
 | **12 vCPU / 24 GB** | **≤3 vCPU burst / ≤4 GB RAM peak** | **1B–3B, 4-bit quantized** | **1–2** | Extra capacity primarily buys monitoring/user concurrency, not permission for an unnecessarily large model. |
 | **16 vCPU / 32 GB** | **≤3 vCPU burst / ≤5 GB RAM peak** | **1B–3B, 4-bit quantized** | **2** | AI remains lower priority than live monitoring and storage. |
 | **24 vCPU / 48 GB** | **≤4 vCPU burst / ≤6 GB RAM peak** | **1B–3B, 4-bit quantized** | **2–4** | Higher concurrency is preferred over increasing model size. |
 
-For the 8 vCPU / 16 GB tier the normal non-interactive local-intelligence target is **<1 vCPU average and approximately 1–1.5 GB RAM**, with the larger peak envelope used only during bounded inference/analytics activity.
+When Core-resident local intelligence is enabled on the 8 vCPU / 16 GB tier, the normal non-interactive target is **<1 vCPU average and approximately 1–1.5 GB RAM**, with the larger peak envelope used only during bounded inference/analytics activity. The base product does not require Core-resident LLM inference.
 
 Mandatory resource rules:
 
