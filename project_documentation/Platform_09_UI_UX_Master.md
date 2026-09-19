@@ -155,11 +155,11 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
-**Data-quality behavior:** Show Flow-specific telemetry quality including exporter freshness, sampling certainty, template state/misses, sequence gaps, socket/queue drops, malformed/rate-limited records, Sensor spool/downstream health, timestamp quality and Flow Coverage/consistency where available. `No Flow Data` is never displayed as `No Network Traffic` without corroborating evidence. Missing/degraded Flow is a monitoring-quality condition, not a device/link-down assertion.
+**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default queries use benchmarked Flow rollups for the selected time range and server-side pagination/virtualization. Top-N/matrix/Sankey use bounded N/cardinality/time windows with an `Other` aggregation where useful; the UI must not request unrestricted multi-year scans of raw Flow or render unbounded graph edges.
+**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
 
 ---
 
@@ -433,19 +433,18 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - SLA
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open source/destination entity, interface, site or exporter context
-- Investigate Traffic / open Flow with current filters
+- Open contextual entity/detail
 - Save view
 - Share permitted view
-- Export subject to Flow/user-identity permission
+- Export
 - Create/Schedule report
 - Add annotation where time-series context exists
-- Add bounded Flow summary/evidence reference to Investigation/Incident
+- Investigate
 - Ping
 - Traceroute/Path Analysis
-- View topology/path/routing context
+- Create maintenance
+- View topology
 - View alerts/incidents
-- Open exporter/template/data-quality diagnostics
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -636,20 +635,16 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Status/Severity
 
 **Primary table/list columns where applicable:**
-- Time / Flow window
-- Source IP + resolved endpoint/system/FQDN where evidenced
-- Source user where authorized/evidenced
-- Destination IP + resolved endpoint/domain/application
-- Source/Destination Site
-- Protocol / Ports
-- Observed bytes/packets
-- Estimated bytes/packets where sampled
-- Sampling rate/quality
-- Exporter / Observation Point / Interfaces
-- ASN / Cloud / Geo context where available
-- QoS / DSCP
-- Flow quality
-- Related alert/incident/change indicators
+- Entity/Link
+- IP/Identifier
+- Site
+- Vendor/Model
+- Status
+- Availability
+- Primary KPI
+- Sensor
+- Active alerts
+- Last update
 
 **Actions (subject to RBAC, scope and entitlement):**
 - Persistent Action Bar: CLI; Ping; Trace/Path; SNMP Test; Flow; Config; Compare; Investigate; Maintenance
@@ -1265,38 +1260,43 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Flow Data Quality state
 
 **Primary table/list columns where applicable:**
-- Entity/Link
-- IP/Identifier
-- Site
-- Vendor/Model
-- Status
-- Availability
-- Primary KPI
-- Sensor
-- Active alerts
-- Last update
+- Time / Flow window
+- Source IP + resolved endpoint/system/FQDN where evidenced
+- Source user where authorized/evidenced
+- Destination IP + resolved endpoint/domain/application
+- Source/Destination Site
+- Protocol / Ports
+- Observed bytes/packets
+- Estimated bytes/packets where sampled
+- Sampling rate/quality
+- Exporter / Observation Point / Interfaces
+- ASN / Cloud / Geo context where available
+- QoS / DSCP
+- Flow quality
+- Related alert/incident/change indicators
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
+- Open source/destination entity, interface, site or exporter context
+- Investigate Traffic / open Flow with current filters
 - Save view
 - Share permitted view
-- Export
+- Export subject to Flow/user-identity permission
 - Create/Schedule report
 - Add annotation where time-series context exists
-- Investigate
+- Add bounded Flow summary/evidence reference to Investigation/Incident
 - Ping
 - Traceroute/Path Analysis
-- Create maintenance
-- View topology
+- View topology/path/routing context
 - View alerts/incidents
+- Open exporter/template/data-quality diagnostics
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
-**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
+**Data-quality behavior:** Show Flow-specific telemetry quality including exporter freshness, sampling certainty, template state/misses, sequence gaps, socket/queue drops, malformed/rate-limited records, Sensor spool/downstream health, timestamp quality and Flow Coverage/consistency where available. `No Flow Data` is never displayed as `No Network Traffic` without corroborating evidence. Missing/degraded Flow is a monitoring-quality condition, not a device/link-down assertion.
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Default queries use benchmarked Flow rollups for the selected time range and server-side pagination/virtualization. Top-N/matrix/Sankey use bounded N/cardinality/time windows with an `Other` aggregation where useful; the UI must not request unrestricted multi-year scans of raw Flow or render unbounded graph edges.
 
 **Identity/provenance behavior:** IP resolution is temporal. UI may show endpoint/system name, FQDN/domain, user, site, ASN, cloud/SaaS, application and Geo only with source/provenance and applicable confidence. Directory/AD evidence alone is not shown as proof that a user owned an IP at the Flow timestamp. Conflicting user/session evidence is displayed as conflicted/uncertain rather than silently selecting one identity. Public-IP Geo is labelled approximate. Domain/application is not labelled as URL, and full path/query data is absent unless a separately governed source actually supplied it.
 
