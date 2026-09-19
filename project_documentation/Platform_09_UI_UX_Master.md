@@ -1198,84 +1198,98 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 ### UI-017 — Network Flow / Traffic Analytics
 
 **Domain:** Network  
-**Primary roles:** Network engineer  
-**Purpose:** Top talkers/conversations/protocols/ports/sites/interfaces/ASN, traffic matrix, Sankey, time series and anomalies.
+**Primary roles:** Network engineer; capacity engineer; authorized NOC/Security/identity viewers according to resource permissions  
+**Purpose:** Explain traffic volume, consumers, conversations, applications/services, observation points, sampling/coverage quality and traffic shifts without overstating identity or L7 certainty.
 
-**Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
+**Entry/navigation:** Accessible as `Observe -> Flow / Traffic`, from interface/device/site/circuit context, and from alert/incident/investigation drill-downs. Contextual launch preserves time range, entity/interface/site/circuit and tenant scope.
 
 **Default tabs/views:**
 - Overview
 - Conversations
+- Top Talkers
 - Sources
 - Destinations
-- Protocols
+- Applications / Services
+- Protocols / Ports
 - Sites
 - Interfaces
-- ASN
+- ASN / Organization
+- QoS
 - Traffic Matrix
+- Sankey
+- Exporters
+- Data Quality
+- Templates
 
 **Default filters:**
-- Time range
-- Timezone
-- Auto-refresh
-- Tenant/Customer (only where user is authorized for multiple tenants)
-- Region
-- Country
-- Site
-- Business Unit
-- Group/Dynamic Group
-- Criticality
-- Environment
-- Tags
-- Device type
-- Vendor
-- Model
-- Technology
-- Sensor/Sensor Pool
-- Interface
-- Circuit/Provider where relevant
-- Status/Severity
-- Source IP/Subnet
-- Destination IP/Subnet
-- Protocol
-- Port
-- ASN
-- VRF
-- Interface
+- Time range / timezone / auto-refresh
+- Tenant/Customer where authorized
+- Region / Country / Site
+- Sensor / Flow Sensor Pool
+- Exporter / listener / observation domain
+- Device / interface / circuit
+- Source and destination IP / entity / hostname / FQDN / subnet / site
+- Source and destination user identity only with `FLOW_USER_ATTRIBUTION_VIEW` or equivalent permission
+- Domain / URL host where evidence exists
+- Application / classification source
+- Protocol / source port / destination port
+- ASN / organization / cloud-provider context
+- VRF / VLAN
+- DSCP / QoS class
+- direction / observation point
+- Flow protocol/version
+- sampling known/rate
+- quality state
 
-**Primary table/list columns where applicable:**
-- Entity/Link
-- IP/Identifier
-- Site
-- Vendor/Model
-- Status
-- Availability
-- Primary KPI
-- Sensor
-- Active alerts
-- Last update
+**Primary Flow result columns where applicable:**
+- Start/End or Observation Time
+- Source IP + resolved entity/system/FQDN where available
+- Destination IP + resolved entity/system/FQDN/domain where available
+- User attribution indicator/confidence where authorized
+- Protocol / ports / application and classification source
+- Observed bytes/packets
+- Estimated bytes/packets and sampling rate when sampled
+- Exporter / ingress-egress interface / observation domain
+- Site / ASN / Geo/cloud context
+- Flow quality / coverage
+- related alert/incident/change indicators
+
+**Conversation detail** shows directional source records and explains: observed versus estimated volume; sampling provenance; exporter/observation point; interfaces; VRF/VLAN; NAT pre/post fields when supplied; QoS; application-classification source; domain/URL evidence source; endpoint/user attribution source/time/confidence/conflict; Geo source/accuracy; and related topology/path/change/incident evidence.
+
+**Identity/privacy behavior:**
+- IP is never presented as permanent endpoint identity.
+- Directory/AD membership alone is never displayed as proof of the active Flow user.
+- Conflicting/multi-user attribution is shown as `UNKNOWN`/`AMBIGUOUS`/`CONFLICTED` with source evidence.
+- DNS/domain evidence is not labelled as a full URL. Full/sanitized URL fields appear only when an explicit authorized source supplied them.
+- Public-IP geography is labelled approximate network geolocation with dataset/source/accuracy; it is not a person's precise physical location.
+- User-attributed Flow viewing/export requires separate server-side permission and audit. Platform does not provide employee browsing-content surveillance.
+
+**Exporter view** shows configured exporter/entity, source address, protocol/version, assigned FLOW Sensor/listener, last record, records/sec, bytes/sec, observation domains, current sampling, sequence gaps, template count/age/misses, decode errors, receiver/socket drops, queue/backlog and quality state. Unknown exporters are visible only through governed quarantine/onboarding controls.
+
+**Template view** for v9/IPFIX shows exporter/observation domain, template ID/type/hash, fields and enterprise IEs, first/last seen, generation/age/validity, records decoded and template misses. Operators can distinguish packets reaching the Sensor from missing/invalid semantic templates.
+
+**Data Quality view** exposes `RECEIVING`, `NO_RECENT_DATA`, `TEMPLATE_MISSING`, `SEQUENCE_GAPS`, `SAMPLING_UNKNOWN`, `CLOCK_SKEW`, `MALFORMED`, `RATE_LIMITED`, `SENSOR_OVERLOADED`, `QUARANTINED`, `PIPELINE_DEGRADED` and other governed states with remediation. No Flow Data is never rendered as No Traffic.
+
+**Flow Coverage** may show semantic `GOOD|PARTIAL|LOW|UNKNOWN` and supporting evidence when valid SNMP/interface-counter comparison exists. It shall display sampling/direction/observation-point limitations.
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
+- Open endpoint/device/interface/site/exporter context
 - Investigate
-- Ping
-- Traceroute/Path Analysis
-- Create maintenance
-- View topology
+- Open topology/path
+- Open interface utilization/QoS
+- Open related changes/config
+- Save/share permitted view
+- Export permitted fields
+- Create/Schedule report
+- Add annotation
 - View alerts/incidents
+- Open Data Quality / Exporter / Template diagnostics
 
-**Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
+**Drill-down contract:** Entity/interface/flow/conversation/alert/incident clicks retain tenant, time range, observation scope and filters. "Investigate Traffic" from an interface graph opens Flow scoped to that interface/direction/time and surfaces top conversations, sources, destinations, applications, sites and QoS.
 
-**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
+**Data-quality behavior:** Show Flow source/pipeline freshness and quality separately from operational network health. Never convert missing/degraded Flow into device/link/service failure without qualified corroboration.
 
-**Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
-
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Default queries use appropriate ClickHouse rollups, bounded Top-K/Other aggregation, bounded matrix/Sankey edge counts, server-side pagination/virtualization and time/scan limits. The UI must not launch unrestricted multi-year raw-flow scans.
 
 ---
 
@@ -5222,6 +5236,10 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 **Primary roles:** Platform admin  
 **Purpose:** Sensor roles, health, offline/drain/maintenance/standby and capacity.
 
+**Production role contract:** Flow and Log are exclusive production roles. The Sensor Estate must visibly distinguish `NETWORK`, `INFRASTRUCTURE`, `FLOW`, `LOG`, Synthetic/Cloud roles and any `COMBINED_DEV` profile. `COMBINED_DEV` is labelled **Not Production Certified**. A FLOW Sensor cannot be assigned Log/Network polling jobs; a LOG Sensor cannot be assigned Flow/Network polling jobs.
+
+Role-change action is a governed **Drain & Change Role** workflow showing active assignments/sources, spool/backlog, projected drain time, source reassignment requirements and post-change readiness checks. It must not be a one-click live toggle.
+
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
 **Default tabs/views:**
@@ -5260,6 +5278,8 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - CPU/RAM
 - Disk/Queue
 - Throughput/Backlog
+- Role-specific throughput (Flow datagrams/records/bytes or Log EPS/bytes as applicable)
+- Role violations/assignment rejects
 - Version
 - Last heartbeat
 
