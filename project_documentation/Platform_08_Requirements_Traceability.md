@@ -150,6 +150,8 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | `REQ-FLOW-034` | `PRD-FLOW-034` | ✓ | 03/05/06 | 09/14/19/22 — operational Flow anomaly classes, not failure authority |
 | `REQ-FLOW-035` | `PRD-FLOW-035` | ✓ | 03/05 | 09/10/17/18 — separate user-attribution RBAC/privacy/audit |
 | `REQ-FLOW-036` | `PRD-FLOW-036` | ✓ | 03/04/05 | 11/14 — benchmark dimensions and safety headroom; no invented throughput |
+| `REQ-FLOW-037` | `PRD-FLOW-037` | ✓ | 03/04/06 | 11/14/16/17 — exporter-aware Flow Sensor pool redundancy/failover/dedup |
+| `REQ-FLOW-038` | `PRD-FLOW-038` | — | 03/04/05 | 07/10/14/23 — future cloud flow sources reuse canonical Flow model |
 
 ### Infrastructure/Cloud
 
