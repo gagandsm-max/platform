@@ -152,7 +152,8 @@ public class SensorCapabilityPackAssignmentService {
         SensorCapabilityPackState state = assignmentRepository.findState(tenantId, sensorId)
                 .orElse(SensorCapabilityPackState.neverMutated(tenantId, sensorId));
         if (state.desiredGeneration() == 0L) {
-            return SensorPackDesiredState.empty();
+            return new SensorPackDesiredState(
+                    0L, null, state.appliedGeneration(), state.appliedChecksum(), List.of());
         }
         List<DesiredPackEntry> packs = assignmentRepository.listDesiredPackEntries(tenantId, sensorId);
         if (packs.size() > CapabilityPackRegistry.MAX_PACK_COUNT) {
@@ -160,7 +161,13 @@ public class SensorCapabilityPackAssignmentService {
                     "CAPABILITY_PACK_SNAPSHOT_INVALID",
                     "Desired pack count exceeds max " + CapabilityPackRegistry.MAX_PACK_COUNT);
         }
-        return new SensorPackDesiredState(state.desiredGeneration(), state.desiredChecksum(), packs);
+        return new SensorPackDesiredState(
+                state.desiredGeneration(),
+                state.desiredChecksum(),
+                state.appliedGeneration(),
+                state.appliedChecksum(),
+                packs
+        );
     }
 
     @Transactional(readOnly = true)
