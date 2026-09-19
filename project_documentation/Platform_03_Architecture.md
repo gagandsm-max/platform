@@ -377,6 +377,12 @@ Flow enrichment is time-aware and provenance-preserving. Endpoint/system identit
 
 Raw directional observations remain distinct at different observation points. Replay deduplication applies to the same accepted source record, not to legitimate multi-vantage observations of the same conversation.
 
+### 8.6 Flow Sensor redundancy
+
+A production Flow Sensor may participate in a Flow Sensor Pool, but failover is exporter/protocol-profile aware. Some exporters support multiple simultaneous collectors and duplicate export, some support only one collector, and some environments require VIP/listener takeover or device-side reconfiguration. Platform therefore does not assume generic UDP load balancing is correct.
+
+Each certified profile defines exporter fan-out/failover behavior, template/generation state recovery, duplicate/replay handling, source identity, outage gap visibility and capacity reserve. Pool redundancy must not merge legitimate observations or double-count duplicated export.
+
 ---
 
 ## 9. Device/Agent placement architecture
