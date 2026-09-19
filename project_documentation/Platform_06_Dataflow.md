@@ -1973,3 +1973,62 @@ No production claim is made until this architecture is implemented and validated
 6. Service restarts automatically.
 7. Health/compatibility checks execute.
 8. On failure, rollback path is invoked where supported and incident/support evidence is retained.
+
+---
+
+## DF-094 — Qualified endpoint breach to EDS evidence
+
+```text
+normal Agent sample
+ -> normalize/persist under existing Agent telemetry flow
+ -> local effective-policy evaluator
+ -> NORMAL/SUSPECT
+ -> policy duration/hysteresis qualifies BREACHED
+ -> local resource/storm/cooldown gate
+ -> create diagnostic_id + trigger provenance
+ -> run bounded OS-specific EDS collectors
+ -> normalize typed evidence + missing/partial reasons
+ -> durable Agent queue
+ -> assigned Infrastructure Sensor Agent receiver
+ -> Sensor durable path / Core ingest
+ -> evidence association with entity/alert/incident window
+ -> deterministic Core RCA/correlation
+ -> optional bounded ML/GNN/LLM assistance
+ -> recovery/cooldown state
+```
+
+Agent transport/ACK/replay semantics remain the existing authoritative Agent -> Sensor -> Core contract. EDS does not bypass durable delivery.
+
+## DF-095 — Agentless infrastructure EDS
+
+```text
+scheduled monitor or authorized investigation
+ -> Core/Sensor policy decides diagnostic eligibility
+ -> eligible Infrastructure Sensor
+ -> credential/security-profile resolution
+ -> signed/versioned SSH or WinRM/WMI/CIM query pack
+ -> timeout/output/resource gate
+ -> target execution
+ -> parser/normalization
+ -> COMPLETE/PARTIAL/FAILED evidence with source/vantage
+ -> Sensor durable spool
+ -> Core ingest
+ -> evidence/incident/RCA correlation
+```
+
+A remote collection/auth/path failure is stored as monitoring-quality evidence and does not by itself become proof that the target host/service failed.
+
+## DF-096 — Local/private AI assistance isolation
+
+```text
+Core evidence/RCA context
+ -> deterministic authorization + redaction + context builder
+ -> AI Gateway
+ -> certified on-Core inference OR optional dedicated local/private inference provider
+ -> bounded model response
+ -> schema/evidence/tool-policy validation
+ -> assistance result
+```
+
+The optional inference provider has no direct Agent/Sensor/device credential path and owns no authoritative Platform state. Its outage returns AI unavailable/degraded state while deterministic monitoring/RCA continues.
+
