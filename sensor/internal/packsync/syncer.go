@@ -77,9 +77,6 @@ type Syncer struct {
 	mu     sync.RWMutex
 	status Status
 
-	ackedGeneration int64
-	ackedChecksum   string
-
 	stop chan struct{}
 	done chan struct{}
 }
@@ -178,12 +175,12 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 	s.mu.Unlock()
 
 	if desired.Generation == applied.Generation && strings.EqualFold(desired.Checksum, applied.Checksum) {
-		// A local durable commit may have succeeded while its Core ACK was lost.
-		// Re-ACK a non-zero applied state unless this process has already observed
-		// a successful ACK for the same generation/checksum. Core ACK handling is
-		// idempotent, so this converges safely after transient failure and restart
-		// without re-downloading or re-writing artifacts.
-		if desired.Generation > 0 && !s.isAckConfirmed(desired.Generation, desired.Checksum) {
+		// Local durable state is current. Core also reports the last applied state it
+		// has durably recorded, allowing the Sensor to repair a lost ACK or a later
+		// Core restore/regression without periodic blind re-ACK traffic.
+		coreAppliedMatches := desired.AppliedGeneration == applied.Generation &&
+			strings.EqualFold(desired.AppliedChecksum, applied.Checksum)
+		if desired.Generation > 0 && !coreAppliedMatches {
 			if err := s.ackApplied(ctx, desired.Generation, desired.Checksum); err != nil {
 				s.setError(errorCode(err), true)
 				s.cfg.Logger.Warn("capability pack applied-state ACK retry failed",
@@ -415,20 +412,8 @@ func (s *Syncer) ackApplied(ctx context.Context, generation int64, checksum stri
 	if generation == 0 {
 		return nil
 	}
-	if _, err := s.client.AckCapabilityPackAppliedState(ctx, generation, checksum); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	s.ackedGeneration = generation
-	s.ackedChecksum = checksum
-	s.mu.Unlock()
-	return nil
-}
-
-func (s *Syncer) isAckConfirmed(generation int64, checksum string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.ackedGeneration == generation && strings.EqualFold(s.ackedChecksum, checksum)
+	_, err := s.client.AckCapabilityPackAppliedState(ctx, generation, checksum)
+	return err
 }
 
 func (s *Syncer) recoverOnStart() error {
