@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 enterprise Flow/NTA and dedicated Sensor-role reconciliation
 
 ## 1. Authority
 
@@ -100,6 +100,15 @@ This reconciliation updates existing base/specialized masters and keeps the auth
 A post-merge cross-layer audit of the NOC troubleshooting reconciliation identified four documentation-integration defects: the API/event/data-contract master did not yet define the diagnostic/investigation contracts; the sizing master did not explicitly account for interactive diagnostics and multi-vantage fan-out; Interface Detail and RCA/Investigation screen contracts retained weaker legacy action lists; and the phrase **diagnostic pack** could be misread as a second packaging framework beside the single Capability Pack architecture.
 
 This corrective reconciliation closes those defects without adding product scope, a new database, a new mandatory service, a new pack framework or a new dependency. `Platform_17` owns the versioned API/event/data contracts; `Platform_11` owns interactive-diagnostic capacity accounting; `Platform_09` owns explicit screen behavior; and `Platform_23` clarifies that a diagnostic workflow definition is not a second Capability Pack/registry/SDK.
+### 4.5 2026-09-19 enterprise Flow/NTA and dedicated Sensor-role reconciliation
+
+This v3.2.2 reconciliation strengthens existing Flow/NTA and Sensor-role contracts without adding a new Mother Reference file, database, mandatory microservice, pack framework or runtime dependency. It defines trustworthy exporter/template/sampling/sequence semantics, identity/user/domain/geo enrichment provenance, Flow Data Quality, replay/durability boundaries, operational Flow UX, and **production-exclusive high-rate Sensor roles**.
+
+The Universal Sensor Runtime remains one software product/build. Production instances assigned the `FLOW_SENSOR` role execute Flow collection/normalization/spooling only plus mandatory common control/health/upgrade functions; production instances assigned the `LOG_SENSOR` role execute log/event collection/processing only plus the same common functions. They do not also run ordinary network polling, discovery, NCM, synthetics or each other's high-rate workload. `NETWORK_SENSOR` remains the normal network-polling/diagnostic role. Mixed high-rate Flow+Log+polling profiles are limited to explicitly non-production development/lab certification profiles.
+
+Flow enrichment may associate tenant-scoped temporal endpoint/system identity, hostname/FQDN/domain, governed user/session identity, site/internal geography, public-IP geolocation, ASN/BGP, cloud/SaaS and application context **only when supported by evidence with source/time/version/confidence provenance**. Basic Flow records do not imply URL or username visibility. Full URL path/query collection is not an NTA default and remains subject to source capability, privacy/security policy and explicit authorization.
+
+The authoritative file count remains **25 files** and the product-document version remains **v3.2.2**.
 
 ## 5. Precedence
 
@@ -143,6 +152,8 @@ Conflicts require documented change control; implementation must not silently ch
 - Graph-grounded hybrid RCA; GNN is an augmenting scorer, not causal proof; `INCONCLUSIVE` is required.
 - Native Platform dashboard/UI; no embedded Grafana.
 - Core and Sensor managed-storage 80% protection watermark is mandatory.
+- Production Flow and Log collection use dedicated Sensor roles to isolate high-rate workloads from polling/control functions. "Dedicated" means role-exclusive workload isolation, not permission to consume 100% CPU/RAM/disk; certified safety headroom remains mandatory.
+- Flow identity/enrichment is temporal and provenance-aware. IP, hostname, user, domain/URL, GeoIP, ASN/cloud/application classifications are observations/enrichments and never override canonical tenant/entity authority merely because they are present in a Flow record.
 - Customer controls raw retention, rollups, archive and allowed purge priority.
 - DR capability required in v1.0; contractual RPO/RTO remain TBD until frozen.
 - Gemini through AI Gateway initially; deterministic/causal RCA remains independent.
