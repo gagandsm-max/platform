@@ -73,7 +73,7 @@ No release promotion with failing P0/P1 tests, unresolved critical/high security
 
 ## 2. Sensor targets
 
-Planning baseline 4 vCPU/16 GB/150 GB ≈800 normal network devices. Benchmark objective: 8 vCPU/16 GB class approaching 2,000–2,500 comparable normal devices where workload permits. Streaming/Event Sensor benchmarked separately by records/events per second.
+Planning baseline 4 vCPU/16 GB/150 GB ≈800 normal network devices. Benchmark objective: 8 vCPU/16 GB class approaching 2,000–2,500 comparable normal devices where workload permits. Dedicated Flow Sensors and dedicated Log Sensors are benchmarked separately using their protocol-specific workload dimensions; they are not production-mixed with Network Sensor workloads.
 
 ## 3. Benchmark dimensions
 
