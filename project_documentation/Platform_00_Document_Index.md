@@ -9,7 +9,9 @@
 
 ## 1. Authority
 
-**v3.2.2 remains the authoritative Platform mother-reference product version.** The 2026-09-19 UI/UX interaction amendments are additive within v3.2.2; they do not create a new product-version number beyond 3.2.2.
+**v3.2.2 remains the authoritative Platform mother-reference product version.**
+
+**Freshness/source-control rule:** Mother Reference freshness is determined by the canonical Git commit SHA plus this index and in-document reconciliation/version metadata. Filesystem modification times, directory mtimes, checkout timestamps and local working-copy dates are not authoritative because Git does not use them as document-version evidence. The 2026-09-19 UI/UX interaction amendments are additive within v3.2.2; they do not create a new product-version number beyond 3.2.2.
 
 The 2026-09-19 UI/UX interaction-architecture amendments formalize shared dashboard, query, provisioning, investigation, accessibility, security and performance contracts within the existing Mother Reference set without adding a new master document or weakening Capability Pack/monitoring scope or the NOC troubleshooting reconciliation already present on main.
 
