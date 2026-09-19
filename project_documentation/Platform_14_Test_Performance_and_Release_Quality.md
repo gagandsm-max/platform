@@ -73,7 +73,7 @@ No release promotion with failing P0/P1 tests, unresolved critical/high security
 
 ## 2. Sensor targets
 
-Planning baseline 4 vCPU/16 GB/150 GB ≈800 normal network devices. Benchmark objective: 8 vCPU/16 GB class approaching 2,000–2,500 comparable normal devices where workload permits. Streaming/Event Sensor benchmarked separately by records/events per second.
+Planning baseline 4 vCPU/16 GB/150 GB ≈800 normal network devices. Benchmark objective: 8 vCPU/16 GB class approaching 2,000–2,500 comparable normal devices where workload permits. Dedicated Flow Sensor and dedicated Log Sensor are benchmarked separately using their role-specific workloads; no mixed production throughput claim.
 
 ## 3. Benchmark dimensions
 
@@ -149,3 +149,28 @@ Customer Acceptance Profile results must be evidence-backed. A technology listed
 Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certified ≠ deployed.
 
 OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively.
+
+## 7. Enterprise Flow/NTA and dedicated-role certification supplement
+
+A release shall not claim production Flow/NTA readiness merely because GoFlow2 can decode a fixture.
+
+Required evidence, as applicable to the declared protocol/pack profile:
+
+- **Role isolation:** `FLOW_SENSOR` starts no ordinary SNMP/network polling, discovery, NCM, synthetics or log modules; `LOG_SENSOR` starts no Flow or ordinary network-polling modules. Attempts to assign incompatible workloads are rejected. Combined high-rate profile is non-production only.
+- **Protocols:** NetFlow v5/v9, IPFIX and sFlow plus each claimed vendor/J-Flow variant using protocol-faithful fixtures or real exporters; IPv4/IPv6 and supported transport/source behavior.
+- **Exporter identity/tenant:** configured exporter/listener mapping, same source IP in different tenants, NAT/relay cases, observation-domain collisions, unknown-source quarantine/reject and forged payload tenant/source fields.
+- **Templates:** learn/update/refresh/expiry/withdrawal/reuse, options templates, enterprise IEs, variable length, missing/out-of-order templates, exporter restart/generation change and Sensor restart/persisted-cache invalidation.
+- **Sampling:** sampled versus unsampled, known/unknown sampling, rate/algorithm changes inside a query window, observed versus estimated values and non-fabrication of exact traffic.
+- **Sequence/time:** protocol-correct gap/duplicate/out-of-order/reset semantics; export/flow/observed/ingest time; clock skew; exporter uptime/reset behavior.
+- **Durability:** pre-acceptance UDP-loss visibility; post-durable-acceptance stable replay identity; Sensor restart/Core loss/WAN partition/replay without traffic inflation; explicit gap/drop accounting.
+- **Receiver pressure:** kernel/socket drops where observable, receive buffers, queue saturation, malformed/oversized datagrams, template/cardinality attacks, one-exporter flood and per-exporter fairness.
+- **Canonical schema:** IPv4/IPv6, interfaces, VRF/VLAN, ASN/next-hop, NAT, QoS/DSCP/ECN, TCP/ICMP fields, exporter application metadata and bounded enterprise-extension behavior; absent fields remain null/unknown.
+- **Identity enrichment:** historical IP→entity/hostname/site correctness across DHCP/IP moves; user attribution only inside valid session intervals; AD membership alone cannot create attribution; conflicting sources remain explicit.
+- **Domain/application/Geo:** domain vs URL distinction, no inferred URL path/query, application-classification provenance, internal site geography versus approximate public GeoIP, versioned ASN/cloud/SaaS enrichment.
+- **Privacy/RBAC:** user-attributed Flow and sensitive URL-derived content enforce separate authorization/export/audit; query strings/tokens are minimized/redacted according to policy.
+- **Analytics:** raw direction/observation provenance survives conversation aggregation; replay dedup does not collapse legitimate multi-vantage observations; bounded Top-N/Sankey; long-range queries use certified rollups.
+- **Flow Coverage:** SNMP/interface-versus-Flow comparison handles direction, sampling and observation point; missing Flow can produce `PARTIAL/LOW/UNKNOWN` without claiming no traffic.
+- **Operational correlation:** traffic shift can correlate with routing/NCM/topology/incident evidence but is not presented as causal proof without qualifying evidence.
+- **Capacity:** exporters, datagrams/sec, records/sec, bytes/sec, templates/churn, records/datagram, fields/record, sampling mix, enrichment hit/cost, IPv4/IPv6, spool/replay, upload, ClickHouse insert/rollup and query concurrency. One records/sec number is insufficient.
+
+Exact throughput limits remain benchmark outputs, not universal requirements.
