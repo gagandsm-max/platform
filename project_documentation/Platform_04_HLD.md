@@ -1,7 +1,7 @@
 # Platform — High-Level Design (HLD)
 
 **Document ID:** PLATFORM-HLD-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD, PRD, Master Architecture  
 
@@ -226,7 +226,15 @@ Owns configuration metadata, job orchestration, approval, schedules, Device Pack
 
 ### 4.14 CLI Session Broker
 
-Owns browser WebSocket terminal session, privilege policy, credential reference resolution, Sensor routing, command/session audit and optional recording metadata.
+Owns browser WebSocket terminal session, privilege policy, stored/personal/one-time credential resolution under policy, Sensor routing, command/session audit and optional recording metadata. One-time credentials are ephemeral and reusable credentials never return to normal browser clients.
+
+### 4.14A Operational Diagnostics & Investigation Service
+
+A logical module inside the modular Core owns contextual on-demand diagnostic orchestration and Investigation Session state. It coordinates existing protocol workers, Sensor Control, CLI Broker, Query, NCM, Graph, RCA, Alert Qualification and Platform_22 Active Evidence Acquisition rather than replacing them.
+
+Owns: contextual action authorization and typed diagnostic-job lifecycle; source/vantage selection; bounded Ping/traceroute/SNMP/TCP/DNS/SSH/API/domain-test orchestration; multi-vantage fan-out; `Verify Now` diagnostic packs; Live Evidence aggregation; Investigation Session/evidence references; `Why?`, `What Changed?` and `Compare` orchestration; cancellation/timeouts/rate/concurrency limits; and audit/correlation IDs.
+
+Sensors/Agents execute interactive diagnostics under bounded worker budgets so operator activity cannot starve routine monitoring. Results are normalized evidence, not free-form claims.
 
 ### 4.15 IPAM Service
 
