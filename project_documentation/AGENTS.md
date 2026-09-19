@@ -29,6 +29,8 @@ For work involving alert qualification/evidence contracts, telemetry-quality tru
 
 For work involving enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph versus governed-CMDB semantics, or coverage measurement, **`Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
+For work involving Linux/Windows Agent durable buffering, Agent→Sensor acknowledgement/deletion semantics, replay/idempotency, primary/fallback Sensor failover, assignment fencing, Agent operational states, atomic Agent configuration, certificate rotation, Agent upgrade/rollback, Agent-started pipeline integrity, collector isolation, Agent disk-pressure/resource limits or Agent reliability/failure certification, **`Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
+
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
 ## Canonical GitHub governance (USER-FIXED)
@@ -99,6 +101,8 @@ For enterprise-gap capabilities governed by `Platform_21`, Definition of Done al
 For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`, Definition of Done also includes the applicable Alert Evidence Contract, telemetry-quality negative cases, semantic-state behavior, false-alert/backtest/shadow evidence, confidence/evidence coverage, contradiction handling, tenant-isolation and data-egress tests, prompt-injection/tool-firewall tests, graceful AI degradation, model/data-drift observability and the formal `REQ-MIA-*` acceptance evidence.
 
 For enterprise-monitoring-coverage / Capability Pack capabilities governed by `Platform_23`, Definition of Done also includes dimensional certification evidence, pack compatibility/version evidence, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior and the formal `REQ-EMC-*` acceptance evidence. Specification of a technology family is not certification.
+
+For Agent reliability capabilities governed by `Platform_24`, Definition of Done also includes applicable durable-queue/ACK evidence, replay/idempotency, assignment-fencing and failover tests, Agent operational-state observability, configuration/certificate/upgrade rollback behavior, pipeline reconciliation, tenant/security negative tests, failure injection and measured CPU/RAM/disk/network evidence where resource claims are affected. Specification or unit tests alone are not production reliability certification.
 
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
