@@ -51,7 +51,7 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| REQ-S-001 | Universal Sensor Runtime with Network, Infrastructure, Combined, Streaming/Event, Synthetic and Cloud/API roles | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-001 | One Universal Sensor Runtime/package with governed Network, Infrastructure, Flow, Log, Synthetic, Cloud/API and other approved roles | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-002 | Sensor locality-aware placement close to devices | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-003 | Capacity-aware placement; never overload Sensor for lower RTT | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-004 | Customer modes: Auto, Auto-with-approval, Manual, Sensor Pool | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -67,6 +67,8 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-S-014 | Windows/Linux Agent supports host metrics and edge network tests | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-015 | Branch→DC and DC→branch test support for asymmetric-path evidence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-016 | Agent enrolls with Core and Core assigns correct available Sensor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-017 | Production FLOW and LOG Sensors are exclusive major-workload roles; no mixed Flow+Log+Network monitoring on one production Sensor instance | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-018 | Production Sensor role conversion drains/reassigns incompatible workloads and accounts for durable backlog before new-role activation; mixed role is non-production only | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Provisioning/Discovery
 
