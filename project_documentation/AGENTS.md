@@ -31,6 +31,8 @@ For work involving enterprise monitoring-domain catalogue, Capability Pack contr
 
 For work involving Linux/Windows Agent durable buffering, Agent→Sensor acknowledgement/deletion semantics, replay/idempotency, primary/fallback Sensor failover, assignment fencing, Agent operational states, atomic Agent configuration, certificate rotation, Agent upgrade/rollback, Agent-started pipeline integrity, collector isolation, Agent disk-pressure/resource limits or Agent reliability/failure certification, **`Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
+For work involving Sensor ownership/partition/fencing semantics, Sensor→Core durable acknowledgement, push-protocol HA/receiver redundancy, fallback-Sensor readiness, poll de-synchronization, correlated retry-storm control, current-vs-replay fairness, Sensor uploader batching, protocol continuity/loss evidence, Sensor buffer horizon or Sensor communication resource certification, **`Platform_25_Sensor_Communication_Integrity_Resilience_and_Resource_Assurance_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
+
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
 ## Canonical GitHub governance (USER-FIXED)
@@ -103,6 +105,8 @@ For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`,
 For enterprise-monitoring-coverage / Capability Pack capabilities governed by `Platform_23`, Definition of Done also includes dimensional certification evidence, pack compatibility/version evidence, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior and the formal `REQ-EMC-*` acceptance evidence. Specification of a technology family is not certification.
 
 For Agent reliability capabilities governed by `Platform_24`, Definition of Done also includes applicable durable-queue/ACK evidence, replay/idempotency, assignment-fencing and failover tests, Agent operational-state observability, configuration/certificate/upgrade rollback behavior, pipeline reconciliation, tenant/security negative tests, failure injection and measured CPU/RAM/disk/network evidence where resource claims are affected. Specification or unit tests alone are not production reliability certification.
+
+For Sensor communication reliability capabilities governed by `Platform_25`, Definition of Done also includes applicable partition/fencing evidence, push-receiver HA/limitation evidence, fallback readiness, poll/retry amplification tests, replay/current fairness, protocol-specific loss/gap evidence, buffer-horizon behavior, false-alert negative tests and measured Sensor CPU/RAM/disk/network/FD/socket/goroutine results. Existing Pipeline Integrity and durable-ACK P0 authority must not be duplicated or weakened.
 
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
