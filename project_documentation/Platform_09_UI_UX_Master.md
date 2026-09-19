@@ -155,11 +155,11 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
-**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
+**Data-quality behavior:** Show Flow-specific telemetry quality including exporter freshness, sampling certainty, template state/misses, sequence gaps, socket/queue drops, malformed/rate-limited records, Sensor spool/downstream health, timestamp quality and Flow Coverage/consistency where available. `No Flow Data` is never displayed as `No Network Traffic` without corroborating evidence. Missing/degraded Flow is a monitoring-quality condition, not a device/link-down assertion.
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Default queries use benchmarked Flow rollups for the selected time range and server-side pagination/virtualization. Top-N/matrix/Sankey use bounded N/cardinality/time windows with an `Other` aggregation where useful; the UI must not request unrestricted multi-year scans of raw Flow or render unbounded graph edges.
 
 ---
 
@@ -433,18 +433,19 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - SLA
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
+- Open source/destination entity, interface, site or exporter context
+- Investigate Traffic / open Flow with current filters
 - Save view
 - Share permitted view
-- Export
+- Export subject to Flow/user-identity permission
 - Create/Schedule report
 - Add annotation where time-series context exists
-- Investigate
+- Add bounded Flow summary/evidence reference to Investigation/Incident
 - Ping
 - Traceroute/Path Analysis
-- Create maintenance
-- View topology
+- View topology/path/routing context
 - View alerts/incidents
+- Open exporter/template/data-quality diagnostics
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -635,16 +636,20 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Status/Severity
 
 **Primary table/list columns where applicable:**
-- Entity/Link
-- IP/Identifier
-- Site
-- Vendor/Model
-- Status
-- Availability
-- Primary KPI
-- Sensor
-- Active alerts
-- Last update
+- Time / Flow window
+- Source IP + resolved endpoint/system/FQDN where evidenced
+- Source user where authorized/evidenced
+- Destination IP + resolved endpoint/domain/application
+- Source/Destination Site
+- Protocol / Ports
+- Observed bytes/packets
+- Estimated bytes/packets where sampled
+- Sampling rate/quality
+- Exporter / Observation Point / Interfaces
+- ASN / Cloud / Geo context where available
+- QoS / DSCP
+- Flow quality
+- Related alert/incident/change indicators
 
 **Actions (subject to RBAC, scope and entitlement):**
 - Persistent Action Bar: CLI; Ping; Trace/Path; SNMP Test; Flow; Config; Compare; Investigate; Maintenance
@@ -1199,20 +1204,28 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Network  
 **Primary roles:** Network engineer  
-**Purpose:** Top talkers/conversations/protocols/ports/sites/interfaces/ASN, traffic matrix, Sankey, time series and anomalies.
+**Purpose:** Operational Flow/NTA workspace for trustworthy top talkers/conversations, endpoint/user/domain/application context, protocols/ports, sites/interfaces/ASN/QoS, traffic matrix, Sankey, exporter/data-quality diagnostics, time series and anomalies.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
 **Default tabs/views:**
 - Overview
 - Conversations
+- Top Talkers
 - Sources
 - Destinations
-- Protocols
+- Applications / Domains
+- Protocols / Ports
 - Sites
 - Interfaces
-- ASN
+- ASN / External Networks
+- QoS
 - Traffic Matrix
+- Sankey
+- Exporters
+- Templates
+- Data Quality
+- Anomalies
 
 **Default filters:**
 - Time range
@@ -1235,13 +1248,21 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Interface
 - Circuit/Provider where relevant
 - Status/Severity
-- Source IP/Subnet
-- Destination IP/Subnet
+- Source IP/Subnet/Entity/System Name/FQDN
+- Destination IP/Subnet/Entity/System Name/FQDN/Domain
+- Source/Destination user identity where authorized and evidenced
 - Protocol
-- Port
-- ASN
+- Source/Destination port
+- Application and application-classification source
+- ASN / Organization
 - VRF
-- Interface
+- VLAN
+- Interface / Observation Point
+- DSCP / QoS class
+- Flow protocol/version
+- Sampling known/unknown/rate
+- Exporter / Observation Domain
+- Flow Data Quality state
 
 **Primary table/list columns where applicable:**
 - Entity/Link
@@ -1276,6 +1297,18 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
 **Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+
+**Identity/provenance behavior:** IP resolution is temporal. UI may show endpoint/system name, FQDN/domain, user, site, ASN, cloud/SaaS, application and Geo only with source/provenance and applicable confidence. Directory/AD evidence alone is not shown as proof that a user owned an IP at the Flow timestamp. Conflicting user/session evidence is displayed as conflicted/uncertain rather than silently selecting one identity. Public-IP Geo is labelled approximate. Domain/application is not labelled as URL, and full path/query data is absent unless a separately governed source actually supplied it.
+
+**Conversation detail:** Shows source/destination, directional observations, protocol/service, observed and estimated traffic, sampling, exporter/observation point, ingress/egress interfaces, site/VRF/VLAN, ASN/cloud/Geo, application provenance, NAT/QoS/TCP/ICMP fields where exported, related routing/path/change/alert evidence and raw-record provenance.
+
+**Exporter management:** `Settings → Data Sources → Flow Exporters` (or current navigation equivalent) shows exporter, protocol/version, assigned Flow Sensor, last record, record/byte rate, observation domains, sampling, templates, sequence gaps, decode/socket/queue drops and quality. Unknown exporters remain quarantined/pending according to policy until mapped/approved.
+
+**Template Explorer:** For NetFlow v9/IPFIX show exporter/observation domain, template ID/type/hash/generation, fields and enterprise IEs, first/last seen, validity/withdrawal/expiry, dependent data-record counts and template-miss/error counters.
+
+**Interface workflow:** From an interface utilization view, `Investigate Traffic` opens Flow prefiltered to the canonical device/interface and selected time range, exposing top conversations/sources/destinations/applications/protocols/sites/QoS plus Flow Coverage evidence where available.
+
+**Privacy/RBAC:** User-attributed Flow requires a distinct authorized permission/resource scope, and access/export is audited. Product UX is for operational troubleshooting, not employee browsing-history or productivity surveillance.
 
 ---
 
