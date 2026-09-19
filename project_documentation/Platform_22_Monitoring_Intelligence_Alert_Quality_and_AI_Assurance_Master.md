@@ -132,6 +132,10 @@ Promotion evidence is class-specific. It shall include representative positive/n
 
 Active evidence acquisition is an investigation capability, not unrestricted probing. Each action must specify purpose, allowed target/scope, expected information gain, protocol/tool, credential need, rate/time/resource budget, potential impact and stop conditions. RBAC, tenant policy, maintenance constraints and audit apply. Unsafe or disruptive evidence collection requires explicit approval or is forbidden.
 
+The base PRD/UI additionally requires **operator-triggered** bounded diagnostics (for example Ping, traceroute/path, SNMP/TCP/DNS/SSH/API tests), multi-vantage verification, Live Evidence and deterministic `Verify Now` packs. Those manual NOC actions use the same evidence/safety model but are not dependent on an AI/planner. Planner-selected/autonomous evidence acquisition remains governed by this section and its release priority; manual safe diagnostics may be implemented earlier as base product workflow.
+
+Multi-vantage acquisition must preserve independent source/vantage results and contradictions rather than average disagreement into a false operational conclusion. On-demand evidence remains provenance-distinct from continuously monitored evidence even when both contribute to qualification/RCA.
+
 The investigation planner may rank candidate evidence actions, but deterministic policy decides whether an action is allowed. Failure to acquire evidence must reduce confidence rather than be interpreted as confirmation of the hypothesis.
 
 ---
@@ -183,6 +187,8 @@ Incident Copilot is an assistance layer over authoritative Platform state, not a
 Every evidence reference must resolve to an authoritative incident/alert/change/topology/telemetry/runbook artifact available to the requesting tenant/user. When evidence is insufficient, Copilot returns `INCONCLUSIVE` and identifies the missing evidence or safest validation path.
 
 Recommendations remain non-executable text/plans until they pass deterministic remediation/tool policy, RBAC, parameter validation, approval requirements, blast-radius controls, audit and post-action validation. The Copilot cannot directly execute privileged tools.
+
+Within the Troubleshoot/Investigation experience, Copilot may explain current evidence and rank **Suggested Next Tests** from the deterministic permitted action/diagnostic-pack catalogue. Suggestions must identify why the test is useful, expected information gain where available, and material safety/cost considerations. Selecting a suggestion invokes the normal deterministic authorization/bounds flow; Copilot wording never grants privilege or fabricates a test result.
 
 ---
 
