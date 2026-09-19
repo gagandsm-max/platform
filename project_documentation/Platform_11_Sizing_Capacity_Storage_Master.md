@@ -176,7 +176,7 @@ Customer modes: **Automatic (recommended)**, **Automatic with Approval**, **Manu
 
 ## 8. Standard Network Workload Profile SNWP-2500-v1
 
-The 8 vCPU/16 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; and Flow/syslog below dedicated-streaming threshold. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
+The 8 vCPU/16 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; with **no production Flow/Log workload on the Network Sensor**; Flow and Log Sensors are benchmarked independently. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
 
 A separate Heavy Network Workload profile covers high-interface, aggressive polling, heavy routing, gNMI, API/NCM and high-rate stream cases.
 
