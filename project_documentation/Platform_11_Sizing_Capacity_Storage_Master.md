@@ -138,6 +138,8 @@ Flow sizing/certification includes at minimum:
 
 Per-exporter fairness and global ceilings are included in capacity tests so a single source cannot consume the certified role envelope.
 
+Flow Sensor Pool redundancy is sized per exporter/failover profile. Capacity planning includes spare receiver/decode/spool/upload headroom for a failed peer or moved exporter assignment and accounts for duplicate-export overhead where exporters send to more than one collector. A generic `active + 1` count is not assumed across all Flow deployments until exporter behavior and locality/security boundaries are known.
+
 ### 5.2 Log Sensor workload model
 
 Log Sensor sizing is independent of Flow sizing and uses source count, EPS, bytes/sec, transport/TLS connections, parser/multiline/redaction/fingerprint cost, spool/forwarding queues and egress. Flow and Log capacity are never added into one production Sensor budget.
