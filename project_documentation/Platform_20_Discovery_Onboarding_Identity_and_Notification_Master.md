@@ -189,6 +189,29 @@ Canonical identity remains protocol-independent and tenant-scoped. For Agent-bac
 
 Address/hostname changes are modeled as observations/attributes/history. Reconciliation uses stable evidence and provenance; ambiguity produces a review state rather than an invented identity decision.
 
+### 4.2A Flow enrichment consumption of identity state
+
+Flow analytics consumes this master's canonical entity/address-history authority; it does not create a competing endpoint identity system.
+
+For an address observed at Flow time `t`, enrichment queries the tenant-scoped temporal ownership/attachment evidence valid at `t`. Current DHCP, hostname or Agent state shall not silently rewrite historical Flow attribution.
+
+Human/user attribution is a separate temporal binding from endpoint identity. Where permitted, identity/session evidence may be normalized from Agent login/session telemetry, AD/LDAP/Entra authentication/directory context, VPN, RADIUS/802.1X, NAC, WLAN controller, firewall user-ID, proxy/SWG or equivalent sources.
+
+A session-binding observation preserves:
+
+- tenant;
+- canonical user/subject ID where resolved;
+- canonical endpoint/entity ID where resolved;
+- IP/network attachment where applicable;
+- valid/observed start and end;
+- source type/source identity/evidence reference;
+- confidence/quality;
+- conflict/ambiguity state.
+
+Directory membership or a user object alone is not an active network-session binding. Shared/NAT addresses, terminal servers, VDI/multi-user systems and conflicting sources may produce multiple candidates or `UNKNOWN/CONFLICTED`.
+
+Flow/UI consumption of user identity is separately authorized and audited. This identity evidence is for operational troubleshooting/traffic attribution, not employee productivity or browsing-content surveillance.
+
 ### 4.3 Notification Center architecture
 
 The modular Core owns an in-product Notification Center module. PostgreSQL owns authoritative notification metadata, recipient state and subscription/preferences. High-volume raw monitoring events remain in their normal telemetry/event path; they are not copied wholesale into per-user notification state.
