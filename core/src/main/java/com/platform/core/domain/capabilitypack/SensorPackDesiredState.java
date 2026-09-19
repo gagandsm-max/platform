@@ -7,17 +7,22 @@ import java.util.Objects;
 public record SensorPackDesiredState(
         long generation,
         String checksum,
+        long appliedGeneration,
+        String appliedChecksum,
         List<DesiredPackEntry> packs
 ) {
     public SensorPackDesiredState {
         Objects.requireNonNull(packs, "packs");
         packs = List.copyOf(packs);
-        if (generation < 0) {
-            throw new IllegalArgumentException("generation must be >= 0");
+        if (generation < 0 || appliedGeneration < 0) {
+            throw new IllegalArgumentException("generation values must be >= 0");
+        }
+        if (appliedGeneration > generation) {
+            throw new IllegalArgumentException("appliedGeneration must not exceed desired generation");
         }
     }
 
     public static SensorPackDesiredState empty() {
-        return new SensorPackDesiredState(0L, null, List.of());
+        return new SensorPackDesiredState(0L, null, 0L, null, List.of());
     }
 }
