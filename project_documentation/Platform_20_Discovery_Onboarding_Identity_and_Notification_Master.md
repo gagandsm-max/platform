@@ -189,6 +189,29 @@ Canonical identity remains protocol-independent and tenant-scoped. For Agent-bac
 
 Address/hostname changes are modeled as observations/attributes/history. Reconciliation uses stable evidence and provenance; ambiguity produces a review state rather than an invented identity decision.
 
+### 4.2A Flow consumption of temporal identity/session evidence
+
+Flow analytics consumes this master's canonical entity/address-history authority and does not create a competing endpoint identity system.
+
+For an address observed at Flow time `t`, enrichment uses tenant-scoped ownership/attachment evidence valid at `t`. Current DHCP, hostname, DNS or Agent state shall not silently rewrite historical Flow attribution.
+
+Human/user attribution is a separate temporal binding from endpoint identity. Where permitted, evidence may be normalized from Agent login/session telemetry, AD/LDAP/Entra authentication/directory context, VPN, RADIUS/802.1X, NAC, WLAN controller, firewall user-ID, proxy/SWG or equivalent sources.
+
+A session-binding observation preserves, where available:
+
+- tenant;
+- canonical user/subject ID;
+- canonical endpoint/entity ID;
+- IP/network attachment;
+- valid/observed start and end;
+- source type/source identity/evidence reference;
+- confidence/quality;
+- conflict/ambiguity state.
+
+Directory membership or existence of a user object alone is **not** an active network-session binding. Shared/NAT addresses, terminal servers, VDI/multi-user systems and conflicting sources may produce multiple candidates or `UNKNOWN/CONFLICTED`.
+
+Flow/UI consumption of user identity is separately authorized and audited. This evidence is for operational troubleshooting/traffic attribution, not employee productivity or browsing-content surveillance.
+
 ### 4.3 Notification Center architecture
 
 The modular Core owns an in-product Notification Center module. PostgreSQL owns authoritative notification metadata, recipient state and subscription/preferences. High-volume raw monitoring events remain in their normal telemetry/event path; they are not copied wholesale into per-user notification state.
