@@ -1881,23 +1881,32 @@ sequenceDiagram
 
 ## DF-074 — Flow ingestion through GoFlow2
 
+This later detailed flow is consistent with DF-013 and does not create a second Flow pipeline.
+
 ```mermaid
 sequenceDiagram
   participant E as Exporter
-  participant SS as Streaming Sensor
+  participant FS as Dedicated FLOW Sensor
   participant F as FlowDecoder/GoFlow2
+  participant ST as Exporter/Template/Sampling State
+  participant SP as Durable Flow Spool
   participant I as Core Ingestion
   participant K as Kafka
-  participant EN as Enrichment
+  participant EN as Temporal Enrichment
   participant CH as ClickHouse
-  E->>SS: NetFlow/IPFIX/sFlow datagrams
-  SS->>F: Decode template/record
-  F-->>SS: Canonical raw flow
-  SS->>SS: local sequence + buffer/cardinality protection
-  SS->>I: mTLS batched Flow records
-  I->>K: telemetry.flow.v1
+  E->>FS: NetFlow/IPFIX/sFlow datagrams
+  FS->>FS: role/listener/source/tenant admission + bounded queue
+  FS->>F: Decode packet/template/data/sample
+  F->>ST: exporter/observation-domain/sequence/template/sampling update
+  ST-->>FS: canonical directional Flow or explicit quality outcome
+  FS->>SP: durable Flow record(s) + stable IDs
+  FS->>I: mTLS replay-safe batch
+  I->>K: network.flow.v1
   K->>EN: consume
-  EN->>EN: enrich entity/interface/site/IPAM/ASN/VRF/QoS
+  EN->>EN: temporal entity/interface/IPAM/DHCP/DNS/session/ASN/Geo/cloud enrichment
+  EN->>CH: raw/common Flow + provenance + bounded rollups
+  I-->>FS: durable acceptance watermark
+  FS->>SP: release acknowledged segment
   EN->>CH: Insert network_flow
 ```
 
