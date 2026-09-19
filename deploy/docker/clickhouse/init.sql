@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS platform.metric_numeric (
     sequence_id String,
     source_protocol LowCardinality(String)
 ) ENGINE = MergeTree()
-ORDER BY (tenant_id, entity_id, metric_id, ts);
+ORDER BY (tenant_id, entity_id, metric_id, ts)
+SETTINGS non_replicated_deduplication_window = 10000;
 
 -- Initial health verification record
 INSERT INTO platform.health_verification (node_id, status) 
