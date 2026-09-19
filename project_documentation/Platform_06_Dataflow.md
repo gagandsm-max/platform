@@ -1842,23 +1842,31 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   participant E as Exporter
-  participant SS as Streaming Sensor
+  participant FS as Dedicated Flow Sensor
   participant F as FlowDecoder/GoFlow2
+  participant ST as Exporter/Template/Sampling/Sequence State
+  participant C as Temporal Context/Identity
+  participant SP as Durable Flow Spool
   participant I as Core Ingestion
   participant K as Kafka
-  participant EN as Enrichment
   participant CH as ClickHouse
-  E->>SS: NetFlow/IPFIX/sFlow datagrams
-  SS->>F: Decode template/record
-  F-->>SS: Canonical raw flow
-  SS->>SS: local sequence + buffer/cardinality protection
-  SS->>I: mTLS batched Flow records
-  I->>K: telemetry.flow.v1
-  K->>EN: consume
-  EN->>EN: enrich entity/interface/site/IPAM/ASN/VRF/QoS
-  EN->>CH: Insert network_flow
+  E->>FS: NetFlow/IPFIX/sFlow/J-Flow datagrams
+  FS->>FS: configured listener/exporter admission + socket accounting
+  FS->>F: bounded decode
+  F-->>FS: protocol-faithful records/template/options
+  FS->>ST: template/generation/sequence/sampling/time processing
+  ST-->>FS: normalized raw observation + quality/gap state
+  FS->>C: temporal entity/interface/IPAM/DNS/session/site/ASN/cloud/app/geo lookup
+  C-->>FS: versioned provenance/confidence enrichment
+  FS->>SP: durable canonical directional Flow + replay identity
+  FS->>I: mTLS batch + quality/accounting
+  I->>K: network.flow.v1
+  K->>CH: raw Flow + bounded aggregates/quality
+  I-->>FS: durable acceptance watermark
+  FS->>SP: release acknowledged segment
 ```
 
+Pre-acceptance UDP is best-effort; after local durable acceptance, common Sensor replay/idempotency applies. Equivalent observations at different network vantage points are not replay duplicates.
 ## DF-075 — gNMI/YANG subscription
 
 Sensor loads Device Pack/YANG mapping, validates subscription paths using goyang/ygot metadata, establishes OpenConfig gNMI subscription, applies backpressure/rate policy, converts updates/deletes to canonical telemetry, and sends batches through Core Ingestion. Subscription failure produces a structured collection-health event rather than a generic `device down` condition.
