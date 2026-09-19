@@ -511,3 +511,422 @@ Terms:
 - **CERTIFIED** — defined certification gates/evidence have passed.
 
 This file intentionally does not convert provisional Flow decisions into canonical authority by its mere existence.
+
+
+---
+
+## 13. Additional accepted refinements from the second Flow review
+
+The following refinements are also preserved for the eventual canonical Flow reconciliation. They supplement, and where more specific supersede, the earlier safety-net wording.
+
+### 13.1 Three-layer logical Flow model
+
+The logical Flow model should be treated as three separable layers:
+
+1. **Source Observation** — what the exporter/source actually emitted, including exporter/observation-domain/template/sequence/sampling and source timestamps.
+2. **Normalized Flow** — protocol-neutral Flow semantics suitable for ingestion, storage and analysis.
+3. **Enrichment Context** — temporal endpoint/user/site/name/domain/application/Geo/ASN/cloud/topology context derived from other evidence.
+
+Enrichment must never overwrite or redefine the source observation.
+
+Physical storage is implementation-delegated. The logical separation does **not** require every enrichment field to be materialized into every historical ClickHouse row. Dictionary IDs, materialized projections, time-aware joins or other designs may be used if they preserve correctness, provenance, tenant isolation, replay behavior and query performance.
+
+### 13.2 Identity-session model
+
+User attribution should consume a canonical, tenant-scoped temporal session concept. A logical session may include:
+
+- stable session/association identity;
+- tenant;
+- user identity;
+- endpoint entity identity;
+- IP/address binding where observed;
+- session start/end/effective interval;
+- source;
+- confidence/quality;
+- provenance.
+
+This is a logical contract, not an instruction to create a separate Flow identity database or one new table per field.
+
+The canonical entity/identity graph should be reused so the same temporal identity evidence can support Flow, logs, alerts, RCA, topology and endpoint monitoring.
+
+### 13.3 Shared endpoints and attribution states
+
+Shared or multiplexed systems such as:
+
+- Citrix/terminal servers;
+- VDI hosts;
+- jump hosts;
+- kiosks;
+- NAT/proxy gateways;
+- shared application servers;
+
+may have a known endpoint but ambiguous user attribution.
+
+Final canonical semantics should represent attribution states equivalent to:
+
+- UNKNOWN;
+- AMBIGUOUS;
+- INFERRED;
+- AUTHORITATIVE;
+
+or the existing Platform quality vocabulary if one already covers the same meaning.
+
+Do not fabricate a single user merely to populate a field.
+
+### 13.4 Destination/name evidence levels
+
+The canonical model must keep distinct evidence classes for:
+
+- destination IP;
+- reverse DNS;
+- DNS-associated FQDN/domain;
+- TLS SNI when actually observed by a source;
+- HTTP Host when actually observed by a source;
+- full URL when actually supplied by an authoritative telemetry source;
+- exporter/vendor application classification;
+- service/SaaS classification;
+- organization/provider;
+- ASN.
+
+**Full URL must not be inferred from DNS, SNI, HTTP Host, destination IP or application classification.**
+
+Temporal DNS correlation may support domain/FQDN association when bounded by endpoint/source context, TTL/effective time and other quality rules.
+
+CDN/shared-hosting addresses must not become permanent domain identity.
+
+### 13.5 Full-URL privacy boundary
+
+Full URL/path/query collection is not mandatory Flow functionality.
+
+Where another governed source provides it, the final policy must cover:
+
+- query-string handling;
+- token/credential stripping;
+- masking/redaction;
+- path normalization;
+- cardinality bounds;
+- RBAC;
+- retention;
+- export/egress controls.
+
+Arbitrary query strings, credentials, reset tokens and personal content must not be blindly persisted.
+
+### 13.6 Offline GeoIP / ASN datasets
+
+Air-gapped operation requires GeoIP/ASN enrichment to work without a runtime Internet lookup.
+
+Any offline dataset/package admitted for this purpose must have governed:
+
+- source;
+- licence;
+- version;
+- integrity hash;
+- update/import workflow;
+- provenance;
+- compatibility/rollback behavior.
+
+No public Geo API call is allowed per Flow record.
+
+### 13.7 Enrichment execution placement is tiered
+
+The Flow Sensor's first duty is correct, loss-aware reception/decoding and durable forwarding. Expensive enrichment must not make the receive path fragile.
+
+Preferred logical placement:
+
+```text
+FLOW SENSOR — HOT PATH
+  receive
+  exporter/observation-domain authority
+  template/options state
+  sequence/sampling/time quality
+  decode
+  protocol normalization
+  bounded low-cost local mappings/cache where justified
+  durable spool / upload
+
+CORE / INTERNAL STREAM PROCESSING
+  canonical entity resolution
+  historical IPAM/DHCP/site mapping
+  identity-session/user association
+  DNS/domain correlation
+  AD/Entra/NAC/VPN context
+  ASN/Geo/cloud/SaaS classification
+  NAT/topology/change context
+  versioned enrichment
+  analytics/storage/query
+```
+
+Kafka remains internal to Core. Sensors continue to communicate through the Platform ingestion boundary rather than writing directly to Kafka.
+
+Some enrichment may be cached at the Sensor only when benchmarking proves it reduces cost without compromising ingestion correctness.
+
+There must be no:
+
+- LDAP/AD query per Flow record;
+- live DNS lookup per destination Flow;
+- external GeoIP/ASN API lookup per Flow.
+
+### 13.8 Existing Infrastructure Sensor role must not be lost
+
+Canonical main already models an **Infrastructure Sensor Pool** separately from the Network Sensor Pool.
+
+The eventual dedicated-role reconciliation must therefore preserve at least these product role families:
+
+- Network Monitoring Sensor;
+- Infrastructure Monitoring Sensor;
+- Flow Monitoring Sensor;
+- Log Monitoring Sensor;
+- other specialist roles only when explicitly governed.
+
+The new exclusivity decision applies specifically to high-rate Flow and Log roles.
+
+It does **not** authorize collapsing Infrastructure monitoring into the Network role without a separate architecture decision.
+
+Final enum names must match the then-current canonical Sensor role model.
+
+### 13.9 Hard placement compatibility
+
+Core placement/assignment must treat Sensor role as a hard eligibility constraint.
+
+Examples:
+
+- SNMP/network polling -> eligible Network role;
+- infrastructure/agentless workload -> eligible Infrastructure role as defined by canonical contracts;
+- Flow exporter/listener -> Flow role;
+- Syslog/log source -> Log role.
+
+Incompatible assignment must fail closed with a stable machine-readable reason. A candidate reason such as `SENSOR_ROLE_INCOMPATIBLE` is acceptable for design discussion, but the final code must follow the canonical error-code namespace.
+
+Capacity pressure must never cause automatic cross-role fallback.
+
+### 13.10 Role assignment and conversion semantics
+
+A Sensor role is effectively immutable while active customer workloads are assigned, but it is not necessarily immutable for the lifetime of the installed software.
+
+Installation/enrollment should expose governed role selection and clearly show exclusive-role behavior.
+
+Role conversion requires drain/reassignment validation as already described in §8.
+
+### 13.11 Flow Sensor onboarding and exporter preflight
+
+The final UI/workflow should support a dedicated Flow Sensor onboarding path and separate Flow exporter/source onboarding.
+
+A Flow Sensor preflight should be able to prove, where applicable:
+
+- packets/datagrams received;
+- detected Flow protocol/version;
+- exporter identity;
+- observation domain/engine;
+- template/options receipt and validity;
+- data-record decode success;
+- sampling state;
+- sequence state/gaps;
+- interface mapping availability;
+- source time quality;
+- estimated records/sec and ingress bandwidth;
+- Sensor capacity/storage readiness.
+
+This is a preflight/activation workflow, not permission to bypass normal tenant/RBAC/audit controls.
+
+### 13.12 Flow-specific HA and duplicate semantics
+
+Flow HA differs from polling HA because exporters send to configured collector addresses.
+
+Certified deployment profiles must cover source-specific mechanisms such as:
+
+- multiple collector destinations;
+- duplicate export;
+- active/passive listener/VIP;
+- device-specific failover/reconfiguration.
+
+If identical or overlapping export streams can arrive at multiple Flow Sensors, duplicate/replay handling must use exporter/observation-domain/template/sequence/record identity and source semantics.
+
+A 5-tuple alone is insufficient for deduplication.
+
+### 13.13 Flow Sensor self-observability
+
+A production Flow Sensor must expose more than process-up health.
+
+At minimum, certification should consider:
+
+- packets/datagrams/sec;
+- records/sec;
+- bytes/sec;
+- exporters active;
+- observation domains;
+- template/options count;
+- template misses;
+- template churn;
+- sampling state;
+- sequence gaps/resets;
+- kernel/socket drops;
+- receiver queue drops;
+- decode failures;
+- decode/normalization latency;
+- enrichment latency where local enrichment exists;
+- durable spool size/age;
+- upload rate;
+- replay backlog;
+- CPU/RAM/disk/network;
+- per-exporter rate;
+- per-exporter drops/quality.
+
+Exact metric names and thresholds are implementation/certification concerns.
+
+### 13.14 Log Sensor self-observability and isolation
+
+The same isolation principle applies to Log Sensors.
+
+A dedicated Log role may own, where canonical logging authority permits:
+
+- Syslog UDP/TCP/TLS;
+- remote/application/network log receiving;
+- OTLP Logs where assigned;
+- parsing;
+- multiline;
+- redaction;
+- fingerprinting/deduplication;
+- durable spool;
+- downstream routing/forwarding when architecture assigns it there.
+
+It must not accept Flow or ordinary polling workloads in production.
+
+### 13.15 Role-specific capacity models
+
+Flow and Log capacity must not be represented primarily by monitored-device count.
+
+Flow workload inputs should include:
+
+- exporters;
+- datagrams/sec;
+- records/sec;
+- bytes/sec;
+- templates/options/sec and churn;
+- fields/record;
+- sampling;
+- IPv4/IPv6 mix;
+- enrichment cost;
+- spool horizon/pressure;
+- Core upload/replay rate.
+
+Log workload inputs should include:
+
+- sources;
+- EPS;
+- bytes/event;
+- TCP/TLS connection count;
+- parser complexity;
+- multiline;
+- redaction/fingerprinting;
+- routing destinations;
+- spool horizon.
+
+These are inputs to the existing Platform sizing/capacity authority rather than a new capacity subsystem.
+
+### 13.16 Flow completeness/coverage quality
+
+Flow completeness should be measured against configured/expected exporter and observation coverage, not by assuming that SNMP proves individual Flow records.
+
+Useful quality dimensions may include:
+
+- expected exporters versus active exporters;
+- expected observation domains/interfaces versus observed;
+- template readiness;
+- sequence gaps;
+- sampling knowledge;
+- last accepted Flow;
+- source freshness;
+- source/exporter configuration drift where observable;
+- known blind spots.
+
+SNMP/device inventory may provide expected interface/exporter context, but it is supporting evidence rather than authoritative proof that every Flow record was received.
+
+### 13.17 Privacy, RBAC and retention
+
+Identity/domain/full-URL enrichment is more sensitive than ordinary interface telemetry.
+
+The final canonical reconciliation must:
+
+- reuse or extend the canonical RBAC namespace rather than invent permission names in isolation;
+- permit separation between ordinary Flow access, identity-attributed Flow, domain/full-URL access and export where appropriate;
+- audit sensitive access/export;
+- permit signal/association-specific retention classes;
+- avoid hard-coding example retention durations as defaults;
+- preserve incident/legal-evidence pinning through existing retention authority.
+
+### 13.18 Explainability
+
+Every derived identity/domain/application/Geo association shown to an operator must be explainable.
+
+The UI/API should be able to expose, subject to RBAC:
+
+- value;
+- evidence source(s);
+- effective/observed time;
+- source/dataset version;
+- confidence/quality;
+- conflicting evidence where applicable.
+
+Prefer per-association/per-field quality rather than one global Flow confidence score.
+
+### 13.19 Storage/query design remains implementation-delegated
+
+The richer enrichment model does not require all fields to be denormalized into every Flow row.
+
+The implementation must benchmark and choose among:
+
+- dictionary IDs;
+- materialized enrichment;
+- time-aware joins;
+- projections/materialized views;
+- bounded query-time enrichment;
+
+while preserving tenant isolation, historical correctness, replay/idempotency, retention behavior and acceptable query cost.
+
+No new Flow database or identity database is authorized by these requirements.
+
+### 13.20 Provisional role/enrichment architecture
+
+The current reconciliation target is:
+
+```text
+                         PLATFORM CORE
+                              |
+                  policy / identity / graph
+                              |
+       +----------------------+----------------------+
+       |                      |                      |
+ NETWORK SENSOR          FLOW SENSOR            LOG SENSOR
+ network role            exclusive Flow         exclusive Log
+       |                      |                      |
+ polling/discovery       NetFlow/IPFIX          Syslog/logs
+ topology/NCM            sFlow/J-Flow           OTLP Logs where assigned
+       |                      |                      |
+       |                 normalized Flow              |
+       +----------------------+----------------------+
+                              |
+                    identity/context graph
+                              |
+              DNS/IPAM/Agent/NAC/VPN/AD/Entra
+                              |
+                     versioned enrichment
+                              |
+                     internal Core pipeline
+                              |
+                         ClickHouse/UI/RCA
+```
+
+Infrastructure Sensor remains a separate canonical role family and must be included in the final role model even though omitted from this compact diagram.
+
+---
+
+## 14. Challenge outcomes recorded
+
+The following parts of the second review were deliberately **qualified rather than copied literally**:
+
+1. **Full URL:** may be stored only when actually observed/provided by an authoritative source. DNS/SNI/Host correlation can establish domain/host evidence, not a fabricated full URL.
+2. **Enrichment-before-Kafka diagram:** not adopted literally. Kafka is internal to Core; expensive enrichment should usually occur after the Sensor has safely decoded/normalized/spooled/uploaded source Flow.
+3. **Infrastructure Sensor:** retained as an existing canonical role family; not silently folded into Network Sensor.
+4. **Permission names:** candidate names are illustrative only until reconciled with the canonical RBAC namespace.
+5. **Retention durations:** examples are not defaults; retention remains policy-driven.
+6. **Flow completeness:** SNMP/inventory may provide expected coverage context but does not prove per-record Flow completeness.
