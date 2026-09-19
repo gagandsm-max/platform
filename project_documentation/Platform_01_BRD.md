@@ -106,8 +106,8 @@ Platform shall provide, directly or through approved extensibility frameworks:
 - Storage and SAN/fabric monitoring.
 - Database monitoring.
 - Kubernetes/container monitoring.
-- AWS, Azure and GCP monitoring.
-- OpenTelemetry metrics and logs; trace-ready architecture, without marketing full APM initially.
+- AWS, Azure, GCP and OCI cloud monitoring, with the first Cloud Observability GA requiring certified day-one provider-root onboarding, inventory, health, change/event, network, quota and high-value managed-service coverage as governed by `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`.
+- OpenTelemetry metrics, logs and traces as core P0 observability signals, including service/resource correlation and cross-signal investigation. Platform does not require proprietary full-bytecode APM agents as a prerequisite for P0.
 - Synthetic ICMP/TCP/DNS/HTTP/HTTPS/API/TLS tests.
 - DNS/DHCP/NTP monitoring.
 - Identity infrastructure monitoring such as AD/LDAP/DC replication/Kerberos/RADIUS/TACACS+ where supported by secure probes/APIs.
@@ -128,7 +128,7 @@ Platform shall provide, directly or through approved extensibility frameworks:
 ### 5.2 Out of initial product scope
 
 - Full DPI / packet-level Layer-7 observability as a primary product capability.
-- Full APM transaction tracing product positioning.
+- Mandatory proprietary full-bytecode APM agents for every language/runtime are outside the initial P0 boundary. OpenTelemetry-native distributed tracing, service graphs and cross-signal transaction investigation are explicitly in scope under `Platform_24`.
 - Autonomous closed-loop remediation in initial release; assisted recommendations and operator-controlled workflows come first.
 - Future Master Core / Regional Core federation is architecturally anticipated but is not part of the initial implementation scope.
 
