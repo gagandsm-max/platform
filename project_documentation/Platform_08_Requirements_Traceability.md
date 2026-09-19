@@ -4,7 +4,7 @@
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Completeness Control**
-**Last reconciliation:** 2026-09-13 — v3.2.2 specialized-master RTM supplements including `Platform_23`
+**Last reconciliation:** 2026-09-19 — v3.2.2 Sensor communication-integrity requirement reconciliation
 
 ## 1. Purpose
 
