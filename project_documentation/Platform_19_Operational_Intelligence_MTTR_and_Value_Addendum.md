@@ -107,7 +107,7 @@ Provider status is supporting evidence, not causal proof. Reconcile it with obse
 
 ### 3.6 Incident Flight Recorder — `PRD-OIV-006`
 
-For configured qualified incidents or authorized investigations, Platform shall pin/capture a bounded evidence window containing, where available: topology/graph state before/during/after; interface/link state/errors; BGP/OSPF/IS-IS/BFD/HSRP/VRRP changes; traceroute/path and synthetic results; Flow summaries; syslog/traps/events; relevant metrics/anomalies; NCM/external change facts; Sensor/telemetry quality; server/VM/container/database/storage state; business-service state; and authorized triggered packet evidence.
+For configured qualified incidents or authorized investigations, Platform shall pin/capture a bounded evidence window containing, where available: topology/graph state before/during/after; interface/link state/errors; BGP/OSPF/IS-IS/BFD/HSRP/VRRP changes; traceroute/path and synthetic results; **bounded Flow summaries such as top conversations/talkers, application/site/QoS mix, material traffic shifts, Flow Coverage/exporter-quality state and observation scope**; syslog/traps/events; relevant metrics/anomalies; NCM/external change facts; Sensor/telemetry quality; server/VM/container/database/storage state; business-service state; and authorized triggered packet evidence. Incident state references bounded Flow evidence/aggregates rather than copying millions of raw Flow rows.
 
 Event time, ingest time, quality, provenance and correlation IDs shall be retained. UI provides a replayable timeline and historical graph snapshot.
 
@@ -121,7 +121,7 @@ Similarity is advisory. Low-quality/stale/contradictory/poisoned history reduces
 
 ### 3.8 Cross-domain Change Intelligence — `PRD-OIV-008`
 
-The unified change model includes where available NCM/device config, firewall/LB, cloud control plane, CI/CD, IaC, Kubernetes, database deployment/schema, safe certificate/secret rotation metadata, patch/reboot/maintenance, Platform policy/credential/monitoring and ITSM changes.
+The unified change model includes where available NCM/device config, firewall/LB, cloud control plane, CI/CD, IaC, Kubernetes, database deployment/schema, safe certificate/secret rotation metadata, patch/reboot/maintenance, Platform policy/credential/monitoring and ITSM changes. Change Intelligence may correlate material Flow traffic shifts with these changes when time/entity/path evidence aligns, but traffic shift/temporal proximity remains supporting or contradictory evidence and is not causal proof.
 
 Investigations distinguish temporal correlation from proven causation.
 
