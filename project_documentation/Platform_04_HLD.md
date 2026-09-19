@@ -264,32 +264,92 @@ Owns Core/Sensor/data-service health, support bundle orchestration, backup/resto
 
 ## 5. Sensor service decomposition
 
+One Sensor binary/runtime is role-gated at enrollment/configuration. Production instances enable exactly one major role family plus mandatory common services.
+
 ```mermaid
 flowchart TB
-  CTRL[Core Control / Policies] --> CLIENT[Sensor Control Client]
-  CLIENT --> JOB[Job / Lease Scheduler]
-  JOB --> ICMP[ICMP/Traceroute Pool]
-  JOB --> SNMP[SNMP Pool]
-  JOB --> SSH[SSH/NETCONF Pool]
-  JOB --> API[REST/gNMI Pool]
-  JOB --> INFRA[Infra Worker Pool]
-  JOB --> NCM[NCM Worker Pool]
-  FLOW[Flow/Syslog/Event Receivers] --> NORM[Normalizer]
-  ICMP --> NORM
-  SNMP --> NORM
-  SSH --> NORM
-  API --> NORM
-  INFRA --> NORM
-  NCM --> NORM
-  NORM --> SPOOL[Durable Local Spool]
+  CTRL[Core Control / Policies] --> CLIENT[Common Sensor Control Client]
+  CLIENT --> ROLE[Role Gate / Assignment Validator]
+
+  ROLE --> NET[NETWORK role]
+  ROLE --> FLOW[FLOW role]
+  ROLE --> LOG[LOG role]
+  ROLE --> INFRA[INFRA role]
+
+  NET --> JOB[Job / Lease Scheduler]
+  JOB --> ICMP[ICMP/Traceroute]
+  JOB --> SNMP[SNMP + Traps/Informs]
+  JOB --> SSH[SSH/NETCONF]
+  JOB --> API[REST/gNMI]
+  JOB --> NCM[NCM]
+  JOB --> DISC[Discovery/Topology]
+
+  FLOW --> FRX[Flow Receiver]
+  FRX --> FSTATE[Exporter / Template / Sampling / Sequence State]
+  FSTATE --> FNORM[Flow Normalizer / Enrichment]
+
+  LOG --> LRX[Log Receivers]
+  LRX --> LNORM[Parser / Multiline / Redaction / Fingerprint]
+
+  INFRA --> IWORK[Infrastructure Workers]
+
+  ICMP --> SPOOL[Role-local Durable Spool]
+  SNMP --> SPOOL
+  SSH --> SPOOL
+  API --> SPOOL
+  NCM --> SPOOL
+  DISC --> SPOOL
+  FNORM --> SPOOL
+  LNORM --> SPOOL
+  IWORK --> SPOOL
+
   SPOOL --> UP[Uploader mTLS HTTPS/gRPC]
-  CAP[Capacity/Health Monitor] --> CLIENT
-  DISC[Discovery/Topology Workers] --> NORM
+  CAP[Capacity / Health / Role Monitor] --> CLIENT
 ```
 
-### 5.1 Worker isolation
+### 5.1 Production role isolation
 
-Each worker class has bounded concurrency/queues. High-rate event receivers and NCM have independent limits so they cannot exhaust polling resources.
+- **NETWORK:** network polling/control/diagnostics only; no Flow or Log ingestion.
+- **FLOW:** Flow reception/normalization/enrichment/spool only; no Network polling, discovery, NCM, synthetics or Log ingestion.
+- **LOG:** Log reception/normalization/forwarding/spool only; no Flow or Network polling/discovery/NCM/synthetics.
+- **INFRA/other roles:** remain governed by their own contracts and do not silently co-host Flow or Log.
+
+Mandatory common Sensor services (mTLS/enrollment, Core control, role enforcement, upgrade/certificates, local storage/spool, uploader, health/support diagnostics) are permitted in every role and are not considered a second monitoring workload.
+
+A combined development role may exist only for development/CI/demo and is explicitly not production certified. Role conversion is a drain/reassignment operation, not an in-place toggle while incompatible work remains active.
+
+Each enabled worker class has bounded concurrency/queues. Flow and Log roles have independent capacity/certification profiles because their receive rates, memory/cardinality and spool characteristics materially differ from scheduled polling.
+
+### 5.1A Flow Sensor subsystem contract
+
+The Flow role contains logical components inside the Sensor runtime:
+
+- **Listener/Source Gate** — configured protocol/listener, tenant/exporter mapping, source allowlist/quarantine and socket/kernel-drop telemetry;
+- **Protocol Decoder** — GoFlow2-backed NetFlow v5/v9, IPFIX, sFlow and certified vendor-format decoding with packet/record/field bounds;
+- **Exporter State** — canonical exporter/source identity, protocol-specific sequence/restart state and per-exporter fairness;
+- **Template State** — v9/IPFIX template/options-template lifecycle scoped by exporter/observation domain, bounded persistence/expiry and template-miss accounting;
+- **Sampling State** — sampling algorithm/rate/source/epoch and observed-versus-estimated semantics;
+- **Flow Normalizer** — canonical directional Flow observation, timestamp quality, IPv4/IPv6, interface/VRF/VLAN/NAT/QoS/application provenance and bounded extension attributes;
+- **Enrichment Resolver** — bounded temporal context lookups for entity/interface/site/IPAM/DHCP/DNS/Agent/user-session/ASN/Geo/cloud/application evidence; it never turns uncertain joins into authoritative identity;
+- **Flow Quality Reporter** — exporter/listener/template/sequence/sampling/drop/spool/upload health;
+- **Flow Spool/Uploader** — role-local durable acceptance/replay using the common Sensor durability contract.
+
+High-cardinality enrichment does not require a full directory/graph copy on the Sensor. Core may provide bounded versioned context caches; unresolved enrichment may occur downstream while raw Flow provenance remains intact.
+
+### 5.1B Core Flow analytics responsibilities
+
+Flow analytics remains a logical module of the modular Core, not a new mandatory microservice. It owns/reuses:
+
+- Flow ingestion/schema validation and replay-safe identity;
+- temporal enrichment where not completed at the Sensor;
+- ClickHouse raw/rollup/query plans;
+- directional observation and derived Conversation semantics;
+- Top-N/matrix/Sankey bounded query services;
+- Flow Coverage comparison with interface/SNMP evidence where valid;
+- exporter/data-quality health APIs;
+- incident/change/RCA evidence projections.
+
+Identity sources such as AD/LDAP/Entra, VPN/RADIUS/NAC/WLAN/firewall/proxy evidence remain governed integrations/canonical identity evidence; Flow analytics consumes their time-bounded mappings and does not become an identity provider.
 
 ### 5.2 Device Pack runtime
 
