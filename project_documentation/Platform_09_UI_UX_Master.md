@@ -1198,7 +1198,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 ### UI-017 — Network Flow / Traffic Analytics
 
 **Domain:** Network  
-**Primary roles:** Network engineer, capacity engineer; user-attribution views require additional permission  
+**Primary roles:** Network engineer, capacity engineer; user-attribution views require additional permission
 **Purpose:** Explain who/what is using network capacity, from which observation point, with explicit sampling/data-quality/provenance rather than only drawing Top Talker charts.
 
 **Entry/navigation:** `Observe → Flow / Traffic` or equivalent, plus contextual `Investigate Traffic` from interface/device/site/path/alert/incident views. Role/tenant/resource scope is enforced server-side.
