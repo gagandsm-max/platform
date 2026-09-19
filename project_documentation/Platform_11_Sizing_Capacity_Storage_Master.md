@@ -41,7 +41,7 @@ The exact two-Core synchronization/fencing mechanisms for Kafka/ClickHouse/Postg
 
 ### 2.3 Local AI / ML / LLM compute envelope — v3.2.2
 
-Local intelligence is part of the planned Core footprint; it shall **not increase the minimum certified Core sizing tiers**. Standard Platform operation is CPU-first and shall not require a GPU. AI/ML/LLM workloads are subordinate to collection, ingestion, storage durability, alert qualification, incident processing and deterministic RCA.
+Core-resident local intelligence is an **optional certified execution profile** within the planned Core footprint and shall **not increase the minimum certified Core sizing tiers**. Standard Platform operation is CPU-first and shall not require a GPU. AI/ML/LLM workloads are subordinate to collection, ingestion, storage durability, alert qualification, incident processing and deterministic RCA. A deployment that requires stronger compute isolation may use an optional dedicated local/private inference provider through AI Gateway; that provider is sized/certified separately and is not a Core/HA node.
 
 Planning envelopes below are hard design targets until benchmark certification:
 
@@ -213,3 +213,53 @@ Stateful service containers must have bounded development defaults and named vol
 ## 14. Local log/disk protection
 
 Docker volumes and container logs are included in workstation disk monitoring guidance. Development instructions shall include commands to identify large images/volumes, safely prune disposable build artifacts and retain named volumes that contain intentional development state. Automated scripts must never indiscriminately prune all Docker data on a shared development laptop.
+
+---
+
+## 15. Endpoint Diagnostic Snapshot and isolated local-inference resource model
+
+### 15.1 Endpoint EDS resource contract
+
+EDS is event-driven evidence acquisition, not continuous duplicate monitoring.
+
+Resource rules:
+
+- trigger evaluation reuses normal Agent/Sensor observations wherever possible;
+- no separate always-on RCA interpreter/process is required on the endpoint;
+- one or another small bounded number of concurrent captures is permitted only according to certified endpoint profile;
+- capture duration, evidence bytes, Top-N cardinality, log/Event Log lookback and retry frequency have hard policy/implementation ceilings;
+- repeated equivalent breaches are coalesced and cooldown-governed;
+- site/tenant/estate storm budgets prevent simultaneous threshold events from producing an evidence-upload storm;
+- endpoint pressure checks can shorten/suppress capture; a `PARTIAL` result is preferable to worsening the incident;
+- EDS queue/upload remains lower priority than protected endpoint workload and lower priority on Sensor/Core than routine collection/ingestion durability.
+
+A literal zero-CPU promise is prohibited. Certification instead measures **incremental idle overhead** and **bounded transient capture overhead** for representative Linux/Windows endpoint classes.
+
+### 15.2 Infrastructure Sensor capacity accounting
+
+Infrastructure Sensor MWU accounting shall include:
+
+- SSH/WinRM recurring collection cost;
+- EDS diagnostic query cost;
+- target RTT/timeouts/authentication cost;
+- output/parser cost;
+- concurrent Agent EDS receive/forward workload;
+- agentless EDS fan-out/storm load.
+
+When the Infrastructure Sensor lacks headroom, diagnostics queue/defer/reject explicitly before scheduled monitoring is starved.
+
+### 15.3 Optional dedicated local/private inference provider
+
+A dedicated inference provider is a separately sized optional component for customers that do not want LLM/embedding bursts on Core.
+
+It:
+
+- is not counted as a third Core;
+- stores no authoritative control/telemetry database;
+- is not part of Core HA quorum/fencing;
+- may be CPU-only or use an optional accelerator according to its own certified profile;
+- receives bounded context from AI Gateway rather than raw unrestricted telemetry;
+- can be stopped/unavailable without affecting deterministic monitoring/RCA.
+
+Exact CPU/RAM/GPU/model combinations are release-certified profiles, not universal minimums. No dedicated inference hardware is required for Platform base operation.
+
