@@ -53,13 +53,13 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | REQ-S-001 | Universal Sensor Runtime with Network, Infrastructure, Combined, Streaming/Event, Synthetic and Cloud/API roles | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-002 | Sensor locality-aware placement close to devices | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-S-003 | Capacity-aware placement; never overload Sensor for lower RTT | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-003 | Capacity-aware placement/failover readiness includes target/protocol/credential/security-zone reachability; never overload or select a merely healthy but unusable Sensor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-004 | Customer modes: Auto, Auto-with-approval, Manual, Sensor Pool | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-005 | Sensor pools support N+1/N+2/N+K/1:1/active-active capacity models | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-S-006 | Distributed leases/fencing prevent duplicate polling | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-S-007 | Local durable spool/store-and-forward | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-006 | Partition-safe distributed leases/fencing balance bounded disconnected polling continuity with prevention/reconciliation of duplicate Sensor authority | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-007 | Local durable spool/store-and-forward; ACK-gated reclamation, idempotent replay and control/current telemetry protected from replay starvation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-008 | Sensor 80% disk protection and bounded junk/log cleanup | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-S-009 | Sensor self-observability: CPU/RAM/disk/queue/poll latency/backlog/failures | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-009 | Sensor self-observability: CPU/RAM/disk/queue/poll latency/backlog, buffer horizon, retry amplification, receiver/drop/gap evidence and failover readiness | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-010 | Initial planning baseline 4 vCPU/16GB/150GB ~800 normal network devices | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-011 | Benchmark 8 vCPU/16GB high-density target ~2,000–2,500 normal network devices | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-012 | Agentless infrastructure target ~800 endpoints per 4C/16G Sensor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -94,9 +94,9 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | REQ-NET-001 | SNMP v1/v2c/v3 with customer-configurable auth/privacy/security protocols | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-002 | ICMP/traceroute/TCP/DNS/TLS/HTTP probes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-NET-003 | SNMP traps/informs and syslog | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-NET-004 | NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-NET-005 | NETCONF/RESTCONF/gNMI/gRPC/streaming | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-NET-003 | SNMP traps/informs and Syslog with explicit transport-loss semantics, receiver/drop evidence and policy-driven redundant push destinations where source capability permits | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-NET-004 | NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow with template/sequence/drop continuity evidence and HA receiver guidance where source capability permits | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-NET-005 | NETCONF/RESTCONF/gNMI/gRPC/streaming with session/subscription continuity, reconnect and explicit gap evidence where continuity cannot be proven | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-006 | SSH/CLI; Telnet legacy disabled by default and audited | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-007 | CDP/LLDP/ARP/FDB discovery/topology | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-008 | BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VLAN-STP/VRF/HSRP-VRRP/LACP/QoS-CBQoS/multicast/SD-WAN monitoring | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -222,7 +222,7 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-DATA-012 | Telemetry cardinality/explosion protection | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-DATA-013 | Deduplication, replay, late/out-of-order handling | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-DATA-014 | Legal hold/preserve incident evidence from purge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-DATA-015 | Data pipeline integrity counters and no silent data loss | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-DATA-015 | Compact end-to-end pipeline integrity watermarks/counters explain accepted/rejected/duplicate/late/dropped records; unexplained discrepancy raises PIPELINE_INTEGRITY_GAP | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Integration/Governance/Security
 
