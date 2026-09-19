@@ -11,7 +11,6 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -161,14 +160,27 @@ public class ClickHouseTelemetryConsumer {
         }
     }
 
+    private static void updateInt(MessageDigest digest, int value) {
+        digest.update((byte) (value >>> 24));
+        digest.update((byte) (value >>> 16));
+        digest.update((byte) (value >>> 8));
+        digest.update((byte) value);
+    }
+
+    private static void updateLong(MessageDigest digest, long value) {
+        for (int shift = 56; shift >= 0; shift -= 8) {
+            digest.update((byte) (value >>> shift));
+        }
+    }
+
     static String deduplicationToken(List<ConsumerRecord<String, String>> records) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             for (ConsumerRecord<String, String> record : records) {
                 digest.update(record.topic().getBytes(StandardCharsets.UTF_8));
                 digest.update((byte) 0);
-                digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(record.partition()).array());
-                digest.update(ByteBuffer.allocate(Long.BYTES).putLong(record.offset()).array());
+                updateInt(digest, record.partition());
+                updateLong(digest, record.offset());
             }
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException e) {
