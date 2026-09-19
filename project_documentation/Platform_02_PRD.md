@@ -47,7 +47,7 @@ Platform shall provide a unified enterprise operations experience covering:
 18. Data retention, rollups, archive, capacity forecasting and storage protection.
 19. Extensibility through MIB Studio, API Studio and Device Pack Studio.
 
-DPI and full APM are excluded for the initial product scope.
+Full always-on DPI and mandatory proprietary full-bytecode APM agents are excluded from the initial product scope. OpenTelemetry-native traces, service graphs and cross-signal investigation are P0 under `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`.
 
 ---
 
@@ -581,7 +581,7 @@ Database credentials shall be scoped and protected. Arbitrary dangerous SQL shal
 
 ### 14.1 Cloud
 
-AWS, Azure and GCP integrations shall use supported provider APIs/SDKs and normalize accounts/subscriptions/projects, regions, networks, compute, storage, database and load-balancer entities.
+AWS, Azure, GCP and OCI integrations shall use supported provider APIs/SDKs and normalize provider hierarchy, regions/zones, networks, compute, storage, databases, load balancers, Kubernetes, serverless and supported managed-service entities. The first Cloud Observability GA shall satisfy the P0 day-one provider-root and mandatory service-family requirements in `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`; specification alone does not claim current certification.
 
 ### 14.2 Kubernetes
 
@@ -593,7 +593,7 @@ Monitor node/pod/container health, CPU/memory, restarts, pending/failed state, e
 
 ### 14.3 OpenTelemetry
 
-Platform shall accept OTLP metrics and logs initially. Architecture shall be trace-ready, but full APM shall not be marketed until trace storage, analysis and UX are explicitly implemented and accepted.
+Platform shall accept OTLP metrics, logs and traces as P0 observability signals. Trace storage, sampling, analysis, service/resource correlation, service graph and Trace Explorer UX shall satisfy `Platform_24`. This does not require Platform to ship proprietary full-bytecode APM agents for every language/runtime.
 
 ---
 
@@ -1997,7 +1997,7 @@ The following tables are product requirements because they prevent engineering t
 | Redfish/Swordfish | Gofish | unified hardware lifecycle entities/alerts |
 | VMware | govmomi | vCenter/cluster/host/VM/datastore/network graph and monitoring |
 | Kubernetes | client-go | cluster/node/namespace/workload/pod/container/service graph |
-| OpenTelemetry | OTel Collector/libraries | OTLP metrics/logs ingest; no full APM claim initially |
+| OpenTelemetry | OTel Collector/libraries | OTLP metrics/logs/traces ingest, resource/service identity and approved receivers; Platform-owned storage/query/correlation/sampling; no mandatory proprietary full-bytecode APM-agent dependency |
 
 ### NCM implementation basis
 
