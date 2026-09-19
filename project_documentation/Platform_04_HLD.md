@@ -321,6 +321,8 @@ Logical components:
 
 A single high-volume/broken exporter cannot monopolize the role; per-exporter fairness/quotas and global ceilings are required.
 
+**Flow Sensor Pool HA:** redundancy strategy is a profile of exporter behavior rather than a universal load-balancer rule. The pool may use exporter multi-collector configuration, active/standby listener/VIP takeover, or another certified mechanism. Duplicate export is normalized through source-record/replay identity without collapsing valid observations from different observation points. Failover exposes template warmup/state and any unavoidable UDP gap.
+
 
 ### 5.2 Device Pack runtime
 
