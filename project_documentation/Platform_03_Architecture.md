@@ -1239,3 +1239,62 @@ Platform self-observability is mandatory. Every deployment unit emits structured
 ### 34.6 Windows certification exception
 
 Windows Agent source can be cross-compiled and most functional tests can run in containerized CI, but GA certification of Windows Service installation, reboot auto-start, SCM recovery, MSI behavior and Windows-specific permissions requires an isolated Windows runner/VM. This is an OS-compatibility test environment, not permission to install Platform development dependencies directly on the primary developer laptop.
+
+---
+
+## 35. Endpoint diagnostics and local-intelligence placement — v3.2.2 reconciliation
+
+### 35.1 Placement
+
+```text
+Windows/Linux Agent
+  normal collectors
+  -> deterministic trigger evaluator
+  -> bounded EDS evidence capture
+  -> durable local queue
+  -> assigned Infrastructure Sensor
+  -> Core evidence/incident/RCA
+
+Agentless Linux/Windows
+  Core monitoring policy/job
+  -> eligible Infrastructure Sensor
+  -> signed/versioned SSH or WinRM/WMI/CIM query workflow
+  -> normalized EDS evidence
+  -> Core evidence/incident/RCA
+
+Core
+  deterministic qualification/correlation/RCA
+  -> bounded statistical/ML assistance
+  -> AI Gateway
+       -> certified on-Core local runtime OR optional dedicated local/private inference provider
+```
+
+Agents and Sensors remain collection/evidence executors. They do not become independent causal authorities. No normal monitored Agent or Sensor shall host an LLM, GNN or foundation-model service for EDS.
+
+### 35.2 Agent and agentless infrastructure semantics
+
+Linux/Windows monitoring shall normalize comparable host/process/service/evidence concepts while retaining source-specific provenance and capability gaps. Agent-based collection may legitimately expose richer evidence than SSH/WinRM agentless collection.
+
+Agentless execution uses Platform-controlled, versioned, bounded query definitions. A generic arbitrary remote-shell/PowerShell facility is not introduced by infrastructure monitoring or EDS.
+
+### 35.3 EDS resource and failure boundary
+
+EDS reuses continuous observations for qualification, then performs only bounded event-driven evidence capture. Steady-state design objective is near-zero incremental overhead beyond normal monitoring; a literal zero-compute requirement is invalid.
+
+EDS execution is subordinate to endpoint workload safety and to Sensor/Core routine monitoring. It has explicit cancellation, deadline, evidence-size, Top-N, frequency/cooldown and storm/backpressure controls. Missing privilege or collection failure yields partial/degraded evidence, not confirmation of the suspected cause.
+
+### 35.4 Optional dedicated local/private inference provider
+
+Where customers require AI compute isolation from Core, AI Gateway may invoke an approved dedicated local/private inference provider.
+
+That provider:
+
+- owns no authoritative tenant/inventory/incident/telemetry database;
+- receives only bounded, authorized, redacted context through AI Gateway;
+- has no direct device/Agent/Sensor credential authority;
+- is outside the exactly-two-Core HA authority model;
+- may fail, restart or be removed without disabling deterministic monitoring/RCA;
+- requires normal OSS/model/security/sizing certification before supported use.
+
+On-Core local inference remains allowed only when the exact profile passes `Platform_11` non-interference certification.
+
