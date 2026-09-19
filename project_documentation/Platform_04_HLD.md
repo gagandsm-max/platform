@@ -264,32 +264,63 @@ Owns Core/Sensor/data-service health, support bundle orchestration, backup/resto
 
 ## 5. Sensor service decomposition
 
+The Sensor ships as one software product/runtime. Production role selection controls which data-plane modules start.
+
 ```mermaid
 flowchart TB
   CTRL[Core Control / Policies] --> CLIENT[Sensor Control Client]
-  CLIENT --> JOB[Job / Lease Scheduler]
-  JOB --> ICMP[ICMP/Traceroute Pool]
-  JOB --> SNMP[SNMP Pool]
-  JOB --> SSH[SSH/NETCONF Pool]
-  JOB --> API[REST/gNMI Pool]
-  JOB --> INFRA[Infra Worker Pool]
-  JOB --> NCM[NCM Worker Pool]
-  FLOW[Flow/Syslog/Event Receivers] --> NORM[Normalizer]
-  ICMP --> NORM
-  SNMP --> NORM
-  SSH --> NORM
-  API --> NORM
-  INFRA --> NORM
-  NCM --> NORM
-  NORM --> SPOOL[Durable Local Spool]
-  SPOOL --> UP[Uploader mTLS HTTPS/gRPC]
-  CAP[Capacity/Health Monitor] --> CLIENT
-  DISC[Discovery/Topology Workers] --> NORM
+  CLIENT --> ROLE[Role Gate]
+  ROLE -->|NETWORK| JOB[Polling / Lease Scheduler]
+  JOB --> ICMP[ICMP/Traceroute]
+  JOB --> SNMP[SNMP]
+  JOB --> SSH[SSH/NETCONF]
+  JOB --> API[REST/gNMI]
+  JOB --> NCM[NCM]
+  ROLE -->|FLOW| FR[Flow Receiver]
+  FR --> FS[Exporter / Template / Sampling / Sequence State]
+  FS --> FN[Flow Normalizer / Enricher]
+  ROLE -->|LOG| LR[Log/Event Receiver]
+  LR --> LN[Log Parser / Normalizer]
+  ICMP --> NS[Role-local Spool]
+  SNMP --> NS
+  SSH --> NS
+  API --> NS
+  NCM --> NS
+  FN --> FSPOOL[Flow Durable Spool]
+  LN --> LSPOOL[Log Durable Spool]
+  NS --> UP[Uploader mTLS HTTPS/gRPC]
+  FSPOOL --> UP
+  LSPOOL --> UP
+  CAP[Role-aware Capacity/Health] --> CLIENT
 ```
 
-### 5.1 Worker isolation
+### 5.1 Production role isolation
 
-Each worker class has bounded concurrency/queues. High-rate event receivers and NCM have independent limits so they cannot exhaust polling resources.
+- `NETWORK_SENSOR` starts only network polling/control/diagnostic modules plus common Sensor services.
+- `FLOW_SENSOR` starts only Flow receive/decode/state/normalize/enrich/spool/upload/health plus common Sensor services.
+- `LOG_SENSOR` starts only log/event receive/parse/normalize/spool/forward/upload/health plus common Sensor services.
+- Flow and Log production roles are mutually exclusive and do not start Network polling/discovery/NCM/synthetics.
+- Combined high-rate roles are non-production development/lab profiles only.
+- Role change requires drain, source/job unassignment, durable queue disposition, validation and restart/reconfiguration.
+
+Each active worker class has bounded concurrency/queues/state. Dedicated roles retain explicit safety headroom and cannot consume common control/health resources without bound.
+
+### 5.1.1 Flow Sensor HLD
+
+Logical components:
+
+- **Flow Listener Manager** — configured UDP listeners/source policy and socket/drop telemetry;
+- **Exporter Registry** — tenant-scoped configured/known/quarantined exporter identity and observation-domain/generation state;
+- **Protocol Decoder** — GoFlow2-backed NetFlow v5/v9, IPFIX and sFlow decoding with bounded vendor extension handling;
+- **Template/Options Cache** — exporter/domain-scoped template lifecycle, generation, expiry/withdrawal and restart invalidation;
+- **Sequence/Sampling/Time Quality** — protocol-aware gap/reset/duplicate/out-of-order and observed-versus-estimated semantics;
+- **Flow Normalizer** — canonical directional records with IPv4/IPv6/NAT/QoS/interface/protocol metadata;
+- **Temporal Enrichment** — canonical entity/interface/site/IPAM/DNS/identity/ASN/cloud/application/geo enrichment with provenance;
+- **Flow Durable Spool** — replay-safe post-acceptance records and gap accounting;
+- **Flow Health** — exporter/listener/template/sampling/sequence/socket/queue/spool/upload quality.
+
+A single high-volume/broken exporter cannot monopolize the role; per-exporter fairness/quotas and global ceilings are required.
+
 
 ### 5.2 Device Pack runtime
 
@@ -418,6 +449,8 @@ Synchronous vs asynchronous commit policy is an engineering benchmark/availabili
 - `metric_numeric`
 - `metric_state`
 - `network_flow`
+- `network_flow_rollup` / bounded derived conversation/site/interface/application aggregates as workload evidence justifies
+- `flow_exporter_quality` / exporter-template-sampling-sequence health where volume warrants analytical history
 - `event_raw`
 - `syslog_event`
 - `trap_event`
