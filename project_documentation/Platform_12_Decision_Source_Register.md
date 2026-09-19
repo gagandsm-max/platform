@@ -101,7 +101,7 @@ The following must remain visibly unresolved until engineering evidence exists:
 - exact Core service fencing/VIP implementation and failure matrix;
 - final contractual DR RPO/RTO and data-loss objectives;
 - final SNWP-2500-v1 metric/interface/event mix and certified performance results;
-- Streaming Sensor certified Flow records/sec and Syslog EPS;
+- dedicated Flow Sensor certified datagrams/records/bytes/exporter profile and dedicated Log Sensor certified EPS/bytes/parser profile;
 - exact GNN model architecture, training labels, inference latency, CPU/GPU footprint and production enablement threshold;
 - final compliance certification program/scope and achieved certifications;
 - exact product SKUs/licensing quantities beyond the agreed behavioral rules.
