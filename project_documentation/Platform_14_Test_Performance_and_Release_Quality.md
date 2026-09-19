@@ -148,4 +148,29 @@ Customer Acceptance Profile results must be evidence-backed. A technology listed
 
 Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certified ≠ deployed.
 
-OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively.
+OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively. Enterprise-log collection/routing/SIEM-forwarding class-specific gates remain in Platform_24.
+
+
+## 7. Enterprise log / SIEM-forwarding release supplement
+
+When Platform_24 capability is enabled in a release, release evidence shall additionally prove:
+
+- RFC3164/RFC5424 parsing and malformed/oversized bounds;
+- UDP loss visibility and TCP/TLS framing/reconnect/certificate behavior;
+- file rotation/truncate/restart checkpoint correctness;
+- journald/Windows Event identity/cursor behavior for shipped collectors;
+- parser/multiline/redaction/fingerprint bounded-resource behavior;
+- canonical Log Event schema compatibility and event/observed/ingest-time semantics;
+- tenant-safe entity/service mapping;
+- high-cardinality/log-storm protection with no silent intervention;
+- Sensor/Core/Kafka/ClickHouse backlog/replay under failure and fixed 80% storage protection;
+- Log Explorer tenant/RBAC/query bounds and live-tail limits;
+- independent destination queue behavior and failure isolation;
+- accurate transport-vs-destination acknowledgement semantics;
+- route filtering/transformation preview correctness;
+- cross-tenant forwarding denial, loop prevention, replay authorization and destination credential secrecy;
+- destination rate-limit, retry/backoff, dead-letter and bounded replay;
+- air-gap install/upgrade/rollback for any mandatory collector artifacts;
+- log/forwarding workloads do not starve the certified monitoring workload.
+
+A release shall not claim enterprise log/SIEM-forwarding readiness from parser unit tests or UDP receipt alone.
