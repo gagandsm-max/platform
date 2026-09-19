@@ -188,9 +188,12 @@ class ClickHouseTelemetryConsumerTest {
                     "payload byte length must be logged"
             );
 
-            // Mirror the production batch DefaultErrorHandler path. A plain listener exception
-            // means the complete batch is retried/redelivered; we never assert that preceding
-            // records were durably processed.
+            // Mirror production DefaultErrorHandler batch semantics (Spring Kafka 3.2.4):
+            // a non-BatchListenerFailedException from a batch listener causes full-batch
+            // redelivery via FailedBatchProcessor fallback — not record-index recovery.
+            // BatchListenerFailedException is intentionally NOT used here: seekOrRecover can
+            // commit offsets for earlier records in the poll, but poison fails before any
+            // ClickHouse insert, so partial offset advance would drop unpersisted observations.
             DefaultErrorHandler errorHandler = new DefaultErrorHandler((rec, exception) -> {
                 throw new KafkaException(
                         "Exhausted retries for record at topic=" + rec.topic()
@@ -221,14 +224,15 @@ class ClickHouseTelemetryConsumerTest {
                         () -> { throw listenerFailed; }
                 );
             } catch (RuntimeException expectedFailClosed) {
-                // The production recoverer intentionally refuses to skip the poisoned record.
+                // Fallback/recoverer must remain fail-closed (no silent skip / no ack).
             }
 
             String errorHandlerLogs = loggingEventsIncludingThrowables(appenders.get(1));
             assertTrue(
-                    errorHandlerLogs.contains("Failed to handle")
-                            || errorHandlerLogs.contains("Exhausted retries"),
-                    "DefaultErrorHandler recovery path must be exercised; got: " + errorHandlerLogs
+                    errorHandlerLogs.contains(
+                            "Expected a BatchListenerFailedException; re-delivering full batch"),
+                    "DefaultErrorHandler must exercise full-batch redelivery for plain batch "
+                            + "listener exceptions; got: " + errorHandlerLogs
             );
             assertFalse(errorHandlerLogs.contains(SUPER_SECRET_SENTINEL_DO_NOT_LOG),
                     "sentinel must not appear in DefaultErrorHandler recovery logs: " + errorHandlerLogs);
