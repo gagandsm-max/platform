@@ -2,16 +2,16 @@
 
 **Document ID:** PLATFORM-INDEX-001  
 **Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — 26-File Consolidated Engineering Source of Truth**
+**Status:** **Authoritative Mother Reference — 27-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-19 — v3.2.2 Agent reliability/failover/durability/resource-assurance specialized-master addition
+**Last reconciliation:** 2026-09-19 — v3.2.2 Agent reliability plus Sensor communication-integrity/resilience/resource-assurance specialized-master additions
 
 ## 1. Authority
 
 **v3.2.2 supersedes v3.2.1 as the authoritative Platform mother-reference set after merge to the canonical GitHub `main`.**
 
-v3.2.2 is an additive product/engineering scope revision. It includes six specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value; `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center; `Platform_21_Enterprise_Gap_Closure_Master.md` for enterprise adoption gaps such as normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, tamper-evident audit, governed offboarding/data portability and connector families; `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` for evidence-qualified alerting, monitoring-state semantics, RCA/AI assurance, bounded AI assistance and related shared-service evidence; `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` for enterprise monitoring-domain coverage, the single Capability Pack architecture, dimensional certification and Real Customer Requirements normalization; and `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` for Linux/Windows Agent durability, Sensor failover, assignment fencing, replay/idempotency, configuration/certificate/upgrade transactions, pipeline integrity and resource/failure certification. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement. Existence of a specialized master is specification authority, not proof of implementation or certification.
+v3.2.2 is an additive product/engineering scope revision. It includes seven specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value; `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center; `Platform_21_Enterprise_Gap_Closure_Master.md` for enterprise adoption gaps such as normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, tamper-evident audit, governed offboarding/data portability and connector families; `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` for evidence-qualified alerting, monitoring-state semantics, RCA/AI assurance, bounded AI assistance and related shared-service evidence; `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` for enterprise monitoring-domain coverage, the single Capability Pack architecture, dimensional certification and Real Customer Requirements normalization; `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` for Linux/Windows Agent durability, Sensor failover, assignment fencing, replay/idempotency, configuration/certificate/upgrade transactions, pipeline integrity and resource/failure certification; and `Platform_25_Sensor_Communication_Integrity_Resilience_and_Resource_Assurance_Master.md` for Sensor ownership/failover communication semantics, push-protocol HA, fallback readiness, poll/retry storm control, replay fairness, protocol continuity/loss evidence and Sensor resource certification. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement. Existence of a specialized master is specification authority, not proof of implementation or certification.
 
 v3.2.1 superseded v3.2 as a corrective/governance patch. v3.2 superseded v3.1 as a documentation-packaging revision. Earlier v1/v2/v3.0/v3.1 generated master packages and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as Platform engineering sources of truth.
 
@@ -26,7 +26,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 - Security/compliance readiness must never be represented as achieved certification until independently achieved.
 - Customer-value/MTTR percentages are not product claims until supported by disclosed reproducible customer/pilot evidence.
 
-## 3. Exact 26-file mother-reference set
+## 3. Exact 27-file mother-reference set
 
 | # | File | Governing scope |
 |---:|---|---|
@@ -56,6 +56,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 | 24 | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Authoritative monitoring-intelligence specialized master: class-specific Alert Evidence Contracts, telemetry trust, semantic monitoring states, alert-quality lifecycle, RCA/AI assurance, Incident Copilot, AI safety/provenance, formal `PRD-MIA-*` + `REQ-MIA-*` supplement |
 | 25 | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | Authoritative enterprise-monitoring-coverage specialized master: Capability Pack product contract, L1/L2/L3 dimensional certification, technology-family catalogue, Customer Acceptance Profiles, Real Customer Requirements normalization, formal `PRD-EMC-*` + `REQ-EMC-*` supplement |
 | 26 | `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` | Authoritative Agent reliability specialized master: Linux/Windows Agent durable buffering, Agent→Sensor ACK contract, primary/fallback Sensor failover, assignment fencing, operational FSM, replay/idempotency, atomic config/certificate/upgrade behavior, Agent-started pipeline reconciliation, resource bounds and failure certification, formal `PRD-ARF-*` + `REQ-ARF-*` supplement |
+| 27 | `Platform_25_Sensor_Communication_Integrity_Resilience_and_Resource_Assurance_Master.md` | Authoritative Sensor communication reliability specialized master: partition-safe ownership/fencing, push-protocol HA profiles, target-specific fallback readiness, poll de-synchronization, correlated retry suppression, current-vs-replay fairness, bounded uploader control, protocol continuity/loss evidence, buffer horizon and Sensor resource certification, formal `PRD-SCR-*` + `REQ-SCR-*` supplement |
 
 ## 4. Consolidation and version map
 
@@ -88,6 +89,8 @@ The 2026-09-13 enterprise-monitoring-coverage reconciliation adds `Platform_23_E
 
 The 2026-09-19 Agent-reliability reconciliation adds `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` under the same consolidated specialized-master pattern. Its `PRD-ARF-*` and `REQ-ARF-*` requirements govern Linux/Windows Agent durability, Agent→Sensor acknowledgement semantics, Core-authorized primary/fallback Sensor failover, assignment fencing, operational state, atomic configuration/certificate/upgrade behavior, pipeline integrity and failure/resource certification. It preserves the existing Agent/Sensor architecture and does not authorize a parallel control plane, queue implementation, identity system or arbitrary Sensor selection. This remains **v3.2.2**; no v3.2.3 product-version number is created.
 
+The 2026-09-19 Sensor-communication reconciliation adds `Platform_25_Sensor_Communication_Integrity_Resilience_and_Resource_Assurance_Master.md`. It preserves the existing Go Sensor, durable spool, worker-pool, MWU, Pipeline Integrity, alert-qualification and 80% protection architecture and adds only under-specified communication-reliability requirements: partition-safe ownership continuity/fencing, push-receiver HA profiles, target-specific fallback readiness, poll de-synchronization, correlated retry control, current/replay fairness, protocol continuity/loss evidence, buffer-horizon visibility and explicit Sensor resource certification. It does not resolve the existing Core durable-ACK P0 by declaration and does not introduce heavyweight Sensor dependencies. This remains **v3.2.2**; no v3.2.3 product-version number is created.
+
 The older files remain authoritative for their existing scope and are explicitly supplemented by specialized masters; they are not considered obsolete. This packaging choice is deliberate change control, not a waiver of traceability.
 
 ## 5. Precedence
@@ -114,6 +117,8 @@ When requirements appear to conflict:
 **Enterprise-monitoring-coverage special case:** `Platform_23` is a consolidated specialized amendment. Its `PRD-EMC-*` requirements act as authoritative product supplements for enterprise monitoring coverage, Capability Pack contract, dimensional certification and Customer Acceptance Profiles; its `REQ-EMC-*` catalogue is the formal RTM supplement. It does not silently override Platform_10 connector/security, Platform_19 OIV, Platform_20 onboarding, Platform_21 enterprise-gap or Platform_22 alert/AI-assurance authority outside its assigned scope.
 
 **Agent-reliability special case:** `Platform_24` is a consolidated specialized amendment. Its `PRD-ARF-*` requirements act as authoritative product supplements for Linux/Windows Agent durability, Sensor failover, assignment fencing, Agent operational state, replay/idempotency, transactional configuration/certificate/upgrade behavior, pipeline integrity and resource/failure certification; its `REQ-ARF-*` catalogue is the formal RTM supplement. It may strengthen Agent reliability where base documents are silent but may not claim resolution of the open two-Core Kafka/ClickHouse/fencing P0 items or silently replace existing Core Sensor Control, Agent identity, durable queue or Sensor spool authority.
+
+**Sensor-communication special case:** `Platform_25` is a consolidated specialized amendment. Its `PRD-SCR-*` requirements add Sensor communication semantics that were missing or under-specified while preserving existing `REQ-S-*`, `REQ-ALT-*` and `REQ-DATA-*` authority. Its `REQ-SCR-*` catalogue is the formal RTM supplement. It must not be used to duplicate Pipeline Integrity, weaken alert qualification, claim source-level zero loss, or introduce heavyweight Sensor dependencies without separate architecture approval.
 
 Conflicts require documented change control; implementation must not silently choose a convenient interpretation.
 
@@ -169,7 +174,7 @@ Top-level licence alone is insufficient; transitive/bundled licences, notices, v
 Every release produces SPDX and CycloneDX SBOMs, third-party notices/licence texts, version locks, checksums and provenance.
 Implementation dependencies must match the catalogue; catalogue omissions discovered in implementation require catalogue/change-control updates before milestone/release.
 
-`Platform_19`, `Platform_20`, `Platform_21`, `Platform_22`, `Platform_23` and `Platform_24` do not by themselves select new runtime dependencies. Any new vector database, packet-analysis product, SaaS SDK, browser automation engine, probe runtime, AI/model runtime, vendor SDK, pack runtime or other dependency requires normal OSS catalogue/security/performance approval.
+`Platform_19`, `Platform_20`, `Platform_21`, `Platform_22`, `Platform_23`, `Platform_24` and `Platform_25` do not by themselves select new runtime dependencies. Any new vector database, packet-analysis product, SaaS SDK, browser automation engine, probe runtime, AI/model runtime, vendor SDK, pack runtime or other dependency requires normal OSS catalogue/security/performance approval.
 
 ## 8. Completeness control
 
@@ -182,6 +187,8 @@ For v3.2.2 monitoring-intelligence/alert-quality/AI-assurance scope, `Platform_2
 For v3.2.2 enterprise-monitoring-coverage / Capability Pack certification scope, `Platform_23` contains the authoritative `REQ-EMC-*` traceability supplement mapped to `PRD-EMC-*` requirements. Documentation mapping is not implementation evidence.
 
 For v3.2.2 Agent reliability/failover/durability scope, `Platform_24` contains the authoritative `REQ-ARF-*` traceability supplement mapped to `PRD-ARF-*` requirements. Specification or unit-test coverage is not production reliability certification.
+
+For v3.2.2 Sensor communication integrity/resilience/resource-assurance scope, `Platform_25` contains the authoritative `REQ-SCR-*` traceability supplement mapped to `PRD-SCR-*` requirements. Existing Sensor/Pipeline/Alert requirements remain authoritative and are supplemented rather than copied.
 
 A new requirement is considered incorporated only when it has an ID, affected-layer mapping and sufficient normative behavior for implementation without inventing a load-bearing decision. Specialized masters satisfy this requirement only within their explicitly assigned capability family.
 
@@ -213,6 +220,8 @@ For alert evidence/qualification, semantic monitoring states, alert-policy lifec
 For enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph vs governed-CMDB semantics, or coverage-measurement work, `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading.
 
 For Linux/Windows Agent durable buffering, Agent→Sensor acknowledgement/deletion semantics, Agent replay/idempotency, primary/fallback Sensor failover, assignment fencing, Agent operational states, Agent configuration/certificate/upgrade transactions, Agent-started pipeline reconciliation, Agent disk-pressure/resource limits, or Agent failure certification, `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` is mandatory preflight reading.
+
+For Sensor ownership/partition/fencing behavior, push-protocol HA, Sensor fallback readiness, polling/retry-storm behavior, Sensor replay/current-telemetry fairness, uploader batching/latency, protocol-specific continuity/loss evidence, Sensor buffer horizon, or Sensor communication resource certification, `Platform_25_Sensor_Communication_Integrity_Resilience_and_Resource_Assurance_Master.md` is mandatory preflight reading.
 
 A feature is not complete when it only compiles: tests, observability, error/failure behavior, upgrade/migration impact, security/OSS implications, traceability and acceptance evidence are part of Definition of Done.
 
