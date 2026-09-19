@@ -109,6 +109,10 @@ No contract may encode a universal “two signals always required” rule. Requi
 
 Before operational assertion, the evaluation path shall score whether expected evidence is present, fresh, schema-valid, time-aligned and produced by healthy collectors. Missing or degraded evidence lowers confidence and may change the state to `MONITORING_DEGRADED`, `UNKNOWN` or `STALE` instead of asserting target failure.
 
+For Flow evidence, trust additionally considers configured exporter mapping, template validity, sampling-known/change state, protocol sequence gaps, receiver/socket/queue drops, observation-point scope, enrichment confidence and downstream pipeline health. `NO_RECENT_FLOW`, `TEMPLATE_MISSING`, `SAMPLING_UNKNOWN` or degraded FLOW Sensor health are monitoring-evidence conditions; they do not prove zero network traffic, link failure or application outage.
+
+Flow volume/anomaly evidence may explain or prioritize a congestion/traffic hypothesis but does not independently prove congestion or causal path. Corroborating interface utilization/queue/discard/latency/path/topology/change evidence remains subject to the applicable Alert Evidence Contract.
+
 **Evidence Coverage** shall expose enough machine-readable information to answer: what evidence was expected; what arrived; what is missing/stale/degraded; whether active validation ran; which contradictions exist; and how the evidence affected confidence.
 
 Semantic states are additive to existing alert/incident lifecycle. They describe operational meaning, not merely workflow status. `REDUNDANCY_LOST` means service may still be available but resilience is reduced. `SLA_DEGRADED` means service/path remains up but violates a governed objective. `EXPECTED_STATE` records a known/authorized condition. `UNKNOWN` means insufficient trustworthy evidence. `STALE` means state depends on evidence outside freshness policy.
