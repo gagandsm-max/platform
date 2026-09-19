@@ -94,6 +94,9 @@ Platform shall provide, directly or through approved extensibility frameworks:
 - SNMP v1/v2c/v3 monitoring and traps/informs.
 - ICMP and traceroute.
 - NetFlow, IPFIX, sFlow and vendor-compatible flow ingestion.
+- Flow/NTA shall identify traffic in operational context where trustworthy evidence exists: canonical endpoint/device and system/host name, DNS/FQDN/domain, interface/site/subnet/VRF, ASN/cloud/application, approximate geography and time-bounded user/session identity from approved Agent/AD/LDAP/Entra/VPN/RADIUS/NAC/WLAN/firewall/proxy evidence.
+- Flow identity enrichment must remain evidence/provenance based: IP address alone is not durable endpoint/user identity; AD/directory membership alone does not prove who used an IP at a particular time; domain/application evidence is not silently represented as a full URL; public-IP geolocation is approximate and must not be represented as a person's precise physical location.
+- Flow analytics shall expose collection/data-quality limitations such as sampling, exporter/template/sequence gaps and Sensor/pipeline loss so missing or sampled Flow is not misrepresented as exact traffic truth.
 - Syslog/event ingestion.
 - NETCONF, RESTCONF, gNMI/gRPC and streaming telemetry.
 - SSH/CLI operations with privileged session governance.
@@ -210,9 +213,11 @@ In HA deployments, Sensors and Agents should use the stable **Core HA endpoint**
 
 ## 8. Sensor and Agent business requirements
 
-- Platform uses one Universal Sensor Runtime with selectable roles.
-- Primary customer-facing roles: Network Sensor, Infrastructure Sensor, Combined Sensor.
-- Specialized roles: Streaming/Event Sensor, Synthetic Probe, Cloud/API Sensor and Edge Sensor Lite profile.
+- Platform uses one Universal Sensor Runtime/build with selectable governed roles.
+- Primary production roles include Network Sensor and Infrastructure Sensor plus dedicated **Flow Monitoring Sensor** and **Log Monitoring Sensor** roles.
+- Flow Monitoring and Log Monitoring are isolated production workloads: a Flow Sensor is dedicated to Flow collection and a Log Sensor is dedicated to Log collection so high-rate Flow/log bursts cannot starve routine polling or each other.
+- The common Sensor codebase/package is reused across roles; dedicated roles do not create separate drifting Sensor products. Combined high-rate Flow+Log operation may exist for development/lab/test but is not production-certified unless separately approved.
+- Specialized roles also include Synthetic Probe, Cloud/API Sensor and Edge Sensor Lite profile.
 - Sensor placement must prefer network locality while also respecting reachability, capacity, HA, protocol access and policy.
 - Customers may choose automatic placement, recommendation/approval, manual placement or Sensor Pool assignment.
 - Sensor capacity must be represented by workload, not device count alone.
