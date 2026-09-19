@@ -104,6 +104,8 @@ ARCHIVE="${BACKUP_ROOT}/platform-mother-reference-${STAMP_LABEL}.tar.gz"
   echo
   echo "- generated_utc: ${UTC_STAMP}"
   echo "- git_head_sha: ${HEAD_SHA}"
+  echo "- freshness_authority: git_head_sha_and_in_document_reconciliation_metadata"
+  echo "- filesystem_mtime_authoritative: false"
   echo "- source_index: project_documentation/Platform_00_Document_Index.md §3"
   echo "- file_count: ${#MOTHER_FILES[@]}"
   echo
