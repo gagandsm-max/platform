@@ -7,7 +7,7 @@
 
 ## 1. Governing rule
 
-Device count is a commercial/planning input, not the only engineering load measure. Platform must size and operate using measured workload: poll operations/sec, metrics/sec, interfaces/entities, polling interval, protocol cost, RTT/timeouts, Flow/log rates, streaming subscriptions, NCM jobs, synthetic tests, **interactive/on-demand diagnostics and CLI sessions**, concurrent users, query/report/RCA demand and retention.
+Device count is a commercial/planning input, not the only engineering load measure. Platform must size and operate using measured workload: poll operations/sec, metrics/sec, interfaces/entities, polling interval, protocol cost, RTT/timeouts, Flow/log rates, **dedicated Flow/Log Sensor roles**, streaming subscriptions, NCM jobs, synthetic tests, **interactive/on-demand diagnostics and CLI sessions**, concurrent users, query/report/RCA demand and retention.
 
 All numbers below are **engineering planning targets until benchmark-certified**. They are not contractual scale claims merely because incumbent products publish similar densities.
 
@@ -104,9 +104,36 @@ If devices are divided into multiple network-isolated/locality pools, redundancy
 - Agent-push ingestion planning target: approximately **2,200 endpoints per 4 vCPU / 16 GB ingestion capacity unit**.
 - These are separate workload classes and are not added to network-device counts as if they had identical cost.
 
-## 5. Streaming/Event Sensor
+## 5. Dedicated Flow and Log Sensor capacity
 
-High-volume NetFlow/IPFIX/sFlow/J-Flow, Syslog, traps and high-rate OTel are separated from polling when volume risks starving normal collection. A small deployment may combine roles, but Platform's Capacity Engine must recommend/require role separation once safe limits are approached. Exact records/sec and EPS certification values are benchmark-defined.
+Production `FLOW_SENSOR` and `LOG_SENSOR` are separate dedicated capacity units using the common Sensor build. They are not mixed with each other or with Network/Infrastructure monitoring in certified production operation. Combined high-rate Flow+Log operation is development/lab/test only unless later certified through change control.
+
+### 5.1 Flow Monitoring Sensor
+
+Flow Sensor sizing is based on measured workload, not device count. Certification records at least:
+
+- configured exporters/listeners and observation domains;
+- datagrams/sec, records/sec and bytes/sec average/peak;
+- records/datagram and fields/record;
+- NetFlow v5/v9, IPFIX, sFlow/vendor mix;
+- template count/rate/churn/options/enterprise-IE complexity;
+- sampling mix/rate changes and observed→estimated processing cost;
+- IPv4/IPv6 mix;
+- source admission/rate-limit/fairness cost;
+- temporal entity/IPAM/DNS/user/session/Geo/ASN/cloud/app enrichment cost;
+- dedicated spool write/growth/replay-drain rate;
+- Core upload and Kafka/ClickHouse insert/rollup cost;
+- Flow Explorer/top-N/matrix/Sankey/query concurrency.
+
+No production records/sec guarantee is fixed before benchmark evidence. Flow Sensor CPU/RAM/disk/network targets are certified independently from Network Sensor device-density targets.
+
+### 5.2 Log Monitoring Sensor
+
+Log Sensor sizing is independently based on source count, EPS/bytes, transport/connections, parser/multiline/redaction/fingerprint cost, spool/forwarding and downstream load. Flow capacity is never consumed as Log headroom and vice versa.
+
+### 5.3 Dedicated-role headroom and failure isolation
+
+Dedicated means no competing monitoring workload, not permission to run resources at 100%. Certified roles preserve burst, spool/replay, upgrade, health and failure-recovery headroom. A Flow burst or exporter storm must not consume Network/Log Sensor resources; a log storm must not consume Flow/Network Sensor resources.
 
 ## 6. Monitoring Work Units (MWU)
 
@@ -119,7 +146,7 @@ Platform must compute a workload score using at least:
 - RTT, packet loss and timeout rate;
 - gNMI stream rate;
 - REST calls and response size;
-- Flow records/sec and template rate;
+- Flow datagrams/sec, records/sec, bytes/sec, exporter/observation-domain count, records/datagram, fields/record, template rate/churn, sampling/enrichment cost and dedicated spool/replay;
 - Syslog/events/sec;
 - agent/agentless collection cost;
 - NCM/CLI scheduled/concurrent jobs;
