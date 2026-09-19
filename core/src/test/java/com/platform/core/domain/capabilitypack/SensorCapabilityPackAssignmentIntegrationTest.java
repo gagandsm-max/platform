@@ -201,6 +201,8 @@ class SensorCapabilityPackAssignmentIntegrationTest {
         SensorPackDesiredState desired = assignments.getDesiredState(tenantA.tenantId(), "sensor-pull");
         assertEquals(1L, desired.generation());
         assertEquals(assigned.desiredChecksum(), desired.checksum());
+        assertEquals(0L, desired.appliedGeneration());
+        assertNull(desired.appliedChecksum());
         assertEquals(1, desired.packs().size());
 
         StoredCapabilityPack artifact = assignments.requireAssignedArtifact(
@@ -214,6 +216,10 @@ class SensorCapabilityPackAssignmentIntegrationTest {
                 desired.generation(), desired.checksum());
         assignments.ackAppliedState(tenantA.tenantId(), "sensor-pull",
                 desired.generation(), desired.checksum()); // idempotent
+
+        SensorPackDesiredState afterAck = assignments.getDesiredState(tenantA.tenantId(), "sensor-pull");
+        assertEquals(desired.generation(), afterAck.appliedGeneration());
+        assertEquals(desired.checksum(), afterAck.appliedChecksum());
 
         DomainException stale = assertThrows(DomainException.class, () ->
                 assignments.ackAppliedState(tenantA.tenantId(), "sensor-pull", 0L, desired.checksum()));
@@ -240,6 +246,9 @@ class SensorCapabilityPackAssignmentIntegrationTest {
         assertArrayEquals(v1, assignments.requireAssignedArtifact(
                 tenantA.tenantId(), "sensor-e2e", PACK, "1.0.0").manifestBytes());
         assignments.ackAppliedState(tenantA.tenantId(), "sensor-e2e", d1.generation(), d1.checksum());
+        SensorPackDesiredState d1Applied = assignments.getDesiredState(tenantA.tenantId(), "sensor-e2e");
+        assertEquals(d1.generation(), d1Applied.appliedGeneration());
+        assertEquals(d1.checksum(), d1Applied.appliedChecksum());
 
         assignments.unassign(tenantA.tenantId(), "sensor-e2e", PACK, g1.desiredGeneration());
         catalog.activate(tenantA.tenantId(), PACK, "2.0.0", 1L);
@@ -250,6 +259,9 @@ class SensorCapabilityPackAssignmentIntegrationTest {
         assertArrayEquals(v2, assignments.requireAssignedArtifact(
                 tenantA.tenantId(), "sensor-e2e", PACK, "2.0.0").manifestBytes());
         assignments.ackAppliedState(tenantA.tenantId(), "sensor-e2e", d2.generation(), d2.checksum());
+        SensorPackDesiredState d2Applied = assignments.getDesiredState(tenantA.tenantId(), "sensor-e2e");
+        assertEquals(d2.generation(), d2Applied.appliedGeneration());
+        assertEquals(d2.checksum(), d2Applied.appliedChecksum());
 
         var view = assignments.getAssignments(tenantA.tenantId(), "sensor-e2e");
         assertEquals(d2.generation(), view.appliedGeneration());
