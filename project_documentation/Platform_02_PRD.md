@@ -228,7 +228,7 @@ Sensors shall:
 Platform shall treat communication reliability as a correctness contract, not as a promise that external networks never lose packets.
 
 - Telemetry durably accepted by Platform shall not become silently unexplained loss within the certified Platform durability boundary.
-- A Sensor shall not delete acknowledged spool data until the Core durable-acceptance contract permits deletion under the certified HA design.
+- A Sensor shall not delete or reclaim spool data until the Core durable-acceptance contract permits deletion under the certified HA design.
 - Source/network loss outside Platform control, especially unacknowledged UDP, is not represented as guaranteed delivery. Where technically observable, receiver/kernel drops, decoder drops, queue/rate-limit drops, template misses and exporter/session sequence gaps shall be surfaced as telemetry-quality evidence.
 - Core/WAN recovery and historical replay shall not starve identity, PKI, assignment/fencing/heartbeat control traffic or materially delay current critical operational telemetry; replay must still make bounded forward progress.
 - Critical push telemetry such as traps, Syslog and Flow shall support a policy-driven HA deployment profile where source technology permits redundant delivery. Supported patterns may include a stable collector VIP/FQDN, vendor-supported multiple destinations, dual collectors or another certified deployment-specific receiver mechanism. Standalone deployments do not imply Sensor-HA guarantees.
