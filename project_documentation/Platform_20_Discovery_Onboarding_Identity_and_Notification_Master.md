@@ -189,6 +189,24 @@ Canonical identity remains protocol-independent and tenant-scoped. For Agent-bac
 
 Address/hostname changes are modeled as observations/attributes/history. Reconciliation uses stable evidence and provenance; ambiguity produces a review state rather than an invented identity decision.
 
+### 4.2.1 Temporal identity for Flow enrichment
+
+Flow consumes, but does not redefine, canonical identity. Historical Flow resolution uses the identity/address/session evidence effective at the Flow observation time.
+
+Applicable temporal evidence may include:
+
+- canonical entity/address assignment history from Platform discovery/IPAM/DHCP;
+- Agent-backed system/host name and network-attachment history;
+- DNS/FQDN observations with observed/effective time;
+- authenticated endpoint/user session evidence from Agent, AD/auth events, Entra, RADIUS/802.1X, VPN, WLAN/NAC, firewall/proxy identity or equivalent governed source;
+- site/subnet/VRF attachment history.
+
+AD/LDAP/Entra directory account/computer metadata can enrich a resolved identity but **directory existence/group membership alone does not prove that a user controlled a particular IP at a particular Flow timestamp**.
+
+A user-attribution binding records source, validity interval/observed time, confidence and conflict state. Conflicting simultaneous evidence is retained for review/low-confidence presentation; Platform does not silently pick a user.
+
+Dynamic IP reuse, VPN/NAT or hostname change must not retroactively move old Flow to the current endpoint/user. Flow may reference temporal identity/enrichment records rather than copying every mutable directory attribute into high-volume telemetry.
+
 ### 4.3 Notification Center architecture
 
 The modular Core owns an in-product Notification Center module. PostgreSQL owns authoritative notification metadata, recipient state and subscription/preferences. High-volume raw monitoring events remain in their normal telemetry/event path; they are not copied wholesale into per-user notification state.
