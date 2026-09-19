@@ -29,6 +29,10 @@ Install signed native package. Wizard/CLI prompts for Standalone or HA. In HA, f
 
 Install Sensor package, provide current Master Core address/enrollment material and role/site/pool inputs. Sensor performs secure handshake, receives identity/certificate/configuration and joins the appropriate Sensor Pool. Core remains authoritative for assignment/policy.
 
+Production installer/enrollment exposes the Sensor role explicitly. `FLOW` and `LOG` are exclusive production roles in the common Sensor package. The effective configuration starts only modules permitted by the selected role and rejects incompatible assignments/listeners. A `COMBINED_DEV` or equivalent mixed role, if shipped, is clearly marked not production certified.
+
+For FLOW Sensor activation, readiness validates listening interfaces/ports, exporter/source policy, expected rate/capacity inputs, socket/kernel limits, role-local spool/disk and Core ingestion path. For LOG Sensor activation, readiness validates configured log transports/sources, connection/parser capacity, role-local spool and applicable forwarding path.
+
 ## 3. Agent installation
 
 Linux Agent native package or Windows MSI/BAT wrapper installs service, enrolls against current Master Core, receives identity and is directed by Core to the appropriate Sensor. Agent retains enough information to reconnect after reboot while Core may revise assignment.
@@ -40,6 +44,22 @@ Installers enable services automatically. Reboot test is mandatory before instal
 ## 5. Upgrade
 
 Preflight → capacity/free-space check → package signature → state/config backup → drain/standby orchestration → package update → schema migration → service start → health verification → compatibility verification → completion.
+
+A production Sensor role change uses a separate governed workflow:
+
+```text
+request role change
+→ reject new incompatible assignments/sources
+→ drain/reassign active sources/work
+→ flush or explicitly account for role-local durable backlog
+→ verify no incompatible active assignment/listener
+→ apply role/configuration
+→ restart/reconcile where required
+→ role-specific readiness/capacity validation
+→ activate
+```
+
+Role change is not used as a shortcut around capacity planning or HA/redundancy. Exporters/log sources are reconfigured/reassigned according to their protocol-specific failover behavior before the old role is removed.
 
 HA Core upgrades are rolling where architecture permits: upgrade Standby, verify, controlled switchover, upgrade former Active. Exact data-service upgrade sequencing follows component version compatibility.
 
@@ -57,7 +77,7 @@ Every installer returns stable error code, writes sanitized install log and poin
 
 ## 1. Required runbooks
 
-Core process failure; repeated crash loop; HA failover; Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation.
+Core process failure; repeated crash loop; HA failover; Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; **Flow exporter no-data/unknown-source; Flow template missing/churn; sampling unknown/change; sequence gaps/exporter reset; Flow receiver/socket/queue drops; Flow Sensor overload/spool pressure; Flow identity/enrichment conflict; Flow redundancy/failover; Log Sensor overload/spool pressure; production Sensor role violation/failed role change**; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation.
 
 ## 2. Runbook structure
 
@@ -66,3 +86,27 @@ Every runbook states trigger, impact, immediate safety action, diagnostic eviden
 ## 3. Logging
 
 Support teams should first use Platform Health/Audit/Support Bundle rather than ad-hoc shell access. Shell commands are documented only where necessary and must not expose secrets.
+
+
+## 5. Dedicated Flow/Log Sensor operational supplement — v3.2.2
+
+Flow runbooks distinguish at least:
+
+- exporter/source unreachable or no recent data;
+- unknown/quarantined exporter versus expected configured source;
+- packets received but template missing/invalid;
+- template churn/ID reuse/exporter restart;
+- sequence gaps versus Platform receiver drops;
+- sampling unknown/rate change versus genuine traffic change;
+- socket/kernel receive-buffer exhaustion;
+- decoder/normalizer queue backlog;
+- per-exporter throttling/fairness intervention;
+- role-local spool pressure and remaining certified buffer horizon;
+- Core/Kafka/ClickHouse downstream degradation;
+- temporal identity/user/DNS/Geo enrichment unknown/conflict;
+- Flow Coverage discrepancy versus interface counters;
+- duplicate-export/multi-collector failover behavior.
+
+Log runbooks remain separate and a Log storm shall not be remediated by moving Log work onto a Flow or Network Sensor.
+
+Support bundles for a FLOW Sensor include sanitized role/config version, listener/source/exporter identifiers, protocol/version, observation-domain/template counts and ages, sampling state, sequence/drop counters, socket/queue health, decoder lag, records/bytes rate, spool/backlog, upload/downstream health and recent stable error codes. User identity evidence is minimized; credentials and unnecessary raw Flow payloads are excluded.
