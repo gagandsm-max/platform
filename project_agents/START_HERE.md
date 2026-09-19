@@ -44,6 +44,23 @@ selectedAgents: [platform-codebase-onboarding-engineer, platform-network-enginee
 selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, bounded_implementation, snmp_mib, sensor_edge, device_pack_authoring, evidence_bundle]
 ```
 
+
+### Build or harden Linux/Windows Agent reliability
+
+```text
+Read Platform_24 first. Reconcile the current Agent/Sensor/Core implementation before writing. Preserve the existing Agent queue, identity and Sensor Control authority unless evidence requires a controlled architecture change. Route transport/ACK/idempotency contracts to platform-api-platform-engineer, Sensor durability/failover to platform-sensor-runtime-engineer, operational recovery to platform-sre, failure automation to platform-test-automation-engineer and resource certification to platform-performance-benchmarker. Finish with independent code review and evidence collection. Do not claim final CORE_DURABLE semantics while that P0 remains open; safe Agent deletion is Sensor-durable ACK only when proven.
+selectedAgents: [platform-codebase-onboarding-engineer, platform-api-platform-engineer, platform-sensor-runtime-engineer, platform-sre, platform-test-automation-engineer, platform-performance-benchmarker, platform-code-reviewer, platform-evidence-collector]
+selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, bounded_implementation, sensor_edge, replay_idempotency, runtime_failure_injection, install_upgrade, evidence_bundle]
+```
+
+### Harden Sensor communication integrity (existing masters — no Platform_25)
+
+```text
+Reconcile existing spool, scheduler, uploader, Sensor Control, protocol receivers, Pipeline Integrity and alert-evidence behavior against Platform_00/03–06/10/11/14/17 and Decision Register Sensor communication-integrity decisions. Preserve existing mechanisms where they already satisfy the contract. Route Sensor runtime/fencing/replay to platform-sensor-runtime-engineer, protocol/push/fallback-path semantics to platform-network-engineer, Core ingestion/ACK to platform-api-platform-engineer + platform-telemetry-pipeline-engineer + platform-database-reliability-engineer, failure/resource certification to platform-test-automation-engineer + platform-performance-benchmarker, and operational failure modes to platform-sre. Do not add heavyweight Sensor dependencies or a Platform_25 SCR master.
+selectedAgents: [platform-codebase-onboarding-engineer, platform-sensor-runtime-engineer, platform-network-engineer, platform-api-platform-engineer, platform-telemetry-pipeline-engineer, platform-database-reliability-engineer, platform-sre, platform-test-automation-engineer, platform-performance-benchmarker, platform-code-reviewer, platform-evidence-collector]
+selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, sensor_edge, replay_idempotency, distributed_systems, runtime_failure_injection, capacity_performance, evidence_bundle]
+```
+
 ### Privileged NCM / connector / telemetry pipeline
 
 ```text

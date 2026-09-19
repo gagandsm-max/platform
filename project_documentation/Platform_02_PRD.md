@@ -1,7 +1,7 @@
 # Platform — Product Requirements Document (PRD)
 
 **Document ID:** PLATFORM-PRD-001  
-**Version:** 3.2.2  
+**Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Depends on:** `Platform_01_BRD.md`  
 **Engineering companions:** Architecture, HLD, LLD and Dataflow documents in this set  
@@ -223,6 +223,17 @@ Sensors shall:
 - apply the 80% local-storage safety policy;
 - preserve higher-priority/recent operational data preferentially under extreme local pressure.
 
+### 6.6 Sensor communication integrity and push-protocol continuity
+
+Platform shall treat communication reliability as a correctness contract, not as a promise that external networks never lose packets.
+
+- Telemetry durably accepted by Platform shall not become silently unexplained loss within the certified Platform durability boundary.
+- Normal acknowledgement-driven spool compaction/reclamation shall not delete data before the Core durable-acceptance contract permits it under the certified HA design. The mandatory 80% storage-protection policy remains an explicit emergency exception: when unavoidable, eligible oldest lower-priority unacknowledged buffered data may be shed, but it must never be reported as acknowledged/delivered and the loss/risk must be counted, audited and surfaced.
+- Source/network loss outside Platform control, especially unacknowledged UDP, is not represented as guaranteed delivery. Where technically observable, receiver/kernel drops, decoder drops, queue/rate-limit drops, template misses and exporter/session sequence gaps shall be surfaced as telemetry-quality evidence.
+- Core/WAN recovery and historical replay shall not starve identity, PKI, assignment/fencing/heartbeat control traffic or materially delay current critical operational telemetry; replay must still make bounded forward progress.
+- Critical push telemetry such as traps, Syslog and Flow shall support a policy-driven HA deployment profile where source technology permits redundant delivery. Supported patterns may include a stable collector VIP/FQDN, vendor-supported multiple destinations, dual collectors or another certified deployment-specific receiver mechanism. Standalone deployments do not imply Sensor-HA guarantees.
+- Platform shall not add a full Sensor database, Kafka/Valkey service, JVM process or separate mandatory reliability service merely to implement these semantics unless benchmark evidence and architecture change control prove it necessary.
+
 ---
 
 ## 7. Sensor placement and capacity
@@ -281,6 +292,19 @@ UI shall show both:
 - calculated workload percentage based on Monitoring Work Units.
 
 Device count alone shall not be the sole enforcement model.
+
+### 7.6 Failover readiness
+
+When HA/redundancy is enabled, failover eligibility for a target shall not be inferred only from backup-Sensor CPU/RAM/disk health. Eligibility shall consider, as applicable:
+
+- target/network reachability from the candidate Sensor;
+- protocol/port/TLS reachability;
+- credential usability and authorization;
+- site/security-zone/pool policy;
+- Sensor role/version/capability compatibility;
+- current MWU, queue/backlog and reserved failover capacity.
+
+For critical targets, Platform may maintain lightweight, staggered and policy-driven readiness evidence using bounded probes or change-triggered validation. Full duplicate monitoring is not required merely to prove standby readiness.
 
 ---
 
@@ -1903,7 +1927,9 @@ Operators shall be able to compare device A vs device B, or one entity/time wind
 
 ### 64.12 Data Pipeline Integrity
 
-Platform Operations shall expose produced, accepted, consumed, inserted, rejected, duplicate, late, schema-error and dropped telemetry counts. The purpose is to detect silent data loss between Sensor, ingestion, Kafka, processing and ClickHouse.
+Platform Operations shall expose produced, Sensor-durable/acknowledged, ingestion-accepted, Kafka-produced, consumed/processed, inserted, rejected, duplicate, late, schema-error and intentionally dropped telemetry watermarks/counters as applicable to each stream. Reconciliation should use compact sequence/watermark/counter evidence rather than storing per-stage copies of every observation solely for integrity accounting.
+
+Any unexplained difference outside the certified reconciliation/tolerance rules shall create a Platform internal `PIPELINE_INTEGRITY_GAP` condition with affected tenant/Sensor/topic/data-class scope and investigation evidence. The purpose is to detect silent data loss between Sensor, ingestion, Kafka, processing and ClickHouse without duplicating the telemetry pipeline.
 
 ### 64.13 Scheduled Housekeeping
 
@@ -2137,3 +2163,51 @@ Required log classes include startup, configuration load, registration/enrollmen
 ### PRD-LOG-002 — Supportability
 
 The Administration and Platform Health workspaces shall expose service health, recent failures, restart count, last successful recovery and links to sanitized diagnostics/support-bundle generation according to RBAC.
+
+---
+
+## v3.2.2 UI/UX interaction and self-service requirements (2026-09-19 amendment)
+
+The following requirements are additive and refine the existing UI/UX requirements without weakening them.
+
+| PRD ID | Requirement |
+|---|---|
+| `PRD-UI-001` | Platform shall provide a persistent role-aware global shell with shared tenant/site/entity/service/tag/time context that survives compatible drill-down, back/forward navigation, deep links, saved views, dashboard editing, investigation drawers and NOC mode without silently reinterpreting dimensions. |
+| `PRD-UI-002` | Platform shall provide a native no-code Dashboard Studio using a governed responsive grid, drag/resize/snap interactions, reusable panels, template variables, drill-down links, import/export and NOC layouts; embedded Grafana is not the product UI. |
+| `PRD-UI-003` | Dashboard definitions shall be versioned declarative documents with draft, validate and publish lifecycle, immutable published versions, attribution/audit and safe rollback; arbitrary customer JavaScript/React/eval is prohibited. |
+| `PRD-UI-004` | Platform shall provide a visual query builder that produces a versioned typed query AST covering source, namespace, entity, metric, aggregation, grouping and time bucket; Core/query services remain authorization and execution authority. |
+| `PRD-UI-005` | Expert raw-query mode, where supported, shall be read-only, RBAC-controlled, tenant-scoped, bounded and server-validated; it shall not provide an unrestricted browser-to-database escape hatch. |
+| `PRD-UI-006` | Dashboard variables shall be typed, multi-select capable, cascading and parameterized; user input shall never be concatenated directly into privileged query text. |
+| `PRD-UI-007` | A master time controller shall support quick/absolute ranges, timezone, auto-refresh, manual refresh and Pause/Play during triage; the shared temporal context shall drive compatible panels and investigations. |
+| `PRD-UI-008` | Each panel shall have independent loading, cancellation, stale-response suppression, error and retry state so one slow/failing query cannot block other panels. |
+| `PRD-UI-009` | Platform shall provide governed panel families for time series, stat/sparkline, gauges/progress, virtualized tables, health matrices, threshold/policy overlays, topology, flow/Sankey, geospatial views and bounded streaming event/log views. |
+| `PRD-UI-010` | Status shall never rely on color alone; semantic text/icon/shape tokens, accessible contrast and keyboard interaction are mandatory. |
+| `PRD-UI-011` | Platform shall provide a unified self-service provisioning framework for device onboarding, database connectors, REST/OpenAPI connectors, credential references, preflight testing and provisioning inventory without backend scripts for normal administration. GraphQL is a future connector candidate and is not a mandatory v1 contract. |
+| `PRD-UI-012` | Provisioning shall expose real backend preflight evidence and actionable diagnostics before activation; discovery/candidate review remains distinct from monitoring activation. |
+| `PRD-UI-013` | Credential UX shall allow authorized use of reusable secrets without revealing/copying plaintext; secrets shall be stored through the Platform secrets/KMS abstraction and shall not be embedded in dashboard/provisioning documents. |
+| `PRD-UI-014` | Network operations shall provide multi-layer topology, interface/port inspection, typed global search and time-aware/historical views with persistent operator layouts where applicable. |
+| `PRD-UI-015` | Incident/RCA workspaces shall synchronize metrics, logs, flow, events, changes and evidence through shared temporal/entity context and shall display causal evidence/provenance; `INCONCLUSIVE` remains a valid outcome. |
+| `PRD-UI-016` | Numeric RCA confidence shall be shown only when the score is calibrated and its semantics are documented; heuristic/LLM output shall not be presented as false precision. |
+| `PRD-UI-017` | NOC wallboard mode shall provide high-contrast, large-distance-readable views, reduced non-essential animation and hidden editing/navigation chrome without changing server authorization. |
+| `PRD-UI-018` | Dashboard View/Edit/Share/Delete and Provision/Manage actions shall use distinct server-authorized permissions; UI hiding is never authorization. |
+| `PRD-UI-019` | Query cardinality, time range, concurrency, transformation size and rendered data volume shall be bounded; server-side aggregation/downsampling and pagination shall prevent the browser from materializing enterprise-scale raw datasets. |
+| `PRD-UI-020` | Dashboard blueprints, saved views and connector mappings shall be schema validated, tenant-scoped and safe to import/export; unknown executable content and cross-tenant data-source substitution shall fail closed. |
+| `PRD-UI-021` | The global omnibar shall search governed entity identifiers such as IP, MAC, hostname, interface, VLAN, VRF and ASN using typed results; search backend choice remains an architecture decision, not a UI dependency mandate. |
+| `PRD-UI-022` | High-risk browser terminal and zero-touch configuration deployment shall remain gated until bastion/NCM authorization, audit, approval, validation and rollback contracts are production-ready. |
+| `PRD-UI-023` | Platform shall provide reusable investigation patterns, including a three-pane list/evidence/context layout where appropriate, instead of inventing separate interaction models per workspace. |
+| `PRD-UI-024` | Monitoring-domain switching may accelerate Network, Flow, Infrastructure, Synthetics, API and Database navigation but shall not replace the authoritative primary product navigation. |
+
+Named charting, graph, map, search, template or rendering libraries in design references are implementation candidates only and do not become product requirements by mention.
+
+---
+
+## v3.2.2 UI/UX operational-domain requirement additions (2026-09-19 amendment)
+
+| PRD ID | Requirement |
+|---|---|
+| `PRD-UI-025` | Platform shall support cross-domain operational dashboards and context-preserving drill-down across compatible Network, Flow, Infrastructure, Cloud/Kubernetes, Synthetics/API and Database dimensions without silently reinterpreting incompatible context. |
+| `PRD-UI-026` | Network device views shall provide evidence-driven physical faceplate or logical interface-density visualization; physical placement shall not be fabricated when Device Pack/hardware inventory evidence is unavailable. |
+| `PRD-UI-027` | Synthetic/API workspaces shall provide timing waterfall, multi-location comparison, assertion evidence and a size-bounded escaped/redacted response inspector where source data supports them. |
+| `PRD-UI-028` | Database workspaces shall provide slow-query, connection-pool/session, lock/wait and normalized explain-plan interactions where supported, with escaped/redacted query evidence and safe raw-plan fallback. |
+| `PRD-UI-029` | Operational UI shall explicitly distinguish presentation/visualization thresholds from effective alert/monitoring policy; changing visual styling shall not silently mutate alert policy. |
+| `PRD-UI-030` | Drag/drop, resize, panel actions, topology and other pointer-centric interaction shall provide keyboard-accessible alternatives/equivalent commands and shall not rely on hover or color as the sole carrier of operational meaning. |

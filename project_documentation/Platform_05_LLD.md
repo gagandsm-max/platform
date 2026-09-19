@@ -1,7 +1,7 @@
 # Platform — Low-Level Design (LLD)
 
 **Document ID:** PLATFORM-LLD-001  
-**Version:** 3.2.2  
+**Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD → PRD → Architecture → HLD  
 
@@ -494,9 +494,9 @@ priority
 
 ### 7.2 Ack semantics
 
-A Sensor deletes a local segment only after Core returns a durable acceptance acknowledgment consistent with the certified HA design.
+Under normal acknowledgement-driven compaction, a Sensor deletes a local segment only after Core returns a durable acceptance acknowledgment consistent with the certified HA design. Receipt of that acknowledgement is permission to advance the local acknowledged watermark and eventually reclaim the covered spool records. The mandatory 80% emergency storage-protection path is a separate loss path: when unavoidable it may shed only eligible oldest lower-priority unacknowledged buffered data according to policy, but it must not advance the acknowledged watermark or represent those records as delivered; the resulting sequence/data gap is counted, audited and reported when connectivity permits. If emergency shedding creates a non-contiguous sequence gap, the Sensor must not infer acknowledgement across that gap. The exact representation/reconciliation of terminally lost ranges and the rule for later accepted observations to resume safe replay/reclamation are part of the existing `ACK_DURABLE` P0 spike; until certified, acknowledgement-driven reclamation across such a gap fails closed.
 
-Because Kafka is internal and the two-Core Kafka mechanism is still a P0 spike, `ACK_DURABLE` must be defined only after failure testing proves where the durable boundary is.
+Because Kafka is internal and the exact two-Core Kafka/ClickHouse/PostgreSQL recovery/fencing mechanism is still a P0 spike, `ACK_DURABLE` must be defined only after failure testing proves where the recoverable boundary is. The contract does **not** require waiting for every downstream analytical consumer/ClickHouse insert unless the P0 spike proves that is necessary for recoverability; downstream persistence gaps remain subject to Pipeline Integrity reconciliation.
 
 Until then, design target:
 
@@ -507,7 +507,7 @@ Until then, design target:
 5. Sensor marks/deletes acknowledged segments.
 6. Duplicate replay is tolerated using observation/batch IDs.
 
-No component may acknowledge and then silently lose data without a documented replay source.
+No component may acknowledge and then silently lose data without a documented replay source. Crash-window certification must include at least: Kafka commit before PostgreSQL watermark commit, PostgreSQL commit before ACK transmission, ACK response loss, Active-Core loss immediately after ACK, Standby takeover and duplicate replay.
 
 ### 7.3 Duplicate handling
 
@@ -516,6 +516,20 @@ Consumers must be idempotent where practical. ClickHouse ingestion may use repla
 ### 7.4 Late data
 
 Late observations retain original `eventTime`. Query/RCA pipelines distinguish event time from ingest time. Late data can amend historical facts but must not incorrectly reopen old incidents unless policy explicitly permits.
+
+### 7.5 Uploader priority and batching
+
+Logical priority is required even when one HTTPS/gRPC transport is used:
+
+1. identity/PKI/fencing/control;
+2. heartbeat/assignment/lease;
+3. current critical state/events;
+4. current normal telemetry;
+5. replay backlog.
+
+Implementations may use weighted queues, stream scheduling or uploader budgets, but must prove that backlog recovery cannot starve control/current monitoring and that replay cannot starve forever.
+
+Telemetry batches are bounded by record count, encoded bytes/request bytes and maximum batch age. Fixed certified defaults are preferred initially; adaptive batching/compression is added only when benchmarks prove a material benefit without violating latency/resource limits.
 
 ---
 
@@ -557,6 +571,29 @@ Core returns:
 ### 8.3 Fencing tokens for jobs
 
 Every poll/NCM job lease includes monotonically increasing assignment/fencing version. A Sensor must refuse a superseded lease once it has observed a newer version. This reduces duplicate polling during reassignment.
+
+### 8.4 Disconnected ownership and reconciliation — P0 engineering spike
+
+The existing assignment version + lease model remains the baseline; additional metadata is introduced only if the spike proves it necessary.
+
+Required behavior:
+
+- loss of Core connectivity does not immediately stop safe polling while certified local capacity remains;
+- disconnected autonomy is bounded and visible;
+- Core does not reassign solely on a short heartbeat miss when that would predictably create duplicate authority;
+- when failover/reassignment is justified, a newer authoritative assignment/fencing version prevents stale work once observed;
+- a reconnecting Sensor reconciles assignment state before resuming superseded jobs;
+- exact disconnected-grace, reassignment hold-off, takeover evidence and any extra epoch/token fields remain **TBD/P0-SPIKE** until partition tests prove the simplest safe contract.
+
+### 8.5 Failover readiness evidence
+
+For an HA-enabled target, candidate readiness is a typed record derived from capacity plus target/network/protocol/TLS/credential/security-zone/role/version compatibility evidence. Critical-target readiness may be refreshed by lightweight staggered probes and change-triggered validation. Full duplicate monitoring is prohibited as the default readiness mechanism.
+
+### 8.6 Poll distribution and retry-domain control
+
+Recurring polling is deterministically phase-distributed across its configured interval, with bounded jitter where appropriate, so common intervals do not synchronize large estates into bursts while preserving the requested cadence.
+
+Retries remain bounded/exponential/jittered. When strong evidence identifies a shared failure domain (for example site/WAN, credential profile, protocol service or Sensor interface), Platform may suppress per-target retry amplification and retain bounded recovery probes. Weak/speculative topology evidence must not suppress independent failures.
 
 ---
 
@@ -2108,22 +2145,25 @@ Recommendations are advisory and require review before changing policy.
 
 ## 69. Pipeline integrity LLD
 
-Maintain watermarks/counters:
+Maintain compact watermarks/counters sufficient to reconcile the certified path:
 
 ```text
 sensor_produced_seq
+sensor_durable_seq
 sensor_acked_seq
 ingestion_accepted_seq
-kafka_produced_count
-consumer_processed_count
-clickhouse_inserted_count
-rejected_count
+kafka_produced_count_or_offset
+consumer_processed_count_or_offset
+clickhouse_inserted_count_or_watermark
+rejected_count_with_reason
 duplicate_count
 late_count
 dropped_count_with_reason
 ```
 
-Perfect one-to-one counts may not exist for transformed/aggregated streams, so reconciliation is defined per stream stage/schema. Any unexplained loss must create a data-quality/internal Platform event.
+Perfect one-to-one counts may not exist for transformed/aggregated streams, so reconciliation is defined per stream stage/schema and transformation contract. The reconciler must be able to classify the observed difference as accepted/persisted, duplicate, rejected, late or intentionally dropped. Any remaining unexplained discrepancy outside certified tolerance creates `PIPELINE_INTEGRITY_GAP` with tenant/Sensor/topic/data-class scope and audit evidence.
+
+Do not persist per-stage copies of every observation solely for integrity accounting. Sequence ranges, offsets, compact watermarks and counters are preferred unless a specific stream proves that stronger evidence is required.
 
 ## 70. Shift handover / PIR / Runbook records
 
@@ -2420,3 +2460,90 @@ Logs shall be bounded. Linux packages integrate with journald/logrotate policy; 
 ### 71.7 Package scripts
 
 `.deb`/`.rpm` install/upgrade/uninstall scripts must be idempotent, must not destroy customer data on package removal unless an explicit purge operation is requested, and must preserve configuration/state across in-place upgrade. Package scripts must record failures with actionable error codes.
+
+---
+
+## v3.2.2 UI interaction LLD supplement (2026-09-19 amendment)
+
+### Dashboard definition contract
+
+A dashboard is a schema-versioned declarative document. At minimum it contains:
+
+```json
+{
+  "schemaVersion": "1.x",
+  "dashboardId": "<stable-id>",
+  "title": "...",
+  "layout": {"columns": 24, "breakpoints": {}},
+  "variables": [],
+  "panels": [],
+  "links": [],
+  "permissions": {},
+  "contextDefaults": {}
+}
+```
+
+Each panel carries a stable panel ID, approved panel type, grid coordinates `x/y/w/h`, min/max constraints, query references/AST, visual options, thresholds/policy bindings, overrides and drill-down links. Definitions contain data/source references, never plaintext credentials or executable customer code.
+
+Published versions are immutable. Rollback creates a new version based on a previous definition rather than mutating history in place.
+
+### Query AST
+
+The visual builder emits a versioned AST rather than privileged SQL text. The logical model includes:
+- source/data-domain;
+- namespace;
+- entity/resource selector;
+- metric/field;
+- aggregation/function;
+- group-by dimensions;
+- time bucket/resolution;
+- bounded filters/order/limit;
+- optional approved transformation references.
+
+Variable substitution is typed and parameterized. Server compilation is responsible for tenant/resource predicates and source-specific syntax.
+
+Raw-query mode, when enabled for a source, is a separately authorized expert contract with read-only grammar/policy enforcement, maximum range/rows/scan/concurrency and audit.
+
+### Shared context
+
+`DashboardContext`/workspace context carries authenticated tenant, resource scope, time range, timezone, refresh/pause state, comparison window, entity/service/site/tag selections and typed dashboard variables. Non-applicable dimensions are preserved as inactive context where practical; they are not silently reinterpreted.
+
+### Panel runtime
+
+Every panel owns an AbortController/cancellation scope, stale-response fence, independent loading/error/freshness state, bounded client data and an error boundary. Bounded expensive client work may use a worker.
+
+### Security
+
+Dashboard import and connector response inspection must reject executable HTML/script, unsafe raw payload rendering and unknown schema content where required. SQL/JSON/log text is rendered escaped. Mutable actions require click/select/confirmation surfaces and server authorization; hover is informational only.
+
+---
+
+## v3.2.2 Operational-domain UI LLD supplement (2026-09-19 amendment)
+
+### Faceplate metadata
+
+A physical faceplate representation may use tenant-scoped entity/device metadata describing chassis/module/port relationships and optional stable display coordinates/order. The UI must treat this metadata as optional. Missing/incomplete evidence falls back to logical interface rows/tiles.
+
+### Synthetic timing evidence
+
+A synthetic result may expose an ordered array of supported timing phases, each with phase type, start/duration or duration, location/probe identity and freshness/provenance. Response-body/header inspection is a separate bounded/redacted field set and is never the source of credentials.
+
+### Database evidence
+
+Database operational views use normalized query identity where available. Query samples, explain plans, lock/wait/session evidence and pool metrics are bounded. Explain-plan normalized tree nodes retain source provenance; raw fallback text is escaped and size limited.
+
+### Threshold typing
+
+Panel configuration distinguishes:
+- `visualThresholds` — display-only styling bands/markers;
+- `monitoringPolicyRef` / effective-policy projection — authoritative alert/monitoring semantics.
+
+Saving `visualThresholds` cannot update policy state.
+
+### Dashboard save concurrency
+
+Dashboard draft/save/publish operations use server-authoritative version/revision concurrency. Client optimistic updates may improve responsiveness, but every save carries the expected authoritative revision/version; a stale write fails with a stable conflict response and the UI preserves the unsaved draft for merge/retry. Browser cache/localStorage is never the conflict-resolution authority.
+
+### Accessibility commands
+
+Drag, resize, reorder, topology select/focus and equivalent pointer actions must have keyboard-command or menu equivalents where the action is operationally material.

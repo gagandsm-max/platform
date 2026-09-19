@@ -4,7 +4,7 @@
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Completeness Control**
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 UI/UX + Agent reliability + Sensor communication-integrity RTM reconciliation
 
 ## 1. Purpose
 
@@ -53,13 +53,13 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | REQ-S-001 | Universal Sensor Runtime with Network, Infrastructure, Combined, Streaming/Event, Synthetic and Cloud/API roles | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-002 | Sensor locality-aware placement close to devices | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-S-003 | Capacity-aware placement; never overload Sensor for lower RTT | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-003 | Capacity-aware placement/failover readiness includes target/protocol/credential/security-zone reachability; never overload or select a merely healthy but unusable Sensor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-004 | Customer modes: Auto, Auto-with-approval, Manual, Sensor Pool | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-005 | Sensor pools support N+1/N+2/N+K/1:1/active-active capacity models | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-S-006 | Distributed leases/fencing prevent duplicate polling | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-S-007 | Local durable spool/store-and-forward | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-006 | Partition-safe distributed leases/fencing balance bounded disconnected polling continuity with prevention/reconciliation of duplicate Sensor authority | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-007 | Local durable spool/store-and-forward; ACK-gated reclamation, idempotent replay and control/current telemetry protected from replay starvation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-008 | Sensor 80% disk protection and bounded junk/log cleanup | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-S-009 | Sensor self-observability: CPU/RAM/disk/queue/poll latency/backlog/failures | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-009 | Sensor self-observability: CPU/RAM/disk/queue/poll latency/backlog, buffer horizon, retry amplification, receiver/drop/gap evidence and failover readiness | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-010 | Initial planning baseline 4 vCPU/16GB/150GB ~800 normal network devices | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-011 | Benchmark 8 vCPU/16GB high-density target ~2,000–2,500 normal network devices | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-012 | Agentless infrastructure target ~800 endpoints per 4C/16G Sensor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -94,9 +94,9 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | REQ-NET-001 | SNMP v1/v2c/v3 with customer-configurable auth/privacy/security protocols | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-002 | ICMP/traceroute/TCP/DNS/TLS/HTTP probes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-NET-003 | SNMP traps/informs and syslog | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-NET-004 | NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-NET-005 | NETCONF/RESTCONF/gNMI/gRPC/streaming | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-NET-003 | SNMP traps/informs and Syslog with explicit transport-loss semantics, receiver/drop evidence and policy-driven redundant push destinations where source capability permits | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-NET-004 | NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow with template/sequence/drop continuity evidence and HA receiver guidance where source capability permits | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-NET-005 | NETCONF/RESTCONF/gNMI/gRPC/streaming with session/subscription continuity, reconnect and explicit gap evidence where continuity cannot be proven | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-006 | SSH/CLI; Telnet legacy disabled by default and audited | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-007 | CDP/LLDP/ARP/FDB discovery/topology | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-008 | BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VLAN-STP/VRF/HSRP-VRRP/LACP/QoS-CBQoS/multicast/SD-WAN monitoring | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -233,7 +233,7 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-DATA-012 | Telemetry cardinality/explosion protection | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-DATA-013 | Deduplication, replay, late/out-of-order handling | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-DATA-014 | Legal hold/preserve incident evidence from purge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-DATA-015 | Data pipeline integrity counters and no silent data loss | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-DATA-015 | Compact end-to-end pipeline integrity watermarks/counters explain accepted/rejected/duplicate/late/dropped records; unexplained discrepancy raises PIPELINE_INTEGRITY_GAP | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Integration/Governance/Security
 
@@ -341,6 +341,8 @@ v3.2.2 specialized-master RTM supplements live in their owning masters and are n
 - EGC: `PRD-EGC-*` / `REQ-EGC-*` in `Platform_21_Enterprise_Gap_Closure_Master.md`
 - MIA: `PRD-MIA-*` / `REQ-MIA-*` in `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`
 - EMC: `PRD-EMC-001` through `PRD-EMC-018` and `REQ-EMC-001` through `REQ-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
+- ARF: `PRD-ARF-001` through `PRD-ARF-018` and `REQ-ARF-001` through `REQ-ARF-018` in `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md`
+- Sensor communication-integrity: strengthen existing `REQ-S-*` / `REQ-NET-*` / `REQ-DATA-*` rows in this catalogue and governing base masters; **no** `PRD-SCR-*` / `REQ-SCR-*` catalogue and **no** `Platform_25` specialized master
 
 Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack completeness control and are supplemented, not replaced, by Capability Pack certification requirements in `Platform_23`.
 
@@ -363,6 +365,7 @@ Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack complete
 - Enterprise gap-closure specialized-master RTM supplement: `Platform_21_Enterprise_Gap_Closure_Master.md`.
 - Monitoring-intelligence/alert-quality/AI-assurance specialized-master RTM supplement: `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`.
 - Enterprise monitoring coverage / Capability Pack certification specialized-master RTM supplement: `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`.
+- Agent reliability / failover / durability / resource-assurance specialized-master RTM supplement: `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md`.
 
 ### Development, packaging, service supervision and diagnostics — v3.1
 
@@ -376,3 +379,47 @@ Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack complete
 | SVC-RECOVERY-001 | Recoverable crashes trigger supervised restart; persistent crash loops remain visible/diagnosable | §21.3 | PRD-SVC-001 | §34.4 | §35.4 | §71.3/71.4 | DF-091/092 |
 | LOG-STRUCT-001 | All components maintain structured lifecycle/failure/health logs with correlation IDs and secret redaction | §21.4 | PRD-LOG-001 | §34.5 | §35.4 | §71.5/71.6 | DF-090..093 |
 | DEV-WIN-CERT-001 | Windows-specific service/MSI/reboot certification uses isolated Windows runner/VM despite Docker-first development | §21.1/21.2 | PRD-PKG-001 | §34.6 | §35.5 | §71.4 | DF-092/093 |
+
+---
+
+## v3.2.2 UI interaction traceability supplement (2026-09-19 amendment)
+
+Existing `REQ-UI-001`–`REQ-UI-025` remain authoritative (including the NOC troubleshooting IDs `REQ-UI-015`–`REQ-UI-025`). The following requirements add the shared interaction architecture needed to implement the 98 workspaces consistently and are numbered `REQ-UI-026` onward to avoid colliding with NOC IDs.
+
+| ID | Requirement | PRD | Architecture | HLD | LLD | Dataflow | UI Master | API/Data | Threat | Quality / Specialized |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| REQ-UI-026 | Persistent shared tenant/resource/time context across compatible navigation and drill-down | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-027 | Declarative dashboard definition with draft/validate/publish and immutable version history | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-028 | Visual no-code query builder emits versioned typed Query AST | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-029 | Raw query mode is expert-only, read-only, RBAC/tenant/budget constrained and server validated | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-030 | Cascading typed variables plus master time/timezone/refresh/Pause controls | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-031 | Independent panel cancellation/error/freshness boundaries and stale-response suppression | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-032 | Server-side query budgets, aggregation/downsampling, pagination and cardinality protection | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-033 | Governed native panel library: time series/stat/gauge/table/matrix/topology/flow/map/stream | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-034 | Accessible semantic status; no color-only operational meaning | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-035 | Unified self-service provisioning framework with real preflight evidence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_20 |
+| REQ-UI-036 | Credential selection/use without plaintext reveal; secret references only in UI documents | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_10/20 |
+| REQ-UI-037 | Typed global omnibar/entity search with backend-pluggable index | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-038 | Multi-layer topology, interface inspector and time-aware network operations UX | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-039 | Shared incident/RCA investigation layout and cross-telemetry temporal synchronization | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_19 |
+| REQ-UI-040 | Calibrated RCA confidence only; evidence/provenance and INCONCLUSIVE preserved | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_19 |
+| REQ-UI-041 | High-contrast NOC wallboard mode with reduced animation and no authorization change | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-042 | Distinct dashboard/provisioning read/edit/share/delete/manage permissions enforced server-side | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-043 | Safe schema-validated dashboard blueprint import/export and tenant-aware remapping | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-044 | Bounded client transformations; expensive work off-main-thread/server-side | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-045 | Browser terminal and ZTP remain gated by bastion/NCM audit, approval and rollback controls | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_10 |
+| REQ-UI-046 | UI/search/rendering dependency choice requires formal OSS admission and benchmark | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_07/14 |
+| REQ-UI-047 | Notification channel manager and later kiosk/snapshot features reuse shared dashboard/security contracts | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Platform_19/20 |
+
+---
+
+## v3.2.2 UI operational-domain traceability additions (2026-09-19 amendment)
+
+| ID | Requirement | PRD | Architecture | HLD | LLD | Dataflow | UI Master | API/Data | Threat | Quality / Specialized |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| REQ-UI-048 | Cross-domain dashboard composition and context-preserving drill-down | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-049 | Evidence-driven device faceplate/interface-density visualization | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-050 | Synthetic/API timing waterfall, comparison and safe response inspector | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-051 | Database slow-query/plan/pool/lock interaction model | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-052 | Presentation thresholds explicitly distinguished from monitoring/alert policy | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-053 | Accessibility parity for drag/drop, panel actions and topology interaction | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |

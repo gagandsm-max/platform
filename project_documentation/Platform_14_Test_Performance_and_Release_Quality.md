@@ -51,6 +51,38 @@ Wrong SNMP community/v3 user/auth/privacy, SNMP disabled, ACL/firewall drop, unr
 
 UI E2E/integration suites shall verify: device/alert/incident context is preserved while Troubleshoot/embedded CLI is used; on-demand Ping/Trace/SNMP returns source/vantage and bounded results; multi-vantage disagreement remains visible; `Verify Now` returns per-check evidence; Live Evidence distinguishes monitored from on-demand state; Investigation Sessions retain evidence references; stored/personal/one-time CLI credential modes obey policy; low-risk read-only diagnostics avoid unnecessary friction while privileged/configuration commands enforce configured controls; and interactive load cannot starve certified monitoring workload.
 
+### 3.1 Sensor communication-integrity failure certification
+
+The Sensor/Core communication path cannot be certified from happy-path tests alone. Release evidence shall inject representative failures at the device/source, Sensor and Core/data-service boundaries, including at minimum:
+
+- packet loss/burst loss/high latency/jitter, DNS/route/ACL/port/MTU failures;
+- SNMP timeout/auth/privacy/partial/`tooBig`/GETBULK incompatibility;
+- REST 401/403/429/5xx/timeout/token expiry/schema/partial response;
+- SSH host-key/auth/session-limit failures and gNMI disconnect/reconnect/subscription gap;
+- trap/Syslog/Flow bursts, template miss and receiver/queue saturation;
+- Sensor process/host restart, CPU/RAM/FD/disk pressure, spool corruption/read-only filesystem, worker/queue/retry storms;
+- Primary Sensor loss, fallback unreachable/firewall/credential failure, stale ownership and reassignment race;
+- Core unreachable, TLS/certificate failure/rotation, Kafka unavailable/lag, ClickHouse unavailable, Core failover, ACK response loss, duplicate/out-of-order replay and large backlog recovery.
+
+Each case records whether safe polling/current monitoring continued, whether data loss was avoidable/unavoidable and explicitly measured, whether duplicates were harmless, whether resource/retry amplification remained bounded, whether the target was falsely declared DOWN, whether the actual failure domain was represented truthfully, whether recovery was automatic where safe and whether the transition/recovery was auditable.
+
+### 3.2 Communication release blockers
+
+The applicable production/HA profile is blocked until evidence proves:
+
+1. one failed primary poll cannot by itself create false device-down;
+2. shared-path failure cannot create uncontrolled retry storms;
+3. Sensor overload/drop/storage pressure is explicit rather than silent;
+4. Core outage does not stop polling solely because Core is unavailable while certified local buffer/autonomy remains valid;
+5. recovery replay cannot starve control/current telemetry;
+6. normal acknowledgement-driven spool reclamation does not occur before the certified durable ACK boundary permits it; any unavoidable 80% emergency shedding is separately evidenced as explicit unacknowledged data loss and never advances the acknowledged watermark;
+7. duplicate replay does not duplicate authoritative alerts/incidents or distort metrics;
+8. configured pull-workload failover is partition/fencing safe and target-ready;
+9. push-protocol HA/loss behavior is documented/tested according to source capability;
+10. streaming/UDP continuity gaps are explicit where completeness cannot be proven;
+11. resource consumption remains within the certified Sensor profile;
+12. no heavyweight Sensor dependency is added merely to solve coordination.
+
 ## 4. False-alert quality
 
 Qualification tests must prove that SNMP failure alone does not automatically declare device-down where secondary evidence shows device reachability. Flapping/storm/dependency correlation and recovery qualification require regression suites.
@@ -74,6 +106,8 @@ No release promotion with failing P0/P1 tests, unresolved critical/high security
 ## 2. Sensor targets
 
 Planning baseline 4 vCPU/16 GB/150 GB ≈800 normal network devices. Benchmark objective: 8 vCPU/16 GB class approaching 2,000–2,500 comparable normal devices where workload permits. Streaming/Event Sensor benchmarked separately by records/events per second.
+
+Communication/resource certification additionally records CPU/RAM per MWU, poll operations/sec/core, metrics/sec/core, Flow records/sec/core, Syslog EPS/core, network and disk bytes/observation, spool write amplification/compression, replay throughput, retry amplification, goroutine/thread and FD/socket counts and GC overhead under healthy, WAN-loss/site-failure/credential-failure/Core-outage/replay/failover/burst profiles.
 
 ## 3. Benchmark dimensions
 
@@ -118,6 +152,8 @@ Full regression, performance certification, HA/DR evidence, migration/upgrade ma
 - missing SBOM/notices/provenance;
 - HA failover violating agreed <60s target under certified test profile;
 - unsupported silent data loss in certified normal failure scenarios;
+- unresolved durable-ACK or Sensor ownership/fencing P0 semantics for any HA profile being declared production-ready;
+- unexplained pipeline-integrity gaps or unbounded replay/retry amplification in the certified profile;
 - unresolved RED OSS dependency.
 
 ## 5. Evidence
@@ -149,3 +185,36 @@ Customer Acceptance Profile results must be evidence-backed. A technology listed
 Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certified ≠ deployed.
 
 OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively.
+
+---
+
+## 7. v3.2.2 UI/UX quality and performance gates (2026-09-19 amendment)
+
+The following are release-quality gates for implemented the 2026-09-19 v3.2.2 UI/UX amendment UI capabilities:
+
+- **Panel isolation:** a timed-out, cancelled, malformed or failing panel query must not stop unrelated panels or the shell.
+- **Cancellation correctness:** superseded preview/panel requests must be cancelled or fenced so stale responses cannot overwrite newer state.
+- **Tenant/query security:** Query AST, raw-query, saved-view, dashboard-import and provisioning APIs require tenant-isolation and authorization negative tests.
+- **Query budgets:** time range, rows, scanned data, series/cardinality, concurrency and export limits require boundary and abuse tests.
+- **Rendering scale:** certify representative time-series, virtualized table, health-matrix, topology and NOC workloads; do not claim fixed 2,000-point or 5,000-object targets without benchmark evidence.
+- **Downsampling fidelity:** server aggregation/downsampling must preserve operationally significant spikes/states according to metric semantics.
+- **Main-thread responsiveness:** benchmark expensive client parsing/transformation separately; long-running transformations must not freeze navigation/triage.
+- **Accessibility:** keyboard navigation, focus management, semantic labels, high contrast and no color-only status are release gates.
+- **NOC endurance:** wallboard mode is soak-tested for long-lived refresh, memory growth, GPU/CPU usage and reconnect behavior.
+- **Dashboard lifecycle:** concurrent edit/publish/version rollback/import validation and permission boundaries require deterministic tests.
+- **Provisioning:** credential non-reveal, preflight evidence, safe error/redaction and stale/bulk action behavior require E2E coverage.
+- **Investigation context:** cross-telemetry time/entity synchronization must not silently change scope or expose data from another tenant.
+- **Dependency admission:** any new visualization/search/map/headless-browser dependency must have exact-version licence/CVE/SBOM/offline-packaging and resource benchmark evidence before GA.
+
+Exact GA UI latency/render SLOs remain evidence-driven and shall be frozen only after representative benchmark runs.
+
+---
+
+## 8. v3.2.2 operational-UX acceptance additions (2026-09-19 amendment)
+
+- **Faceplate evidence:** physical port/chassis layouts require validated hardware/Device Pack relationship evidence; fallback logical density views are tested for incomplete inventory.
+- **Synthetic inspector:** timing waterfall ordering, multi-location alignment, response-size bounds, escaping and credential/header redaction require negative tests.
+- **Database evidence:** slow-query samples, SQL/query text and explain-plan data are escaped/redacted; plan-tree normalization failure falls back safely without exposing secrets.
+- **Threshold provenance:** tests prove visualization-only threshold edits cannot mutate monitoring/alert policy and that effective policy provenance is visible where applicable.
+- **Accessibility parity:** keyboard-only tests cover dashboard panel actions, resize/reorder alternatives, topology selection and primary investigation actions.
+- **Dashboard sequencing:** Dashboard Studio release is blocked until versioned schema, Query AST, context, authorization, panel registry and version lifecycle contracts have passing contract tests.

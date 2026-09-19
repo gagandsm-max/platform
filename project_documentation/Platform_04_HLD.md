@@ -1,7 +1,7 @@
 # Platform — High-Level Design (HLD)
 
 **Document ID:** PLATFORM-HLD-001  
-**Version:** 3.2.2  
+**Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD, PRD, Master Architecture  
 
@@ -169,7 +169,10 @@ Owns:
 - rebalancing;
 - Sensor drain/maintenance;
 - update rollout;
-- Agent→Sensor assignment.
+- Agent→Sensor assignment;
+- assignment-version/lease/fencing policy, including disconnected-grace and reconnect reconciliation once the P0 ownership spike is resolved;
+- failover-candidate readiness evidence for target/protocol/credential/security-zone compatibility where HA policy requires it;
+- push-receiver HA deployment state/policy where the source protocol supports redundant destinations.
 
 ### 4.7 Credential Service
 
@@ -258,7 +261,7 @@ Owns retention policies, rollup status, archive, storage forecasting, 80% waterm
 
 ### 4.20 Platform Operations Service
 
-Owns Core/Sensor/data-service health, support bundle orchestration, backup/restore status, upgrades, certificates, licence warnings and internal housekeeping dashboards.
+Owns Core/Sensor/data-service health, support bundle orchestration, backup/restore status, upgrades, certificates, licence warnings and internal housekeeping dashboards. Sensor communication observability includes buffer horizon, oldest unacknowledged telemetry, replay progress, retry amplification, receiver/decoder/drop evidence, failover readiness state and `PIPELINE_INTEGRITY_GAP` conditions without misclassifying communication degradation as monitored-resource failure.
 
 ---
 
@@ -314,6 +317,10 @@ Spool responsibilities:
 - preserve ordering per source/entity where required;
 - compact/delete acknowledged segments;
 - enforce 80% disk-protection policy.
+
+### 5.4 Uploader/replay arbitration
+
+The Sensor may share one secure Core transport while maintaining logical scheduling classes/budgets. Identity/PKI and control-plane traffic cannot be starved by replay. Current critical/current telemetry receives bounded service ahead of old backlog, while replay retains guaranteed forward progress. Batch formation remains bounded by record count, encoded bytes and maximum batch age; further adaptive behavior is benchmark-driven rather than mandatory architectural complexity.
 
 ---
 
@@ -1050,7 +1057,7 @@ Aggregates RCA feedback, ground-truth benchmark results, qualification outcomes,
 
 ### 34.7 Pipeline Integrity Service
 
-Reconciles sequence/watermark counters across Sensor spool, Ingestion Gateway, Kafka consumer groups and ClickHouse insert acknowledgements. It creates internal alerts when unexplained gaps exceed configured tolerance.
+Reconciles compact sequence/watermark/counter evidence across Sensor produced/durable/acknowledged state, Ingestion Gateway acceptance, Kafka publication/consumer progress and ClickHouse insert acknowledgements. It accounts explicitly for duplicates, rejections, late data and intentional drops. Any discrepancy that cannot be explained by certified stream transformation/tolerance rules creates an internal `PIPELINE_INTEGRITY_GAP` with affected scope and investigation evidence; the service does not persist duplicate copies of every observation solely for reconciliation.
 
 
 ---
@@ -1216,3 +1223,53 @@ Each deployment unit shall implement a common health/logging contract. Logs flow
 ### 35.5 Windows Agent deployment unit
 
 The Windows Agent is one compiled service executable plus configuration/certificate state and an installer. BAT wrappers are convenience automation; they are not the Agent runtime itself. GA packaging uses MSI and code signing.
+
+---
+
+## v3.2.2 UI/dashboard/provisioning HLD supplement (2026-09-19 amendment)
+
+### Shared UI subsystem boundaries
+
+1. **Shell & Context**
+   - owns route/navigation state, persistent time/scope context, NOC mode, breadcrumbs and command/search entry;
+   - never substitutes presentation permissions for Core authorization.
+
+2. **Dashboard Definition Service**
+   - owns draft/published definitions, immutable versions, attribution and rollback lineage;
+   - validates schema and panel references before publish.
+
+3. **Panel Query Service**
+   - accepts a versioned Query AST plus authenticated scope/context;
+   - applies RBAC, tenant filters, query budgets, time/cardinality limits, source routing, aggregation/downsampling and safe errors;
+   - never accepts unrestricted mutation statements.
+
+4. **Panel Runtime**
+   - one independent cancellation/error/freshness boundary per panel;
+   - shared Temporal Interaction Bus for compatible hover/zoom/selection;
+   - bounded rendering and streaming buffers.
+
+5. **Provisioning Studio**
+   - shares wizard, credential-reference, preflight, review and job-status components;
+   - protocol/connector-specific forms delegate to existing Core/Sensor protocol contracts.
+
+6. **Investigation Workbench**
+   - shared three-pane interaction model for incident/alert/entity/RCA workflows;
+   - time/entity/evidence context propagates through links and drill-downs.
+
+### Failure isolation
+
+A failed query, import, panel renderer, connector test or transformation must remain isolated to its bounded operation. The shell and unrelated panels/workspaces remain usable, with explicit degraded/error state rather than blank-page failure.
+
+---
+
+## v3.2.2 Operational-domain UI HLD supplement (2026-09-19 amendment)
+
+Domain workspaces plug into the shared panel/query/context runtime.
+
+- **Network faceplate adapter:** consumes certified hardware/Device Pack port relationships when present and otherwise exposes logical interface-density data.
+- **Synthetic/API evidence adapter:** exposes bounded phase timing, assertion and redacted response-inspection data.
+- **Database evidence adapter:** exposes normalized query identity, bounded samples, pool/session/lock state and normalized explain-plan structures where supported.
+- **Policy provenance adapter:** lets panels display effective monitoring/alert policy separately from visualization styling.
+- **Accessibility adapter contract:** panel/topology/grid actions expose keyboard-operable commands/equivalents in addition to pointer interactions.
+
+These adapters are logical UI/query responsibilities and do not require new standalone microservices by default.

@@ -2,7 +2,7 @@
 # Platform — Authoritative Open-Source Software Catalogue
 
 **Document ID:** PLATFORM-OSS-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Dependency Allow-List Baseline**  
 **Verification date:** 2026-09-06 (v3.2.1 bootstrap UI/build/logging admissions)  
 **Important:** This is an engineering/licensing governance baseline, not legal advice. Exact pinned versions and their complete transitive/bundled licenses must be scanned before release.
@@ -233,3 +233,38 @@ Tooling-only status does not mean licensing can be ignored; it means the tool is
 ### 10.1 Podman decision
 
 Podman compatibility is **not** a v1 engineering requirement. Adding a second local container runtime would increase variance in Compose compatibility, networking, volume behavior, rootless operation and support burden. The project will standardize on Docker Compose until a customer/developer requirement justifies another runtime.
+
+---
+
+---
+
+## v3.2.2 UI/UX dependency-governance clarification (2026-09-19 amendment)
+
+UI/UX design recommendations may name technologies for illustration. The authoritative OSS status is the catalogue above, not recommendation text.
+
+### Already selected / approved architectural basis
+
+The following are already marked `USE` and are the default implementation basis when their capability is implemented:
+
+- React — application framework;
+- Apache ECharts — charts and operational visualization primitives;
+- TanStack Table — large-table behavior;
+- TanStack Query — browser server-state/query caching;
+- react-grid-layout — dashboard grid/canvas layout;
+- Cytoscape.js — topology/causal graph rendering;
+- MapLibre GL JS — geospatial rendering;
+- xterm.js — terminal emulator component, subject to the separate privileged Session Broker/NCM security gate;
+- Jinja2 — NCM configuration templating only, under NCM validation/approval/secret controls.
+
+`USE` selects the library family; it does not claim the current UI bundle already includes it, that every surrounding feature is production-ready, or that arbitrary versions may be introduced. First implementation still requires exact-version locking, licence/notice verification, CVE/supply-chain scan, SBOM and offline-packaging evidence.
+
+### Not selected merely by recommendation
+
+- Do not add uPlot alongside ECharts without benchmark evidence that ECharts cannot meet a certified requirement.
+- Do not add G6/AntV alongside Cytoscape.js without approved architecture change.
+- Do not add Mapbox SDK in place of MapLibre without separate licensing/product decision.
+- OpenSearch remains `OPTIONAL-LATER`; do not introduce it solely for omnibar search. Elasticsearch is not a core Platform search dependency.
+- Puppeteer/Playwright are not production reporting dependencies unless a later rendering requirement passes architecture/OSS/resource/security review.
+- Arbitrary customer JavaScript remains prohibited in dashboard/query/transformation paths.
+
+Any future addition still requires bundle/runtime, rendering-density, accessibility, deterministic-test, offline-packaging, maintainership, security, licensing and resource-envelope review.

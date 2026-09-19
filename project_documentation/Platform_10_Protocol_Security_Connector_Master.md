@@ -1,7 +1,7 @@
 # Platform — Protocol, Security, Credential & Connector Master
 
 **Document ID:** PLATFORM-PROTOCOL-001  
-**Version:** 3.2.2  
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Protocol/Security/Connector Contract**  
 **Product:** Platform
 
@@ -37,6 +37,22 @@
 | Flow | NetFlow v5/v9, IPFIX, sFlow; J-Flow/vendor variants through compatible formats/packs | exporter/collector configurable | receiver port, template handling, source mapping | GoFlow2 | enrichment, de-dup/template cache, high-rate safeguards |
 | CDP/LLDP/ARP/FDB | SNMP/CLI/API/gNMI derived | underlying protocol endpoints | discovery profile | GoSNMP/CLI/gNMI | topology provenance/confidence/history |
 | Routing/state | BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VRF/STP/HSRP/VRRP/LACP/QoS/multicast/SD-WAN via SNMP/gNMI/NETCONF/REST/CLI | vendor-specific | Device Pack/Monitoring Profile | protocol foundations above | canonical graph and RCA semantics, not a routing daemon |
+
+### 2.1 Protocol delivery and continuity semantics
+
+Platform shall distinguish protocol/source failure from monitored-resource failure and shall not claim physical/source delivery guarantees that the protocol cannot provide.
+
+- **SNMP polling:** classify network timeout/unreachable, authentication, privacy/security, authorization, partial response, `tooBig`, unavailable OID and GETBULK/compatibility failures separately. A failed poll alone is not `DEVICE_DOWN`.
+- **SNMP traps:** ordinary UDP traps are unacknowledged and may be lost before Platform receives them. SNMP INFORM provides stronger acknowledgement semantics where the source supports/configures it; Platform does not silently convert traps to informs.
+- **Syslog:** TCP/TLS connection/session failures are distinct from UDP loss. Where observable expose receiver/kernel/socket drops, queue drops, parser/decoder failures and rate-limit drops.
+- **Flow:** where the exporter/protocol exposes sequence/template evidence, track exporter sequence gaps, template lifecycle/misses, receiver/kernel drops, decode drops and rate-limit/queue drops. Absence of such evidence must not be represented as guaranteed completeness.
+- **gNMI/streaming:** expose subscription/session epoch, reconnect count, last source event time, last receive time and explicit gap/unknown state where continuity cannot be proven after disconnect/reboot/reconnect.
+- **REST/API:** distinguish transport/TLS/authentication/authorization/token-refresh/rate-limit/schema/partial/semantic failures.
+- **SSH/NETCONF:** distinguish transport/host-key/authentication/privilege/session-limit/capability/command-parser failures.
+
+For HA-critical **push** telemetry, source/deployment capability determines the supported redundancy pattern. Platform may support a stable collector VIP/FQDN, vendor-supported multiple destinations, dual collectors or another certified deployment-specific receiver mechanism. Anycast is not a default requirement. Standalone deployments are not required to provide push-receiver HA.
+
+For UDP Syslog, ordinary SNMP traps and many Flow exporters, the product promise is **zero unexplained Platform-side loss within certified boundaries plus explicit visibility of observable source/receiver loss**, not “zero packet loss.”
 
 ## 3. Infrastructure/cloud credential matrix
 
@@ -117,3 +133,25 @@ The Connector framework supports reusable, versioned connectors with: authentica
 - All protocol failures preserve raw technical reason internally while presenting safe actionable customer text.
 - Certificates, keys and trust stores have lifecycle/expiry/rotation UI.
 - Every security-sensitive action is audited with actor, tenant, object, result, reason/ticket and request/session context.
+
+---
+
+## v3.2.2 Provisioning and credential UX security clarification (2026-09-19 amendment)
+
+UI-driven provisioning is a presentation layer over the existing protocol/security contracts; it does not weaken them.
+
+- Protocol selection must expose only supported/certified options and their actual security posture.
+- "Test Connection" is a bounded real preflight through Core/Sensor/connector execution and returns safe evidence/remediation codes; the browser does not perform privileged network probing directly.
+- Credential profiles are referenced by opaque tenant-scoped IDs. Operators with USE authority may select a profile without receiving its plaintext.
+- Secrets, private keys, community strings, bearer/API tokens and passwords must not be embedded in dashboard definitions, saved views, URLs, logs, audit details or connector JSON blueprints.
+- API/REST response inspectors escape content and apply size/time/redaction bounds.
+- Browser terminal/SSH is not authorized by this UX change. It remains governed by the privileged CLI/NCM Session Broker requirements, including JIT/approval/command policy/session audit and secret non-disclosure.
+- Zero-touch configuration deployment remains deferred until template validation, authorization, staged diff, execution guardrails and rollback are implemented.
+
+---
+
+## v3.2.2 API Studio scope clarification (2026-09-19 amendment)
+
+The initial governed API Studio contract remains REST/RESTCONF/OpenAPI/Swagger-oriented as defined by the existing extensibility requirements. GraphQL is not promoted to a v1 must-have by the UI/UX recommendations. It may be evaluated later as a connector profile after protocol/security/query-complexity review.
+
+Prometheus is treated as a metrics/integration source when supported, not as a relational/database connector solely for UI taxonomy.

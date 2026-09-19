@@ -1,7 +1,7 @@
 # Platform — Master Architecture Document
 
 **Document ID:** PLATFORM-ARC-001  
-**Version:** 3.2.2  
+**Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Business requirements:** `Platform_01_BRD.md`  
 **Product requirements:** `Platform_02_PRD.md`  
@@ -347,12 +347,22 @@ sequenceDiagram
     loop telemetry batches
       S->>I: HTTPS/gRPC batch + sequence metadata
       I->>K: validated canonical message
-      K->>CH: storage consumer
-      I-->>S: accepted/ack semantics
+      I-->>S: accepted watermark after certified durable boundary
+      K-->>CH: asynchronous storage consumer
     end
 ```
 
 Exact acknowledgment semantics must ensure data is not silently lost when Core fails after accepting a batch; LLD defines the sequence/replay contract.
+
+### 8.5 Sensor communication-integrity invariants
+
+1. **Durable-before-delete for normal compaction:** acknowledgement-driven Sensor spool reclamation is gated by a durable Core acknowledgement whose exact recoverability boundary is certified against the two-Core HA design. The mandatory 80% emergency storage-protection path may shed only eligible oldest lower-priority unacknowledged data when unavoidable; such shedding must not advance the acknowledged watermark or be represented as delivered, and its loss/risk is explicit. The final `ACK_DURABLE` boundary remains a P0 engineering spike until crash/failover evidence resolves it.
+2. **At-least-once transport, duplicate-safe effect:** replay and retry may redeliver observations; deterministic identities/watermarks and downstream idempotency prevent duplicate authoritative effects.
+3. **Continuity without stale authority:** a transient Core partition must not immediately terminate useful polling, but disconnected autonomy is bounded. Reassignment requires fencing/reconciliation semantics that prevent two Sensors from remaining authoritative indefinitely. Exact grace/hold-off/fencing timing is a P0 engineering spike, not guessed here.
+4. **Control/current traffic protection:** backlog recovery cannot starve PKI/identity, heartbeat, assignment/fencing or current critical telemetry. Historical replay remains lower priority but cannot be starved forever.
+5. **Push protocols are destination-bound:** Core reassignment alone cannot recover traps/Syslog/Flow sent to a failed Sensor address. HA-critical deployments use source-supported redundant receiver patterns; Standalone mode retains standalone availability characteristics.
+6. **Compact integrity evidence:** pipeline reconciliation uses sequence/watermark/counter evidence and explicit drop/gap reasons; it does not create a second full telemetry store on Sensor.
+7. **Low-footprint default:** no Sensor PostgreSQL/ClickHouse/Kafka/Valkey/JVM/reliability microservice is introduced without measured proof that the existing Go runtime cannot meet the certified contract.
 
 ---
 
@@ -1177,7 +1187,7 @@ Platform's canonical tenant/entity/data-class model must carry a placement/juris
 
 ## ARCH-X2 — Data pipeline integrity
 
-The ingestion architecture must prove continuity across Sensor produced → ingestion accepted → Kafka persisted → normalization processed → ClickHouse inserted. Counters for rejected, duplicate, late, replayed and intentionally dropped records are first-class. Pipeline loss is an operational incident under **No Silent Failure**; missing evidence reduces RCA confidence.
+The ingestion architecture must prove continuity across Sensor produced/durable → Core accepted/acknowledged → Kafka persisted → consumer/normalization processed → ClickHouse inserted. Counters/watermarks for rejected, duplicate, late, replayed and intentionally dropped records are first-class. Reconciliation is defined per stream/schema where one-to-one counts do not apply. An unexplained discrepancy creates `PIPELINE_INTEGRITY_GAP` and is an operational Platform fault under **No Silent Failure**; missing evidence reduces RCA confidence. Integrity accounting should remain compact and must not require per-stage copies of every observation solely for reconciliation.
 
 ## 34. Development, packaging and service-runtime architecture — v3.1
 
@@ -1239,3 +1249,41 @@ Platform self-observability is mandatory. Every deployment unit emits structured
 ### 34.6 Windows certification exception
 
 Windows Agent source can be cross-compiled and most functional tests can run in containerized CI, but GA certification of Windows Service installation, reboot auto-start, SCM recovery, MSI behavior and Windows-specific permissions requires an isolated Windows runner/VM. This is an OS-compatibility test environment, not permission to install Platform development dependencies directly on the primary developer laptop.
+
+---
+
+## v3.2.2 Shared UI platform architecture (2026-09-19 amendment)
+
+The UI is a governed product subsystem rather than a collection of independent pages.
+
+### Logical UI components
+
+- **Application Shell** — primary navigation, tenant/resource scope, breadcrumbs, command/omnibar, notification entry, NOC mode and persistent context.
+- **Workspace Runtime** — renders the 98 canonical workspaces from shared navigation, authorization, context and error-boundary primitives.
+- **Dashboard Runtime** — renders versioned declarative dashboard definitions and isolated panel instances.
+- **Dashboard Authoring** — governed grid/canvas, panel editor, variables, links, version lifecycle and blueprint import/export.
+- **Query Gateway/Planner** — accepts versioned typed query ASTs, authorizes tenant/resource scope, enforces budgets and compiles source-specific queries. Browser code is not a database authority.
+- **Dashboard Context / Temporal Interaction Bus** — carries time range, timezone, comparison state, shared hover/selection/zoom and semantically compatible entity/scope variables.
+- **Panel Registry** — approved visualization/interaction types and their versioned configuration schemas.
+- **Provisioning Studio Framework** — shared wizard/preflight/job/inventory primitives for network, database and API onboarding.
+- **Investigation Workbench** — reusable list/evidence/context model for alerts, incidents, entities and RCA.
+- **Search/Command Surface** — typed entity/action lookup; backend implementation remains pluggable.
+
+### Data and authority boundaries
+
+- PostgreSQL owns authoritative dashboard definitions/versions, saved views, provisioning configuration metadata and permissions.
+- ClickHouse/high-volume stores remain query sources for historical telemetry; browsers do not bypass Core/query authorization.
+- Browser local storage may cache ephemeral unsaved draft/recovery state only and is never the authoritative shared configuration store.
+- Large aggregation/transformation remains server-side. Bounded client transformations may execute off-main-thread.
+- UI dependencies remain subject to `Platform_07` admission; no proposal-named library is selected by this architecture section.
+
+---
+
+## v3.2.2 Operational-domain interaction architecture supplement (2026-09-19 amendment)
+
+The shared UI platform must support cross-domain composition without creating separate query/security models per domain. Network/Flow/Infrastructure/Cloud/Kubernetes/Synthetics/API/Database panels reuse the same tenant/time/scope context, Query Gateway, panel registry and authorization boundary.
+
+- Physical faceplate rendering is an evidence-backed specialization of entity/topology metadata; absence of trustworthy hardware relationships results in logical interface-density views, never invented physical placement.
+- Synthetic/API timing-waterfall data and Database slow-query/plan/pool evidence are domain-specific payloads carried through the same governed query/API layer.
+- Presentation thresholds are dashboard state; monitoring/alert policy remains a separate authoritative policy domain.
+- Pointer-centric advanced interactions require accessible equivalent commands; accessibility is a platform primitive, not a per-workspace afterthought.

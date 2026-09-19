@@ -2,7 +2,7 @@
 
 This file should be available at the repository root of a working clone (commonly `~/nms/AGENTS.md`). For ChatGPT Project/source management it may also be stored in `project_documentation`; the preferred repository setup is a root copy or symlink to this authoritative file. It is a navigation and enforcement file, not a replacement for the mother-reference documents.
 
-**Mother-reference version:** 3.2.2  
+**Mother-reference version:** 3.2.2
 **Canonical repository (USER-FIXED):** https://github.com/gagandsm-max/platform  
 
 Local clones (including `~/nms`) are working copies. Changes become authoritative only after push and merge into the canonical GitHub repository.
@@ -28,6 +28,11 @@ For work involving normalized SD-WAN, SCIM lifecycle, SLI/SLO/error budgets, aud
 For work involving alert qualification/evidence contracts, telemetry-quality trust, semantic monitoring states, alert-policy lifecycle/backtesting/shadowing, false-alert measurement, active evidence acquisition, evidence coverage, RCA confidence/contradictions, AI/ML evaluation, Incident Copilot, AI provider/egress controls, tenant-scoped learning, prompt-injection/tool-use controls, shared-service dependency monitoring, PKI assurance, predictive operations or AI observability, **`Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
 For work involving enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph versus governed-CMDB semantics, or coverage measurement, **`Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
+
+
+For work involving Linux/Windows Agent durable buffering, Agent→Sensor acknowledgement/deletion semantics, replay/idempotency, primary/fallback Sensor failover, assignment fencing, Agent operational states, atomic Agent configuration, certificate rotation, Agent upgrade/rollback, Agent-started pipeline integrity, collector isolation, Agent disk-pressure/resource limits or Agent reliability/failure certification, **`Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
+
+For work involving Sensor ownership/partition/fencing, Sensor→Core durable acknowledgement, push-protocol HA, fallback readiness, poll/retry storm control, replay fairness, protocol continuity/loss evidence, buffer horizon or Sensor communication resource certification, read the governing base Mother Reference masters and Decision Register Sensor communication-integrity decisions; **do not expect a `Platform_25` specialized master**.
 
 For work involving NOC no-context-switch troubleshooting, contextual action bars/drawers, embedded CLI, on-demand or multi-vantage diagnostics, `Verify Now`, Live Evidence, Investigation Sessions, or diagnostic workflow definitions, mandatory preflight reading includes **`Platform_09_UI_UX_Master.md`, `Platform_10_Protocol_Security_Connector_Master.md`, `Platform_11_Sizing_Capacity_Storage_Master.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`, `Platform_18_Security_Threat_Model.md` and `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`**. Read `Platform_23` as well when technology/Capability Pack diagnostics are involved.
 
@@ -104,6 +109,8 @@ For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`,
 
 For enterprise-monitoring-coverage / Capability Pack capabilities governed by `Platform_23`, Definition of Done also includes dimensional certification evidence, pack compatibility/version evidence, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior and the formal `REQ-EMC-*` acceptance evidence. Specification of a technology family is not certification.
 
+For Agent reliability capabilities governed by `Platform_24`, Definition of Done also includes applicable durable-queue/ACK evidence, replay/idempotency, assignment-fencing and failover tests, Agent operational-state observability, configuration/certificate/upgrade rollback behavior, pipeline reconciliation, tenant/security negative tests, failure injection and measured CPU/RAM/disk/network evidence where resource claims are affected. Specification or unit tests alone are not production reliability certification. Safe Agent deletion uses Sensor-durable ACK only when proven; do not claim final `CORE_DURABLE` semantics while that P0 remains open.
+
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
 - Network auto-discovery and Agent enrollment feed a governed onboarding/review lifecycle. Newly found/enrolled entities do not silently become licensed/actively monitored unless an explicit authorized trusted auto-approval policy applies.
@@ -179,4 +186,17 @@ Do not paste the agent or Skill catalogue here. Resolve it from manifests.
 - Writer isolation: one writer per checkout; parallel writes use separate branches/worktrees
 - Evidence: typed claims, exact-head current-base CI, no writer self-certification
 
-Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.2.2. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
+Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform Mother Reference version is v3.2.2; implementation/release versioning remains governed separately by the release process. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
+
+## v3.2.2 UI/UX architecture gate (2026-09-19 amendment)
+
+For any UI, dashboard, provisioning, investigation, NOC, topology or visualization work, read `Platform_09_UI_UX_Master.md` plus the corresponding API/security contracts in `Platform_17_API_Event_and_Data_Model_Contracts.md` and `Platform_18_Security_Threat_Model.md` before editing.
+
+Non-negotiable:
+- reuse the shared shell, persistent context, Query AST, panel runtime, Temporal Interaction Bus, provisioning and investigation primitives; do not build independent interaction frameworks per workspace;
+- published/shared dashboard and provisioning state is Core-authoritative; browser storage is draft/recovery cache only;
+- raw query capability is expert-only, read-only, RBAC-controlled, tenant-scoped, bounded and server-validated;
+- no arbitrary customer JavaScript/React/eval in dashboard or transformation definitions;
+- no new chart/graph/map/search/template/headless-browser dependency merely because a UX reference names one; production admission follows `Platform_07_OSS_Catalog.md`;
+- secrets are references; USE is distinct from REVEAL; UI hiding is never authorization;
+- browser terminal and ZTP remain gated by the NCM/security contracts until their audit, approval and rollback controls are production-ready.

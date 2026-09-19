@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
-**Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the approved v3.2.2 NOC troubleshooting API/event/data contracts. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
+**Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2/v3.2.1) and adds the approved v3.2.2 NOC troubleshooting API/event/data contracts plus the 2026-09-19 Sensor communication-integrity contract hardening below. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 
 ## 1. Purpose
 
@@ -51,6 +51,17 @@ Enrollment establishes identity/certificate. Subsequent sessions authenticate wi
 
 For on-demand diagnostics, Core sends an authorized bounded execution request containing job/correlation ID, canonical target, diagnostic type, effective parameters, timeout/cancellation/fencing context and no reusable secret material beyond the minimum execution reference/token required by the worker. Sensor/Agent returns a typed per-vantage result with timestamps, evidence quality and normalized error/result code. Expired/replayed/fenced diagnostic jobs are rejected.
 
+Sensor assignment/control contracts carry a monotonically advancing assignment/fencing version and lease validity. A Sensor rejects work superseded by a newer version it has observed. The exact disconnected-grace, reassignment hold-off and any extra epoch/token metadata remain a P0 engineering spike so transient Core loss does not automatically stop polling and stale disconnected ownership cannot persist indefinitely.
+
+### 3.1 Durable telemetry acknowledgement contract
+
+Each replayable Sensor stream/batch carries deterministic source identity, sequence/range identity and checksum/idempotency metadata sufficient to detect gaps, regressions, duplicates and conflicting replay.
+
+Core durable acknowledgement exposes an accepted-through watermark. Under normal acknowledgement-driven compaction, Sensor may advance its durable acknowledged watermark and reclaim covered spool data only after a valid acknowledgement consistent with the certified HA recoverability boundary. Missing, malformed, out-of-range or unsupported acknowledgement semantics fail closed and retain spool data. The mandatory 80% emergency storage-protection path is separate: unavoidable shedding of eligible oldest lower-priority unacknowledged data must not advance the acknowledged watermark or be represented as delivery, and the resulting loss/gap must be explicitly accounted for. When such shedding creates a non-contiguous sequence gap, neither Sensor nor Core may infer acknowledgement across the missing range. The exact loss-range representation/reconciliation and rule for resuming later accepted-through progress are part of the existing `ACK_DURABLE` **TBD/P0-SPIKE**; until certified, acknowledgement-driven reclamation across that gap fails closed while bounded collection continues under the storage-protection policy.
+
+The exact `ACK_DURABLE` recoverability boundary across the two-Core Kafka/PostgreSQL/ClickHouse failure model is **TBD/P0-SPIKE** until crash/failover tests prove it. Cross-system distributed 2PC/XA is not assumed by declaration. At-least-once transport is acceptable when duplicate authoritative effects are prevented by deterministic identity/idempotency.
+
+
 ## 4. Kafka event rules
 
 Kafka is internal. Events include schema version, tenant, source identity, event ID/sequence where required, event time, ingest time, quality/provenance and payload. Producers/consumers must tolerate compatible schema evolution.
@@ -83,6 +94,67 @@ Raw, rollup, incident, audit, configuration, **diagnostic/investigation evidence
 
 ## 5. Data integrity
 
-Ingestion records support deduplication/idempotency and late/out-of-order data handling. Pipeline reconciliation detects produced/accepted/normalized/inserted/rejected discrepancies.
+Ingestion records support deduplication/idempotency and late/out-of-order data handling. Pipeline reconciliation detects produced/Sensor-durable/Sensor-acknowledged/Core-accepted/Kafka-produced/consumer-processed/storage-inserted discrepancies and explicitly accounts for rejected, duplicate, late and intentionally dropped records.
+
+Reconciliation may use sequence ranges, offsets, compact watermarks and counters appropriate to each stream/transformation; it does not require duplicate per-stage storage of every observation solely for accounting. Any residual unexplained discrepancy outside the certified tolerance/transform contract emits `PIPELINE_INTEGRITY_GAP` with affected scope and audit evidence.
 
 Diagnostic/investigation integrity requires tenant-scoped canonical targets, immutable result/evidence provenance, per-vantage source identity, result/observed timestamps, correlation IDs and explicit state transitions. Evidence references must not silently retarget another tenant/entity after creation. Cancellation/timeout/partial results remain visible. No secret or one-time credential value may be persisted in diagnostic result, investigation evidence, audit, event or analytics rows.
+
+---
+
+## 5. v3.2.2 UI/dashboard/query contract supplement (2026-09-19 amendment)
+
+### Dashboard definition/version contract
+
+Dashboard APIs operate on tenant-scoped, schema-versioned declarative definitions. Published versions are immutable and include dashboard ID, version/revision, actor, timestamp, optional change note and integrity metadata. Draft and publish operations are separate authorization decisions. Rollback creates a new published version derived from a prior one.
+
+Definitions may reference approved panel types, Query ASTs, variables, links, layout and presentation options. They must not contain plaintext credentials, executable customer code or cross-tenant object references.
+
+### Query request contract
+
+A panel/query request carries:
+- query schema version;
+- source/data domain;
+- namespace/resource selectors;
+- metric/field;
+- aggregation/group/time bucket;
+- typed filters/variables;
+- requested time range/timezone/comparison context;
+- bounded output hints such as panel width/resolution;
+- correlation/request ID.
+
+Server derives authoritative tenant/resource scope from authentication and permissions, not from client claims. Query services enforce budgets and may choose a coarser safe resolution.
+
+Raw-query APIs, where present, are separate expert contracts with read-only source-specific validation and all normal tenant/budget controls.
+
+### Shared context and saved views
+
+Saved views/context serialization may persist compatible tenant-safe filters, time preferences, entity/service/site/tag selections, layout and visualization state. Context payloads cannot grant authority. Resource IDs are re-authorized on use.
+
+### Provisioning/preflight
+
+Provisioning APIs use credential-reference IDs, not secrets. Preflight is an asynchronous or bounded synchronous job returning structured checks, evidence status and remediation codes. The browser never receives reusable secret material from preflight responses.
+
+### Error/data safety
+
+Dashboard, query, import and connector APIs return stable safe error codes. SQL text, stack traces, credentials, private data-source URLs and unredacted raw payloads are not returned merely for debugging. Large raw response inspection is bounded and escaped.
+
+---
+
+## 6. v3.2.2 operational-view contract additions (2026-09-19 amendment)
+
+### Synthetic/API evidence
+
+Where a synthetic monitor captures phase timing, responses may expose structured bounded timing phases such as DNS, connect, TLS, first-byte and transfer plus assertion results and location identity. Raw/response inspection is separately authorized, size bounded, escaped and redacted. Authentication material and secret headers are never returned.
+
+### Database operational evidence
+
+Database query/workload responses use normalized query identity where possible and bounded samples. Query text, lock/session evidence and explain-plan payloads are tenant scoped, permission checked and redacted. Explain plans should expose a normalized tree when parser support exists and a bounded escaped raw representation otherwise.
+
+### Threshold provenance
+
+Panel definitions distinguish visualization/presentation thresholds from references to effective monitoring policy. A dashboard-definition write cannot mutate alert policy unless it calls the separate authorized policy API/workflow.
+
+### Faceplate metadata
+
+Physical faceplate coordinates/relationships are optional evidence supplied by certified device/hardware metadata. Clients must tolerate absence and fall back to logical interface lists/density representations rather than inventing physical placement.

@@ -1,7 +1,7 @@
 # Platform — Operational Intelligence, MTTR Reduction & Customer Value Master
 
 **Document ID:** PLATFORM-INTELVALUE-001  
-**Version:** 3.2.2  
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Operational Intelligence / MTTR / Customer Value**  
 **Product:** Platform  
 **Change class:** Additive approved product scope; does not remove or weaken any v3.2.1 requirement
@@ -364,3 +364,20 @@ This master supplements legacy `Platform_01`, `02`, `03`, `04`, `05`, `06`, `08`
 This document is specification evidence only. Completion requires implementation, tests, security, tenant isolation, data integrity, observability, resource bounds, upgrade/migration behavior, runbooks, UI, traceability and applicable performance evidence.
 
 No MTTR-reduction or financial-value percentage becomes a product claim merely because the Value Engine can calculate a number.
+
+---
+
+## 15. v3.2.2 Incident/RCA interaction supplement (2026-09-19 amendment)
+
+The OIV UI adopts the common the 2026-09-19 v3.2.2 UI/UX amendment interaction architecture.
+
+- Incident feed compresses duplicate/symptom events while preserving child evidence and provenance.
+- Investigation uses a reusable three-pane pattern with incident/list context, synchronized evidence/timeline and actions/details.
+- Selecting a datapoint or event propagates bounded time/entity context to compatible metrics, logs, flow, changes, alerts and RCA evidence.
+- Root-cause presentation includes causal path, supporting/contradicting/missing evidence, affected scope and provenance.
+- `INCONCLUSIVE` remains first-class.
+- Numeric confidence is displayed only for calibrated scores with documented semantics; LLM language is not converted to pseudo-precise probability.
+- Anomaly corridors visualize backend-generated baselines and uncertainty; the UI does not choose causal/anomaly algorithms.
+- Human-in-the-loop remediation displays preconditions, expected impact/blast radius, authorization/approval state, execution evidence, validation and rollback/escalation.
+- Predictive runway/capacity views include evidence quality and uncertainty.
+- Collaborative war-room editing is deferred until shared incident authorization/audit semantics are production-ready.

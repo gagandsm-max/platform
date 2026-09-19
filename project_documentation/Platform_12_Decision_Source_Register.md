@@ -1,7 +1,7 @@
 # Platform — Decision, Source & Assumption-Control Register
 
 **Document ID:** PLATFORM-DECISION-001  
-**Version:** 3.2.2  
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Decision Provenance**
 
 ## 1. Purpose
@@ -99,6 +99,8 @@ The following must remain visibly unresolved until engineering evidence exists:
 - exact two-Core ClickHouse replication/promotion/fencing design;
 - exact PostgreSQL two-Core failover/fencing/rewind mechanics;
 - exact Core service fencing/VIP implementation and failure matrix;
+- exact recoverable `ACK_DURABLE` boundary across the certified two-Core Kafka/PostgreSQL/ClickHouse failure model, including crash immediately after acceptance/acknowledgement and reconciliation of emergency-shed sequence gaps without treating lost observations as acknowledged;
+- exact Sensor disconnected-grace/reassignment hold-off/fencing/reconciliation behavior that preserves useful Core-disconnected polling without allowing stale duplicate Sensor authority;
 - final contractual DR RPO/RTO and data-loss objectives;
 - final SNWP-2500-v1 metric/interface/event mix and certified performance results;
 - Streaming Sensor certified Flow records/sec and Syslog EPS;
@@ -212,3 +214,72 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Real-customer requirements normalization | USER-FIXED | Recurring enterprise ITOM/AIOps needs are normalized as Real Customer Enterprise Benchmark — Automotive / ITOM-AIOps with classification A–G. Confidential customer names, inventories, locations, quantities, commercial clauses, penalties, unique SLAs and contract language must not be embedded in Mother References. |
 | Enterprise-monitoring-coverage product scope | USER-FIXED | `PRD-EMC-001` through `PRD-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` are approved additive v3.2.2 product requirements/targets. They are EMC-0 specification only and do not claim runtime, pack certification or contractual coverage. |
 | Enterprise-monitoring-coverage packaging | ARCH-DELEGATED | `Platform_23` is the consolidated authoritative v3.2.2 specialized master for this family. `REQ-EMC-001` through `REQ-EMC-018` are the RTM supplement. It does not replace Platform_10, 19, 20, 21 or 22 outside its assigned scope. |
+
+---
+
+## v3.2.2 UI/UX architecture decisions (2026-09-19 amendment)
+
+Source: product-owner UI/UX enhancement requests reconciled by the delegated CTO/architecture authority and tracked through GitHub issue #56.
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Shared UI primitives before workspace breadth | ARCH-DELEGATED | The 98 workspaces reuse common shell/context/query/panel/investigation/provisioning primitives; do not implement 98 separate interaction frameworks. |
+| Native Dashboard Studio | ARCH-DELEGATED | Platform owns the no-code dashboard/canvas experience; third-party dashboard products are not embedded as the primary customer UI. |
+| Dashboard persistence | ARCH-DELEGATED | Published/shared dashboard definitions and versions are backend authoritative; localStorage is limited to ephemeral draft/recovery caching. |
+| Dashboard lifecycle | ARCH-DELEGATED | Declarative schema with DRAFT → VALIDATE → PUBLISH, immutable published versions and auditable rollback-as-new-version. |
+| Query architecture | ARCH-DELEGATED | Visual builder emits a typed versioned Query AST; Core/query services authorize, tenant-scope, budget and compile it. |
+| Raw query mode | ARCH-DELEGATED | Expert-only, read-only, RBAC-controlled, tenant-scoped and server validated; never unrestricted browser-to-database access. |
+| Temporal context | ARCH-DELEGATED | Persistent time/scope context and a shared Temporal Interaction Bus synchronize compatible panels/workspaces and preserve incompatible dimensions without silent reinterpretation. |
+| Panel failure isolation | ARCH-DELEGATED | Each panel has independent cancellation/error/freshness state; one failing query cannot block a dashboard. |
+| Transformation placement | ARCH-DELEGATED | Large/expensive transformations are server-side; bounded expensive client transforms may use workers; trivial work stays simple. |
+| UI visualization/layout dependency basis | ARCH-DELEGATED | Use the existing `Platform_07` `USE` selections: Apache ECharts, TanStack Table/Query, react-grid-layout, Cytoscape.js and MapLibre GL JS for their assigned UI roles. Do not add uPlot/G6/Mapbox or competing libraries without new evidence/change control. |
+| Search backend | TBD/P0-SPIKE | Omnibar is required; OpenSearch/Elasticsearch is not mandatory. Select simplest backend meeting measured scale/SLOs. |
+| Credential UX | ARCH-DELEGATED | USE without REVEAL is the default operator model; dashboard/provisioning definitions store secret references only. |
+| Browser terminal | ARCH-DELEGATED | Deferred until a secure audited bastion/session-broker implementation satisfies NCM/security requirements. |
+| ZTP | ARCH-DELEGATED | Deferred until NCM authorization, validation, approval, execution and rollback are production-ready. |
+| RCA confidence | ARCH-DELEGATED | Numeric confidence is shown only when calibrated/documented; evidence/provenance and INCONCLUSIVE remain authoritative. |
+| Status semantics | ARCH-DELEGATED | Operational status is semantic and accessible; no color-only meaning and no UI-local threshold silently overriding effective monitoring policy. |
+| UI implementation order | ARCH-DELEGATED | Shell/context → Provisioning → Dashboard platform → shared interaction → NOC → Incident/RCA → Network/Flow → Infra/Cloud/K8s → Synthetics/API → Database → remaining workspaces. |
+| GraphQL connector scope | ARCH-DELEGATED | REST/OpenAPI remains the initial API Studio contract. GraphQL is a future connector candidate after protocol/security/query-complexity review. |
+| Device faceplate truthfulness | ARCH-DELEGATED | Render physical faceplates only from trustworthy Device Pack/hardware inventory relationships; otherwise use logical interface-density views. |
+| Presentation vs alert threshold | ARCH-DELEGATED | Visualization thresholds are presentation state; effective monitoring/alert policy is separately governed and must be visibly distinguishable. |
+| Dashboard runtime before Studio | ARCH-DELEGATED | Freeze schema/Query AST/context/version/authorization/panel-registry contracts before implementing the drag-and-drop Dashboard Studio. |
+
+## 13. v3.2.2 USER-FIXED / ARCH-DELEGATED Agent reliability decisions — 2026-09-19
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Agent reliability product scope | USER-FIXED | `PRD-ARF-001` through `PRD-ARF-018` in `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` are approved additive v3.2.2 product requirements. |
+| Agent reliability traceability | ARCH-DELEGATED | `REQ-ARF-001` through `REQ-ARF-018` in `Platform_24` §27 are the authoritative RTM supplement for this capability family. |
+| Agent reliability specialized master | USER-FIXED + ARCH-DELEGATED packaging | `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` is the authoritative v3.2.2 specialized master for Linux/Windows Agent durability, failover, fencing, operational state, replay/idempotency, lifecycle transactions, pipeline integrity and resource/failure certification. |
+| Enhance, do not replace Agent architecture | USER-FIXED | Existing Go Agent, shared `agent/common`, Core Sensor Control, Agent identity/mTLS, durable Agent queue and Sensor durable spool are preserved. This approval does not authorize a parallel control plane, identity system or queue implementation. |
+| Agent deletion boundary | USER-FIXED + ARCH-DELEGATED implementation | Agent records may be removed only after a valid Agent/batch/range-bound application ACK proving authorized Sensor durable acceptance. `CORE_DURABLE` is not declared the current Agent deletion boundary while two-Core Kafka/ClickHouse/fencing P0 items remain unresolved. |
+| Primary/fallback Sensor HA | USER-FIXED | Core-authorized primary plus policy-authorized fallback Sensors are required where HA policy/topology needs them. Normal telemetry has one active destination by default; arbitrary Agent-selected Sensors and default dual full-stream telemetry are prohibited. |
+| Assignment fencing | USER-FIXED + ARCH-DELEGATED implementation | Stale/conflicting Agent→Sensor authority fails closed. Existing monotonic assignment generation is extended as the primary fence; additional lease/token mechanisms require demonstrated need. |
+| Offline-authorized failover | USER-FIXED | An enrolled Agent may fail over to a previously Core-authorized fallback during Core/WAN disruption if identity, assignment validity and fencing checks succeed. Core remains the authority that issued that authorization. |
+| Agent operational state | USER-FIXED | Agent runtime exposes explicit buffering/replay/failover/degraded/security states with stable reason codes and queue/certificate/assignment context rather than binary connected/disconnected only. |
+| Atomic Agent desired state | USER-FIXED | Agent configuration is validated/staged/atomically activated; invalid new config cannot partially replace the previous known-good config. |
+| Safe certificate rotation | USER-FIXED | Certificate rotation uses staged trust/identity validation and bounded overlap so routine renewal does not create an avoidable monitoring outage. |
+| Agent upgrade success/rollback | USER-FIXED | Upgrade success requires restored identity, Sensor handshake and durable telemetry acceptance; process start alone is insufficient. Failed validation rolls back to known-good state where technically supported. |
+| Agent-started pipeline reconciliation | USER-FIXED | Telemetry integrity accounting starts at Agent production and explains final persisted/pending/deduplicated/rejected/lost disposition; unexplained gaps are Platform integrity faults. |
+| Monitoring-path state vs host state | USER-FIXED | Agent/Sensor/collector/telemetry/pipeline failure states are not equivalent to `HOST_DOWN`; host/service failure assertions remain evidence-qualified. |
+| Bounded Agent resources | USER-FIXED + ARCH-DELEGATED certification | Agent CPU/RAM/disk/network/queue/thread/log use is bounded and benchmark-certified. Suggested CPU/RSS/footprint values in Platform_24 are engineering targets until measured, not external product claims. |
+| Failure certification | USER-FIXED | Agent reliability production-readiness requires repeatable failure-injection, replay/idempotency, security/tenant, package/reboot/rollback and resource evidence for certified Linux/Windows profiles. |
+
+These decisions are additive and do not resolve the open two-Core Kafka, ClickHouse, PostgreSQL or HA-fencing P0 engineering spikes by declaration.
+
+## 14. v3.2.2 ARCH-DELEGATED Sensor communication-integrity decisions — 2026-09-19
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Preserve Universal Sensor architecture | ARCH-DELEGATED | Keep the Go Universal Sensor Runtime, bounded worker pools, durable local spool, Core-authoritative placement/policy, mTLS transport, MWU capacity model and horizontal Sensor scale. Do not add Sensor PostgreSQL/ClickHouse/Kafka/Valkey/JVM or a mandatory reliability microservice without benchmark-backed architecture change control. |
+| Communication-integrity product promise | ARCH-DELEGATED | Platform targets zero unexplained telemetry loss within certified Platform durability boundaries, explicit visibility of observable source/network loss, deterministic replay/deduplication and truthful monitoring state. It does not claim zero physical packet loss for external/unacknowledged protocols. |
+| Durable Core acknowledgement | TBD/P0-SPIKE | Normal acknowledgement-driven Sensor spool reclamation is gated by durable accepted-through acknowledgement. The mandatory 80% emergency storage-protection policy remains a distinct explicit-loss path for eligible oldest lower-priority unacknowledged data; emergency shedding never advances the acknowledged watermark or counts as delivery. If shedding creates a sequence gap, acknowledgement must not be inferred across that gap. The exact recoverable `ACK_DURABLE` boundary, terminal-loss range representation/reconciliation and safe resumption of later replay/reclamation must be proven against two-Core crash/failover behavior before GA; they are not guessed and do not automatically mean “wait for ClickHouse” unless evidence requires that boundary. |
+| Partition-safe Sensor ownership | TBD/P0-SPIKE | Current assignment version/lease/fencing remains the baseline. Exact disconnected grace, reassignment hold-off, takeover evidence and any additional epoch/token metadata must be proven by partition tests so Core-disconnected polling can continue safely without indefinite duplicate authority. |
+| Fallback Sensor readiness | ARCH-DELEGATED | HA failover eligibility is target-specific: capacity plus network/protocol/TLS/credential/security-zone/version-role compatibility. Critical readiness validation is lightweight, staggered/cached/change-triggered; always-on full duplicate polling is rejected. |
+| Push-protocol HA | ARCH-DELEGATED | Critical push telemetry uses source/deployment-supported receiver redundancy (stable VIP/FQDN, multiple destinations, dual collectors or another certified pattern) when required by profile. Anycast and N+1 are not mandatory universal defaults; Standalone retains standalone availability. |
+| Pipeline integrity | ARCH-DELEGATED | Reconcile compact sequence/watermark/counter evidence from Sensor through ingestion/Kafka/consumers/storage. Duplicates/rejections/late/intentional drops are explained; residual discrepancy raises `PIPELINE_INTEGRITY_GAP`. Do not store duplicate per-stage copies solely for reconciliation. |
+| Poll/retry load control | ARCH-DELEGATED | Recurring polls are deterministically phase-distributed; retry remains bounded/backed off/jittered and may be suppressed by strongly evidenced shared failure domain while retaining recovery probes. Weak topology inference cannot suppress independent failures. |
+| Replay/current traffic priority | ARCH-DELEGATED | Identity/PKI/control and current critical/current telemetry cannot be starved by old backlog; replay must still make forward progress. Exact queue implementation is delegated and no separate service is implied. |
+| Uploader batching | ARCH-DELEGATED | Batches are bounded by records, encoded bytes/request bytes and maximum age. Fixed benchmark-certified defaults are preferred first; adaptive batching/compression is optional only when measurement proves value. |
+| Sensor hardware envelope | ARCH-DELEGATED | Communication-integrity hardening does not by declaration raise existing Sensor sizing targets. Any hardware increase requires reproducible performance evidence and explicit sizing change control. |
