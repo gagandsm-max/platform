@@ -346,8 +346,8 @@ sequenceDiagram
     loop telemetry batches
       S->>I: HTTPS/gRPC batch + sequence metadata
       I->>K: validated canonical message
-      K->>CH: storage consumer
-      I-->>S: accepted/ack semantics
+      I-->>S: accepted watermark after certified durable boundary
+      K-->>CH: asynchronous storage consumer
     end
 ```
 
