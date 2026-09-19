@@ -344,29 +344,249 @@ source_protocol
 
 ### 5.3 `network_flow`
 
+Logical canonical schema. Physical ClickHouse layout may split raw/common/enrichment columns or use compatible nested/Map structures where benchmarks justify it, but shall preserve these semantics without unbounded dynamic columns.
+
 ```text
+flow_record_id
+schema_version
+
 tenant_id
-exporter_entity_id
 sensor_id
-start_ts
-end_ts
+listener_id
+
+exporter_entity_id
+configured_exporter_id
+exporter_source_address
+observation_domain_id nullable
+exporter_engine/source_id nullable
+exporter_generation nullable
+
+flow_protocol              # NETFLOW5|NETFLOW9|IPFIX|SFLOW|vendor-certified
+flow_protocol_version
+record_kind                # FLOW_RECORD|PACKET_SAMPLE|COUNTER_SAMPLE|...
+source_sequence nullable
+record_index nullable
+
+export_time nullable
+observed_time
+ingest_time
+start_time nullable
+end_time nullable
+timestamp_quality
+
 src_ip
 dst_ip
-src_port
-dst_port
-protocol
-bytes
-packets
-ingress_if_id
-egress_if_id
+src_port nullable
+dst_port nullable
+ip_protocol
+tcp_flags nullable
+icmp_type nullable
+icmp_code nullable
+
+observed_bytes nullable
+observed_packets nullable
+sampling_algorithm nullable
+sampling_rate nullable
+sampling_known
+estimated_bytes nullable
+estimated_packets nullable
+estimation_quality
+
+raw_ingress_ifindex nullable
+raw_egress_ifindex nullable
+ingress_interface_entity_id nullable
+egress_interface_entity_id nullable
+src_vlan/dst_vlan nullable
+vrf_id nullable
+
+src_asn/dst_asn nullable
+next_hop nullable
+bgp_next_hop nullable
+
+dscp nullable
+ecn nullable
+qos_class nullable
+
+pre_nat_src_ip/pre_nat_dst_ip nullable
+post_nat_src_ip/post_nat_dst_ip nullable
+pre_nat_src_port/pre_nat_dst_port nullable
+post_nat_src_port/post_nat_dst_port nullable
+
+flow_end_reason nullable
+
+template_id nullable
+template_hash/version nullable
+
+src_entity_id/dst_entity_id nullable
 src_site_id/dst_site_id nullable
 src_subnet_id/dst_subnet_id nullable
-vrf_id nullable
-src_asn/dst_asn nullable
-app_id nullable if exporter supplied
-flow_type
-sequence/template metadata
+
+src_hostname/dst_hostname nullable
+src_fqdn/dst_fqdn nullable
+src_user_identity_id/dst_user_identity_id nullable
+src_identity_confidence/dst_identity_confidence nullable
+src_domain/dst_domain nullable
+url_host nullable
+sanitized_url_ref nullable
+src_geo_ref/dst_geo_ref nullable
+src_cloud_ref/dst_cloud_ref nullable
+app_id nullable
+app_classification_source nullable
+
+enrichment_version/provenance_ref nullable
+quality
+bounded_extension_attributes
 ```
+
+Rules:
+
+- IP fields are IPv4/IPv6 capable.
+- `observed_*` values represent source-observed/sample values; `estimated_*` are separate statistical estimates and never overwrite observed values.
+- `start_time/end_time` remain null when the protocol does not provide authoritative values.
+- full URL/path/query is not inferred from an IP/DNS join; `url_host` or sanitized URL evidence exists only when an explicit authorized source supplies it.
+- user identity is a time-bounded attribution with provenance/confidence, not an IP label.
+- public-IP Geo is approximate metadata; internal site geography comes from canonical inventory/site state.
+- vendor/enterprise information elements not promoted to common fields remain in bounded controlled attributes or Capability Pack mappings; they do not create arbitrary database columns.
+
+### 5.3A Flow exporter identity and source admission
+
+A production listener is explicitly assigned to the FLOW Sensor role. Tenant authority is derived from the Sensor/listener/configured-exporter control plane, never from packet payload fields.
+
+Logical exporter key uses the strongest protocol-appropriate tuple:
+
+```text
+tenant_id
+sensor_id/listener_id
+configured_exporter_id
+source_transport_address
+protocol/version
+observation_domain_id or engine/source identity where applicable
+exporter_generation/epoch where derivable
+```
+
+UDP source address alone is not a canonical exporter identity. Unknown/unmapped sources follow configured `REJECT` or `QUARANTINE` policy and are rate limited/accounted before expensive enrichment.
+
+### 5.3B Template/options-template cache
+
+NetFlow v9/IPFIX template state is scoped by exporter identity + observation domain + template ID. Template entries contain at minimum:
+
+```text
+protocol
+exporter_key
+observation_domain_id
+template_id
+template_kind
+field definitions[]
+enterprise IE metadata[]
+template_hash
+learned_at
+last_seen
+source/exporter_generation
+expiry/validity state
+```
+
+The cache enforces limits on exporters, observation domains, templates/exporter, fields/template, enterprise elements, variable-length field sizes, churn rate and total memory.
+
+Lifecycle supports arrival, refresh/update, withdrawal where protocol provides it, expiry, exporter restart/generation change and template-ID reuse. A data record with no valid template becomes explicit `TEMPLATE_MISSING`/quality evidence; it never becomes zero traffic.
+
+A bounded local persisted cache may accelerate Sensor restart recovery only when validity/age/exporter-generation checks succeed. Stale persisted templates are invalidated rather than trusted indefinitely.
+
+### 5.3C Sampling semantics
+
+Sampling metadata is part of source truth:
+
+```text
+sampling_known
+sampling_algorithm
+sampling_rate
+sampling_source
+sampling_epoch/version
+```
+
+Observed packets/bytes and estimated packets/bytes remain distinct. Sampling-rate changes create a new temporal sampling epoch/provenance. A query spanning multiple epochs normalizes each segment using its applicable sampling evidence and exposes estimation quality.
+
+Unknown sampling never silently defaults to 1:1.
+
+### 5.3D Sequence, loss and replay accounting
+
+Sequence semantics are decoder/protocol specific. The decoder adapter emits normalized quality outcomes such as:
+
+```text
+SEQUENCE_GAP
+OUT_OF_ORDER
+DUPLICATE_SOURCE_RECORD
+EXPORTER_RESET
+TEMPLATE_MISSING
+SAMPLING_UNKNOWN
+MALFORMED
+RATE_LIMITED
+RECEIVER_DROP
+```
+
+The same source observation replayed by Platform transport uses a stable `flow_record_id`/ingestion identity for idempotent Sensor→Core replay. Similar 5-tuples observed at different exporters/interfaces/observation domains are **not** transport duplicates.
+
+End-to-end accounting distinguishes socket/kernel drops, listener/queue drops, decoder rejects, source/template/sampling problems, spool/storage rejection, upload/Core rejection, Kafka/downstream lag/rejection and ClickHouse insert failure.
+
+### 5.3E Flow receiver bounds and fairness
+
+Per FLOW Sensor configure/certify:
+
+- socket receive buffer and observable kernel-drop counters;
+- packet/datagram max size;
+- packet queue depth;
+- decoder/normalizer worker count;
+- exporters/listener and per-exporter queue/rate ceilings;
+- observation domains/exporter;
+- templates/exporter and churn;
+- records/datagram and fields/record;
+- variable-length/extension field bounds;
+- memory/cardinality limits;
+- spool write/upload throughput.
+
+A hot exporter may be throttled/quarantined according to policy without starving unrelated exporters or mandatory Sensor control/health.
+
+### 5.3F Temporal enrichment and identity attribution
+
+Flow consumes canonical temporal evidence rather than owning a second identity system.
+
+Endpoint/system resolution may use Agent identity, inventory, IPAM, DHCP lease history, DNS observations and topology. User attribution may use time-bounded Agent login/session evidence, AD/LDAP/Entra authentication/directory context, VPN, RADIUS/802.1X, NAC, WLAN, firewall user-ID, proxy/SWG or equivalent governed sources.
+
+Required attribution fields include as applicable:
+
+```text
+identity/entity ID
+display/system name
+binding start/end
+observed_at
+source type/source ID
+source record/evidence ref
+confidence
+conflict state
+```
+
+Directory membership alone does not prove an active user/IP binding. Multi-user systems, VDI, NAT/shared proxy and conflicting evidence may resolve to `UNKNOWN`, multiple candidates or `CONFLICTED`.
+
+DNS enrichment is time-window/TTL aware. A DNS answer or reverse lookup may provide domain/FQDN evidence but does not prove an HTTP URL or application. DoH/DoT, shared CDN IPs and cached answers may reduce confidence.
+
+Public-IP Geo uses governed offline-capable dataset/provider metadata with dataset version and accuracy/confidence. It must not be represented as precise person location. Internal location prefers canonical Site/region/country inventory.
+
+### 5.3G Conversation and observation-point model
+
+Raw Flow is directional. A derived Conversation groups compatible directional records by bounded time/key rules for user analytics while retaining source observation references.
+
+Observation point is represented by exporter + observation domain + ingress/egress interface + Sensor/listener provenance. Records from multiple observation points remain separate path evidence. The UI/query layer may aggregate them only with an explicit scope to avoid double-counting.
+
+### 5.3H Flow Coverage quality
+
+Where a valid comparison exists, Platform may compare normalized Flow volume with authoritative interface-counter evidence such as SNMP high-capacity counters for the same interface/direction/window.
+
+Coverage evaluation accounts for sampling, observation point, counter discontinuity, time alignment and known protocol exclusions. Output is semantic evidence such as `GOOD|PARTIAL|LOW|UNKNOWN` with reason/confidence; a naive universal ratio is prohibited.
+
+### 5.3I Flow rollups and retention
+
+Raw normalized Flow uses a configurable shorter retention class. Longer-lived rollups may include bounded dimensions such as time, exporter/interface, site pair, entity/subnet pair, protocol/service/application, ASN, VRF, QoS and conversation.
+
+Incident-protected Flow evidence uses the normal protected-evidence lifecycle. Materialized rollups must be complete/validated before normal raw expiry. Top-N, matrix and Sankey queries use bounded ranges/Top-K/Other aggregation and may not request unbounded raw scans or graph edges.
 
 ### 5.4 `event_raw`
 
@@ -2174,7 +2394,7 @@ No domain package may import an OSS protocol/client library directly except its 
 |---|---|---|
 | `SnmpAdapter` | GoSNMP | `MetricObservation`, `InventoryObservation`, `TrapEvent`, normalized error reason |
 | `MibCompiler` | gosmi | `MibModule`, `OidDefinition`, `TableDefinition`, `NotificationDefinition`, provenance |
-| `FlowDecoder` | GoFlow2 | `FlowRecord` with exporter/interface/5-tuple/bytes/packets/time/template metadata |
+| `FlowDecoder` | GoFlow2 | bounded protocol record plus exporter/observation-domain/template/sequence/sampling/source-time/value provenance; Platform maps this to canonical Flow/quality records |
 | `IcmpProbe` | x/net/icmp | `ProbeResult` RTT/loss/status/error |
 | `DnsProbe` | miekg/dns | DNS timings/rcode/answer validation |
 | `SshAdapter` | x/crypto/ssh / scrapligo | command/session result with prompt/mode/error metadata |
@@ -2217,7 +2437,7 @@ Topic families remain internal and tenant-aware in payload/partition strategy. M
 ```text
 telemetry.metric.numeric.v1
 telemetry.metric.state.v1
-telemetry.flow.v1
+network.flow.v1
 telemetry.event.v1
 telemetry.syslog.v1
 telemetry.inventory.v1
@@ -2240,7 +2460,8 @@ At minimum keep physically/logically separate high-volume classes:
 
 - `metric_numeric`
 - `metric_state`
-- `network_flow`
+- `network_flow` raw/common directional observations
+- bounded Flow rollup/Top-N/conversation/quality aggregates selected by benchmarked query patterns
 - `event`
 - `syslog`
 - `alert_history`
