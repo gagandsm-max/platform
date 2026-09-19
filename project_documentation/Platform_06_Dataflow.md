@@ -372,27 +372,79 @@ sequenceDiagram
 
 ---
 
-## 14. Flow DF-013 — Flow ingestion and enrichment
+## 14. Flow DF-013 — Dedicated Flow Sensor ingestion, accounting and enrichment
 
 ```mermaid
 sequenceDiagram
   participant X as Flow Exporter
-  participant S as Streaming Sensor
-  participant INV as Local/Core context cache
-  participant I as Ingestion
+  participant S as Dedicated FLOW Sensor
+  participant G as Source Gate / Exporter State
+  participant T as Template / Sampling / Sequence State
+  participant SP as Role-local Durable Flow Spool
+  participant I as Core Ingestion
   participant K as Kafka
+  participant E as Temporal Enrichment
   participant CH as ClickHouse
+  participant Q as Flow Quality / RCA
 
-  X->>S: NetFlow/IPFIX/sFlow
-  S->>S: Decode templates/records
-  S->>INV: Resolve exporter/interface/site/IPAM/VRF/ASN context
-  INV-->>S: Enrichment metadata
-  S->>I: Batched normalized flows
+  X->>S: NetFlow v5/v9 / IPFIX / sFlow / certified vendor flow
+  S->>G: Listener + source/tenant/exporter admission
+  G->>T: Protocol datagram/record with exporter identity
+  T->>T: Template/options-template lookup + sequence + sampling epoch
+  T-->>S: Typed directional Flow record or explicit quality outcome
+  S->>S: Normalize IPv4/IPv6/time/interface/VRF/VLAN/NAT/QoS/app provenance
+  S->>SP: Durable accepted Flow batch + stable record identities
+  S->>I: mTLS replay-safe batch
   I->>K: network.flow.v1
-  K->>CH: Flow insert/aggregates
+  K->>E: Temporal enrichment request/event
+  E->>E: Entity/IPAM/DHCP/DNS/Agent/user-session/ASN/Geo/cloud mapping
+  E->>CH: Raw/common Flow + provenance + rollups
+  K->>Q: Exporter/template/sampling/gap/drop quality evidence
+  I-->>S: Durable acceptance watermark
+  S->>SP: Release acknowledged segment
 ```
 
-Every forced drop/template miss is counted and exposed through telemetry-quality/platform-health data.
+Pre-durable UDP loss is best effort. After the common certified Sensor durable-acceptance boundary, replay/idempotency/accounting follow the common Sensor reliability contract.
+
+No Flow Data does not mean No Network Traffic. Socket/kernel drops, receiver queue drops, malformed/unsupported packets, unknown/quarantined exporter, template miss/expiry, sampling unknown/change, sequence gap/reset, rate limiting, spool/storage pressure, upload/Core rejection, Kafka lag/rejection and ClickHouse failure are separate health/quality outcomes.
+
+### 14.1 Flow temporal identity enrichment
+
+```mermaid
+flowchart LR
+  F[Flow IP + timestamp] --> E[Temporal Entity/IP Ownership]
+  E --> A[Agent / Inventory / IPAM / DHCP]
+  E --> D[DNS evidence]
+  E --> U[User/Session evidence]
+  U --> AD[AD/LDAP/Entra]
+  U --> VPN[VPN/RADIUS/NAC/WLAN]
+  U --> FW[Firewall/Proxy/SWG]
+  E --> G[Site / Internal Geography]
+  E --> N[ASN/BGP/Public Geo/Cloud Catalogue]
+  A --> R[Versioned Enriched Flow]
+  D --> R
+  U --> R
+  G --> R
+  N --> R
+```
+
+Every identity enrichment is time-bounded and provenance-aware. A current directory object does not retroactively own a historical IP. Directory membership alone does not prove the active user. DNS/FQDN evidence does not prove a complete URL. Public-IP Geo is approximate network metadata.
+
+### 14.2 Flow coverage correlation
+
+When interface/direction/time alignment is valid:
+
+```text
+SNMP/interface exact counter evidence
+        +
+Flow normalized observed/estimated volume
+        +
+sampling + observation-point quality
+        ↓
+Flow Coverage = GOOD | PARTIAL | LOW | UNKNOWN
+```
+
+A coverage discrepancy generates telemetry-quality/investigation evidence, not an automatic device/link failure.
 
 ---
 
@@ -400,15 +452,18 @@ Every forced drop/template miss is counted and exposed through telemetry-quality
 
 ```mermaid
 flowchart LR
-  D[Device/App] -->|UDP/TCP/TLS| S[Sensor Event Receiver]
+  D[Device/App] -->|UDP/TCP/TLS| S[Dedicated LOG Sensor]
   S --> P[Parse PRI/timestamp/structured data]
-  P --> M[Device Pack parser + sensitive data policy]
+  P --> M[Parser/Capability Pack + sensitive data policy]
   M --> E[Entity correlation]
-  E --> I[Ingestion Gateway]
+  E --> SP[Role-local durable Log spool]
+  SP --> I[Ingestion Gateway]
   I --> K[Kafka event.syslog]
   K --> CH[ClickHouse]
   K --> AE[Alert/Correlation]
 ```
+
+Production LOG Sensors do not co-host Flow or Network polling workloads; production FLOW Sensors do not receive Syslog.
 
 ---
 
