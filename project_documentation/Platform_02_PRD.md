@@ -223,6 +223,17 @@ Sensors shall:
 - apply the 80% local-storage safety policy;
 - preserve higher-priority/recent operational data preferentially under extreme local pressure.
 
+### 6.6 Sensor communication integrity and push-protocol continuity
+
+Platform shall treat communication reliability as a correctness contract, not as a promise that external networks never lose packets.
+
+- Telemetry durably accepted by Platform shall not become silently unexplained loss within the certified Platform durability boundary.
+- A Sensor shall not delete acknowledged spool data until the Core durable-acceptance contract permits deletion under the certified HA design.
+- Source/network loss outside Platform control, especially unacknowledged UDP, is not represented as guaranteed delivery. Where technically observable, receiver/kernel drops, decoder drops, queue/rate-limit drops, template misses and exporter/session sequence gaps shall be surfaced as telemetry-quality evidence.
+- Core/WAN recovery and historical replay shall not starve identity, PKI, assignment/fencing/heartbeat control traffic or materially delay current critical operational telemetry; replay must still make bounded forward progress.
+- Critical push telemetry such as traps, Syslog and Flow shall support a policy-driven HA deployment profile where source technology permits redundant delivery. Supported patterns may include a stable collector VIP/FQDN, vendor-supported multiple destinations, dual collectors or another certified deployment-specific receiver mechanism. Standalone deployments do not imply Sensor-HA guarantees.
+- Platform shall not add a full Sensor database, Kafka/Valkey service, JVM process or separate mandatory reliability service merely to implement these semantics unless benchmark evidence and architecture change control prove it necessary.
+
 ---
 
 ## 7. Sensor placement and capacity
@@ -281,6 +292,19 @@ UI shall show both:
 - calculated workload percentage based on Monitoring Work Units.
 
 Device count alone shall not be the sole enforcement model.
+
+### 7.6 Failover readiness
+
+When HA/redundancy is enabled, failover eligibility for a target shall not be inferred only from backup-Sensor CPU/RAM/disk health. Eligibility shall consider, as applicable:
+
+- target/network reachability from the candidate Sensor;
+- protocol/port/TLS reachability;
+- credential usability and authorization;
+- site/security-zone/pool policy;
+- Sensor role/version/capability compatibility;
+- current MWU, queue/backlog and reserved failover capacity.
+
+For critical targets, Platform may maintain lightweight, staggered and policy-driven readiness evidence using bounded probes or change-triggered validation. Full duplicate monitoring is not required merely to prove standby readiness.
 
 ---
 
@@ -1900,7 +1924,9 @@ Operators shall be able to compare device A vs device B, or one entity/time wind
 
 ### 64.12 Data Pipeline Integrity
 
-Platform Operations shall expose produced, accepted, consumed, inserted, rejected, duplicate, late, schema-error and dropped telemetry counts. The purpose is to detect silent data loss between Sensor, ingestion, Kafka, processing and ClickHouse.
+Platform Operations shall expose produced, Sensor-durable/acknowledged, ingestion-accepted, Kafka-produced, consumed/processed, inserted, rejected, duplicate, late, schema-error and intentionally dropped telemetry watermarks/counters as applicable to each stream. Reconciliation should use compact sequence/watermark/counter evidence rather than storing per-stage copies of every observation solely for integrity accounting.
+
+Any unexplained difference outside the certified reconciliation/tolerance rules shall create a Platform internal `PIPELINE_INTEGRITY_GAP` condition with affected tenant/Sensor/topic/data-class scope and investigation evidence. The purpose is to detect silent data loss between Sensor, ingestion, Kafka, processing and ClickHouse without duplicating the telemetry pipeline.
 
 ### 64.13 Scheduled Housekeeping
 
