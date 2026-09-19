@@ -51,6 +51,8 @@ public class IngestionKafkaConfiguration {
     ) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
+        // Consume the complete Kafka poll as one bounded ClickHouse insert instead of one HTTP insert per record.
+        factory.setBatchListener(true);
         // Manual immediate acknowledgement ensures offsets ONLY commit after ClickHouse persistence succeeds
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
         // Default error handler with fail-closed recoverer: halts offset progression without skipping failed records
