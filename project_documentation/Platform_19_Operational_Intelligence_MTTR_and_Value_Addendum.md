@@ -4,6 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Operational Intelligence / MTTR / Customer Value**  
 **Product:** Platform  
+**Last reconciliation:** 2026-09-19 — v3.2.2 consolidated Mother Reference metadata alignment  
 **Change class:** Additive approved product scope; does not remove or weaken any v3.2.1 requirement
 
 ---
@@ -29,7 +30,7 @@ It is intentionally consolidated rather than duplicating the same requirement te
 
 `Platform_00_Document_Index.md` defines precedence. Where an older v3.2.1 document is silent, this document adds normative v3.2.2 behavior. Where an actual contradiction is found, the higher-precedence governing layer wins and change control must reconcile the conflict before implementation.
 
-After this branch is merged to canonical `main`, `PRD-OIV-*` and `REQ-OIV-*` requirements are implementation-authoritative. Before merge, this branch remains proposed change-control state only.
+`PRD-OIV-*` and `REQ-OIV-*` requirements are authoritative specification requirements in the canonical Mother Reference set. Runtime implementation, validation and certification remain separate engineering evidence gates.
 
 The purpose is not to add decorative AI. The purpose is to reduce operational noise, shorten time to diagnosis and restoration, preserve transient evidence, correlate cross-domain changes, enable bounded controlled remediation, and prove customer value using evidence rather than unsupported claims.
 
