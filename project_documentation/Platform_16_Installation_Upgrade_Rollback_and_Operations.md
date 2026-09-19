@@ -83,4 +83,6 @@ Production `FLOW_SENSOR`/`LOG_SENSOR` role conversion is a governed operation:
 
 Flow runbooks distinguish exporter silence from no traffic, packet/socket loss from decoder rejection, missing templates from exporter failure, sequence reset from packet loss, sampling change from genuine traffic change, stale template from current generation, identity-enrichment conflict from raw source truth, and downstream storage failure from source collection failure.
 
+Flow Sensor Pool runbooks additionally cover peer failure, exporter multi-collector duplication, listener/VIP takeover where certified, duplicate suppression versus legitimate multi-vantage observations, template warm-up after failover, gap estimation and capacity exhaustion on the surviving Sensor.
+
 Support bundles include sanitized role, listener/exporter IDs, protocol/version, observation domains, template hashes/state, sampling state, sequence/drop counters, queue/spool/backlog, last record, replay/drain and downstream lag. They do not expose sensitive user/session attributes beyond authorized diagnostic need.
