@@ -100,14 +100,16 @@ flowchart TB
     subgraph EDGE[Distributed Edge]
       NS[Network Sensor Pool]
       IS[Infrastructure Sensor Pool]
-      SS[Streaming/Event Sensor Pool]
+      FS[Flow Sensor Pool]
+      LS[Log Sensor Pool]
       SP[Synthetic Probe]
       AG[Windows/Linux Agents]
     end
 
     NS -->|mTLS HTTPS/gRPC| ING
     IS -->|mTLS HTTPS/gRPC| ING
-    SS -->|mTLS HTTPS/gRPC| ING
+    FS -->|mTLS HTTPS/gRPC| ING
+    LS -->|mTLS HTTPS/gRPC| ING
     SP -->|mTLS HTTPS/gRPC| ING
     AG --> IS
 
@@ -946,7 +948,7 @@ Upgrade architecture uses preflight, backup, compatibility checks, Sensor drains
 | Two-node stateful services without third quorum | Split brain/data availability | Fail-safe active/passive design, fencing/positive failure confirmation, Sensor replay, failure lab before GA |
 | 8C/16G Core target too aggressive for all-in-one Core stack | Product footprint misses goal | Strict resource envelopes, modular runtime, benchmark SNWP-2500-v1, tune Kafka/ClickHouse/Java memory |
 | High-cardinality custom APIs/OTel | Storage/query blow-up | Cardinality guardrails, quotas, mapping review, alerting |
-| Flow/syslog overload starves polling | False gaps/alerts | Separate worker pools and dedicated Streaming Sensor thresholds |
+| Flow/log overload starves polling or each other | False gaps/alerts / collection loss | Production-exclusive FLOW_SENSOR and LOG_SENSOR instances with independent worker/queue/spool/capacity budgets; combined high-rate role not production-certified |
 | Stale topology leads to wrong RCA | Wrong diagnosis | edge provenance/freshness, telemetry quality, confidence reduction, inconclusive outcome |
 | GNN overconfidence | Wrong root cause | constrained fusion, calibration, evidence requirement, benchmark, model disable path |
 | LLM hallucination | Unsafe advice | tool-grounding, data boundary, no direct execution, approval, explicit evidence |
@@ -1067,7 +1069,7 @@ The v1 document listed only names. The v2 architecture freezes how OSS is used a
 | OSS-014 | Search | Optional dedicated full-text search | OpenSearch | Apache-2.0 | OPTIONAL-LATER | Core | Add only if customer log search requirements exceed ClickHouse text-search capability. | Not mandatory in V1 to keep footprint low. Elasticsearch is not the core store. |
 | OSS-020 | Network Collection | SNMP v1/v2c/v3 | GoSNMP | BSD-style | USE/WRAP | Sensor | SNMP Get/GetNext/GetBulk/Walk/Set and traps/informs protocol engine. | Do not reimplement BER/SNMP. Platform owns scheduling, credential profiles, normalization, validation, retry and policy. |
 | OSS-021 | Network Collection | MIB parsing | gosmi | MIT | USE/WRAP | Core Studio/Sensor build tooling | Parse SMIv1/v2 MIBs for MIB Studio, OID metadata, enums, tables and notifications. | Platform owns MIB provenance, dependency workflow, metric semantics, Device Pack generation and redistribution controls. |
-| OSS-022 | Network Collection | NetFlow/IPFIX/sFlow parsing | GoFlow2 | BSD-3-Clause | USE/WRAP | Streaming Sensor | Decode NetFlow v5/v9, IPFIX and sFlow. | Platform owns enrichment, canonical flow schema, cardinality controls, Kafka publishing and analytics. |
+| OSS-022 | Network Collection | NetFlow/IPFIX/sFlow parsing | GoFlow2 | BSD-3-Clause | USE/WRAP | Dedicated Flow Monitoring Sensor | Decode NetFlow v5/v9, IPFIX and sFlow. | Platform owns exporter admission, template/sampling/sequence state, canonical Flow schema, bounded resources, temporal enrichment, durability/quality and analytics. |
 | OSS-023 | Network Collection | ICMP | golang.org/x/net/icmp | BSD-3-Clause | USE | Sensor/Agent | ICMP echo and low-level packet operations. | Platform owns scheduling, statistics, validation workflows, jitter/loss aggregation and path correlation. |
 | OSS-024 | Network Collection | DNS protocol | miekg/dns | BSD-style | USE | Sensor/Agent | Detailed DNS synthetic checks where standard resolver APIs are insufficient. | Platform owns test definitions, validation and SLA semantics. |
 | OSS-025 | Network Collection | SSH | golang.org/x/crypto/ssh | BSD-3-Clause | USE/WRAP | Sensor | SSH transport for CLI, discovery, diagnostics and NCM. | Platform owns credential brokering, command controls, session audit and vendor behavior. |
@@ -1076,7 +1078,7 @@ The v1 document listed only names. The v2 architecture freezes how OSS is used a
 | OSS-028 | Network Collection | YANG parsing | OpenConfig goyang | Apache-2.0 | USE | Core Studio/Sensor | YANG model parsing for Device Pack/YANG support. | Platform owns YANG Studio workflow, provenance and mapping. |
 | OSS-029 | Network Collection | YANG model utilities | OpenConfig ygot | Apache-2.0 | USE | Core Studio/Sensor | YANG-centric validation/marshal/unmarshal utilities. | Platform owns canonical mapping and compatibility policy. |
 | OSS-030 | API Connectors | OpenAPI parser/validator | kin-openapi | MIT | USE | Core Studio/Sensor | OpenAPI/Swagger import, validation and schema handling for API Studio. | Platform owns endpoint discovery, field/metric/entity inference, chained-call orchestration and Device Pack generation. |
-| OSS-031 | Logs/Events | Log/syslog collection helper | Fluent Bit | Apache-2.0 | CANDIDATE/INTEGRATE | Streaming Sensor/Agent | Use as an integration/collection component where appropriate for log ingestion and parsing. | Do not make Fluent Bit the Platform event model. Platform owns normalization, cardinality, retention and alert/RCA semantics. |
+| OSS-031 | Logs/Events | Log/syslog collection helper | Fluent Bit | Apache-2.0 | CANDIDATE/INTEGRATE | Dedicated Log Monitoring Sensor/Agent | Use as an integration/collection component where appropriate for log ingestion and parsing. | Do not make Fluent Bit the Platform event model. Platform owns role isolation, normalization, cardinality, retention and alert/RCA semantics. |
 | OSS-040 | Infrastructure | Windows WinRM | masterzen/winrm | Apache-2.0 | USE/WRAP | Infrastructure Sensor | WinRM command/collection plumbing for Windows agentless monitoring. | Platform owns secure policy, metrics, credentials, diagnostics and retries. |
 | OSS-041 | Infrastructure | Host metrics helpers | gopsutil | BSD-3-Clause | USE | Agent/Sensor | Cross-platform host process/CPU/memory/disk/network primitives where suitable. | Use native OS APIs where required for accuracy; Platform owns schema and collection policy. |
 | OSS-042 | Hardware | Redfish/Swordfish | Gofish | BSD-3-Clause | USE/WRAP | Infrastructure Sensor | Redfish/Swordfish hardware inventory/health collection. | Platform owns normalized hardware entity model and vendor packs. |
@@ -1250,7 +1252,7 @@ Docker networks/containers/volumes
   ├─ ClickHouse
   ├─ PostgreSQL
   ├─ Valkey
-  ├─ Network/Infrastructure/Streaming Sensors
+  ├─ Network/Infrastructure/Flow/Log Sensors
   ├─ mock protocol devices/exporters
   └─ test runners
 ```
