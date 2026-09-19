@@ -189,7 +189,7 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| REQ-UI-001 | Native Grafana-like Dashboard Studio; no embedded Grafana | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-001 | Native Platform Dashboard Studio with flexible composable dashboards; Grafana may inspire interaction patterns but is not copied/embedded | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-002 | Create/group/folder/clone/import/export/share dashboards | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-003 | Drag/drop/resizable panels and broad chart/table/topology/map/Sankey types | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-004 | Light/dark theme, readable fonts, density options | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -203,6 +203,17 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-UI-012 | Mobile incident/dashboard experience; desktop for full admin/studios | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-013 | Query protection: timeout/row/scan/concurrency/async export | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-014 | Fast UI with caching/preaggregation/virtualization/lazy loading/query cancellation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-015 | No-context-switch NOC troubleshooting from entity/alert/incident context | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-016 | Persistent contextual action bar + Troubleshoot drawer/workspace | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-017 | On-demand bounded ICMP/traceroute/SNMP/TCP/DNS/SSH/API tests through eligible Sensor/Agent | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-018 | Multi-vantage verification with contradictory evidence preserved | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-019 | Verify Now deterministic diagnostic bundles/packs | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-020 | Live Evidence distinguishes monitored state from fresh operator-triggered verification | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-021 | Why/What Changed/Compare contextual investigation actions | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-022 | Investigation Session preserves diagnostic/CLI/config/topology/flow evidence references and can link to incident | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-023 | Risk-proportionate action friction; CLI supports stored/personal/one-time credentials without browser exposure of reusable secrets | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-024 | Diagnostic jobs bounded by tenant/scope/target/rate/concurrency/timeout/cancellation and isolated from routine monitoring capacity | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-025 | AI may explain/suggest permitted next tests but cannot fabricate results or bypass authorization/execution controls | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Data lifecycle
 
