@@ -45,6 +45,16 @@ The versioned API surface shall expose typed resource families for **Diagnostic 
 
 All contracts are tenant/resource scoped server-side, use stable error codes/correlation IDs, and expose `DENIED`, `CAPACITY_LIMITED`, `TARGET_UNREACHABLE`, `CREDENTIAL_FAILURE`, `TIMEOUT`, `CANCELLED` and other protocol-specific normalized outcomes without leaking secrets.
 
+### 2.2 Cloud and full-stack observability API contracts
+
+The versioned API surface shall expose typed resource families for cloud provider connections, hierarchy/scope discovery, credential/permission preflight, cloud resource/service query, connector health/rate budget, observability coverage/blind spots, traces/cross-signal pivots, service graph, cloud changes/events, quotas/autoscaling and SLO/service state as governed by `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`.
+
+Cloud connection create/update requests carry provider, tenant-scoped hierarchy scope, credential reference/auth mode, selected Cloud/API Sensor pool, selected Capability/Cloud Service Packs, include/exclude filters, collection policy and parent-scope ephemeral activation policy. Secret values are accepted only through protected credential-binding operations and are never returned by normal read APIs.
+
+Hierarchy/resource queries are paginated and expose provider source IDs as aliases/evidence plus canonical Platform entity IDs. Trace/log/metric/event queries enforce tenant/resource scope and query/cardinality limits; trace/span IDs never authorize access by themselves.
+
+Coverage and connector-health responses expose freshness, permission gaps, unsupported/unavailable signals, throttle/rate state, last successful reconciliation and normalized states such as `CONNECTED`, `PARTIAL`, `AUTHORIZATION_DEGRADED`, `THROTTLED`, `STALE`, `RECONCILING`, `MISCONFIGURED`, `DISCONNECTED` and `SUSPENDED`.
+
 ## 3. Sensor/Agent control contract
 
 Enrollment establishes identity/certificate. Subsequent sessions authenticate with mTLS. Core sends versioned desired configuration/assignment; endpoint acknowledges applied version/checksum. Telemetry ingestion is asynchronous and replay-safe.
@@ -57,6 +67,8 @@ Kafka is internal. Events include schema version, tenant, source identity, event
 
 Diagnostic/investigation event families, where carried internally, include job/session ID, origin reference, canonical target/evidence reference, source/vantage, state transition, timestamps, quality/provenance, normalized result/error code and correlation ID. **Secrets, one-time credentials, reusable credential material and terminal keystroke payloads are prohibited from general Kafka/audit/analytics events.** Browser/UI live updates use an authenticated Platform UI channel; Kafka is never exposed directly to the browser.
 
+Cloud/full-stack logical event families include telemetry metric/log/trace, cloud inventory/event/change/network-flow, connector-health/coverage and SLO evaluation. Exact topic names follow repository schema governance, but every schema carries tenant, source/provider, canonical entity/service references where known, schema version, event/observation time, ingest time, quality/freshness, provenance and idempotency/correlation identity where required. Provider events and trace/log attributes are untrusted payload data until validated; credentials and prohibited sensitive fields never enter general events.
+
 ## 5. Compatibility
 
 Breaking API/event changes require major contract version and migration window. Core must expose compatibility matrix for Sensor/Agent versions.
@@ -67,11 +79,11 @@ Breaking API/event changes require major contract version and migration window. 
 
 ## 1. Ownership
 
-PostgreSQL owns transactional/control state: tenants, users/RBAC metadata, inventory/current entity state, policies, credentials metadata/references, licensing, **diagnostic job metadata, Investigation Session state/evidence references**, other job metadata and configuration. ClickHouse owns high-volume historical metrics/flow/events/log/audit analytics and normalized diagnostic-result analytics where retention/query volume justifies it. Kafka transports events; Valkey stores cache/ephemeral state only. No separate diagnostics database is introduced.
+PostgreSQL owns transactional/control state: tenants, users/RBAC metadata, inventory/current entity state, policies, credentials metadata/references, licensing, **diagnostic job metadata, Investigation Session state/evidence references**, cloud provider connections and hierarchy metadata, Cloud Service Pack bindings, durable reconciliation cursors where correctness requires them, canonical cloud/service identity aliases, ephemeral-parent activation policy, SLO definitions, coverage policy/expectations, connector desired state and compatibility/certification references. ClickHouse owns high-volume historical metrics/flow/events/log/audit analytics, trace spans/derived trace metrics, cloud audit/control-plane events, normalized cloud changes, cloud network-flow facts/summaries, provider-health observations, historical quota/autoscaling observations, coverage-history facts, normalized diagnostic-result analytics and, when P1 is enabled, high-volume RUM/profile/cloud-cost facts. Kafka transports versioned events; Valkey stores only reconstructable cache/ephemeral state such as bounded correlation windows and rate/token buckets. No separate diagnostics, cloud or trace database is introduced by Platform_24.
 
 ## 2. Canonical identity
 
-Every monitored object maps to canonical tenant-scoped entity identity independent of protocol. IP is an attribute, not sole identity. Provenance and source protocol are retained.
+Every monitored object maps to canonical tenant-scoped entity identity independent of protocol. IP is an attribute, not sole identity. Provenance and source protocol are retained. The same runtime/resource/service must not become duplicate canonical entities merely because it is observed through provider API, Kubernetes, Agent, OpenTelemetry, logs, flow or synthetics. Provider resource IDs/ARNs/URIs, Kubernetes UIDs and OTel resource/service attributes are tenant-scoped source identifiers/aliases and never override Platform tenant authority.
 
 ## 3. Schema migration
 
@@ -79,7 +91,7 @@ Migrations are versioned, automated, tested from supported upgrade origins and i
 
 ## 4. Retention classes
 
-Raw, rollup, incident, audit, configuration, **diagnostic/investigation evidence** and protected/legal-hold classes use different lifecycle policies. Investigation evidence linked to an incident/legal hold follows the applicable protected lifecycle; ephemeral one-time credentials are never a retention class. Emergency purge never treats all tables equally.
+Raw, rollup, incident, audit, configuration, **diagnostic/investigation evidence**, trace, cloud-change/event/network-flow, coverage-history and protected/legal-hold classes use different lifecycle policies. P1 RUM/profile/cost classes are independently configurable. Investigation evidence linked to an incident/legal hold follows the applicable protected lifecycle; ephemeral one-time credentials are never a retention class. Emergency purge never treats all tables equally. Trace/log/RUM/profile attributes are subject to sensitive-field and cardinality policy before long-term retention/indexing.
 
 ## 5. Data integrity
 
