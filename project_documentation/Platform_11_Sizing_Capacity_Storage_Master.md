@@ -7,7 +7,7 @@
 
 ## 1. Governing rule
 
-Device count is a commercial/planning input, not the only engineering load measure. Platform must size and operate using measured workload: poll operations/sec, metrics/sec, interfaces/entities, polling interval, protocol cost, RTT/timeouts, Flow/log rates, streaming subscriptions, NCM jobs, synthetic tests, **interactive/on-demand diagnostics and CLI sessions**, concurrent users, query/report/RCA demand and retention.
+Device count is a commercial/planning input, not the only engineering load measure. Platform must size and operate using measured workload: poll operations/sec, metrics/sec, interfaces/entities, polling interval, protocol cost, RTT/timeouts, Flow datagrams/records/bytes and Log EPS/bytes on their dedicated Sensor roles, streaming subscriptions, NCM jobs, synthetic tests, **interactive/on-demand diagnostics and CLI sessions**, concurrent users, query/report/RCA demand and retention.
 
 All numbers below are **engineering planning targets until benchmark-certified**. They are not contractual scale claims merely because incumbent products publish similar densities.
 
@@ -104,9 +104,42 @@ If devices are divided into multiple network-isolated/locality pools, redundancy
 - Agent-push ingestion planning target: approximately **2,200 endpoints per 4 vCPU / 16 GB ingestion capacity unit**.
 - These are separate workload classes and are not added to network-device counts as if they had identical cost.
 
-## 5. Streaming/Event Sensor
+## 5. Dedicated Flow and Log Sensor sizing
 
-High-volume NetFlow/IPFIX/sFlow/J-Flow, Syslog, traps and high-rate OTel are separated from polling when volume risks starving normal collection. A small deployment may combine roles, but Platform's Capacity Engine must recommend/require role separation once safe limits are approached. Exact records/sec and EPS certification values are benchmark-defined.
+Production Flow and Log monitoring use separate exclusive Sensor instances from first deployment; they are not capacity thresholds inside Network/Infrastructure Sensors.
+
+### 5.1 Flow Sensor workload dimensions
+
+Flow Sensor certification uses at minimum:
+
+- exporter count and observation domains/exporter;
+- datagrams/sec, records/sec and bytes/sec;
+- records/datagram and fields/record;
+- NetFlow v5/v9/IPFIX/sFlow/vendor mix;
+- IPv4/IPv6 mix;
+- template/options-template count, refresh rate and churn;
+- sampling algorithm/rate/change frequency;
+- exporter/source sequence gaps and reset frequency;
+- packet size / variable-length / enterprise-IE mix;
+- socket/kernel drop rate;
+- receiver queue depth/lag;
+- decoder/normalizer CPU and allocation/GC behavior;
+- bounded enrichment lookup/cache hit/miss and provenance cost;
+- Flow spool write rate, bytes and certified buffer horizon;
+- replay drain rate after Core/WAN outage;
+- Sensor→Core upload bytes/sec;
+- downstream Kafka/ClickHouse insert/rollup rate;
+- Flow Explorer/Top-N/matrix/Sankey query concurrency and latency.
+
+A certified Flow Sensor profile reserves operational headroom for bursts, template churn, spool/replay, health and upgrade. Dedicated does not mean 100% CPU/RAM/disk target utilization. Safe operating envelopes are benchmark outputs, not guessed constants.
+
+### 5.2 Log Sensor workload dimensions
+
+Log Sensor certification is independent from Flow and uses source count, connections, average/peak EPS, bytes/sec, transport/TLS cost, parser/multiline/redaction/fingerprint complexity, cardinality, spool/backlog, forwarding fan-out and query/retention dimensions owned by the logging contract. Flow records/sec and Log EPS are never added into one mixed production Sensor capacity claim.
+
+### 5.3 Role and host isolation
+
+Each production Sensor instance's allocated CPU/RAM/disk/NIC belongs to its role. Separate VMs may share a physical hypervisor only where reserved resources/noisy-neighbor controls satisfy the certified profile. FLOW and LOG roles have separate local spool budgets and failure domains.
 
 ## 6. Monitoring Work Units (MWU)
 
@@ -119,7 +152,7 @@ Platform must compute a workload score using at least:
 - RTT, packet loss and timeout rate;
 - gNMI stream rate;
 - REST calls and response size;
-- Flow records/sec and template rate;
+- Flow datagrams/sec, records/sec, bytes/sec, exporter/template/sampling/cardinality/enrichment cost on dedicated FLOW Sensors;
 - Syslog/events/sec;
 - agent/agentless collection cost;
 - NCM/CLI scheduled/concurrent jobs;
@@ -149,7 +182,7 @@ Customer modes: **Automatic (recommended)**, **Automatic with Approval**, **Manu
 
 ## 8. Standard Network Workload Profile SNWP-2500-v1
 
-The 8 vCPU/16 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; and Flow/syslog below dedicated-streaming threshold. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
+The 8 vCPU/16 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; with Flow/Log collection executed on separate dedicated Sensors. Core-side ingest/analytics load from Flow/Log is included only in the specific certified workload profile; Network Sensor sizing never assumes co-hosted Flow/Log. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
 
 A separate Heavy Network Workload profile covers high-interface, aggressive polling, heavy routing, gNMI, API/NCM and high-rate stream cases.
 
@@ -200,7 +233,11 @@ Incident/investigation legal holds protect selected time windows/entities/eviden
 
 ## 12. Performance/resource certification
 
-Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, Flow records/sec, syslog EPS, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, **interactive diagnostic/CLI concurrency, multi-vantage fan-out, bounded continuous-test load and diagnostic latency under simultaneous certified monitoring load**, compression, retention cleanup and failure recovery. Certification must prove that interactive troubleshooting cannot starve scheduled monitoring/ingestion. Regressions beyond approved tolerance fail certification or require documented exception.
+Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, dedicated Flow datagrams/records/bytes/sec, dedicated Log EPS/bytes/sec, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, **interactive diagnostic/CLI concurrency, multi-vantage fan-out, bounded continuous-test load and diagnostic latency under simultaneous certified monitoring load**, compression, retention cleanup and failure recovery.
+
+Flow certification additionally records exporters, observation domains, records/datagram, fields/record, template rate/churn, sampling mix, IPv4/IPv6 mix, socket/kernel drops, decoder lag, enrichment cost, spool growth, replay drain, Kafka/ClickHouse load and bounded Flow-query cost. Log and Flow results are reported separately; no single mixed "Streaming Sensor" throughput number is a production certification.
+
+Certification must prove role isolation and that interactive troubleshooting cannot starve scheduled monitoring/ingestion. Regressions beyond approved tolerance fail certification or require documented exception.
 
 For releases enabling Local AI/ML/LLM, certification additionally records per-module normal/peak CPU and RAM, inference latency, local LLM concurrency/context, model load/unload behavior, queue/backpressure, GNN/embedding workload, AI artifact disk footprint and the effect of AI load on ingestion, alert qualification, query latency and failover. The supported local-intelligence profile must pass inside the same certified Core tier; it does not create a hidden higher minimum hardware requirement.
 
