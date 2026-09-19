@@ -1795,7 +1795,7 @@ Engineering shall construct the profile using a representative mixture of enterp
 - alert evaluation;
 - a representative number of simultaneous dashboard users and background reports;
 - representative incident/RCA workload;
-- controlled Flow/syslog workload below the threshold that requires a dedicated Streaming Sensor.
+- no production Flow or high-rate log workload on the Network Sensor benchmark profile; dedicated Flow/Log Sensor profiles are benchmarked separately.
 
 **Exact interface count, metrics/device, poll distribution and event rates remain benchmark-derived values and must be committed into the test profile before a capacity claim is certified.** They are not invented in this PRD.
 
@@ -1811,7 +1811,7 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 - UI-driven provisioning for single, bulk and discovery;
 - actionable preflight diagnostics;
 - central Sensor/Agent assignment and locality/capacity-aware placement;
-- SNMP/flow/syslog/network protocol collection;
+- SNMP/network protocol collection plus separately certified dedicated Flow Sensor and dedicated Log Sensor collection;
 - infrastructure/cloud/K8s/DB/synthetic coverage committed for release;
 - policy inheritance and no hard-coded customer thresholds;
 - alert qualification and recovery qualification;
@@ -1843,7 +1843,7 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 | PRD-TBD-06 | Exact numeric UI/API SLO values after benchmark |
 | PRD-TBD-07 | Final default retention/rollup values and minimum emergency-recent window |
 | PRD-TBD-08 | Final commercial over-entitlement behavior |
-| PRD-TBD-09 | Exact trigger/load threshold for moving flow/syslog to dedicated Streaming Sensor |
+| PRD-TBD-09 | Exact certified capacity envelopes for dedicated Flow Sensor and Log Sensor profiles |
 | PRD-TBD-10 | Future Master Core/Regional Core release scope |
 
 
