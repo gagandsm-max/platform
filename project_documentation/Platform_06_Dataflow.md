@@ -1907,7 +1907,6 @@ sequenceDiagram
   EN->>CH: raw/common Flow + provenance + bounded rollups
   I-->>FS: durable acceptance watermark
   FS->>SP: release acknowledged segment
-  EN->>CH: Insert network_flow
 ```
 
 ## DF-075 — gNMI/YANG subscription
