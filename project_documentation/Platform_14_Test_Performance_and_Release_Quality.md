@@ -45,7 +45,7 @@ Platform targets banks, defence and large enterprises; testing therefore validat
 
 ## 3. Mandatory negative tests
 
-Wrong SNMP community/v3 user/auth/privacy, SNMP disabled, ACL/firewall drop, unreachable host, wrong API token, TLS failure, expired certificate, DNS failure, Kafka unavailable, ClickHouse unavailable, PostgreSQL failover, sensor disk pressure, Core loss, duplicate/replayed telemetry, malformed bulk import, high-cardinality explosion, clock skew, unauthorized/cross-tenant diagnostic target, arbitrary/ad-hoc target abuse, diagnostic rate/concurrency exhaustion, unbounded continuous test, cancellation/timeout failure, multi-vantage contradictory results, reused/expired diagnostic authorization, CLI session hijack, one-time/reusable credential leakage, command-policy bypass, privilege escalation/config-mode denial and missing diagnostic/CLI/investigation audit evidence.
+Wrong SNMP community/v3 user/auth/privacy, SNMP disabled, ACL/firewall drop, unreachable host, wrong API token, TLS failure, expired certificate, DNS failure, Kafka unavailable, ClickHouse unavailable, PostgreSQL failover, sensor disk pressure, Core loss, duplicate/replayed telemetry, malformed bulk import, high-cardinality explosion, clock skew, unauthorized/cross-tenant diagnostic target, arbitrary/ad-hoc target abuse, diagnostic rate/concurrency exhaustion, unbounded continuous test, cancellation/timeout failure, multi-vantage contradictory results, reused/expired diagnostic authorization, CLI session hijack, one-time/reusable credential leakage, command-policy bypass, privilege escalation/config-mode denial and missing diagnostic/CLI/investigation audit evidence. Cloud/full-stack negative cases additionally include revoked/expired cloud identity, insufficient provider permissions, cross-account/subscription/project/compartment scope escape, provider API throttling, malformed/truncated pagination or cursor replay, missed provider events followed by reconciliation, high-churn ephemeral resources, duplicate cloud events, trace/log cross-tenant correlation attempts, trace attribute/cardinality bombs, sensitive trace/log field leakage, sampling/backpressure failure and cloud connector stale/partial state being misclassified as resource-down.
 
 ## 3.1 NOC troubleshooting acceptance tests
 
@@ -63,6 +63,8 @@ Every `.deb`/`.rpm` package is installed on clean certified OS images, rebooted,
 
 No release promotion with failing P0/P1 tests, unresolved critical/high security defects without approved exception, tenant-isolation failure, data-loss defect in certified normal failure scenarios, failed upgrade/rollback gate, broken SBOM/license gate or performance regression beyond approved threshold.
 
+For a **Cloud Observability GA** claim, all `PRD-CLOBS-001..021` / `REQ-CLOBS-001..021` P0 gates in `Platform_24` are mandatory. AWS, Azure, GCP and OCI provider roots must each have certified onboarding, hierarchy/inventory, connector health, required P0 evidence classes and mandatory high-value Cloud Service Pack coverage. Specification or a generic connector is not certification.
+
 ## 4. Platform — Performance & Benchmark Plan
 
 > Consolidated from `Platform_22_Performance_and_Benchmark_Plan.md` v3.1. Requirements in this section remain normative.
@@ -77,7 +79,7 @@ Planning baseline 4 vCPU/16 GB/150 GB ≈800 normal network devices. Benchmark o
 
 ## 3. Benchmark dimensions
 
-Devices, interfaces, metrics, poll interval, SNMP version/security, RTT, timeouts, traps/events, flow rate, syslog EPS, gNMI subscriptions, concurrent users, dashboard queries, reports, RCA jobs and storage retention.
+Devices, interfaces, metrics, poll interval, SNMP version/security, RTT, timeouts, traps/events, flow rate, syslog EPS, gNMI subscriptions, concurrent users, dashboard queries, reports, RCA jobs and storage retention. Cloud/full-stack dimensions additionally include provider organizations/accounts/subscriptions/projects/compartments, resources by region/type, provider API calls/minute and throttling, metric samples/sec, log bytes/events/sec, spans/sec and attributes/span, Kubernetes object/event churn, serverless invocation volume, cloud flow records/sec, cloud audit/change events/sec, SLO evaluations and concurrent Trace/Log/Service-graph queries. P1 benchmarks add RUM events, profiling volume and cloud-cost facts.
 
 ## 4. UI targets
 
@@ -118,7 +120,10 @@ Full regression, performance certification, HA/DR evidence, migration/upgrade ma
 - missing SBOM/notices/provenance;
 - HA failover violating agreed <60s target under certified test profile;
 - unsupported silent data loss in certified normal failure scenarios;
-- unresolved RED OSS dependency.
+- unresolved RED OSS dependency;
+- Cloud Observability GA with any AWS/Azure/GCP/OCI P0 provider root or mandatory Platform_24 service-family certification missing;
+- cloud credential/trace/log/resource tenant-isolation defect or secret/sensitive-field leakage;
+- connector/API degradation that can silently convert missing/stale cloud telemetry into false resource-down state.
 
 ## 5. Evidence
 
