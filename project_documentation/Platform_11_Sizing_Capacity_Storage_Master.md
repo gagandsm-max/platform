@@ -98,6 +98,10 @@ Current safe planning baseline retained from prior deployments:
 
 If devices are divided into multiple network-isolated/locality pools, redundancy is applied per pool. Therefore final Sensor count is distribution-dependent rather than one global `active + 1`.
 
+### 3.2 Communication-reliability resource rule
+
+Communication-integrity hardening shall fit inside the existing certified Sensor tiers unless benchmark evidence proves otherwise. Reliability is achieved first through deterministic poll distribution, bounded queues, compact counters/watermarks, controlled retries, priority scheduling, lightweight readiness probes and bounded spool metadata—not by silently increasing Sensor hardware or adding heavyweight local data services. HA/redundancy capacity is customer/profile driven; one standalone Sensor remains a supported non-HA deployment.
+
 ## 4. Infrastructure Sensor planning
 
 - Agentless SSH/WMI/WinRM planning target: approximately **800 endpoints per 4 vCPU / 16 GB Sensor**.
@@ -130,7 +134,9 @@ UI shows both simple device count and calculated workload/capacity. Placement ne
 
 ## 7. Sensor Placement Engine
 
-Eligibility considers: tenant/security boundary, protocol reachability, preferred/allowed/forbidden pools, site/region locality, measured RTT/loss, Sensor role, CPU/RAM, current MWU, queue/backlog, local disk, HA reserve and maintenance/drain state.
+Eligibility considers: tenant/security boundary, protocol reachability, preferred/allowed/forbidden pools, site/region locality, measured RTT/loss, Sensor role/version/capability, CPU/RAM, current MWU, queue/backlog, local disk, HA reserve and maintenance/drain state.
+
+For HA/failover selection, Sensor-host health alone is insufficient. Candidate readiness additionally considers target/network path, applicable protocol/port/TLS reachability, credential usability/authorization and security-zone policy. For critical targets this evidence may be maintained by lightweight, staggered, cached or change-triggered checks; complete duplicate polling is not the default readiness mechanism.
 
 Customer modes: **Automatic (recommended)**, **Automatic with Approval**, **Manual**, **Pool Based**. Rebalancing uses hysteresis to avoid thrashing.
 
@@ -181,13 +187,19 @@ The 80% safety watermark is non-disableable. Pre-watermark zones provide warning
 
 The same 80% principle applies to Sensor disks. Sensor cleanup prioritizes junk/temp/debug logs and already-delivered/expired spool data; if necessary during prolonged outage, oldest eligible lower-priority buffered raw data may be shed according to policy while polling continues. Sensor must expose remaining buffer horizon and loss risk.
 
+Operational buffer horizon is calculated from usable remaining spool capacity and a smoothed recent spool growth rate, with burst-resistant forecasting rather than rejecting work from a single transient spike. Platform Operations shall expose spool usage/bytes, growth rate, oldest unacknowledged age, projected 70/75/80% times where meaningful, estimated remaining outage survivability and replay completion estimate. Admission/placement may use a policy minimum buffer horizon only from sustained/forecast evidence.
+
 ### 11.3 Legal hold
 
 Incident/investigation legal holds protect selected time windows/entities/evidence from normal purge and make the Storage Engine reclaim other eligible data first.
 
 ## 12. Performance/resource certification
 
-Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, Flow records/sec, syslog EPS, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, compression, retention cleanup and failure recovery. Regressions beyond approved tolerance fail certification or require documented exception.
+Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, Flow records/sec, syslog EPS, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, compression, retention cleanup and failure recovery. Sensor certification additionally records CPU/RAM per MWU, poll operations/sec/core, metrics/sec/core, Flow records/sec/core, Syslog events/sec/core, network bytes/observation, disk bytes/observation, spool write amplification/compression, replay throughput, retry amplification, goroutine/thread count, open file descriptors, socket count and GC overhead.
+
+The Sensor resource profile is exercised under healthy state, WAN loss/degradation, shared site failure, credential failure, Core outage, Core recovery/replay, Sensor overload/failover, large target-timeout events and Flow/Syslog bursts. Reliability controls must remain bounded and must not materially increase the customer's monitored-device management-plane load or silently raise the minimum Sensor tier.
+
+Regressions beyond approved tolerance fail certification or require documented exception.
 
 For releases enabling Local AI/ML/LLM, certification additionally records per-module normal/peak CPU and RAM, inference latency, local LLM concurrency/context, model load/unload behavior, queue/backpressure, GNN/embedding workload, AI artifact disk footprint and the effect of AI load on ingestion, alert qualification, query latency and failover. The supported local-intelligence profile must pass inside the same certified Core tier; it does not create a hidden higher minimum hardware requirement.
 
