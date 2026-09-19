@@ -545,6 +545,110 @@ Cloud cost facts shall be normalized to a FOCUS-compatible logical model where p
 
 ---
 
+### 20.9 Logical PostgreSQL table families
+
+The names below are **logical schema contracts**, not permission to bypass the repository's migration/schema naming conventions. Physical names are frozen through normal migration review.
+
+| Logical family | Key data | Required integrity/index behavior |
+|---|---|---|
+| `cloud_connection` | tenant, provider, root scope, auth-mode/credential reference, Sensor pool, desired state, status | unique tenant/provider/root-scope identity; tenant-first access; no secret value columns |
+| `cloud_scope` | organization/tenant/folder/OU/account/subscription/project/compartment hierarchy, parent, display metadata, enabled regions | unique canonical scope identity within tenant/provider; parent/child traversal index |
+| `cloud_pack_binding` | connection/scope, Capability Pack ID/version, effective policy, enabled state | FK to connection/scope/pack registry; versioned/auditable |
+| `cloud_reconcile_cursor` | provider/API family/scope cursor or watermark, last success, last full reconciliation, error state | durable update semantics; tenant/provider/scope lookup; never stored only in Valkey |
+| `cloud_external_identity_binding` | canonical entity/service ID ↔ provider external ID/ARN/URI/K8s UID/OTel resource identity | unique active binding within tenant/source scope; conflict state instead of silent merge |
+| `cloud_parent_activation_policy` | approved durable scope, include/exclude predicates, inherited profile/retention/alert/SLO policy | versioned, auditable and linked to Platform_20 authorization decision |
+| `cloud_coverage_expectation` | scope/service class and required metric/log/trace/change/network/SLO evidence | versioned policy; supports explicit unsupported/not-required state |
+| `cloud_connector_desired_state` | rate budgets, collection classes, regions, service packs, reconciliation cadence | versioned desired state with observed/applied version |
+| `service_catalog_binding` | canonical service/business-service ownership, environment, version/repository/runbook references where governed | tenant/service unique active identity; ownership history preserved |
+| `slo_definition/reference` | use/refer to Platform_21 authoritative SLO domain | do not fork a second SLO definition table solely for cloud |
+
+Cloud current-state materialization may reuse existing canonical inventory/entity/relationship tables rather than duplicate one PostgreSQL table for every provider resource type. Provider-specific payload fragments are retained only when needed for provenance/diagnostics and are bounded by schema/security policy.
+
+### 20.10 Logical ClickHouse table families
+
+| Logical family | Core fields/query keys | Storage rules |
+|---|---|---|
+| `trace_span` | tenant, trace_id, span_id, parent/link IDs, service/entity IDs, environment/version, start/end/duration, status, span kind, bounded attributes/events, source/collector | time partition; tenant + service/entity + time ordering; trace-id lookup acceleration; materialize frequently queried semantic fields; do not index arbitrary attributes indiscriminately |
+| `cloud_operational_event` | tenant, provider, scope/entity/service, event class, source event ID, event/ingest time, actor/service identity where available, normalized state/result, raw evidence reference | dedupe/idempotency by source identity; time-partitioned; provider/source provenance retained |
+| `cloud_connector_health_history` | tenant, connection, API family, auth/permission state, API latency/error/throttle, rate-budget usage, cursor/reconcile age, lag/freshness | bounded operational history; current authoritative desired/config state stays in PostgreSQL |
+| `cloud_quota_sample` | tenant, provider/scope/resource/service quota, limit, observed usage, forecast risk, observation time | time series/rollup; unknown usage remains unknown rather than fabricated |
+| `cloud_autoscaling_event` | tenant, scaling target, desired/current/min/max, policy, action/result, blocker/quota evidence, time | event-time ordering and incident/change correlation |
+| `observability_coverage_history` | tenant, scope/service/entity, expected signal, observed signal/freshness/quality, connector state, gap reason | use for trend/coverage history; current expectations/config remain PostgreSQL |
+| `rum_event` (P1) | tenant, app/service/session-safe pseudonymous IDs, page/navigation/Web-Vitals/error/request timing, trace correlation | privacy minimization, high-cardinality limits, short/default-bounded retention |
+| `profile_sample/aggregate` (P1) | tenant, service/version/runtime/profile type, stack/function symbol reference, value/time, trace correlation where supported | prefer aggregated/bounded representation; artifact store permitted for payloads not suited to rows |
+| `cloud_cost_usage` (P1) | tenant, billing period/time, provider/account, service/resource/workload/owner allocation, normalized FOCUS-compatible dimensions, amount/currency/unit, source/estimate flag | billing facts are delayed analytical data; partition by billing/event period; never operational availability truth |
+
+Existing Platform tables shall be reused rather than forked where semantics already exist:
+
+- network flow data remains the existing `network_flow` family enriched with cloud/provider/interface/subnet/service identity;
+- Platform_19 normalized change evidence remains the authoritative cross-domain change model;
+- generic metric/log/event/audit table families remain reusable where their schema satisfies Platform_24 identity/provenance requirements;
+- Incident Flight Recorder pins/references existing evidence instead of copying every signal into a second incident database.
+
+### 20.11 Partitioning, indexing and retention invariants
+
+- PostgreSQL indexes begin with tenant/scope dimensions for tenant-owned high-selectivity access paths; provider external identifiers are never globally trusted without tenant/source scope.
+- ClickHouse partitioning is time-oriented and designed to avoid per-tenant/per-resource partition explosion. Dominant ORDER BY/query keys begin with tenant plus stable service/entity/signal dimensions and time as appropriate.
+- Trace-ID, error/status and selected semantic-convention fields may use materialized/data-skipping indexes after benchmark; arbitrary attribute keys must not generate unbounded indexes/materialized columns.
+- Every high-volume table has a signal-specific TTL/retention class compatible with Platform_11 storage protection. Incident/legal-hold pinning uses the existing protected-evidence mechanism.
+- Late/out-of-order, replay and duplicate cloud/trace events are handled using existing ingestion idempotency/event-time semantics; a provider retry must not create duplicate incident effects.
+- P1 cost/RUM/profile retention and access policies are independent from operational metrics/logs/traces and may be disabled without breaking P0 monitoring.
+- Schema evolution uses versioned events and normal database migrations; provider API field changes do not directly mutate canonical schemas without normalization/version handling.
+
+### 20.12 P0 end-to-end dataflows
+
+**Cloud onboarding / inventory:**
+
+```text
+UI Add Cloud Environment
+→ Core validates tenant/RBAC + stores protected credential reference
+→ Cloud/API Sensor executes identity/permission/network preflight
+→ provider hierarchy/resource discovery
+→ normalize identity + reconcile canonical entities/relationships
+→ PostgreSQL current/control state
+→ inventory/change events through Kafka where applicable
+→ ClickHouse historical evidence
+→ Graph / Coverage / UI verification
+```
+
+**OpenTelemetry trace ingestion:**
+
+```text
+Application / OTel SDK or Collector
+→ approved OTLP endpoint / Sensor path
+→ tenant/source/schema/size/cardinality validation
+→ sampling/backpressure policy
+→ Kafka internal telemetry.trace event
+→ trace normalization + canonical service/resource mapping
+→ ClickHouse trace_span
+→ derived RED metrics / service graph / SLO / investigation / RCA
+```
+
+**Provider event/change path:**
+
+```text
+Provider event/audit source
+→ Cloud/API Sensor or approved connector
+→ source authentication + replay/idempotency validation
+→ normalized cloud event/change
+→ Kafka
+→ ClickHouse evidence history
+→ canonical current-state reconciliation where applicable
+→ Change Intelligence / Incident Flight Recorder / RCA
+→ periodic inventory reconciliation repairs missed-event drift
+```
+
+**Query/investigation path:**
+
+```text
+UI Service / Trace / Cloud / Incident view
+→ Query API enforces tenant/resource/time/cardinality limits
+→ PostgreSQL current identity/control + ClickHouse historical signals
+→ Graph/Correlation joins by canonical entity/service/evidence references
+→ bounded response with freshness/quality/provenance
+→ UI exposes evidence, contradictions and missing coverage
+```
+
 ## 21. API and event contracts
 
 P0 API surfaces shall exist for at least:
