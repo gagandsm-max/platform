@@ -1,11 +1,11 @@
 # Platform — Agent Reliability, Failover, Durability & Resource Assurance Master
 
-**Document ID:** PLATFORM-ARF-001  
-**Version:** 3.2.2  
-**Status:** **Authoritative Specialized Mother Reference — Agent Reliability / Failover / Durability / Resource Assurance**  
-**Product:** Platform  
-**Effective date:** 2026-09-19  
-**Scope:** Linux Agent + Windows Agent + Agent↔Sensor↔Core reliability contract  
+**Document ID:** PLATFORM-ARF-001
+**Version:** 3.2.2
+**Status:** **Authoritative Specialized Mother Reference — Agent Reliability / Failover / Durability / Resource Assurance**
+**Product:** Platform
+**Effective date:** 2026-09-19
+**Scope:** Linux Agent + Windows Agent + Agent↔Sensor↔Core reliability contract
 **Change classification:** Additive reliability hardening; no product-version increment; no Agent rewrite authorization
 
 ---
