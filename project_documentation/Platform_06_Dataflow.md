@@ -343,10 +343,10 @@ sequenceDiagram
   S->>SP: Durable canonical batch
   S->>I: mTLS batch
   I->>K: telemetry.numeric/state
-  K->>CH: Storage consumer
-  K->>AE: Evaluation consumer
-  I-->>S: Durable acceptance watermark
+  I-->>S: Durable acceptance watermark after certified Core boundary
   S->>SP: Release acknowledged segment
+  K-->>CH: Asynchronous storage consumer
+  K-->>AE: Evaluation consumer
 ```
 
 ---
