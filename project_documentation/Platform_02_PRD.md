@@ -165,15 +165,25 @@ Exact contractual RPO, RTO and automated/manual DR activation remain TBD and mus
 
 ### 6.1 Universal runtime and roles
 
-One Universal Sensor Runtime shall support selectable profiles:
+One common Universal Sensor Runtime/build shall support governed selectable roles/profiles:
 
 - Network Sensor;
 - Infrastructure Sensor;
-- Combined Sensor;
-- Streaming/Event Sensor;
+- **Flow Monitoring Sensor**;
+- **Log Monitoring Sensor**;
 - Synthetic Probe;
 - Cloud/API Sensor;
-- Edge Sensor Lite deployment profile.
+- Edge Sensor Lite deployment profile;
+- Combined development/lab profile where explicitly permitted.
+
+Formal production-role requirements:
+
+| PRD ID | Requirement |
+|---|---|
+| `PRD-SENSOR-001` | Platform shall ship one common Sensor software/runtime and activate only the modules allowed by the selected governed Sensor role; dedicated Flow/Log requirements shall not create separate source trees, installers or independently drifting Sensor products. |
+| `PRD-SENSOR-002` | A production `FLOW_SENSOR` shall dedicate its monitoring capacity to NetFlow/IPFIX/sFlow/J-Flow/vendor-compatible Flow ingestion, exporter/template/sampling state, Flow normalization, Flow durability/upload and Flow self-health. It shall not run SNMP polling, discovery, NCM, synthetic monitoring or log collection. |
+| `PRD-SENSOR-003` | A production `LOG_SENSOR` shall dedicate its monitoring capacity to governed log/event ingestion such as Syslog/application/network logs and assigned OTLP Log workloads. It shall not run Flow collection, SNMP polling, discovery, NCM or synthetic monitoring. |
+| `PRD-SENSOR-004` | Production Sensor role changes shall use a governed drain/reassignment/reconfiguration workflow that stops new work, flushes or accounts for durable spool state, validates no incompatible assignments remain, applies the new role and revalidates health before activation. Combined Flow+Log/high-rate operation is development/lab/test only unless later separately certified by change control. |
 
 ### 6.2 Network Sensor responsibilities
 
@@ -189,7 +199,6 @@ Network Sensor shall support, as enabled by policy/device capability:
 - SSH discovery/diagnostics;
 - NCM execution;
 - IP SLA/SD-WAN and vendor Device Pack monitors;
-- lightweight flow/syslog/event ingestion below capacity thresholds.
 
 ### 6.3 Infrastructure Sensor responsibilities
 
@@ -206,9 +215,17 @@ Infrastructure Sensor shall support:
 - OpenTelemetry;
 - REST/API connectors.
 
-### 6.4 Streaming/Event Sensor
+### 6.4 Dedicated Flow and Log Sensors
 
-High-volume NetFlow/IPFIX/sFlow/J-Flow, syslog, traps and high-rate OpenTelemetry/event ingestion shall move to dedicated Streaming/Event Sensor capacity when the workload would risk starving polling workers. The same runtime may serve smaller mixed deployments.
+Production high-rate Flow and Log collection use distinct dedicated Sensor instances/roles.
+
+**Flow Monitoring Sensor:** NetFlow v5/v9, IPFIX, sFlow and compatible J-Flow/vendor formats; exporter/template/sampling/sequence state; canonical Flow normalization; bounded local Flow spool; Flow upload and self-health.
+
+**Log Monitoring Sensor:** Syslog/application/network logs, assigned log/event receivers and high-rate OTLP Logs according to the governing log/OTel authorities; parser/normalization pipeline; bounded local Log spool; upload/forwarding and self-health.
+
+Network SNMP polling/traps/informs remain owned by the Network Sensor unless a later explicit certified event-role design changes that boundary. Flow and Log Sensors retain common Sensor control identity, mTLS, configuration, health, upgrade and role-specific spool/uploader functionality only.
+
+Production role isolation is mandatory even for small deployments; saving a VM does not justify allowing Flow/log bursts to starve routine monitoring. A combined role may exist only for development/lab/test and is not production-certified.
 
 ### 6.5 Sensor local continuity
 
@@ -499,19 +516,44 @@ Device Packs/telemetry shall support deep monitoring for:
 
 ### 11.4 Flow analytics
 
-Platform shall ingest NetFlow v5/v9, IPFIX, sFlow and compatible vendor flow formats and enrich flows with:
+Platform shall ingest NetFlow v5/v9, IPFIX, sFlow and compatible vendor flow formats through dedicated Flow Monitoring Sensors and shall preserve protocol/source semantics before enrichment.
 
-- entity/device/interface;
-- site/region;
-- IPAM/subnet;
-- VLAN/VRF;
-- ASN/BGP context;
-- cloud context;
-- service/application metadata when exporter provides it;
-- QoS context;
-- tenant.
+Core product requirements:
 
-Views shall include top talkers, source/destination, conversations, protocols/ports, site-to-site, interfaces, ASN, matrices, Sankey, anomalies and capacity. Platform shall not claim deep L7 application visibility without exporter-provided metadata or future DPI capability.
+| PRD ID | Requirement |
+|---|---|
+| `PRD-FLOW-001` | Platform shall identify each configured Flow exporter using tenant-scoped canonical exporter identity plus listener/Sensor/source/protocol and protocol-appropriate observation-domain/engine context; UDP source IP alone shall not be treated as durable exporter identity. |
+| `PRD-FLOW-002` | Flow source admission shall use configured tenant/listener/exporter mapping, source policy and bounded rate/resource controls. Unknown/unmapped exporters shall be rejected or quarantined according to policy and shall never self-assign tenant authority from packet contents. |
+| `PRD-FLOW-003` | NetFlow v9/IPFIX template state shall be exporter/observation-domain scoped and support template arrival/update/expiry/withdrawal/reuse, exporter restart/generation, options templates, enterprise information elements, variable-length fields and explicit missing/invalid-template quality. |
+| `PRD-FLOW-004` | Sensor restart may reuse a bounded persisted template cache only when exporter/generation validity is still defensible; stale template reuse after restart/reset shall be invalidated rather than silently decoding records with obsolete semantics. |
+| `PRD-FLOW-005` | Sampling metadata shall be first-class. Platform shall distinguish observed from estimated packets/bytes, retain algorithm/rate/source/provenance, represent unknown sampling explicitly and preserve sampling-rate changes over time. Estimated traffic shall never be represented as exact unsampled measurement. |
+| `PRD-FLOW-006` | Canonical Flow time shall distinguish flow start/end where protocol evidence exists, exporter/export time, Sensor observed time and Core ingest time with timestamp quality; protocols that do not provide authoritative start/end shall not receive fabricated values. |
+| `PRD-FLOW-007` | Protocol-aware sequence/state tracking shall distinguish sequence gaps, duplicates, replay, out-of-order data and exporter reset according to NetFlow/IPFIX/sFlow semantics rather than applying one generic sequence algorithm. |
+| `PRD-FLOW-008` | Canonical Flow records shall be IPv4/IPv6 capable and preserve exporter/observation point, five-tuple where available, bytes/packets, sampling, raw ingress/egress interface indexes, canonical interface references, VLAN/VRF, ASN, next-hop/BGP context, QoS/DSCP, NAT fields when exported, application metadata/provenance, template/sequence and quality. Unsupported/missing fields remain null/unknown rather than invented. |
+| `PRD-FLOW-009` | Common operational fields shall use strongly typed canonical columns/contracts; vendor/enterprise information elements use bounded controlled extension attributes or Capability Pack mappings rather than unbounded dynamic database columns. |
+| `PRD-FLOW-010` | Before Platform durable local acceptance, UDP Flow export is best-effort. After certified local durable acceptance, normalized Flow records participate in the common Sensor replay/idempotency/durability contract with stable Platform ingestion identity and explicit terminal loss/gap accounting. |
+| `PRD-FLOW-011` | Flow Data Quality shall expose source/exporter freshness, template status/misses, sequence gaps, sampling certainty, clock/timestamp quality, malformed/unsupported records, socket/queue drops, rate limits, spool/storage pressure and downstream pipeline state. `No Flow Data` shall not imply `No Network Traffic`. |
+| `PRD-FLOW-012` | Flow enrichment shall resolve source/destination IPs to canonical entities, endpoint/system name/FQDN/DNS, subnet/site/region, interface/VRF/VLAN, ASN/BGP, cloud/SaaS/application and approved identity context only where evidence exists; every material enrichment shall retain source, effective/observed time, version and confidence/provenance. |
+| `PRD-FLOW-013` | User attribution shall be temporal and evidence-based. AD/LDAP/Entra directory data may enrich identities but shall not by itself prove which user controlled an IP at a historical time; attribution may consume Agent login/session, AD/auth events, RADIUS/802.1X, VPN, WLAN/NAC, firewall/proxy identity or equivalent evidence with validity interval, source and confidence. Conflicts remain explicit. |
+| `PRD-FLOW-014` | Domain/FQDN/application and URL are distinct concepts. Platform may correlate DNS, exporter application metadata, proxy/SWG/firewall/service logs or other approved evidence to domains/applications; it shall not fabricate a full URL from an IP/domain. Full URL/path/query capture is outside basic Flow semantics and requires an explicit governed source/privacy policy. |
+| `PRD-FLOW-015` | Internal geography shall prefer authoritative Platform site/subnet/entity mappings. Public-IP geolocation shall be represented as approximate provider/database evidence with accuracy/confidence/provenance and shall not assert a person's precise physical location. |
+| `PRD-FLOW-016` | Historical Flow enrichment shall remain temporally correct when IP ownership, hostname, user session, site, ASN, cloud catalogue, DNS or application mappings change; current enrichment state shall not silently rewrite historical identity. |
+| `PRD-FLOW-017` | Raw Flow observations remain directional and observation-point specific. Replayed records from the same source may be deduplicated by stable source/ingestion identity, while the same traffic observed at different exporters/interfaces remains distinct valid evidence and shall not be globally deduplicated by five-tuple alone. |
+| `PRD-FLOW-018` | Bidirectional Conversation, site-pair, application and traffic-matrix objects are derived analytical views over raw directional Flow observations and preserve links/provenance back to underlying observation points. |
+| `PRD-FLOW-019` | NAT, QoS/DSCP/ECN, TCP flags/ICMP metadata, exporter-supplied application classification and vendor enterprise fields shall retain explicit source/provenance and shall not be synthesized when absent. Application identity shall distinguish exporter-classified, catalogue/pack-mapped, port-inferred and unknown sources. |
+| `PRD-FLOW-020` | Platform shall correlate Flow with canonical topology, interface, VRF, routing/BGP, site/circuit and change evidence where available, while preserving that Flow correlation is observation evidence rather than proof of the actual routed path or cause. |
+| `PRD-FLOW-021` | Platform shall support a Flow Coverage/consistency signal by comparing normalized Flow-estimated traffic with compatible SNMP/interface counter evidence where semantics/observation point/sampling permit. Coverage states shall expose `GOOD|PARTIAL|LOW|UNKNOWN` or equivalent rather than blindly presenting a misleading exact ratio. |
+| `PRD-FLOW-022` | Flow UX shall include a bounded Flow Explorer plus exporter/source health and template diagnostics. Operators shall be able to investigate an interface/link/time range directly into top conversations, sources, destinations, applications, protocols, sites and QoS without losing context. |
+| `PRD-FLOW-023` | Flow retention shall distinguish raw normalized Flow, shorter-window detailed aggregates, longer-lived conversation/site/interface/application rollups and incident-protected evidence. Interactive top-N/matrix/Sankey queries shall use bounded ranges/cardinality and suitable rollups rather than unrestricted scans. |
+| `PRD-FLOW-024` | Operational Flow anomaly classes may include elephant-flow emergence, top-talker surge, new dominant destination, site-to-site shift, protocol/application-mix shift, fan-in/fan-out change, unexpected interface traffic shift and QoS-class change. Anomaly alone shall not assert device/link failure or causal root cause. |
+| `PRD-FLOW-025` | Flow collection shall enforce bounded socket/packet queues, decoder workers, exporter/template/domain cardinality, records/datagram, field/value size, per-exporter fairness/quotas and global Sensor ceilings. One exporter or template/cardinality storm shall not starve other exporters or another Platform Sensor role. |
+| `PRD-FLOW-026` | Flow production certification shall measure datagrams/sec, records/sec, bytes/sec, exporter count, template rate/churn, records/datagram, fields/record, sampling mix, IPv4/IPv6, enrichment cost, socket/queue loss, spool growth/replay drain, Core/Kafka/ClickHouse load and bounded analytics/query concurrency. No universal records/sec guarantee is fixed without benchmark evidence. |
+| `PRD-FLOW-027` | Flow-source resilience/redundancy shall be certified per exporter protocol/capability (multiple collectors, duplicate export, single collector, VIP/failover or other supported mechanism). Platform shall not assume a generic load balancer is safe for all template/source semantics. |
+| `PRD-FLOW-028` | Future cloud-native flow-log inputs such as AWS/Azure/GCP flow logs shall normalize into the same high-level Flow identity/quality/enrichment model where semantics are compatible rather than creating a second NTA product. They are not implied as implemented by this requirement. |
+| `PRD-FLOW-029` | Flow-derived user identity and browsing/application context shall be least-data, RBAC/resource scoped and auditable. Platform shall support operational troubleshooting without turning Flow into employee-surveillance or unrestricted browsing-history collection. |
+| `PRD-FLOW-030` | Flow absence, exporter/template/Sensor failure, sampling uncertainty or Flow anomaly shall feed telemetry-quality/Alert Evidence semantics and shall not by itself assert `NO_TRAFFIC`, `LINK_DOWN`, `DEVICE_DOWN` or causal incident state. |
+
+Views shall include Overview, Conversations, Sources, Destinations, Applications, Protocols/Ports, Sites, Interfaces, ASN, QoS, Traffic Matrix, Sankey, Exporters, Data Quality, anomalies and capacity. Platform shall not claim deep L7 application or full-URL visibility without explicit exporter/source metadata or a separately governed source; full always-on DPI remains excluded.
 
 ---
 
