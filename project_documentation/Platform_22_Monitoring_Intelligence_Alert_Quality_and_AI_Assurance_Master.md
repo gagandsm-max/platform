@@ -30,7 +30,7 @@ Nothing in this document selects a commercial model/provider, vector database, m
 8. **No silent learning across tenants.** Tenant data, operator feedback and incident evidence remain tenant scoped unless an explicitly approved privacy/security/governance process authorizes another use.
 9. **No invented universal thresholds.** Alert evidence and release gates are class-specific and policy/evidence driven.
 10. **AI claims require provenance.** Every causal or recommended-action claim must trace to authoritative evidence and disclose uncertainty/contradictions.
-11. **Local intelligence is lightweight by design.** Local AI/ML/LLM shall run inside the existing certified Core tiers, shall not create a mandatory GPU requirement and shall yield resources before live monitoring is degraded.
+11. **Local intelligence is lightweight by design.** Local AI/ML/LLM may run on Core only inside a certified non-interference envelope or may use an approved dedicated local/private inference provider through AI Gateway; neither mode creates a mandatory GPU requirement, and AI work shall yield or fail independently before live monitoring is degraded.
 12. **Small model, strong tools.** Platform shall reduce/query/correlate evidence deterministically before LLM inference; the local LLM is an explanation/copilot layer, not the hot-path monitoring or causal engine.
 
 ---
