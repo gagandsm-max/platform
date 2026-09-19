@@ -186,6 +186,8 @@ Authoritative list is `Platform_12_Decision_Source_Register.md` §5. Restated he
 - exact two-Core ClickHouse replication/promotion/fencing design;
 - exact PostgreSQL two-Core failover/fencing/rewind mechanics;
 - exact Core service fencing/VIP implementation and failure matrix;
+- exact recoverable `ACK_DURABLE` boundary across the certified two-Core Kafka/PostgreSQL/ClickHouse failure model, including crash-after-accept/ACK windows and reconciliation of emergency-shed sequence gaps without representing lost observations as acknowledged;
+- exact Sensor disconnected-grace/reassignment hold-off/fencing/reconciliation behavior that preserves useful Core-disconnected polling without allowing stale duplicate Sensor authority;
 - final contractual DR RPO/RTO and data-loss objectives;
 - final SNWP-2500-v1 metric/interface/event mix and certified performance results;
 - Streaming Sensor certified Flow records/sec and Syslog EPS;
