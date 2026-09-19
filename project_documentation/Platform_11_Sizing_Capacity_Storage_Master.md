@@ -7,7 +7,7 @@
 
 ## 1. Governing rule
 
-Device count is a commercial/planning input, not the only engineering load measure. Platform must size and operate using measured workload: poll operations/sec, metrics/sec, interfaces/entities, polling interval, protocol cost, RTT/timeouts, Flow/log rates, streaming subscriptions, NCM jobs, synthetic tests, **interactive/on-demand diagnostics and CLI sessions**, concurrent users, query/report/RCA demand and retention.
+Device count is a commercial/planning input, not the only engineering load measure. Platform must size and operate using measured workload: poll operations/sec, metrics/sec, interfaces/entities, polling interval, protocol cost, RTT/timeouts, Flow/log rates (EPS and bytes/sec), parser/multiline/redaction/fingerprint cost, SIEM route fan-out/egress, streaming subscriptions, NCM jobs, synthetic tests, **interactive/on-demand diagnostics and CLI sessions**, concurrent users, query/report/RCA demand and retention.
 
 All numbers below are **engineering planning targets until benchmark-certified**. They are not contractual scale claims merely because incumbent products publish similar densities.
 
@@ -108,6 +108,10 @@ If devices are divided into multiple network-isolated/locality pools, redundancy
 
 High-volume NetFlow/IPFIX/sFlow/J-Flow, Syslog, traps and high-rate OTel are separated from polling when volume risks starving normal collection. A small deployment may combine roles, but Platform's Capacity Engine must recommend/require role separation once safe limits are approached. Exact records/sec and EPS certification values are benchmark-defined.
 
+### 5.1 Enterprise log and SIEM-forwarding sizing
+
+For `Platform_24`, sizing additionally accounts for source count, average/peak EPS, average/peak bytes/event, UDP/TCP/TLS/OTLP/file mix, multiline/parser/redaction/fingerprint cost, controlled attribute cardinality, source spool horizon, raw/normalized/archive retention, Log Explorer/query concurrency, bounded live-tail sessions, destination count/fan-out, outbound EPS/bytes, per-destination queue horizon and WAN/egress bandwidth. High-rate forwarding from a Streaming/Event Sensor is certified against simultaneous Platform ingestion so forwarding cannot starve routine monitoring or local durability. No universal log-EPS claim is made before benchmark evidence.
+
 ## 6. Monitoring Work Units (MWU)
 
 Platform must compute a workload score using at least:
@@ -120,7 +124,8 @@ Platform must compute a workload score using at least:
 - gNMI stream rate;
 - REST calls and response size;
 - Flow records/sec and template rate;
-- Syslog/events/sec;
+- Syslog/events/sec and bytes/sec, including parser/multiline/redaction/fingerprint cost;
+- external log/SIEM forwarding fan-out, outbound EPS/bytes, per-destination queue/backlog and egress bandwidth;
 - agent/agentless collection cost;
 - NCM/CLI scheduled/concurrent jobs;
 - interactive/on-demand diagnostic jobs, multi-vantage fan-out, bounded continuous tests and concurrent CLI sessions;
@@ -161,7 +166,8 @@ A fixed “TB per device” number is prohibited because storage depends on data
 raw metric bytes/day
 + state/event bytes/day
 + Flow bytes/day
-+ syslog/log bytes/day
++ syslog/log bytes/day (raw/normalized/fingerprint classes as configured)
++ external-forwarding queue/headroom where applicable
 + audit/incident/NCM/diagnostic-investigation evidence bytes/day
 + Kafka operational retention
 + PostgreSQL control growth
@@ -200,7 +206,7 @@ Incident/investigation legal holds protect selected time windows/entities/eviden
 
 ## 12. Performance/resource certification
 
-Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, Flow records/sec, syslog EPS, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, **interactive diagnostic/CLI concurrency, multi-vantage fan-out, bounded continuous-test load and diagnostic latency under simultaneous certified monitoring load**, compression, retention cleanup and failure recovery. Certification must prove that interactive troubleshooting cannot starve scheduled monitoring/ingestion. Regressions beyond approved tolerance fail certification or require documented exception.
+Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, Flow records/sec, syslog EPS, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, **interactive diagnostic/CLI concurrency, multi-vantage fan-out, bounded continuous-test load and diagnostic latency under simultaneous certified monitoring load**, compression, retention cleanup and failure recovery. Releases shipping `Platform_24` capabilities additionally benchmark application/file/OTLP log throughput, bytes/sec, parser and multiline complexity, redaction/fingerprint cost, Log Explorer/search concurrency, route transformation cost, destination fan-out, outbound queues, replay/dead-letter recovery and one-destination-failure isolation under simultaneous certified monitoring load. Certification must prove that interactive troubleshooting cannot starve scheduled monitoring/ingestion. Regressions beyond approved tolerance fail certification or require documented exception.
 
 For releases enabling Local AI/ML/LLM, certification additionally records per-module normal/peak CPU and RAM, inference latency, local LLM concurrency/context, model load/unload behavior, queue/backpressure, GNN/embedding workload, AI artifact disk footprint and the effect of AI load on ingestion, alert qualification, query latency and failover. The supported local-intelligence profile must pass inside the same certified Core tier; it does not create a hidden higher minimum hardware requirement.
 
