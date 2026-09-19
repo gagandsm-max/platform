@@ -392,6 +392,10 @@ Identity enrichment consumes existing canonical identity sources. Endpoint/syste
 
 Production Flow executes on a dedicated `FLOW_SENSOR`; production log/event workloads execute on a dedicated `LOG_SENSOR`. Both use the one Universal Sensor Runtime but are mutually exclusive high-rate roles. Mixed Flow+Log+polling is non-production lab/development only.
 
+Future cloud-native flow sources such as AWS VPC Flow Logs, Azure network/NSG flow logs and GCP VPC Flow Logs are Cloud/Capability Pack targets. Where source semantics match, they normalize into the canonical Flow model with source-specific timestamp/direction/action/sampling/quality provenance rather than creating a parallel NTA product. No cloud flow source is certified by this requirement alone.
+
+Flow Sensor redundancy is also certification-dimensional: the exporter/profile must prove its multi-collector, active/standby/VIP or equivalent behavior and duplicate/gap/template recovery semantics.
+
 Bounded Triggered Packet Evidence remains permitted under `Platform_19`. Always-on full DPI remains deferred. Flow metadata, DNS/domain correlation or exporter application classification does not reopen full DPI and shall not be marketed as arbitrary full-URL/L7 visibility.
 
 ---
