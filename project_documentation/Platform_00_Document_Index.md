@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 enterprise Flow monitoring and dedicated Sensor-role reconciliation
 
 ## 1. Authority
 
@@ -101,6 +101,18 @@ A post-merge cross-layer audit of the NOC troubleshooting reconciliation identif
 
 This corrective reconciliation closes those defects without adding product scope, a new database, a new mandatory service, a new pack framework or a new dependency. `Platform_17` owns the versioned API/event/data contracts; `Platform_11` owns interactive-diagnostic capacity accounting; `Platform_09` owns explicit screen behavior; and `Platform_23` clarifies that a diagnostic workflow definition is not a second Capability Pack/registry/SDK.
 
+### 4.5 2026-09-19 enterprise Flow and dedicated Sensor-role reconciliation
+
+This v3.2.2 reconciliation strengthens the existing Flow/NTA architecture and changes the production Sensor role contract without creating a new Mother Reference file, database, microservice, Sensor codebase or pack framework.
+
+Production **FLOW** and **LOG** Sensors are exclusive major-workload roles in the common Sensor runtime. A FLOW Sensor does not co-host Network polling/discovery/NCM/synthetics/Log monitoring; a LOG Sensor does not co-host Flow/Network polling/discovery/NCM/synthetics. A mixed role may exist for development/CI/demo only and is not production certified. Role conversion is a governed drain/reassignment operation.
+
+Flow correctness now explicitly includes exporter/source identity and trust, v9/IPFIX template lifecycle, sampling provenance, protocol-specific sequence/gap accounting, bounded high-rate receiver/fairness, durable accepted-record replay identity, timestamp/IPv6/NAT/QoS/application semantics, Flow Data Quality, temporal enrichment, bounded rollups/query UX and protocol-aware redundancy.
+
+Where reliable evidence exists, Flow may associate IPs with canonical endpoint/system/FQDN, time-bounded user/session identity (including AD/LDAP/Entra and other session sources), internal site geography, approximate public-IP Geo, ASN/organization, cloud/SaaS and domain/application context. These are evidence joins with time/source/version/confidence; Platform does not infer a full URL or current user from IP/DNS/directory membership alone and does not expand into employee browsing-content surveillance.
+
+Formal base requirements are `PRD-FLOW-001..033`, `REQ-FLOW-001..033`, plus updated Sensor-role requirements. The authoritative file count remains **25 files** and version remains **v3.2.2**. Specification does not imply runtime implementation or Flow throughput certification.
+
 ## 5. Precedence
 
 When requirements appear to conflict:
@@ -170,6 +182,9 @@ Conflicts require documented change control; implementation must not silently ch
 - Core monitoring and deterministic RCA/alerting continue without Internet/hosted AI availability; hosted/private/local/no-LLM operation is governed by explicit data-egress and fallback controls.
 - Capability Pack is the canonical enterprise extension architecture. Technology Monitoring Pack, Device / Network Pack, SaaS Monitoring Pack, Integration Pack and optional Customer Extension Pack are classifications/profiles of that architecture, not independent frameworks. Existing Device Pack contracts remain valid under this model.
 - Monitoring-technology certification is dimensional (Discovery/L1/L2/L3/Topology/NCM/Security/version). A family listed in `Platform_23` is a coverage target, not an implemented or certified pack.
+- Production Flow monitoring uses an exclusive dedicated FLOW Sensor instance; production Log monitoring uses an exclusive dedicated LOG Sensor instance. Both use the common Sensor package/runtime with role-gated modules; mixed Flow+Log+Network production Sensors are not certified.
+- Flow enrichment may expose endpoint/system/FQDN, time-bounded user identity, Site/Geo, ASN/cloud and domain/application context only with provenance-aware evidence. IP/DNS/AD/public-Geo alone do not authorize invented user, URL or precise-person-location claims.
+- No Flow Data is a collection/quality condition, not proof of zero traffic. Sampling/template/sequence/socket/pipeline quality is first-class evidence.
 
 ## 7. OSS governance
 
@@ -182,7 +197,7 @@ Implementation dependencies must match the catalogue; catalogue omissions discov
 
 ## 8. Completeness control
 
-`Platform_08_Requirements_Traceability.md` remains the base formal guard against lost requirements.
+`Platform_08_Requirements_Traceability.md` remains the base formal guard against lost requirements. Base Flow requirements `REQ-FLOW-001..033` and updated Sensor-role requirements are traced there; detailed Flow support also depends on the owning protocol, sizing, UI, security, identity, quality and data-contract masters.
 
 For v3.2.2 OIV scope, `Platform_19` contains the authoritative `REQ-OIV-*` traceability supplement.
 For v3.2.2 onboarding scope, `Platform_20` contains the authoritative `REQ-ONB-*` traceability supplement.
@@ -202,7 +217,8 @@ Authoritative list is `Platform_12_Decision_Source_Register.md` §5. Restated he
 - exact Core service fencing/VIP implementation and failure matrix;
 - final contractual DR RPO/RTO and data-loss objectives;
 - final SNWP-2500-v1 metric/interface/event mix and certified performance results;
-- Streaming Sensor certified Flow records/sec and Syslog EPS;
+- dedicated FLOW Sensor certified datagrams/records/bytes per second and safe operating envelope;
+- dedicated LOG Sensor certified EPS/bytes per second and safe operating envelope;
 - exact GNN model architecture, training labels, inference latency, CPU/GPU footprint and production enablement threshold;
 - final compliance certification program/scope and achieved certifications;
 - exact product SKUs/licensing quantities beyond the agreed behavioral rules.
