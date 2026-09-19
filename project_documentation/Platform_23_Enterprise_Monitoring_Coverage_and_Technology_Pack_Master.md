@@ -4,6 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Specialized Master**
 **Product:** Platform
+**Last reconciliation:** 2026-09-19 — v3.2.2 consolidated Mother Reference metadata alignment
 **Change class:** Additive v3.2.2 product/engineering requirements; EMC-0 specification only. No runtime implementation, vendor-pack shipment, certification achievement or contractual guarantee is claimed by this document.
 
 ---
@@ -130,7 +131,7 @@ A technology may therefore be Discovery `CERTIFIED`, L1 `CERTIFIED`, L2 `CERTIFI
 
 ## 6. Capability Pack contract
 
-This section specifies the product contract only. The runtime loader, SDK and pack registry are **EMC-1** work and are not implemented by this PR.
+This section specifies the product contract only. The runtime loader, SDK and pack registry are **EMC-1** work and are not implemented merely by this specification.
 
 A Capability Pack, where applicable, declares:
 
@@ -515,7 +516,7 @@ Each `REQ-EMC-*` owns the corresponding `PRD-EMC-*`. Implementation status for a
 
 ## 24. Implementation sequencing (specified, not executed)
 
-This PR performs **EMC-0** only.
+This specialized master specifies **EMC-0** only; runtime implementation, validation and certification remain separate engineering work.
 
 | Stage | Scope |
 |---|---|
