@@ -1288,20 +1288,29 @@ This is a dependency sequence for this capability family, not permission to bypa
 
 ### P1 — first operational integrations
 
-9. implement/certify a bounded initial ITSM connector set from the already governed baseline plus Generic REST/Webhook using the full implementation-experience certification;
-10. implement CI/service mapping and bidirectional state/conflict rules;
-11. implement normalized automation executor/action/risk contract;
-12. integrate controlled-remediation validation/rollback with fresh monitoring evidence;
-13. ingest executor/IaC/ITSM change facts.
+ITSM is not a late-stage “connector polish” item. As soon as the Platform Incident lifecycle and P0 integration contracts are stable enough to bind safely, the first certified ITSM path is an immediate P1 deliverable.
+
+Use a reference-implementation strategy:
+
+- **Reference-grade first:** ServiceNow + Generic REST/Webhook. These must exercise the complete connector capability, binding, mapping, readiness, diagnostics, recovery/reopen, bidirectional and supportability contracts.
+- **Certified baseline next:** Jira Service Management, BMC Helix/Remedy, ManageEngine ServiceDesk Plus, Freshservice/Freshworks and SummitAI/SymphonyAI Summit, reusing the same runtime/contracts rather than separate subsystems.
+- **Expansion after:** additional Integration Packs based on customer demand/API viability, only after the baseline certification mechanism proves maintainable.
+
+9. implement/certify ServiceNow and Generic REST/Webhook as reference-grade connectors using the full implementation-experience certification;
+10. certify the remaining already-governed baseline ITSM connectors against the same common runtime and tests;
+11. implement CI/service mapping and bidirectional state/conflict rules;
+12. implement normalized automation executor/action/risk contract;
+13. integrate controlled-remediation validation/rollback with fresh monitoring evidence;
+14. ingest executor/IaC/ITSM change facts.
 
 ### P2 — ecosystem expansion
 
-14. expand ITSM/automation Integration Packs by measured customer demand;
-15. expose stable Monitoring-as-Code API/declarative resources;
-16. add Terraform provider after API lifecycle stability; verify OpenTofu compatibility;
-17. add external NetBox/NetOps interoperability where required;
-18. add optional OTel-export/Cribl packs when customer use cases justify them;
-19. add Pulumi/Crossplane integrations only when they avoid duplicated control-plane logic.
+15. expand ITSM/automation Integration Packs by measured customer demand;
+16. expose stable Monitoring-as-Code API/declarative resources;
+17. add Terraform provider after API lifecycle stability; verify OpenTofu compatibility;
+18. add external NetBox/NetOps interoperability where required;
+19. add optional OTel-export/Cribl packs when customer use cases justify them;
+20. add Pulumi/Crossplane integrations only when they avoid duplicated control-plane logic.
 
 ---
 
