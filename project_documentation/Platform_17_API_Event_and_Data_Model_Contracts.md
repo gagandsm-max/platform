@@ -45,6 +45,18 @@ The versioned API surface shall expose typed resource families for **Diagnostic 
 
 All contracts are tenant/resource scoped server-side, use stable error codes/correlation IDs, and expose `DENIED`, `CAPACITY_LIMITED`, `TARGET_UNREACHABLE`, `CREDENTIAL_FAILURE`, `TIMEOUT`, `CANCELLED` and other protocol-specific normalized outcomes without leaking secrets.
 
+### 2.2 Enterprise log and SIEM-forwarding API contracts
+
+The versioned API surface shall expose typed resource families for Log Sources, Parser Profiles, Log Data Quality, Log Search, Log Destinations, Routing Policies, destination test/health, Dead-Letter state and Replay Jobs. Exact route strings are frozen in generated OpenAPI before implementation/GA.
+
+Log Source and Parser mutations are tenant/resource scoped, versioned and validated before activation. Parser preview uses bounded sample input and returns parsed/normalized/redacted/entity-mapping results without creating active ingestion state.
+
+Log Destination and Routing Policy contracts reference credentials by secure profile/reference only. Route preview may return estimated match count/bytes/rate from available telemetry and must label estimates as non-guaranteed.
+
+Replay Jobs require destination, bounded time/scope, estimated volume, rate/concurrency controls, actor/reason and explicit authorization. Dead-letter retry/discard is an auditable mutation.
+
+Live-tail/query APIs are bounded by tenant/resource scope, time/rate/query limits and never expose Kafka directly.
+
 ## 3. Sensor/Agent control contract
 
 Enrollment establishes identity/certificate. Subsequent sessions authenticate with mTLS. Core sends versioned desired configuration/assignment; endpoint acknowledges applied version/checksum. Telemetry ingestion is asynchronous and replay-safe.
@@ -57,6 +69,12 @@ Kafka is internal. Events include schema version, tenant, source identity, event
 
 Diagnostic/investigation event families, where carried internally, include job/session ID, origin reference, canonical target/evidence reference, source/vantage, state transition, timestamps, quality/provenance, normalized result/error code and correlation ID. **Secrets, one-time credentials, reusable credential material and terminal keystroke payloads are prohibited from general Kafka/audit/analytics events.** Browser/UI live updates use an authenticated Platform UI channel; Kafka is never exposed directly to the browser.
 
+### 4.1 Canonical log/event and forwarding event rules
+
+Internal log events carry schema version, trusted tenant/source identity, event ID where required, event/observed/ingest time, timestamp quality, entity/service references where resolved, original/normalized severity, event class/code, fingerprint, parser/version, provenance/quality and bounded payload/attributes. Payload-provided tenant fields never override trusted envelope identity.
+
+Routing/forwarding events carry route/destination identity, source event reference, representation/format, queue/delivery state, attempt/correlation context and safe error code. Secret material is prohibited from general Kafka/audit/analytics events. Delivery state distinguishes transport acceptance from destination acknowledgement where the target protocol proves the latter.
+
 ## 5. Compatibility
 
 Breaking API/event changes require major contract version and migration window. Core must expose compatibility matrix for Sensor/Agent versions.
@@ -67,7 +85,7 @@ Breaking API/event changes require major contract version and migration window. 
 
 ## 1. Ownership
 
-PostgreSQL owns transactional/control state: tenants, users/RBAC metadata, inventory/current entity state, policies, credentials metadata/references, licensing, **diagnostic job metadata, Investigation Session state/evidence references**, other job metadata and configuration. ClickHouse owns high-volume historical metrics/flow/events/log/audit analytics and normalized diagnostic-result analytics where retention/query volume justifies it. Kafka transports events; Valkey stores cache/ephemeral state only. No separate diagnostics database is introduced.
+PostgreSQL owns transactional/control state: tenants, users/RBAC metadata, inventory/current entity state, policies, credentials metadata/references, licensing, **diagnostic job metadata, Investigation Session state/evidence references**, log-source/parser/routing/destination control metadata, dead-letter/replay job metadata, other job metadata and configuration. ClickHouse owns high-volume historical metrics/flow/events/log/audit analytics, log fingerprint/pattern analytics and normalized diagnostic-result analytics where retention/query volume justifies it. Kafka transports events; Valkey stores cache/ephemeral state only. No separate diagnostics or mandatory log database is introduced.
 
 ## 2. Canonical identity
 
@@ -86,3 +104,5 @@ Raw, rollup, incident, audit, configuration, **diagnostic/investigation evidence
 Ingestion records support deduplication/idempotency and late/out-of-order data handling. Pipeline reconciliation detects produced/accepted/normalized/inserted/rejected discrepancies.
 
 Diagnostic/investigation integrity requires tenant-scoped canonical targets, immutable result/evidence provenance, per-vantage source identity, result/observed timestamps, correlation IDs and explicit state transitions. Evidence references must not silently retarget another tenant/entity after creation. Cancellation/timeout/partial results remain visible. No secret or one-time credential value may be persisted in diagnostic result, investigation evidence, audit, event or analytics rows.
+
+Enterprise-log integrity additionally requires a canonical Log Event ID/schema, trusted tenant/source envelope, event/observed/ingest time distinction, parser/version/provenance, duplicate/replay tolerance, bounded raw evidence/reference, and explicit drop/reject/rate-limit accounting. External-routing integrity requires destination/route identity, independent delivery state, loop-prevention metadata and tenant-safe replay/dead-letter semantics. Transport success must not be stored or displayed as destination indexing unless the destination contract proves that acknowledgement.
