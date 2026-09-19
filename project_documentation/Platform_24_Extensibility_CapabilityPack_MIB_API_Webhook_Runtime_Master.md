@@ -64,7 +64,7 @@ This document **does not** select a new database, mandatory microservice, arbitr
 
 ## 3. Formal product requirements
 
-The following are authoritative v3.2.3 PRD supplements.
+The following are candidate v3.2.3 PRD supplements pending independent review and reconciliation.
 
 | PRD ID | Requirement |
 |---|---|
