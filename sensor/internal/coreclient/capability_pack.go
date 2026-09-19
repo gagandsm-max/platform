@@ -36,9 +36,11 @@ type DesiredPackEntry struct {
 }
 
 type CapabilityPackDesiredState struct {
-	Generation int64              `json:"generation"`
-	Checksum   string             `json:"checksum"`
-	Packs      []DesiredPackEntry `json:"packs"`
+	Generation        int64              `json:"generation"`
+	Checksum          string             `json:"checksum"`
+	AppliedGeneration int64              `json:"appliedGeneration"`
+	AppliedChecksum   string             `json:"appliedChecksum"`
+	Packs             []DesiredPackEntry `json:"packs"`
 }
 
 type CapabilityPackArtifact struct {
@@ -64,6 +66,15 @@ func (c *Client) FetchCapabilityPackDesiredState(ctx context.Context) (Capabilit
 	}
 	if out.Checksum != "" && !isLowerHex64(out.Checksum) {
 		return CapabilityPackDesiredState{}, newError(CodeProtocol, "desired-state checksum is not lowercase 64-hex", nil, false)
+	}
+	if out.AppliedGeneration < 0 || out.AppliedGeneration > out.Generation {
+		return CapabilityPackDesiredState{}, newError(CodeProtocol, "Core applied generation is outside desired-state bounds", nil, false)
+	}
+	if out.AppliedGeneration == 0 && out.AppliedChecksum != "" {
+		return CapabilityPackDesiredState{}, newError(CodeProtocol, "Core applied checksum must be empty at generation zero", nil, false)
+	}
+	if out.AppliedGeneration > 0 && !isLowerHex64(out.AppliedChecksum) {
+		return CapabilityPackDesiredState{}, newError(CodeProtocol, "Core applied checksum is not lowercase 64-hex", nil, false)
 	}
 	return out, nil
 }
