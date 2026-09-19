@@ -164,6 +164,10 @@ A Capability Pack, where applicable, declares:
 - certification metadata
 - provenance
 - signature/integrity requirements
+- Flow exporter/protocol/version and enterprise-IE mappings where applicable
+- Flow template/sampling/sequence compatibility hints where applicable
+- application/QoS/NAT/interface/VRF semantic mappings where applicable
+- Flow redundancy/failover test profile where applicable
 
 Device / Network Packs continue to satisfy existing Device Pack identification, mapping, provenance and test-lab contracts. They gain the Capability Pack identity/lifecycle/certification envelope without a second schema family.
 
@@ -382,9 +386,17 @@ LLMs must not be the authoritative calculator. Sizing/capacity numbers remain su
 
 ## 15. NTA / DPI boundary
 
-Native initial capability includes: NetFlow; IPFIX; sFlow; J-Flow/vendor flow; exported application classification; top talkers; conversations; site matrices; QoS analysis; trends; anomalies; capacity analysis.
+Native initial capability includes: NetFlow; IPFIX; sFlow; J-Flow/vendor flow; exporter/template/sampling/data-quality management; endpoint/system/domain/user/site/Geo/ASN/cloud enrichment where evidence exists; exported application classification; top talkers; conversations; site matrices; QoS analysis; trends; operational anomalies; capacity analysis.
 
-Bounded Triggered Packet Evidence remains permitted under `Platform_19`. Always-on full DPI remains deferred. This master does not reopen full DPI.
+Production Flow collection runs on the dedicated FLOW Sensor role defined by the base architecture. Flow Capability/Device Packs may declare vendor-specific exporter identification, information-element mappings, enterprise IEs, application/QoS/NAT semantics, template quirks, sampling semantics and certification fixtures, but they do not create a second Flow engine or bypass source admission, tenant identity, privacy, replay or data-quality contracts.
+
+Certification is dimensional. A vendor/device can be certified for basic Flow export without being certified for application identity, NAT, QoS, user mapping, enterprise IEs, dual-collector failover or every firmware version.
+
+Cloud-native VPC/network Flow logs may later enter through Cloud Capability Packs and normalize into the same canonical Flow model where source semantics permit. They are not a separate NTA product.
+
+Flow endpoint/user/domain/Geo enrichment preserves provenance/confidence. AD/LDAP/Entra directory data alone does not prove a current user/IP session; DNS does not prove full URL; public-IP Geo does not prove a person's precise location.
+
+Bounded Triggered Packet Evidence remains permitted under `Platform_19`. Always-on full DPI remains deferred. This master does not reopen full DPI or employee web-content surveillance.
 
 ---
 
