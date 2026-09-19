@@ -128,8 +128,8 @@ public class ClickHouseTelemetryConsumer {
         );
         throw new RuntimeException(
                 "ClickHouse persistence unavailable; stopping offset progression for batch starting at offset "
-                        + firstRecord.offset(),
-                lastException
+                        + firstRecord.offset()
+                        + " failureClass=" + failureClass
         );
     }
 
