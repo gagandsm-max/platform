@@ -2,16 +2,16 @@
 
 **Document ID:** PLATFORM-INDEX-001  
 **Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
+**Status:** **Authoritative Mother Reference — 26-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 enterprise log/event collection and SIEM-forwarding reconciliation
 
 ## 1. Authority
 
 **v3.2.2 supersedes v3.2.1 as the authoritative Platform mother-reference set after merge to the canonical GitHub `main`.**
 
-v3.2.2 is an additive product/engineering scope revision. It includes five specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value; `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center; `Platform_21_Enterprise_Gap_Closure_Master.md` for enterprise adoption gaps such as normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, tamper-evident audit, governed offboarding/data portability and connector families; `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` for evidence-qualified alerting, monitoring-state semantics, RCA/AI assurance, bounded AI assistance and related shared-service evidence; and `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` for enterprise monitoring-domain coverage, the single Capability Pack architecture, dimensional certification and Real Customer Requirements normalization. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement. Existence of `Platform_23` is EMC-0 specification only and does not imply pack runtime, vendor certification or contractual coverage.
+v3.2.2 is an additive product/engineering scope revision. It includes five specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value; `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center; `Platform_21_Enterprise_Gap_Closure_Master.md` for enterprise adoption gaps such as normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, tamper-evident audit, governed offboarding/data portability and connector families; `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` for evidence-qualified alerting, monitoring-state semantics, RCA/AI assurance, bounded AI assistance and related shared-service evidence; and `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` for enterprise monitoring-domain coverage, the single Capability Pack architecture, dimensional certification and Real Customer Requirements normalization; and `Platform_24_Enterprise_Log_Event_and_SIEM_Forwarding_Master.md` for unified operational log collection, normalization, search, evidence, routing and external SIEM/log forwarding. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement. Existence of `Platform_23` is EMC-0 specification only and does not imply pack runtime, vendor certification or contractual coverage.
 
 v3.2.1 superseded v3.2 as a corrective/governance patch. v3.2 superseded v3.1 as a documentation-packaging revision. Earlier v1/v2/v3.0/v3.1 generated master packages and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as Platform engineering sources of truth.
 
@@ -26,7 +26,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 - Security/compliance readiness must never be represented as achieved certification until independently achieved.
 - Customer-value/MTTR percentages are not product claims until supported by disclosed reproducible customer/pilot evidence.
 
-## 3. Exact 25-file mother-reference set
+## 3. Exact 26-file mother-reference set
 
 | # | File | Governing scope |
 |---:|---|---|
@@ -55,6 +55,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 | 23 | `Platform_21_Enterprise_Gap_Closure_Master.md` | Authoritative enterprise gap-closure specialized master: normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, audit tamper evidence, enterprise connector/offboarding/licensing/policy-as-code requirements, formal `PRD-EGC-*` + `REQ-EGC-*` supplement |
 | 24 | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Authoritative monitoring-intelligence specialized master: class-specific Alert Evidence Contracts, telemetry trust, semantic monitoring states, alert-quality lifecycle, RCA/AI assurance, Incident Copilot, AI safety/provenance, formal `PRD-MIA-*` + `REQ-MIA-*` supplement |
 | 25 | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | Authoritative enterprise-monitoring-coverage specialized master: Capability Pack product contract, L1/L2/L3 dimensional certification, technology-family catalogue, Customer Acceptance Profiles, Real Customer Requirements normalization, formal `PRD-EMC-*` + `REQ-EMC-*` supplement |
+| 26 | `Platform_24_Enterprise_Log_Event_and_SIEM_Forwarding_Master.md` | Authoritative enterprise-log specialized master: Syslog/application/OS/container/OTLP/custom log collection, canonical Log Event model, Log Explorer/data quality, durable routing, SIEM forwarding, formal `PRD-LOG-*` + `REQ-LOG-*` supplement |
 
 ## 4. Consolidation and version map
 
@@ -84,6 +85,8 @@ The enterprise gap-closure reconciliation adds `Platform_21_Enterprise_Gap_Closu
 The 2026-09-12 monitoring-intelligence reconciliation adds `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`. Its `PRD-MIA-*` and `REQ-MIA-*` requirements govern alert evidence/quality, semantic monitoring states, RCA/AI assurance, bounded AI assistance and related dependency evidence. This remains **v3.2.2**; no v3.2.3 product-version number is created.
 
 The 2026-09-13 enterprise-monitoring-coverage reconciliation adds `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` under the same pattern. Its `PRD-EMC-*` and `REQ-EMC-*` requirements govern the Capability Pack architecture, dimensional certification, enterprise technology coverage and Customer Acceptance Profiles. Technology Monitoring Pack, Device / Network Pack, SaaS Monitoring Pack, Integration Pack and optional Customer Extension Pack are classifications/profiles of Capability Pack, not a competing framework. This remains **v3.2.2**; no v3.2.3 product-version number is created. `Platform_23` does not replace Device Pack contracts, `Platform_10` connector/security mechanics, `Platform_19` OIV, `Platform_20` onboarding, `Platform_21` enterprise-gap or `Platform_22` alert/AI-assurance authority.
+
+The 2026-09-19 enterprise-log reconciliation adds `Platform_24_Enterprise_Log_Event_and_SIEM_Forwarding_Master.md` under the same specialized-amendment pattern. Its `PRD-LOG-*` and `REQ-LOG-*` requirements govern unified operational log collection, parser/data-quality semantics, canonical Log Event behavior, Log Explorer, retention/routing and SIEM forwarding. It reuses existing Sensor/Core/Kafka/ClickHouse/Capability Pack architecture and does not approve a new mandatory log database, SIEM product or OSS dependency. This remains **v3.2.2**.
 
 The older files remain authoritative for their existing scope and are explicitly supplemented by specialized masters; they are not considered obsolete. This packaging choice is deliberate change control, not a waiver of traceability.
 
@@ -123,6 +126,8 @@ When requirements appear to conflict:
 **Monitoring-intelligence special case:** `Platform_22` is a consolidated specialized amendment. Its `PRD-MIA-*` requirements act as authoritative product supplements for alert quality, evidence qualification and AI/RCA assurance; its architecture/security/operability sections govern that capability family and its `REQ-MIA-*` catalogue is the formal RTM supplement. It does not silently override Platform_19 OIV or Platform_21 enterprise-gap authority outside its assigned scope.
 
 **Enterprise-monitoring-coverage special case:** `Platform_23` is a consolidated specialized amendment. Its `PRD-EMC-*` requirements act as authoritative product supplements for enterprise monitoring coverage, Capability Pack contract, dimensional certification and Customer Acceptance Profiles; its `REQ-EMC-*` catalogue is the formal RTM supplement. It does not silently override Platform_10 connector/security, Platform_19 OIV, Platform_20 onboarding, Platform_21 enterprise-gap or Platform_22 alert/AI-assurance authority outside its assigned scope.
+
+**Enterprise-log special case:** `Platform_24` is a consolidated specialized amendment. Its `PRD-LOG-*` requirements act as authoritative product supplements for operational log collection, normalization, search, data quality, routing and SIEM forwarding; its `REQ-LOG-*` catalogue is the formal RTM supplement. Protocol/security mechanics remain with Platform_10, datastore/API contracts with Platform_17, Alert Evidence/RCA/AI assurance with Platform_22 and vendor-specific mappings/certification with Platform_23.
 
 Conflicts require documented change control; implementation must not silently choose a convenient interpretation.
 
@@ -170,6 +175,9 @@ Conflicts require documented change control; implementation must not silently ch
 - Core monitoring and deterministic RCA/alerting continue without Internet/hosted AI availability; hosted/private/local/no-LLM operation is governed by explicit data-egress and fallback controls.
 - Capability Pack is the canonical enterprise extension architecture. Technology Monitoring Pack, Device / Network Pack, SaaS Monitoring Pack, Integration Pack and optional Customer Extension Pack are classifications/profiles of that architecture, not independent frameworks. Existing Device Pack contracts remain valid under this model.
 - Monitoring-technology certification is dimensional (Discovery/L1/L2/L3/Topology/NCM/Security/version). A family listed in `Platform_23` is a coverage target, not an implemented or certified pack.
+- Operational logs use one canonical collection/normalization model across Syslog, host/application, Windows, container, OTLP, cloud/API and custom sources; log events are evidence, not automatic alerts.
+- Platform supports governed store-only/store-and-forward/forward-only routing to external SIEM/log destinations with independent destination queues, explicit delivery semantics, tenant isolation and no claim that transport success equals SIEM indexing.
+- High-rate logging/forwarding may execute on Streaming/Event Sensors while Core retains routing policy, authorization, credential-reference and audit authority; logging must not starve routine monitoring.
 
 ## 7. OSS governance
 
