@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -31,8 +32,9 @@ const (
 	appliedStateFile = "applied.json"
 	artifactsDirName = "artifacts"
 	stateDirName     = "state"
-	maxPackCount     = 256
-	schemaVersion    = "1.0.0"
+	maxPackCount         = 256
+	maxAppliedStateBytes int64 = 512 * 1024
+	schemaVersion        = "1.0.0"
 )
 
 // CorePackClient is the narrow Core surface used by pack sync.
@@ -74,8 +76,12 @@ type Syncer struct {
 	client CorePackClient
 	mu     sync.RWMutex
 	status Status
-	stop   chan struct{}
-	done   chan struct{}
+
+	ackedGeneration int64
+	ackedChecksum   string
+
+	stop chan struct{}
+	done chan struct{}
 }
 
 func New(cfg Config, client CorePackClient) (*Syncer, error) {
@@ -172,6 +178,19 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 	s.mu.Unlock()
 
 	if desired.Generation == applied.Generation && strings.EqualFold(desired.Checksum, applied.Checksum) {
+		// A local durable commit may have succeeded while its Core ACK was lost.
+		// Re-ACK a non-zero applied state unless this process has already observed
+		// a successful ACK for the same generation/checksum. Core ACK handling is
+		// idempotent, so this converges safely after transient failure and restart
+		// without re-downloading or re-writing artifacts.
+		if desired.Generation > 0 && !s.isAckConfirmed(desired.Generation, desired.Checksum) {
+			if err := s.ackApplied(ctx, desired.Generation, desired.Checksum); err != nil {
+				s.setError(errorCode(err), true)
+				s.cfg.Logger.Warn("capability pack applied-state ACK retry failed",
+					"error_code", errorCode(err), "generation", desired.Generation, "error", err)
+				return
+			}
+		}
 		s.setSuccess(desired.Generation, len(desired.Packs))
 		return
 	}
@@ -240,7 +259,7 @@ func (s *Syncer) applyDesired(ctx context.Context, desired coreclient.Capability
 		return err
 	}
 	// ACK only after durable applied.json commit.
-	if _, err := s.client.AckCapabilityPackAppliedState(ctx, desired.Generation, desired.Checksum); err != nil {
+	if err := s.ackApplied(ctx, desired.Generation, desired.Checksum); err != nil {
 		return err
 	}
 	s.gcUnreferenced(seenSHA)
@@ -349,18 +368,67 @@ func syncDir(dir string) error {
 
 func (s *Syncer) loadApplied() (AppliedState, error) {
 	path := filepath.Join(s.cfg.Dir, stateDirName, appliedStateFile)
-	data, err := os.ReadFile(path)
+	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return AppliedState{Generation: 0, Packs: []AppliedPackRef{}}, nil
 	}
 	if err != nil {
 		return AppliedState{}, err
 	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return AppliedState{}, fmt.Errorf("%s: applied.json must be a regular non-symlink file", ErrCodeRestartFailClosed)
+	}
+	if info.Size() < 0 || info.Size() > maxAppliedStateBytes {
+		return AppliedState{}, fmt.Errorf("%s: applied.json exceeds size limit", ErrCodeRestartFailClosed)
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return AppliedState{}, err
+	}
+	defer file.Close()
+
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return AppliedState{}, err
+	}
+	if !openedInfo.Mode().IsRegular() || openedInfo.Size() < 0 || openedInfo.Size() > maxAppliedStateBytes {
+		return AppliedState{}, fmt.Errorf("%s: applied.json changed or exceeds size limit", ErrCodeRestartFailClosed)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, maxAppliedStateBytes+1))
+	if err != nil {
+		return AppliedState{}, err
+	}
+	if int64(len(data)) > maxAppliedStateBytes {
+		return AppliedState{}, fmt.Errorf("%s: applied.json exceeds size limit", ErrCodeRestartFailClosed)
+	}
+
 	var state AppliedState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return AppliedState{}, fmt.Errorf("%s: malformed applied.json", ErrCodeRestartFailClosed)
 	}
 	return state, nil
+}
+
+func (s *Syncer) ackApplied(ctx context.Context, generation int64, checksum string) error {
+	if generation == 0 {
+		return nil
+	}
+	if _, err := s.client.AckCapabilityPackAppliedState(ctx, generation, checksum); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.ackedGeneration = generation
+	s.ackedChecksum = checksum
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Syncer) isAckConfirmed(generation int64, checksum string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ackedGeneration == generation && strings.EqualFold(s.ackedChecksum, checksum)
 }
 
 func (s *Syncer) recoverOnStart() error {
