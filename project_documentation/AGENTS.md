@@ -29,6 +29,8 @@ For work involving alert qualification/evidence contracts, telemetry-quality tru
 
 For work involving enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph versus governed-CMDB semantics, or coverage measurement, **`Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
+For work involving ITSM delivery modes/lifecycle, connector capability/version certification, external-object binding/bidirectional synchronization, payload mapping/data-boundary policy, remote-create ambiguity, multi-system routing, external automation executors, action risk/post-action validation, Monitoring-as-Code provider/API strategy, or NetOps/NetBox/Cribl interoperability, **`Platform_24_Integration_Automation_and_Ecosystem_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
+
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
 ## Canonical GitHub governance (USER-FIXED)
@@ -100,6 +102,8 @@ For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`,
 
 For enterprise-monitoring-coverage / Capability Pack capabilities governed by `Platform_23`, Definition of Done also includes dimensional certification evidence, pack compatibility/version evidence, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior and the formal `REQ-EMC-*` acceptance evidence. Specification of a technology family is not certification.
 
+For integration/automation capabilities governed by `Platform_24`, Definition of Done also includes connector capability/version evidence, external-binding lifecycle/race/idempotency tests, payload/data-boundary verification, tenant isolation, remote-state conflict handling, automation risk/approval/revalidation/rollback evidence, queue/circuit observability, resource regression evidence and the formal `REQ-IAX-*` acceptance evidence. External execution success is not monitored recovery.
+
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
 - Network auto-discovery and Agent enrollment feed a governed onboarding/review lifecycle. Newly found/enrolled entities do not silently become licensed/actively monitored unless an explicit authorized trusted auto-approval policy applies.
@@ -144,6 +148,16 @@ For enterprise-monitoring-coverage / Capability Pack capabilities governed by `P
 - Coverage metrics remain distinct (architecture/specification/implementation/pack/certification/integration). Specified is not implemented; tested is not certified; certified is not deployed.
 - OEM/customer extensions use supported pack/SDK mechanisms. Core forks are prohibited.
 - Always-on full DPI, unrestricted SIEM replacement, full bytecode APM, broad BMS/DCIM and uncontrolled automated NCM remain excluded or deferred as recorded in `Platform_23`.
+
+## v3.2.2 integration, automation, ITSM and ecosystem safeguards
+
+- “Integration & Automation Fabric” is a logical capability domain over existing modular Integration Service/NCM/remediation/Capability Pack boundaries, not authority to add a mandatory new microservice.
+- Incident-oriented ITSM defaults to stable Platform-incident binding; child alerts update evidence. RCA may evolve and is not the default external binding identity.
+- Remote ticket closure never marks a monitored object healthy. External automation job success never resolves an incident without fresh Platform monitoring/recovery qualification.
+- Connector support is capability/version certified. Named candidate products are not implementation, certification, support or release commitments until evidence exists.
+- Customer payload mappings use bounded schemas/templates/CEL and governed egress controls; arbitrary executable scripting and secret-reveal/cross-tenant mapping are prohibited.
+- External delivery uses bounded durable queues, classified retries/backoff/circuit policy, idempotency/ambiguity reconciliation and first-class health/dead-letter telemetry.
+- Monitoring-as-Code is API/declarative-contract first; do not create separate Terraform/OpenTofu/Pulumi/Crossplane control planes. NetBox/Cribl remain optional integrations and cannot replace Platform authority by implication.
 
 ## Cursor Cloud specific instructions
 
