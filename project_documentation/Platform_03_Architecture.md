@@ -1,7 +1,7 @@
 # Platform — Master Architecture Document
 
 **Document ID:** PLATFORM-ARC-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Business requirements:** `Platform_01_BRD.md`  
 **Product requirements:** `Platform_02_PRD.md`  
