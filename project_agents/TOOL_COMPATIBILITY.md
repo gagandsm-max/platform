@@ -4,11 +4,8 @@ Record of **verified** mechanisms only. Unverified surfaces are labelled as such
 Do not treat this file as permission to invent CLI flags, skill paths, or
 subagent loaders.
 
-**Verification date:** 2026-09-12
-**Verified against repository HEAD at write time on branch**
-`feature/engineering-capability-pack-v1-2`, after fetching `origin/main`
-`a8ddda794ac50368c4d917e0ae3d51703b79124e` (Platform CI run `34687320630`,
-workflow run name “Platform CI”, conclusion SUCCESS).
+**Verification date:** 2026-09-19
+**Governance rebaseline:** canonical GitHub `main` was `3b9f669b5b4603cd378c567f31f829e3180a761a` when this tool-authority section was refreshed. CLI flag support below remains limited to mechanisms previously verified in the Platform programme; this refresh changes authority/routing, not unverified CLI syntax.
 
 ## Shared Platform contract (all tools)
 
