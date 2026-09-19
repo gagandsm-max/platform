@@ -229,4 +229,3 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Replay/current traffic priority | ARCH-DELEGATED | Identity/PKI/control and current critical/current telemetry cannot be starved by old backlog; replay must still make forward progress. Exact queue implementation is delegated and no separate service is implied. |
 | Uploader batching | ARCH-DELEGATED | Batches are bounded by records, encoded bytes/request bytes and maximum age. Fixed benchmark-certified defaults are preferred first; adaptive batching/compression is optional only when measurement proves value. |
 | Sensor hardware envelope | ARCH-DELEGATED | Communication-integrity hardening does not by declaration raise existing Sensor sizing targets. Any hardware increase requires reproducible performance evidence and explicit sizing change control. |
-
