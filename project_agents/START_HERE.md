@@ -52,6 +52,14 @@ selectedAgents: [platform-codebase-onboarding-engineer, platform-api-platform-en
 selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, bounded_implementation, sensor_edge, replay_idempotency, runtime_failure_injection, install_upgrade, evidence_bundle]
 ```
 
+### Build or harden Sensor communication reliability
+
+```text
+Read Platform_25 first. Reconcile existing spool, scheduler, uploader, Sensor Control, protocol receivers, Pipeline Integrity and alert-evidence behavior before writing. Preserve existing mechanisms where they already satisfy the contract. Route Sensor runtime/fencing/replay to platform-sensor-runtime-engineer, protocol/push/fallback-path semantics to platform-network-engineer, Core ingestion/ACK to platform-api-platform-engineer + platform-telemetry-pipeline-engineer + platform-database-reliability-engineer, failure/resource certification to platform-test-automation-engineer + platform-performance-benchmarker, and operational failure modes to platform-sre. Do not add heavyweight Sensor dependencies or duplicate full monitoring merely for HA.
+selectedAgents: [platform-codebase-onboarding-engineer, platform-sensor-runtime-engineer, platform-network-engineer, platform-api-platform-engineer, platform-telemetry-pipeline-engineer, platform-database-reliability-engineer, platform-sre, platform-test-automation-engineer, platform-performance-benchmarker, platform-code-reviewer, platform-evidence-collector]
+selectedSkills: [source_truth_rebaseline, mother_reference_reconciliation, bounded_implementation, sensor_edge, replay_idempotency, distributed_systems, runtime_failure_injection, capacity_performance, evidence_bundle]
+```
+
 ### Privileged NCM / connector / telemetry pipeline
 
 ```text
