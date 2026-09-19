@@ -68,13 +68,19 @@ class SensorCapabilityPackControllerTest {
         X509Certificate cert = mock(X509Certificate.class);
         when(resolver.resolve(cert)).thenReturn(new SensorScope(SENSOR, TENANT, null, Set.of(), true));
         when(assignments.getDesiredState(TENANT, SENSOR)).thenReturn(new SensorPackDesiredState(
-                2L, "a".repeat(64), List.of(new DesiredPackEntry("pack.a", "1.0.0", "b".repeat(64), 12))));
+                2L,
+                "a".repeat(64),
+                1L,
+                "c".repeat(64),
+                List.of(new DesiredPackEntry("pack.a", "1.0.0", "b".repeat(64), 12))));
 
         mockMvc.perform(get("/api/v1/sensor/capability-packs/desired-state")
                         .requestAttr(CERT_ATTR, new X509Certificate[]{cert})
                         .header("X-Claimed-Sensor-Id", "evil-sensor"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.generation").value(2))
+                .andExpect(jsonPath("$.appliedGeneration").value(1))
+                .andExpect(jsonPath("$.appliedChecksum").value("c".repeat(64)))
                 .andExpect(jsonPath("$.packs[0].packId").value("pack.a"))
                 .andExpect(jsonPath("$.packs[0].manifestBytes").doesNotExist());
 
