@@ -980,7 +980,7 @@ sequenceDiagram
 
 A short Core/Sensor communication interruption is not by itself proof that the original Sensor lost target reachability. Exact disconnected-grace/reassignment hold-off/fencing behavior remains the P0 ownership spike.
 
-### Flow DF-039A — Sensor/Core partition while original Sensor still reaches target
+### Partition case — Sensor/Core partition while original Sensor still reaches target
 
 ```mermaid
 sequenceDiagram
@@ -1003,7 +1003,7 @@ sequenceDiagram
   end
 ```
 
-### Flow DF-039B — Push receiver failure
+### Push-receiver case — Push receiver failure
 
 ```mermaid
 sequenceDiagram
@@ -1024,7 +1024,7 @@ sequenceDiagram
 
 Core assignment changes alone do not redirect a device/exporter that is configured to send to a failed physical Sensor address.
 
-### Flow DF-039C — Core recovery and backlog replay
+### Recovery case — Core recovery and backlog replay
 
 ```mermaid
 sequenceDiagram
