@@ -42,6 +42,16 @@ If documents conflict, stop and resolve through the precedence defined in `Platf
 - Commits must be traceable to the change being made; preserve decision provenance in history.
 - Selecting GitHub does **not** freeze a CI provider. GitHub Actions is not a fixed architecture decision unless separately approved.
 
+## Tool authority model
+
+- **ChatGPT + GitHub is the Platform control plane.** It owns source-truth rebaselining, architecture/technical decisions, task sequencing, PR integration, merge authority, progress accounting and final technical acceptance.
+- **Cursor CLI / Cursor Cloud are the primary implementation writers.** They operate only on explicitly assigned branches/worktrees and bounded scope. A Cursor writer never self-certifies merge readiness.
+- **Antigravity CLI is verifier-first and read-only/adversarial by default.** Write authority is exceptional, explicit and isolated to a dedicated branch/worktree; Antigravity must not become a second writer on an active Cursor branch.
+- **Codex CLI / GitHub Codex is an independent exact-SHA adversarial auditor and certification gate when explicitly invoked.** It is not a routine developer/fixer and must not write production changes unless ChatGPT explicitly assigns an isolated implementation lane.
+- **One writer per branch/worktree.** Parallelism is for independent review/evidence by default; parallel writes require isolated branches/worktrees and later controlled integration.
+- Every tool must re-fetch authoritative `main` and exact task/PR head before acting. Main/head drift invalidates stale review.
+- No writer may close `REALITY_GATE`, `MERGE_READY`, `POST_MERGE_VERIFY` or `COMPLETE` for its own work.
+
 ## Mother-document change control (READ-MOSTLY)
 
 Mother documents under `project_documentation/` are **READ-MOSTLY** and authoritative.
