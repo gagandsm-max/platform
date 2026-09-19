@@ -1267,6 +1267,10 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Flow Coverage:** when evidence permits, compare SNMP/interface traffic with normalized Flow for the same interface/time/direction/observation scope and show `GOOD | PARTIAL | LOW | UNKNOWN` or evidence-backed percentage/range. A naive bytes ratio is prohibited.
 
+**Exporter administration:** `Settings → Data Sources → Flow Exporters` (or equivalent) shows exporter, canonical device, protocol/version, assigned Flow Sensor/listener, observation domains, last record, datagrams/records/bytes rate, sampling state, active templates, sequence gaps, decode/socket/queue drops, spool/backlog and quality. Unknown sources enter Pending/Quarantined state for authorized mapping/validation rather than silently joining a tenant.
+
+**Template Explorer:** exporter detail exposes Template ID, observation domain, field/enterprise-IE summary, hash/generation, first/last seen, expiry/withdrawal state, records using the template and template-miss/error counts. This is a troubleshooting view; editing protocol templates directly in the database is prohibited.
+
 **Actions:** save/share permitted view, bounded export, report, Investigate, open entity/interface/site, view topology/path/routing/change/incident, and `Investigate Traffic` context transfer. User-attributed exports require additional permission/audit.
 
 **Performance:** server-side queries use bounded time/rows/scan/concurrency. Top-N uses bounded Top-K/pre-aggregation where appropriate. Sankey defaults to Top-N plus `Other`; the browser does not render unbounded edges or scan unrestricted multi-year raw Flow.
