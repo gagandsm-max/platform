@@ -141,11 +141,43 @@ fi
 # ------------------------------------------------------------------------------
 TEST_NUM=8
 TEST_DESC="ClickHouse Analytical Store Health & Telemetry Tables"
-CH_CHECK=$(curl -s -u "${CLICKHOUSE_USER:-platform_app}:${CLICKHOUSE_PASSWORD:-platform_dev_ch_password_change_in_prod}" "http://127.0.0.1:${PLATFORM_CLICKHOUSE_HTTP_HOST_PORT:-28123}/?query=SELECT+count()+FROM+platform.health_verification" 2>/dev/null || echo "0")
-if [ "${CH_CHECK}" -ge 1 ]; then
-    pass ${TEST_NUM} "${TEST_DESC} (ClickHouse health verification count: ${CH_CHECK})"
-else
+CH_BASE_URL="http://127.0.0.1:${PLATFORM_CLICKHOUSE_HTTP_HOST_PORT:-28123}"
+CH_AUTH="${CLICKHOUSE_USER:-platform_app}:${CLICKHOUSE_PASSWORD:-platform_dev_ch_password_change_in_prod}"
+CH_CHECK=$(curl -s -u "${CH_AUTH}" "${CH_BASE_URL}/?query=SELECT+count()+FROM+platform.health_verification" 2>/dev/null || echo "0")
+if [ "${CH_CHECK}" -lt 1 ]; then
     fail ${TEST_NUM} "${TEST_DESC}" "ClickHouse health query returned unexpected output: ${CH_CHECK}"
+else
+    # Verify non-replicated insert deduplication is active for safe retry after ambiguous HTTP outcomes.
+    DEDUP_SUFFIX="$(date +%s%N)"
+    DEDUP_METRIC="ci.dedup.${DEDUP_SUFFIX}"
+    DEDUP_TOKEN="ci-${DEDUP_SUFFIX}"
+    DEDUP_ROW="{\"tenant_id\":\"ci-tenant\",\"entity_id\":\"ci-entity\",\"metric_id\":\"${DEDUP_METRIC}\",\"sensor_id\":\"ci-sensor\",\"ts\":\"2026-09-19 07:00:00.000\",\"value\":1.0,\"quality\":1,\"flags\":0,\"sequence_id\":\"1\",\"source_protocol\":\"ci\"}"
+    CH_INSERT_URL="${CH_BASE_URL}/?query=INSERT%20INTO%20platform.metric_numeric%20FORMAT%20JSONEachRow&insert_deduplication_token=${DEDUP_TOKEN}"
+    curl -fsS -u "${CH_AUTH}" --data-binary "${DEDUP_ROW}" "${CH_INSERT_URL}" >/dev/null
+    curl -fsS -u "${CH_AUTH}" --data-binary "${DEDUP_ROW}" "${CH_INSERT_URL}" >/dev/null
+    DEDUP_COUNT=$(curl -fsS -u "${CH_AUTH}" "${CH_BASE_URL}/?query=SELECT+count()+FROM+platform.metric_numeric+WHERE+metric_id%3D%27${DEDUP_METRIC}%27")
+    if [ "${DEDUP_COUNT}" -ne 1 ]; then
+        fail ${TEST_NUM} "${TEST_DESC}" "ClickHouse retry deduplication failed: expected 1 row, found ${DEDUP_COUNT}"
+    else
+        # Prove the live Core batch listener consumes Kafka and persists to ClickHouse.
+        PIPELINE_METRIC="ci.pipeline.${DEDUP_SUFFIX}"
+        PIPELINE_PAYLOAD="{\"tenantId\":\"ci-tenant\",\"entityId\":\"ci-entity\",\"metricId\":\"${PIPELINE_METRIC}\",\"sensorId\":\"ci-sensor\",\"timestamp\":\"2026-09-19T07:00:00Z\",\"value\":42.0,\"quality\":1,\"flags\":0,\"sequenceId\":\"2\",\"sourceProtocol\":\"ci\"}"
+        printf '%s\n' "${PIPELINE_PAYLOAD}" | docker exec -i platform-kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic telemetry.numeric.v1 >/dev/null 2>&1
+
+        PIPELINE_COUNT=0
+        for _ in $(seq 1 15); do
+            PIPELINE_COUNT=$(curl -fsS -u "${CH_AUTH}" "${CH_BASE_URL}/?query=SELECT+count()+FROM+platform.metric_numeric+WHERE+metric_id%3D%27${PIPELINE_METRIC}%27" || echo "0")
+            if [ "${PIPELINE_COUNT}" -eq 1 ]; then
+                break
+            fi
+            sleep 1
+        done
+        if [ "${PIPELINE_COUNT}" -ne 1 ]; then
+            fail ${TEST_NUM} "${TEST_DESC}" "Kafka -> Core -> ClickHouse live pipeline did not persist the test observation"
+        else
+            pass ${TEST_NUM} "${TEST_DESC} (health=${CH_CHECK}, retry dedup=PASS, live Kafka pipeline=PASS)"
+        fi
+    fi
 fi
 
 # ------------------------------------------------------------------------------
