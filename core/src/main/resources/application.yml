@@ -49,6 +49,10 @@ spring:
     consumer:
       group-id: platform-core-group
       auto-offset-reset: earliest
+      max-poll-records: ${PLATFORM_TELEMETRY_CONSUMER_MAX_BATCH_RECORDS:2000}
+      properties:
+        fetch.min.bytes: ${PLATFORM_TELEMETRY_CONSUMER_FETCH_MIN_BYTES:65536}
+        fetch.max.wait.ms: ${PLATFORM_TELEMETRY_CONSUMER_FETCH_MAX_WAIT_MS:1000}
     listener:
       auto-startup: ${SPRING_KAFKA_LISTENER_AUTO_STARTUP:false}
 
