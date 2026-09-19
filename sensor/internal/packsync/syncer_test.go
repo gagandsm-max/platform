@@ -17,9 +17,9 @@ import (
 )
 
 type fakeCore struct {
-	mu       sync.Mutex
-	desired  coreclient.CapabilityPackDesiredState
-	arts     map[string]coreclient.CapabilityPackArtifact
+	mu              sync.Mutex
+	desired         coreclient.CapabilityPackDesiredState
+	arts            map[string]coreclient.CapabilityPackArtifact
 	acks            []ackCall
 	artifactFetches int
 	fetchErr        error
