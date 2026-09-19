@@ -5,6 +5,7 @@ import com.platform.core.domain.DomainException;
 import com.platform.core.id.UuidV7;
 import com.platform.core.logging.CorrelationIdFilter;
 import com.platform.core.persistence.CapabilityPackRepository;
+import com.platform.core.persistence.SensorCapabilityPackAssignmentRepository;
 import com.platform.core.security.http.PlatformSecurityContext;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,17 +34,23 @@ public class CapabilityPackCatalogService {
     public static final String ERR_GENERATION_CONFLICT = "CAPABILITY_PACK_GENERATION_CONFLICT";
     public static final String ERR_DEPENDENCY_IN_USE = "CAPABILITY_PACK_DEPENDENCY_IN_USE";
     public static final String ERR_SNAPSHOT_INVALID = "CAPABILITY_PACK_SNAPSHOT_INVALID";
+    public static final String ERR_SENSOR_ASSIGNMENTS_EXIST = "CAPABILITY_PACK_SENSOR_ASSIGNMENTS_EXIST";
 
     private final CapabilityPackRepository repository;
     private final CapabilityPackLoader loader;
+    private final SensorCapabilityPackAssignmentRepository assignmentRepository;
 
     @Autowired
-    public CapabilityPackCatalogService(CapabilityPackRepository repository) {
+    public CapabilityPackCatalogService(
+            CapabilityPackRepository repository,
+            SensorCapabilityPackAssignmentRepository assignmentRepository
+    ) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.loader = new CapabilityPackLoader();
+        this.assignmentRepository = Objects.requireNonNull(assignmentRepository, "assignmentRepository");
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public CapabilityPackRegistrationResult register(
             UUID tenantId,
             String packId,
@@ -135,7 +142,7 @@ public class CapabilityPackCatalogService {
                 .orElseThrow(() -> new DomainException(ERR_NOT_FOUND, "No active capability pack version"));
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public CapabilityPackActivation activate(UUID tenantId, String packId, String packVersion, long expectedGeneration) {
         lockTenant(tenantId);
         Objects.requireNonNull(packId, "packId");
@@ -156,6 +163,13 @@ public class CapabilityPackCatalogService {
                 && currentActive.get().packVersion().equals(packVersion)
                 && currentActive.get().generation() == expectedGeneration) {
             return currentActive.get();
+        }
+
+        // Activation fence: Sensors holding assignments for this pack_id block replace/deactivate.
+        if (currentActive.isPresent() && assignmentRepository.hasAssignmentsForPack(tenantId, packId)) {
+            throw new DomainException(
+                    ERR_SENSOR_ASSIGNMENTS_EXIST,
+                    "Sensor capability pack assignments exist for this pack");
         }
 
         List<CapabilityPackDescriptor> candidate = buildCandidateSnapshot(tenantId, packId, target);
@@ -189,7 +203,7 @@ public class CapabilityPackCatalogService {
         return created;
     }
 
-    @Transactional
+    @Transactional("transactionManager")
     public CapabilityPackActivation deactivate(UUID tenantId, String packId, long expectedGeneration) {
         lockTenant(tenantId);
         Objects.requireNonNull(packId, "packId");
@@ -201,6 +215,12 @@ public class CapabilityPackCatalogService {
                 .orElseThrow(() -> new DomainException(ERR_NOT_FOUND, "No active capability pack version"));
         if (current.generation() != expectedGeneration) {
             throw new DomainException(ERR_GENERATION_CONFLICT, "Capability pack activation generation conflict");
+        }
+
+        if (assignmentRepository.hasAssignmentsForPack(tenantId, packId)) {
+            throw new DomainException(
+                    ERR_SENSOR_ASSIGNMENTS_EXIST,
+                    "Sensor capability pack assignments exist for this pack");
         }
 
         List<CapabilityPackDescriptor> candidate = buildCandidateSnapshot(tenantId, packId, null);

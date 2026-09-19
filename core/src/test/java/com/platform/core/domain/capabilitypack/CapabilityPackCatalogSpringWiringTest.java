@@ -2,6 +2,8 @@ package com.platform.core.domain.capabilitypack;
 
 import com.platform.core.api.CapabilityPackController;
 import com.platform.core.persistence.CapabilityPackRepository;
+import com.platform.core.persistence.SensorCapabilityPackAssignmentRepository;
+import com.platform.core.security.http.SecurityAuditEmitter;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -27,8 +29,12 @@ class CapabilityPackCatalogSpringWiringTest {
         AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
         NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
         context.getDefaultListableBeanFactory().registerSingleton("namedParameterJdbcTemplate", jdbc);
+        context.getDefaultListableBeanFactory().registerSingleton(
+                "securityAuditEmitter", mock(SecurityAuditEmitter.class));
         context.register(CapabilityPackRepository.class);
+        context.register(SensorCapabilityPackAssignmentRepository.class);
         context.register(CapabilityPackCatalogService.class);
+        context.register(SensorCapabilityPackAssignmentService.class);
         context.register(CapabilityPackController.class);
         context.refresh();
 

@@ -84,6 +84,9 @@ class CapabilityPackHttpSecurityWebTest {
     private CapabilityPackCatalogService catalog;
 
     @MockBean
+    private com.platform.core.domain.capabilitypack.SensorCapabilityPackAssignmentService assignmentService;
+
+    @MockBean
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     @MockBean

@@ -9,6 +9,7 @@ import com.platform.core.domain.capabilitypack.CapabilityPackCatalogService;
 import com.platform.core.domain.capabilitypack.CapabilityPackLoader;
 import com.platform.core.domain.capabilitypack.CapabilityPackRegistrationResult;
 import com.platform.core.domain.capabilitypack.CapabilityPackTestSupport;
+import com.platform.core.domain.capabilitypack.SensorCapabilityPackAssignmentService;
 import com.platform.core.domain.capabilitypack.StoredCapabilityPack;
 import com.platform.core.logging.CorrelationIdFilter;
 import org.junit.jupiter.api.AfterEach;
@@ -45,12 +46,14 @@ class CapabilityPackApiTest {
 
     private MockMvc mockMvc;
     private CapabilityPackCatalogService catalog;
+    private SensorCapabilityPackAssignmentService assignmentService;
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
 
     @BeforeEach
     void setUp() {
         catalog = mock(CapabilityPackCatalogService.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new CapabilityPackController(catalog))
+        assignmentService = mock(SensorCapabilityPackAssignmentService.class);
+        mockMvc = MockMvcBuilders.standaloneSetup(new CapabilityPackController(catalog, assignmentService))
                 .addFilters(new CorrelationIdFilter())
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();

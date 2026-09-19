@@ -42,6 +42,9 @@ type Config struct {
 	AgentDrainMaxBackoff           time.Duration
 	AgentDrainIdleInterval         time.Duration
 	AgentDrainShutdownGrace        time.Duration
+
+	// Capability Pack durable staging (EMC1.3). Absolute path; distinct from telemetry/agent spool.
+	CapabilityPackDir string
 }
 
 func getEnv(key, defaultVal string) string {
@@ -117,6 +120,8 @@ func LoadConfig() *Config {
 		AgentDrainMaxBackoff:           getEnvDurationSeconds("SENSOR_AGENT_DRAIN_MAX_BACKOFF_SECONDS", 30*time.Second),
 		AgentDrainIdleInterval:         getEnvDurationSeconds("SENSOR_AGENT_DRAIN_IDLE_INTERVAL_SECONDS", 1*time.Second),
 		AgentDrainShutdownGrace:        getEnvDurationSeconds("SENSOR_AGENT_DRAIN_SHUTDOWN_GRACE_SECONDS", 10*time.Second),
+
+		CapabilityPackDir: getEnv("SENSOR_CAPABILITY_PACK_DIR", ""),
 	}
 }
 

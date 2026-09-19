@@ -1,12 +1,19 @@
 package com.platform.core.api.dto;
 
 import java.time.Instant;
+import java.util.List;
 
 public final class CapabilityPackDtos {
     private CapabilityPackDtos() {
     }
 
     public record ActivateRequest(String packVersion, Long expectedGeneration) {
+    }
+
+    public record AssignRequest(String packVersion, Long expectedGeneration) {
+    }
+
+    public record AppliedStateRequest(Long generation, String checksum) {
     }
 
     public record PackVersionResponse(
@@ -54,6 +61,42 @@ public final class CapabilityPackDtos {
             long generation,
             Instant activatedAt,
             String activatedBy
+    ) {
+    }
+
+    public record SensorAssignmentItem(
+            String packId,
+            String packVersion,
+            String assignedBy,
+            Instant assignedAt
+    ) {
+    }
+
+    public record SensorAssignmentsResponse(
+            String sensorId,
+            long desiredGeneration,
+            String desiredChecksum,
+            long appliedGeneration,
+            String appliedChecksum,
+            Instant appliedAt,
+            List<SensorAssignmentItem> assignments
+    ) {
+    }
+
+    public record DesiredPackItem(
+            String packId,
+            String packVersion,
+            String manifestSha256,
+            int artifactBytes
+    ) {
+    }
+
+    public record SensorDesiredStateResponse(
+            long generation,
+            String checksum,
+            long appliedGeneration,
+            String appliedChecksum,
+            List<DesiredPackItem> packs
     ) {
     }
 }
