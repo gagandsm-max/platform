@@ -88,6 +88,88 @@ func TestCoreClientRefusesRedirects(t *testing.T) {
 	}
 }
 
+func TestFetchCapabilityPackDesiredStateIncludesCoreAppliedState(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"generation":2,
+			"checksum":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"appliedGeneration":1,
+			"appliedChecksum":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			"packs":[]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := testClient(t, srv)
+	state, err := client.FetchCapabilityPackDesiredState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Generation != 2 || state.AppliedGeneration != 1 {
+		t.Fatalf("unexpected generations: desired=%d applied=%d", state.Generation, state.AppliedGeneration)
+	}
+	if state.AppliedChecksum != strings.Repeat("b", 64) {
+		t.Fatalf("unexpected applied checksum %q", state.AppliedChecksum)
+	}
+}
+
+func TestFetchCapabilityPackDesiredStateRejectsAppliedAheadOfDesired(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"generation":1,
+			"checksum":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"appliedGeneration":2,
+			"appliedChecksum":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			"packs":[]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := testClient(t, srv)
+	_, err := client.FetchCapabilityPackDesiredState(context.Background())
+	if err == nil || !IsCode(err, CodeProtocol) {
+		t.Fatalf("expected protocol error for applied generation ahead of desired, got %v", err)
+	}
+}
+
+func TestFetchCapabilityPackDesiredStateRejectsInvalidAppliedChecksum(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"generation":2,
+			"checksum":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"appliedGeneration":1,
+			"appliedChecksum":"NOT-A-CHECKSUM",
+			"packs":[]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := testClient(t, srv)
+	_, err := client.FetchCapabilityPackDesiredState(context.Background())
+	if err == nil || !IsCode(err, CodeProtocol) {
+		t.Fatalf("expected protocol error for invalid applied checksum, got %v", err)
+	}
+}
+
+func TestFetchCapabilityPackDesiredStateRejectsChecksumAtAppliedGenerationZero(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"generation":2,
+			"checksum":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"appliedGeneration":0,
+			"appliedChecksum":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			"packs":[]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := testClient(t, srv)
+	_, err := client.FetchCapabilityPackDesiredState(context.Background())
+	if err == nil || !IsCode(err, CodeProtocol) {
+		t.Fatalf("expected protocol error for applied checksum at generation zero, got %v", err)
+	}
+}
+
 func testClient(t *testing.T, srv *httptest.Server) *Client {
 	t.Helper()
 	u, err := url.Parse(srv.URL)
