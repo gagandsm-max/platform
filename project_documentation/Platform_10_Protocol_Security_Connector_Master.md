@@ -1,7 +1,7 @@
 # Platform — Protocol, Security, Credential & Connector Master
 
 **Document ID:** PLATFORM-PROTOCOL-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2  
 **Status:** **Authoritative Mother Reference — Protocol/Security/Connector Contract**  
 **Product:** Platform
 
@@ -86,6 +86,20 @@ input normalization
 ```
 
 Canonical errors include `INPUT_INVALID`, `DEVICE_UNREACHABLE`, `DNS_FAILURE`, `ROUTE_UNAVAILABLE`, `PROTOCOL_TIMEOUT`, `PROTOCOL_DISABLED_SUSPECTED`, `AUTHENTICATION_FAILED`, `AUTHORIZATION_FAILED`, `ACL_FIREWALL_SUSPECTED`, `PORT_UNREACHABLE`, `CREDENTIAL_PROFILE_INVALID`, `DEVICE_ALREADY_EXISTS`, `MIB_REQUIRED`, `API_SCHEMA_INVALID`, `TLS_CERTIFICATE_FAILURE`, `SENSOR_CAPACITY_EXCEEDED`, `NO_ELIGIBLE_SENSOR`, `MONITORING_PROFILE_INCOMPATIBLE`, `DEVICE_IDENTITY_CONFLICT`.
+
+## 5A. On-demand operational diagnostic and CLI contract
+
+Provisioning diagnostic primitives are reusable for authorized operational troubleshooting, but operational execution has an explicit job/audit context and may not bypass normal security or monitoring boundaries.
+
+1. On-demand ICMP/traceroute/SNMP/TCP/DNS/SSH/API/domain tests execute from an eligible Platform Sensor/Agent selected by Core; the browser does not obtain raw network reachability to managed targets.
+2. Default target is a tenant-scoped canonical entity/endpoint. Any ad-hoc target capability must be separately authorized and restricted against cross-tenant, link-local/metadata/control-plane and arbitrary-network abuse.
+3. Packet count/size, duration, timeout, rate, concurrent jobs, multi-vantage fan-out and continuous-test duration are bounded and cancellable.
+4. Multi-vantage tests preserve source identity and independent results. Failed remote vantage plus successful local vantage must not be flattened into `device down`.
+5. Results expose stable codes, evidence, uncertainty/quality and remediation where known; raw vendor/library errors are sanitized for customer display.
+6. CLI may use an authorized Credential Profile, policy-permitted personal credential or one-time session credential. Reusable secret material is never returned to the normal browser; one-time credentials are ephemeral/redacted and not promoted to reusable storage implicitly.
+7. CLI privilege is policy-tiered. Configuration/destructive command classes can require JIT, MFA/re-auth, reason/ticket, maker-checker/approval and command deny/allow policy.
+8. Every diagnostic/CLI job records actor, tenant, origin, canonical target, source/vantage, action, start/end/result, correlation ID and investigation/incident reference where applicable without logging secret values.
+9. Interactive diagnostics use bounded worker/concurrency budgets so they cannot starve scheduled polling, ingestion or NCM safety work.
 
 ## 6. Firewall/connectivity matrix generation
 

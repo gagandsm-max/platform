@@ -1,7 +1,7 @@
 # Platform — Business Requirements Document (BRD)
 
 **Document ID:** PLATFORM-BRD-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Product name:** Platform  
 **Implementation model:** Clean-room implementation; independent project, not part of ThoughtData or NetAI  
@@ -50,6 +50,7 @@ Platform is intended to compete in a crowded market. Therefore feature presence 
 | BR-P09 | HTTPS-only UI | Customer UI is served only over HTTPS/TLS. Platform shall not expose an application listener on TCP/80. |
 | BR-P10 | No silent failure | Material collection, storage, integration, HA, provisioning, authentication or workflow failures must expose what failed, evidence, impact and remediation guidance. |
 | BR-P11 | Safe by default, flexible by choice | Secure/safe defaults are enabled initially; customers may customize operational behavior through UI where doing so does not violate tenant isolation, integrity or mandatory safety controls. |
+| BR-P12 | No-context-switch operations | An authorized NOC/operator shall be able to verify, diagnose and investigate a monitored entity from its current Platform context using safe on-demand diagnostics, browser CLI and related evidence without requiring routine external ping/traceroute/SSH/SNMP/flow/config-comparison tools. Low-risk actions shall be easy; privileged or destructive actions shall retain proportionate controls and audit. |
 
 ---
 
@@ -96,6 +97,7 @@ Platform shall provide, directly or through approved extensibility frameworks:
 - Syslog/event ingestion.
 - NETCONF, RESTCONF, gNMI/gRPC and streaming telemetry.
 - SSH/CLI operations with privileged session governance.
+- Contextual NOC troubleshooting with on-demand ICMP/traceroute/SNMP/TCP/DNS/SSH/API verification, multi-vantage checks, Investigation Sessions and risk-tiered operational actions from the relevant entity/alert/incident workspace.
 - NCM: backup, versioning, diff, compliance, controlled push, rollback, approval and audit.
 - Deep network monitoring for routing, switching, overlays and WAN technologies including BGP, OSPF, IS-IS, MPLS, VXLAN/EVPN, VLAN/STP, VRF, HSRP/VRRP, LACP, QoS/CBQoS, multicast, IP SLA, VPN, SD-WAN and WLAN, subject to Device Pack/vendor telemetry availability.
 - Infrastructure monitoring using SSH, WMI/WinRM, agents and APIs.
