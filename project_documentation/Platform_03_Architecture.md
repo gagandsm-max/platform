@@ -1174,7 +1174,7 @@ Sensors execute protocol adapters and bounded local buffering. They do **not** o
 - Sensors are headless and Core-authoritative;
 - asynchronous mTLS ingestion and local spool reduce sensitivity to Core/Sensor RTT;
 - Sensor Placement Engine uses actual reachability/RTT/capacity/HA/security, not only geography;
-- streaming Flow/syslog is separable from polling so heavy event load cannot starve SNMP;
+- production Flow and Log collection use separate dedicated Sensor instances so Flow/log bursts cannot starve SNMP or each other;
 - global/regional Master Core is future architecture only, not a V1 dependency.
 
 ## ARCH-GNN — GNN and causal intelligence architecture
