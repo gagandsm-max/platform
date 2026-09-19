@@ -5305,6 +5305,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Overview
 - Assignments
 - Failover
+- Fallback Readiness
 - Capacity
 
 **Default filters:**
@@ -5337,6 +5338,9 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - CPU/RAM
 - Disk/Queue
 - Throughput/Backlog
+- Estimated buffer horizon / oldest unacknowledged telemetry
+- Fallback readiness state / last validation / blocking reason
+- Assignment/fencing version where applicable
 - Version
 - Last heartbeat
 
@@ -5371,11 +5375,15 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
+**Continuity evidence:** Where applicable show Sensor/source session state, last event vs last received time, subscription/reconnect epoch, exporter sequence/template gaps, receiver/kernel/queue/decoder/rate-limit drops, credential/protocol failure classification and whether completeness can or cannot be proven. UDP-based sources must not be presented as guaranteed complete merely because the receiver is healthy.
+
 **Default tabs/views:**
 - Overview
 - Freshness
 - Completeness
 - Failures
+- Protocol Continuity
+- Receiver / Queue Drops
 - Clock
 - Schema
 
@@ -6430,15 +6438,16 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
 **Default tabs/views:**
-- Produced
-- accepted
-- Kafka
-- processed
-- inserted
-- rejected
-- duplicates
-- late
-- dropped
+- Produced / Sensor Durable
+- Sensor Acknowledged / Core Accepted
+- Kafka Produced
+- Consumed / Processed
+- Inserted
+- Rejected
+- Duplicates
+- Late
+- Intentionally Dropped
+- Unexplained Gaps
 
 **Default filters:**
 - Time range
@@ -6477,7 +6486,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
-**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
+**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion. Reconciliation shall identify explained differences (duplicate/rejected/late/intentionally dropped/transformed) separately from an unexplained `PIPELINE_INTEGRITY_GAP`, with affected tenant/Sensor/topic/data-class scope and the last matching stage watermark.
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
