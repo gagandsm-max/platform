@@ -1,7 +1,7 @@
 # Platform — End-to-End Dataflow & Sequence Documentation
 
 **Document ID:** PLATFORM-DF-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Governing documents:** BRD, PRD, Architecture, HLD, LLD  
 
