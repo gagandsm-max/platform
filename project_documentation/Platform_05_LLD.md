@@ -344,29 +344,193 @@ source_protocol
 
 ### 5.3 `network_flow`
 
+Logical canonical Flow schema; physical ClickHouse layout remains benchmark/migration controlled:
+
 ```text
+flow_record_id
+schema_version
+
 tenant_id
-exporter_entity_id
 sensor_id
-start_ts
-end_ts
+listener_id
+
+exporter_entity_id
+exporter_source_address
+exporter_profile_id
+observation_domain_id nullable
+exporter_engine/source_id nullable
+exporter_generation nullable
+
+flow_protocol
+flow_protocol_version
+record_kind  # FLOW_RECORD|PACKET_SAMPLE|COUNTER_SAMPLE|OTHER
+source_record_identity
+source_sequence nullable
+record_index nullable
+
+export_time nullable
+observed_ts
+ingest_ts
+flow_start_ts nullable
+flow_end_ts nullable
+timestamp_quality
+
 src_ip
 dst_ip
-src_port
-dst_port
-protocol
-bytes
-packets
-ingress_if_id
-egress_if_id
+src_port nullable
+dst_port nullable
+ip_protocol nullable
+tcp_flags nullable
+icmp_type nullable
+icmp_code nullable
+
+observed_bytes nullable
+observed_packets nullable
+sampling_algorithm nullable
+sampling_rate nullable
+sampling_known
+estimated_bytes nullable
+estimated_packets nullable
+estimation_quality
+
+raw_ingress_ifindex nullable
+raw_egress_ifindex nullable
+ingress_interface_entity_id nullable
+egress_interface_entity_id nullable
+src_vlan/dst_vlan nullable
+vrf_id nullable
+
+src_asn/dst_asn nullable
+next_hop nullable
+bgp_next_hop nullable
+dscp nullable
+ecn nullable
+qos_class nullable
+
+pre_nat_src_ip/dst_ip nullable
+post_nat_src_ip/dst_ip nullable
+pre_nat_src_port/dst_port nullable
+post_nat_src_port/dst_port nullable
+
+src_entity_id/dst_entity_id nullable
+src_hostname_id/dst_hostname_id nullable
+src_domain_id/dst_domain_id nullable
+src_user_identity_id/dst_user_identity_id nullable
 src_site_id/dst_site_id nullable
 src_subnet_id/dst_subnet_id nullable
-vrf_id nullable
-src_asn/dst_asn nullable
-app_id nullable if exporter supplied
-flow_type
-sequence/template metadata
+src_geo_id/dst_geo_id nullable
+src_cloud_service_id/dst_cloud_service_id nullable
+
+app_id nullable
+app_classification_source nullable
+app_confidence nullable
+
+template_id nullable
+template_hash/version nullable
+template_generation nullable
+sequence_quality
+quality
+
+enrichment_version
+enrichment_provenance_ref
+extension_attributes_bounded
 ```
+
+Rules:
+
+- source/destination IP use a canonical binary/address representation supporting IPv4 and IPv6;
+- `observed_bytes/packets` are exporter/source observations; `estimated_bytes/packets` are separate sampled estimates and may be null;
+- raw directional observations are never collapsed into bidirectional conversation rows in this table;
+- current identity/DNS/user/Geo/ASN/application mappings do not silently rewrite historical records; enrichment fields carry temporal/versioned provenance or are resolved through temporal joins;
+- public-IP geolocation is approximate evidence and must not encode precise-person-location claims;
+- domain/FQDN/application and URL are separate. Basic Flow does not create a URL field from an IP/domain;
+- arbitrary IPFIX enterprise information elements do not automatically become dedicated ClickHouse columns; approved common fields are typed and other extensions remain bounded/namespaced or Pack-mapped.
+
+#### 5.3.1 Flow exporter/control state — PostgreSQL
+
+Logical control entities:
+
+```text
+flow_exporter_profile
+  tenant_id
+  exporter_profile_id
+  canonical_exporter_entity_id nullable
+  sensor_role/pool
+  listener_id
+  allowed_source_addresses/policy
+  supported_protocols
+  expected_observation_domains nullable
+  admission_state ACTIVE|QUARANTINED|DISABLED
+  rate/resource policy
+  redundancy/failover profile
+  revision
+
+flow_enrichment_policy
+  tenant/site scope
+  DNS/IPAM/DHCP/entity/session/directory/ASN/Geo/cloud/app sources
+  privacy/RBAC policy
+  temporal-resolution policy
+  revision
+```
+
+Packet-provided tenant/exporter fields never override trusted configured ownership.
+
+#### 5.3.2 Flow template/sampling/sequence state — Flow Sensor
+
+Bounded local state is keyed by tenant + Sensor/listener + exporter identity + protocol + observation domain/engine as applicable.
+
+```text
+template_state
+  template_id
+  template_type
+  field list/type/length/enterprise IE
+  template_hash
+  generation
+  learned_at
+  last_seen_at
+  expires_at/withdrawn_at nullable
+  validity
+
+sampling_state
+  algorithm
+  interval/rate
+  source
+  generation
+  effective_from
+  effective_to nullable
+  quality
+
+sequence_state
+  last protocol-specific sequence
+  exporter generation/reset evidence
+  gap/duplicate/out-of-order counters
+```
+
+A persisted template cache may survive Sensor restart only with protocol-specific validity guards. Exporter reset/generation evidence invalidates unsafe stale state.
+
+#### 5.3.3 Temporal endpoint/user/domain/Geo enrichment
+
+Flow enrichment may reference canonical Platform identity/session/history rather than copying mutable directory/profile data into every row. User attribution requires time-bounded evidence such as Agent session, authentication/AD event, RADIUS/802.1X, VPN, WLAN/NAC, firewall/proxy user mapping or equivalent. Directory/AD/LDAP/Entra membership alone does not establish that a user controlled an IP at a Flow timestamp.
+
+Identity attribution stores or resolves:
+
+```text
+identity/session reference
+source
+valid_from
+valid_to
+observed_at
+confidence
+conflict_state
+```
+
+Conflicting evidence is preserved. User-attributed Flow access/export is permission scoped and audited.
+
+#### 5.3.4 Derived Flow analytics
+
+Conversation, site-pair, interface, application, ASN, QoS and top-N rollups are derived from canonical directional records. They retain observation scope/provenance and must not globally deduplicate separate valid observation points by five-tuple alone.
+
+Sankey/matrix/top-N queries use bounded cardinality/range and benchmark-selected aggregates. Raw Flow retention, rollup retention and incident-protected Flow evidence are separate lifecycle classes.
 
 ### 5.4 `event_raw`
 
@@ -404,6 +568,8 @@ clock_offset_ms nullable
 quality_score
 ```
 
+Flow quality extends this model with exporter/listener/observation-domain scope and counters/state such as last datagram/record, datagrams/sec, records/sec, socket/kernel drops where available, receiver-queue drops, malformed/unsupported packets, template missing/invalid/churn, sequence gaps, duplicates/replay/out-of-order, exporter reset, sampling known/unknown/change, clock/timestamp quality, rate-limit/quarantine decisions, spool rejection/storage pressure, upload/Core/Kafka/ClickHouse discrepancies and downstream lag. `NO_RECENT_DATA` is a collection-quality state and is not interpreted as zero traffic.
+
 ### 5.6 Historical lifecycle tables
 
 - `alert_history`
@@ -425,7 +591,7 @@ Topic names are versioned by major schema compatibility. Example:
 ```text
 telemetry.numeric.v1
 telemetry.state.v1
-network.flow.v1
+network.flow.v1  # canonical Flow record/source-quality family; exact subtopic/partition realization remains implementation-delegated
 event.syslog.v1
 event.trap.v1
 event.generic.v1
