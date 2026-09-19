@@ -27,7 +27,7 @@ Install signed native package. Wizard/CLI prompts for Standalone or HA. In HA, f
 
 ## 2. Sensor installation
 
-Install Sensor package, provide current Master Core address/enrollment material and role/site/pool inputs. Sensor performs secure handshake, receives identity/certificate/configuration and joins the appropriate Sensor Pool. Core remains authoritative for assignment/policy.
+Install Sensor package, provide current Master Core address/enrollment material and role/site/pool inputs. Sensor performs secure handshake, receives identity/certificate/configuration and joins the appropriate Sensor Pool. Core remains authoritative for assignment/policy. Production role selection explicitly distinguishes `NETWORK_SENSOR`, `INFRASTRUCTURE_SENSOR`, `FLOW_SENSOR`, `LOG_SENSOR` and other certified profiles. Flow/Log roles are exclusive; installer/readiness checks verify that incompatible data-plane modules are disabled and that required listener ports, disk/spool and network capacity are available.
 
 ## 3. Agent installation
 
@@ -57,7 +57,7 @@ Every installer returns stable error code, writes sanitized install log and poin
 
 ## 1. Required runbooks
 
-Core process failure; repeated crash loop; HA failover; Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation.
+Core process failure; repeated crash loop; HA failover; Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; **Flow Sensor receiver/socket drop; unknown/quarantined exporter; template missing/churn; sequence gaps/exporter reset; sampling unknown/change; Flow spool/backlog/replay; Flow enrichment identity conflict; Flow-vs-SNMP coverage degradation; Flow role misconfiguration; Log Sensor role misconfiguration**; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation.
 
 ## 2. Runbook structure
 
@@ -66,3 +66,21 @@ Every runbook states trigger, impact, immediate safety action, diagnostic eviden
 ## 3. Logging
 
 Support teams should first use Platform Health/Audit/Support Bundle rather than ad-hoc shell access. Shell commands are documented only where necessary and must not expose secrets.
+
+## 5. Dedicated Sensor role conversion and Flow operations supplement
+
+Production `FLOW_SENSOR`/`LOG_SENSOR` role conversion is a governed operation:
+
+1. place Sensor in drain/maintenance;
+2. stop new source/job assignment;
+3. verify and drain or explicitly disposition durable spool/backlog;
+4. remove incompatible source assignments/listeners;
+5. apply signed/effective role configuration;
+6. restart/reconfigure required modules;
+7. run role-specific listener/storage/network/capacity readiness checks;
+8. activate compatible assignments only after health passes;
+9. audit operator, reason, old/new role and queue disposition.
+
+Flow runbooks distinguish exporter silence from no traffic, packet/socket loss from decoder rejection, missing templates from exporter failure, sequence reset from packet loss, sampling change from genuine traffic change, stale template from current generation, identity-enrichment conflict from raw source truth, and downstream storage failure from source collection failure.
+
+Support bundles include sanitized role, listener/exporter IDs, protocol/version, observation domains, template hashes/state, sampling state, sequence/drop counters, queue/spool/backlog, last record, replay/drain and downstream lag. They do not expose sensitive user/session attributes beyond authorized diagnostic need.
