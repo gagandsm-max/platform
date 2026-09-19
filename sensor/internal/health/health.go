@@ -9,13 +9,19 @@ import (
 	"sync"
 	"time"
 
+	"platform/sensor/internal/packsync"
 	"platform/sensor/internal/spool"
 )
+
+type packSyncStatusProvider interface {
+	Snapshot() packsync.Status
+}
 
 type HealthServer struct {
 	server     *http.Server
 	spool      *spool.DiskSpool
 	agentSpool *spool.DiskSpool
+	packSync   packSyncStatusProvider
 	mu         sync.RWMutex
 	logger     *slog.Logger
 }
@@ -48,6 +54,17 @@ func (hs *HealthServer) SetAgentSpool(agentSpool *spool.DiskSpool) {
 	hs.agentSpool = agentSpool
 }
 
+// SetPackSync optionally wires Capability Pack sync status (no secrets).
+func (hs *HealthServer) SetPackSync(syncer packSyncStatusProvider) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	if syncer == nil || syncer == (*packsync.Syncer)(nil) {
+		hs.packSync = nil
+		return
+	}
+	hs.packSync = syncer
+}
+
 func (hs *HealthServer) handleLive(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -77,6 +94,7 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	hs.mu.RLock()
 	agentSpool := hs.agentSpool
+	packSync := hs.packSync
 	hs.mu.RUnlock()
 	agentStorage := 0.0
 	if agentSpool != nil {
@@ -92,14 +110,53 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	packStatus := map[string]any{}
+	if packSync != nil {
+		snap := packSync.Snapshot()
+		packStatus = map[string]any{
+			"desired_generation":         snap.DesiredGeneration,
+			"applied_generation":         snap.AppliedGeneration,
+			"pack_count":                 snap.PackCount,
+			"last_successful_sync":       formatTime(snap.LastSuccessfulSync),
+			"last_error_code":            snap.LastErrorCode,
+			"degraded":                   snap.Degraded,
+			"trusted_applied":            snap.TrustedApplied,
+			"core_authority_established": snap.CoreAuthorityEstablished,
+		}
+		if !snap.TrustedApplied {
+			// Fail closed: trusted pack state could not be established (e.g. corrupt recovery).
+			httpStatus = http.StatusServiceUnavailable
+			if status == "UP" || status == "DEGRADED" {
+				status = "PACK_TRUST_NOT_ESTABLISHED"
+			}
+		} else if !snap.CoreAuthorityEstablished {
+			// Local empty/structurally clean state is not Core-confirmed authority.
+			httpStatus = http.StatusServiceUnavailable
+			if status == "UP" || status == "DEGRADED" {
+				status = "PACK_CORE_AUTHORITY_NOT_ESTABLISHED"
+			}
+		} else if snap.Degraded && status == "UP" {
+			// Auth/degraded with retained trusted applied + Core authority stays ready (HTTP 200).
+			status = "DEGRADED"
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":                status,
 		"storage_percent":       fmt.Sprintf("%.2f%%", storagePercent),
 		"agent_storage_percent": fmt.Sprintf("%.2f%%", agentStorage),
+		"capability_pack_sync":  packStatus,
 		"timestamp":             time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+func formatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func (hs *HealthServer) Start() error {

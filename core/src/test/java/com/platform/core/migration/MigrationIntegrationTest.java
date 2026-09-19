@@ -54,16 +54,17 @@ class MigrationIntegrationTest {
                                      'discovery_request','discovery_target','discovery_evidence','discovery_candidate',
                                      'sensor','sensor_certificate_credential','sensor_allowed_entity',
                                      'agent','agent_certificate_credential','agent_sensor_assignment',
-                                     'tenant_capability_pack','tenant_capability_pack_activation')
+                                     'tenant_capability_pack','tenant_capability_pack_activation',
+                                     'sensor_capability_pack_assignment','sensor_capability_pack_state')
                 """,
                 Integer.class
         );
-        assertEquals(24, tables);
+        assertEquals(26, tables);
 
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, checksum FROM platform.schema_history ORDER BY version"
         );
-        assertEquals(7, history.size());
+        assertEquals(8, history.size());
         assertEquals("V001", history.get(0).get("version"));
         assertEquals("V002", history.get(1).get("version"));
         assertEquals("V003", history.get(2).get("version"));
@@ -71,11 +72,12 @@ class MigrationIntegrationTest {
         assertEquals("V005", history.get(4).get("version"));
         assertEquals("V006", history.get(5).get("version"));
         assertEquals("V007", history.get(6).get("version"));
+        assertEquals("V008", history.get(7).get("version"));
         String checksum = String.valueOf(history.get(0).get("checksum"));
         assertTrue(checksum.matches("[a-f0-9]{64}"));
 
         pg.migrate();
-        assertEquals(7, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(8, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
 
         jdbc.update("UPDATE platform.schema_history SET checksum='deadbeef' WHERE version='V001'");
         MigrationException ex = assertThrows(MigrationException.class, pg::migrate);
@@ -185,10 +187,10 @@ class MigrationIntegrationTest {
 
         // 10. Assert restart is idempotent and does not alter data
         pg.migrate();
-        assertEquals(7, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(8, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
 
-        // 11. V001→V007 upgrade must materialize Sensor/Agent Control and Capability Pack tables
+        // 11. V001→V008 upgrade must materialize Sensor/Agent Control and Capability Pack tables
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V004'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
@@ -197,6 +199,8 @@ class MigrationIntegrationTest {
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V006'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V007'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V008'", Integer.class));
         Integer sensorControlTables = jdbc.queryForObject(
                 """
                 SELECT COUNT(*) FROM information_schema.tables
@@ -220,11 +224,12 @@ class MigrationIntegrationTest {
                 """
                 SELECT COUNT(*) FROM information_schema.tables
                 WHERE table_schema='platform'
-                  AND table_name IN ('tenant_capability_pack','tenant_capability_pack_activation')
+                  AND table_name IN ('tenant_capability_pack','tenant_capability_pack_activation',
+                                     'sensor_capability_pack_assignment','sensor_capability_pack_state')
                 """,
                 Integer.class
         );
-        assertEquals(2, capabilityPackTables);
+        assertEquals(4, capabilityPackTables);
     }
 
     @Test
@@ -293,6 +298,8 @@ class MigrationIntegrationTest {
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V006'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V007'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V008'", Integer.class));
         assertEquals("uuid", jdbc.queryForObject("""
                 SELECT data_type FROM information_schema.columns
                  WHERE table_schema='platform' AND table_name='tenant' AND column_name='tenant_id'

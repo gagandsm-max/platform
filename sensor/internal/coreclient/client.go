@@ -169,7 +169,15 @@ func New(cfg Config) (*Client, error) {
 		IdleConnTimeout: 90 * time.Second, ForceAttemptHTTP2: true,
 	}
 	return &Client{
-		baseURL: u, httpClient: &http.Client{Transport: transport, Timeout: cfg.RequestTimeout},
+		baseURL: u,
+		httpClient: &http.Client{
+			Transport: transport,
+			Timeout:   cfg.RequestTimeout,
+			// Refuse redirects for Sensor↔Core machine transport (telemetry + pack pull).
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return newError(CodeProtocol, "Core redirects are not followed", nil, false)
+			},
+		},
 		logger: cfg.Logger, maxResponseBytes: cfg.MaxResponseBytes,
 	}, nil
 }

@@ -6,6 +6,7 @@ import com.platform.core.domain.tenant.TenantMode;
 import com.platform.core.domain.tenant.TenantService;
 import com.platform.core.domain.tenant.TenantStatus;
 import com.platform.core.persistence.CapabilityPackRepository;
+import com.platform.core.persistence.SensorCapabilityPackAssignmentRepository;
 import com.platform.core.persistence.TenantRepository;
 import com.platform.core.security.authorization.AuthenticationState;
 import com.platform.core.security.authorization.PrincipalContext;
@@ -71,7 +72,7 @@ class CapabilityPackCatalogIntegrationTest {
         TenantRepository tenantRepo = new TenantRepository(named);
         packRepo = new CapabilityPackRepository(named);
         tenants = new TenantService(tenantRepo);
-        catalog = new CapabilityPackCatalogService(packRepo);
+        catalog = new CapabilityPackCatalogService(packRepo, new SensorCapabilityPackAssignmentRepository(named));
         tenantA = tenants.create("Pack Tenant A", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
         tenantB = tenants.create("Pack Tenant B", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
         authenticateAs("actor-a");

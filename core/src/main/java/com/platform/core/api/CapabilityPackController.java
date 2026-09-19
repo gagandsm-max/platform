@@ -3,13 +3,18 @@ package com.platform.core.api;
 import com.platform.core.api.dto.CapabilityPackDtos.ActivateRequest;
 import com.platform.core.api.dto.CapabilityPackDtos.ActiveVersionResponse;
 import com.platform.core.api.dto.CapabilityPackDtos.ActiveVersionSummary;
+import com.platform.core.api.dto.CapabilityPackDtos.AssignRequest;
 import com.platform.core.api.dto.CapabilityPackDtos.PackVersionListItem;
 import com.platform.core.api.dto.CapabilityPackDtos.PackVersionResponse;
+import com.platform.core.api.dto.CapabilityPackDtos.SensorAssignmentItem;
+import com.platform.core.api.dto.CapabilityPackDtos.SensorAssignmentsResponse;
 import com.platform.core.domain.DomainException;
 import com.platform.core.domain.capabilitypack.CapabilityPackActivation;
 import com.platform.core.domain.capabilitypack.CapabilityPackCatalogService;
 import com.platform.core.domain.capabilitypack.CapabilityPackLoader;
 import com.platform.core.domain.capabilitypack.CapabilityPackRegistrationResult;
+import com.platform.core.domain.capabilitypack.SensorCapabilityPackAssignment;
+import com.platform.core.domain.capabilitypack.SensorCapabilityPackAssignmentService;
 import com.platform.core.domain.capabilitypack.StoredCapabilityPack;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -31,9 +36,14 @@ import java.util.UUID;
 public class CapabilityPackController {
 
     private final CapabilityPackCatalogService catalog;
+    private final SensorCapabilityPackAssignmentService assignmentService;
 
-    public CapabilityPackController(CapabilityPackCatalogService catalog) {
+    public CapabilityPackController(
+            CapabilityPackCatalogService catalog,
+            SensorCapabilityPackAssignmentService assignmentService
+    ) {
         this.catalog = catalog;
+        this.assignmentService = assignmentService;
     }
 
     @PutMapping(
@@ -137,6 +147,70 @@ public class CapabilityPackController {
     ) {
         catalog.deactivate(tenantId, packId, expectedGeneration);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/assignments/sensors/{sensorId}")
+    public SensorAssignmentsResponse getSensorAssignments(
+            @PathVariable UUID tenantId,
+            @PathVariable String sensorId
+    ) {
+        return toAssignmentsResponse(sensorId, assignmentService.getAssignments(tenantId, sensorId));
+    }
+
+    @PutMapping(
+            path = "/assignments/sensors/{sensorId}/{packId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE
+    )
+    public SensorAssignmentsResponse assignToSensor(
+            @PathVariable UUID tenantId,
+            @PathVariable String sensorId,
+            @PathVariable String packId,
+            @RequestBody AssignRequest request
+    ) {
+        if (request == null || request.packVersion() == null || request.packVersion().isBlank()) {
+            throw new DomainException("VALIDATION_FAILED", "packVersion is required");
+        }
+        if (request.expectedGeneration() == null) {
+            throw new DomainException("VALIDATION_FAILED", "expectedGeneration is required");
+        }
+        return toAssignmentsResponse(
+                sensorId,
+                assignmentService.assign(
+                        tenantId, sensorId, packId, request.packVersion(), request.expectedGeneration()));
+    }
+
+    @DeleteMapping("/assignments/sensors/{sensorId}/{packId}")
+    public SensorAssignmentsResponse unassignFromSensor(
+            @PathVariable UUID tenantId,
+            @PathVariable String sensorId,
+            @PathVariable String packId,
+            @RequestParam(required = false) Long expectedGeneration
+    ) {
+        if (expectedGeneration == null) {
+            throw new DomainException("VALIDATION_FAILED", "expectedGeneration is required");
+        }
+        return toAssignmentsResponse(
+                sensorId,
+                assignmentService.unassign(tenantId, sensorId, packId, expectedGeneration));
+    }
+
+    private static SensorAssignmentsResponse toAssignmentsResponse(
+            String sensorId,
+            SensorCapabilityPackAssignmentService.AssignmentView view
+    ) {
+        return new SensorAssignmentsResponse(
+                sensorId,
+                view.desiredGeneration(),
+                view.desiredChecksum(),
+                view.appliedGeneration(),
+                view.appliedChecksum(),
+                view.appliedAt(),
+                view.assignments().stream().map(CapabilityPackController::toAssignmentItem).toList()
+        );
+    }
+
+    private static SensorAssignmentItem toAssignmentItem(SensorCapabilityPackAssignment a) {
+        return new SensorAssignmentItem(a.packId(), a.packVersion(), a.assignedBy(), a.assignedAt());
     }
 
     private static PackVersionListItem toListItem(StoredCapabilityPack pack) {
