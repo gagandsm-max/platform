@@ -925,36 +925,93 @@ Raw sockets/capabilities should use minimal Linux capabilities rather than runni
 
 ## 14. Flow LLD
 
-### 14.1 Receiver
+### 14.1 Dedicated receiver
 
-Streaming Sensor/Network Sensor receives datagrams/streams and tracks exporter/template state.
+Only a production `FLOW_SENSOR` receives NetFlow/IPFIX/sFlow/J-Flow-compatible traffic. Listener configuration is tenant/exporter governed; Network/Infrastructure/Log Sensors do not activate Flow listeners.
 
-### 14.2 Enrichment pipeline
+Receiver stages:
 
 ```text
-raw flow
-→ exporter identity
-→ interface identity
-→ IPAM/subnet
-→ site/region
-→ VRF/VLAN where known
-→ ASN/BGP
-→ cloud context
-→ exporter-provided app/QoS metadata
-→ canonical network_flow
+UDP datagram
+→ socket/kernel accounting
+→ listener/source admission
+→ bounded packet queue
+→ GoFlow2 decode
+→ exporter/observation-domain state
+→ template/options lookup
+→ sampling/sequence classification
+→ canonical directional observation
+→ temporal enrichment
+→ dedicated durable Flow spool
 ```
 
-### 14.3 High-rate safeguards
+No unbounded goroutine-per-packet execution.
 
-- bounded decode queues;
-- drop counters by reason;
-- per-exporter rate metrics;
-- template-miss counters;
-- backpressure metrics;
-- cardinality detection;
-- dedicated Streaming Sensor recommendation.
+### 14.2 Exporter/template state
 
-No silent drop: every intentional/forced drop must be counted and surfaced.
+Exporter state key includes tenant, Flow Sensor/listener, configured exporter identity/source, protocol and observation domain/engine where applicable. Template ID alone is never globally unique.
+
+NetFlow v9/IPFIX support covers template arrival/update/expiry/withdrawal/reuse, options templates, exporter restart/generation, enterprise IEs and variable-length fields. Unknown template yields explicit quality/accounting; it is not decoded using an unrelated or indefinitely stale template.
+
+### 14.3 Sampling and source values
+
+Observed values remain source truth. Sampling-derived estimates use separate fields and quality:
+
+```text
+observed bytes/packets
+sampling algorithm/rate/source
+→ estimated bytes/packets
+→ estimation quality
+```
+
+Sampling change creates a new effective sampling epoch. `sampling_unknown` is valid and suppresses false exactness.
+
+sFlow sample/counter record kinds preserve their statistical/source semantics; Platform does not fabricate NetFlow-style authoritative start/end fields.
+
+### 14.4 Enrichment pipeline
+
+```text
+raw canonical Flow
+→ exporter + observation point
+→ interface/VRF/VLAN
+→ temporal IPAM/DHCP/entity ownership
+→ system/host name + DNS/FQDN
+→ temporal Agent/auth/VPN/RADIUS/NAC/WLAN/firewall/proxy session identity
+→ AD/LDAP/Entra directory enrichment
+→ site/region/internal Geo
+→ ASN/BGP
+→ public-IP Geo approximation
+→ cloud/SaaS catalogue
+→ exporter app/QoS/NAT metadata
+→ canonical network_flow + enrichment provenance
+```
+
+AD/directory membership is not session proof. Domain/application does not imply full URL. Historical enrichments preserve effective time/version.
+
+### 14.5 High-rate safeguards and fairness
+
+- bounded socket and decode queues;
+- datagram/record/value/field size limits;
+- bounded exporters/listener, observation domains/exporter, templates/exporter and template churn;
+- per-exporter fairness/rate policy plus global Sensor ceiling;
+- socket/kernel drop counters where available;
+- receiver-queue/drop counters by reason;
+- malformed/unsupported/template/sampling/sequence counters;
+- spool/backpressure/storage counters;
+- cardinality protection;
+- explicit quarantine/reject counters for unknown exporters.
+
+Every intentional/forced drop after receiver visibility is counted. UDP packets lost before Platform receives them cannot be guaranteed and are represented through socket/protocol gap evidence where observable.
+
+### 14.6 Replay and observation identity
+
+After certified durable local acceptance, each canonical Flow record has stable Platform ingestion identity for Sensor→Core replay. Source sequence/record index/template/generation metadata are retained where available.
+
+Do not deduplicate valid observations from different exporters/interfaces by five-tuple. Retransmission/source-record duplicates and multi-vantage conversation correlation are separate mechanisms.
+
+### 14.7 Flow Coverage
+
+Where source semantics are comparable, correlate Flow observed/estimated volume with exact interface-counter evidence. Account for direction, sampling, observation point, timing and known exclusions. Emit qualified coverage/consistency and supporting evidence; invalid comparison is `UNKNOWN`, not a fabricated percentage.
 
 ---
 
