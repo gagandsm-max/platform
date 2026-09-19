@@ -104,9 +104,43 @@ If devices are divided into multiple network-isolated/locality pools, redundancy
 - Agent-push ingestion planning target: approximately **2,200 endpoints per 4 vCPU / 16 GB ingestion capacity unit**.
 - These are separate workload classes and are not added to network-device counts as if they had identical cost.
 
-## 5. Streaming/Event Sensor
+## 5. Dedicated Flow and Log Sensor sizing
 
-High-volume NetFlow/IPFIX/sFlow/J-Flow, Syslog, traps and high-rate OTel are separated from polling when volume risks starving normal collection. A small deployment may combine roles, but Platform's Capacity Engine must recommend/require role separation once safe limits are approached. Exact records/sec and EPS certification values are benchmark-defined.
+Production Flow and Log collection are **role-exclusive**, not threshold-triggered mixed workloads.
+
+- `FLOW_SENSOR`: NetFlow/IPFIX/sFlow/J-Flow/vendor Flow only, plus mandatory common Sensor services.
+- `LOG_SENSOR`: Syslog/log/event/assigned OTLP-log workloads only, plus mandatory common Sensor services.
+- Neither role shares a production instance with ordinary polling/discovery/NCM/synthetics or with the other high-rate role.
+- Combined high-rate roles exist only for development/CI/demo/explicit non-production lab use.
+
+Exact Flow records/sec and Log EPS values remain benchmark-defined. Dedicated roles still require safety headroom for bursts, spool growth, replay, runtime/GC, upgrades, health and failover; 'use the whole Sensor' means exclusive workload ownership, not 100% resource saturation.
+
+### 5.1 Flow Sensor workload model
+
+Flow sizing/certification includes at minimum:
+
+- configured/active exporters and listeners;
+- datagrams/sec, records/sec and bytes/sec;
+- NetFlow v5/v9, IPFIX, sFlow/J-Flow mix;
+- average/max records/datagram and fields/record;
+- observation domains/exporter;
+- template count, templates/sec and template churn;
+- enterprise/variable-length information-element cost;
+- sampling mix and normalization cost;
+- IPv4/IPv6/NAT/QoS/application metadata mix;
+- identity/DNS/IPAM/user/ASN/cloud/GeoIP enrichment hit rate and lookup/cache cost;
+- kernel/socket drop behavior and receive-buffer pressure;
+- decode/normalize/spool queue depth/age;
+- local durable-spool write rate/horizon and 80% protection;
+- Core upload bandwidth, replay drain time and downstream ingestion lag;
+- ClickHouse insert/rollup cost;
+- Top-N/matrix/Sankey/query concurrency.
+
+Per-exporter fairness and global ceilings are included in capacity tests so a single source cannot consume the certified role envelope.
+
+### 5.2 Log Sensor workload model
+
+Log Sensor sizing is independent of Flow sizing and uses source count, EPS, bytes/sec, transport/TLS connections, parser/multiline/redaction/fingerprint cost, spool/forwarding queues and egress. Flow and Log capacity are never added into one production Sensor budget.
 
 ## 6. Monitoring Work Units (MWU)
 
@@ -119,8 +153,8 @@ Platform must compute a workload score using at least:
 - RTT, packet loss and timeout rate;
 - gNMI stream rate;
 - REST calls and response size;
-- Flow records/sec and template rate;
-- Syslog/events/sec;
+- Flow records/sec, datagrams/sec, bytes/sec, exporter/domain count, template rate/churn, sampling/enrichment and spool cost (Flow Sensor only);
+- Syslog/events/sec, bytes/sec, parser/multiline/redaction/forwarding cost (Log Sensor only);
 - agent/agentless collection cost;
 - NCM/CLI scheduled/concurrent jobs;
 - interactive/on-demand diagnostic jobs, multi-vantage fan-out, bounded continuous tests and concurrent CLI sessions;
@@ -149,9 +183,9 @@ Customer modes: **Automatic (recommended)**, **Automatic with Approval**, **Manu
 
 ## 8. Standard Network Workload Profile SNWP-2500-v1
 
-The 8 vCPU/16 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; and Flow/syslog below dedicated-streaming threshold. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
+The 8 vCPU/16 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; with Flow and high-rate log workloads excluded from the Network Sensor profile because production Flow/Log run on dedicated roles. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
 
-A separate Heavy Network Workload profile covers high-interface, aggressive polling, heavy routing, gNMI, API/NCM and high-rate stream cases.
+A separate Heavy Network Workload profile covers high-interface, aggressive polling, heavy routing, gNMI and API/NCM cases. Flow and high-rate log streams use their own dedicated-role benchmark profiles rather than a mixed Network Sensor profile.
 
 ## 9. Core storage sizing model
 
