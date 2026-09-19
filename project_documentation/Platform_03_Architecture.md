@@ -41,6 +41,7 @@ The architecture is governed by the following constraints already decided:
 | ARC-P02 | Locality first, capacity always | Place Sensors near devices but never overload them merely to minimize RTT. |
 | ARC-P03 | Asynchronous over WAN | A poll must not require synchronous DB access across WAN. Sensor queues isolate WAN/Core disruption. |
 | ARC-P04 | Central policy authority | Sensors are headless execution nodes. Desired state originates from Core. |
+| ARC-P04A | Dedicated production high-rate roles | Flow and Log are exclusive production Sensor roles in the common Sensor runtime; no mixed Flow+Log+Network monitoring on one production Sensor instance. |
 | ARC-P05 | One canonical entity graph | SNMP/flow/syslog/NCM/API observations converge on one entity identity and relationship model. |
 | ARC-P06 | Evidence before AI | Deterministic/protocol/topology evidence is authoritative; ML/GNN augments ranking/anomaly detection; LLM explains/interacts. |
 | ARC-P07 | Inconclusive is valid | RCA may explicitly return insufficient evidence rather than invent a cause. |
@@ -100,20 +101,23 @@ flowchart TB
     subgraph EDGE[Distributed Edge]
       NS[Network Sensor Pool]
       IS[Infrastructure Sensor Pool]
-      SS[Streaming/Event Sensor Pool]
+      FS[Dedicated Flow Sensor Pool]
+      LS[Dedicated Log Sensor Pool]
       SP[Synthetic Probe]
       AG[Windows/Linux Agents]
     end
 
     NS -->|mTLS HTTPS/gRPC| ING
     IS -->|mTLS HTTPS/gRPC| ING
-    SS -->|mTLS HTTPS/gRPC| ING
+    FS -->|mTLS HTTPS/gRPC| ING
+    LS -->|mTLS HTTPS/gRPC| ING
     SP -->|mTLS HTTPS/gRPC| ING
     AG --> IS
 
     DEV[Network / Infra / DB / Cloud / K8s Targets] --> NS
     DEV --> IS
-    DEV --> SS
+    DEV --> FS
+    DEV --> LS
     DEV --> SP
 ```
 
@@ -301,25 +305,64 @@ Reasons:
 
 Rust may be introduced only for benchmark-proven hotspots, not as a blanket requirement.
 
-### 8.2 Internal Sensor worker pools
+### 8.2 Sensor role isolation and internal worker pools
 
-Sensor isolates workloads into bounded worker pools:
+Platform ships one governed Sensor runtime, but production Sensor instances use exclusive major roles to prevent high-rate Flow/Log workloads from consuming the same CPU, memory, queue, disk-spool and network budgets as polling/control workloads.
 
-- ICMP/traceroute;
-- SNMP;
-- SSH/NETCONF/CLI;
-- REST/API;
-- gNMI/streaming;
-- discovery/topology;
-- NCM execution;
-- flow/event receivers;
-- Agent ingress;
-- local spool/uploader;
-- diagnostics/health.
+**NETWORK role** may enable bounded pools for ICMP/traceroute, SNMP/traps/informs, SSH/NETCONF/CLI, REST/API, gNMI/streaming, discovery/topology, NCM, diagnostics plus common spool/uploader/control/health.
 
-A high-rate Flow workload must not starve SNMP polling or NCM safety tasks.
+**FLOW role** enables Flow receiver, exporter/template/sampling/sequence state, decoding/normalization, bounded enrichment cache access, Flow spool/uploader and common control/health only.
+
+**LOG role** enables log/event-log receivers, parser/multiline/redaction/fingerprint/data-quality, log spool/uploader/forwarding and common control/health only.
+
+Infrastructure/Synthetic/Cloud roles retain their separately governed responsibilities. A mixed `COMBINED_DEV` role may exist for development/CI/demo only and is not production certified.
+
+The runtime enforces role capability allowlists before accepting assignments/listeners. Spare capacity on a Flow or Log Sensor is not an authorization to activate unrelated monitoring.
+
+### 8.2.1 Flow Sensor hot path
+
+The Flow Sensor hot path is intentionally bounded:
+
+```text
+UDP/TCP source where protocol permits
+→ listener/source gate
+→ bounded packet queue
+→ decoder workers
+→ exporter/template/sampling/sequence state
+→ canonical observation normalization
+→ bounded enrichment lookup/cache
+→ durable Flow spool
+→ uploader
+```
+
+No goroutine/thread-per-packet or unbounded template/exporter/cardinality structure is permitted. Per-exporter fairness and global ceilings protect the Sensor during exporter faults or storms. Socket/kernel-drop observability is part of the certified receiver contract.
+
+### 8.2.2 Flow identity and enrichment architecture
+
+Raw Flow observations preserve source truth and observation point before enrichment. Enrichment is an evidence join against temporal Platform context, not a mutation of exporter truth:
+
+```text
+Raw Flow
+  → canonical exporter / observation point
+  → temporal IP↔entity / interface / VRF / site mapping
+  → DHCP/IPAM/DNS/Agent endpoint identity
+  → time-bounded user/session evidence (AD/LDAP/Entra/VPN/RADIUS/NAC/WLAN/firewall/proxy where available)
+  → ASN/BGP / public-IP Geo / cloud-SaaS catalogue
+  → exporter/application/QoS/NAT metadata
+  → versioned enriched Flow view/record
+```
+
+Every enrichment carries source/provenance and time/version/confidence where applicable. Directory membership alone does not prove a current Flow user; DNS correlation does not prove a complete URL; public-IP Geo does not prove a person's physical location.
+
+### 8.2.3 Observation-point and conversation semantics
+
+A raw Flow observation remains directional and bound to exporter/interface/observation-domain provenance. The same packet/conversation observed at different network points is not globally deduplicated as a retransmission.
+
+Protocol/source replay deduplication and user-facing bidirectional Conversation derivation are separate operations. Conversation analytics may aggregate related directional observations for usability while retaining the raw evidence needed for path, NAT, topology and RCA reasoning.
 
 ### 8.3 Sensor local storage
+
+Dedicated Flow and Log Sensors have separate role-specific local spool budgets and do not share a Sensor instance's disk with Network polling continuity. Their allocated CPU/RAM/disk/NIC capacity belongs to that production role; virtualization may share a physical host only where resource reservation/isolation satisfies the certified profile.
 
 The Sensor stores only operational state required for continuity:
 
