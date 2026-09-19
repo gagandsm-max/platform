@@ -158,6 +158,7 @@ For integration/automation capabilities governed by `Platform_24`, Definition of
 - Customer payload mappings use bounded schemas/templates/CEL and governed egress controls; arbitrary executable scripting and secret-reveal/cross-tenant mapping are prohibited.
 - External delivery uses bounded durable queues, classified retries/backoff/circuit policy, idempotency/ambiguity reconciliation and first-class health/dead-letter telemetry.
 - Monitoring-as-Code is API/declarative-contract first; do not create separate Terraform/OpenTofu/Pulumi/Crossplane control planes. NetBox/Cribl remain optional integrations and cannot replace Platform authority by implication.
+- Certified standard ITSM integrations must be implementation-team friendly: no source changes, direct database edits, hidden server-file changes or arbitrary executable mappings in the normal supported path. Require guided preflight/readiness, discoverable vendor metadata where available, exact payload preview, actionable stage-specific diagnostics, safe configuration promotion and reproducible usability certification.
 
 ## Cursor Cloud specific instructions
 
