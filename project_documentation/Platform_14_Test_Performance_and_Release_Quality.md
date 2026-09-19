@@ -149,3 +149,33 @@ Customer Acceptance Profile results must be evidence-backed. A technology listed
 Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certified ≠ deployed.
 
 OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively.
+
+
+## 7. Enterprise Flow / dedicated Sensor quality supplement
+
+A release shall not claim production Flow capability merely because GoFlow2 can decode a fixture or because a dashboard can query stored rows.
+
+Required evidence for declared Flow certification includes:
+
+- **Role isolation:** production FLOW Sensor rejects Network/Log workload assignments/listeners; production LOG Sensor rejects Flow/Network assignments; mixed role is visibly non-production. Resource/failure injection proves a Flow/log storm cannot consume another role's Sensor instance.
+- **Protocol fixtures:** NetFlow v5/v9, IPFIX, sFlow and each declared vendor variant using protocol-faithful fixtures/exporters; IPv4/IPv6; UDP loss/out-of-order/duplicate/malformed/oversized behavior; unsupported versions fail explicitly.
+- **Exporter/source trust:** configured source/listener/tenant mapping, unknown exporter reject/quarantine, NAT/relay cases, same exporter source IP across tenant/listener contexts and forged payload tenant/source fields.
+- **Templates:** v9/IPFIX template and options-template arrival, refresh/update, withdrawal where supported, expiry, ID reuse, observation-domain collision, exporter restart/generation, Sensor restart/persisted cache validity, unknown template and template churn/cardinality attack.
+- **Sampling:** known and unknown sampling, algorithm/rate changes over time, sampled observed-versus-estimated bytes/packets, query aggregation across sampling epochs and prevention of false traffic jumps caused only by sampling configuration changes.
+- **Sequence/data quality:** protocol-specific sequence gaps, exporter resets, out-of-order, source duplicate versus valid multi-observation-point records, socket/kernel drop visibility, queue drops, decoder rejects and produced→accepted→persisted accounting.
+- **Timestamp:** export/start/end/observed/ingest semantics, uptime-derived time, clock skew, missing start/end and exporter reboot.
+- **Schema:** IPv4/IPv6, TCP/ICMP, interfaces, VLAN/VRF, ASN/next-hop, QoS/DSCP/ECN, NAT fields, application provenance, enterprise IE bounds and no unbounded dynamic-column creation.
+- **Durability/replay:** pre-accept UDP loss is not overclaimed; post-durable-accept Sensor restart/Core outage/WAN outage/replay does not silently lose or duplicate accepted records.
+- **Fairness/resource abuse:** one high-volume/broken exporter, template churn, large fields and cardinality pressure do not starve other exporters or Sensor control/health; all interventions are counted.
+- **Temporal enrichment:** IP address reassignment, DHCP lease change, hostname/DNS changes and current-vs-historical inventory do not rewrite old Flow identity.
+- **User attribution:** Agent/session, AD/LDAP/Entra, VPN/RADIUS/NAC/WLAN/firewall/proxy evidence is time bounded; directory membership alone does not create a user/IP binding; multi-user/NAT/conflicting evidence produces UNKNOWN/AMBIGUOUS/CONFLICTED as appropriate.
+- **Domain/URL:** DNS/FQDN evidence never becomes a fabricated full URL; URL-host/path/query is shown only from an explicit authorized source and obeys minimization/RBAC.
+- **Geo:** internal Site geography and public-IP Geo are distinguishable; public Geo shows dataset/version/accuracy/confidence and does not claim precise person location.
+- **Application/cloud/ASN:** provenance/version distinguishes exporter App-ID from port/service inference and catalogue/DNS mappings.
+- **Observation/conversation:** source replay dedup does not destroy valid records seen at multiple exporters/interfaces; derived bidirectional Conversation preserves raw directional evidence.
+- **Flow Coverage:** SNMP/interface-counter comparison handles sampling, direction, observation point, counter discontinuity and time alignment; invalid comparisons produce UNKNOWN rather than misleading percentages.
+- **UI/RBAC/privacy:** Flow Explorer, Exporter/Data Quality and Template views are tenant/resource scoped; user-attributed Flow has separate authorization/audit; bounded Top-N/matrix/Sankey and export limits are enforced.
+- **Redundancy:** each declared exporter profile proves multiple-collector/duplicate-export/single-collector/VIP/failover semantics before HA claims; generic load-balancer behavior is not assumed.
+- **Performance:** publish exporters, datagrams/sec, records/sec, bytes/sec, templates/sec/churn, records/datagram, fields/record, sampling/IP-family mix, socket drops, decoder lag, enrichment cost, spool growth/replay drain, Core/Kafka/ClickHouse insert/rollup load and bounded query concurrency/latency.
+
+Exact throughput and safe utilization values remain benchmark results in the performance evidence repository and Decision Register P0/TBD state until certified.
