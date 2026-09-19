@@ -159,6 +159,17 @@ else
     if [ "${DEDUP_COUNT}" -ne 1 ]; then
         fail ${TEST_NUM} "${TEST_DESC}" "ClickHouse retry deduplication failed: expected 1 row, found ${DEDUP_COUNT}"
     else
+        # Stable observation identity is the second replay defense. Use different insert
+        # tokens so this assertion proves ReplacingMergeTree sequence-identity collapse,
+        # not only block-token deduplication.
+        REPLAY_METRIC="ci.replay.${DEDUP_SUFFIX}"
+        REPLAY_ROW="{\"tenant_id\":\"ci-tenant\",\"entity_id\":\"ci-entity\",\"metric_id\":\"${REPLAY_METRIC}\",\"sensor_id\":\"ci-sensor\",\"ts\":\"2026-09-19 07:00:00.000\",\"value\":2.0,\"quality\":1,\"flags\":0,\"sequence_id\":\"stable-sequence-${DEDUP_SUFFIX}\",\"source_protocol\":\"ci\"}"
+        curl -fsS -u "${CH_AUTH}" --data-binary "${REPLAY_ROW}" "${CH_BASE_URL}/?query=INSERT%20INTO%20platform.metric_numeric%20FORMAT%20JSONEachRow&insert_deduplication_token=replay-a-${DEDUP_SUFFIX}" >/dev/null
+        curl -fsS -u "${CH_AUTH}" --data-binary "${REPLAY_ROW}" "${CH_BASE_URL}/?query=INSERT%20INTO%20platform.metric_numeric%20FORMAT%20JSONEachRow&insert_deduplication_token=replay-b-${DEDUP_SUFFIX}" >/dev/null
+        REPLAY_COUNT=$(curl -fsS -u "${CH_AUTH}" "${CH_BASE_URL}/?query=SELECT+count()+FROM+platform.metric_numeric+FINAL+WHERE+metric_id%3D%27${REPLAY_METRIC}%27")
+        if [ "${REPLAY_COUNT}" -ne 1 ]; then
+            fail ${TEST_NUM} "${TEST_DESC}" "Stable observation replay deduplication failed: expected 1 FINAL row, found ${REPLAY_COUNT}"
+        else
         # Prove the live Core batch listener consumes Kafka and persists to ClickHouse.
         PIPELINE_METRIC="ci.pipeline.${DEDUP_SUFFIX}"
         PIPELINE_PAYLOAD="{\"tenantId\":\"ci-tenant\",\"entityId\":\"ci-entity\",\"metricId\":\"${PIPELINE_METRIC}\",\"sensorId\":\"ci-sensor\",\"timestamp\":\"2026-09-19T07:00:00Z\",\"value\":42.0,\"quality\":1,\"flags\":0,\"sequenceId\":\"2\",\"sourceProtocol\":\"ci\"}"
@@ -175,7 +186,8 @@ else
         if [ "${PIPELINE_COUNT}" -ne 1 ]; then
             fail ${TEST_NUM} "${TEST_DESC}" "Kafka -> Core -> ClickHouse live pipeline did not persist the test observation"
         else
-            pass ${TEST_NUM} "${TEST_DESC} (health=${CH_CHECK}, retry dedup=PASS, live Kafka pipeline=PASS)"
+            pass ${TEST_NUM} "${TEST_DESC} (health=${CH_CHECK}, retry dedup=PASS, stable replay dedup=PASS, live Kafka pipeline=PASS)"
+        fi
         fi
     fi
 fi
