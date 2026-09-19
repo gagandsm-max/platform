@@ -382,9 +382,27 @@ LLMs must not be the authoritative calculator. Sizing/capacity numbers remain su
 
 ## 15. NTA / DPI boundary
 
-Native initial capability includes: NetFlow; IPFIX; sFlow; J-Flow/vendor flow; exported application classification; top talkers; conversations; site matrices; QoS analysis; trends; anomalies; capacity analysis.
+Native initial capability includes: NetFlow v5/v9; IPFIX; sFlow; J-Flow/vendor-compatible Flow; exported application classification; top talkers; conversations; site/interface/application/ASN/QoS matrices; traffic trends; qualified anomalies; capacity context; exporter/template/data-quality diagnostics.
 
-Bounded Triggered Packet Evidence remains permitted under `Platform_19`. Always-on full DPI remains deferred. This master does not reopen full DPI.
+Flow/NTA certification is dimensional. A protocol/Pack may separately certify:
+
+- exporter/source identity and observation-domain/engine semantics;
+- templates/options/enterprise information elements;
+- sampling and observed-vs-estimated normalization;
+- sequence/reset/gap behavior;
+- IPv4/IPv6, NAT, VRF/VLAN, interface and next-hop/BGP fields;
+- application/QoS fields and their provenance;
+- vendor enterprise-field mappings;
+- exporter redundancy/multi-collector behavior;
+- Flow Sensor resource/capacity profile.
+
+Capability Packs may map vendor-specific Flow enterprise information elements and application/classification fields into the bounded canonical Flow model. They do not create a second NTA schema, database or Flow engine.
+
+Identity/domain/user/Geo enrichment consumes Platform identity/IPAM/DNS/session/directory/cloud/ASN evidence with temporal provenance. AD/LDAP/Entra metadata alone is not session proof. Domain/application is not full URL. Public-IP Geo is approximate. User-attributed Flow remains operational evidence under privacy/RBAC controls.
+
+Cloud-native flow logs may later enter the same high-level Flow model through Cloud Capability Packs where semantics are compatible; listing this target does not claim implementation.
+
+Bounded Triggered Packet Evidence remains permitted under `Platform_19`. Always-on full DPI remains deferred. Full URL/content inspection is not implied by Flow/NTA. This master does not reopen full DPI.
 
 ---
 
