@@ -34,9 +34,39 @@
 | TLS/certificate | TLS 1.2/1.3 checks; certificate/chain/hostname/expiry | target-specific | CA/trust, hostname, expected policy | Go `crypto/tls`, `x509` | expiry/chain/hostname/version/handshake monitoring |
 | SCP/SFTP | SSH secure transfer | TCP/22 default | credential/key and destination | SSH libraries | NCM/config transfer where needed |
 | TFTP/FTP | Legacy only if explicitly required | protocol default | explicit policy | Platform/OS adapter subject to review | disabled by default; warning/audit; no secret fallback |
-| Flow | NetFlow v5/v9, IPFIX, sFlow; J-Flow/vendor variants through compatible formats/packs | exporter/collector configurable | receiver port, template handling, source mapping | GoFlow2 | enrichment, de-dup/template cache, high-rate safeguards |
+| Flow | NetFlow v5/v9, IPFIX, sFlow; J-Flow/vendor variants through compatible formats/packs | exporter/collector configurable | dedicated FLOW Sensor/listener, source/exporter mapping, protocol/version, template/sampling policy, rate/bounds | GoFlow2 | source/tenant admission, exporter/observation identity, template/options-template lifecycle, sampling/sequence quality, bounded decoding, replay-safe canonical Flow and enrichment provenance |
 | CDP/LLDP/ARP/FDB | SNMP/CLI/API/gNMI derived | underlying protocol endpoints | discovery profile | GoSNMP/CLI/gNMI | topology provenance/confidence/history |
 | Routing/state | BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VRF/STP/HSRP/VRRP/LACP/QoS/multicast/SD-WAN via SNMP/gNMI/NETCONF/REST/CLI | vendor-specific | Device Pack/Monitoring Profile | protocol foundations above | canonical graph and RCA semantics, not a routing daemon |
+
+## 2.1 Flow source, trust and enrichment-security supplement
+
+- **Production role:** Flow listeners are valid only on Sensors with the exclusive `FLOW` production role. A FLOW Sensor rejects Network/Log workload assignments. A LOG Sensor rejects Flow listeners.
+- **Tenant authority:** tenant/listener/exporter association comes from authenticated Platform control state. NetFlow/IPFIX/sFlow packet contents never select or override tenant.
+- **Exporter admission:** configured exporters/source ranges are mapped to canonical exporter entities. Unknown sources follow explicit `REJECT` or `QUARANTINE` policy with bounded pre-decode rate protection.
+- **UDP trust:** source IP/community-like metadata in UDP Flow protocols is evidence, not cryptographic identity. Source spoofing/NAT/relay scenarios are part of certification. Platform must not describe UDP reception before local durable acceptance as zero-loss.
+- **Template/record bounds:** exporter count, observation domains, templates, fields, variable-length data, enterprise IEs, datagram/record size, churn and per-exporter rate are bounded before expensive processing.
+- **Identity enrichment:** endpoint/system/FQDN/user/site/Geo/cloud/application enrichment consumes canonical temporal evidence. AD/LDAP/Entra directory membership does not itself prove a Flow-time user/IP binding. Time-bounded Agent, VPN, RADIUS/802.1X, NAC, WLAN, firewall user-ID, proxy/SWG or equivalent evidence may contribute according to connector/source trust.
+- **DNS/URL boundary:** forward/reverse DNS can provide FQDN/domain evidence with timestamp/TTL/provenance. DNS-to-IP correlation does not prove a full URL. URL host/path/query may be recorded only when an explicit authorized source supplies it; path/query collection is minimized and disabled by default unless policy requires it.
+- **Geo boundary:** internal geography derives from canonical Site/inventory. Public-IP Geo is approximate dataset-derived network metadata with dataset version/accuracy/confidence and is never represented as precise person location.
+- **User privacy:** user-attributed Flow query/export is separately authorized and audited. Flow enrichment shall not become employee content/browsing surveillance.
+- **Application classification:** exporter-provided App-ID/NBAR/vendor application identity remains distinguishable from port/service inference, DNS correlation or Capability Pack mapping.
+
+### 2.2 Identity/session enrichment source classes
+
+Where configured and permitted, the connector framework may supply time-bounded identity/session evidence from:
+
+- Windows/Linux Agent session/login state;
+- AD/LDAP/Entra authentication/directory sources;
+- VPN concentrators;
+- RADIUS/802.1X;
+- NAC;
+- WLAN controllers;
+- firewalls/user-ID mappings;
+- proxies/SWG;
+- DHCP/IPAM/DNS;
+- cloud identity/network metadata.
+
+These sources normalize into Platform-owned identity/session evidence with tenant, subject/entity, IP/network attachment where applicable, valid/observed time, source record/provenance and confidence. They do not create a Flow-specific identity authority.
 
 ## 3. Infrastructure/cloud credential matrix
 
