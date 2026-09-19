@@ -29,6 +29,7 @@ This document does **not** select a new OSS dependency, database, Core service, 
 | `Platform_21` | Existing enterprise gap-closure requirements (`PRD-EGC-*` / `REQ-EGC-*`) |
 | `Platform_22` | Telemetry trust, evidence-qualified alerting, alert quality, RCA/AI assurance |
 | `Platform_23` (this master) | Enterprise monitoring-domain catalogue; Capability Pack product contract; L1/L2/L3 maturity; dimensional certification; pack compatibility/version lifecycle; enterprise technology coverage; Customer Acceptance Profiles; Real Customer Requirements normalization; operational-graph vs governed-CMDB semantics; enterprise service-health dependency semantics; coverage measurement; pack certification requirements |
+| `Platform_24` | Unified log/event collection, parser/data-quality semantics, canonical Log Event behavior, Log Explorer, routing and SIEM-forwarding product contract |
 
 Existing Device Pack contracts remain valid. They are classifications/profiles under the single Capability Pack architecture and must not be broken by this packaging.
 
@@ -164,6 +165,9 @@ A Capability Pack, where applicable, declares:
 - certification metadata
 - provenance
 - signature/integrity requirements
+- log parser/source mapping declarations where applicable
+- log severity/event-class/fingerprint hints where applicable
+- SIEM/output mapping declarations for Integration Packs where applicable
 
 Device / Network Packs continue to satisfy existing Device Pack identification, mapping, provenance and test-lab contracts. They gain the Capability Pack identity/lifecycle/certification envelope without a second schema family.
 
@@ -315,6 +319,8 @@ Integration Pack is a Capability Pack classification. `Platform_10` owns connect
 Categories include: ITSM; SIEM; EDR; Vulnerability Management; CMDB; APM; Collaboration; Security SaaS; Cloud.
 
 Integration requirements include: retry/backoff; idempotency; reconciliation; failure/dead-letter handling; audit; credentials; tenant scope; authorization; API version compatibility.
+
+Log/SIEM Integration Packs additionally comply with `Platform_24`: independent destination failure isolation, raw/normalized/enriched mapping, explicit delivery semantics, route/egress policy, bounded replay and forwarding-loop prevention. They do not create a second log pipeline or event model.
 
 Teams/ChatOps actions may include: acknowledge; assign; escalate; status; deep link; copilot interaction; approved diagnostics; approved remediation.
 
