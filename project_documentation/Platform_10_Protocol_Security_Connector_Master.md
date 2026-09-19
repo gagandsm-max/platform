@@ -117,3 +117,46 @@ The Connector framework supports reusable, versioned connectors with: authentica
 - All protocol failures preserve raw technical reason internally while presenting safe actionable customer text.
 - Certificates, keys and trust stores have lifecycle/expiry/rotation UI.
 - Every security-sensitive action is audited with actor, tenant, object, result, reason/ticket and request/session context.
+
+---
+
+## 9. Endpoint and infrastructure diagnostic execution contract
+
+### 9.1 Agent-based diagnostics
+
+Linux/Windows Agent EDS executes through the existing authenticated Agent runtime and identity. It uses native read-only evidence paths under least privilege. EDS does not authorize an arbitrary local-shell, PowerShell, script-upload or customer-code execution interface.
+
+A diagnostic request from Core/Sensor must be authenticated, tenant/entity scoped, versioned, time bounded and replay/idempotency protected. Agent applies only a supported diagnostic definition and reports unsupported/denied/expired requests explicitly.
+
+### 9.2 Linux SSH agentless diagnostics
+
+Infrastructure Sensor SSH diagnostics require:
+
+- SSHv2;
+- host-key validation;
+- security-profile/credential binding;
+- public-key authentication preferred where applicable;
+- least-privilege account;
+- controlled sudo only for explicitly approved read-only operations;
+- allowlisted/versioned query pack;
+- parameter validation/escaping;
+- command timeout, output-byte limit and concurrency budget;
+- secret/redaction controls;
+- audit of query definition/version, target, actor/job and result code.
+
+Generic unrestricted shell execution is not part of routine monitoring/EDS.
+
+### 9.3 Windows agentless diagnostics
+
+WinRM/WMI/CIM diagnostics require HTTPS/TLS where supported by the selected transport policy, credential/profile scoping, certificate validation and bounded versioned query definitions. Recurring monitoring/EDS shall prefer structured CIM/WMI/performance/service/Event Log operations over arbitrary PowerShell.
+
+Where PowerShell is unavoidable for a certified query, the exact script/command template is Platform-owned/versioned, parameter constrained, read-only by declared policy and separately security tested.
+
+### 9.4 Evidence privacy
+
+Default EDS excludes environment variables, arbitrary file content, packet payload, interactive user content and unrestricted process command lines. Privacy-sensitive process arguments/log fields require explicit policy, minimization/redaction and tenant authorization.
+
+### 9.5 AI boundary
+
+Agent/Sensor credentials, reusable secrets and unrestricted device-control capability are never provided to a local/private LLM provider. AI Gateway receives only bounded authorized evidence context and all tool/action authority remains deterministic Platform policy.
+
