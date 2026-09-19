@@ -242,6 +242,8 @@ Use ClickHouse for:
 
 Separate tables by workload rather than forcing all records into a generic table.
 
+For Flow, ClickHouse stores canonical normalized observations plus a benchmark-selected bounded set of rollups/materialized aggregates. Common typed fields remain columns; vendor/IPFIX enterprise extensions use bounded controlled attributes or Capability Pack mappings rather than unbounded dynamic columns. Raw Flow retention is generally shorter than aggregate/incident-protected retention and remains policy/sizing controlled.
+
 ### 6.3 Kafka — internal durable streaming backbone
 
 Kafka is mandatory internally for:
@@ -301,23 +303,71 @@ Reasons:
 
 Rust may be introduced only for benchmark-proven hotspots, not as a blanket requirement.
 
-### 8.2 Internal Sensor worker pools
+### 8.2 Sensor role isolation and internal worker pools
 
-Sensor isolates workloads into bounded worker pools:
+Platform ships one common Go Sensor runtime/build, but production activation is role-governed.
 
-- ICMP/traceroute;
-- SNMP;
-- SSH/NETCONF/CLI;
-- REST/API;
-- gNMI/streaming;
-- discovery/topology;
-- NCM execution;
-- flow/event receivers;
-- Agent ingress;
-- local spool/uploader;
-- diagnostics/health.
+**NETWORK_SENSOR** enables applicable network polling/control pools such as ICMP/traceroute, SNMP, SSH/NETCONF/CLI, REST/API, gNMI, discovery/topology, NCM, traps/informs, diagnostics, plus common local spool/uploader and health.
 
-A high-rate Flow workload must not starve SNMP polling or NCM safety tasks.
+**FLOW_SENSOR** enables only the Flow data plane plus common Sensor control/health: bounded NetFlow/IPFIX/sFlow/J-Flow receivers, exporter/template/sampling/sequence state, decode/normalize/enrichment cache, dedicated Flow spool/uploader and Flow health. It does not enable SNMP polling, discovery, NCM, synthetics or Log collection.
+
+**LOG_SENSOR** enables only the governed Log/event data plane plus common Sensor control/health: log/event receivers, assigned parsing/normalization/redaction, dedicated Log spool/uploader/forwarding and Log health. It does not enable Flow, SNMP polling, discovery, NCM or synthetics.
+
+Infrastructure/Cloud/Synthetic profiles remain governed by their existing responsibilities. A combined high-rate Flow+Log role may exist for development/lab/test only and is not production-certified.
+
+Role isolation is a runtime activation and resource-boundary contract, not a reason for separate Sensor source trees or installers. Flow and Log Sensors have independent worker/queue/spool/disk budgets and cannot borrow routine Network Sensor capacity implicitly.
+
+### 8.2.1 Flow Sensor data plane
+
+```text
+Exporter UDP
+  -> bounded socket receive
+  -> configured exporter/source admission
+  -> protocol decoder (GoFlow2 wrapper)
+  -> exporter / observation-domain / template / sampling / sequence state
+  -> canonical raw Flow observation
+  -> local identity/enrichment cache
+  -> bounded enrichment + quality classification
+  -> durable Flow spool
+  -> Platform ingestion mTLS
+  -> Kafka network.flow.v1
+  -> ClickHouse / rollups / analytics
+```
+
+The receiver uses bounded packet queues/decoder workers/template memory and per-exporter/global fairness controls. It must expose kernel/socket loss where the OS/runtime makes that observable. No goroutine-per-packet or unbounded template/cardinality behavior is permitted.
+
+The Flow Sensor never treats a UDP source address as sufficient tenant/exporter authority. Admission is based on configured tenant/listener/exporter context, with unknown sources rejected or quarantined by policy.
+
+### 8.2.2 Flow state and temporal enrichment
+
+Exporter state is scoped by tenant, Flow Sensor/listener, canonical exporter entity/source address, protocol and protocol-appropriate observation domain/engine. Template IDs are never global.
+
+Flow enrichment is layered and temporal:
+
+```text
+Flow IP/interface/VRF
+ -> canonical entity/IPAM/DHCP history
+ -> DNS/FQDN evidence
+ -> Agent/endpoint identity
+ -> AD/LDAP/Entra + auth/session evidence where available
+ -> site/region/internal geography
+ -> BGP/ASN
+ -> cloud/SaaS catalogue
+ -> exporter application metadata
+ -> analytical conversation/site/application views
+```
+
+Each material enrichment retains provenance/effective time/version/confidence. Current IP/hostname/user/site state must not silently reinterpret historical Flow. AD/directory membership alone is not proof that a user controlled an IP at the Flow timestamp; user attribution requires temporal session/authentication evidence.
+
+Domain/FQDN, application and URL are distinct. Flow may correlate domain/application evidence but does not fabricate a URL from an IP/domain. Public-IP geolocation is approximate network-location evidence, not proof of a person's physical location.
+
+### 8.2.3 Flow observation and analytics model
+
+Raw Flow observations remain directional and observation-point specific. Retransmission/replay deduplication is scoped to stable source/record identity; the same conversation observed at multiple network points remains multiple valid observations.
+
+Conversation, site-pair, application, QoS and traffic-matrix objects are derived analytics linked back to underlying observations. Flow correlation with topology/routing/change evidence supports investigation but does not by itself prove routed path or causal root cause.
+
+Where compatible, Platform may compare normalized Flow-estimated traffic with SNMP/interface counter evidence to derive a Flow Coverage quality signal. Sampling, direction and observation-point mismatch must be accounted for; no naive ratio is authoritative.
 
 ### 8.3 Sensor local storage
 
