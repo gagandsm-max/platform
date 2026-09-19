@@ -157,7 +157,8 @@ A release shall not claim production Flow/NTA readiness merely because GoFlow2 c
 Required evidence, as applicable to the declared protocol/pack profile:
 
 - **Role isolation:** `FLOW_SENSOR` starts no ordinary SNMP/network polling, discovery, NCM, synthetics or log modules; `LOG_SENSOR` starts no Flow or ordinary network-polling modules. Attempts to assign incompatible workloads are rejected. Combined high-rate profile is non-production only.
-- **Protocols:** NetFlow v5/v9, IPFIX and sFlow plus each claimed vendor/J-Flow variant using protocol-faithful fixtures or real exporters; IPv4/IPv6 and supported transport/source behavior.
+- **Flow Sensor HA:** each certified exporter profile proves multi-collector duplication or active/standby/VIP/failover behavior, template/state recovery, duplicate accounting, gap visibility and capacity after one Flow Sensor failure; a generic UDP load balancer is not assumed.
+- **Protocols:** NetFlow v5/v9, IPFIX and sFlow plus each claimed vendor/J-Flow variant using protocol-faithful fixtures or real exporters; IPv4/IPv6 and supported transport/source behavior. Future AWS/Azure/GCP flow-log connectors are certified separately through Cloud/Capability Packs and must prove canonical semantic mapping.
 - **Exporter identity/tenant:** configured exporter/listener mapping, same source IP in different tenants, NAT/relay cases, observation-domain collisions, unknown-source quarantine/reject and forged payload tenant/source fields.
 - **Templates:** learn/update/refresh/expiry/withdrawal/reuse, options templates, enterprise IEs, variable length, missing/out-of-order templates, exporter restart/generation change and Sensor restart/persisted-cache invalidation.
 - **Sampling:** sampled versus unsampled, known/unknown sampling, rate/algorithm changes inside a query window, observed versus estimated values and non-fabrication of exact traffic.
