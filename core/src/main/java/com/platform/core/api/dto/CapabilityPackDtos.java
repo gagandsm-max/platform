@@ -94,6 +94,8 @@ public final class CapabilityPackDtos {
     public record SensorDesiredStateResponse(
             long generation,
             String checksum,
+            long appliedGeneration,
+            String appliedChecksum,
             List<DesiredPackItem> packs
     ) {
     }
