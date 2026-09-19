@@ -115,7 +115,8 @@ flowchart TB
 
     DEV[Network / Infra / DB / Cloud / K8s Targets] --> NS
     DEV --> IS
-    DEV --> SS
+    DEV --> FS
+    DEV --> LS
     DEV --> SP
 ```
 
