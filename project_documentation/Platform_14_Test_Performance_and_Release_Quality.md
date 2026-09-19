@@ -149,3 +149,32 @@ Customer Acceptance Profile results must be evidence-backed. A technology listed
 Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certified ≠ deployed.
 
 OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively.
+
+
+## 7. Enterprise Flow/NTA and dedicated Sensor-role certification supplement
+
+A release shall not claim production Flow/NTA readiness merely because GoFlow2 decodes a fixture or a dashboard renders top talkers.
+
+Required evidence, as applicable to the declared protocol/profile, includes:
+
+- **Role isolation:** production FLOW_SENSOR and LOG_SENSOR activate only their allowed high-rate modules plus common control/health/spool/uploader; negative tests prove Flow cannot start SNMP/discovery/NCM/log workers and Log cannot start Flow/SNMP/discovery/NCM workers. Combined high-rate role is not production-certified.
+- **Role change:** drain/reassignment, spool/accounting completion, incompatible-assignment rejection, restart/config apply and post-change health verification.
+- **Protocols:** NetFlow v5/v9, IPFIX, sFlow and certified vendor-compatible variants with malformed/oversized/truncated datagrams and unsupported versions.
+- **Exporter/source authority:** tenant/listener/exporter mapping, same source IP in different tenants, NAT/relay scenarios, unknown/quarantined exporters, spoofed observation domain/engine fields and no packet-derived tenant override.
+- **Templates:** arrival/update/expiry/withdrawal/reuse, exporter restart/generation, options templates, enterprise IEs, variable-length fields, missing/invalid templates, Sensor restart with cache validity and template churn/cardinality attack.
+- **Sampling:** known/unknown sampling, 1:N changes during a time window, exporter-provided algorithms/options, observed-vs-estimated bytes/packets and no exact-unsampled misrepresentation.
+- **Time/sequence:** flow/export/observed/ingest time quality, uptime-derived time/restart, sequence gaps, duplicates, replay, out-of-order and protocol-specific semantics.
+- **Schema:** IPv4/IPv6/dual stack, NAT, VRF/VLAN, interfaces, next-hop/BGP, QoS/DSCP/ECN, TCP/ICMP fields, application-provenance and bounded enterprise extensions.
+- **Durability:** UDP pre-acceptance loss is observable/best-effort; certified local durable acceptance creates stable replay identity; Sensor restart/Core/WAN/Kafka/ClickHouse interruption proves idempotent replay and explicit terminal-gap accounting.
+- **Data quality:** socket/kernel drops where observable, receiver queue drops, malformed/unsupported, template misses, sequence gaps, rate limits, sampling unknown, clock skew, spool/storage pressure and downstream rejection/lag are distinguishable.
+- **Fairness/resource safety:** one exporter or template/cardinality storm cannot monopolize Flow Sensor workers/memory/queue/disk; Flow/Log role isolation prevents starvation of Network monitoring.
+- **Temporal enrichment:** DHCP/IPAM/entity/hostname/DNS/user/session/site/ASN/Geo/cloud/application changes do not rewrite historical identity incorrectly; conflicts preserve uncertainty; directory membership without session evidence cannot assert user attribution.
+- **Privacy:** domain/application is not presented as URL; no fabricated path/query; public-IP Geo is approximate; user-attributed Flow access/export obeys permission/audit and surveillance restrictions.
+- **Observation points:** replay of the same source record can dedupe; legitimate multi-exporter/interface observations are retained and are not globally five-tuple-deduplicated.
+- **Coverage:** compatible SNMP/interface counter comparison accounts for sampling/direction/observation point and yields qualified Flow Coverage/consistency, including UNKNOWN when comparison is invalid.
+- **Analytics/UI:** bounded top-N, conversation, site/interface/application/QoS, matrix and Sankey behavior; exporter/source health; Template Explorer; Data Quality; interface→Investigate Traffic context; query/cardinality/time bounds.
+- **Performance:** datagrams/sec, records/sec, bytes/sec, exporter count, records/datagram, fields/record, template rate/churn, sampling mix, IPv4/IPv6 mix, enrichment cost, socket/queue loss, spool growth/replay drain, Core/Kafka/ClickHouse insert/rollup load and concurrent Flow query latency.
+- **False-alert semantics:** Flow disappearance/degradation/anomaly alone cannot assert no traffic, link down, device down or root cause when other credible evidence contradicts it.
+- **Redundancy:** each certified exporter failover/multi-collector pattern proves duplicate/loss/template/session behavior; a generic load-balancer assumption is not certification evidence.
+
+Capacity results are profile-specific. No universal Flow records/sec, exporter-count or retention guarantee is created by this section.
