@@ -6,11 +6,11 @@
 
 ## 1. Assets
 
-Credentials, certificates/private keys, tenant data, telemetry, network configurations, privileged CLI/NCM access, audit records, licensing, AI context and software supply chain.
+Credentials, certificates/private keys, tenant data, telemetry/log contents, log source/parser/routing policy, external-destination credentials, network configurations, privileged CLI/NCM access, audit records, licensing, AI context and software supply chain.
 
 ## 2. Trust boundaries
 
-Browser↔Core; Sensor/Agent↔Core ingestion/control; Core↔data services; Core↔ITSM/cloud/AI; NCM worker↔managed device; package/update channel; tenant boundary; HA peer boundary.
+Browser↔Core; log/device/application source↔Sensor/Agent; Sensor/Agent↔Core ingestion/control; Core↔data services; Core/eligible Streaming Sensor↔external SIEM/log destination; Core↔ITSM/cloud/AI; NCM worker↔managed device; package/update channel; tenant boundary; HA peer boundary.
 
 ## 3. Threat classes
 
