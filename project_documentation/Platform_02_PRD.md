@@ -1,7 +1,7 @@
 # Platform — Product Requirements Document (PRD)
 
 **Document ID:** PLATFORM-PRD-001  
-**Version:** 3.2.1  
+**Version:** 3.2.2  
 **Status:** Authoritative Mother Reference — Engineering Source of Truth
 **Depends on:** `Platform_01_BRD.md`  
 **Engineering companions:** Architecture, HLD, LLD and Dataflow documents in this set  
@@ -1045,27 +1045,28 @@ Timeline data shall be queryable around incident windows and support historical 
 
 ## 32. Investigation and troubleshooting workspace
 
-Universal `Troubleshoot` action shall expose context-relevant tools.
+Platform shall implement a **no-context-switch operational troubleshooting experience**. An authorized NOC/operator shall be able to move from observation to verification, diagnosis and evidence capture without leaving the current device/interface/alert/incident context for routine troubleshooting. Flexible composable dashboard interaction patterns may take inspiration from mature dashboard products such as Grafana, but Platform shall not copy Grafana literally; Platform troubleshooting remains domain-aware and action-oriented rather than a generic visualization-only experience.
 
-For network devices:
+| ID | Requirement |
+|---|---|
+| PRD-TRB-001 | Entity/detail, alert and incident workspaces shall expose a persistent permission-aware contextual action bar for applicable operations such as CLI, Ping, Traceroute/Path, SNMP test, Flow, Configuration, Compare, Investigate and Maintenance. |
+| PRD-TRB-002 | `Troubleshoot` shall open a persistent drawer/workspace that preserves the originating entity, time range and filters while the operator performs diagnostics; routine tools shall not force navigation to unrelated pages. |
+| PRD-TRB-003 | On-demand ICMP shall support bounded packet count/size/timeout, assigned-Sensor execution by default, authorized alternate Sensor/Agent source selection, live loss/RTT/jitter result and evidence attachment. Continuous tests, where allowed, shall be explicitly bounded and cancellable. |
+| PRD-TRB-004 | Multi-vantage verification shall compare evidence from eligible Sensors/Agents so Platform can distinguish target failure from path/locality/Sensor failure. Vantage eligibility remains tenant/resource/capacity/policy controlled. |
+| PRD-TRB-005 | Alerts/incidents shall support `Verify Now` where applicable. Verification executes a deterministic bounded diagnostic bundle based on entity/technology/alert context and returns individual evidence results; it shall not hide contradictory or failed checks. |
+| PRD-TRB-006 | Entity health shall support `Why?` evidence explaining the observations/policies that produce the displayed state, including freshness/quality and contradictory evidence. Missing telemetry shall never be silently translated to device-down. |
+| PRD-TRB-007 | `What Changed?` shall correlate relevant Platform/NCM/configuration/topology/routing/maintenance/external change evidence around the selected time/incident where available. Temporal proximity is supporting evidence, not causal proof. |
+| PRD-TRB-008 | `Compare` shall support appropriate current-vs-prior-period, baseline, peer entity/interface/site, pre-incident and pre-change comparisons without losing the current context. |
+| PRD-TRB-009 | Platform shall distinguish continuously monitored state from fresh operator-triggered verification through a **Live Evidence** presentation containing result time, source/vantage and quality. |
+| PRD-TRB-010 | An operator may start an **Investigation Session**. Authorized diagnostic results, CLI sessions/commands, graph/config/flow/log snapshots, notes and related evidence performed in that context are attachable automatically to the investigation and may be linked to an incident. |
+| PRD-TRB-011 | Platform shall provide deterministic diagnostic packs for common failure classes (for example device unreachable, WAN degradation, BGP/routing, wireless/client and service reachability) with explicit checks, bounded execution and per-check results. AI may explain/suggest the next permitted test but may not invent results or bypass action authorization. |
+| PRD-TRB-012 | Operational friction shall be proportional to risk: safe read-only diagnostics are fast; interactive/privileged CLI and configuration-affecting operations require applicable RBAC/resource scope, JIT/MFA/reason/ticket/approval/command policy and audit. |
 
-- Ping;
-- traceroute/path analysis;
-- SNMP test;
-- TCP test;
-- DNS;
-- SSH test;
-- API test;
-- topology;
-- Flow;
-- recent changes;
-- NCM configuration;
-- CLI;
-- RCA.
+For network devices the Troubleshoot surface shall expose, when applicable: Ping; traceroute/path analysis; SNMP test; TCP test; DNS; SSH test; API test; topology; Flow; recent changes; NCM configuration; CLI; RCA; Compare; Verify Now; Live Evidence and Investigation Session.
 
-For servers/infrastructure, equivalent Agent/SSH/WinRM/process/service/log tests shall be shown.
+For servers/infrastructure, equivalent Agent/SSH/WinRM/process/service/log/network tests shall be shown. Databases, APIs, cloud, virtualization and other entity classes shall expose equivalent domain-relevant actions rather than a network-only toolbar.
 
-Temporary **Investigation Mode** may increase polling, run deeper checks and gather additional evidence, then automatically revert according to policy/capacity limits.
+Temporary **Investigation Mode** may increase polling, run deeper checks and gather additional evidence, then automatically revert according to policy/capacity limits. This is separate from an Investigation Session: Investigation Mode changes bounded collection behavior; an Investigation Session is the operator evidence/context container.
 
 ---
 
@@ -1111,11 +1112,13 @@ Bulk operations shall support dry-run/impact preview and canary/staged execution
 
 The browser shall never directly receive reusable device credentials.
 
+CLI launch may use an authorized stored Credential Profile, a user-scoped/personal credential where policy permits, or explicitly entered one-time session credentials. One-time credentials must be ephemeral, must not be persisted as reusable secrets unless the user explicitly invokes an authorized credential-management workflow, and must never be logged or exposed to unrelated browser/API clients.
+
 Flow: Browser HTTPS/WebSocket → Core Session Broker → assigned Network Sensor → SSH device.
 
 Controls:
 
-- no CLI/read-only/operational/config/full privileged levels;
+- CLI privilege tiers: no access / read-only / operational / configuration / full privileged, as applicable;
 - tenant/resource scope;
 - JIT/temporary access;
 - reason/ticket requirement;
