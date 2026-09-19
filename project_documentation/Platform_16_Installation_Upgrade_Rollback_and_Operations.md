@@ -57,7 +57,7 @@ Every installer returns stable error code, writes sanitized install log and poin
 
 ## 1. Required runbooks
 
-Core process failure; repeated crash loop; HA failover; Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation.
+Core process failure; repeated crash loop; HA failover; Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; Syslog/log receiver failure; file/journald/Windows Event collection failure; parser/data-quality degradation; log spool pressure; log cardinality/storm condition; SIEM destination auth/TLS/outage/rate-limit; outbound queue pressure; dead-letter growth; bounded replay; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation.
 
 ## 2. Runbook structure
 
@@ -66,3 +66,8 @@ Every runbook states trigger, impact, immediate safety action, diagnostic eviden
 ## 3. Logging
 
 Support teams should first use Platform Health/Audit/Support Bundle rather than ad-hoc shell access. Shell commands are documented only where necessary and must not expose secrets.
+
+
+## 5. Enterprise log/forwarding operations supplement
+
+Platform_24-controlled log source/parser/route/destination configuration participates in normal backup, upgrade and rollback checks. If a collector helper becomes a packaged dependency, offline installation, exact version, service lifecycle, upgrade/rollback and support-bundle diagnostics are mandatory. Operations must preserve distinct health for source collection, parser/normalization, storage and external forwarding so a SIEM outage is not represented as monitored-target failure.
