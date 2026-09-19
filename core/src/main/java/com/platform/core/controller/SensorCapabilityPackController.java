@@ -66,6 +66,8 @@ public class SensorCapabilityPackController {
             return ResponseEntity.ok(new SensorDesiredStateResponse(
                     desired.generation(),
                     desired.checksum(),
+                    desired.appliedGeneration(),
+                    desired.appliedChecksum(),
                     desired.packs().stream().map(SensorCapabilityPackController::toItem).toList()
             ));
         } catch (IngestionException e) {
