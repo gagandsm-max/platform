@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"platform/sensor/internal/coreclient"
@@ -63,12 +64,16 @@ type AppliedPackRef struct {
 }
 
 type Status struct {
-	DesiredGeneration   int64
-	AppliedGeneration   int64
-	PackCount           int
-	LastSuccessfulSync  time.Time
-	LastErrorCode       string
-	Degraded            bool
+	DesiredGeneration  int64
+	AppliedGeneration  int64
+	PackCount          int
+	LastSuccessfulSync time.Time
+	LastErrorCode      string
+	Degraded           bool
+	// TrustedApplied is true only after successful recoverOnStart (empty gen0 or
+	// fully validated applied state) or successful setSuccess after apply.
+	// False when recovery fail-closed; transient sync errors do not clear it.
+	TrustedApplied bool
 }
 
 type Syncer struct {
@@ -169,6 +174,12 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 		s.setError(ErrCodeRestartFailClosed, true)
 		return
 	}
+	if err := validateAppliedInvariants(applied); err != nil {
+		s.setError(ErrCodeRestartFailClosed, true)
+		s.cfg.Logger.Error("capability pack applied invariants failed during sync",
+			"error_code", ErrCodeRestartFailClosed, "error", err)
+		return
+	}
 
 	s.mu.Lock()
 	s.status.DesiredGeneration = desired.Generation
@@ -178,6 +189,17 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 		// Local durable state is current. Core also reports the last applied state it
 		// has durably recorded, allowing the Sensor to repair a lost ACK or a later
 		// Core restore/regression without periodic blind re-ACK traffic.
+		//
+		// Generation+checksum match alone must not publish TrustedApplied when restart
+		// recovery already failed closed: re-validate artifacts before setSuccess.
+		if !s.Snapshot().TrustedApplied {
+			if err := s.verifyAppliedArtifacts(applied); err != nil {
+				s.setError(ErrCodeRestartFailClosed, true)
+				s.cfg.Logger.Error("capability pack fast-path artifact revalidation failed",
+					"error_code", ErrCodeRestartFailClosed, "error", err)
+				return
+			}
+		}
 		coreAppliedMatches := desired.AppliedGeneration == applied.Generation &&
 			strings.EqualFold(desired.AppliedChecksum, applied.Checksum)
 		if desired.Generation > 0 && !coreAppliedMatches {
@@ -220,8 +242,29 @@ func (s *Syncer) applyDesired(ctx context.Context, desired coreclient.Capability
 	}
 
 	staging := make([]AppliedPackRef, 0, len(desired.Packs))
+	seenID := map[string]struct{}{}
 	seenSHA := map[string]struct{}{}
 	for _, p := range desired.Packs {
+		if p.PackID == "" || p.PackVersion == "" || !isLowerHex64(p.ManifestSHA256) {
+			return fmt.Errorf("%s: desired pack ref invalid", ErrCodeArtifactVerify)
+		}
+		if _, dup := seenID[p.PackID]; dup {
+			return fmt.Errorf("%s: duplicate pack id", ErrCodeArtifactVerify)
+		}
+		seenID[p.PackID] = struct{}{}
+		if _, dup := seenSHA[p.ManifestSHA256]; dup {
+			return fmt.Errorf("%s: duplicate artifact sha", ErrCodeArtifactVerify)
+		}
+		seenSHA[p.ManifestSHA256] = struct{}{}
+		staging = append(staging, AppliedPackRef{
+			PackID: p.PackID, PackVersion: p.PackVersion, ManifestSHA256: p.ManifestSHA256,
+		})
+	}
+	if computed := ComputeDesiredChecksum(staging); computed != desired.Checksum {
+		return fmt.Errorf("%s: desired checksum does not match pack set", ErrCodeArtifactVerify)
+	}
+
+	for i, p := range desired.Packs {
 		art, err := s.client.FetchCapabilityPackArtifact(ctx, p.PackID, p.PackVersion, p.ArtifactBytes)
 		if err != nil {
 			return err
@@ -235,16 +278,10 @@ func (s *Syncer) applyDesired(ctx context.Context, desired coreclient.Capability
 		if err := verifyEnvelope(art.Bytes, p.PackID, p.PackVersion); err != nil {
 			return err
 		}
-		if _, dup := seenSHA[art.ManifestSHA256]; dup {
-			return fmt.Errorf("%s: duplicate artifact sha", ErrCodeArtifactVerify)
-		}
-		seenSHA[art.ManifestSHA256] = struct{}{}
 		if err := s.writeArtifactDurable(art.ManifestSHA256, art.Bytes); err != nil {
 			return err
 		}
-		staging = append(staging, AppliedPackRef{
-			PackID: p.PackID, PackVersion: p.PackVersion, ManifestSHA256: art.ManifestSHA256,
-		})
+		staging[i].ManifestSHA256 = art.ManifestSHA256
 	}
 
 	next := AppliedState{
@@ -287,19 +324,18 @@ func verifyEnvelope(raw []byte, packID, packVersion string) error {
 func (s *Syncer) writeArtifactDurable(sha string, data []byte) error {
 	dir := filepath.Join(s.cfg.Dir, artifactsDirName)
 	final := filepath.Join(dir, sha+".json")
-	if info, err := os.Lstat(final); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s: refusing symlink artifact", ErrCodeArtifactVerify)
-		}
-		existing, err := os.ReadFile(final)
+	if _, err := os.Lstat(final); err == nil {
+		existing, err := readRegularFileLimited(final, int64(coreclient.MaxCapabilityPackArtifactBytes), ErrCodeArtifactVerify)
 		if err != nil {
-			return fmt.Errorf("%s: %w", ErrCodeDurableWrite, err)
+			return err
 		}
 		sum := sha256.Sum256(existing)
 		if hex.EncodeToString(sum[:]) != sha {
 			return fmt.Errorf("%s: existing artifact checksum mismatch", ErrCodeArtifactVerify)
 		}
 		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%s: %w", ErrCodeDurableWrite, err)
 	}
 	return atomicWriteFile(final, data, 0o600)
 }
@@ -421,31 +457,36 @@ func (s *Syncer) recoverOnStart() error {
 	if err != nil {
 		return err
 	}
-	if state.Generation == 0 && len(state.Packs) == 0 {
-		return nil
+	return s.trustAppliedState(state)
+}
+
+// trustAppliedState validates applied.json invariants and on-disk artifacts, then
+// publishes AppliedGeneration / PackCount / TrustedApplied. Used by recoverOnStart.
+func (s *Syncer) trustAppliedState(state AppliedState) error {
+	if err := validateAppliedInvariants(state); err != nil {
+		return err
 	}
-	seen := map[string]struct{}{}
+	if err := s.verifyAppliedArtifacts(state); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.status.AppliedGeneration = state.Generation
+	s.status.PackCount = len(state.Packs)
+	s.status.TrustedApplied = true
+	s.mu.Unlock()
+	return nil
+}
+
+// verifyAppliedArtifacts confirms every applied pack ref has a readable regular
+// artifact whose content hash and envelope match the durable reference.
+func (s *Syncer) verifyAppliedArtifacts(state AppliedState) error {
 	for _, p := range state.Packs {
-		if p.PackID == "" || p.PackVersion == "" || !isLowerHex64(p.ManifestSHA256) {
-			return fmt.Errorf("%s: applied pack ref invalid", ErrCodeRestartFailClosed)
-		}
-		if _, dup := seen[p.ManifestSHA256]; dup {
-			return fmt.Errorf("%s: duplicate applied artifact", ErrCodeRestartFailClosed)
-		}
-		seen[p.ManifestSHA256] = struct{}{}
 		path := filepath.Join(s.cfg.Dir, artifactsDirName, p.ManifestSHA256+".json")
-		info, err := os.Lstat(path)
+		raw, err := readRegularFileLimited(path, int64(coreclient.MaxCapabilityPackArtifactBytes), ErrCodeRestartFailClosed)
 		if err != nil {
-			return fmt.Errorf("%s: missing artifact %s", ErrCodeRestartFailClosed, p.ManifestSHA256)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s: symlink artifact refused", ErrCodeRestartFailClosed)
-		}
-		if info.Size() > coreclient.MaxCapabilityPackArtifactBytes {
-			return fmt.Errorf("%s: oversized artifact", ErrCodeRestartFailClosed)
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("%s: missing artifact %s", ErrCodeRestartFailClosed, p.ManifestSHA256)
+			}
 			return err
 		}
 		sum := sha256.Sum256(raw)
@@ -453,14 +494,99 @@ func (s *Syncer) recoverOnStart() error {
 			return fmt.Errorf("%s: artifact checksum mismatch", ErrCodeRestartFailClosed)
 		}
 		if err := verifyEnvelope(raw, p.PackID, p.PackVersion); err != nil {
-			return err
+			return fmt.Errorf("%s: artifact envelope invalid", ErrCodeRestartFailClosed)
 		}
 	}
-	s.mu.Lock()
-	s.status.AppliedGeneration = state.Generation
-	s.status.PackCount = len(state.Packs)
-	s.mu.Unlock()
 	return nil
+}
+
+// validateAppliedInvariants checks structural rules and recomputes the canonical
+// state checksum before any AppliedGeneration / TrustedApplied publication.
+func validateAppliedInvariants(state AppliedState) error {
+	if state.Generation < 0 {
+		return fmt.Errorf("%s: negative applied generation", ErrCodeRestartFailClosed)
+	}
+	if len(state.Packs) > maxPackCount {
+		return fmt.Errorf("%s: pack count exceeds max", ErrCodeRestartFailClosed)
+	}
+	if state.Generation == 0 {
+		if len(state.Packs) != 0 || state.Checksum != "" {
+			return fmt.Errorf("%s: generation 0 requires empty packs and checksum", ErrCodeRestartFailClosed)
+		}
+		return nil
+	}
+	if len(state.Packs) == 0 {
+		if state.Checksum != "" {
+			return fmt.Errorf("%s: empty pack set requires empty checksum", ErrCodeRestartFailClosed)
+		}
+	} else if !isLowerHex64(state.Checksum) {
+		return fmt.Errorf("%s: applied checksum is not lowercase 64-hex", ErrCodeRestartFailClosed)
+	}
+
+	seenID := map[string]struct{}{}
+	seenSHA := map[string]struct{}{}
+	for _, p := range state.Packs {
+		if p.PackID == "" || p.PackVersion == "" || !isLowerHex64(p.ManifestSHA256) {
+			return fmt.Errorf("%s: applied pack ref invalid", ErrCodeRestartFailClosed)
+		}
+		if _, dup := seenID[p.PackID]; dup {
+			return fmt.Errorf("%s: duplicate pack id", ErrCodeRestartFailClosed)
+		}
+		seenID[p.PackID] = struct{}{}
+		if _, dup := seenSHA[p.ManifestSHA256]; dup {
+			return fmt.Errorf("%s: duplicate applied artifact", ErrCodeRestartFailClosed)
+		}
+		seenSHA[p.ManifestSHA256] = struct{}{}
+	}
+	if computed := ComputeDesiredChecksum(state.Packs); computed != state.Checksum {
+		return fmt.Errorf("%s: applied state checksum mismatch", ErrCodeRestartFailClosed)
+	}
+	return nil
+}
+
+// readRegularFileLimited Lstats first (reject symlink / non-regular including FIFO
+// before any open/read), enforces max size, then open+fstat+LimitReader. Uses
+// O_NONBLOCK so a TOCTOU race to a FIFO cannot hang the Sensor.
+func readRegularFileLimited(path string, maxBytes int64, failCode string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%s: refusing symlink", failCode)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: not a regular file", failCode)
+	}
+	if info.Size() < 0 || info.Size() > maxBytes {
+		return nil, fmt.Errorf("%s: exceeds size limit", failCode)
+	}
+
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", failCode, err)
+	}
+	defer file.Close()
+
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", failCode, err)
+	}
+	if !openedInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: not a regular file", failCode)
+	}
+	if openedInfo.Size() < 0 || openedInfo.Size() > maxBytes {
+		return nil, fmt.Errorf("%s: exceeds size limit", failCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", failCode, err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%s: exceeds size limit", failCode)
+	}
+	return data, nil
 }
 
 func (s *Syncer) gcUnreferenced(keep map[string]struct{}) {
@@ -503,6 +629,7 @@ func (s *Syncer) setSuccess(gen int64, packCount int) {
 	s.status.LastSuccessfulSync = time.Now().UTC()
 	s.status.LastErrorCode = ""
 	s.status.Degraded = false
+	s.status.TrustedApplied = true
 }
 
 func (s *Syncer) setError(code string, degraded bool) {
@@ -512,6 +639,18 @@ func (s *Syncer) setError(code string, degraded bool) {
 	if degraded {
 		s.status.Degraded = true
 	}
+	// Do not set TrustedApplied; transient/auth errors retain prior trust.
+}
+
+// TestingSetError records a sync error without clearing TrustedApplied.
+// Intended for readiness/health unit tests only.
+func (s *Syncer) TestingSetError(code string, degraded bool) {
+	s.setError(code, degraded)
+}
+
+// TestingSetSuccess marks a successful apply for readiness/health unit tests.
+func (s *Syncer) TestingSetSuccess(gen int64, packCount int) {
+	s.setSuccess(gen, packCount)
 }
 
 func errorCode(err error) string {

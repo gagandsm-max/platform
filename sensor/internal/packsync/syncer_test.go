@@ -68,14 +68,15 @@ func TestPackSyncApplyAckAndIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	manifest := minimalManifest("fixture.pack", "1.0.0")
 	sha := shaOf(manifest)
-	checksum := "ab" + sha[:62]
+	entry := coreclient.DesiredPackEntry{
+		PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
+	}
+	checksum := checksumForDesired(entry)
 	core := &fakeCore{
 		desired: coreclient.CapabilityPackDesiredState{
 			Generation: 1,
 			Checksum:   checksum,
-			Packs: []coreclient.DesiredPackEntry{{
-				PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
-			}},
+			Packs:      []coreclient.DesiredPackEntry{entry},
 		},
 		arts: map[string]coreclient.CapabilityPackArtifact{
 			"fixture.pack@1.0.0": {PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, Bytes: manifest},
@@ -120,14 +121,15 @@ func TestPackSyncLostAckRetriesWithoutRedownload(t *testing.T) {
 	dir := t.TempDir()
 	manifest := minimalManifest("fixture.pack", "1.0.0")
 	sha := shaOf(manifest)
-	checksum := "af" + sha[:62]
+	entry := coreclient.DesiredPackEntry{
+		PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
+	}
+	checksum := checksumForDesired(entry)
 	core := &fakeCore{
 		desired: coreclient.CapabilityPackDesiredState{
 			Generation: 1,
 			Checksum:   checksum,
-			Packs: []coreclient.DesiredPackEntry{{
-				PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
-			}},
+			Packs:      []coreclient.DesiredPackEntry{entry},
 		},
 		arts: map[string]coreclient.CapabilityPackArtifact{
 			"fixture.pack@1.0.0": {PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, Bytes: manifest},
@@ -174,14 +176,15 @@ func TestPackSyncRestartReAcksDurableAppliedState(t *testing.T) {
 	dir := t.TempDir()
 	manifest := minimalManifest("fixture.pack", "1.0.0")
 	sha := shaOf(manifest)
-	checksum := "bc" + sha[:62]
+	entry := coreclient.DesiredPackEntry{
+		PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
+	}
+	checksum := checksumForDesired(entry)
 	core := &fakeCore{
 		desired: coreclient.CapabilityPackDesiredState{
 			Generation: 1,
 			Checksum:   checksum,
-			Packs: []coreclient.DesiredPackEntry{{
-				PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
-			}},
+			Packs:      []coreclient.DesiredPackEntry{entry},
 		},
 		arts: map[string]coreclient.CapabilityPackArtifact{
 			"fixture.pack@1.0.0": {PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, Bytes: manifest},
@@ -219,14 +222,15 @@ func TestPackSyncCoreAppliedStateRegressionReconcilesWithoutRedownload(t *testin
 	dir := t.TempDir()
 	manifest := minimalManifest("fixture.pack", "1.0.0")
 	sha := shaOf(manifest)
-	checksum := "bd" + sha[:62]
+	entry := coreclient.DesiredPackEntry{
+		PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
+	}
+	checksum := checksumForDesired(entry)
 	core := &fakeCore{
 		desired: coreclient.CapabilityPackDesiredState{
 			Generation: 1,
 			Checksum:   checksum,
-			Packs: []coreclient.DesiredPackEntry{{
-				PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
-			}},
+			Packs:      []coreclient.DesiredPackEntry{entry},
 		},
 		arts: map[string]coreclient.CapabilityPackArtifact{
 			"fixture.pack@1.0.0": {PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, Bytes: manifest},
@@ -288,7 +292,8 @@ func TestPackSyncRegressionAndConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.writeAppliedDurable(AppliedState{Generation: 3, Checksum: "cc" + sha[:62], Packs: nil}); err != nil {
+	// Empty pack sets require empty checksum (validated before fencing).
+	if err := s.writeAppliedDurable(AppliedState{Generation: 3, Checksum: "", Packs: nil}); err != nil {
 		t.Fatal(err)
 	}
 	s.syncOnce(context.Background())
@@ -296,7 +301,7 @@ func TestPackSyncRegressionAndConflict(t *testing.T) {
 		t.Fatalf("expected regression, got %s", s.Snapshot().LastErrorCode)
 	}
 
-	if err := s.writeAppliedDurable(AppliedState{Generation: 2, Checksum: "dd" + sha[:62], Packs: nil}); err != nil {
+	if err := s.writeAppliedDurable(AppliedState{Generation: 2, Checksum: "", Packs: nil}); err != nil {
 		t.Fatal(err)
 	}
 	s.syncOnce(context.Background())
@@ -309,13 +314,14 @@ func TestPackSyncFailureKeepsPriorNoAck(t *testing.T) {
 	dir := t.TempDir()
 	manifest := minimalManifest("fixture.pack", "1.0.0")
 	sha := shaOf(manifest)
+	entry := coreclient.DesiredPackEntry{
+		PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
+	}
 	core := &fakeCore{
 		desired: coreclient.CapabilityPackDesiredState{
 			Generation: 1,
-			Checksum:   "ee" + sha[:62],
-			Packs: []coreclient.DesiredPackEntry{{
-				PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha, ArtifactBytes: len(manifest),
-			}},
+			Checksum:   checksumForDesired(entry),
+			Packs:      []coreclient.DesiredPackEntry{entry},
 		},
 		arts: map[string]coreclient.CapabilityPackArtifact{},
 	}
@@ -435,12 +441,13 @@ func TestRestartRecoversValidAppliedState(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(artDir, sha+".json"), manifest, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	packs := []AppliedPackRef{{
+		PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha,
+	}}
 	state := AppliedState{
 		Generation: 1,
-		Checksum:   strings.Repeat("b", 64),
-		Packs: []AppliedPackRef{{
-			PackID: "fixture.pack", PackVersion: "1.0.0", ManifestSHA256: sha,
-		}},
+		Checksum:   ComputeDesiredChecksum(packs),
+		Packs:      packs,
 	}
 	raw, err := json.Marshal(state)
 	if err != nil {
@@ -455,7 +462,7 @@ func TestRestartRecoversValidAppliedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := s.Snapshot()
-	if snap.Degraded || snap.LastErrorCode != "" || snap.AppliedGeneration != 1 || snap.PackCount != 1 {
+	if snap.Degraded || snap.LastErrorCode != "" || snap.AppliedGeneration != 1 || snap.PackCount != 1 || !snap.TrustedApplied {
 		t.Fatalf("valid restart state did not recover cleanly: %+v", snap)
 	}
 }
@@ -495,4 +502,38 @@ func minimalManifest(packID, version string) []byte {
 func shaOf(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+func checksumForDesired(packs ...coreclient.DesiredPackEntry) string {
+	refs := make([]AppliedPackRef, len(packs))
+	for i, p := range packs {
+		refs[i] = AppliedPackRef{
+			PackID: p.PackID, PackVersion: p.PackVersion, ManifestSHA256: p.ManifestSHA256,
+		}
+	}
+	return ComputeDesiredChecksum(refs)
+}
+
+func writeAppliedFixture(t *testing.T, dir string, state AppliedState, artifacts map[string][]byte) {
+	t.Helper()
+	artDir := filepath.Join(dir, artifactsDirName)
+	stateDir := filepath.Join(dir, stateDirName)
+	if err := os.MkdirAll(artDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for sha, body := range artifacts {
+		if err := os.WriteFile(filepath.Join(artDir, sha+".json"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, appliedStateFile), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

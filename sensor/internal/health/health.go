@@ -106,17 +106,23 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if packSync != nil {
 		snap := packSync.Snapshot()
 		packStatus = map[string]any{
-			"desired_generation":  snap.DesiredGeneration,
-			"applied_generation":  snap.AppliedGeneration,
-			"pack_count":          snap.PackCount,
+			"desired_generation":   snap.DesiredGeneration,
+			"applied_generation":   snap.AppliedGeneration,
+			"pack_count":           snap.PackCount,
 			"last_successful_sync": formatTime(snap.LastSuccessfulSync),
-			"last_error_code":     snap.LastErrorCode,
-			"degraded":            snap.Degraded,
+			"last_error_code":      snap.LastErrorCode,
+			"degraded":             snap.Degraded,
+			"trusted_applied":      snap.TrustedApplied,
 		}
-		// Transient Core outage must not fail liveness; only mark DEGRADED when pack-sync is fail-closed.
-		if snap.Degraded && status == "UP" {
+		if !snap.TrustedApplied {
+			// Fail closed: trusted pack state could not be established (e.g. corrupt recovery).
+			httpStatus = http.StatusServiceUnavailable
+			if status == "UP" || status == "DEGRADED" {
+				status = "PACK_TRUST_NOT_ESTABLISHED"
+			}
+		} else if snap.Degraded && status == "UP" {
+			// Auth/degraded with retained trusted applied state stays ready (HTTP 200).
 			status = "DEGRADED"
-			// Keep HTTP 200 for readiness when only pack-sync is degraded (telemetry still healthy).
 		}
 	}
 
