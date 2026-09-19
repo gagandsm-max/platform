@@ -8,7 +8,9 @@
 
 ---
 
-## 1. Authority and purpose\n\n**Proposed filename:** `Platform_24_Extensibility_CapabilityPack_MIB_API_Webhook_Runtime_Master.md`
+## 1. Authority and purpose
+
+**Proposed filename:** `Platform_24_Extensibility_CapabilityPack_MIB_API_Webhook_Runtime_Master.md`
 
 This document is a candidate v3.2.3 specialized master for Platform extensibility: new SNMP MIBs, new device/vendor/model/firmware monitoring, REST/OpenAPI connectors, Capability Packs, outbound/inbound/callback webhooks, their persistence, distribution, security, testing, UI and operations.
 
@@ -30,7 +32,9 @@ Logical authority:
 - §14 = formal traceability supplement;
 - §15 = Definition of Done and change-control rules.
 
-**Current-main reconciliation note:** this draft was rebased conceptually onto `main` at `df0dd5f19ce502dbc141e8e4b13a84293dc2a7ca`, where Platform 21–23 already exist and Capability Pack is the canonical single extensibility architecture. It must not be merged until the Main Chat independently checks every `REQ-EXTL-*` item for duplication, contradiction, priority and implementation reality.\n\n`Platform_00_Document_Index.md` defines precedence. This master may add detail where existing documents are silent. If a true contradiction exists, it must be reconciled through deliberate Mother Reference change control before implementation.
+**Current-main reconciliation note:** this draft was rebased conceptually onto `main` at `df0dd5f19ce502dbc141e8e4b13a84293dc2a7ca`, where Platform 21–23 already exist and Capability Pack is the canonical single extensibility architecture. It must not be merged until the Main Chat independently checks every `REQ-EXTL-*` item for duplication, contradiction, priority and implementation reality.
+
+`Platform_00_Document_Index.md` defines precedence. This master may add detail where existing documents are silent. If a true contradiction exists, it must be reconciled through deliberate Mother Reference change control before implementation.
 
 This document **does not** select a new database, mandatory microservice, arbitrary-code plugin system, Internet marketplace dependency or new OSS component. Existing PostgreSQL/ClickHouse/Kafka/Valkey and Core/Sensor architecture remain governing unless separately changed.
 
