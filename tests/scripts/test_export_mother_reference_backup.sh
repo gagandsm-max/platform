@@ -59,6 +59,8 @@ grep -q 'END PLATFORM_MOTHER_REFERENCE_BACKUP' "${COMBINED}" || fail "missing EN
 grep -q 'BEGIN FILE: AGENTS.md' "${COMBINED}" || fail "missing AGENTS begin"
 grep -q 'git_head_sha:' "${COMBINED}" || fail "missing HEAD SHA metadata"
 grep -q 'generated_utc:' "${COMBINED}" || fail "missing UTC metadata"
+grep -q 'freshness_authority: git_head_sha_and_in_document_reconciliation_metadata' "${COMBINED}" || fail "missing freshness-authority metadata"
+grep -q 'filesystem_mtime_authoritative: false' "${COMBINED}" || fail "filesystem mtime authority must be false"
 
 SUMS="$(find "${BACKUP_DIR}" -name SHA256SUMS | head -1)"
 [[ -f "${SUMS}" ]] || fail "SHA256SUMS missing"
