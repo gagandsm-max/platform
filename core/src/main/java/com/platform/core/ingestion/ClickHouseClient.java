@@ -109,9 +109,11 @@ public class ClickHouseClient {
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
-            String errorMsg = "ClickHouse insert failed with status " + response.statusCode() + ": " + response.body();
-            metrics.recordClickHouseFailure(errorMsg);
-            throw new RuntimeException(errorMsg);
+            // ClickHouse error bodies may contain data-dependent diagnostics. Keep those bodies
+            // out of application exceptions, health state, and Kafka framework logs.
+            String failureCode = "CLICKHOUSE_HTTP_" + response.statusCode();
+            metrics.recordClickHouseFailure(failureCode);
+            throw new RuntimeException("ClickHouse insert failed with status " + response.statusCode());
         }
 
         long durationMs = System.currentTimeMillis() - startTime;
