@@ -42,7 +42,7 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 | OSS-014 | Search | Optional dedicated full-text search | OpenSearch | Apache-2.0 | OPTIONAL-LATER | Core | Add only if customer log search requirements exceed ClickHouse text-search capability. | Not mandatory in V1 to keep footprint low. Elasticsearch is not the core store. |
 | OSS-020 | Network Collection | SNMP v1/v2c/v3 | GoSNMP | BSD-style | USE/WRAP | Sensor | SNMP Get/GetNext/GetBulk/Walk/Set and traps/informs protocol engine. | Do not reimplement BER/SNMP. Platform owns scheduling, credential profiles, normalization, validation, retry and policy. |
 | OSS-021 | Network Collection | MIB parsing | gosmi | MIT | USE/WRAP | Core Studio/Sensor build tooling | Parse SMIv1/v2 MIBs for MIB Studio, OID metadata, enums, tables and notifications. | Platform owns MIB provenance, dependency workflow, metric semantics, Device Pack generation and redistribution controls. |
-| OSS-022 | Network Collection | NetFlow/IPFIX/sFlow parsing | GoFlow2 | BSD-3-Clause | USE/WRAP | Streaming Sensor | Decode NetFlow v5/v9, IPFIX and sFlow. | Platform owns enrichment, canonical flow schema, cardinality controls, Kafka publishing and analytics. |
+| OSS-022 | Network Collection | NetFlow/IPFIX/sFlow parsing | GoFlow2 | BSD-3-Clause | USE/WRAP | Dedicated Flow Sensor | Decode NetFlow v5/v9, IPFIX and sFlow protocol records/templates. | Platform owns source admission, exporter identity, template/sampling/sequence state, bounds/fairness, canonical Flow/quality schema, enrichment/provenance, durability, Kafka publishing and analytics. Catalogue approval does not claim the Sensor dependency/runtime is already wired or certified. |
 | OSS-023 | Network Collection | ICMP | golang.org/x/net/icmp | BSD-3-Clause | USE | Sensor/Agent | ICMP echo and low-level packet operations. | Platform owns scheduling, statistics, validation workflows, jitter/loss aggregation and path correlation. |
 | OSS-024 | Network Collection | DNS protocol | miekg/dns | BSD-style | USE | Sensor/Agent | Detailed DNS synthetic checks where standard resolver APIs are insufficient. | Platform owns test definitions, validation and SLA semantics. |
 | OSS-025 | Network Collection | SSH | golang.org/x/crypto/ssh | BSD-3-Clause | USE/WRAP | Sensor | SSH transport for CLI, discovery, diagnostics and NCM. | Platform owns credential brokering, command controls, session audit and vendor behavior. |
@@ -158,7 +158,7 @@ Dependency proposed
 | Platform module | Primary OSS foundation | Platform-owned differentiation |
 |---|---|---|
 | SNMP | GoSNMP + gosmi | polling scheduler, credentials, MIB Studio, normalization, policy, validation |
-| NetFlow/IPFIX/sFlow | GoFlow2 | enrichment, canonical flow model, cardinality, analytics, correlation |
+| NetFlow/IPFIX/sFlow | GoFlow2 | dedicated Flow Sensor source admission; exporter/template/sampling/sequence accounting; bounded canonical Flow/quality model; temporal enrichment; analytics/correlation |
 | ICMP/traceroute | x/net/icmp + Platform path engine | scheduling, jitter/loss statistics, multi-vantage/path RCA |
 | DNS | miekg/dns + Go networking | synthetic profiles, validation, SLA |
 | SSH/CLI | x/crypto/ssh / scrapligo | credential broker, command policy, audit, session recording |
