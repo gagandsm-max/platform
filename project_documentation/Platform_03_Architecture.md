@@ -27,7 +27,7 @@ The architecture is governed by the following constraints already decided:
 - UI is HTTPS only and does not expose an application endpoint on TCP/80.
 - Core and Sensor managed storage have a mandatory 80% storage-protection watermark.
 - DR capability is required in v1.0.
-- Full DPI and full APM are excluded initially.
+- Full always-on DPI and mandatory proprietary full-bytecode APM agents are excluded initially. OpenTelemetry-native metrics, logs and traces, service graphs and cross-signal investigation are P0 under `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`.
 - Gemini is accessed through an AI Gateway; causal RCA is not LLM-only.
 - Platform is independent from ThoughtData and NetAI and must not reuse their proprietary implementation assets.
 
@@ -881,7 +881,7 @@ Upgrade architecture uses preflight, backup, compatibility checks, Sensor drains
 | ADR-015 | Core/Sensor 80% storage protection mandatory | Accepted |
 | ADR-016 | UI HTTPS only, no TCP/80 application listener | Accepted |
 | ADR-017 | DR architecture mandatory v1.0 | Accepted |
-| ADR-018 | DPI/full APM excluded initial scope | Accepted |
+| ADR-018 | Full always-on DPI and mandatory proprietary full-bytecode APM agents excluded from initial scope; OTel-native traces/service graphs/cross-signal observability are P0 under Platform_24 | Accepted / reconciled 2026-09-19 |
 | ADR-019 | Full Master/Regional Core federation future only | Accepted |
 | ADR-020 | Excessive microservice decomposition avoided in small Core | Accepted |
 | ADR-021 | Exact two-node Kafka/ClickHouse failover mechanism requires P0 engineering spike | Open implementation decision |
@@ -1032,7 +1032,7 @@ The v1 document listed only names. The v2 architecture freezes how OSS is used a
 | OSS-042 | Hardware | Redfish/Swordfish | Gofish | BSD-3-Clause | USE/WRAP | Infrastructure Sensor | Redfish/Swordfish hardware inventory/health collection. | Platform owns normalized hardware entity model and vendor packs. |
 | OSS-043 | Virtualization | VMware vSphere | govmomi | Apache-2.0 | USE/WRAP | Infrastructure Sensor | vCenter/ESXi inventory, topology and metrics via vSphere APIs. | Platform owns graph, monitoring policy, dashboards and alerts. |
 | OSS-044 | Containers | Kubernetes client | client-go | Apache-2.0 | USE/WRAP | Infrastructure/Cloud Sensor | Kubernetes API, inventory, events and workload discovery. | Platform owns canonical K8s graph and correlation. |
-| OSS-045 | Observability | OpenTelemetry / OTLP | OpenTelemetry Collector + contrib | Apache-2.0 | USE/INTEGRATE | Sensor/Core ingestion | OTLP metrics/logs ingestion and selected receivers/exporters where appropriate. | Platform does not market full APM initially. Trace storage/UX is future-ready only. |
+| OSS-045 | Observability | OpenTelemetry / OTLP | OpenTelemetry Collector + contrib | Apache-2.0 | USE/INTEGRATE | Sensor/Core ingestion | OTLP metrics/logs/traces ingestion and selected receivers/exporters where appropriate, including approved Prometheus/OpenMetrics collection paths. | Platform owns trace storage/query/sampling, service/resource identity, correlation and alert/RCA semantics. This does not select proprietary full-bytecode APM agents. |
 | OSS-046 | Containers | Docker/container runtime API | Moby/Docker client libraries | Apache-2.0 | CANDIDATE | Infrastructure Sensor | Container runtime inventory/metrics where Docker API is used. | Use only required client APIs and version-pin. |
 | OSS-047 | Cloud | AWS API/monitoring | AWS SDK for Go v2 | Apache-2.0 | USE/WRAP | Cloud Sensor | AWS inventory/monitoring API access. | Platform owns entity normalization and policy. Version-level dependency scan mandatory. |
 | OSS-048 | Cloud | Azure API/monitoring | Azure SDK for Go | MIT / component-specific review | USE/WRAP | Cloud Sensor | Azure inventory/monitoring APIs. | Version-level component/license scan required. |
