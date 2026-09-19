@@ -60,6 +60,8 @@ ORT/Syft/Trivy/ScanCode or approved equivalents run according to the OSS catalog
 
 Core, Sensor and Linux Agent each produce `.deb` and `.rpm`. They are separate packages and may version independently within compatibility rules.
 
+There is one production Sensor package/codebase. Network, Infrastructure, FLOW, LOG and other approved Sensor roles are selected through governed enrollment/configuration; FLOW/LOG role isolation does not create separate Flow-Sensor or Log-Sensor package families. Packaging/install tests shall verify that a role-gated Sensor starts only permitted modules and rejects incompatible role assignments.
+
 ## 2. Linux filesystem contract
 
 Recommended layout:
