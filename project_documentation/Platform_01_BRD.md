@@ -49,6 +49,7 @@ Platform is intended to compete in a crowded market. Therefore feature presence 
 | BR-P08 | Low latency / fast UI | Common dashboards, search, tables and operational actions must remain responsive at enterprise scale. Performance is a release gate. |
 | BR-P09 | HTTPS-only UI | Customer UI is served only over HTTPS/TLS. Platform shall not expose an application listener on TCP/80. |
 | BR-P10 | No silent failure | Material collection, storage, integration, HA, provisioning, authentication or workflow failures must expose what failed, evidence, impact and remediation guidance. |
+| BR-P10A | Trustworthy traffic context | Flow analytics must preserve source/provenance, sampling and data-quality limitations and may enrich IPs with endpoint/system/domain/user/site/Geo/cloud context only when evidence supports the association. Unknown/conflicting attribution is preferable to invented certainty. |
 | BR-P11 | Safe by default, flexible by choice | Secure/safe defaults are enabled initially; customers may customize operational behavior through UI where doing so does not violate tenant isolation, integrity or mandatory safety controls. |
 | BR-P12 | No-context-switch operations | An authorized NOC/operator shall be able to verify, diagnose and investigate a monitored entity from its current Platform context using safe on-demand diagnostics, browser CLI and related evidence without requiring routine external ping/traceroute/SSH/SNMP/flow/config-comparison tools. Low-risk actions shall be easy; privileged or destructive actions shall retain proportionate controls and audit. |
 
@@ -93,7 +94,7 @@ Platform shall provide, directly or through approved extensibility frameworks:
 - Network discovery and inventory.
 - SNMP v1/v2c/v3 monitoring and traps/informs.
 - ICMP and traceroute.
-- NetFlow, IPFIX, sFlow and vendor-compatible flow ingestion.
+- NetFlow, IPFIX, sFlow and vendor-compatible flow ingestion with exporter/template/sampling/data-quality visibility and operational traffic analytics.
 - Syslog/event ingestion.
 - NETCONF, RESTCONF, gNMI/gRPC and streaming telemetry.
 - SSH/CLI operations with privileged session governance.
@@ -110,7 +111,7 @@ Platform shall provide, directly or through approved extensibility frameworks:
 - OpenTelemetry metrics and logs; trace-ready architecture, without marketing full APM initially.
 - Synthetic ICMP/TCP/DNS/HTTP/HTTPS/API/TLS tests.
 - DNS/DHCP/NTP monitoring.
-- Identity infrastructure monitoring such as AD/LDAP/DC replication/Kerberos/RADIUS/TACACS+ where supported by secure probes/APIs.
+- Identity infrastructure monitoring such as AD/LDAP/DC replication/Kerberos/RADIUS/TACACS+ where supported by secure probes/APIs, and governed use of time-bounded identity/session evidence to enrich operational Flow where available.
 - UPS/PDU/environment/power/cooling monitoring.
 - IPAM with IPv4/IPv6, subnet hierarchy, VRF/VLAN context, DNS/DHCP integration, utilization, conflicts, history and forecasting.
 - Flexible topology and maps: physical, L2, L3, routing, MPLS, VXLAN/EVPN, SD-WAN, traffic, infrastructure, service, causal and geographic.
@@ -210,10 +211,13 @@ In HA deployments, Sensors and Agents should use the stable **Core HA endpoint**
 
 ## 8. Sensor and Agent business requirements
 
-- Platform uses one Universal Sensor Runtime with selectable roles.
-- Primary customer-facing roles: Network Sensor, Infrastructure Sensor, Combined Sensor.
-- Specialized roles: Streaming/Event Sensor, Synthetic Probe, Cloud/API Sensor and Edge Sensor Lite profile.
+- Platform uses one Universal Sensor Runtime with selectable roles rather than separate Sensor codebases.
+- Production Flow monitoring uses a dedicated **Flow Sensor** instance whose allocated monitoring capacity is not shared with Network polling, discovery, NCM, synthetics or Log monitoring.
+- Production Log monitoring uses a dedicated **Log Sensor** instance whose allocated monitoring capacity is not shared with Flow monitoring, Network polling, discovery, NCM or synthetics.
+- Network and Infrastructure Sensor roles remain separately scoped. A mixed/combined Sensor may exist for development, CI, demonstration or explicitly non-production lab use but is not production certified for Flow/Log capacity.
+- Sensor role selection must be visible, governed and capacity-aware; changing a production role requires workload drain/reassignment and health validation rather than a casual live toggle.
 - Sensor placement must prefer network locality while also respecting reachability, capacity, HA, protocol access and policy.
+- Flow and Log availability/redundancy must be protocol/source aware; the product shall not assume an unvalidated generic load balancer or duplicate-collector behavior works for every exporter/log source.
 - Customers may choose automatic placement, recommendation/approval, manual placement or Sensor Pool assignment.
 - Sensor capacity must be represented by workload, not device count alone.
 - Customer may deploy multiple Sensor Pools by region/country/site/security zone.
