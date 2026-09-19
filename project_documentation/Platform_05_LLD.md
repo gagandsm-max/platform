@@ -979,36 +979,70 @@ Raw sockets/capabilities should use minimal Linux capabilities rather than runni
 
 ## 14. Flow LLD
 
-### 14.1 Receiver
+### 14.1 Dedicated receiver and role gate
 
-Streaming Sensor/Network Sensor receives datagrams/streams and tracks exporter/template state.
+Only a production Sensor with effective `FLOW` role may activate Flow listeners. The role gate rejects Network/Log workload assignments and enforces the bounds defined in §§5.3A–5.3E.
+
+Receiver pipeline:
+
+```text
+listener/source gate
+→ bounded datagram queue
+→ GoFlow2 adapter
+→ exporter/template/options-template/sampling/sequence state
+→ canonical directional Flow + quality
+→ bounded enrichment lookup
+→ role-local durable Flow spool
+→ uploader
+```
+
+Kernel/socket drops, application queue drops and decoder rejects are separate counters.
 
 ### 14.2 Enrichment pipeline
 
 ```text
-raw flow
-→ exporter identity
-→ interface identity
-→ IPAM/subnet
-→ site/region
-→ VRF/VLAN where known
-→ ASN/BGP
-→ cloud context
-→ exporter-provided app/QoS metadata
-→ canonical network_flow
+raw canonical Flow
+→ temporal exporter/interface/VRF/VLAN identity
+→ temporal IP↔entity / IPAM / DHCP / Agent ownership
+→ DNS/FQDN evidence
+→ time-bounded user/session evidence (AD/LDAP/Entra/VPN/RADIUS/NAC/WLAN/firewall/proxy)
+→ site/internal geography
+→ ASN/BGP + public-IP Geo + cloud/SaaS catalogue
+→ exporter-provided application/QoS/NAT metadata
+→ versioned/provenance-aware enriched network_flow
 ```
+
+An unresolved enrichment does not reject an otherwise valid Flow record. Unknown/conflicting identity is stored as quality/provenance, not invented certainty.
 
 ### 14.3 High-rate safeguards
 
-- bounded decode queues;
-- drop counters by reason;
-- per-exporter rate metrics;
-- template-miss counters;
-- backpressure metrics;
+- bounded socket/packet/decode/normalization queues;
+- drop counters by layer/reason;
+- per-exporter rate/fairness metrics and quotas;
+- bounded exporters/observation domains/templates/fields/enterprise IEs;
+- template-miss/churn counters;
+- sampling-known/change counters;
+- protocol-specific sequence-gap/reset counters;
+- backpressure/spool horizon metrics;
 - cardinality detection;
-- dedicated Streaming Sensor recommendation.
+- role-local CPU/RAM/disk/network capacity limits.
 
-No silent drop: every intentional/forced drop must be counted and surfaced.
+No silent drop: every intentional/forced drop after the observable receive boundary is counted and surfaced. UDP loss before Platform receives a datagram is not falsely claimed as detectable/zero-loss.
+
+### 14.4 Source identity and privacy invariants
+
+- packet fields never select tenant;
+- UDP source IP alone is not canonical exporter identity;
+- IP alone is not endpoint identity;
+- AD/directory membership alone is not active user attribution;
+- DNS/domain evidence alone is not a full URL;
+- public-IP Geo is approximate network metadata;
+- user-attributed Flow query/export is separately RBAC/audit controlled;
+- raw directional observation provenance survives Conversation aggregation.
+
+### 14.5 Redundancy
+
+Exporter HA behavior is profile-specific. Multiple collector targets, duplicate export, single-target failover/VIP and deduplication are certified per exporter/device/profile. A generic load balancer is not assumed protocol-correct for every Flow source.
 
 ---
 
