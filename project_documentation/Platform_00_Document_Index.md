@@ -2,7 +2,7 @@
 
 **Document ID:** PLATFORM-INDEX-001  
 **Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
+**Status:** **Authoritative Mother Reference — 26-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
 **Last reconciliation:** 2026-09-13 — v3.2.2 enterprise monitoring coverage / Capability Pack certification specialized-master addition
@@ -11,7 +11,7 @@
 
 **v3.2.2 supersedes v3.2.1 as the authoritative Platform mother-reference set after merge to the canonical GitHub `main`.**
 
-v3.2.2 is an additive product/engineering scope revision. It includes five specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value; `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center; `Platform_21_Enterprise_Gap_Closure_Master.md` for enterprise adoption gaps such as normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, tamper-evident audit, governed offboarding/data portability and connector families; `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` for evidence-qualified alerting, monitoring-state semantics, RCA/AI assurance, bounded AI assistance and related shared-service evidence; and `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` for enterprise monitoring-domain coverage, the single Capability Pack architecture, dimensional certification and Real Customer Requirements normalization. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement. Existence of `Platform_23` is EMC-0 specification only and does not imply pack runtime, vendor certification or contractual coverage.
+v3.2.2 is an additive product/engineering scope revision. It includes six specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value; `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center; `Platform_21_Enterprise_Gap_Closure_Master.md` for enterprise adoption gaps such as normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, tamper-evident audit, governed offboarding/data portability and connector families; `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` for evidence-qualified alerting, monitoring-state semantics, RCA/AI assurance, bounded AI assistance and related shared-service evidence; `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` for enterprise monitoring-domain coverage, the single Capability Pack architecture, dimensional certification and Real Customer Requirements normalization; and `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` for Linux/Windows Agent durability, Sensor failover, assignment fencing, replay/idempotency, configuration/certificate/upgrade transactions, pipeline integrity and resource/failure certification. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement. Existence of a specialized master is specification authority, not proof of implementation or certification.
 
 v3.2.1 superseded v3.2 as a corrective/governance patch. v3.2 superseded v3.1 as a documentation-packaging revision. Earlier v1/v2/v3.0/v3.1 generated master packages and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as Platform engineering sources of truth.
 
@@ -26,7 +26,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 - Security/compliance readiness must never be represented as achieved certification until independently achieved.
 - Customer-value/MTTR percentages are not product claims until supported by disclosed reproducible customer/pilot evidence.
 
-## 3. Exact 25-file mother-reference set
+## 3. Exact 26-file mother-reference set
 
 | # | File | Governing scope |
 |---:|---|---|
@@ -55,6 +55,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 | 23 | `Platform_21_Enterprise_Gap_Closure_Master.md` | Authoritative enterprise gap-closure specialized master: normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, audit tamper evidence, enterprise connector/offboarding/licensing/policy-as-code requirements, formal `PRD-EGC-*` + `REQ-EGC-*` supplement |
 | 24 | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Authoritative monitoring-intelligence specialized master: class-specific Alert Evidence Contracts, telemetry trust, semantic monitoring states, alert-quality lifecycle, RCA/AI assurance, Incident Copilot, AI safety/provenance, formal `PRD-MIA-*` + `REQ-MIA-*` supplement |
 | 25 | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | Authoritative enterprise-monitoring-coverage specialized master: Capability Pack product contract, L1/L2/L3 dimensional certification, technology-family catalogue, Customer Acceptance Profiles, Real Customer Requirements normalization, formal `PRD-EMC-*` + `REQ-EMC-*` supplement |
+| 26 | `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` | Authoritative Agent reliability specialized master: Linux/Windows Agent durable buffering, Agent→Sensor ACK contract, primary/fallback Sensor failover, assignment fencing, operational FSM, replay/idempotency, atomic config/certificate/upgrade behavior, Agent-started pipeline reconciliation, resource bounds and failure certification, formal `PRD-ARF-*` + `REQ-ARF-*` supplement |
 
 ## 4. Consolidation and version map
 
@@ -85,6 +86,8 @@ The 2026-09-12 monitoring-intelligence reconciliation adds `Platform_22_Monitori
 
 The 2026-09-13 enterprise-monitoring-coverage reconciliation adds `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` under the same pattern. Its `PRD-EMC-*` and `REQ-EMC-*` requirements govern the Capability Pack architecture, dimensional certification, enterprise technology coverage and Customer Acceptance Profiles. Technology Monitoring Pack, Device / Network Pack, SaaS Monitoring Pack, Integration Pack and optional Customer Extension Pack are classifications/profiles of Capability Pack, not a competing framework. This remains **v3.2.2**; no v3.2.3 product-version number is created. `Platform_23` does not replace Device Pack contracts, `Platform_10` connector/security mechanics, `Platform_19` OIV, `Platform_20` onboarding, `Platform_21` enterprise-gap or `Platform_22` alert/AI-assurance authority.
 
+The 2026-09-19 Agent-reliability reconciliation adds `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` under the same consolidated specialized-master pattern. Its `PRD-ARF-*` and `REQ-ARF-*` requirements govern Linux/Windows Agent durability, Agent→Sensor acknowledgement semantics, Core-authorized primary/fallback Sensor failover, assignment fencing, operational state, atomic configuration/certificate/upgrade behavior, pipeline integrity and failure/resource certification. It preserves the existing Agent/Sensor architecture and does not authorize a parallel control plane, queue implementation, identity system or arbitrary Sensor selection. This remains **v3.2.2**; no v3.2.3 product-version number is created.
+
 The older files remain authoritative for their existing scope and are explicitly supplemented by specialized masters; they are not considered obsolete. This packaging choice is deliberate change control, not a waiver of traceability.
 
 ## 5. Precedence
@@ -109,6 +112,8 @@ When requirements appear to conflict:
 **Monitoring-intelligence special case:** `Platform_22` is a consolidated specialized amendment. Its `PRD-MIA-*` requirements act as authoritative product supplements for alert quality, evidence qualification and AI/RCA assurance; its architecture/security/operability sections govern that capability family and its `REQ-MIA-*` catalogue is the formal RTM supplement. It does not silently override Platform_19 OIV or Platform_21 enterprise-gap authority outside its assigned scope.
 
 **Enterprise-monitoring-coverage special case:** `Platform_23` is a consolidated specialized amendment. Its `PRD-EMC-*` requirements act as authoritative product supplements for enterprise monitoring coverage, Capability Pack contract, dimensional certification and Customer Acceptance Profiles; its `REQ-EMC-*` catalogue is the formal RTM supplement. It does not silently override Platform_10 connector/security, Platform_19 OIV, Platform_20 onboarding, Platform_21 enterprise-gap or Platform_22 alert/AI-assurance authority outside its assigned scope.
+
+**Agent-reliability special case:** `Platform_24` is a consolidated specialized amendment. Its `PRD-ARF-*` requirements act as authoritative product supplements for Linux/Windows Agent durability, Sensor failover, assignment fencing, Agent operational state, replay/idempotency, transactional configuration/certificate/upgrade behavior, pipeline integrity and resource/failure certification; its `REQ-ARF-*` catalogue is the formal RTM supplement. It may strengthen Agent reliability where base documents are silent but may not claim resolution of the open two-Core Kafka/ClickHouse/fencing P0 items or silently replace existing Core Sensor Control, Agent identity, durable queue or Sensor spool authority.
 
 Conflicts require documented change control; implementation must not silently choose a convenient interpretation.
 
@@ -164,7 +169,7 @@ Top-level licence alone is insufficient; transitive/bundled licences, notices, v
 Every release produces SPDX and CycloneDX SBOMs, third-party notices/licence texts, version locks, checksums and provenance.
 Implementation dependencies must match the catalogue; catalogue omissions discovered in implementation require catalogue/change-control updates before milestone/release.
 
-`Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` do not by themselves select new runtime dependencies. Any new vector database, packet-analysis product, SaaS SDK, browser automation engine, probe runtime, AI/model runtime, vendor SDK, pack runtime or other dependency requires normal OSS catalogue/security/performance approval.
+`Platform_19`, `Platform_20`, `Platform_21`, `Platform_22`, `Platform_23` and `Platform_24` do not by themselves select new runtime dependencies. Any new vector database, packet-analysis product, SaaS SDK, browser automation engine, probe runtime, AI/model runtime, vendor SDK, pack runtime or other dependency requires normal OSS catalogue/security/performance approval.
 
 ## 8. Completeness control
 
@@ -175,6 +180,8 @@ For v3.2.2 onboarding scope, `Platform_20` contains the authoritative `REQ-ONB-*
 For v3.2.2 enterprise gap-closure scope, `Platform_21` contains the authoritative `REQ-EGC-*` traceability supplement mapped to `PRD-EGC-*` requirements and their governing architecture/security/operability clauses.
 For v3.2.2 monitoring-intelligence/alert-quality/AI-assurance scope, `Platform_22` contains the authoritative `REQ-MIA-*` traceability supplement mapped to `PRD-MIA-*` requirements and their governing evidence/security/operability clauses.
 For v3.2.2 enterprise-monitoring-coverage / Capability Pack certification scope, `Platform_23` contains the authoritative `REQ-EMC-*` traceability supplement mapped to `PRD-EMC-*` requirements. Documentation mapping is not implementation evidence.
+
+For v3.2.2 Agent reliability/failover/durability scope, `Platform_24` contains the authoritative `REQ-ARF-*` traceability supplement mapped to `PRD-ARF-*` requirements. Specification or unit-test coverage is not production reliability certification.
 
 A new requirement is considered incorporated only when it has an ID, affected-layer mapping and sufficient normative behavior for implementation without inventing a load-bearing decision. Specialized masters satisfy this requirement only within their explicitly assigned capability family.
 
@@ -204,6 +211,8 @@ For discovery review, Agent onboarding/enrollment identity, dynamic endpoint ide
 For normalized SD-WAN, SCIM lifecycle, SLI/SLO/error budgets, audit tamper evidence, middleware/backup/SASE connectors, tenant offboarding/data portability, licensing safety, declarative configuration/policy-as-code, Incident Command Workspace, privacy-bounded endpoint DEX, browser synthetics, customer-operated probes or future regional federation, `Platform_21_Enterprise_Gap_Closure_Master.md` is mandatory preflight reading.
 For alert evidence/qualification, semantic monitoring states, alert-policy lifecycle/quality, active evidence acquisition, RCA confidence/contradictions, AI evaluation/safety, Incident Copilot, AI provider/egress controls, prompt-injection/tool-use protection, tenant-scoped learning, shared-service dependency evidence, PKI assurance or AI observability, `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` is mandatory preflight reading.
 For enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph vs governed-CMDB semantics, or coverage-measurement work, `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading.
+
+For Linux/Windows Agent durable buffering, Agent→Sensor acknowledgement/deletion semantics, Agent replay/idempotency, primary/fallback Sensor failover, assignment fencing, Agent operational states, Agent configuration/certificate/upgrade transactions, Agent-started pipeline reconciliation, Agent disk-pressure/resource limits, or Agent failure certification, `Platform_24_Agent_Reliability_Failover_Durability_and_Resource_Assurance_Master.md` is mandatory preflight reading.
 
 A feature is not complete when it only compiles: tests, observability, error/failure behavior, upgrade/migration impact, security/OSS implications, traceability and acceptance evidence are part of Definition of Done.
 
