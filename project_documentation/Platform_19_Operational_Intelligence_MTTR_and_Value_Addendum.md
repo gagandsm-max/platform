@@ -109,6 +109,8 @@ Provider status is supporting evidence, not causal proof. Reconcile it with obse
 
 For configured qualified incidents or authorized investigations, Platform shall pin/capture a bounded evidence window containing, where available: topology/graph state before/during/after; interface/link state/errors; BGP/OSPF/IS-IS/BFD/HSRP/VRRP changes; traceroute/path and synthetic results; Flow summaries; syslog/traps/events; relevant metrics/anomalies; NCM/external change facts; Sensor/telemetry quality; server/VM/container/database/storage state; business-service state; and authorized triggered packet evidence.
 
+Flow evidence in the Incident Flight Recorder is **bounded and summarized**, not a copy of every raw Flow row. Where relevant capture/reference: top conversations/sources/destinations/applications/site pairs, interface/observation-point traffic, sampling state, Flow Data Quality/coverage, material traffic-mix or QoS shifts, exporter/template health and links to the underlying authorized Flow query window. User-attributed Flow and domain/application context retain their privacy/RBAC/provenance controls.
+
 Event time, ingest time, quality, provenance and correlation IDs shall be retained. UI provides a replayable timeline and historical graph snapshot.
 
 ### 3.7 Similar Incident Memory — `PRD-OIV-007`
