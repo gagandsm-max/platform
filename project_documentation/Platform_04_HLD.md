@@ -1039,7 +1039,7 @@ Engineering design review shall not approve HLD implementation plans unless they
 4. PostgreSQL sync mode after benchmark/RPO definition.
 5. Exact GNN framework and runtime profile.
 6. DR topology/RPO/RTO.
-7. Numeric thresholds for dedicated Streaming Sensor recommendation.
+7. Certified Flow Sensor records/datagrams/bytes/exporter workload profiles and certified Log Sensor EPS/bytes/parser workload profiles.
 8. Final SNWP-2500-v1 workload constants.
 
 ---
@@ -1135,13 +1135,13 @@ The following cross-cutting capabilities are mandatory where applicable and must
 | Analytics/RCA workers | Python + Polars/NumPy/scikit-learn; GNN candidate PyTorch/PyG | isolated worker boundary with resource quotas and no direct secret access |
 | OSS compliance | ORT/Syft/Trivy/ScanCode | CI/release, not runtime customer workflow |
 
-### Network/Streaming Sensor
+### Network / Dedicated Flow / Dedicated Log Sensor
 
 | Worker family | OSS foundation | Platform worker responsibilities |
 |---|---|---|
 | SNMP | GoSNMP | scheduling, credential ref, bulk planning, normalized metrics, retry/qualification |
 | MIB | gosmi | compiled Device Pack metadata; runtime avoids reparsing MIB for every poll |
-| Flow | GoFlow2 | parser + canonical flow publication |
+| Flow | GoFlow2 | dedicated FLOW_SENSOR receiver; exporter/template/sampling/sequence state; source admission; bounded decode; canonical Flow + quality publication |
 | ICMP/path | x/net/icmp | probe scheduling and measurements |
 | DNS | miekg/dns | synthetic DNS worker |
 | SSH | x/crypto/ssh / scrapligo | discovery/diagnostics/CLI/NCM execution |
