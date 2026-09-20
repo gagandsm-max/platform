@@ -229,7 +229,7 @@ func TestRealSNMPPipelineE2E(t *testing.T) {
 	tr := &recordingTransport{}
 	up, err := uploader.New(uploader.Config{
 		SensorID:             expectedSensor,
-		BootEpoch:            "epoch-e2e-1",
+		StreamID:             diskSpool.StreamID(),
 		MaxBatchRecords:      10,
 		MaxBatchPayloadBytes: 1024 * 1024,
 		MaxRequestBytes:      2 * 1024 * 1024,
@@ -257,6 +257,9 @@ func TestRealSNMPPipelineE2E(t *testing.T) {
 	uploadedBatch := tr.batches[0]
 	if uploadedBatch.FirstSequence != 1 || uploadedBatch.LastSequence != 1 {
 		t.Fatalf("batch sequence bounds mismatch: [%d..%d]", uploadedBatch.FirstSequence, uploadedBatch.LastSequence)
+	}
+	if uploadedBatch.BootEpoch != diskSpool.StreamID() {
+		t.Fatalf("wire bootEpoch must carry durable spool stream ID, got %q want %q", uploadedBatch.BootEpoch, diskSpool.StreamID())
 	}
 	if uploadedBatch.Checksum == "" {
 		t.Fatalf("batch checksum must not be empty")

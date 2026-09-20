@@ -68,7 +68,7 @@ func main() {
 
 	up, err := uploader.New(uploader.Config{
 		SensorID:             cfg.SensorID,
-		BootEpoch:            fmt.Sprintf("epoch-%d", time.Now().Unix()),
+		StreamID:             diskSpool.StreamID(),
 		MaxBatchRecords:      100,
 		MaxBatchPayloadBytes: 1024 * 1024,
 		MaxRequestBytes:      2 * 1024 * 1024,

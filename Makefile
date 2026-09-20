@@ -14,7 +14,7 @@ endif
 include $(ENV_FILE)
 export
 
-.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-static-contracts test-integration test-contract test-security-smoke test-agent-runtime-e2e evidence clean dev-reset certs post-reboot-verify dev-disk-check dev-hygiene
+.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-static-contracts test-integration test-contract test-security-smoke test-telemetry-pipeline test-clickhouse-replay-migration test-agent-runtime-e2e evidence clean dev-reset certs post-reboot-verify dev-disk-check dev-hygiene
 
 help: ## Show available Makefile targets
 	@echo "========================================================================"
@@ -108,6 +108,10 @@ test-security-smoke: ## Run mTLS, port isolation, and host runtime security smok
 test-telemetry-pipeline: ## Run end-to-end Sensor->Spool->Core->Kafka->ClickHouse pipeline verification
 	@echo "==> Running Platform telemetry pipeline verification..."
 	@bash tests/run-telemetry-pipeline-test.sh
+
+test-clickhouse-replay-migration: ## Prove legacy ClickHouse upgrade and replay-safe canonical reads
+	@echo "==> Running ClickHouse replay-identity migration test..."
+	@bash tests/run-clickhouse-replay-migration-test.sh
 
 test-agent-runtime-e2e: ## Real Agent→Sensor Receiver→Agent spool→Core→Kafka path (test-only overlay)
 	@echo "==> Running Agent runtime E2E (does not change SENSOR_AGENT_RECEIVER_ENABLED compose default)..."

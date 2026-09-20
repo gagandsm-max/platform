@@ -4,7 +4,10 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Immutable durable replay watermark state for a single Sensor.
+ * Immutable durable watermark state for a single Sensor ingress stream.
+ *
+ * <p>Telemetry Sensor spool ingestion uses {@link ReplayReservation} / pending-reservation
+ * semantics. Agent-ingress watermarking still uses this simple last-accepted range record.
  */
 public record WatermarkState(
         String sensorId,

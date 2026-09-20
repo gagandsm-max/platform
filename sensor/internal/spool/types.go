@@ -13,6 +13,7 @@ const (
 	stateSchemaVersion      = 1
 	recordSchemaVersion     = 1
 	stateFileName           = "state.json"
+	streamIDFileName        = "stream-id"
 	quarantineDirName       = "quarantine"
 )
 
@@ -127,6 +128,7 @@ type spaceStatus struct {
 }
 type DiskSpool struct {
 	dir            string
+	streamID       string
 	quarantineDir  string
 	maxRecordBytes int
 	logger         *slog.Logger

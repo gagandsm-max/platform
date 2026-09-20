@@ -588,8 +588,11 @@ public class IngestionValidator {
                         );
                     }
 
-                    // P0-5: Stable logical observation identity:
-                    // <tenantId>:<sensorId>:<bootEpoch>:<sequence>:<ordinal>:<metricId>
+                    // P0 replay identity uses the durable Sensor spool stream generation.
+                    // The v1 wire field remains named bootEpoch for compatibility, but the Sensor now
+                    // supplies its persisted spool StreamID: stable across process restart and new only
+                    // when the durable spool itself is recreated.
+                    // <tenantId>:<sensorId>:<streamId>:<sequence>:<ordinal>:<metricId>
                     String stableSeqId = authoritativeTenantId + ":"
                             + authoritativeSensorId + ":"
                             + batch.bootEpoch() + ":"

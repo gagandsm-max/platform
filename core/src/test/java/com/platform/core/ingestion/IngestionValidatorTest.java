@@ -249,6 +249,51 @@ class IngestionValidatorTest {
     }
 
     @Test
+    void testLogicalObservationIdentityUsesDurableSpoolGeneration() throws Exception {
+        String recordJson = "{\"sequence\":105,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\"," +
+                "\"entityId\":\"" + entityId + "\"," +
+                "\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\"," +
+                "\"quality\":\"GOOD\"," +
+                "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":1234567}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String streamA = "stream-00112233445566778899aabbccddeeff";
+        String streamB = "stream-ffeeddccbbaa99887766554433221100";
+
+        String firstJson = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"" + streamA +
+                "\",\"batchId\":\"b-1\",\"firstSequence\":105,\"lastSequence\":105,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        String processRestartRetryJson = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"" + streamA +
+                "\",\"batchId\":\"b-2\",\"firstSequence\":105,\"lastSequence\":105,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        String recreatedSpoolJson = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"" + streamB +
+                "\",\"batchId\":\"b-3\",\"firstSequence\":105,\"lastSequence\":105,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+
+        TelemetryBatchRequest firstRequest = objectMapper.readValue(firstJson, TelemetryBatchRequest.class);
+        TelemetryBatchRequest restartRequest = objectMapper.readValue(processRestartRetryJson, TelemetryBatchRequest.class);
+        TelemetryBatchRequest recreatedRequest = objectMapper.readValue(recreatedSpoolJson, TelemetryBatchRequest.class);
+
+        List<CanonicalObservation> first = validator.validateAndExtract(
+                firstJson.getBytes(StandardCharsets.UTF_8), firstRequest, testScope);
+        List<CanonicalObservation> retry = validator.validateAndExtract(
+                processRestartRetryJson.getBytes(StandardCharsets.UTF_8), restartRequest, testScope);
+        List<CanonicalObservation> recreated = validator.validateAndExtract(
+                recreatedSpoolJson.getBytes(StandardCharsets.UTF_8), recreatedRequest, testScope);
+
+        assertEquals(first.get(0).sequenceId(), retry.get(0).sequenceId(),
+                "Sensor process restart must retain the durable spool generation identity");
+        assertNotEquals(first.get(0).sequenceId(), recreated.get(0).sequenceId(),
+                "a recreated spool generation must not collide with historical sequence identity");
+    }
+
+    @Test
     void testSequenceContinuityDiscontinuityRejected() throws Exception {
         // Range 1..3, but only sequences 1 and 3 are present (count = 2 != 3)
         String rec1 = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
