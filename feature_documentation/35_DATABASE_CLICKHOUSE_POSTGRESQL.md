@@ -1,6 +1,6 @@
 # Databases — ClickHouse & PostgreSQL
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_03, 04, 05, 11, 14, 16, 17
 
 ## Product objective
