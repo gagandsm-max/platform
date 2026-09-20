@@ -47,7 +47,7 @@ Nothing in this document selects a new OSS dependency, database, mandatory micro
 | `PRD-EGC-010` | P1 | SASE/SSE/ZTNA integrations shall normalize service/connector/tunnel/session/policy/experience evidence into Platform inventory, topology, health and incident context without claiming to replace the security control plane. |
 | `PRD-EGC-011` | P1 | Platform shall provide a lean Incident Command Workspace that assembles incident state, evidence, timeline, ownership, actions and links to ITSM/collaboration systems; it shall not duplicate Slack/Teams/chat functionality. |
 | `PRD-EGC-012` | V1.x | Optional endpoint Digital Experience Monitoring may collect bounded device/application/network experience signals needed for service quality, with explicit tenant policy, transparency, minimization, retention controls and prohibitions on keystroke/content/user-surveillance collection. |
-| `PRD-EGC-013` | P1 | Platform may add multi-step browser synthetics with scripted journeys, assertions, timing and evidence capture. No browser runtime or automation dependency is selected by this requirement. Platform_24 incorporates browser journeys into the P1 full-stack observability roadmap. |
+| `PRD-EGC-013` | P1 | Platform may add multi-step browser synthetics with scripted journeys, assertions, timing and evidence capture. No browser runtime or automation dependency is selected by this requirement. Platform_26 incorporates browser journeys into the P1 full-stack observability roadmap. |
 | `PRD-EGC-014` | V1.x | Platform may support customer-operated/outside-in probes for externally observed reachability and service experience. This does not commit Platform to operating a global managed probe SaaS. |
 | `PRD-EGC-015` | P2 | Future regional Core federation may provide governed cross-region inventory/service/incident summarization and continuity, but shall not alter the v1 exactly-two-Core Active/Standby contract without separate architecture change control. |
 
@@ -65,7 +65,7 @@ SCIM integration is an identity-governance target, not a certification claim. Pr
 
 ### 4.3 SLI/SLO and error budgets
 
-An SLO definition binds service/resource scope, SLI expression, evaluation window, target, exclusions/maintenance semantics and ownership. Burn-rate evaluation must support more than one time horizon so short severe breaches and sustained degradation can be distinguished. Threshold values remain policy/customer decisions unless an existing requirement fixes them. Under Platform_24, this existing P0 SLO authority is integrated with cloud/service identity, traces, synthetics, metrics, incidents and the service graph; Platform_24 does not create a second SLO engine.
+An SLO definition binds service/resource scope, SLI expression, evaluation window, target, exclusions/maintenance semantics and ownership. Burn-rate evaluation must support more than one time horizon so short severe breaches and sustained degradation can be distinguished. Threshold values remain policy/customer decisions unless an existing requirement fixes them. Under Platform_26, this existing P0 SLO authority is integrated with cloud/service identity, traces, synthetics, metrics, incidents and the service graph; Platform_26 does not create a second SLO engine.
 
 ### 4.4 Audit tamper evidence
 
@@ -143,7 +143,7 @@ P0/P1 capability implementation is not complete until the relevant requirements 
 | `REQ-EGC-009` | P1 | SASE/SSE/ZTNA tests prove normalized identity/relationship mapping, secret handling, API rate/failure behavior and separation of observation from enforcement. |
 | `REQ-EGC-010` | P1 | Incident Command Workspace tests prove authoritative-object linkage, role/tenant scoping, external-integration degradation behavior and absence of an independent chat authority. |
 | `REQ-EGC-011` | V1.x | DEX privacy tests prove prohibited content/surveillance fields are not collected, tenant policy gates collection, and retention/export honor configured privacy controls. |
-| `REQ-EGC-012` | P1 | Browser-synthetic implementation requires an approved dependency/security/performance decision plus deterministic journey, secret, evidence-retention and failure-isolation tests; Platform_24 defines the P1 observability integration. |
+| `REQ-EGC-012` | P1 | Browser-synthetic implementation requires an approved dependency/security/performance decision plus deterministic journey, secret, evidence-retention and failure-isolation tests; Platform_26 defines the P1 observability integration. |
 | `REQ-EGC-013` | V1.x | Outside-in probe implementation proves customer/probe identity, tenant scope, replay resistance, bounded buffering, time quality and explicit ownership/operating model. |
 | `REQ-EGC-014` | P2 | Regional federation requires separate architecture approval and tests for partition, authority, data residency, reconciliation and compatibility while preserving v1 two-Core HA semantics. |
 | `REQ-EGC-015` | P0 | Every capability introduced under this master exposes health/lag/error/capacity telemetry sufficient to distinguish Platform collection/control degradation from monitored-environment failure. |
