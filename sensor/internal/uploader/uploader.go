@@ -56,7 +56,7 @@ func codeErr(code ErrorCode, msg string, cause error, transient bool) error {
 
 type Config struct {
 	SensorID             string
-	BootEpoch            string
+	StreamID             string
 	MaxBatchRecords      int
 	MaxBatchPayloadBytes int
 	MaxRequestBytes      int
@@ -112,7 +112,7 @@ type Uploader struct {
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Uploader, error) {
-	if cfg.SensorID == "" || cfg.BootEpoch == "" || cfg.MaxBatchRecords <= 0 || cfg.MaxBatchPayloadBytes <= 0 || cfg.MaxRequestBytes <= 0 || cfg.MaxAttempts <= 0 || cfg.InitialBackoff <= 0 || cfg.MaxBackoff < cfg.InitialBackoff || cfg.JitterFraction < 0 || cfg.JitterFraction > 1 || cfg.IdleInterval <= 0 || sp == nil || tr == nil {
+	if cfg.SensorID == "" || cfg.StreamID == "" || cfg.MaxBatchRecords <= 0 || cfg.MaxBatchPayloadBytes <= 0 || cfg.MaxRequestBytes <= 0 || cfg.MaxAttempts <= 0 || cfg.InitialBackoff <= 0 || cfg.MaxBackoff < cfg.InitialBackoff || cfg.JitterFraction < 0 || cfg.JitterFraction > 1 || cfg.IdleInterval <= 0 || sp == nil || tr == nil {
 		return nil, codeErr(CodeInvalidConfig, "uploader requires explicit identity, bounded batch/retry timings, spool and transport", nil, false)
 	}
 	u := &Uploader{cfg: cfg, spool: sp, transport: tr, state: StateIdle, done: make(chan struct{})}
@@ -256,8 +256,8 @@ func (u *Uploader) makeBatch(b spool.Batch) (coreclient.Batch, error) {
 		_, _ = h.Write(enc)
 	}
 	checksum := hex.EncodeToString(h.Sum(nil))
-	batchID := fmt.Sprintf("%s-%s-%020d-%020d-%s", u.cfg.SensorID, u.cfg.BootEpoch, b.FirstSequence, b.LastSequence, checksum[:16])
-	out := coreclient.Batch{SchemaVersion: 1, SensorID: u.cfg.SensorID, BootEpoch: u.cfg.BootEpoch, BatchID: batchID, FirstSequence: b.FirstSequence, LastSequence: b.LastSequence, Checksum: checksum, Records: records, CorrelationID: "upload-" + batchID}
+	batchID := fmt.Sprintf("%s-%s-%020d-%020d-%s", u.cfg.SensorID, u.cfg.StreamID, b.FirstSequence, b.LastSequence, checksum[:16])
+	out := coreclient.Batch{SchemaVersion: 1, SensorID: u.cfg.SensorID, BootEpoch: u.cfg.StreamID, BatchID: batchID, FirstSequence: b.FirstSequence, LastSequence: b.LastSequence, Checksum: checksum, Records: records, CorrelationID: "upload-" + batchID}
 	encoded, err := json.Marshal(out)
 	if err != nil {
 		return coreclient.Batch{}, codeErr(CodeSpool, "failed encoding upload batch", err, false)
