@@ -226,3 +226,9 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Tiered local-intelligence implementation architecture | ARCH-DELEGATED | Tier 0 is model-free endpoint capture-eligibility/evidence logic; Tier 1 is bounded/cold Core analytics that yields to protected monitoring; Tier 2 is optional LLM/embedding assistance behind AI Gateway. |
 | Dedicated local/private inference isolation mechanics | ARCH-DELEGATED | **If** a dedicated local/private inference provider is supported/enabled, its isolation/security/non-authority requirements are mandatory. It is not required for Linux/Windows monitoring, EDS, deterministic RCA or base Platform operation; it is not a third Core/HA node; it owns no authoritative Platform state; it may fail/absent without affecting deterministic Platform operation. |
 | Documentation packaging | ARCH-DELEGATED | This enhancement remains v3.2.2 and is reconciled across existing base documents plus `Platform_22` and `Platform_23`; no `Platform_24`/`Platform_25` or competing specialized-master framework is created. |
+
+## 14. Specialized-master number allocation governance — 2026-09-20
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Specialized-master number allocation | ARCH-DELEGATED | Canonical `Platform_NN` specialized-master numbers are allocated only from the merged set on current `main` during final reconciliation. Open/draft PRs have no reservation authority via filename, branch, title or draft content. Number assignment, document rename and Index/Decision/RTM/AGENTS cross-reference updates occur atomically in that reconciliation; merge order determines allocation among parallel candidates. The set-wide Mother Reference version remains unchanged unless separately approved; a candidate PR cannot silently advance the full set (for example to v3.2.3). |
