@@ -69,6 +69,7 @@ public class SensorIngestionService {
         ReplayReservation reservation = watermarkStore.reserveBatch(
                 scope.tenantId(),
                 scope.sensorId(),
+                request.bootEpoch(),
                 request.firstSequence(),
                 request.lastSequence(),
                 request.checksum(),
@@ -103,6 +104,7 @@ public class SensorIngestionService {
         watermarkStore.finalizeReservedBatch(
                 scope.tenantId(),
                 scope.sensorId(),
+                request.bootEpoch(),
                 request.firstSequence(),
                 request.lastSequence(),
                 request.checksum(),
