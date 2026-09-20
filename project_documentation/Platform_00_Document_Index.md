@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-20 — v3.2.2 specialized-master namespace and authority reconciliation
 
 ## 1. Authority
 
@@ -100,6 +100,29 @@ This reconciliation updates existing base/specialized masters and keeps the auth
 A post-merge cross-layer audit of the NOC troubleshooting reconciliation identified four documentation-integration defects: the API/event/data-contract master did not yet define the diagnostic/investigation contracts; the sizing master did not explicitly account for interactive diagnostics and multi-vantage fan-out; Interface Detail and RCA/Investigation screen contracts retained weaker legacy action lists; and the phrase **diagnostic pack** could be misread as a second packaging framework beside the single Capability Pack architecture.
 
 This corrective reconciliation closes those defects without adding product scope, a new database, a new mandatory service, a new pack framework or a new dependency. `Platform_17` owns the versioned API/event/data contracts; `Platform_11` owns interactive-diagnostic capacity accounting; `Platform_09` owns explicit screen behavior; and `Platform_23` clarifies that a diagnostic workflow definition is not a second Capability Pack/registry/SDK.
+
+## 4.5 Reserved specialized-master namespace for active reconciliation lanes — 2026-09-20
+
+The authoritative Mother Reference set remains the exact 25-file set in §3 until a candidate specialized master is independently reconciled, merged and registered here. Open pull requests do **not** become authority by filename, branch name or draft status.
+
+To prevent parallel branches from independently claiming the same document number, the following identifiers are reserved for the currently active candidate capability families:
+
+| Reserved file | Capability family | Current reconciliation rule |
+|---|---|---|
+| `Platform_24_Extensibility_CapabilityPack_MIB_API_Webhook_Runtime_Master.md` | Extensibility / Capability Pack authoring/runtime / MIB / API / webhook | Foundation dependency for later connector-heavy specialized masters; must remain compatible with the single Capability Pack authority in Platform_23. |
+| `Platform_25_Enterprise_Log_Event_and_SIEM_Forwarding_Master.md` | Enterprise log/event collection and SIEM forwarding | Must consume the common extensibility/integration runtime rather than create a parallel connector framework. |
+| `Platform_26_Cloud_and_Full_Stack_Observability_Master.md` | Cloud and full-stack observability | Must reuse Capability Pack, identity, telemetry, log/trace, security and sizing authorities rather than create parallel storage/control planes. |
+| `Platform_27_Integration_Automation_and_Ecosystem_Master.md` | ITSM / integration / automation / ecosystem | Must reuse the common connector/webhook/runtime contracts and existing Incident/NCM/remediation authority. |
+
+These are **namespace reservations, not implementation or merge approval**. A reserved document becomes authoritative only after deliberate Mother Reference reconciliation, exact-head review, required Index/Decision/RTM/AGENTS updates and merge to canonical `main`.
+
+Additional rules:
+
+1. Candidate branches may not self-allocate or reuse `Platform_24`–`Platform_27` for a different capability family without deliberate change control.
+2. The reservations do not increase the current authoritative file count.
+3. These additive candidates remain part of the v3.2.2 documentation line unless a separate approved product/document-version change explicitly creates v3.2.3. A draft filename/header alone cannot create a new authoritative version.
+4. Flow/NTA enrichment and dedicated Sensor-role reconciliation shall **not** create another specialized Mother Reference. The active Flow lanes must reconcile into the existing base/specialized masters, with one surviving implementation/documentation lane.
+5. Safety-net/handoff artifacts are non-authoritative and must be deleted after their accepted content is reconciled; they may not survive as parallel sources of truth.
 
 ## 5. Precedence
 
