@@ -1,6 +1,6 @@
 # Installing Core
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 03, 15, 16
 
 ## Product objective

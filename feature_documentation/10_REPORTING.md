@@ -1,6 +1,6 @@
 # Reporting
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 07, 09, 11, 17, 19
 
 ## Product objective

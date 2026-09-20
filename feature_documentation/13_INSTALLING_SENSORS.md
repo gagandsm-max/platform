@@ -1,7 +1,7 @@
 # Installing Sensors
 
-**Class:** Derived feature brief — non-authoritative  
-**Primary sources:** Platform_02, 03, 10, 11, 16  
+**Class:** Derived feature brief — non-authoritative
+**Primary sources:** Platform_02, 03, 10, 11, 16
 **Pending enhancement:** production Sensor role exclusivity defined in `35_SENSOR_DEPLOYMENT_ARCHITECTURE.md`.
 
 ## Product objective

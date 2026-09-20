@@ -1,6 +1,6 @@
 # Core Data Integrity & Persistence
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_03, 04, 05, 06, 14, 17, 18
 
 ## Product objective
