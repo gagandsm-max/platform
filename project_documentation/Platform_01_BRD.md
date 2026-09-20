@@ -128,7 +128,7 @@ Platform shall provide, directly or through approved extensibility frameworks:
 ### 5.2 Out of initial product scope
 
 - Full DPI / packet-level Layer-7 observability as a primary product capability.
-- Mandatory proprietary full-bytecode APM agents for every language/runtime are outside the initial P0 boundary. OpenTelemetry-native distributed tracing, service graphs and cross-signal transaction investigation are explicitly in scope under `Platform_24`.
+- Mandatory proprietary full-bytecode APM agents for every language/runtime are outside the initial P0 boundary. OpenTelemetry-native distributed tracing, service graphs and cross-signal transaction investigation are explicitly in scope under `Platform_26`.
 - Autonomous closed-loop remediation in initial release; assisted recommendations and operator-controlled workflows come first.
 - Future Master Core / Regional Core federation is architecturally anticipated but is not part of the initial implementation scope.
 
