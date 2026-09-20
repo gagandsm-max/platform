@@ -1050,7 +1050,7 @@ Every intentional/forced drop after receiver visibility is counted. UDP packets 
 
 ### 14.6 Replay and observation identity
 
-After certified durable local acceptance, each canonical Flow record has stable Platform ingestion identity for Sensor→Core replay. Source sequence/record index/template/generation metadata are retained where available.
+After certified durable local acceptance, each canonical Flow record has stable Platform ingestion identity for Sensor→Core replay. The Platform replay identity is anchored to tenant + Flow Sensor + **durable Flow-spool stream generation** + spool sequence/batch + record ordinal (or an equivalent collision-resistant deterministic identity). The durable stream generation is created once for a spool lifetime and survives process restart; a process boot/session identifier must not change the identity of an already-spooled record. Recreating/loss of the durable Flow spool creates a new stream generation and must enter the same explicit continuity/re-enrollment/fail-closed handling used by the certified Sensor replay contract rather than silently resetting sequence authority. Source exporter sequence/record index/template/generation metadata are retained where available but are not the sole Platform replay identity.
 
 Do not deduplicate valid observations from different exporters/interfaces by five-tuple. Retransmission/source-record duplicates and multi-vantage conversation correlation are separate mechanisms.
 
