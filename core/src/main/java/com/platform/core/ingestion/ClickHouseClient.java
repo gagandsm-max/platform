@@ -81,7 +81,7 @@ public class ClickHouseClient {
             body.append(objectMapper.writeValueAsString(row)).append("\n");
         }
 
-        URI uri = URI.create(baseUrl + "/?query=INSERT+INTO+platform.metric_numeric+FORMAT+JSONEachRow");
+        URI uri = URI.create(baseUrl + "/?query=INSERT+INTO+platform.metric_numeric_raw+FORMAT+JSONEachRow");
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(uri)
                 .timeout(Duration.ofSeconds(10))
@@ -92,14 +92,16 @@ public class ClickHouseClient {
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
-            String errorMsg = "ClickHouse insert failed with status " + response.statusCode() + ": " + response.body();
-            metrics.recordClickHouseFailure(errorMsg);
-            throw new RuntimeException(errorMsg);
+            // ClickHouse response bodies can contain data-dependent diagnostics. Never propagate
+            // those bodies into application exceptions, health state, or Kafka framework logs.
+            String failureCode = "CLICKHOUSE_HTTP_" + response.statusCode();
+            metrics.recordClickHouseFailure(failureCode);
+            throw new RuntimeException("ClickHouse insert failed with status " + response.statusCode());
         }
 
         long durationMs = System.currentTimeMillis() - startTime;
         metrics.recordClickHouseInsert(observations.size(), durationMs);
-        log.debug("Successfully inserted {} observations into ClickHouse platform.metric_numeric ({}ms)",
+        log.debug("Successfully inserted {} observations into ClickHouse platform.metric_numeric_raw ({}ms)",
                 observations.size(), durationMs);
     }
 }
