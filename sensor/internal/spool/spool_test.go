@@ -36,6 +36,10 @@ func TestAppendSequencesRestartAndStateRecovery(t *testing.T) {
 		t.Fatal(e)
 	}
 	s.space = func(int64) (spaceStatus, error) { return spaceStatus{1000000, 1000, .1}, nil }
+	streamID := s.StreamID()
+	if streamID == "" {
+		t.Fatal("durable spool stream ID must be initialized")
+	}
 	for i := 1; i <= 20; i++ {
 		r, e := s.Append(AppendRequest{Class: ClassMetric, Type: "m", Payload: []byte("x")})
 		if e != nil || r.Sequence != uint64(i) {
@@ -50,11 +54,30 @@ func TestAppendSequencesRestartAndStateRecovery(t *testing.T) {
 		t.Fatal(e)
 	}
 	s2.space = s.space
+	if s2.StreamID() != streamID {
+		t.Fatalf("stream ID changed across process-style reopen: before=%s after=%s", streamID, s2.StreamID())
+	}
 	r, e := s2.Append(AppendRequest{Class: ClassEvent, Type: "e", Payload: []byte("y")})
 	if e != nil || r.Sequence != 21 {
 		t.Fatalf("restart seq=%d err=%v", r.Sequence, e)
 	}
 }
+func TestSpoolRecreationCreatesNewStreamID(t *testing.T) {
+	first := openTest(t, 1024)
+	firstID := first.StreamID()
+	if firstID == "" {
+		t.Fatal("first stream ID missing")
+	}
+	second := openTest(t, 1024)
+	secondID := second.StreamID()
+	if secondID == "" {
+		t.Fatal("second stream ID missing")
+	}
+	if firstID == secondID {
+		t.Fatalf("independent spool generations must not share stream ID: %s", firstID)
+	}
+}
+
 func TestOrderedBatchBounds(t *testing.T) {
 	s := openTest(t, 1024)
 	for _, p := range []string{"aa", "bbb", "cccc"} {
