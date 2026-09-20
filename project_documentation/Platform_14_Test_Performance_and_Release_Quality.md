@@ -148,12 +148,12 @@ Customer Acceptance Profile results must be evidence-backed. A technology listed
 
 Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certified ≠ deployed.
 
-OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively. Enterprise-log collection/routing/SIEM-forwarding class-specific gates remain in Platform_24.
+OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively. Enterprise-log collection/routing/SIEM-forwarding class-specific gates remain in Platform_25.
 
 
 ## 7. Enterprise log / SIEM-forwarding release supplement
 
-When Platform_24 capability is enabled in a release, release evidence shall additionally prove:
+When Platform_25 capability is enabled in a release, release evidence shall additionally prove:
 
 - RFC3164/RFC5424 parsing and malformed/oversized bounds;
 - UDP loss visibility and TCP/TLS framing/reconnect/certificate behavior;
