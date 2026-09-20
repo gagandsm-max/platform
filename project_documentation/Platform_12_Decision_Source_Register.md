@@ -217,7 +217,7 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 
 | Decision | Classification | Governing statement |
 |---|---|---|
-| Cloud/full-stack observability product scope | USER-FIXED | `PRD-CLOBS-001` through `PRD-CLOBS-028` in `Platform_24_Cloud_and_Full_Stack_Observability_Master.md` are approved additive v3.2.2 requirements. |
+| Cloud/full-stack observability product scope | USER-FIXED | `PRD-CLOBS-001` through `PRD-CLOBS-028` in `Platform_26_Cloud_and_Full_Stack_Observability_Master.md` are approved additive v3.2.2 requirements. |
 | Cloud observability P0/P1 model | USER-FIXED | `PRD-CLOBS-001..021` are P0 for the first Cloud Observability GA claim; `PRD-CLOBS-022..028` are P1. This priority model is distinct from unresolved `TBD/P0-SPIKE` implementation decisions in §5. |
 | Day-one provider roots | USER-FIXED | AWS, Azure, GCP and OCI are mandatory provider roots for the first Cloud Observability GA. The mandatory service-family catalogue in Platform_24 is a certification target; no current implementation/certification claim exists until dimensional evidence is recorded. |
 | OpenTelemetry trace scope | USER-FIXED | Metrics, logs and traces are core P0 observability signals. Platform shall provide OTel-native trace storage/query/sampling, resource/service correlation and cross-signal investigation. Mandatory proprietary full-bytecode agents for every language/runtime remain outside P0. |
