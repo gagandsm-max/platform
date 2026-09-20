@@ -21,7 +21,7 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 |---|---|---|
 | Product name | USER-FIXED | New product/project is **Platform**; do not call it Enterprise360 except when discussing legacy/reference material. |
 | Independence | USER-FIXED | Build from scratch; separate from ThoughtData and NetAI. |
-| Scope | USER-FIXED | Network + Infrastructure + DB + Cloud + Kubernetes + OpenTelemetry metrics/logs/traces + synthetics + service/full-stack observability. Full always-on DPI and mandatory proprietary full-bytecode APM agents are excluded from P0; Platform_24 governs P0/P1 cloud/full-stack scope. |
+| Scope | USER-FIXED | Network + Infrastructure + DB + Cloud + Kubernetes + OpenTelemetry metrics/logs/traces + synthetics + service/full-stack observability. Full always-on DPI and mandatory proprietary full-bytecode APM agents are excluded from P0; Platform_26 governs P0/P1 cloud/full-stack scope. |
 | Core HA | USER-FIXED | Exactly two full Core nodes; one Active, one Standby; continuous sync; failover target <60 seconds. |
 | Core install | USER-FIXED | Separate Core build; installer chooses Standalone/HA and pairs two Cores through supplied peer/HA addressing. |
 | Sensor/Agent install | USER-FIXED | Separate Sensor and Agent builds; install against current master Core, handshake, download effective config; Core directs Agent to appropriate Sensor. |
@@ -89,7 +89,7 @@ Retained design lessons: Central–Probe model, probes close to monitored networ
 
 ### 4.4 Legacy ThoughtData/Enterprise360 learning
 
-Legacy material was used as capability/reference input for broad monitoring coverage such as SNMP/Flow, infrastructure, virtualization, DB, cloud, custom MIB, dashboards, NCM/IPAM/topology/synthetics. Platform is clean-room and does not inherit legacy proprietary source or claims. Cyber-threat and full always-on DPI scope are not carried into current Platform product scope. Mandatory proprietary full-bytecode APM is still excluded from P0, while OpenTelemetry-native tracing/service graphs/cross-signal observability are now independently approved Platform scope under Platform_24.
+Legacy material was used as capability/reference input for broad monitoring coverage such as SNMP/Flow, infrastructure, virtualization, DB, cloud, custom MIB, dashboards, NCM/IPAM/topology/synthetics. Platform is clean-room and does not inherit legacy proprietary source or claims. Cyber-threat and full always-on DPI scope are not carried into current Platform product scope. Mandatory proprietary full-bytecode APM is still excluded from P0, while OpenTelemetry-native tracing/service graphs/cross-signal observability are now independently approved Platform scope under Platform_26.
 
 ## 5. Explicit TBD/P0 Engineering Spikes
 
@@ -219,7 +219,7 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 |---|---|---|
 | Cloud/full-stack observability product scope | USER-FIXED | `PRD-CLOBS-001` through `PRD-CLOBS-028` in `Platform_26_Cloud_and_Full_Stack_Observability_Master.md` are approved additive v3.2.2 requirements. |
 | Cloud observability P0/P1 model | USER-FIXED | `PRD-CLOBS-001..021` are P0 for the first Cloud Observability GA claim; `PRD-CLOBS-022..028` are P1. This priority model is distinct from unresolved `TBD/P0-SPIKE` implementation decisions in §5. |
-| Day-one provider roots | USER-FIXED | AWS, Azure, GCP and OCI are mandatory provider roots for the first Cloud Observability GA. The mandatory service-family catalogue in Platform_24 is a certification target; no current implementation/certification claim exists until dimensional evidence is recorded. |
+| Day-one provider roots | USER-FIXED | AWS, Azure, GCP and OCI are mandatory provider roots for the first Cloud Observability GA. The mandatory service-family catalogue in Platform_26 is a certification target; no current implementation/certification claim exists until dimensional evidence is recorded. |
 | OpenTelemetry trace scope | USER-FIXED | Metrics, logs and traces are core P0 observability signals. Platform shall provide OTel-native trace storage/query/sampling, resource/service correlation and cross-signal investigation. Mandatory proprietary full-bytecode agents for every language/runtime remain outside P0. |
 | Prometheus/OpenMetrics interoperability | ARCH-DELEGATED | Platform accepts approved Prometheus/OpenMetrics collection/ingestion through the OTel/ingestion architecture while retaining ClickHouse/Platform policy/alert/RCA authority; Prometheus is not selected as the primary Platform TSDB. |
 | Cloud Service Pack architecture | USER-FIXED + ARCH-DELEGATED implementation | Provider/service integrations use the single Capability Pack architecture from Platform_23. No second Cloud Pack framework or provider-specific Core fork is allowed. |
@@ -227,8 +227,8 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Cloud-native ephemeral lifecycle | USER-FIXED | Approved durable cloud/Kubernetes parent scope may authorize inherited monitoring/reconciliation of short-lived children without per-child manual approval; tenant authority, provenance, exclusions and conflict review remain mandatory. |
 | Cloud/full-stack data architecture | ARCH-DELEGATED | Reuse PostgreSQL for control/current-state metadata, ClickHouse for high-volume observability history including spans/cloud events/flows, Kafka for versioned internal events, Valkey for reconstructable ephemeral state and existing bounded artifact storage where appropriate. No new mandatory cloud/trace database is selected. |
 | Cloud connector trust | USER-FIXED + ARCH-DELEGATED implementation | Provider API/credential/collector degradation is monitoring evidence and produces explicit partial/degraded/stale states; it must not silently become managed-resource DOWN. |
-| SLO integration | USER-FIXED | Platform_21 remains SLI/SLO/error-budget authority; Platform_24 makes its service/cloud integration P0 rather than creating a second SLO engine. |
-| P1 digital/application observability | USER-FIXED | Browser RUM, mobile/browser-journey expansion, profiling, eBPF-assisted discovery, FinOps/cost observability, customer AI/LLM observability, GPU/accelerator observability and observability-as-code are P1 under Platform_24. |
+| SLO integration | USER-FIXED | Platform_21 remains SLI/SLO/error-budget authority; Platform_26 makes its service/cloud integration P0 rather than creating a second SLO engine. |
+| P1 digital/application observability | USER-FIXED | Browser RUM, mobile/browser-journey expansion, profiling, eBPF-assisted discovery, FinOps/cost observability, customer AI/LLM observability, GPU/accelerator observability and observability-as-code are P1 under Platform_26. |
 | FinOps boundary | USER-FIXED + ARCH-DELEGATED implementation | Cloud cost observability is P1 and uses provider billing evidence with a FOCUS-compatible normalized model where practical; Platform does not become a billing system. |
 | Session replay boundary | ARCH-DELEGATED | Browser session replay remains deferred pending separate privacy/security/storage change control; P1 RUM does not imply replay. |
 | Cloud/full-stack traceability | ARCH-DELEGATED | `REQ-CLOBS-001` through `REQ-CLOBS-028` are the authoritative RTM supplement for this capability family. |
