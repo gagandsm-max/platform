@@ -41,7 +41,7 @@ func rec(seq uint64) spool.Record {
 	return spool.Record{SchemaVersion: 1, Sequence: seq, ID: "r", Class: spool.ClassMetric, Type: "m", CreatedAt: time.Now(), ContentLength: 1, Checksum: "x", Payload: []byte("x")}
 }
 func cfg() Config {
-	return Config{SensorID: "s1", BootEpoch: "b1", MaxBatchRecords: 10, MaxBatchPayloadBytes: 1000, MaxRequestBytes: 10000, MaxAttempts: 3, InitialBackoff: time.Millisecond, MaxBackoff: 10 * time.Millisecond, JitterFraction: 0, IdleInterval: time.Second}
+	return Config{SensorID: "s1", StreamID: "stream-00112233445566778899aabbccddeeff", MaxBatchRecords: 10, MaxBatchPayloadBytes: 1000, MaxRequestBytes: 10000, MaxAttempts: 3, InitialBackoff: time.Millisecond, MaxBackoff: 10 * time.Millisecond, JitterFraction: 0, IdleInterval: time.Second}
 }
 func TestSuccessAndPartialAck(t *testing.T) {
 	v := uint64(1)
@@ -49,6 +49,9 @@ func TestSuccessAndPartialAck(t *testing.T) {
 	tr := &fakeTransport{fn: func(_ int, b coreclient.Batch) (coreclient.UploadAck, error) {
 		if b.FirstSequence != 1 || b.LastSequence != 2 || b.BatchID == "" || b.CorrelationID == "" {
 			t.Fatalf("bad batch %#v", b)
+		}
+		if b.BootEpoch != "stream-00112233445566778899aabbccddeeff" {
+			t.Fatalf("wire bootEpoch must carry durable spool stream ID, got %q", b.BootEpoch)
 		}
 		return coreclient.UploadAck{AcceptedThroughSequence: &v}, nil
 	}}
