@@ -13,8 +13,10 @@ CREATE TABLE IF NOT EXISTS platform.health_verification (
 ) ENGINE = MergeTree()
 ORDER BY (status, checked_at);
 
--- Initial foundational telemetry table definition for dev readiness
-CREATE TABLE IF NOT EXISTS platform.metric_numeric (
+-- Physical telemetry storage. Replays may create duplicate physical rows after
+-- Kafka/Core crash windows, so durable logical identity (sequence_id) is part of the
+-- replacement key. Readers use the canonical FINAL view below, never the raw table.
+CREATE TABLE IF NOT EXISTS platform.metric_numeric_raw (
     tenant_id String,
     entity_id String,
     metric_id String,
@@ -25,8 +27,24 @@ CREATE TABLE IF NOT EXISTS platform.metric_numeric (
     flags UInt32,
     sequence_id String,
     source_protocol LowCardinality(String)
-) ENGINE = MergeTree()
-ORDER BY (tenant_id, entity_id, metric_id, ts);
+) ENGINE = ReplacingMergeTree()
+ORDER BY (tenant_id, entity_id, metric_id, ts, sensor_id, sequence_id);
+
+-- Canonical read surface: duplicate replays are collapsed immediately at query time,
+-- independent of merge timing or finite insert-deduplication windows.
+CREATE VIEW IF NOT EXISTS platform.metric_numeric AS
+SELECT
+    tenant_id,
+    entity_id,
+    metric_id,
+    sensor_id,
+    ts,
+    value,
+    quality,
+    flags,
+    sequence_id,
+    source_protocol
+FROM platform.metric_numeric_raw FINAL;
 
 -- Initial health verification record
 INSERT INTO platform.health_verification (node_id, status) 
