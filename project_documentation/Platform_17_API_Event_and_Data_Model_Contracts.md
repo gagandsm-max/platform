@@ -93,6 +93,11 @@ Every monitored object maps to canonical tenant-scoped entity identity independe
 
 Flow uses temporal identity. Source/destination IP at an observation time may resolve to canonical endpoint/device/system/FQDN, site/subnet and user/session identity only through provenance-bearing history. AD/LDAP/Entra directory identity enriches the canonical user/person/account model but is not sufficient historical session evidence by itself. Current address/hostname/user/site state must not silently rewrite historical Flow.
 
+The canonical temporal identity-session/association contract is tenant scoped and reusable across Flow, logs, alerts, RCA, topology and endpoint monitoring. It carries stable session/association identity, user/account identity, endpoint entity identity, observed address binding where available, effective/session interval, source, quality/confidence and provenance. Shared or multiplexed endpoints may legitimately return ambiguous attribution; APIs must preserve ambiguity rather than fabricate one user.
+
+Flow enrichment fields are derived evidence, not raw source truth. API/event responses preserve source observation identity separately from normalized Flow and enrichment context. Enrichment changes are versioned/effective-time aware; a present-day identity lookup must not silently reinterpret historical observations.
+
+
 Flow observation identity and analytical conversation identity are distinct. Stable source record/Platform ingestion identity supports replay/deduplication; a derived conversation may reference multiple valid observation points without destroying directional provenance.
 
 ## 3. Schema migration
