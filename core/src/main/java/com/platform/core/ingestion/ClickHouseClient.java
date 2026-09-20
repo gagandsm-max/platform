@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -51,8 +52,15 @@ public class ClickHouseClient {
     }
 
     public void insertNumericBatch(List<CanonicalObservation> observations) throws Exception {
+        insertNumericBatch(observations, null);
+    }
+
+    public void insertNumericBatch(List<CanonicalObservation> observations, String deduplicationToken) throws Exception {
         if (observations == null || observations.isEmpty()) {
             return;
+        }
+        if (deduplicationToken != null && !deduplicationToken.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("ClickHouse deduplication token must be a lowercase SHA-256 hex value");
         }
 
         long startTime = System.currentTimeMillis();
@@ -81,7 +89,15 @@ public class ClickHouseClient {
             body.append(objectMapper.writeValueAsString(row)).append("\n");
         }
 
-        URI uri = URI.create(baseUrl + "/?query=INSERT+INTO+platform.metric_numeric+FORMAT+JSONEachRow");
+        String query = "INSERT INTO platform.metric_numeric FORMAT JSONEachRow";
+        StringBuilder endpoint = new StringBuilder(baseUrl)
+                .append("/?query=")
+                .append(URLEncoder.encode(query, StandardCharsets.UTF_8));
+        if (deduplicationToken != null) {
+            endpoint.append("&insert_deduplication_token=")
+                    .append(URLEncoder.encode(deduplicationToken, StandardCharsets.UTF_8));
+        }
+        URI uri = URI.create(endpoint.toString());
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(uri)
                 .timeout(Duration.ofSeconds(10))
@@ -92,9 +108,11 @@ public class ClickHouseClient {
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
-            String errorMsg = "ClickHouse insert failed with status " + response.statusCode() + ": " + response.body();
-            metrics.recordClickHouseFailure(errorMsg);
-            throw new RuntimeException(errorMsg);
+            // ClickHouse error bodies can echo data-dependent details. Do not copy
+            // them into application exceptions, health state, or framework logs.
+            String failureCode = "CLICKHOUSE_HTTP_" + response.statusCode();
+            metrics.recordClickHouseFailure(failureCode);
+            throw new RuntimeException("ClickHouse insert failed with status " + response.statusCode());
         }
 
         long durationMs = System.currentTimeMillis() - startTime;
