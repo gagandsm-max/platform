@@ -1,6 +1,7 @@
 package spool
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -47,7 +48,7 @@ func (s *DiskSpool) recover() error {
 	var maxSeq uint64
 	for _, entry := range entries {
 		name := entry.Name()
-		if name == stateFileName || name == quarantineDirName {
+		if name == stateFileName || name == streamIDFileName || name == quarantineDirName {
 			continue
 		}
 		full := filepath.Join(s.dir, name)
@@ -106,6 +107,45 @@ func (s *DiskSpool) recover() error {
 		return err
 	}
 	return syncDir(s.dir)
+}
+
+func (s *DiskSpool) loadOrCreateStreamID() error {
+	path := filepath.Join(s.dir, streamIDFileName)
+	info, err := os.Lstat(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return newError(CodeIO, "failed to inspect spool stream identity", err)
+		}
+		random := make([]byte, 16)
+		if _, err := rand.Read(random); err != nil {
+			return newError(CodeIO, "failed to generate spool stream identity", err)
+		}
+		streamID := "stream-" + hex.EncodeToString(random)
+		if err := atomicWriteFile(path, []byte(streamID+"\n"), 0640); err != nil {
+			return err
+		}
+		s.streamID = streamID
+		return nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return newError(CodeUnsafePath, "spool stream identity must be a regular file", nil)
+	}
+	if info.Size() <= 0 || info.Size() > 128 {
+		return newError(CodeCorruption, "spool stream identity has invalid size", nil)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return newError(CodeIO, "failed to read spool stream identity", err)
+	}
+	streamID := strings.TrimSpace(string(data))
+	if len(streamID) != len("stream-")+32 || !strings.HasPrefix(streamID, "stream-") {
+		return newError(CodeCorruption, "spool stream identity has invalid format", nil)
+	}
+	if _, err := hex.DecodeString(strings.TrimPrefix(streamID, "stream-")); err != nil {
+		return newError(CodeCorruption, "spool stream identity has invalid encoding", err)
+	}
+	s.streamID = streamID
+	return nil
 }
 
 func (s *DiskSpool) loadStateLocked() error {
