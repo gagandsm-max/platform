@@ -113,19 +113,8 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
 
         ReplayRow row = rows.get(0);
 
-        if (row.streamId() == null) {
-            int bound = jdbcTemplate.update(
-                    """
-                    UPDATE platform.sensor_telemetry_watermark
-                       SET stream_id = ?, updated_at = CURRENT_TIMESTAMP
-                     WHERE tenant_id = ? AND sensor_id = ? AND stream_id IS NULL
-                    """,
-                    streamId, tenantId, sensorId
-            );
-            if (bound != 1) {
-                throw new IllegalStateException("Failed to bind durable telemetry stream identity");
-            }
-        } else if (!row.streamId().equals(streamId)) {
+        boolean legacyUnboundStream = row.streamId() == null;
+        if (!legacyUnboundStream && !row.streamId().equals(streamId)) {
             return ReplayReservation.rejected(
                     row.ackedThroughSequence(),
                     "ERR_SENSOR_STREAM_CHANGED",
@@ -134,6 +123,9 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
         }
 
         if (row.pendingFirstSequence() != null) {
+            if (legacyUnboundStream) {
+                throw new IllegalStateException("Pending replay reservation has no durable stream binding");
+            }
             boolean samePendingRange = row.pendingFirstSequence() == firstSeq
                     && row.pendingLastSequence() != null
                     && row.pendingLastSequence() == lastSeq;
@@ -157,6 +149,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
 
         if (firstSeq == row.lastFirstSequence() && lastSeq == row.lastLastSequence()) {
             if (checksum.equalsIgnoreCase(row.lastChecksum())) {
+                bindStreamIfNeeded(tenantId, sensorId, streamId, legacyUnboundStream);
                 return ReplayReservation.alreadyAcked(row.ackedThroughSequence());
             }
             return ReplayReservation.rejected(
@@ -186,6 +179,8 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
                             + row.ackedThroughSequence()
             );
         }
+
+        bindStreamIfNeeded(tenantId, sensorId, streamId, legacyUnboundStream);
 
         int updated = jdbcTemplate.update(
                 """
@@ -297,6 +292,28 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
         );
         if (updated != 1) {
             throw new IllegalStateException("Failed to finalize telemetry replay watermark for Sensor");
+        }
+    }
+
+    private void bindStreamIfNeeded(
+            UUID tenantId,
+            String sensorId,
+            String streamId,
+            boolean legacyUnboundStream
+    ) {
+        if (!legacyUnboundStream) {
+            return;
+        }
+        int bound = jdbcTemplate.update(
+                """
+                UPDATE platform.sensor_telemetry_watermark
+                   SET stream_id = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE tenant_id = ? AND sensor_id = ? AND stream_id IS NULL
+                """,
+                streamId, tenantId, sensorId
+        );
+        if (bound != 1) {
+            throw new IllegalStateException("Failed to bind durable telemetry stream identity");
         }
     }
 
