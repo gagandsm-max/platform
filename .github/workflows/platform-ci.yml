@@ -229,6 +229,7 @@ jobs:
           DEV_CONTAINERS=(
             "platform-postgres"
             "platform-clickhouse"
+            "platform-clickhouse-migrate"
             "platform-kafka"
             "platform-valkey"
             "platform-core"
@@ -358,6 +359,9 @@ jobs:
 
           print("[OK] Rendered Compose safety gate PASSED: 6 isolated CI volumes and 6 CI ports verified.")
           PY
+
+      - name: Prove ClickHouse legacy upgrade and replay-safe canonical reads
+        run: make test-clickhouse-replay-migration
 
       - name: Run 20-test integration suite
         run: make test-integration
