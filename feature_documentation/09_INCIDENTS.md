@@ -1,6 +1,6 @@
 # Incidents
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 09, 17, 19, 21, 22
 
 ## Product objective

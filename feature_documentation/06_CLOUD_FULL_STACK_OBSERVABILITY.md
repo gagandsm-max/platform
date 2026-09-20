@@ -1,6 +1,6 @@
 # Cloud / Full-Stack Observability
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 03, 19, 21, 22, 23
 
 ## Product objective

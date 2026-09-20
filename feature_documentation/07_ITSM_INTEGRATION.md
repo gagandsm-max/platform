@@ -1,7 +1,7 @@
 # ITSM Integration
 
-**Class:** Derived feature brief — non-authoritative  
-**Canonical sources:** Platform_02, 10, 17, 19, 21, 23  
+**Class:** Derived feature brief — non-authoritative
+**Canonical sources:** Platform_02, 10, 17, 19, 21, 23
 **Draft enhancement:** PR #61
 
 ## Product objective
