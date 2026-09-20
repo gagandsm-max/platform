@@ -1,6 +1,6 @@
 # Capability Packs / MIB Studio / API Studio / Extensibility
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 07, 09, 10, 20, 23
 
 ## Product objective

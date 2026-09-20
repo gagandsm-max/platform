@@ -1,6 +1,6 @@
 # HA / DR / Backup / Restore / Upgrades
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 03, 14, 15, 16, 17, 18
 
 ## Product objective

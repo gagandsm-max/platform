@@ -1,8 +1,8 @@
 # Logs
 
-**Class:** Derived feature brief — non-authoritative  
-**Canonical sources:** Platform_02, 03, 04, 05, 06, 09, 10, 11, 17, 18, 22, 23  
-**Draft enhancement:** PR #67  
+**Class:** Derived feature brief — non-authoritative
+**Canonical sources:** Platform_02, 03, 04, 05, 06, 09, 10, 11, 17, 18, 22, 23
+**Draft enhancement:** PR #67
 **Pending architecture refinement:** production `sensor_role = LOG`, central SIEM forwarding default.
 
 ## Product objective
