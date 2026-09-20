@@ -47,7 +47,7 @@ Platform shall provide a unified enterprise operations experience covering:
 18. Data retention, rollups, archive, capacity forecasting and storage protection.
 19. Extensibility through MIB Studio, API Studio and Device Pack Studio.
 
-Full always-on DPI and mandatory proprietary full-bytecode APM agents are excluded from the initial product scope. OpenTelemetry-native traces, service graphs and cross-signal investigation are P0 under `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`.
+Full always-on DPI and mandatory proprietary full-bytecode APM agents are excluded from the initial product scope. OpenTelemetry-native traces, service graphs and cross-signal investigation are P0 under `Platform_26_Cloud_and_Full_Stack_Observability_Master.md`.
 
 ---
 
@@ -581,7 +581,7 @@ Database credentials shall be scoped and protected. Arbitrary dangerous SQL shal
 
 ### 14.1 Cloud
 
-AWS, Azure, GCP and OCI integrations shall use supported provider APIs/SDKs and normalize provider hierarchy, regions/zones, networks, compute, storage, databases, load balancers, Kubernetes, serverless and supported managed-service entities. The first Cloud Observability GA shall satisfy the P0 day-one provider-root and mandatory service-family requirements in `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`; specification alone does not claim current certification.
+AWS, Azure, GCP and OCI integrations shall use supported provider APIs/SDKs and normalize provider hierarchy, regions/zones, networks, compute, storage, databases, load balancers, Kubernetes, serverless and supported managed-service entities. The first Cloud Observability GA shall satisfy the P0 day-one provider-root and mandatory service-family requirements in `Platform_26_Cloud_and_Full_Stack_Observability_Master.md`; specification alone does not claim current certification.
 
 ### 14.2 Kubernetes
 
