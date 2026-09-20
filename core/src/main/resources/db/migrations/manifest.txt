@@ -6,3 +6,4 @@ V005__agent_control_authority.sql|Agent control authority principal certificate 
 V006__agent_ingress_replay.sql|Agent ingress durable drain replay watermark state
 V007__capability_pack_registry.sql|Tenant capability pack registry artifacts and activation history
 V008__sensor_capability_pack_assignment.sql|Sensor capability pack assignment desired-state and applied ACK
+V009__drop_redundant_identifier_lookup_index.sql|Remove redundant entity identifier lookup index covered by unique resolution constraint
