@@ -105,6 +105,50 @@ log "restart ClickHouse and verify canonical replay safety survives restart"
 docker restart "$SERVER" >/dev/null
 wait_ch
 assert_target
-[[ "$(ch "SELECT count() FROM metric_numeric WHERE metric_id='replay.metric'")" == "1" ]]   || fail "canonical replay collapse failed after restart"
+[[ "$(ch "SELECT count() FROM metric_numeric WHERE metric_id=\'replay.metric\'")" == "1" ]]   || fail "canonical replay collapse failed after restart"
+
+log "simulate interrupted cutover after writer quiesce but before copy completes"
+ch "DROP VIEW metric_numeric"
+ch "DROP TABLE metric_numeric_raw"
+ch "CREATE TABLE metric_numeric_v002_legacy (
+  tenant_id String,
+  entity_id String,
+  metric_id String,
+  sensor_id String,
+  ts DateTime64(3, \'UTC\'),
+  value Float64,
+  quality UInt8,
+  flags UInt32,
+  sequence_id String,
+  source_protocol LowCardinality(String)
+) ENGINE = MergeTree()
+ORDER BY (tenant_id, entity_id, metric_id, ts)"
+ch "INSERT INTO metric_numeric_v002_legacy VALUES
+(\'tenant-r\',\'entity-1\',\'recovery.one\',\'sensor-r\',\'2026-09-20 03:00:00.000\',1,1,0,\'recover-1\',\'snmp\'),
+(\'tenant-r\',\'entity-2\',\'recovery.two\',\'sensor-r\',\'2026-09-20 03:00:01.000\',2,1,0,\'recover-2\',\'snmp\')"
+ch "CREATE TABLE metric_numeric_raw (
+  tenant_id String,
+  entity_id String,
+  metric_id String,
+  sensor_id String,
+  ts DateTime64(3, \'UTC\'),
+  value Float64,
+  quality UInt8,
+  flags UInt32,
+  sequence_id String,
+  source_protocol LowCardinality(String)
+) ENGINE = ReplacingMergeTree()
+ORDER BY (tenant_id, entity_id, metric_id, ts, sensor_id, sequence_id)"
+ch "INSERT INTO metric_numeric_raw SELECT * FROM metric_numeric_v002_legacy LIMIT 1"
+
+if ch "INSERT INTO metric_numeric VALUES (\'tenant-r\',\'entity-old-writer\',\'must.fail\',\'sensor-r\',\'2026-09-20 03:00:02.000\',3,1,0,\'recover-3\',\'snmp\')" >/dev/null 2>&1; then
+  fail "old writer unexpectedly inserted through removed canonical table name during cutover"
+fi
+log "old writer path fails closed while migration is incomplete"
+
+run_migration
+assert_target
+[[ "$(ch "SELECT count() FROM metric_numeric WHERE metric_id LIKE \'recovery.%\'")" == "2" ]] || fail "partial-cutover recovery did not restore both legacy rows"
+[[ "$(ch "SELECT count() FROM system.tables WHERE database=\'platform\' AND name=\'metric_numeric_v002_legacy\'")" == "0" ]] || fail "legacy backup remained after verified recovery"
 
 log "PASS"
