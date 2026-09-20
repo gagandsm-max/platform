@@ -32,6 +32,9 @@ func Open(cfg Config) (*DiskSpool, error) {
 	}
 	s := &DiskSpool{dir: clean, quarantineDir: quarantine, maxRecordBytes: cfg.MaxRecordBytes, logger: cfg.Logger}
 	s.space = s.filesystemStatus
+	if err := s.loadOrCreateStreamID(); err != nil {
+		return nil, err
+	}
 	if err := s.recover(); err != nil {
 		return nil, err
 	}
@@ -223,6 +226,14 @@ func (s *DiskSpool) Stats() (Stats, error) {
 		}
 	}
 	return out, nil
+}
+
+// StreamID is the durable generation identifier for this spool lifetime.
+// It survives Sensor process restarts and changes only when the spool itself is recreated.
+func (s *DiskSpool) StreamID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.streamID
 }
 
 // AckedThrough returns the durable acknowledged spool watermark. Sequences at
