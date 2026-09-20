@@ -212,3 +212,16 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Real-customer requirements normalization | USER-FIXED | Recurring enterprise ITOM/AIOps needs are normalized as Real Customer Enterprise Benchmark — Automotive / ITOM-AIOps with classification A–G. Confidential customer names, inventories, locations, quantities, commercial clauses, penalties, unique SLAs and contract language must not be embedded in Mother References. |
 | Enterprise-monitoring-coverage product scope | USER-FIXED | `PRD-EMC-001` through `PRD-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` are approved additive v3.2.2 product requirements/targets. They are EMC-0 specification only and do not claim runtime, pack certification or contractual coverage. |
 | Enterprise-monitoring-coverage packaging | ARCH-DELEGATED | `Platform_23` is the consolidated authoritative v3.2.2 specialized master for this family. `REQ-EMC-001` through `REQ-EMC-018` are the RTM supplement. It does not replace Platform_10, 19, 20, 21 or 22 outside its assigned scope. |
+
+## 13. v3.2.2 ARCH-DELEGATED specialized-master namespace decisions — 2026-09-20
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Specialized-master identifier allocation | ARCH-DELEGATED | Active candidate specialized masters are reserved as Platform_24 Extensibility/Capability Pack/MIB/API/Webhook Runtime, Platform_25 Enterprise Log/Event/SIEM Forwarding, Platform_26 Cloud & Full-Stack Observability and Platform_27 Integration/Automation/ITSM/Ecosystem. The authoritative set remains 25 files until each candidate is separately reconciled and merged. |
+| Dependency order | ARCH-DELEGATED | Extensibility/common connector-runtime contracts are the foundation for connector-heavy logging, cloud and integration masters. Later masters reuse that architecture rather than creating independent connector/pack/webhook runtimes. |
+| Candidate version discipline | ARCH-DELEGATED | Candidate specialized masters remain on the v3.2.2 documentation line unless separate deliberate change control explicitly creates a later authoritative version. A draft header, branch or filename cannot independently create v3.2.3. |
+| Flow reconciliation | ARCH-DELEGATED | Flow/NTA enrichment and dedicated Flow/Log Sensor-role requirements reconcile into existing Mother References. No new Flow specialized master is authorized. One surviving Flow lane shall absorb unique valid requirements from overlapping drafts; non-authoritative safety-net artifacts must then be deleted. |
+| Namespace ownership | ARCH-DELEGATED | Specialized-master document numbers are centrally allocated through Platform_00/Platform_12 change control. Parallel feature branches may not independently claim the same Platform_NN identifier. |
+
+These decisions resolve the document-authority collision only. They do not declare the candidate capabilities implemented, tested, certified or merge-ready and do not resolve any existing data-layer HA/DR P0/TBD item.
+
