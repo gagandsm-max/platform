@@ -6,8 +6,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -30,7 +31,7 @@ class PostgresTelemetryWatermarkStoreTest {
         pg = new PostgresTestSupport();
         pg.start();
         pg.migrate();
-        store = new PostgresTelemetryWatermarkStore(pg.jdbc());
+        store = new PostgresTelemetryWatermarkStore(pg.jdbc(), new DataSourceTransactionManager(pg.dataSource()));
 
         // Ensure default tenant exists
         pg.jdbc().update("""
@@ -72,6 +73,102 @@ class PostgresTelemetryWatermarkStoreTest {
         WatermarkState advanced = store.getWatermarkForUpdate(tenantId, sensorId);
         assertEquals(110L, advanced.ackedThroughSequence());
         assertEquals("checksum-110", advanced.lastChecksum());
+    }
+
+    @Test
+    void reserveFinalizeCycleIsDurableBoundedAndIdempotent() {
+        String sensorId = "sensor-reservation-01";
+
+        ReplayReservation first = store.reserveBatch(
+                tenantId, sensorId, 1L, 10L, "checksum-a", "batch-a");
+        assertEquals(ReplayReservation.Status.RESERVED, first.status());
+        assertEquals(0L, first.ackedThroughSequence());
+
+        Map<String, Object> pending = pg.jdbc().queryForMap("""
+                SELECT acked_through_sequence, pending_first_sequence, pending_last_sequence,
+                       pending_checksum, pending_batch_id
+                  FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensorId);
+        assertEquals(0L, ((Number) pending.get("acked_through_sequence")).longValue());
+        assertEquals(1L, ((Number) pending.get("pending_first_sequence")).longValue());
+        assertEquals(10L, ((Number) pending.get("pending_last_sequence")).longValue());
+        assertEquals("checksum-a", pending.get("pending_checksum"));
+        assertEquals("batch-a", pending.get("pending_batch_id"));
+
+        ReplayReservation exactPendingRetry = store.reserveBatch(
+                tenantId, sensorId, 1L, 10L, "checksum-a", "batch-a-retry");
+        assertEquals(ReplayReservation.Status.RETRY_PENDING, exactPendingRetry.status());
+
+        ReplayReservation conflictingPending = store.reserveBatch(
+                tenantId, sensorId, 1L, 10L, "checksum-tampered", "batch-tampered");
+        assertEquals(ReplayReservation.Status.REJECTED, conflictingPending.status());
+        assertEquals("ERR_IDEMPOTENCY_CONFLICT", conflictingPending.rejectionCode());
+
+        ReplayReservation outOfOrderWhilePending = store.reserveBatch(
+                tenantId, sensorId, 11L, 20L, "checksum-b", "batch-b");
+        assertEquals(ReplayReservation.Status.REJECTED, outOfOrderWhilePending.status());
+        assertEquals("ERR_PREVIOUS_BATCH_PENDING", outOfOrderWhilePending.rejectionCode());
+
+        store.finalizeReservedBatch(
+                tenantId, sensorId, 1L, 10L, "checksum-a", "batch-a");
+
+        Map<String, Object> finalized = pg.jdbc().queryForMap("""
+                SELECT acked_through_sequence, last_first_sequence, last_last_sequence,
+                       last_checksum, pending_first_sequence, pending_last_sequence,
+                       pending_checksum, pending_batch_id, pending_reserved_at
+                  FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensorId);
+        assertEquals(10L, ((Number) finalized.get("acked_through_sequence")).longValue());
+        assertEquals(1L, ((Number) finalized.get("last_first_sequence")).longValue());
+        assertEquals(10L, ((Number) finalized.get("last_last_sequence")).longValue());
+        assertEquals("checksum-a", finalized.get("last_checksum"));
+        assertNull(finalized.get("pending_first_sequence"));
+        assertNull(finalized.get("pending_last_sequence"));
+        assertNull(finalized.get("pending_checksum"));
+        assertNull(finalized.get("pending_batch_id"));
+        assertNull(finalized.get("pending_reserved_at"));
+
+        ReplayReservation alreadyAcked = store.reserveBatch(
+                tenantId, sensorId, 1L, 10L, "checksum-a", "batch-a-replay");
+        assertEquals(ReplayReservation.Status.ALREADY_ACKED, alreadyAcked.status());
+        assertEquals(10L, alreadyAcked.ackedThroughSequence());
+
+        // Finalize is itself idempotent for the exact accepted batch.
+        assertDoesNotThrow(() -> store.finalizeReservedBatch(
+                tenantId, sensorId, 1L, 10L, "checksum-a", "batch-a-replay"));
+    }
+
+    @Test
+    void reservationRejectsRegressionGapAndCrossTenantInterference() {
+        String sensorId = "sensor-reservation-shared";
+        UUID tenantId2 = UUID.fromString("018f0e0a-0000-7000-8000-000000000002");
+        pg.jdbc().update("""
+                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                VALUES (?, 'Tenant 2', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
+                ON CONFLICT (tenant_id) DO NOTHING
+                """, tenantId2);
+
+        assertEquals(ReplayReservation.Status.RESERVED,
+                store.reserveBatch(tenantId, sensorId, 1L, 5L, "t1-a", "t1-a").status());
+        store.finalizeReservedBatch(tenantId, sensorId, 1L, 5L, "t1-a", "t1-a");
+
+        ReplayReservation regression = store.reserveBatch(
+                tenantId, sensorId, 4L, 4L, "t1-old", "t1-old");
+        assertEquals(ReplayReservation.Status.REJECTED, regression.status());
+        assertEquals("ERR_SEQUENCE_REGRESSION", regression.rejectionCode());
+
+        ReplayReservation gap = store.reserveBatch(
+                tenantId, sensorId, 7L, 7L, "t1-gap", "t1-gap");
+        assertEquals(ReplayReservation.Status.REJECTED, gap.status());
+        assertEquals("ERR_SEQUENCE_GAP", gap.rejectionCode());
+
+        // Same sensor identifier in another tenant is an independent replay domain.
+        ReplayReservation otherTenant = store.reserveBatch(
+                tenantId2, sensorId, 1L, 1L, "t2-a", "t2-a");
+        assertEquals(ReplayReservation.Status.RESERVED, otherTenant.status());
+        assertEquals(0L, otherTenant.ackedThroughSequence());
     }
 
     @Test
