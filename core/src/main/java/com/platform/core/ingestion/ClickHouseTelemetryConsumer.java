@@ -12,6 +12,9 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 
 @Component
@@ -84,11 +87,13 @@ public class ClickHouseTelemetryConsumer {
             );
         }
 
+        String deduplicationToken = stableObservationToken(obs.sequenceId());
+
         // Bounded retry and backoff against ClickHouse
         Exception lastException = null;
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                clickHouseClient.insertNumericBatch(List.of(obs));
+                clickHouseClient.insertNumericBatch(List.of(obs), deduplicationToken);
                 // Insertion succeeded: commit offset and update health
                 if (acknowledgment != null) {
                     acknowledgment.acknowledge();
@@ -97,8 +102,11 @@ public class ClickHouseTelemetryConsumer {
                 return;
             } catch (Exception e) {
                 lastException = e;
-                log.warn("ClickHouse insert attempt {}/{} failed for topic={} partition={} offset={}: {}",
-                        attempt, maxRetries, record.topic(), record.partition(), record.offset(), e.getMessage());
+                log.warn(
+                        "ClickHouse insert attempt {}/{} failed topic={} partition={} offset={} failureClass={}",
+                        attempt, maxRetries, record.topic(), record.partition(), record.offset(),
+                        e.getClass().getSimpleName()
+                );
                 if (attempt < maxRetries) {
                     try {
                         Thread.sleep(backoffMs * (1L << (attempt - 1)));
@@ -111,10 +119,32 @@ public class ClickHouseTelemetryConsumer {
         }
 
         // Retries exhausted: do NOT acknowledge offset. Surface degraded state.
-        String failureReason = "ClickHouse unavailable after " + maxRetries + " attempts: " + lastException.getMessage();
+        String failureClass = lastException == null ? "Unknown" : lastException.getClass().getSimpleName();
+        String failureReason = "ClickHouse unavailable after " + maxRetries + " attempts: " + failureClass;
         metrics.recordConsumerDegraded(failureReason);
-        log.error("ClickHouse retries exhausted for topic={} partition={} offset={}. Offset will NOT progress.",
-                record.topic(), record.partition(), record.offset(), lastException);
-        throw new RuntimeException("ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset(), lastException);
+        log.error(
+                "ClickHouse retries exhausted topic={} partition={} offset={}. Offset will NOT progress. failureClass={}",
+                record.topic(), record.partition(), record.offset(), failureClass
+        );
+        throw new RuntimeException(
+                "ClickHouse persistence unavailable; stopping offset progression at offset "
+                        + record.offset() + " failureClass=" + failureClass
+        );
+    }
+
+    static String stableObservationToken(String sequenceId) {
+        if (sequenceId == null || sequenceId.isBlank()) {
+            throw new IngestionException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    ERR_KAFKA_POISON_EVENT,
+                    "Telemetry observation is missing stable sequence identity"
+            );
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(sequenceId.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable for telemetry replay identity", e);
+        }
     }
 }
