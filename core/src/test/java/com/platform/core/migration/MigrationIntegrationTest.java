@@ -73,7 +73,7 @@ class MigrationIntegrationTest {
         assertEquals("V006", history.get(5).get("version"));
         assertEquals("V007", history.get(6).get("version"));
         assertEquals("V008", history.get(7).get("version"));
-        assertEquals("V010", history.get(8).get("version"));
+        assertEquals("V009", history.get(8).get("version"));
         String checksum = String.valueOf(history.get(0).get("checksum"));
         assertTrue(checksum.matches("[a-f0-9]{64}"));
 
@@ -191,7 +191,7 @@ class MigrationIntegrationTest {
         assertEquals(9, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
 
-        // 11. V001→V010 upgrade must materialize Sensor/Agent Control/Capability Pack and replay-reservation schema
+        // 11. V001→V009 upgrade must materialize Sensor/Agent Control/Capability Pack and replay-reservation schema
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V004'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
@@ -203,7 +203,7 @@ class MigrationIntegrationTest {
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V008'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
-                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V010'", Integer.class));
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V009'", Integer.class));
         Integer sensorControlTables = jdbc.queryForObject(
                 """
                 SELECT COUNT(*) FROM information_schema.tables
