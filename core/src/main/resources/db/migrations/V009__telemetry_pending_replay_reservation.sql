@@ -19,6 +19,7 @@ ALTER TABLE platform.sensor_telemetry_watermark
             pending_first_sequence IS NULL
             AND pending_last_sequence IS NULL
             AND pending_checksum IS NULL
+            AND pending_batch_id IS NULL
             AND pending_reserved_at IS NULL
         )
         OR
@@ -26,6 +27,7 @@ ALTER TABLE platform.sensor_telemetry_watermark
             pending_first_sequence IS NOT NULL
             AND pending_last_sequence IS NOT NULL
             AND pending_checksum IS NOT NULL
+            AND pending_batch_id IS NOT NULL
             AND pending_reserved_at IS NOT NULL
             AND pending_first_sequence > 0
             AND pending_last_sequence >= pending_first_sequence
@@ -37,7 +39,5 @@ ALTER TABLE platform.sensor_telemetry_watermark
 
 ALTER TABLE platform.sensor_telemetry_watermark
     ADD CONSTRAINT chk_sensor_telemetry_stream_id CHECK (
-        stream_id IS NULL OR stream_id ~ '^stream-[0-9a-f]{32}
-    );
-
+        stream_id IS NULL OR stream_id ~ '^stream-[0-9a-f]{32}$'
     );
