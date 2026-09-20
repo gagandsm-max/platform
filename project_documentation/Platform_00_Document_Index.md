@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-19 — v3.2.2 Windows/Linux infrastructure monitoring, Endpoint Diagnostic Snapshot and local-intelligence placement reconciliation
+**Last reconciliation:** 2026-09-20 — v3.2.2 Mother Reference specialized-master number-allocation governance
 
 ## 1. Authority
 
@@ -25,6 +25,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 - Capacity statements remain engineering targets until benchmark-certified.
 - Security/compliance readiness must never be represented as achieved certification until independently achieved.
 - Customer-value/MTTR percentages are not product claims until supported by disclosed reproducible customer/pilot evidence.
+- Open/draft PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not change the authoritative Mother Reference set or version.
 
 ## 3. Exact 25-file mother-reference set
 
@@ -55,6 +56,25 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 | 23 | `Platform_21_Enterprise_Gap_Closure_Master.md` | Authoritative enterprise gap-closure specialized master: normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, audit tamper evidence, enterprise connector/offboarding/licensing/policy-as-code requirements, formal `PRD-EGC-*` + `REQ-EGC-*` supplement |
 | 24 | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Authoritative monitoring-intelligence specialized master: class-specific Alert Evidence Contracts, telemetry trust, semantic monitoring states, Endpoint Diagnostic Snapshot (EDS), tiered local intelligence, RCA/AI assurance, Incident Copilot, AI safety/provenance, formal `PRD-MIA-*` + `REQ-MIA-*` supplement |
 | 25 | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | Authoritative enterprise-monitoring-coverage specialized master: Capability Pack product contract, L1/L2/L3 dimensional certification, Linux/Windows Agent and agentless infrastructure coverage, technology-family catalogue, Customer Acceptance Profiles, Real Customer Requirements normalization, formal `PRD-EMC-*` + `REQ-EMC-*` supplement |
+
+### 3.1 Specialized-master number allocation
+
+The canonical Mother Reference remains the actual merged set listed in §3 on current GitHub `main`. Today the numbered specialized-master sequence ends at the highest merged master (`Platform_23`). Candidate or open PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not enlarge the authoritative set.
+
+A Platform number becomes canonical only when the corresponding specialized master is finally reconciled and merged. At each final specialized-master reconciliation:
+
+1. fetch exact current `main`;
+2. enumerate merged canonical `Platform_NN_*` specialized masters;
+3. determine the highest canonical number;
+4. assign the next available number to the master currently being finalized;
+5. rename the candidate document to that number;
+6. update Index, Decision Register, RTM, AGENTS and other cross-references where applicable;
+7. make those changes atomically in the same final reconciliation;
+8. run exact-head validation/review/CI;
+9. merge;
+10. only then does that number become canonical.
+
+Multiple parallel candidate PRs must not each claim the same next number. Merge order against then-current `main` determines allocation. Candidate documents remain **unnumbered/unallocated until final reconciliation**; temporary internal names are allowed, but they confer no reservation authority. Number assignment, rename and cross-reference updates must occur atomically before merge. A candidate specialized master must not silently advance the set-wide Mother Reference version (currently **v3.2.2**); version changes require separate set-wide change control.
 
 ## 4. Consolidation and version map
 
