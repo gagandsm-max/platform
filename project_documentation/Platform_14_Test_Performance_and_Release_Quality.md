@@ -63,7 +63,7 @@ Every `.deb`/`.rpm` package is installed on clean certified OS images, rebooted,
 
 No release promotion with failing P0/P1 tests, unresolved critical/high security defects without approved exception, tenant-isolation failure, data-loss defect in certified normal failure scenarios, failed upgrade/rollback gate, broken SBOM/license gate or performance regression beyond approved threshold.
 
-For a **Cloud Observability GA** claim, all `PRD-CLOBS-001..021` / `REQ-CLOBS-001..021` P0 gates in `Platform_24` are mandatory. AWS, Azure, GCP and OCI provider roots must each have certified onboarding, hierarchy/inventory, connector health, required P0 evidence classes and mandatory high-value Cloud Service Pack coverage. Specification or a generic connector is not certification.
+For a **Cloud Observability GA** claim, all `PRD-CLOBS-001..021` / `REQ-CLOBS-001..021` P0 gates in `Platform_26` are mandatory. AWS, Azure, GCP and OCI provider roots must each have certified onboarding, hierarchy/inventory, connector health, required P0 evidence classes and mandatory high-value Cloud Service Pack coverage. Specification or a generic connector is not certification.
 
 ## 4. Platform — Performance & Benchmark Plan
 
@@ -121,7 +121,7 @@ Full regression, performance certification, HA/DR evidence, migration/upgrade ma
 - HA failover violating agreed <60s target under certified test profile;
 - unsupported silent data loss in certified normal failure scenarios;
 - unresolved RED OSS dependency;
-- Cloud Observability GA with any AWS/Azure/GCP/OCI P0 provider root or mandatory Platform_24 service-family certification missing;
+- Cloud Observability GA with any AWS/Azure/GCP/OCI P0 provider root or mandatory Platform_26 service-family certification missing;
 - cloud credential/trace/log/resource tenant-isolation defect or secret/sensitive-field leakage;
 - connector/API degradation that can silently convert missing/stale cloud telemetry into false resource-down state.
 
