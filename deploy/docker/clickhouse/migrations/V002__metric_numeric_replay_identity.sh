@@ -87,17 +87,37 @@ validate_view() {
 
 finish_partial_state() {
   validate_raw
-  if exists "$VIEW"; then
-    [[ "$(engine "$VIEW")" == "View" ]] || die "${VIEW} exists but is not canonical View"
-  else
-    create_view
-  fi
-  validate_view
+
+  # A prior migration attempt may have already removed the writable legacy table name
+  # before copying. While LEGACY exists, no Core is permitted to start. Recover by
+  # rebuilding RAW from the immutable/quiesced legacy table rather than accepting a
+  # partial copy.
   if exists "$LEGACY"; then
     local legacy_count raw_count
     legacy_count="$(ch "SELECT count() FROM ${LEGACY}")"
     raw_count="$(ch "SELECT count() FROM ${RAW}")"
-    [[ "$legacy_count" == "$raw_count" ]] || die "legacy/raw count mismatch; preserving backup"
+    if [[ "$legacy_count" != "$raw_count" ]]; then
+      log "partial migration detected (legacy=${legacy_count} raw=${raw_count}); rebuilding raw copy"
+      exists "$VIEW" && ch "DROP VIEW IF EXISTS ${VIEW}"
+      ch "TRUNCATE TABLE ${RAW}"
+      ch "INSERT INTO ${RAW} SELECT * FROM ${LEGACY}"
+      raw_count="$(ch "SELECT count() FROM ${RAW}")"
+      [[ "$legacy_count" == "$raw_count" ]] || die "legacy/raw rebuild mismatch; preserving legacy backup"
+    fi
+  fi
+
+  if exists "$VIEW"; then
+    [[ "$(engine "$VIEW")" == "View" ]] || die "$VIEW exists but is not canonical View"
+  else
+    create_view
+  fi
+  validate_view
+
+  if exists "$LEGACY"; then
+    local legacy_count_final raw_count_final
+    legacy_count_final="$(ch "SELECT count() FROM ${LEGACY}")"
+    raw_count_final="$(ch "SELECT count() FROM ${RAW}")"
+    [[ "$legacy_count_final" == "$raw_count_final" ]] || die "legacy/raw count mismatch; preserving backup"
     ch "DROP TABLE ${LEGACY}"
   fi
 }
@@ -105,26 +125,30 @@ finish_partial_state() {
 migrate_legacy() {
   [[ "$(engine "$VIEW")" == "MergeTree" ]] || die "unsupported pre-V002 engine for ${VIEW}: $(engine "$VIEW")"
   exists "$STAGING" && ch "DROP TABLE ${STAGING}"
+  exists "$LEGACY" && die "legacy backup already exists without raw target; refusing ambiguous migration state"
   create_raw "$STAGING"
 
-  local before staged after
-  before="$(ch "SELECT count() FROM ${VIEW}")"
-  ch "INSERT INTO ${STAGING} SELECT * FROM ${VIEW}"
-  staged="$(ch "SELECT count() FROM ${STAGING}")"
-  after="$(ch "SELECT count() FROM ${VIEW}")"
-  [[ "$before" == "$staged" && "$before" == "$after" ]] || {
-    ch "DROP TABLE IF EXISTS ${STAGING}"
-    die "source changed during migration or copy mismatch (before=$before staged=$staged after=$after)"
-  }
-
+  # Cut the old writer off BEFORE copying. Any pre-cutover insert lands in LEGACY and
+  # is copied. Any post-cutover old-Core insert to metric_numeric fails closed and its
+  # Kafka offset must remain unacknowledged/replayable. This removes the prior race
+  # where a row could arrive after the final source count but before the rename and be
+  # silently discarded with the legacy table.
   ch "RENAME TABLE ${VIEW} TO ${LEGACY}, ${STAGING} TO ${RAW}"
+
+  local before raw_count
+  before="$(ch "SELECT count() FROM ${LEGACY}")"
+  ch "INSERT INTO ${RAW} SELECT * FROM ${LEGACY}"
+  raw_count="$(ch "SELECT count() FROM ${RAW}")"
+  [[ "$before" == "$raw_count" ]] || die "legacy/raw copy mismatch; preserving legacy backup and blocking Core start"
+
   create_view
   validate_raw
   validate_view
 
-  local raw_count
-  raw_count="$(ch "SELECT count() FROM ${RAW}")"
-  [[ "$raw_count" == "$before" ]] || die "post-migration raw row count mismatch; legacy backup retained"
+  local legacy_count_final canonical_count
+  legacy_count_final="$(ch "SELECT count() FROM ${LEGACY}")"
+  canonical_count="$(ch "SELECT count() FROM ${RAW}")"
+  [[ "$legacy_count_final" == "$canonical_count" ]] || die "post-migration row count mismatch; legacy backup retained"
   ch "DROP TABLE ${LEGACY}"
 }
 
