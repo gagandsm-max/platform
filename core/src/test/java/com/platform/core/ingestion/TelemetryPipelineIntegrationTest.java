@@ -184,7 +184,7 @@ public class TelemetryPipelineIntegrationTest {
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
 
             when(watermarkStore.reserveBatch(
-                    tenantId, sensorId, 10L, 10L, "chk-10", "b-10"))
+                    tenantId, sensorId, "ep-1", 10L, 10L, "chk-10", "b-10"))
                     .thenReturn(ReplayReservation.alreadyAcked(10L));
 
             TelemetryAckResponse ack = service.ingestTelemetry("{}".getBytes(), req, "b-10", cert);
@@ -193,7 +193,7 @@ public class TelemetryPipelineIntegrationTest {
             assertEquals(10L, ack.acceptedThroughSequence());
             verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
             verify(watermarkStore, never()).finalizeReservedBatch(
-                    any(), any(), anyLong(), anyLong(), any(), any());
+                    any(), any(), any(), anyLong(), anyLong(), any(), any());
         }
 
         @Test
@@ -210,7 +210,7 @@ public class TelemetryPipelineIntegrationTest {
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
 
             when(watermarkStore.reserveBatch(
-                    tenantId, sensorId, 10L, 10L, "chk-DIFFERENT", "b-10-tampered"))
+                    tenantId, sensorId, "ep-1", 10L, 10L, "chk-DIFFERENT", "b-10-tampered"))
                     .thenReturn(ReplayReservation.rejected(
                             10L, "ERR_IDEMPOTENCY_CONFLICT", "checksum conflict"));
 
@@ -237,7 +237,7 @@ public class TelemetryPipelineIntegrationTest {
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
 
             when(watermarkStore.reserveBatch(
-                    tenantId, sensorId, 5L, 5L, "chk-5", "b-5"))
+                    tenantId, sensorId, "ep-1", 5L, 5L, "chk-5", "b-5"))
                     .thenReturn(ReplayReservation.rejected(
                             10L, "ERR_SEQUENCE_REGRESSION", "sequence already accepted"));
 
@@ -263,7 +263,7 @@ public class TelemetryPipelineIntegrationTest {
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
 
             when(watermarkStore.reserveBatch(
-                    tenantId, sensorId, 12L, 12L, "chk-12", "b-12"))
+                    tenantId, sensorId, "ep-1", 12L, 12L, "chk-12", "b-12"))
                     .thenReturn(ReplayReservation.rejected(
                             10L, "ERR_SEQUENCE_GAP", "unexpected sequence gap"));
 
@@ -300,7 +300,7 @@ public class TelemetryPipelineIntegrationTest {
             when(validator.resolveAuthority(cert)).thenReturn(scope);
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
             when(watermarkStore.reserveBatch(
-                    tenantId, sensorId, 1L, 1L, "chk-1", "b-1"))
+                    tenantId, sensorId, "ep-1", 1L, 1L, "chk-1", "b-1"))
                     .thenReturn(ReplayReservation.reserved(0L));
             doThrow(new IngestionException(HttpStatus.SERVICE_UNAVAILABLE, "ERR_KAFKA_PUBLISH_FAILED", "Broker connection failed"))
                     .when(kafkaProducer).publishBatchTransactionally(anyList());
@@ -311,7 +311,7 @@ public class TelemetryPipelineIntegrationTest {
 
             assertEquals("ERR_KAFKA_PUBLISH_FAILED", ex.getCode());
             verify(watermarkStore, never()).finalizeReservedBatch(
-                    any(), any(), anyLong(), anyLong(), any(), any());
+                    any(), any(), any(), anyLong(), anyLong(), any(), any());
         }
 
         @Test
