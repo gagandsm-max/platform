@@ -1,7 +1,7 @@
 # OpenTelemetry / OTLP
 
-**Class:** Derived feature brief — non-authoritative  
-**Primary sources:** Platform_01, 02, 03, 04, 07, 10, 11, 19, 22  
+**Class:** Derived feature brief — non-authoritative
+**Primary sources:** Platform_01, 02, 03, 04, 07, 10, 11, 19, 22
 **Current scope:** metrics and logs initially; trace-ready, not full native APM claim.
 
 ## Product objective

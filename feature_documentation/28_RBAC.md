@@ -1,6 +1,6 @@
 # Role-Based Access Control (RBAC)
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 09, 10, 17, 18
 
 ## Product objective

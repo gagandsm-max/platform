@@ -1,6 +1,6 @@
 # Synthetic Testing — URL, API, Web Application & Service Checks
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 09, 10, 14, 21
 
 ## Product objective

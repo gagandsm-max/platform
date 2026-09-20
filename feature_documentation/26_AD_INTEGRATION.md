@@ -1,7 +1,7 @@
 # Active Directory Integration
 
-**Class:** Derived feature brief — non-authoritative  
-**Primary sources:** Platform_02, 10, 20, 21, 22  
+**Class:** Derived feature brief — non-authoritative
+**Primary sources:** Platform_02, 10, 20, 21, 22
 **Pending enrichment:** Flow user/endpoint correlation described in `02_FLOW_MONITORING.md`.
 
 ## Product objective

@@ -1,6 +1,6 @@
 # Single Sign-On (SSO)
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 03, 07, 09, 10
 
 ## Product objective
