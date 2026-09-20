@@ -3261,9 +3261,9 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 ---
 
-### Cloud & Full-Stack Observability UI supplement — Platform_24
+### Cloud & Full-Stack Observability UI supplement — Platform_26
 
-The Cloud/Containers workspace shall expose the Platform_24 P0 model without forcing users into separate products:
+The Cloud/Containers workspace shall expose the Platform_26 P0 model without forcing users into separate products:
 
 - **Cloud Integration Administration:** Administration → Integrations → Cloud lists AWS/Azure/GCP/OCI connections with provider scope, auth mode, Sensor pool, selected Cloud Service Packs, state, last verification/reconciliation, API-budget/throttle health and coverage. **Add Cloud Environment** runs the governed provider → scope → authentication → permission preflight → hierarchy discovery → service-pack selection → collection plan → Sensor placement → rate/capacity preview → ownership/policy mapping → ephemeral-resource policy → discovery preview → activate → verify workflow.
 - **Cloud Provider Workspace:** every day-one provider root (AWS, Azure, GCP, OCI) exposes hierarchy, regions, service-family health, incidents, SLO impact, quota risk, connector health, changes and coverage gaps. Existing UI-045/046/047 are provider presets; OCI is mandatory through the same provider-workspace contract even though the legacy base catalogue has no dedicated numeric slot.
