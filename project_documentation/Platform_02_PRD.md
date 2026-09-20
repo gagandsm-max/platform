@@ -593,7 +593,7 @@ Monitor node/pod/container health, CPU/memory, restarts, pending/failed state, e
 
 ### 14.3 OpenTelemetry
 
-Platform shall accept OTLP metrics, logs and traces as P0 observability signals. Trace storage, sampling, analysis, service/resource correlation, service graph and Trace Explorer UX shall satisfy `Platform_24`. This does not require Platform to ship proprietary full-bytecode APM agents for every language/runtime.
+Platform shall accept OTLP metrics, logs and traces as P0 observability signals. Trace storage, sampling, analysis, service/resource correlation, service graph and Trace Explorer UX shall satisfy `Platform_26`. This does not require Platform to ship proprietary full-bytecode APM agents for every language/runtime.
 
 ---
 
