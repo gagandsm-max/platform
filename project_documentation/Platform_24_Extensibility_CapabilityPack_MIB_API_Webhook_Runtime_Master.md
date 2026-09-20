@@ -251,16 +251,22 @@ API/data model distinguishes OUTBOUND_EVENT, INBOUND_EVENT and CONNECTOR_CALLBAC
 **Required behavior**  
 Outbound delivery is explicitly at-least-once, never falsely exactly-once. Envelope contains stable event_id, delivery_id, tenant_id, event_type, event_schema_version, occurred_at, sent_at, correlation_id, resource references and payload. Delivery states include PENDING, DELIVERING, DELIVERED, RETRY_WAIT, FAILED, DEAD_LETTER and CANCELLED. Retries preserve event identity.
 
+Webhook delivery state is PostgreSQL-authoritative and restart-safe. For a PostgreSQL-authoritative source mutation, creation of the outbound delivery intent uses the same database transaction through a transactional outbox or an equivalent atomic boundary so a committed business transition cannot exist without its required delivery intent. For a Kafka-derived source event, the consumer idempotently materializes the delivery object in PostgreSQL using tenant + endpoint/subscription + stable event identity **before** committing the consumed Kafka offset. Kafka may wake workers but is not the sole record of pending external delivery.
+
+A worker only marks DELIVERED after the configured webhook contract receives a valid remote HTTP/application acceptance response. Socket/TLS write success alone is not DELIVERED. DELIVERED means the webhook endpoint accepted the request according to its HTTP contract; it does not claim that a downstream ticket/SIEM/business workflow indexed or completed processing.
+
 **Minimum acceptance evidence**  
-Receiver can deduplicate repeated deliveries; delivery state/history survives restart/failover; duplicate internal execution does not create ambiguous event identity.
+Receiver can deduplicate repeated deliveries; delivery state/history survives Core restart/failover; crash injection before/after source-state commit, delivery materialization, remote send and delivery-state commit produces neither silent omission nor uncontrolled duplicate business events; Kafka redelivery materializes the same delivery identity; duplicate internal execution does not create ambiguous event identity.
 
 #### `REQ-EXTL-P0-021` — Webhook authentication and replay protection
 
 **Required behavior**  
 Outbound signing uses per-endpoint HMAC-SHA256 baseline with optional/required mTLS by policy. Inbound validation binds endpoint to tenant and validates signature, timestamp, body hash, allowed skew, nonce/event ID replay state, payload schema and size/rate limits. Secrets are Credential/Secret references and are not readable after creation except per approved secret lifecycle.
 
+Security-sensitive inbound replay protection must not depend solely on process memory or Valkey. An accepted event/nonce identity is durably recorded in PostgreSQL (or another explicitly approved durable authority) for at least the enforced replay window before the trusted business event is committed/emitted. Valkey may accelerate the check but cannot be the only evidence after restart. The durable uniqueness key is tenant + inbound endpoint + sender/event identity as applicable.
+
 **Minimum acceptance evidence**  
-Replay, signature-tamper, stale timestamp and cross-tenant endpoint tests fail closed; key rotation is tested without exposing secrets.
+Replay, signature-tamper, stale timestamp and cross-tenant endpoint tests fail closed; replay remains blocked across Core restart/failover within the replay window; concurrent duplicate requests yield one accepted business event; key rotation is tested without exposing secrets.
 
 #### `REQ-EXTL-P0-022` — Webhook retry, expiry and dead-letter contract
 
@@ -909,6 +915,17 @@ Use versioned internal event envelopes for material state changes. Minimum famil
 ### 6.10 State-machine enforcement
 
 State transitions are server-enforced, not UI conventions. Invalid transitions, stale revisions and incompatible desired states return stable typed errors. Rollback/revocation transitions are separate from ordinary deprecation.
+
+
+### 6.11 Webhook delivery/replay persistence boundary
+
+`integration.webhook_delivery` is the durable queue/control record for outbound delivery; `integration.webhook_delivery_attempt` records bounded attempts and safe response metadata. A pending delivery must survive process restart without reconstruction from browser state, Valkey or an expired Kafka offset.
+
+For PostgreSQL-originated domain events, the source mutation and outbox/delivery intent are atomic. For Kafka-originated events, delivery materialization is idempotent and occurs before Kafka acknowledgement/offset commit. Remote I/O is never performed while holding the source-domain database transaction open; workers claim committed delivery rows using bounded concurrency-safe leases/locks and then persist the outcome.
+
+Inbound accepted event/nonce identities are durably unique for the configured replay window. The trusted inbound business event is emitted only after tenant binding, authentication/schema checks and replay-state persistence succeed. Failure to persist replay state fails closed rather than accepting an event that could be replayed after restart.
+
+Dead-letter/replay preserves the original event/delivery identity and creates an auditable new attempt/replay operation; it never rewrites the original event into a new logical business event.
 
 ---
 
