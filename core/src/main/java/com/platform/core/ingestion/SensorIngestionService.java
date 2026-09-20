@@ -96,7 +96,11 @@ public class SensorIngestionService {
         // 4. Publish atomically in a single Kafka transaction.
         // Kafka and PostgreSQL are intentionally not XA/2PC. If Core crashes after Kafka commit,
         // the pending reservation remains and the Sensor retries. Stable logical observation IDs
-        // plus replay-safe ClickHouse reads make the duplicate publication harmless.
+        // plus replay-safe ClickHouse reads make the duplicate publication harmless
+        // (at-least-once, not exactly-once). Concurrent HTTP retries of the same reserved batch
+        // may all republish under RETRY_PENDING; that amplification is a P1 hardening concern
+        // because the normal Sensor uploader path serializes retries. Do not introduce a
+        // publisher lease/new datastore here without production evidence.
         kafkaProducer.publishBatchTransactionally(observations);
 
         // 5. Finalize the reserved batch in a new PostgreSQL transaction only after Kafka commit.

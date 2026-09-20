@@ -30,14 +30,37 @@ ch_raw() {
   docker exec "$SERVER" clickhouse-client     --user "$USER" --password "$PASSWORD" --query "$1"
 }
 
+# ClickHouse 24.8-alpine entrypoint creates the app user and database by
+# rewriting users/config and restarting the server. SELECT 1 can succeed in a
+# transient window before that init finishes; subsequent DDL then fails with
+# ATTEMPT_TO_READ_AFTER_EOF. Require consecutive DDL-capable probes instead.
 wait_ch() {
+  local stable=0
+  local probe_sql
+  probe_sql=$(cat <<'SQL'
+CREATE DATABASE IF NOT EXISTS platform;
+CREATE TABLE IF NOT EXISTS platform.__platform_ready_probe (x UInt8) ENGINE = MergeTree() ORDER BY x;
+DROP TABLE IF EXISTS platform.__platform_ready_probe;
+SQL
+)
   for _ in $(seq 1 90); do
-    if docker exec "$SERVER" clickhouse-client         --user "$USER" --password "$PASSWORD" --query "SELECT 1" >/dev/null 2>&1; then
-      return 0
+    if docker exec "$SERVER" clickhouse-client \
+         --user "$USER" --password "$PASSWORD" --query "SELECT 1" >/dev/null 2>&1 \
+       && docker exec "$SERVER" clickhouse-client \
+         --user "$USER" --password "$PASSWORD" --multiquery --query "$probe_sql" >/dev/null 2>&1 \
+       && docker exec "$SERVER" clickhouse-client \
+         --user "$USER" --password "$PASSWORD" --database platform \
+         --query "SELECT name FROM system.databases WHERE name='platform'" >/dev/null 2>&1; then
+      stable=$((stable + 1))
+      if [[ "$stable" -ge 2 ]]; then
+        return 0
+      fi
+    else
+      stable=0
     fi
     sleep 1
   done
-  fail "ClickHouse did not become ready"
+  fail "ClickHouse did not become DDL-ready (entrypoint user/database init may still be restarting)"
 }
 
 run_migration() {
