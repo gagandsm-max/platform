@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 Windows/Linux infrastructure monitoring, Endpoint Diagnostic Snapshot and local-intelligence placement reconciliation
 
 ## 1. Authority
 
@@ -53,8 +53,8 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 | 21 | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | Authoritative OIV specialized master: SaaS/carrier/change intelligence, Flight Recorder, Similar Incident Memory, triggered packet evidence, controlled remediation, MTTR/value engine, formal `PRD-OIV-*` + `REQ-OIV-*` supplement |
 | 22 | `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` | Authoritative onboarding specialized master: discovery review, Agent enrollment/identity continuity, approval/audit, grouping/policy preview, Notification Center, formal `PRD-ONB-*` + `REQ-ONB-*` supplement |
 | 23 | `Platform_21_Enterprise_Gap_Closure_Master.md` | Authoritative enterprise gap-closure specialized master: normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, audit tamper evidence, enterprise connector/offboarding/licensing/policy-as-code requirements, formal `PRD-EGC-*` + `REQ-EGC-*` supplement |
-| 24 | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Authoritative monitoring-intelligence specialized master: class-specific Alert Evidence Contracts, telemetry trust, semantic monitoring states, alert-quality lifecycle, RCA/AI assurance, Incident Copilot, AI safety/provenance, formal `PRD-MIA-*` + `REQ-MIA-*` supplement |
-| 25 | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | Authoritative enterprise-monitoring-coverage specialized master: Capability Pack product contract, L1/L2/L3 dimensional certification, technology-family catalogue, Customer Acceptance Profiles, Real Customer Requirements normalization, formal `PRD-EMC-*` + `REQ-EMC-*` supplement |
+| 24 | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Authoritative monitoring-intelligence specialized master: class-specific Alert Evidence Contracts, telemetry trust, semantic monitoring states, Endpoint Diagnostic Snapshot (EDS), tiered local intelligence, RCA/AI assurance, Incident Copilot, AI safety/provenance, formal `PRD-MIA-*` + `REQ-MIA-*` supplement |
+| 25 | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | Authoritative enterprise-monitoring-coverage specialized master: Capability Pack product contract, L1/L2/L3 dimensional certification, Linux/Windows Agent and agentless infrastructure coverage, technology-family catalogue, Customer Acceptance Profiles, Real Customer Requirements normalization, formal `PRD-EMC-*` + `REQ-EMC-*` supplement |
 
 ## 4. Consolidation and version map
 
@@ -101,6 +101,17 @@ A post-merge cross-layer audit of the NOC troubleshooting reconciliation identif
 
 This corrective reconciliation closes those defects without adding product scope, a new database, a new mandatory service, a new pack framework or a new dependency. `Platform_17` owns the versioned API/event/data contracts; `Platform_11` owns interactive-diagnostic capacity accounting; `Platform_09` owns explicit screen behavior; and `Platform_23` clarifies that a diagnostic workflow definition is not a second Capability Pack/registry/SDK.
 
+### 4.5 2026-09-19 endpoint diagnostics and local-intelligence reconciliation
+
+This v3.2.2 reconciliation formalizes comprehensive Windows/Linux infrastructure monitoring and a bounded **Endpoint Diagnostic Snapshot (EDS)** without adding a new Mother Reference file, mandatory endpoint interpreter, mandatory AI appliance, new causal authority or second diagnostics framework.
+
+EDS is the product-facing name for a specialized diagnostic type/profile (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`) of the existing Diagnostic Job / Live Evidence / Investigation Session architecture. It does not create a second diagnostic registry, scheduler, authorization system, investigation state machine or evidence store.
+
+`Platform_23` owns separate Agent-based versus agentless/remote infrastructure coverage and certification, including CPU/resource pressure, memory/swap, filesystem/inode, block I/O, NIC, process, service and applicable OS/event/hardware evidence. `Platform_22` owns EDS capture-eligibility/evidence semantics and tiered local intelligence: deterministic/model-free endpoint logic, bounded Core analytics and optional LLM/embedding assistance behind AI Gateway. No LLM/GNN/foundation-model runtime is placed on normal monitored Agents or Sensors for EDS.
+
+An optional dedicated local/private inference provider is a **conditional** compute-isolation boundary: **if** that provider mode is supported/enabled, its isolation/security/non-authority requirements are mandatory. It is not required to deliver Linux/Windows monitoring, SSH/WinRM/WMI/CIM, EDS, deterministic Core RCA or normal Platform operation. It is not a third Core, owns no authoritative Platform state and may fail or be absent without affecting deterministic monitoring/RCA. Existing on-Core local inference remains optional and allowed only inside the certified `Platform_11` non-interference envelope. All-AI-disabled remains a supported deterministic mode.
+
+This reconciliation updates existing base/specialized masters and keeps the authoritative set at **25 files** and version **v3.2.2**. No `Platform_24` / `Platform_25` document is introduced.
 ## 5. Precedence
 
 When requirements appear to conflict:
@@ -170,6 +181,10 @@ Conflicts require documented change control; implementation must not silently ch
 - Core monitoring and deterministic RCA/alerting continue without Internet/hosted AI availability; hosted/private/local/no-LLM operation is governed by explicit data-egress and fallback controls.
 - Capability Pack is the canonical enterprise extension architecture. Technology Monitoring Pack, Device / Network Pack, SaaS Monitoring Pack, Integration Pack and optional Customer Extension Pack are classifications/profiles of that architecture, not independent frameworks. Existing Device Pack contracts remain valid under this model.
 - Monitoring-technology certification is dimensional (Discovery/L1/L2/L3/Topology/NCM/Security/version). A family listed in `Platform_23` is a coverage target, not an implemented or certified pack.
+- Windows/Linux server monitoring certifies Agent-based and agentless/remote modes separately; collection/credential/path failure is monitoring-health evidence and does not automatically assert host/service failure.
+- Endpoint Diagnostic Snapshot is a bounded typed evidence-acquisition capability triggered by qualified policy state or authorized investigation; endpoint evidence informs but does not replace Core-authoritative cross-domain RCA.
+- Normal monitored Agents and Sensors do not host an LLM/GNN/foundation-model runtime for EDS; endpoint-local intelligence is deterministic/bounded statistical logic only.
+- Optional dedicated local/private inference is an AI-Gateway provider, not a third Core/HA authority or authoritative data store; deterministic Platform operation does not depend on it.
 
 ## 7. OSS governance
 

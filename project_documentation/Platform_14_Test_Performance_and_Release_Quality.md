@@ -149,3 +149,28 @@ Customer Acceptance Profile results must be evidence-backed. A technology listed
 Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certified ≠ deployed.
 
 OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively.
+
+---
+
+## 7. Endpoint diagnostics and local-intelligence quality supplement — v3.2.2
+
+Applicable implementation may not be represented as production-ready until evidence covers:
+
+- Linux Agent continuous telemetry: CPU/scheduler/PSI, memory/swap/page pressure, filesystem/inodes, block I/O, NIC, bounded process/service and selected OS/event evidence;
+- Windows Agent native runtime on supported Windows hosts, including real Service/SCM lifecycle and applicable performance/service/Event Log evidence; cross-compilation alone is not certification;
+- Linux SSH and Windows WinRM/WMI/CIM agentless monitoring with secure credential handling and explicit coverage gaps;
+- EDS capture-eligibility state machine (`INELIGIBLE|QUALIFYING|CAPTURE_ELIGIBLE|COOLDOWN`): duration, hysteresis, recovery, cooldown, duplicate coalescing and policy-version changes; prove these states are capture eligibility only and do not assert authoritative host DOWN/severity;
+- Core-issued authority/generation fencing for automatic EDS: fresh, stale, expired, revoked, replayed and reassigned cases fail closed;
+- manual/Core-requested EDS Diagnostic Job authorization, expiry, idempotency and replay protection;
+- `COMPLETE/PARTIAL/FAILED/SUPPRESSED` capture_status under privilege denial, unsupported evidence, timeout, collector fault and resource pressure, with explicit/observable incomplete evidence;
+- endpoint idle-overhead benchmark plus bounded transient capture CPU/RAM/I/O/network overhead;
+- Sensor/Core storm tests with many simultaneous capture-eligible endpoints, backpressure, queue/storage pressure and **preservation of routine monitoring/ingestion durability ahead of EDS**;
+- negative security tests proving no arbitrary shell/`sh -c`/`bash -c`/PowerShell/script-upload execution path and no secret/user-content leakage;
+- Agent/agentless semantic normalization and explicit parity differences;
+- deterministic Core RCA remaining correct when EDS is missing, partial, late or contradictory;
+- Tier-0 endpoint logic with all AI/model runtimes disabled;
+- Tier-1 analytics cancellation/yield behavior under Core pressure;
+- Tier-2 hosted/on-Core/dedicated-local/no-LLM degradation behavior as applicable;
+- dedicated local/private inference provider outage (when that optional mode is enabled) proving no impact on collection, alerting, incidents, deterministic RCA, Core HA or data durability; and proving that mode is not required for EDS/base monitoring.
+
+No fixed endpoint-overhead number is asserted by documentation alone. Release certification records measured idle and triggered overhead per supported OS/profile and establishes the admissible envelope. Specified ≠ implemented ≠ tested ≠ certified ≠ deployed.

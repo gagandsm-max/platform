@@ -4,7 +4,7 @@
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Completeness Control**
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 endpoint diagnostics and infrastructure-monitoring reconciliation
 
 ## 1. Purpose
 
@@ -340,7 +340,8 @@ v3.2.2 specialized-master RTM supplements live in their owning masters and are n
 - ONB: `PRD-ONB-*` / `REQ-ONB-*` in `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
 - EGC: `PRD-EGC-*` / `REQ-EGC-*` in `Platform_21_Enterprise_Gap_Closure_Master.md`
 - MIA: `PRD-MIA-*` / `REQ-MIA-*` in `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`
-- EMC: `PRD-EMC-001` through `PRD-EMC-018` and `REQ-EMC-001` through `REQ-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
+  - EDS/local-intelligence extension: `PRD-MIA-043` through `PRD-MIA-050` / `REQ-MIA-040` through `REQ-MIA-047`
+- EMC: `PRD-EMC-001` through `PRD-EMC-022` and `REQ-EMC-001` through `REQ-EMC-022` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack completeness control and are supplemented, not replaced, by Capability Pack certification requirements in `Platform_23`.
 

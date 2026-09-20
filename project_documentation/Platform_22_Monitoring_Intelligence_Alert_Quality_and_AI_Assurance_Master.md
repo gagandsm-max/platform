@@ -30,7 +30,7 @@ Nothing in this document selects a commercial model/provider, vector database, m
 8. **No silent learning across tenants.** Tenant data, operator feedback and incident evidence remain tenant scoped unless an explicitly approved privacy/security/governance process authorizes another use.
 9. **No invented universal thresholds.** Alert evidence and release gates are class-specific and policy/evidence driven.
 10. **AI claims require provenance.** Every causal or recommended-action claim must trace to authoritative evidence and disclose uncertainty/contradictions.
-11. **Local intelligence is lightweight by design.** Local AI/ML/LLM shall run inside the existing certified Core tiers, shall not create a mandatory GPU requirement and shall yield resources before live monitoring is degraded.
+11. **Local intelligence is lightweight by design.** Local AI/ML/LLM may run on Core only inside a certified non-interference envelope or may use an approved dedicated local/private inference provider through AI Gateway; neither mode creates a mandatory GPU requirement, and AI work shall yield or fail independently before live monitoring is degraded.
 12. **Small model, strong tools.** Platform shall reduce/query/correlate evidence deterministically before LLM inference; the local LLM is an explanation/copilot layer, not the hot-path monitoring or causal engine.
 
 ---
@@ -72,8 +72,8 @@ Nothing in this document selects a commercial model/provider, vector database, m
 | `PRD-MIA-031` | P0 | AI/analytics workloads shall have explicit CPU/memory/GPU/concurrency/queue/time budgets and fail-safe degradation so intelligence cannot starve core monitoring. |
 | `PRD-MIA-032` | P0 | AI/ML operations shall expose model/prompt/policy/version provenance, latency, error/timeout/fallback rates, token/compute usage where relevant, cache use, grounding/evidence coverage and decision audit. |
 | `PRD-MIA-033` | P0 | Platform shall implement the Local Intelligence capability as bounded logical modules under the existing modular Core/analytics architecture; the module map in §15.1 is authoritative and does not imply one process/microservice per module. |
-| `PRD-MIA-034` | P0 | Supported Local AI/ML/LLM shall fit inside the existing Core sizing tiers in `Platform_11`; standard deployment shall be CPU-first with **no mandatory GPU** and shall preserve monitoring/ingestion/storage/alert/RCA objectives under certified AI load. |
-| `PRD-MIA-035` | P0 | On the 8 vCPU/16 GB tier the default local LLM target is a **0.5B–1.5B parameter 4-bit-quantized** model with one concurrent request; larger models, including up to approximately 3B, require explicit benchmark certification and may not silently raise the minimum Core requirement. |
+| `PRD-MIA-034` | P0 | Supported Local AI/ML/LLM may execute on Core only within a certified non-interference envelope in `Platform_11`; deployments requiring compute isolation shall support an optional dedicated local/private inference provider through the same AI Gateway. Standard monitoring remains CPU-first with **no mandatory GPU**, and monitoring/ingestion/storage/alert/deterministic-RCA objectives take precedence over all AI work. |
+| `PRD-MIA-035` | P0 | **If Core-resident LLM inference is enabled** on the 8 vCPU/16 GB tier, the certified target profile is a **0.5B–1.5B parameter 4-bit-quantized** model with one concurrent request; larger models, including up to approximately 3B, require explicit benchmark certification and may not silently raise the minimum Core requirement. Core-resident LLM is optional, not a prerequisite for base monitoring/RCA. |
 | `PRD-MIA-036` | P0 | Customer production Core shall not train or fine-tune foundation LLMs. Local LLM intelligence shall use approved pretrained quantized artifacts plus Platform evidence retrieval/tools; lightweight statistical/ML recalibration remains permitted when bounded and interruptible. |
 | `PRD-MIA-037` | P0 | Local LLM input shall be produced by a bounded context/evidence builder; high-volume raw telemetry shall be aggregated/queried by Platform first, and the supported small-Core operating context shall normally remain within a 2K–4K token envelope unless benchmarked otherwise. |
 | `PRD-MIA-038` | P0 | GNN inference shall use bounded incident-relevant temporal subgraphs and shall not evaluate the complete enterprise graph for every observation; GNN remains optional assistance behind deterministic RCA and may be deferred under resource pressure. |
@@ -81,6 +81,14 @@ Nothing in this document selects a commercial model/provider, vector database, m
 | `PRD-MIA-040` | P0 | Local model/runtime artifacts shall be offline-packageable, signed/checksummed, versioned and governed by a Platform Model Registry with provenance, evaluation status, compatibility and rollback metadata. |
 | `PRD-MIA-041` | P1 | Similar-incident, runbook and knowledge retrieval shall prefer Platform-owned structured/graph/keyword retrieval plus bounded embeddings where useful; no dedicated vector database is required unless benchmark evidence demonstrates a material gap. |
 | `PRD-MIA-042` | P0 | Runtime/library selection shall remain dependency-governed: existing approved NumPy/Polars/scikit-learn may be used; PyTorch/PyG remain GNN candidates; **llama.cpp** is the preferred P0 candidate for CPU/GGUF local-LLM inference and **ONNX Runtime CPU** the preferred P0 candidate for compact embedding/ML inference, but neither may ship until admitted by `Platform_07` exact-version licence/CVE/SBOM and performance review. |
+| `PRD-MIA-043` | P0 | Platform shall implement a bounded **Endpoint Diagnostic Snapshot (EDS)** capability for Windows/Linux infrastructure as Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT`. EDS may be triggered by a capture-eligible endpoint policy condition or an authorized Core investigation request and shall collect diagnostic evidence; it shall not independently assert the authoritative incident root cause or create a second diagnostics framework. |
+| `PRD-MIA-044` | P0 | Agent-side EDS triggering shall reuse normal monitoring observations and a deterministic **capture-eligibility** state machine (`INELIGIBLE|QUALIFYING|CAPTURE_ELIGIBLE|COOLDOWN`) with policy-defined duration, hysteresis, recovery and cooldown under current Core-issued authority/generation. Eligibility is not host-health authority. The design target is **near-zero incremental steady-state overhead**, not zero compute; deeper collection is short-lived, cancellable and bounded. |
+| `PRD-MIA-045` | P0 | EDS output shall be typed, schema-versioned Diagnostic Job / Live Evidence with trigger/policy/authority provenance, timestamps, source quality, supporting observations, missing/unavailable evidence and capture status `COMPLETE|PARTIAL|FAILED|SUPPRESSED` subordinate to canonical Diagnostic Job state. Endpoint evidence shall not encode unsupported causal certainty or free-form repair instructions as fact. |
+| `PRD-MIA-046` | P0 | Windows/Linux Agent EDS shall use least-privilege native OS evidence paths and the existing Agent runtime. It shall not require an always-on Python interpreter, arbitrary shell/PowerShell execution, an endpoint LLM/GNN, or foundation-model artifacts on monitored hosts. |
+| `PRD-MIA-047` | P0 | Agentless infrastructure monitoring shall provide equivalent governed diagnostic semantics where the target permits them: Linux through bounded SSH query packs (fixed operation + structured parameters; no generic remote shell) and Windows through bounded WinRM/WMI/CIM query packs executed by eligible Infrastructure Sensors. Missing privilege/evidence reduces completeness/confidence and shall not be interpreted as confirmation of failure. |
+| `PRD-MIA-048` | P0 | EDS shall enforce per-endpoint concurrency, deadline, evidence-size/Top-N, frequency/cooldown and estate/storm budgets, and shall remain lower priority than routine monitoring/telemetry durability. Under endpoint, Sensor or Core pressure it shall queue, suppress, cancel or return `PARTIAL`/`SUPPRESSED` with explicit observable reason before creating a self-induced outage or silently destroying routine telemetry durability. |
+| `PRD-MIA-049` | P0 | Local intelligence placement shall be tiered: **Tier 0** deterministic endpoint trigger/evidence logic with no model runtime; **Tier 1** bounded/cold Core statistical/ML analytics that yield to protected monitoring; **Tier 2** optional LLM/embedding assistance through AI Gateway, either certified on-Core or isolated on an optional local/private inference provider. |
+| `PRD-MIA-050` | P0 | **If** an optional dedicated local/private inference node/provider is supported/enabled, it shall be stateless with respect to authoritative Platform control/telemetry state, shall not become a third Core/HA authority, shall receive only bounded authorized context through AI Gateway, and may fail or be absent without impairing collection, alerting, incident handling or deterministic RCA. That provider is not required for Linux/Windows monitoring, EDS or base Platform operation; Core-resident LLM remains optional; all-AI-disabled remains supported. |
 
 ---
 
@@ -284,7 +292,9 @@ Do not add a mandatory LangChain/LlamaIndex/Ray/Spark/MLflow/vector-database/Kub
 
 The local LLM is responsible for natural-language explanation, evidence summarization, operator Q&A, structured tool proposal, runbook/similar-incident explanation, report/PIR assistance and other bounded language tasks. It is **not** responsible for polling, metric calculation, threshold/baseline evaluation, authoritative alert qualification, graph traversal, raw incident correlation or independent causal proof.
 
-Standard smallest-Core target:
+Standard smallest-Core target applies only when the local LLM is certified to run on Core without violating protected workload objectives. Customers that require stronger compute isolation may attach an approved dedicated local/private inference provider through AI Gateway; that provider is not a Core node, does not own authoritative state and is not required for deterministic monitoring/RCA.
+
+Optional Core-resident smallest-tier profile:
 
 ```text
 Core tier                  8 vCPU / 16 GB RAM
@@ -329,6 +339,56 @@ Every shipped local model/embedding/GNN artifact records at least: model ID/type
 
 Air-gapped installation/upgrade includes the exact approved runtime/model artifacts in signed offline media; runtime may not fetch model weights from the Internet. Untrusted or customer-supplied models are disabled by default and require a governed import/security/evaluation workflow.
 
+### 15.7 Endpoint Diagnostic Snapshot (EDS) and endpoint-local intelligence
+
+EDS is a **deterministic evidence-acquisition Diagnostic Job profile** (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`), not an endpoint AI service, not a second RCA authority and not a parallel diagnostics framework. It extends the existing Diagnostic Job / Live Evidence / Investigation Session architecture.
+
+**Capture-eligibility model (not host-health authority)**
+
+```text
+normal observation
+  -> policy evaluation
+  -> INELIGIBLE | QUALIFYING
+  -> CAPTURE_ELIGIBLE after duration/hysteresis
+  -> validate current Core-issued authority/generation
+  -> Diagnostic Job ENDPOINT_DIAGNOSTIC_SNAPSHOT
+  -> bounded EDS capture
+  -> durable Agent/Sensor evidence path
+  -> COOLDOWN / recovery eligibility
+```
+
+`INELIGIBLE` / `QUALIFYING` / `CAPTURE_ELIGIBLE` / `COOLDOWN` are **local diagnostic capture-eligibility states only**. They must not determine authoritative host health, replace semantic monitoring state, create an endpoint Alert Engine, assert device/service DOWN, or independently assert incident severity/cause. Normal monitoring/Alert Engine/Core remain authoritative.
+
+The eligibility evaluator shall reuse normal Agent observations wherever possible. Thresholds, duration, hysteresis, recovery and cooldown are centrally governed effective policy with policy ID/version **and** Core-issued assignment/control generation provenance; policy ID/version alone is insufficient. No universal CPU/memory/disk percentage is fixed by this master. Fresh, stale, expired, replayed and reassigned authority cases must be testable and fail closed when obsolete.
+
+**Minimum evidence families, when supported by OS/version/privilege**
+
+- CPU utilization breakdown, load/run-queue and Linux PSI or Windows scheduling/performance equivalents;
+- memory availability/commit, swap/page activity, pressure and OOM/resource-exhaustion evidence;
+- filesystem capacity/inodes plus block-device I/O, queue/latency/error evidence;
+- NIC throughput/state/errors/drops and bounded TCP/retransmission/socket summaries;
+- bounded Top-N process resource evidence and process/restart state without unrestricted process content collection;
+- Linux systemd / Windows Service Control Manager service state and restart/failure evidence;
+- selected bounded kernel/Event Log evidence relevant to OOM, storage/filesystem, hardware/WHEA/MCE/PCIe, service and driver faults;
+- hardware/thermal/power evidence only where safely available through native OS or approved out-of-band sources.
+
+Command line, environment, arbitrary file content, packet payload, user content and unrestricted logs are not default EDS evidence. Any privacy-sensitive field requires explicit policy and redaction/minimization.
+
+**Collection semantics**
+
+- Agent-based Linux/Windows collection uses the existing Agent process/runtime and native OS interfaces.
+- Agentless Linux collection uses versioned bounded read-only SSH query packs as fixed approved operations with structured argv/typed parameters; `sh -c`/`bash -c`/arbitrary command strings from users/API/model output are prohibited for routine monitoring/EDS.
+- Agentless Windows collection uses versioned bounded WinRM/WMI/CIM structured operations over approved secure transport; arbitrary PowerShell is not a routine facility. Any certified PowerShell fallback is Platform-owned, fixed, versioned, read-only, typed-parameter constrained, bounded and separately security-certified.
+- Query packs are Platform-controlled definitions with allowlisted operation, timeout, output bounds and schema mapping; they are not generic remote-shell execution.
+- Evidence unavailable because of OS, privilege, policy or collection failure is recorded as missing/partial evidence. It does not become positive proof of the suspected cause.
+- EDS flows through the existing durable Agent -> Sensor -> Core path where an Agent exists. Agentless EDS originates at the eligible Infrastructure Sensor and enters the same Live Evidence/incident contracts with source/vantage provenance preserved. No second EDS transport is created.
+- Core owns authoritative cross-domain RCA because endpoint evidence alone cannot observe all network, virtualization, storage, database, cloud, change or shared-service dependencies.
+
+**Resource semantics**
+
+Zero endpoint compute is not a meaningful technical requirement. The requirement is **near-zero incremental steady-state cost** beyond normal monitoring and a benchmarked bounded transient cost during EDS. Logical priority protects authority/control, current monitoring correctness and normal telemetry durability ahead of diagnostic evidence. EDS must stop/degrade before worsening an already resource-starved host or silently destroying routine telemetry durability. Incomplete/suppressed/shed diagnostic evidence remains explicit and auditable. Repeated identical capture-eligible conditions are coalesced/cooldown-governed and estate-wide storms are rate/budget controlled.
+
+No LLM, GNN or foundation-model runtime is permitted on normal monitored Agents or Sensors under this capability. Lightweight endpoint intelligence is deterministic/statistical capture-eligibility and evidence logic only. A dedicated local/private inference provider is optional/conditional and is not required for EDS or base monitoring.
 ---
 
 ## 16. Security, privacy and air-gap requirements
@@ -383,12 +443,20 @@ Air-gapped installation/upgrade includes the exact approved runtime/model artifa
 | `REQ-MIA-031` | P0 | Architecture/component tests map the §15.1 logical modules to bounded deployment units and prove no module bypasses authoritative telemetry/evidence, tenant scope or deterministic RCA/tool policy. |
 | `REQ-MIA-032` | P0 | SNWP-2500-v1 resource certification proves the supported 8 vCPU/16 GB local-intelligence profile remains within **≤2 vCPU AI burst and ≤3 GB aggregate AI peak RAM**, with no regression beyond approved monitoring/ingestion/query/failover tolerances. |
 | `REQ-MIA-033` | P0 | CPU-only certification proves all mandatory Local AI/ML/LLM capabilities can operate without a GPU; optional accelerator failure/removal does not disable core monitoring or supported CPU fallback. |
-| `REQ-MIA-034` | P0 | Local-LLM tests prove default small-Core 0.5B–1.5B Q4 operation, single-request concurrency, bounded 2K–4K context, idle unload/release behavior and refusal to enable an uncertified larger model/profile. |
+| `REQ-MIA-034` | P0 | When Core-resident LLM is enabled, tests prove small-Core 0.5B–1.5B Q4 operation, single-request concurrency, bounded 2K–4K context, idle unload/release behavior and refusal to enable an uncertified larger model/profile; with it disabled, base monitoring/RCA remains complete. |
 | `REQ-MIA-035` | P0 | Production packaging/tests prove foundation-model training/fine-tuning is unavailable on customer Core while lightweight ML recalibration remains bounded, interruptible and lower priority than monitoring. |
 | `REQ-MIA-036` | P0 | GNN/embedding tests prove bounded incident/subgraph and batch/on-demand behavior; full-graph-per-observation or embedding-dependent monitoring hot paths are rejected by design/performance tests. |
 | `REQ-MIA-037` | P0 | Resource-governor failure/load tests prove the documented degradation order, AI queue visibility and local-model unload/suspension before protected collection/ingestion/storage/alert/RCA objectives are violated. |
 | `REQ-MIA-038` | P0 | Model-registry/offline-package tests verify model/runtime checksum/signature, licence/provenance, compatibility, evaluation/resource metadata, no runtime Internet download and rollback to a previously approved artifact. |
 | `REQ-MIA-039` | P0 | Dependency admission tests prove llama.cpp/ONNX Runtime or any replacement runtime cannot ship until exact-version `Platform_07` admission, transitive/bundled licence review, CVE/SBOM scan and resource/security benchmark evidence exist. |
+| `REQ-MIA-040` | P0 | `PRD-MIA-043`: Linux/Windows EDS tests prove capture-eligible and authorized Diagnostic Job paths, evidence provenance, `COMPLETE/PARTIAL/FAILED/SUPPRESSED` capture outcomes subordinate to Diagnostic Job state and Core ownership of authoritative RCA. |
+| `REQ-MIA-041` | P0 | `PRD-MIA-044`: capture-eligibility state-machine tests prove duration/hysteresis/recovery/cooldown, authority/generation fencing (fresh/stale/expired/replayed/reassigned) and that eligibility is not authoritative host-health state; idle-overhead and deeper collection remain bounded/cancellable. |
+| `REQ-MIA-042` | P0 | `PRD-MIA-045`: schema/contract tests prove typed EDS evidence, missing-evidence codes, authority provenance and prohibition of unsupported causal certainty as fact. |
+| `REQ-MIA-043` | P0 | `PRD-MIA-046`: Agent tests prove least privilege, native evidence collection, no arbitrary shell/`sh -c`/`bash -c`/PowerShell execution path and no mandatory Python/LLM/GNN/model runtime on monitored endpoints. |
+| `REQ-MIA-044` | P0 | `PRD-MIA-047`: agentless SSH and WinRM/WMI/CIM diagnostics prove allowlisted/versioned query packs (fixed operation + structured parameters; no generic remote shell/PowerShell facility), secure credential use, bounded output/time and explicit parity/coverage differences versus Agent evidence. |
+| `REQ-MIA-045` | P0 | `PRD-MIA-048`: resource/storm tests prove EDS yields before creating self-induced outage, preserves routine monitoring/telemetry durability and exposes explicit incomplete/suppressed/shed diagnostic evidence. |
+| `REQ-MIA-046` | P0 | `PRD-MIA-049`: placement tests prove Tier 0 endpoint logic works model-free, Tier 1 Core analytics can cold-start/yield, and Tier 2 LLM/embedding assistance can be disabled without monitoring/RCA collapse. |
+| `REQ-MIA-047` | P0 | `PRD-MIA-050`: dedicated local/private inference-provider tests prove isolation/non-authority requirements apply when that optional mode is enabled; prove no authoritative state ownership, no third-Core/HA role, bounded AI-Gateway context, safe failure/absence and that the mode is not required for EDS/base monitoring. |
 
 ---
 
