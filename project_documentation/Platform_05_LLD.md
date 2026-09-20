@@ -988,6 +988,51 @@ raw canonical Flow
 
 AD/directory membership is not session proof. Domain/application does not imply full URL. Historical enrichments preserve effective time/version.
 
+#### 14.4.1 Source, normalized and enrichment separation
+
+Flow processing has three logical layers:
+
+1. **Source Observation** — exactly what the exporter/source emitted, including exporter/observation-domain/template/sequence/sampling and source timestamps.
+2. **Normalized Flow** — protocol-neutral directional Flow semantics used by ingestion/storage/analysis.
+3. **Enrichment Context** — temporal endpoint/user/site/name/domain/application/Geo/ASN/cloud/topology context derived from other evidence.
+
+Enrichment must never overwrite or redefine source evidence. Physical storage may use dictionary IDs, materialized projections/views, time-aware joins or bounded query-time enrichment if benchmark evidence proves tenant isolation, historical correctness, replay/idempotency, retention behavior and query performance. A richer enrichment model does not authorize a new Flow or identity database.
+
+#### 14.4.2 Temporal identity-session contract
+
+User attribution consumes a canonical tenant-scoped temporal session/association concept rather than directory membership alone. A logical session retains, where available:
+
+```text
+session/association identity
+tenant_id
+user/account identity
+endpoint entity_id
+observed IP/address binding
+effective/session start/end
+evidence source
+confidence/quality
+provenance
+```
+
+Shared/multiplexed systems such as terminal servers, VDI, jump hosts, kiosks, NAT/proxy gateways and shared application servers may have known endpoint identity but ambiguous user attribution. Attribution remains `UNKNOWN`, `AMBIGUOUS`, `INFERRED` or `AUTHORITATIVE` (or the equivalent canonical quality vocabulary); Platform shall not fabricate a single user to populate a field.
+
+#### 14.4.3 Destination/name evidence and privacy boundary
+
+Keep distinct evidence classes for destination IP, reverse DNS, DNS-associated FQDN/domain, TLS SNI when actually observed, HTTP Host when actually observed, full URL when actually supplied by an authoritative governed telemetry source, exporter/vendor application classification, service/SaaS classification, organization/provider and ASN.
+
+A full URL is never inferred from destination IP, reverse DNS, DNS, SNI, HTTP Host or application classification. CDN/shared-hosting addresses do not become permanent domain identity.
+
+Where another governed source actually supplies URL/path/query evidence, policy must cover query-string handling, credential/token stripping, masking/redaction, path normalization, cardinality bounds, RBAC, retention and export/egress. Arbitrary query strings, credentials, reset tokens and personal form content are not blindly persisted.
+
+#### 14.4.4 Enrichment placement and offline safeguards
+
+The Flow Sensor hot path prioritizes correct, loss-aware reception, decode, protocol normalization and durable forwarding. Expensive enrichment normally executes in Core/internal processing after safe upload.
+
+There shall be no LDAP/AD query per Flow record, live DNS lookup per destination Flow, or external GeoIP/ASN API lookup per Flow record. GeoIP/ASN enrichment used in air-gapped deployments relies on governed offline datasets/packages with source, licence, version, integrity hash, update/import workflow, provenance and rollback/compatibility metadata.
+
+Bounded Sensor-side enrichment/cache is permitted only where benchmark evidence shows it reduces cost without compromising receive-path correctness or durability.
+
+
 ### 14.5 High-rate safeguards and fairness
 
 - bounded socket and decode queues;
