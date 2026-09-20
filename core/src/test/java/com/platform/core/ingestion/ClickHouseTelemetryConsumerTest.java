@@ -61,7 +61,7 @@ class ClickHouseTelemetryConsumerTest {
 
         consumer.consume(record, ack);
 
-        verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
+        verify(clickHouseClient, times(1)).insertNumericBatch(anyList(), anyString());
         verify(ack, times(1)).acknowledge();
         assertFalse(metrics.isConsumerDegraded());
     }
@@ -255,11 +255,11 @@ class ClickHouseTelemetryConsumerTest {
         doThrow(new RuntimeException("ClickHouse 503"))
                 .doThrow(new RuntimeException("ClickHouse timeout"))
                 .doNothing()
-                .when(clickHouseClient).insertNumericBatch(anyList());
+                .when(clickHouseClient).insertNumericBatch(anyList(), anyString());
 
         assertDoesNotThrow(() -> consumer.consume(record, ack));
 
-        verify(clickHouseClient, times(3)).insertNumericBatch(anyList());
+        verify(clickHouseClient, times(3)).insertNumericBatch(anyList(), anyString());
         verify(ack, times(1)).acknowledge();
         assertFalse(metrics.isConsumerDegraded());
     }
@@ -277,13 +277,13 @@ class ClickHouseTelemetryConsumerTest {
         Acknowledgment ack = mock(Acknowledgment.class);
 
         doThrow(new RuntimeException("ClickHouse connection refused"))
-                .when(clickHouseClient).insertNumericBatch(anyList());
+                .when(clickHouseClient).insertNumericBatch(anyList(), anyString());
 
         RuntimeException ex = assertThrows(RuntimeException.class, () ->
                 consumer.consume(record, ack));
         assertTrue(ex.getMessage().contains("ClickHouse persistence unavailable"));
 
-        verify(clickHouseClient, times(3)).insertNumericBatch(anyList());
+        verify(clickHouseClient, times(3)).insertNumericBatch(anyList(), anyString());
         verify(ack, never()).acknowledge();
         assertTrue(metrics.isConsumerDegraded());
     }
