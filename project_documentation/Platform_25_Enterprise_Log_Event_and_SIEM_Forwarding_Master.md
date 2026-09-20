@@ -354,17 +354,25 @@ Routing supports data-residency constraints such as region/site-specific destina
 
 A failed destination must not block healthy destinations. Logical per-destination queue isolation is mandatory, though physical storage may be shared safely.
 
-Delivery states distinguish queued, sending, transport accepted, destination acknowledged where provable, retrying, rate limited, failed, dead letter and explicitly policy-dropped.
+Each source Log Event routed to a destination receives a stable tenant-scoped **per-destination delivery identity** derived from or durably linked to the canonical source event identity, route/version and destination. Fan-out to N destinations creates N independently recoverable delivery lifecycles; retry/replay of one destination must not create a new logical source event or silently change another destination's state.
 
-UDP Syslog is best-effort. Successful socket send is never represented as "indexed in SIEM".
+The durable forwarding queue is restart/failover safe. PostgreSQL is authoritative for control-plane delivery lifecycle/attempt/dead-letter/replay state. High-rate payload bodies MAY remain in the canonical ClickHouse/log-evidence store or an approved durable artifact path and be referenced by immutable event/evidence identity rather than duplicated into PostgreSQL, but the referenced source event MUST remain retained/pinned for at least the unresolved delivery horizon. A queued delivery may not outlive the only retrievable copy of the payload it is required to send.
+
+For a Kafka-derived canonical Log Event, the routing consumer MUST idempotently materialize every required per-destination delivery intent, or a durable explicit policy-drop disposition, **before committing the consumed Kafka offset**. A Core crash after materialization but before offset commit may repeat routing work, but stable uniqueness/idempotency must converge on the same delivery identities. A crash before materialization commits must leave the Kafka event replayable. Kafka wakeups are not the sole record of pending external delivery.
+
+Where routing is triggered by a PostgreSQL-authoritative control/business transition, creation of any required outbound delivery intent uses a transactional outbox or equivalent single-PostgreSQL atomic boundary with that transition. A committed transition must not exist without its required durable delivery intent, and an uncommitted transition must not expose a phantom queued delivery.
+
+Delivery states distinguish queued, sending, transport accepted, destination acknowledged where provable, retrying, rate limited, failed, dead letter and explicitly policy-dropped. State/attempt updates are monotonic/versioned or concurrency-guarded so failover/retry workers cannot silently regress a terminal state or double-own the same lease.
+
+A worker marks delivery complete only at the configured destination acceptance boundary. UDP Syslog is best-effort. Successful socket/TLS/HTTP write alone is never represented as "indexed in SIEM" or downstream processing completion unless the destination contract proves that stronger acknowledgement. Ambiguous outcomes enter bounded retry/reconciliation according to destination semantics rather than blind duplicate creation where a target offers an idempotency/correlation mechanism.
 
 Retry/backoff is bounded and destination-specific. Health exposes queue depth/bytes, oldest pending, retry rate, last success and estimated durability horizon.
 
-Repeated transformation/schema/target rejection enters dead-letter state. Authorized operators may inspect, correct mapping, bounded-retry or discard with reason/audit.
+Repeated transformation/schema/target rejection enters dead-letter state. Authorized operators may inspect, correct mapping, bounded-retry or discard with reason/audit. Dead-letter/discard is a durable terminal disposition; queue/source retention must not delete the only evidence required for audit or an authorized replay before its retention policy permits.
 
-Replay requires destination/time/scope, volume estimate, rate limit, confirmation and audit. Unbounded historical replay is prohibited.
+Replay requires destination/time/scope, volume estimate, rate limit, confirmation and audit. Replay preserves the original source event and delivery lineage and creates a bounded new attempt/replay execution rather than an unrelated business event. Unbounded historical replay is prohibited.
 
-Per-destination controls may include EPS, bytes/sec, batch size, concurrency and queue limits. Priority/shedding, if needed, is deterministic, policy-driven, counted and visible.
+Per-destination controls may include EPS, bytes/sec, batch size, concurrency and queue limits. Priority/shedding, if needed, is deterministic, policy-driven, counted and visible. A required delivery may be shed only through an explicit policy disposition that records destination, reason, count/bytes and audit/health evidence; silent queue eviction is prohibited.
 
 ---
 
