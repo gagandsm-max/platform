@@ -60,13 +60,14 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
     public ReplayReservation reserveBatch(
             UUID tenantId,
             String sensorId,
+            String streamId,
             long firstSeq,
             long lastSeq,
             String checksum,
             String batchId
     ) {
         ReplayReservation result = transactionTemplate.execute(status ->
-                reserveBatchInTransaction(tenantId, sensorId, firstSeq, lastSeq, checksum, batchId));
+                reserveBatchInTransaction(tenantId, sensorId, streamId, firstSeq, lastSeq, checksum, batchId));
         if (result == null) {
             throw new IllegalStateException("Telemetry replay reservation transaction returned no result");
         }
@@ -76,6 +77,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
     private ReplayReservation reserveBatchInTransaction(
             UUID tenantId,
             String sensorId,
+            String streamId,
             long firstSeq,
             long lastSeq,
             String checksum,
@@ -85,7 +87,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
 
         List<ReplayRow> rows = jdbcTemplate.query(
                 """
-                SELECT acked_through_sequence, last_first_sequence, last_last_sequence,
+                SELECT stream_id, acked_through_sequence, last_first_sequence, last_last_sequence,
                        last_checksum, pending_first_sequence, pending_last_sequence,
                        pending_checksum
                   FROM platform.sensor_telemetry_watermark
@@ -93,6 +95,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
                  FOR UPDATE
                 """,
                 (rs, rowNum) -> new ReplayRow(
+                        rs.getString("stream_id"),
                         rs.getLong("acked_through_sequence"),
                         rs.getLong("last_first_sequence"),
                         rs.getLong("last_last_sequence"),
@@ -109,19 +112,39 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
             jdbcTemplate.update(
                     """
                     INSERT INTO platform.sensor_telemetry_watermark (
-                        tenant_id, sensor_id, acked_through_sequence,
+                        tenant_id, sensor_id, stream_id, acked_through_sequence,
                         last_first_sequence, last_last_sequence, last_checksum,
                         last_batch_id, updated_at,
                         pending_first_sequence, pending_last_sequence,
                         pending_checksum, pending_batch_id, pending_reserved_at
-                    ) VALUES (?, ?, 0, 0, 0, '', NULL, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ) VALUES (?, ?, ?, 0, 0, 0, '', NULL, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     """,
-                    tenantId, sensorId, firstSeq, lastSeq, checksum, batchId
+                    tenantId, sensorId, streamId, firstSeq, lastSeq, checksum, batchId
             );
             return ReplayReservation.reserved(0);
         }
 
         ReplayRow row = rows.get(0);
+
+        if (row.streamId() == null) {
+            int bound = jdbcTemplate.update(
+                    """
+                    UPDATE platform.sensor_telemetry_watermark
+                       SET stream_id = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE tenant_id = ? AND sensor_id = ? AND stream_id IS NULL
+                    """,
+                    streamId, tenantId, sensorId
+            );
+            if (bound != 1) {
+                throw new IllegalStateException("Failed to bind durable telemetry stream identity");
+            }
+        } else if (!row.streamId().equals(streamId)) {
+            return ReplayReservation.rejected(
+                    row.ackedThroughSequence(),
+                    "ERR_SENSOR_STREAM_CHANGED",
+                    "Sensor durable telemetry stream changed unexpectedly; explicit continuity reset/re-enrollment is required"
+            );
+        }
 
         if (row.pendingFirstSequence() != null) {
             boolean samePendingRange = row.pendingFirstSequence() == firstSeq
@@ -200,18 +223,20 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
     public void finalizeReservedBatch(
             UUID tenantId,
             String sensorId,
+            String streamId,
             long firstSeq,
             long lastSeq,
             String checksum,
             String batchId
     ) {
         transactionTemplate.executeWithoutResult(status ->
-                finalizeReservedBatchInTransaction(tenantId, sensorId, firstSeq, lastSeq, checksum, batchId));
+                finalizeReservedBatchInTransaction(tenantId, sensorId, streamId, firstSeq, lastSeq, checksum, batchId));
     }
 
     private void finalizeReservedBatchInTransaction(
             UUID tenantId,
             String sensorId,
+            String streamId,
             long firstSeq,
             long lastSeq,
             String checksum,
@@ -229,6 +254,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
                  FOR UPDATE
                 """,
                 (rs, rowNum) -> new ReplayRow(
+                        rs.getString("stream_id"),
                         rs.getLong("acked_through_sequence"),
                         rs.getLong("last_first_sequence"),
                         rs.getLong("last_last_sequence"),
@@ -245,6 +271,9 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
         }
 
         ReplayRow row = rows.get(0);
+        if (row.streamId() == null || !row.streamId().equals(streamId)) {
+            throw new IllegalStateException("Telemetry stream identity changed before finalize");
+        }
         if (row.pendingFirstSequence() == null) {
             if (row.lastFirstSequence() == firstSeq
                     && row.lastLastSequence() == lastSeq
@@ -324,6 +353,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
     }
 
     private record ReplayRow(
+            String streamId,
             long ackedThroughSequence,
             long lastFirstSequence,
             long lastLastSequence,
