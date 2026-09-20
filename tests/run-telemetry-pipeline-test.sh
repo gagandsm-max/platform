@@ -36,9 +36,9 @@ fi
 
 # Test 1: Query initial ClickHouse telemetry row count
 echo "--> [1/6] Verifying telemetry table status in ClickHouse..."
-INITIAL_COUNT=$(curl -s -u "${CH_USER}:${CH_PASS}" "http://127.0.0.1:${CH_HTTP_PORT}/?query=SELECT+count()+FROM+platform.metric_numeric")
-if [ -z "${INITIAL_COUNT}" ]; then
-    echo "[ERROR] Failed to query ClickHouse platform.metric_numeric table"
+INITIAL_COUNT=$(curl -fsS -u "${CH_USER}:${CH_PASS}" "http://127.0.0.1:${CH_HTTP_PORT}/?query=SELECT+count()+FROM+platform.metric_numeric" || true)
+if ! [[ "${INITIAL_COUNT}" =~ ^[0-9]+$ ]]; then
+    echo "[ERROR] Failed to query numeric ClickHouse platform.metric_numeric count: ${INITIAL_COUNT}"
     exit 1
 fi
 echo "[OK] ClickHouse platform.metric_numeric accessible (current rows: ${INITIAL_COUNT})."
@@ -51,8 +51,8 @@ else
     NEW_COUNT="${INITIAL_COUNT}"
     for i in $(seq 1 15); do
         sleep 1
-        CURRENT_COUNT=$(curl -s -u "${CH_USER}:${CH_PASS}" "http://127.0.0.1:${CH_HTTP_PORT}/?query=SELECT+count()+FROM+platform.metric_numeric")
-        if [ "${CURRENT_COUNT}" -gt "${INITIAL_COUNT}" ]; then
+        CURRENT_COUNT=$(curl -fsS -u "${CH_USER}:${CH_PASS}" "http://127.0.0.1:${CH_HTTP_PORT}/?query=SELECT+count()+FROM+platform.metric_numeric" || true)
+        if [[ "${CURRENT_COUNT}" =~ ^[0-9]+$ ]] && [ "${CURRENT_COUNT}" -gt "${INITIAL_COUNT}" ]; then
             NEW_COUNT="${CURRENT_COUNT}"
             break
         fi
@@ -132,7 +132,7 @@ COLLECTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 RECORD_JSON="{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{\"tenantId\":\"${TEST_TENANT_ID}\",\"entityId\":\"${TEST_ENTITY_ID}\",\"collectedAt\":\"${COLLECTED_AT}\",\"quality\":\"GOOD\",\"protocol\":\"snmp\",\"protocolPayload\":{\"observations\":[{\"status\":\"VALUE\",\"oid\":\".1.3.6.1.2.1.1.3.0\",\"value\":{\"integer\":1234567}}]}}}"
 CHECKSUM=$(echo -n "${RECORD_JSON}" | sha256sum | awk '{print $1}')
 REPLAY_BATCH_ID="test-invalid-$(date +%s%N)"
-echo "--> [5/6] Verifying rejection of reused idempotency key with conflicting payload..."
+echo "--> [5/6] Verifying rejection of telemetry with a corrupted checksum..."
 CONFLICT_PAYLOAD=$(cat <<EOF
 {
   "schemaVersion": 1,
@@ -185,11 +185,19 @@ SPOOF_RESP=$(curl -k -s \
     -H "Content-Type: application/json" \
     -d "${SPOOF_PAYLOAD}")
 
-if ! echo "${SPOOF_RESP}" | grep -q '"code":"ERR_AUTH_IDENTITY_MISMATCH"'; then
-    echo "[ERROR] Expected ERR_AUTH_IDENTITY_MISMATCH on spoofed sensor identity, got: ${SPOOF_RESP}"
-    exit 1
+if [ "${IS_FAIL_CLOSED}" = "true" ]; then
+    if ! echo "${SPOOF_RESP}" | grep -q '"code":"ERR_SENSOR_AUTHORITY_UNAVAILABLE"'; then
+        echo "[ERROR] Expected authority fail-closed rejection, got: ${SPOOF_RESP}"
+        exit 1
+    fi
+    echo "[OK] Spoof attempt remained blocked at the authority boundary."
+else
+    if ! echo "${SPOOF_RESP}" | grep -q '"code":"ERR_AUTH_IDENTITY_MISMATCH"'; then
+        echo "[ERROR] Expected ERR_AUTH_IDENTITY_MISMATCH on spoofed sensor identity, got: ${SPOOF_RESP}"
+        exit 1
+    fi
+    echo "[OK] Spoofed sensor identity rejected with ERR_AUTH_IDENTITY_MISMATCH."
 fi
-echo "[OK] Spoofed sensor identity rejected with ERR_AUTH_IDENTITY_MISMATCH."
 
 echo "========================================================================"
 echo "ALL TELEMETRY PIPELINE E2E TESTS PASSED SUCCESSFULLY"
