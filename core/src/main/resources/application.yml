@@ -49,6 +49,8 @@ spring:
     consumer:
       group-id: platform-core-group
       auto-offset-reset: earliest
+      enable-auto-commit: false
+      isolation-level: read_committed
     listener:
       auto-startup: ${SPRING_KAFKA_LISTENER_AUTO_STARTUP:false}
 
