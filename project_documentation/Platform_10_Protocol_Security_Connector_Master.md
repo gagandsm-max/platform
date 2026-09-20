@@ -110,7 +110,7 @@ Provisioning and Readiness Test must generate a customer-exportable matrix conta
 
 The Connector framework supports reusable, versioned connectors with: authentication profile, endpoint, field mapping, retries/timeouts/backoff, idempotency/correlation ID, rate limit, durable outbound queue, health, test sandbox and audit. ITSM targets include ServiceNow, BMC Helix/Remedy, ServiceDesk Plus, SummitAI, Freshservice/Freshworks, Jira Service Management and Generic REST. Notification targets include email, Teams, Slack, WhatsApp Business/provider API, webhook, SMS and PagerDuty where customer supplies the approved service/account.
 
-For log/SIEM destinations, `Platform_24` adds route/source scope, raw/normalized/enriched mapping, sensitive-data egress policy, per-destination failure isolation, bounded replay/dead-letter and accurate acknowledgement semantics. SIEM targets are Integration Pack classifications under `Platform_23`; connector credentials remain encrypted/referenced and tenant-scoped. High-rate execution may be delegated to an eligible Streaming/Event Sensor while Core remains policy/audit authority.
+For log/SIEM destinations, `Platform_25` adds route/source scope, raw/normalized/enriched mapping, sensitive-data egress policy, per-destination failure isolation, bounded replay/dead-letter and accurate acknowledgement semantics. SIEM targets are Integration Pack classifications under `Platform_23`; connector credentials remain encrypted/referenced and tenant-scoped. High-rate execution may be delegated to an eligible Streaming/Event Sensor while Core remains policy/audit authority.
 
 ## 8. Security acceptance gates
 
