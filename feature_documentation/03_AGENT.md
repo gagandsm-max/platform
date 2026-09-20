@@ -1,7 +1,7 @@
 # Agent
 
-**Class:** Derived feature brief — non-authoritative  
-**Primary sources:** Platform_02, 03, 04, 05, 06, 09, 10, 11, 14, 17, 18, 20, 22, 23  
+**Class:** Derived feature brief — non-authoritative
+**Primary sources:** Platform_02, 03, 04, 05, 06, 09, 10, 11, 14, 17, 18, 20, 22, 23
 **Canonical enhancement:** PR #68 merged into the baseline.
 
 ## Product objective

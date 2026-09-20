@@ -1,7 +1,7 @@
 # SNMP
 
-**Class:** Derived feature brief — non-authoritative  
-**Primary sources:** Platform_02, 03, 04, 05, 06, 07, 09, 10, 11, 14, 17, 18, 22, 23  
+**Class:** Derived feature brief — non-authoritative
+**Primary sources:** Platform_02, 03, 04, 05, 06, 07, 09, 10, 11, 14, 17, 18, 22, 23
 **Draft enhancement:** PR #69
 
 ## Product objective

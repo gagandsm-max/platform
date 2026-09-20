@@ -1,7 +1,7 @@
 # Platform Feature & Functionality Catalogue
 
-**Document class:** Derived product/engineering catalogue — **non-authoritative**  
-**Baseline:** canonical `main` 2c886afb372ff87251e9e87b0295c4893ae09eee  
+**Document class:** Derived product/engineering catalogue — **non-authoritative**
+**Baseline:** canonical `main` 2c886afb372ff87251e9e87b0295c4893ae09eee
 **Purpose:** One readable Markdown file per major Platform feature/functionality area.
 
 ## Authority rule

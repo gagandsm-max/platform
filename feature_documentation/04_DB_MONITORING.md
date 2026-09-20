@@ -1,6 +1,6 @@
 # Database Monitoring
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 09, 10, 11, 22, 23
 
 ## Product objective
