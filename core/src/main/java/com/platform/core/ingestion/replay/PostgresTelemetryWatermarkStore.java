@@ -319,7 +319,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
 
     private void acquireSensorLock(UUID tenantId, String sensorId) {
         jdbcTemplate.execute(
-                "SELECT pg_advisory_xact_lock(hashtext(?))",
+                "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
                 (PreparedStatement ps) -> {
                     ps.setString(1, "sensor_telemetry_watermark:" + tenantId + ":" + sensorId);
                     ps.execute();
