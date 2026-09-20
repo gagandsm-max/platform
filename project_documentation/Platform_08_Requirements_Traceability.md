@@ -341,7 +341,7 @@ v3.2.2 specialized-master RTM supplements live in their owning masters and are n
 - EGC: `PRD-EGC-*` / `REQ-EGC-*` in `Platform_21_Enterprise_Gap_Closure_Master.md`
 - MIA: `PRD-MIA-*` / `REQ-MIA-*` in `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`
 - EMC: `PRD-EMC-001` through `PRD-EMC-018` and `REQ-EMC-001` through `REQ-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
-- LOG: `PRD-LOG-001` through `PRD-LOG-028` and `REQ-LOG-001` through `REQ-LOG-028` in `Platform_24_Enterprise_Log_Event_and_SIEM_Forwarding_Master.md`
+- LOG: `PRD-LOG-001` through `PRD-LOG-028` and `REQ-LOG-001` through `REQ-LOG-028` in `Platform_25_Enterprise_Log_Event_and_SIEM_Forwarding_Master.md`
 
 Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack completeness control and are supplemented, not replaced, by Capability Pack certification requirements in `Platform_23`.
 
@@ -364,7 +364,7 @@ Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack complete
 - Enterprise gap-closure specialized-master RTM supplement: `Platform_21_Enterprise_Gap_Closure_Master.md`.
 - Monitoring-intelligence/alert-quality/AI-assurance specialized-master RTM supplement: `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`.
 - Enterprise monitoring coverage / Capability Pack certification specialized-master RTM supplement: `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`.
-- Enterprise log/event collection, Log Explorer and SIEM-forwarding specialized-master RTM supplement: `Platform_24_Enterprise_Log_Event_and_SIEM_Forwarding_Master.md`.
+- Enterprise log/event collection, Log Explorer and SIEM-forwarding specialized-master RTM supplement: `Platform_25_Enterprise_Log_Event_and_SIEM_Forwarding_Master.md`.
 
 ### Development, packaging, service supervision and diagnostics — v3.1
 
