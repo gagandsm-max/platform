@@ -582,7 +582,7 @@ Existing Platform tables shall be reused rather than forked where semantics alre
 
 - network flow data remains the existing `network_flow` family enriched with cloud/provider/interface/subnet/service identity;
 - Platform_19 normalized change evidence remains the authoritative cross-domain change model;
-- generic metric/log/event/audit table families remain reusable where their schema satisfies Platform_24 identity/provenance requirements;
+- generic metric/log/event/audit table families remain reusable where their schema satisfies Platform_26 identity/provenance requirements;
 - Incident Flight Recorder pins/references existing evidence instead of copying every signal into a second incident database.
 
 ### 20.11 Partitioning, indexing and retention invariants
