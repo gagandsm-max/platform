@@ -1058,6 +1058,13 @@ Do not deduplicate valid observations from different exporters/interfaces by fiv
 
 Where source semantics are comparable, correlate Flow observed/estimated volume with exact interface-counter evidence. Account for direction, sampling, observation point, timing and known exclusions. Emit qualified coverage/consistency and supporting evidence; invalid comparison is `UNKNOWN`, not a fabricated percentage.
 
+Flow completeness is measured against configured/expected source coverage rather than assuming SNMP proves individual Flow records. Quality dimensions include expected-versus-active exporters, expected-versus-observed observation domains/interfaces where known, template readiness, sequence gaps, sampling knowledge, last accepted Flow, source freshness and observable exporter/source configuration drift. SNMP/inventory may provide supporting expected-coverage context but is not proof that every Flow record was received.
+
+### 14.8 Flow Sensor self-observability
+
+A production Flow Sensor exposes role-specific health beyond process-up state. At minimum the implementation/certification surface accounts for datagrams/sec, records/sec, bytes/sec, active exporters/observation domains, template/options count and churn, template misses, sampling state, sequence gaps/resets, kernel/socket drops, receiver queue drops, decode failures/latency, local enrichment latency where applicable, durable-spool size/age, upload rate, replay backlog, CPU/RAM/disk/network and per-exporter rate/drop/quality. Missing counters are reported as unsupported/unknown rather than fabricated.
+
+
 ---
 
 ## 15. Syslog/event LLD
