@@ -103,6 +103,38 @@ services:
     logging: *platform-logging
 
   # ----------------------------------------------------------------------------
+  # ClickHouse one-shot schema migration/verification (existing volumes)
+  # Core starts only after the replay-safe metric_numeric schema is verified.
+  # ----------------------------------------------------------------------------
+  clickhouse-migrate:
+    profiles: ["dev", "test", "ha", "scale", "security", "dr"]
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: platform-clickhouse-migrate
+    restart: "no"
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_NATIVE_PORT: "9000"
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-platform}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-platform_app}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-platform_dev_ch_password_change_in_prod}
+    volumes:
+      - ./deploy/docker/clickhouse/migrations:/migrations:ro
+    networks:
+      - platform_net
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/migrations/V002__metric_numeric_replay_safe.sh"]
+    cpus: 0.5
+    mem_limit: 256m
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    logging: *platform-logging
+
+  # ----------------------------------------------------------------------------
   # Apache Kafka: Internal Streaming Backbone (KRaft mode, No Host Port)
   # ----------------------------------------------------------------------------
   kafka:
@@ -202,6 +234,7 @@ services:
       VALKEY_PASSWORD: ${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SPRING_KAFKA_LISTENER_AUTO_STARTUP: "true"
+      PLATFORM_TELEMETRY_CONSUMER_ENABLED: "true"
       PLATFORM_SENSOR_CONTROL_DEV_BOOTSTRAP_ENROLLMENT: "true"
       PLATFORM_SENSOR_CONTROL_DEV_CERT_DIR: /certs
     ports:
@@ -213,6 +246,8 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+      clickhouse-migrate:
+        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       valkey:
