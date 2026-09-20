@@ -71,6 +71,10 @@ Existing Device Pack contracts remain valid. They are classifications/profiles u
 | `PRD-EMC-016` | Pack lifecycle/compatibility shall be defined across Platform upgrades, including deprecation and EOL. |
 | `PRD-EMC-017` | OEM/customer extensions shall use supported pack/SDK mechanisms rather than Core forks. |
 | `PRD-EMC-018` | Monitoring-coverage completeness shall be measurable by scope, domain, technology and certification dimension. |
+| `PRD-EMC-019` | Windows/Linux infrastructure monitoring shall support and certify **Agent-based** and **agentless/remote** collection as separate capability dimensions while normalizing equivalent host/process/service/evidence semantics where technically available. |
+| `PRD-EMC-020` | Certified server monitoring shall cover host CPU/scheduler pressure, memory/swap/paging pressure, filesystem/inode capacity, block I/O, network/NIC quality, OS/uptime, bounded process/service health and applicable hardware/event evidence rather than CPU/memory/disk-capacity gauges alone. |
+| `PRD-EMC-021` | Linux Agent, Windows Agent, SSH and WinRM/WMI/CIM monitoring shall expose explicit capability/privilege gaps; unsupported or failed collection shall be represented as missing/degraded monitoring evidence rather than target failure. |
+| `PRD-EMC-022` | Infrastructure Capability Packs shall declare continuous-monitoring collectors and bounded EDS diagnostics separately. EDS is Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` within the existing Troubleshoot / Live Evidence architecture (not a second diagnostics framework). Packs shall declare supported OS/version, privilege, evidence fields, resource budget and dimensional certification state. |
 
 ---
 
@@ -164,6 +168,13 @@ A Capability Pack, where applicable, declares:
 - certification metadata
 - provenance
 - signature/integrity requirements
+- SNMP poll definitions/scalar-table-index metadata where applicable
+- MIB/OID references and unresolved-numeric-OID declarations where applicable
+- enum/bit/state mappings where applicable
+- exact counter width/rate/reset/discontinuity semantics where applicable
+- GETBULK/GETNEXT compatibility and bounded poll-planning hints where applicable
+- trap/inform notification mappings, source-trust expectations and storm fingerprint hints where applicable
+- SNMP diagnostic declarations and declared privileged SET/NCM actions where applicable
 
 Device / Network Packs continue to satisfy existing Device Pack identification, mapping, provenance and test-lab contracts. They gain the Capability Pack identity/lifecycle/certification envelope without a second schema family.
 
@@ -213,14 +224,37 @@ Routers; switches; WLAN; firewalls; load balancers / ADC; SD-WAN; DNS; DHCP; PKI
 
 SD-WAN canonical-model mechanics already owned by `Platform_21` are not duplicated here. This family supplies monitoring-coverage and pack-certification classification.
 
+For SNMP-capable network packs, certification is object/semantic aware rather than "SNMP reachable." A pack may declare and separately certify device identity, interface inventory/state, exact high-capacity counters/rates, CPU/memory/environment, routing/neighbor/topology facts, trap/inform semantics, diagnostics and privileged NCM actions. Pack mappings must distinguish raw counter/state/inventory/topology/event evidence and declare firmware/model compatibility where vendor behavior differs. Normal operational-metric cadence defaults to **5 minutes** unless a pack/monitor definition specifies otherwise; packs must not imply that every available OID is polled at that default.
+
+A pack shall not use `ifIndex` as the sole permanent interface identity. Where a vendor provides stronger stable interface/component identifiers, the pack declares them and their reconciliation precedence.
+
 ### 8.2 Servers / operating systems
 
 Windows; RHEL; Ubuntu; SLES; Oracle Linux; AIX; other certified Unix/Linux.
 
 Certification **must** separately record:
 
-- agentless/remote monitoring certification
-- Agent-based certification
+- agentless/remote monitoring certification;
+- Agent-based certification;
+- continuous host-metric coverage;
+- process/service coverage;
+- OS/event/hardware evidence coverage where supported;
+- Endpoint Diagnostic Snapshot (EDS) as Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` / investigation coverage (not a second diagnostics framework);
+- resource-overhead and least-privilege certification.
+
+Minimum normalized server evidence targets, subject to OS/version/privilege capability, are:
+
+- CPU aggregate and useful scheduler breakdown, load/run-queue or platform equivalent;
+- Linux PSI or equivalent resource-pressure evidence where available;
+- memory available/used/commit, swap/page activity and OOM/resource-exhaustion evidence;
+- filesystem capacity and inode state plus block I/O throughput/IOPS/queue/latency/error evidence;
+- NIC state/throughput/errors/drops plus bounded transport-quality counters such as retransmissions where available;
+- bounded Top-N process CPU/memory/I/O/state/restart evidence;
+- Linux systemd and Windows Service Control Manager service state/restart/failure evidence;
+- OS version/boot/uptime/time-quality facts and selected bounded operational/kernel/Event Log evidence;
+- hardware/thermal/power evidence only through safe native or approved out-of-band mechanisms.
+
+Agent collection may provide richer/local evidence than remote collection. Product/UI/API shall disclose these differences rather than falsely claim identical raw coverage. Agentless Linux shall use governed SSH query packs; agentless Windows shall use governed WinRM/WMI/CIM query packs. Collection/credential/path failure is monitoring-health evidence and shall not automatically assert host/service failure.
 
 Legacy systems must never weaken Core security defaults.
 
@@ -476,6 +510,8 @@ Certification evidence requirements (family-specific gates; generic test strateg
 
 **Diagnostics:** each declared diagnostic action/workflow proves target scoping, supported-version behavior, safe/read-only versus privileged classification, parameter bounds, normalized result/error mapping, timeout/cancellation, credential handling, audit, resource budget and negative cases. Multi-vantage-capable diagnostics prove independent source provenance and contradiction preservation. A technology is not certified for a diagnostic merely because the generic Platform diagnostic engine exists.
 
+**SNMP where declared:** v1/v2c/v3 security compatibility; selected-Sensor credential/preflight; exact Counter64; Counter32 wrap; reboot/reset/discontinuity; irregular sample interval; scalar/table/index mapping; noSuch/partial-object behavior; GETBULK tooBig/fallback; ifIndex/interface reconciliation; trap/inform source/security/storm behavior; Inform durable local acceptance before ACK; diagnostics; and read-only monitoring versus privileged SET separation.
+
 **Failure:** timeout; malformed response; API rate limit; partial response; stale telemetry; expired/invalid credentials.
 
 **Upgrade:** supported versions; API schema change; migration; rollback/deprecation handling.
@@ -510,6 +546,10 @@ Each `REQ-EMC-*` owns the corresponding `PRD-EMC-*`. Implementation status for a
 | `REQ-EMC-016` | `PRD-EMC-016` | Architecture, Quality, Operations | Pack version range, upgrade/migration, rollback, deprecation and EOL evidence |
 | `REQ-EMC-017` | `PRD-EMC-017` | Architecture, Security | OEM/customer extensions via pack/SDK only; Core forks prohibited |
 | `REQ-EMC-018` | `PRD-EMC-018` | Quality, Operations | Distinct Architecture/Specification/Implementation/Pack/Certification/Integration coverage metrics |
+| `REQ-EMC-019` | `PRD-EMC-019` | PRD, Architecture, HLD, Quality | Separate Agent/agentless certification evidence for Linux/Windows with normalized semantic mapping and explicit coverage differences |
+| `REQ-EMC-020` | `PRD-EMC-020` | PRD, HLD, LLD, Quality | Server fixtures prove CPU/pressure, memory/swap, filesystem/inodes, block I/O, NIC, process, service, OS and applicable event/hardware coverage |
+| `REQ-EMC-021` | `PRD-EMC-021` | Architecture, Security, Quality | Privilege/credential/path/collector failures map to missing/degraded evidence; negative tests prevent false host/service-down assertion |
+| `REQ-EMC-022` | `PRD-EMC-022` | Architecture, LLD, Quality, Capacity | Capability Pack manifest/certification distinguishes continuous collectors from EDS Diagnostic Job profile diagnostics and records version/privilege/evidence/resource support; no second diagnostics framework |
 
 ---
 

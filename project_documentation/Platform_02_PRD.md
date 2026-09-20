@@ -456,7 +456,7 @@ Credential permissions shall distinguish **USE** from **REVEAL**.
 Platform shall support:
 
 - v1/v2c/v3 polling;
-- GET/GETNEXT/GETBULK/WALK/SET where authorized;
+- GET/GETNEXT/GETBULK/WALK for routine monitoring; SET only through privileged NCM/remediation where explicitly authorized;
 - tables/scalars/counters/gauges/enums;
 - traps/informs;
 - custom MIB upload and dependency resolution;
@@ -464,6 +464,35 @@ Platform shall support:
 - adaptive polling;
 - missing-data detection;
 - polling statistics and diagnostics.
+
+#### 11.1.1 Enterprise SNMP correctness and usability requirements
+
+| PRD ID | Requirement |
+|---|---|
+| `PRD-SNMP-001` | SNMP collection shall normalize into typed canonical evidence classes including numeric metrics, exact counters, state metrics, inventory facts, topology facts/events and collection-quality outcomes rather than forcing all varbinds into one numeric shape. |
+| `PRD-SNMP-002` | Raw Counter32/Counter64 values shall preserve exact integer semantics. Counter64 shall not be rejected or rounded merely because it exceeds IEEE-754 exact-integer range; derived rates may use floating-point after exact delta calculation. |
+| `PRD-SNMP-003` | Counter processing shall handle wrap, reboot/reset, discontinuity and actual elapsed sample time. `sysUpTime` and `ifCounterDiscontinuityTime` or equivalent evidence shall be used where available; missed polls shall not fabricate nominal-interval rates. |
+| `PRD-SNMP-004` | High-capacity interface monitoring shall prefer applicable 64-bit interface counters and shall expose counter discontinuity/quality when rate derivation is invalid or uncertain. |
+| `PRD-SNMP-005` | Canonical interface identity shall not depend on `ifIndex` alone. Platform shall reconcile interface identity from stable evidence such as ifName/ifDescr/ifAlias/MAC/physical slot-port/entity data and retain history when ifIndex changes. |
+| `PRD-SNMP-006` | Production scheduled SNMP polling shall execute through the governed Sensor runtime/scheduler, assignment fencing, bounded worker pools and durable observation path; protocol-library unit success alone is not production readiness. |
+| `PRD-SNMP-007` | Monitoring jobs shall reference governed Credential Profiles. Reusable communities/auth/privacy secrets shall not be exposed to UI, ordinary logs, telemetry, audit payloads or durable generic job history. |
+| `PRD-SNMP-008` | SNMPv3 AuthPriv with modern SHA-2/AES combinations is the preferred secure posture where device compatibility permits. v1/v2c, MD5, SHA-1 and DES remain explicit legacy compatibility choices with visible warning/audit. |
+| `PRD-SNMP-009` | A capability-aware Poll Planner shall choose GET/GETNEXT/GETBULK/WALK grouping, bulk repetitions, table/scalar strategy, timeout/retry and safe fallback according to Device Pack compatibility, response size, RTT/error evidence and Sensor budget. |
+| `PRD-SNMP-010` | Scheduled polling shall use deterministic spreading across the configured interval and bounded per-device/per-worker concurrency so fleet polling, retries and adaptive collection do not create synchronized minute-boundary storms, uncontrolled self-overlap, or starvation of other certified workloads. Restart or Sensor reassignment must not intentionally reshape the entire estate into a burst. |
+| `PRD-SNMP-011` | Adaptive SNMP polling shall have explicit minimum interval, duration, cooldown, target-count and Sensor-capacity limits; a broad incident shall not automatically accelerate an unbounded population. |
+| `PRD-SNMP-012` | SNMP trap/inform ingestion shall preserve source/security/version/OID/time/provenance, decode through MIB/Capability Pack semantics, apply storm/dedup controls, and feed evidence qualification rather than automatically creating operational alerts. |
+| `PRD-SNMP-013` | Trap delivery and Inform acknowledgement semantics shall remain explicit. SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded protocol parse, configured security validation and sufficient source/tenant attribution; MIB/Pack enrichment, Core/Kafka/ClickHouse completion and alert/incident creation are not ACK prerequisites. v1/v2c trap source identity is weak evidence; SNMPv3 notification security shall be validated where configured. |
+| `PRD-SNMP-014` | MIB Studio shall support upload, dependency/import resolution, validation/compile, OID tree, textual conventions, enums, tables/indexes, notifications, test/walk, provenance/licensing and generation/update of Capability/Device Pack mappings. Numeric OID monitoring shall remain possible without a MIB when an authorized semantic mapping is supplied. |
+| `PRD-SNMP-015` | Capability/Device Packs shall declaratively define SNMP identity, poll definitions, table/index semantics, enum/bit mappings, counter/rate semantics, units, inventory/topology mappings, trap rules, diagnostics and compatibility hints. No pack may contain secrets. |
+| `PRD-SNMP-016` | Discovery/preflight shall use the selected Sensor and governed Credential Profile to retrieve identity evidence such as sysDescr/sysObjectID/sysName and SNMPv3 engine identity where available; no default community fallback is permitted. |
+| `PRD-SNMP-017` | The product shall provide an in-context SNMP Test workflow showing Sensor/vantage, target/port/version/profile identity, connectivity/authentication/authorization result, response latency/retries, identity OIDs, GET/Walk/Bulk-Walk results, raw OID, MIB-resolved name, decoded value, stable error code and remediation without revealing secrets. |
+| `PRD-SNMP-018` | Per-device/profile SNMP data quality shall expose poll success, duration, attempted/successful OIDs, retries, timeout/auth/authz/tooBig/noSuch counts, freshness/staleness, expected-vs-received samples and last success. Collection failure shall map to monitoring degradation/unknown semantics rather than device-down by itself. |
+| `PRD-SNMP-019` | Routine monitoring shall remain read-only. SNMP SET, if supported, shall execute only through privileged NCM/remediation controls with capability declaration, RBAC, reason/ticket/approval as applicable, pre-read, post-read verification, blast-radius limits and audit. |
+| `PRD-SNMP-020` | SNMP storage/API/event contracts shall support exact counters plus typed state/inventory/topology/quality records using the existing PostgreSQL/ClickHouse/Kafka architecture; no new database is selected by this requirement. A logical exact-counter family is required; a dedicated Kafka topic is an implementation option when an equivalently typed contract is proven. |
+| `PRD-SNMP-021` | Production certification shall include real or protocol-faithful devices/fixtures covering v1/v2c/v3 security modes, engineID/time-window recovery, malformed/partial responses, TooBig fallback, counter wrap/reset/discontinuity, interface identity changes, trap/inform storms, Inform durable-acceptance/retransmission/duplicate cases and Sensor/Core failure/replay. |
+| `PRD-SNMP-022` | SNMP protocol, credential, parser and source failures shall remain distinguishable from target/service operational failure and shall participate in the Alert Evidence/telemetry-quality contracts of `Platform_22`. |
+| `PRD-SNMP-023` | The normal scheduled SNMP operational-metric default is **5 minutes**. This default does not require polling every available OID every five minutes; Cap Pack/monitor definitions may schedule static inventory/topology/lifecycle metadata more slowly when freshness requirements remain satisfied. Availability/liveness remains a separate plane (commonly ~60 seconds by policy). Event/streaming telemetry remains event/stream driven. Policy inheritance follows the existing Platform Default → Tenant → Business Unit/Region → Site → Device Group → Device → Monitor/Metric hierarchy; intervals are stored as durations, not a rigid enum. |
+
 
 ### 11.2 Availability and path
 
@@ -2137,3 +2166,59 @@ Required log classes include startup, configuration load, registration/enrollmen
 ### PRD-LOG-002 — Supportability
 
 The Administration and Platform Health workspaces shall expose service health, recent failures, restart count, last successful recovery and links to sanitized diagnostics/support-bundle generation according to RBAC.
+
+---
+
+## 67. Endpoint diagnostic evidence and lightweight local intelligence — v3.2.2 reconciliation
+
+This section anchors the detailed `PRD-MIA-043..050` requirements in `Platform_22` and the infrastructure-coverage requirements `PRD-EMC-019..022` in `Platform_23`.
+
+### 67.1 Windows/Linux infrastructure monitoring
+
+Platform shall support both **Agent-based** and **agentless/remote** Windows/Linux infrastructure monitoring as separately certifiable modes.
+
+Customer-visible server monitoring shall include, where the OS/version/privilege supports it:
+
+- CPU utilization and useful scheduler/resource-pressure evidence;
+- memory, swap/page/commit and resource-exhaustion evidence;
+- filesystem capacity/inodes and block-I/O throughput/IOPS/queue/latency/error evidence;
+- network-interface state/throughput/errors/drops and bounded transport-quality counters;
+- bounded process resource/state/restart information;
+- Linux systemd and Windows service state/restart/failure information;
+- OS/boot/uptime/time-quality facts and selected bounded operational/kernel/Event Log evidence;
+- applicable hardware/thermal/power evidence through approved native or out-of-band sources.
+
+Linux Agent and Windows Agent are the richer local collection modes. Linux agentless monitoring uses governed SSH query packs; Windows agentless monitoring uses governed WinRM/WMI/CIM query packs. Product/UI/API shall disclose capability differences rather than imply identical raw coverage.
+
+Collection, credential, privilege or path failure is **monitoring-health evidence**. It shall not automatically become host/service DOWN when the monitored state cannot be established.
+
+### 67.2 Endpoint Diagnostic Snapshot
+
+Platform shall provide a bounded **Endpoint Diagnostic Snapshot (EDS)** for Windows/Linux infrastructure as a specialized profile of the existing Diagnostic Job / Live Evidence / Investigation architecture (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`). EDS may start automatically after a centrally governed threshold/state condition becomes **capture-eligible**, or from an authorized investigation request. Capture-eligibility is not authoritative host-health state.
+
+EDS shall:
+
+- reuse existing normal observations for capture-eligibility evaluation wherever possible;
+- use policy-defined duration, hysteresis, recovery and cooldown rather than one-sample triggering;
+- execute only under currently valid Core-issued assignment/policy/control generation (policy ID/version alone is insufficient);
+- collect a short-lived typed diagnostic evidence bundle appropriate to the capture-eligible resource class;
+- report Diagnostic Job state plus capture completeness `COMPLETE`, `PARTIAL`, `FAILED` or `SUPPRESSED` rather than inventing missing evidence;
+- preserve policy/version, authority generation, trigger, entity, source/vantage, time and evidence provenance;
+- feed the authoritative Core incident/RCA workflow through the existing Agent/Sensor durability paths (no second EDS transport);
+- stop, suppress or degrade with explicit observable reason before creating material additional pressure on an already stressed endpoint or silently destroying routine telemetry durability.
+
+EDS is evidence acquisition, **not endpoint-authoritative RCA** and not a second diagnostics framework. Core remains responsible for cross-domain causal analysis because endpoint-local evidence cannot by itself observe all network, hypervisor, storage, database, cloud, shared-service or change dependencies.
+
+No universal customer CPU/memory/disk threshold is fixed here. Effective values remain governed policy. This section is target architecture/requirements; specified ≠ implemented ≠ tested ≠ certified ≠ deployed.
+
+### 67.3 Lightweight/local AI placement
+
+Local intelligence uses three deployment tiers:
+
+1. **Tier 0 — endpoint deterministic intelligence:** capture-eligibility evaluation, hysteresis, bounded rolling/statistical checks and EDS evidence logic. No LLM/GNN/foundation-model runtime is required or permitted on normal monitored Agents/Sensors for EDS.
+2. **Tier 1 — Core bounded analytics:** statistical/ML, anomaly, forecast, similarity and optional GNN work executes only within certified cold/bounded resource controls and yields to protected monitoring.
+3. **Tier 2 — language/embedding assistance:** LLM/embedding functions run behind AI Gateway either in a certified on-Core profile or through an optional dedicated local/private inference provider.
+
+**If** a dedicated local/private inference provider is supported/enabled, it is optional and must remain stateless with respect to authoritative Platform state. It is not required for Linux/Windows monitoring, EDS, deterministic RCA or base Platform operation; it is not a third Core/HA node; and it may be unavailable without impairing deterministic collection, alerting, incident handling or RCA. Core-resident LLM remains optional. All-AI-disabled remains supported.
+
+Detailed evidence, security, resource and release contracts are authoritative in `Platform_22`, `Platform_23`, `Platform_10`, `Platform_11`, `Platform_14`, `Platform_17` and `Platform_18`.

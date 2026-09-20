@@ -41,18 +41,18 @@ The exact two-Core synchronization/fencing mechanisms for Kafka/ClickHouse/Postg
 
 ### 2.3 Local AI / ML / LLM compute envelope — v3.2.2
 
-Local intelligence is part of the planned Core footprint; it shall **not increase the minimum certified Core sizing tiers**. Standard Platform operation is CPU-first and shall not require a GPU. AI/ML/LLM workloads are subordinate to collection, ingestion, storage durability, alert qualification, incident processing and deterministic RCA.
+Core-resident local intelligence is an **optional certified execution profile** within the planned Core footprint and shall **not increase the minimum certified Core sizing tiers**. Standard Platform operation is CPU-first and shall not require a GPU. AI/ML/LLM workloads are subordinate to collection, ingestion, storage durability, alert qualification, incident processing and deterministic RCA. A deployment that requires stronger compute isolation may use an optional dedicated local/private inference provider through AI Gateway; that provider is sized/certified separately and is not a Core/HA node.
 
 Planning envelopes below are hard design targets until benchmark certification:
 
-| Per-Core target | Local-intelligence peak budget | Default local LLM class | Concurrent local LLM requests | Notes |
+| Per-Core target | Core-resident local-intelligence peak budget (if enabled) | Core-resident LLM class (if enabled) | Concurrent local LLM requests | Notes |
 |---|---:|---|---:|---|
 | **8 vCPU / 16 GB** | **≤2 vCPU burst / ≤3 GB RAM peak** | **0.5B–1.5B parameter, 4-bit quantized** | **1** | Standard smallest Core. A model above 1.5B is not assumed; up to ~3B may be admitted only if SNWP certification proves no monitoring regression. |
 | **12 vCPU / 24 GB** | **≤3 vCPU burst / ≤4 GB RAM peak** | **1B–3B, 4-bit quantized** | **1–2** | Extra capacity primarily buys monitoring/user concurrency, not permission for an unnecessarily large model. |
 | **16 vCPU / 32 GB** | **≤3 vCPU burst / ≤5 GB RAM peak** | **1B–3B, 4-bit quantized** | **2** | AI remains lower priority than live monitoring and storage. |
 | **24 vCPU / 48 GB** | **≤4 vCPU burst / ≤6 GB RAM peak** | **1B–3B, 4-bit quantized** | **2–4** | Higher concurrency is preferred over increasing model size. |
 
-For the 8 vCPU / 16 GB tier the normal non-interactive local-intelligence target is **<1 vCPU average and approximately 1–1.5 GB RAM**, with the larger peak envelope used only during bounded inference/analytics activity.
+When Core-resident local intelligence is enabled on the 8 vCPU / 16 GB tier, the normal non-interactive target is **<1 vCPU average and approximately 1–1.5 GB RAM**, with the larger peak envelope used only during bounded inference/analytics activity. The base product does not require Core-resident LLM inference.
 
 Mandatory resource rules:
 
@@ -116,6 +116,12 @@ Platform must compute a workload score using at least:
 - metrics/OIDs/entities/interface count;
 - poll/subscription interval;
 - SNMP GET/BULK plan and timeout/retry behavior;
+- SNMP scalar/table mix, average/max OIDs per poll, GETBULK repetitions/response bytes and fallback frequency;
+- SNMPv3 security CPU cost and session/engine-discovery behavior;
+- Counter32/Counter64 raw + derived-rate processing cost;
+- trap/inform EPS, notification size, decode/MIB cost and storm-control rate;
+- adaptive-poll target count, accelerated interval, duration/cooldown and worst-case burst;
+- MIB/Capability Pack mapping cost and interface/entity cardinality;
 - RTT, packet loss and timeout rate;
 - gNMI stream rate;
 - REST calls and response size;
@@ -152,6 +158,10 @@ Customer modes: **Automatic (recommended)**, **Automatic with Approval**, **Manu
 The 8 vCPU/16 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; and Flow/syslog below dedicated-streaming threshold. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
 
 A separate Heavy Network Workload profile covers high-interface, aggressive polling, heavy routing, gNMI, API/NCM and high-rate stream cases.
+
+SNMP benchmark evidence shall additionally publish poll operations/sec, OIDs/sec, successful/timeout/auth-failure mix, GETBULK response-size distribution, average/peak poll duration, retry rate, scheduler queue age, exact-counter/rate cost, trap/inform EPS and CPU/RAM/network usage. Fleet tests use deterministic poll spreading across the configured interval (normal operational default **5 minutes** unless overridden); a synchronized all-device minute-boundary is not an acceptable benchmark profile unless explicitly testing storm resilience.
+
+Adaptive polling is capacity-accounted separately. Its configured maximum targets/interval/duration must preserve normal polling freshness and HA reserve. High-rate trap/event load may require Streaming/Event Sensor separation rather than consuming Network Poll workers.
 
 ## 9. Core storage sizing model
 
@@ -213,3 +223,55 @@ Stateful service containers must have bounded development defaults and named vol
 ## 14. Local log/disk protection
 
 Docker volumes and container logs are included in workstation disk monitoring guidance. Development instructions shall include commands to identify large images/volumes, safely prune disposable build artifacts and retain named volumes that contain intentional development state. Automated scripts must never indiscriminately prune all Docker data on a shared development laptop.
+
+---
+
+## 15. Endpoint Diagnostic Snapshot and isolated local-inference resource model
+
+### 15.1 Endpoint EDS resource contract
+
+EDS is event-driven Diagnostic Job profile evidence acquisition on the existing Agent → Sensor → Core durability path, not continuous duplicate monitoring and not a second transport/queue product.
+
+Resource rules:
+
+- capture-eligibility evaluation reuses normal Agent/Sensor observations wherever possible;
+- no separate always-on RCA interpreter/process is required on the endpoint;
+- one or another small bounded number of concurrent captures is permitted only according to certified endpoint profile;
+- capture duration, evidence bytes, Top-N cardinality, log/Event Log lookback and retry frequency have hard policy/implementation ceilings;
+- repeated equivalent capture-eligible conditions are coalesced and cooldown-governed;
+- site/tenant/estate storm budgets prevent simultaneous threshold events from producing an evidence-upload storm;
+- endpoint pressure checks can shorten/suppress capture; a `PARTIAL`/`SUPPRESSED` result with explicit reason is preferable to worsening the incident;
+- logical priority/fairness protects, in order: authority/control/assignment → current monitoring correctness → normal telemetry durability → critical event evidence → diagnostic evidence → old/bulk replay per existing replay policy;
+- EDS queue/upload remains lower priority than protected endpoint workload and lower priority on Sensor/Core than routine collection/ingestion durability;
+- suppressed/shortened/dropped/expired/shed diagnostic evidence must be explicit, observable and auditable; diagnostic protection must never silently destroy routine telemetry durability.
+
+A literal zero-CPU promise is prohibited. Certification instead measures **incremental idle overhead** and **bounded transient capture overhead** for representative Linux/Windows endpoint classes.
+
+### 15.2 Infrastructure Sensor capacity accounting
+
+Infrastructure Sensor MWU accounting shall include:
+
+- SSH/WinRM recurring collection cost;
+- EDS diagnostic query cost;
+- target RTT/timeouts/authentication cost;
+- output/parser cost;
+- concurrent Agent EDS receive/forward workload;
+- agentless EDS fan-out/storm load.
+
+When the Infrastructure Sensor lacks headroom, diagnostics queue/defer/reject explicitly before scheduled monitoring is starved.
+
+### 15.3 Optional dedicated local/private inference provider
+
+A dedicated inference provider is a separately sized **conditional** optional component for customers that do not want LLM/embedding bursts on Core. **If** that mode is supported/enabled, the isolation/security/non-authority requirements below are mandatory. It is **not required** for Linux/Windows monitoring, agentless SSH/WinRM/WMI/CIM, EDS, deterministic Core RCA or base Platform operation. Core-resident LLM remains optional. All-AI-disabled remains supported.
+
+It:
+
+- is not counted as a third Core;
+- stores no authoritative control/telemetry database;
+- is not part of Core HA quorum/fencing;
+- may be CPU-only or use an optional accelerator according to its own certified profile;
+- receives bounded context from AI Gateway rather than raw unrestricted telemetry;
+- can be stopped/unavailable without affecting deterministic monitoring/RCA;
+- is not an EDS release prerequisite.
+
+Exact CPU/RAM/GPU/model combinations are release-certified profiles, not universal minimums. No dedicated inference hardware is required for Platform base operation.

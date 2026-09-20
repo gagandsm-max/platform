@@ -19,10 +19,10 @@
 | Capability | Protocol/security modes | Typical/default endpoint | UI configuration | OSS foundation | Required Platform behavior |
 |---|---|---|---|---|---|
 | Availability | ICMPv4/ICMPv6 | No TCP/UDP port | timeout, attempts, interval, packet size, source/Sensor | `golang.org/x/net/icmp` | loss/RTT/jitter, multi-vantage evidence, qualification input |
-| SNMP polling | SNMP v1, v2c, v3 | UDP/161 default; configurable | version, community or v3 user/security level/auth/privacy/context, timeout/retry, bulk size | GoSNMP | GET/GETNEXT/GETBULK/WALK/SET where permitted; actionable errors |
+| SNMP polling | SNMP v1, v2c, v3 | UDP/161 default; configurable | version, community or v3 user/security level/auth/privacy/context, timeout/retry, bulk size | GoSNMP | GET/GETNEXT/GETBULK/WALK for routine monitoring; actionable typed errors; SET only through privileged NCM/remediation |
 | SNMPv3 auth | noAuthNoPriv, authNoPriv, authPriv; MD5/SHA-1 legacy where required; supported SHA-2 variants | SNMP endpoint | profile-level algorithm selection | GoSNMP + Platform wrapper | secure defaults, compatibility validation, no secret exposure |
 | SNMPv3 privacy | DES legacy opt-in; AES variants where library/device supports | SNMP endpoint | privacy algorithm/key and security level | GoSNMP + Platform wrapper | compatibility test before provisioning |
-| Traps/Informs | SNMP v1/v2c/v3 | UDP/162 default; configurable | listener, source allowlist, v3 security | GoSNMP receiver/Platform event service | decode via MIB, normalize, correlate, rate protect |
+| Traps/Informs | SNMP v1/v2c/v3 | UDP/162 default; configurable | listener, source allowlist, v3 security | GoSNMP receiver/Platform event service | decode via MIB, normalize, correlate, rate protect; Inform ACK only after durable local acceptance/accounting |
 | Syslog | UDP/TCP Syslog, Syslog over TLS | 514 / 6514 defaults | transport, TLS, source rules, parser/profile | Platform receiver; Fluent Bit integration candidate | normalization, cardinality/rate limits, retention, correlation |
 | SSH/CLI | SSHv2 password/public-key/keyboard-interactive; privilege/enable patterns by Device Pack | TCP/22 default | credential, key, host-key policy, privilege policy, command controls | `x/crypto/ssh`, scrapligo/scrapli for selected roles | CLI broker, NCM, audit, no browser credentials |
 | Telnet | Legacy only | TCP/23 default | explicit enable at tenant/device policy | small Platform adapter | disabled by default; never automatic fallback; warning/audit |
@@ -37,6 +37,18 @@
 | Flow | NetFlow v5/v9, IPFIX, sFlow; J-Flow/vendor variants through compatible formats/packs | exporter/collector configurable | receiver port, template handling, source mapping | GoFlow2 | enrichment, de-dup/template cache, high-rate safeguards |
 | CDP/LLDP/ARP/FDB | SNMP/CLI/API/gNMI derived | underlying protocol endpoints | discovery profile | GoSNMP/CLI/gNMI | topology provenance/confidence/history |
 | Routing/state | BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VRF/STP/HSRP/VRRP/LACP/QoS/multicast/SD-WAN via SNMP/gNMI/NETCONF/REST/CLI | vendor-specific | Device Pack/Monitoring Profile | protocol foundations above | canonical graph and RCA semantics, not a routing daemon |
+
+## 2.1 SNMP security, credential and execution supplement
+
+- **Preferred posture:** SNMPv3 `authPriv` using supported SHA-2 authentication and AES privacy where the managed device supports it. v1/v2c, MD5, SHA-1 and DES are legacy compatibility modes, explicitly selected, labelled and audited; they are not automatic downgrade/fallback paths.
+- **Credential Profiles:** normal jobs carry a profile reference/authorization context. `USE` does not imply `REVEAL`. Reusable community/auth/privacy material must not be returned to ordinary browsers, written to telemetry/event/audit records or retained in generic job history. Sensors receive/materialize only the minimum execution secret through the governed secret-delivery/resolution mechanism.
+- **No default community:** Platform shall never probe production targets with an implicit/default `public` community.
+- **SNMPv3 state:** engine ID discovery, engine boots/time synchronization, context, `unknownEngineID` and `notInTimeWindow` are explicit protocol outcomes with bounded recovery; authentication/security failures are not treated as generic timeouts.
+- **Polling is read-only:** monitoring/discovery/on-demand test supports read operations only. SET is routed through privileged NCM/remediation policy and cannot be enabled merely by selecting an SNMP monitoring profile.
+- **Cadence:** normal scheduled SNMP operational metrics default to **5 minutes** under the existing policy hierarchy; Cap Pack/monitor definitions select objects and may schedule static inventory/topology/lifecycle metadata more slowly. Availability/liveness remains a separate plane.
+- **Target authorization:** scheduled/on-demand SNMP targets derive from tenant-scoped canonical entities/authorized diagnostic scope. Arbitrary target testing follows the same anti-pivot/SSRF-like restrictions as other Sensor diagnostics.
+- **Trap trust:** v1/v2c UDP trap source/community is weak identity evidence. v3 notifications use configured USM/security validation. Source allowlist/policy, bounds and rate protection apply before event qualification.
+- **Inform ACK:** SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded parse, configured security validation and sufficient source/tenant attribution while preserving the raw typed notification. MIB/Pack enrichment, Core/Kafka/ClickHouse completion and alert/incident creation are not ACK prerequisites. ACK means local accepted/accounted only.
 
 ## 3. Infrastructure/cloud credential matrix
 
@@ -117,3 +129,46 @@ The Connector framework supports reusable, versioned connectors with: authentica
 - All protocol failures preserve raw technical reason internally while presenting safe actionable customer text.
 - Certificates, keys and trust stores have lifecycle/expiry/rotation UI.
 - Every security-sensitive action is audited with actor, tenant, object, result, reason/ticket and request/session context.
+
+---
+
+## 9. Endpoint and infrastructure diagnostic execution contract
+
+### 9.1 Agent-based diagnostics
+
+Linux/Windows Agent EDS executes as Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` through the existing authenticated Agent runtime and identity. It uses native read-only evidence paths under least privilege. EDS does not authorize an arbitrary local-shell, PowerShell, script-upload or customer-code execution interface.
+
+A diagnostic request from Core/Sensor must be authenticated, tenant/entity scoped, versioned, generation/authority fenced, time bounded and replay/idempotency protected. Agent applies only a supported diagnostic definition under currently valid Core-issued authority and reports unsupported/denied/expired/stale requests explicitly.
+
+### 9.2 Linux SSH agentless diagnostics
+
+Infrastructure Sensor SSH diagnostics require:
+
+- SSHv2;
+- host-key validation;
+- security-profile/credential binding;
+- public-key authentication preferred where applicable;
+- least-privilege account;
+- controlled sudo only for explicitly certified read-only operations (never generic privilege escalation);
+- allowlisted/versioned query pack as **fixed approved executable/operation + structured argv + typed constrained parameters**;
+- parameter schema validation with no unchecked interpolation;
+- prohibition of routine `sh -c` / `bash -c` / arbitrary command strings from users, API clients or model output;
+- command timeout, output-byte limit and concurrency budget;
+- secret/redaction controls;
+- audit of query definition/version, target, actor/`diagnostic_job_id` and result code.
+
+Generic unrestricted shell execution is not part of routine monitoring/EDS.
+
+### 9.3 Windows agentless diagnostics
+
+WinRM/WMI/CIM diagnostics require HTTPS/TLS where supported by the selected transport policy, credential/profile scoping, certificate validation and bounded versioned query definitions. Recurring monitoring/EDS shall prefer structured CIM/WMI/performance/service/Event Log/WinRM operations over PowerShell.
+
+Where a certified PowerShell fallback is unavoidable, the exact script/command template is Platform-owned, fixed, versioned, read-only by declared policy, exact-operation scoped, typed-parameter constrained, output/timeout bounded, audited and separately security-certified. No generic PowerShell facility and no model/user-supplied arbitrary PowerShell are permitted for routine monitoring/EDS.
+
+### 9.4 Evidence privacy
+
+Default EDS excludes environment variables, arbitrary file content, packet payload, interactive user content and unrestricted process command lines. Privacy-sensitive process arguments/log fields require explicit policy, minimization/redaction and tenant authorization.
+
+### 9.5 AI boundary
+
+Agent/Sensor credentials, reusable secrets and unrestricted device-control capability are never provided to a local/private LLM provider. AI Gateway receives only bounded authorized evidence context and all tool/action authority remains deterministic Platform policy. Dedicated local/private inference, when supported, is conditional and not required for EDS or base monitoring.

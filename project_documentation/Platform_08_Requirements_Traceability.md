@@ -4,7 +4,7 @@
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Completeness Control**
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 endpoint diagnostics and infrastructure-monitoring reconciliation
 
 ## 1. Purpose
 
@@ -107,6 +107,37 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-NET-013 | Circuit/ISP inventory and SLA correlation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-014 | Path Analysis workspace | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-015 | IPv4/IPv6/dual-stack first-class support | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+### Enterprise SNMP correctness and usability
+
+| ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| REQ-SNMP-001 | Typed SNMP numeric/counter/state/inventory/topology/quality evidence | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-002 | Exact Counter32/Counter64 preservation; no Float64 precision loss before derivation | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-003 | Counter wrap/reset/discontinuity and actual-elapsed-time rate semantics | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-004 | Prefer certified high-capacity counters for high-speed interfaces | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-005 | Stable interface identity independent of ifIndex alone | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-006 | Production Sensor scheduler/runtime/fencing/durable SNMP path | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-007 | Governed Credential Profile resolution with no secret leakage/generic durable secret payloads | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-008 | SNMPv3 strong-default posture; legacy algorithms/protocols explicit and audited | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-009 | Capability-aware bounded Poll Planner with safe GETBULK fallback | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-010 | Deterministic fleet poll spreading and bounded concurrency | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-011 | Adaptive polling minimum interval/duration/cooldown/target/capacity guardrails | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-012 | Trap/Inform decode, provenance, dedup/storm control and evidence qualification | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-013 | Explicit Trap vs Inform durable-acceptance acknowledgement and source-trust semantics | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-014 | MIB Studio dependency/compile/OID/table/enum/notification/test/provenance workflow plus MIB-less numeric OID support | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-015 | Capability Pack declarative SNMP polling/mapping/counter/table/trap/diagnostic semantics | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-016 | Sensor-local discovery/preflight SNMP identity with governed credentials and no default community | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-017 | In-context SNMP Test with protocol/auth/authorization/MIB/raw+decoded evidence and remediation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-018 | Per-device/profile SNMP data quality and monitoring-degraded semantics | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-019 | SNMP SET separated into privileged NCM/remediation path | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-020 | Existing PostgreSQL/ClickHouse/Kafka architecture supports typed SNMP stores; no new DB | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-021 | Protocol-faithful certification across security, engine/time, malformed, counter, identity, trap and failure/replay cases | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-022 | SNMP collection failure remains distinct from device/service failure under Alert Evidence contracts | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-023 | Five-minute normal SNMP operational-metric default; Cap Pack-driven object selection; liveness/event planes remain distinct | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+BRD column uses the existing RTM marker `—` where no direct BRD business outcome substantively governs the detailed engineering mechanics. Direct BRD coverage is retained only where the BRD itself substantively governs the outcome (for example Sensor collection durability, credential/security posture, trap/inform product scope with storm/false-alert outcomes, MIB/Device Pack studios, discovery/preflight diagnosability, in-context troubleshooting usability, monitoring-quality/false-alert outcomes, NCM privileged separation, existing data-plane architecture, and monitoring-versus-target failure separation). Interface-identity reconciliation mechanics, protocol-faithful certification case matrices and the Founder-fixed five-minute SNMP default remain valid PRD/Decision/REQ rows without inventing BRD text.
+
 
 ### Infrastructure/Cloud
 
@@ -319,6 +350,24 @@ Requirements `REQ-UI-015` through `REQ-UI-025` are additionally governed by the 
 
 A NOC troubleshooting requirement is not complete merely because the BRD/PRD/HLD/LLD/Dataflow columns are checked; applicable supporting-master contracts above must also be satisfied.
 
+### Enterprise SNMP supporting-master coverage
+
+Requirements `REQ-SNMP-001` through `REQ-SNMP-023` are a base-RTM cross-document reconciliation, not a specialized-master supplement. Completion additionally requires applicable contracts in:
+
+- `Platform_07` — approved GoSNMP/gosmi OSS boundaries;
+- `Platform_09` — SNMP Test, Monitoring Quality and MIB Studio UX;
+- `Platform_10` — protocol/security/Credential Profile and legacy-mode policy;
+- `Platform_11` — SNMP MWU, poll/trap/adaptive workload and benchmark accounting;
+- `Platform_14` — protocol-faithful, counter, identity, trap, Inform durable-acceptance and UI certification evidence;
+- `Platform_16` — operational runbooks;
+- `Platform_17` — typed observation, exact counter and data ownership contracts;
+- `Platform_18` — SNMP-specific threats/mitigations;
+- `Platform_22` — telemetry-quality/Alert Evidence semantics;
+- `Platform_23` — Capability Pack declarations and dimensional certification.
+
+An SNMP capability is not production-ready merely because `REQ-NET-001` protocol connectivity is implemented. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
+
+
 ## 3. Completeness gate
 
 A release/major architecture change cannot be declared fully documented until:
@@ -340,7 +389,8 @@ v3.2.2 specialized-master RTM supplements live in their owning masters and are n
 - ONB: `PRD-ONB-*` / `REQ-ONB-*` in `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`
 - EGC: `PRD-EGC-*` / `REQ-EGC-*` in `Platform_21_Enterprise_Gap_Closure_Master.md`
 - MIA: `PRD-MIA-*` / `REQ-MIA-*` in `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`
-- EMC: `PRD-EMC-001` through `PRD-EMC-018` and `REQ-EMC-001` through `REQ-EMC-018` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
+  - EDS/local-intelligence extension: `PRD-MIA-043` through `PRD-MIA-050` / `REQ-MIA-040` through `REQ-MIA-047`
+- EMC: `PRD-EMC-001` through `PRD-EMC-022` and `REQ-EMC-001` through `REQ-EMC-022` in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`
 
 Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack completeness control and are supplemented, not replaced, by Capability Pack certification requirements in `Platform_23`.
 

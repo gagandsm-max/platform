@@ -328,7 +328,31 @@ source_protocol LowCardinality(String)
 
 Common ORDER BY candidate: `(tenant_id, entity_id, metric_id, ts)` subject to benchmark. Partition primarily by time with controlled tenant considerations; avoid one partition per device.
 
-### 5.2 `metric_state`
+### 5.2 `metric_counter`
+
+Logical schema for exact monotonic counters where floating-point storage would lose source truth:
+
+```text
+tenant_id
+entity_id
+metric_id
+sensor_id
+ts
+raw_value_uint64
+counter_bits  # 32|64 where known
+source_oid/source_key
+sequence_id
+source_protocol
+quality
+reset_epoch/discontinuity_marker nullable
+derived_delta nullable
+derived_rate nullable
+derived_quality
+```
+
+The authoritative raw counter is exact. `derived_delta`/`derived_rate` are recomputable outputs and may be null when reset/wrap/discontinuity cannot be resolved safely. Physical ClickHouse layout may optimize columns/types, but shall preserve the above semantics and support UInt64-range Counter64 without precision loss. A dedicated Kafka topic is an implementation option; an equivalently typed payload contract is acceptable when precision, ordering, consumer isolation and schema evolution remain proven.
+
+### 5.3 `metric_state`
 
 ```text
 tenant_id
@@ -342,7 +366,7 @@ sequence_id
 source_protocol
 ```
 
-### 5.3 `network_flow`
+### 5.4 `network_flow`
 
 ```text
 tenant_id
@@ -368,7 +392,7 @@ flow_type
 sequence/template metadata
 ```
 
-### 5.4 `event_raw`
+### 5.5 `event_raw`
 
 ```text
 tenant_id
@@ -387,7 +411,7 @@ quality
 
 Separate `syslog_event` and `trap_event` may be used for optimized fields.
 
-### 5.5 `telemetry_quality`
+### 5.6 `telemetry_quality`
 
 ```text
 tenant_id
@@ -404,7 +428,7 @@ clock_offset_ms nullable
 quality_score
 ```
 
-### 5.6 Historical lifecycle tables
+### 5.7 Historical lifecycle tables
 
 - `alert_history`
 - `incident_history`
@@ -424,6 +448,7 @@ Topic names are versioned by major schema compatibility. Example:
 
 ```text
 telemetry.numeric.v1
+telemetry.counter.v1   # optional dedicated exact-counter topic; equivalently typed payloads permitted when proven
 telemetry.state.v1
 network.flow.v1
 event.syslog.v1
@@ -716,27 +741,170 @@ Parameters:
 - transport/address/port;
 - source/interface binding if needed.
 
-### 12.2 Collection plan
+### 12.2 Collection plan and Poll Planner
 
-Device Pack compiles Monitor Definitions into optimized GET/GETBULK groups based on OID table/scalar and device compatibility.
+Capability/Device Packs compile Monitor Definitions into bounded poll groups. The Poll Planner decides per device/profile:
 
-### 12.3 SNMP error mapping
+- GET versus GETNEXT/GETBULK/WALK;
+- scalar versus table grouping;
+- OID count/PDU size;
+- GETBULK non-repeaters/max-repetitions;
+- timeout and retry policy;
+- deterministic schedule offset across the configured interval;
+- per-device concurrency and no uncontrolled self-overlap of the same scheduled collection;
+- controlled fallback when a device returns `tooBig`, times out, or is certified as GETBULK-incompatible.
+
+The planner consumes Device Pack compatibility metadata, observed response size/RTT/error history and current Sensor capacity. It may reduce bulk repetitions after `tooBig`/fragmentation-risk evidence and may fall back from GETBULK only according to bounded certified policy. It may not create an unbounded retry or adaptive-poll loop.
+
+The normal scheduled SNMP operational-metric default is **5 minutes**. That default does **not** require polling every available OID every five minutes; Cap Pack/monitor definitions drive which objects are collected and how often. Availability/liveness remains a separate plane. Configured intervals are durations under the existing policy hierarchy, not a rigid database enum. Exact generic scheduler hash/algorithm details are out of scope here; SNMP spreading must remain deterministic/stable and compatible with later scheduler reconciliation.
+
+### 12.3 Typed observation contract
+
+SNMP varbinds retain BER/source semantics before canonical mapping. A collection batch can produce multiple typed facts:
+
+```text
+NumericObservation
+ExactCounterObservation
+StateObservation
+InventoryObservation
+TopologyObservation
+TrapEvent
+CollectionQualityObservation
+```
+
+At minimum retain: source OID, resolved MIB object when available, raw BER/value kind, collection timestamp, tenant/entity/Sensor/job provenance, quality/status and stable error/exception code.
+
+`NoSuchObject`, `NoSuchInstance` and `EndOfMibView` are explicit collection-quality/exception outcomes. They are not converted into arbitrary numeric values and must not poison an otherwise valid poll merely because an optional OID is unsupported. Pack policy determines whether an unsupported mandatory OID degrades the monitor/profile.
+
+### 12.4 Exact counter and rate contract
+
+Raw counters are authoritative exact integers:
+
+- Counter32 → unsigned 32-bit;
+- Counter64 → unsigned 64-bit;
+- TimeTicks → typed source value;
+- derived delta/rate → separate derived numeric metric.
+
+Counter64 shall never be coerced through IEEE-754 `Float64` / Java `double` / JSON unsafe-number semantics before exact delta/reset processing. ClickHouse may use `UInt64`/appropriate exact representation for raw counters; derived rates/utilization may use floating-point only after exact delta/reset/discontinuity processing.
+
+For each rate derivation:
+
+1. order samples by authoritative source/entity/metric time;
+2. calculate actual elapsed time;
+3. detect device reboot/reset using `sysUpTime` or equivalent evidence where available;
+4. detect interface-specific discontinuity using `ifCounterDiscontinuityTime` or equivalent where available;
+5. distinguish Counter32 wrap from reset when evidence permits;
+6. reject/mark `UNKNOWN` or `DEGRADED` when a valid delta cannot be proven;
+7. derive rate from exact delta / actual elapsed time;
+8. retain raw samples/provenance required to explain the result.
+
+High-capacity interface packs prefer `ifHCInOctets`/`ifHCOutOctets` and other appropriate 64-bit objects when certified.
+
+### 12.5 Interface identity reconciliation
+
+`ifIndex` is a temporal protocol index, not the sole canonical interface key. Interface reconciliation uses available evidence such as:
+
+- ifName;
+- ifDescr;
+- ifAlias;
+- MAC;
+- entPhysical/slot/port;
+- chassis/module relationship;
+- vendor stable identifier;
+- administrator reconciliation.
+
+A legitimate ifIndex change after reboot, upgrade or hardware change shall not automatically create a new interface entity or lose historical SLA/alert/capacity continuity. Ambiguous identity creates a reconciliation/quality condition rather than a silent merge.
+
+### 12.6 SNMP error mapping
 
 Map library/device errors to stable diagnostics:
 
 - timeout/no response;
-- unknown user;
+- network/route/transport failure;
+- unknown user/engine ID/time window;
 - auth failure;
 - privacy/decryption failure;
-- unsupported security level;
+- unsupported security level/algorithm;
 - authorization/no access;
-- noSuchObject/noSuchInstance;
+- noSuchObject/noSuchInstance/endOfMibView;
 - tooBig;
-- malformed response.
+- malformed/unsupported response;
+- resource/payload bound;
+- cancellation/deadline;
+- storage/durability failure.
 
-### 12.4 SNMP trap receiver
+Authentication failure is not a device-down assertion. `tooBig` may feed bounded Poll Planner fallback; permanent auth/security failures do not retry indefinitely.
 
-Trap/inform packet → decode security/community → MIB resolve → canonical event → entity identity correlation → Kafka/event pipeline.
+### 12.7 Credential execution
+
+Scheduled jobs carry Credential Profile identity/reference and authorization context, not reusable secret material in customer-visible or generic durable job history. The Sensor resolves/materializes only the minimum required community/auth/privacy material for the execution lifetime, keeps it in memory only where practical, disables unsafe shared credential caches, redacts diagnostics and destroys/forgets ephemeral material after use. Credential Profile `USE` does not grant `REVEAL`.
+
+No default `public` community fallback is permitted.
+
+### 12.8 SNMP trap/inform receiver
+
+Authoritative successful Inform path:
+
+```text
+receive Inform
+→ bounded BER/protocol parse
+→ configured security validation
+→ source/tenant authorization and attribution
+→ bounded pre-ACK storm admission/accounting decision
+→ durable local accepted event
+   OR durable local bounded storm-aggregation/accounting record
+→ successful Inform ACK
+→ MIB/Capability Pack semantic enrichment
+→ final entity resolution
+→ semantic dedup/correlation
+→ Core/Kafka/ClickHouse/Alert Evidence downstream
+```
+
+Trap path is the same through parse/security/attribution and durable acceptance/accounting, but Trap remains unacknowledged protocol behavior.
+
+Distinguish:
+
+1. **pre-ACK bounded storm admission/accounting** — the admission/accounting decision that determines whether the notification is durably accepted (accepted raw event **or** durable bounded storm-aggregation/accounting record) and therefore whether a successful Inform ACK may be sent;
+2. **post-ACK semantic dedup/correlation** — MIB/Capability Pack enrichment, final entity resolution and semantic fingerprinting/correlation that may proceed after ACK from the durably preserved source record.
+
+For v1/v2c UDP traps, source IP/community/enterprise OID are evidence and do not constitute strong cryptographic identity. SNMPv3 notifications validate USM/security configuration where enabled.
+
+**Trap** is unacknowledged protocol behavior.
+
+**Inform** acknowledgement requires durable local receiver acceptance/accounting. Before a successful Inform ACK, the receiver must:
+
+1. perform bounded BER/protocol parsing;
+2. validate configured SNMP security;
+3. establish sufficient source/tenant authorization and attribution to determine acceptance;
+4. perform the bounded pre-ACK storm admission/accounting decision that affects durable acceptance;
+5. preserve the raw typed notification including OIDs, raw/typed values, protocol/security metadata, source, timestamp and provenance;
+6. perform durable local acceptance/accounting (durable accepted event **or** durable bounded storm-aggregation/accounting record).
+
+Only after durable local acceptance/accounting succeeds may Platform send a successful Inform ACK. MIB/Capability Pack semantic enrichment, final entity resolution, semantic dedup/correlation, alert correlation, Core delivery, Kafka persistence, ClickHouse persistence and incident creation are **not** prerequisites for protocol ACK. Semantic enrichment and semantic dedup/correlation may proceed after ACK from the durably preserved source event. If Platform cannot durably accept/account the Inform, it must **not** falsely return successful acceptance.
+
+Inform ACK means `LOCAL RECEIVER ACCEPTED/ACCOUNTED`. It does **not** mean Core completed, Kafka completed, ClickHouse completed, alert generated or incident generated. This boundary is distinct from the Sensor→Core telemetry ACK model.
+
+Certification must cover receiver restart, disk/storage pressure, retransmission, duplicate Inform, pre-ACK storm admission/aggregation, failed durable acceptance and enrichment unavailable after durable acceptance.
+
+Pre-ACK admission/accounting and post-ACK semantic dedup controls retain first/last seen, occurrence counts and measurable drop/rate-limit interventions so link-flap/event storms cannot create alert floods.
+
+### 12.9 SNMP SET separation
+
+The routine monitoring executor is read-only and does not expose arbitrary SET.
+
+When a Capability Pack later declares a supported SNMP SET action, execution belongs to the NCM/remediation path and requires:
+
+- explicit action/OID/value schema;
+- tenant/resource RBAC;
+- compatible credential/authorization;
+- reason/ticket and approval where policy requires;
+- pre-read/current-value evidence;
+- bounded scope/blast radius;
+- SET execution;
+- post-read verification;
+- audit and rollback/fail-safe behavior where feasible.
+
+SET is never an implicit fallback of monitoring or discovery.
 
 ---
 
@@ -845,6 +1013,10 @@ Upload MIB(s)
 ```
 
 Compiler errors must identify missing imports and exact source locations where possible.
+
+MIB Studio additionally preserves module/version/hash/source/licence/redistribution provenance; resolves SMIv1/v2 imports; exposes textual conventions, enums, tables/indexes and notifications; distinguishes resolved symbols from unresolved numeric OIDs; and allows bounded test GET/WALK/BULKWALK against an authorized sample device from the selected Sensor. MIB absence shall not prevent authorized numeric-OID monitoring when the administrator supplies an explicit semantic mapping. Approved OSS status for gosmi does not by itself mean MIB Studio/runtime wiring is implemented or certified.
+
+Generated SNMP Pack mappings may include transforms such as `ENUM_MAP`, `BIT_MAP`, `COUNTER_DELTA`, `COUNTER_RATE`, `TABLE_INDEX`, bounded `JOIN/LOOKUP`, `FALLBACK`, `CONDITIONAL`, `SCALE`, `OFFSET` and unit conversion. Transform execution is deterministic, schema-validated and cost-bounded; arbitrary code is not a mapping transform.
 
 ---
 
@@ -1369,9 +1541,14 @@ Fields depending on metric semantics:
 
 ### 35.3 Counter rollup
 
+- preserve exact raw counter semantics before aggregation;
 - delta;
-- rate average/max;
-- reset detection;
+- rate average/max based on actual elapsed sample time;
+- Counter32 wrap detection;
+- Counter64 exactness;
+- device reboot/reset detection;
+- interface/source discontinuity detection;
+- invalid/ambiguous delta → explicit degraded/unknown quality, never fabricated rate;
 - total where meaningful.
 
 ### 35.4 State rollup
@@ -2172,7 +2349,7 @@ No domain package may import an OSS protocol/client library directly except its 
 
 | Adapter | Approved/candidate library | Canonical outputs |
 |---|---|---|
-| `SnmpAdapter` | GoSNMP | `MetricObservation`, `InventoryObservation`, `TrapEvent`, normalized error reason |
+| `SnmpAdapter` | GoSNMP | `NumericObservation`, `ExactCounterObservation`, `StateObservation`, `InventoryObservation`, `TopologyObservation`, `TrapEvent`, `CollectionQualityObservation`, normalized error reason |
 | `MibCompiler` | gosmi | `MibModule`, `OidDefinition`, `TableDefinition`, `NotificationDefinition`, provenance |
 | `FlowDecoder` | GoFlow2 | `FlowRecord` with exporter/interface/5-tuple/bytes/packets/time/template metadata |
 | `IcmpProbe` | x/net/icmp | `ProbeResult` RTT/loss/status/error |
@@ -2205,6 +2382,10 @@ Credential profile fields must support:
 - trap/inform security profile separately from polling profile where required.
 
 Legacy algorithms/protocols are disabled or visibly marked legacy/not recommended. The exact algorithm compatibility matrix is stored in Device Pack/credential capability metadata rather than assumed globally.
+
+SNMPv3 `authPriv` with supported SHA-2/AES is the preferred default posture where device compatibility permits. MD5, SHA-1, DES, v1 and v2c require explicit legacy/compatibility selection and audit/warning. Engine-ID discovery, boots/time-window synchronization, `unknownEngineID`, `notInTimeWindow`, reboot and HA-peer changes are certification cases, not assumed library behavior.
+
+Credential Profile `USE` authorization allows monitoring execution but does not grant `REVEAL`. Reusable SNMP secret values are prohibited from general telemetry, Kafka events, ClickHouse rows, audit records, support bundles and ordinary scheduler-history payloads.
 
 ## LLD-BULK — Bulk import normalization rules
 
@@ -2420,3 +2601,96 @@ Logs shall be bounded. Linux packages integrate with journald/logrotate policy; 
 ### 71.7 Package scripts
 
 `.deb`/`.rpm` install/upgrade/uninstall scripts must be idempotent, must not destroy customer data on package removal unless an explicit purge operation is requested, and must preserve configuration/state across in-place upgrade. Package scripts must record failures with actionable error codes.
+
+---
+
+## 72. Endpoint Diagnostic Snapshot implementation contract — v3.2.2 reconciliation
+
+EDS is implemented as Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` on the existing diagnostic/Live Evidence architecture. It does not add a second scheduler, registry, evidence database or transport.
+
+### 72.1 Capture-eligibility state
+
+For each effective diagnostic trigger, the Agent or agentless monitoring authority retains bounded **capture-eligibility** state sufficient to evaluate whether an automatic EDS Diagnostic Job may be created. This state is **not** authoritative host/operational health:
+
+```text
+policy_id
+policy_version
+authority_generation      Core-issued assignment/policy/control generation
+entity_id
+metric_or_state_key
+INELIGIBLE | QUALIFYING | CAPTURE_ELIGIBLE | COOLDOWN
+eligibility_started_at
+last_observed_at
+last_capture_at
+cooldown_until
+recovery_candidate_since
+```
+
+Evaluation uses the same normalized monitoring observations already collected wherever possible. One sample crossing a threshold does not by itself require EDS when the effective policy specifies duration/qualification. Hysteresis/recovery semantics prevent rapid capture oscillation. Eligibility must never replace Alert Engine/Core semantic monitoring state or assert device/service DOWN.
+
+Automatic capture executes only under currently valid Core-issued authority/generation. Stale, revoked, expired, reassigned or replayed authority fails closed.
+
+### 72.2 Linux Agent evidence collectors
+
+Linux EDS shall prefer bounded native reads/APIs such as `/proc`, `/sys`, stat/statfs and narrowly filtered journal/kernel evidence. Collector implementation shall be dependency-minimal and must not require spawning an unrestricted shell, `sh -c`, `bash -c` or arbitrary command strings from users/API/model output.
+
+Supported evidence families should include where available:
+
+- CPU user/system/iowait/steal, load/run queue and PSI;
+- memory/swap/page faults/pressure/OOM;
+- filesystem capacity/inodes;
+- block-device read/write/IOPS/queue/latency/error counters;
+- NIC throughput/errors/drops and bounded TCP/retransmission/socket state;
+- bounded Top-N process CPU/memory/I/O/state/start/restart information;
+- systemd service state/restart/failure information;
+- bounded kernel/filesystem/MCE/AER/thermal/fan evidence where exposed safely.
+
+### 72.3 Windows Agent evidence collectors
+
+Windows EDS shall use supported native Windows interfaces/APIs appropriate to the metric, including performance-counter/PDH, Service Control Manager, Event Log, IP Helper/network, storage and WHEA/system evidence where required. Recurring collection shall not depend on continuously spawning PowerShell or on arbitrary PowerShell from users/API/model output.
+
+Evidence families normalize to the same Platform concepts as Linux while preserving Windows-specific provenance.
+
+### 72.4 Agentless query packs
+
+Agentless EDS executes only versioned Platform-controlled diagnostic query definitions as Diagnostic Job parameters.
+
+Each query definition declares:
+
+- OS/family/version compatibility;
+- operation identifier and normalized output schema;
+- required credential/privilege class;
+- preferred execution form: fixed approved executable/operation + structured argv / typed CIM/WMI/WinRM operation;
+- parameter schema and escaping rules (no unchecked interpolation; no generic `sh -c`/`bash -c`/arbitrary command string);
+- timeout and maximum output;
+- expected sensitive fields/redaction;
+- resource/safety classification;
+- parser/schema version;
+- failure/error mapping.
+
+Linux query packs execute through the approved SSH transport as fixed operations with structured parameters. Windows query packs execute through approved WinRM HTTPS/WMI/CIM structured operations. Where a certified PowerShell fallback is unavoidable, the exact Platform-owned versioned template is read-only, typed-parameter constrained, output/timeout bounded, audited and separately security-certified. Neither path provides unrestricted generic remote command execution to normal monitoring/EDS workflows. Controlled sudo may exist only for explicitly certified read-only operations.
+
+### 72.5 Resource guard
+
+EDS runtime enforces:
+
+- bounded concurrent capture per endpoint/vantage;
+- bounded duration and cancellation;
+- bounded evidence bytes and Top-N/cardinality;
+- bounded log/Event Log lookback;
+- policy cooldown and duplicate coalescing;
+- tenant/site/estate storm budgets;
+- local pressure checks before and during capture;
+- logical priority that keeps routine monitoring/telemetry durability ahead of diagnostic evidence.
+
+If collection would materially worsen endpoint or monitoring-path pressure, the capture is shortened, suppressed or returned `PARTIAL`/`SUPPRESSED` with an explicit reason. Incomplete diagnostic evidence must be observable; routine telemetry durability must not be silently destroyed to protect EDS.
+
+### 72.6 Endpoint classification boundary
+
+Endpoint code may emit deterministic observations/indicators such as `CPU_PRESSURE`, `MEMORY_PRESSURE`, `OOM_EVENT`, `FILESYSTEM_READ_ONLY`, `BLOCK_IO_PRESSURE`, `SERVICE_FAILED`, `PCIE_AER_EVENT` or `WHEA_HARDWARE_ERROR` only when directly supported by evidence.
+
+It must not convert an indicator into unsupported causal prose such as declaring hardware damage, thermal-paste failure, radio interference or a guaranteed repair. Causal fusion belongs to Core and may result in `INCONCLUSIVE`.
+
+### 72.7 Local intelligence runtime boundary
+
+No LLM/GNN/foundation-model runtime is packaged into normal Agent or Sensor EDS. Tier-0 endpoint intelligence is deterministic/bounded statistical capture-eligibility and evidence logic in the existing runtime. Tier-1/2 intelligence follows `Platform_22` and `Platform_11` resource governance and remains optional; a dedicated inference provider is not an EDS release prerequisite.

@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
 **Product:** Platform
-**Last reconciliation:** 2026-09-19 — v3.2.2 NOC troubleshooting integration-audit closure
+**Last reconciliation:** 2026-09-19 — v3.2.2 endpoint diagnostic evidence reconciliation
 
 ## 1. Authority and no-assumption rule
 
@@ -98,6 +98,37 @@ Platform shall optimize NOC workflow around **observe → verify → diagnose �
 **CLI interaction.** CLI opens inside Platform without losing dashboard context. Launch options may include an authorized stored Credential Profile, a policy-permitted personal credential, or one-time session credentials. One-time credentials are ephemeral. Privileged/configuration modes may require step-up MFA, reason/ticket, approval and stronger command policy.
 
 **Safety and capacity.** Every on-demand action is tenant/resource scoped, audited and bounded by timeout/rate/concurrency/cancellation. Browser clients do not directly open device sockets. Interactive worker budgets cannot starve routine polling.
+
+### 3.5 SNMP operational experience
+
+**SNMP Test.** From an authorized network entity/interface, `SNMP Test` opens in the Troubleshoot workspace and defaults to the assigned eligible Sensor. It shows target, port, Sensor/vantage, SNMP version and Credential Profile **name/reference only**. It must never display community/auth/privacy secrets.
+
+The test separates:
+
+- network/protocol reachability;
+- SNMP response;
+- authentication;
+- authorization;
+- version/security compatibility;
+- MIB/object support;
+- collection quality.
+
+Where permitted it supports bounded GET, WALK and BULKWALK with explicit OID/root selection and safe result limits. Results show raw numeric OID, MIB-resolved name when available, raw typed value, decoded/normalized value, response time, retries, error/status code, quality/provenance and remediation. Identity quick-test includes applicable `sysObjectID`, `sysName`, `sysDescr`, `sysUpTime` and engine identity evidence.
+
+Stable customer outcomes distinguish timeout/path, unknown v3 user, auth mismatch, privacy/decryption mismatch, unsupported security, context mismatch, authorization/no-access, noSuchObject/noSuchInstance, tooBig and malformed response rather than flattening all failures to "SNMP failed."
+
+**SNMP Monitoring Quality.** Device/profile views expose poll success rate, duration, attempted/successful OIDs, retry/timeout/auth/authz/tooBig/noSuch counts, freshness/staleness, expected-vs-received samples, last success and assigned Sensor. `DEVICE HEALTHY + SNMP MONITORING DEGRADED` is a valid display state.
+
+**Counter explanation.** Interface metric detail can show raw counter samples, actual sample interval, reset/wrap/discontinuity quality and derived rate/utilization explanation for authorized troubleshooting. Invalid/ambiguous counter intervals show `UNKNOWN/DEGRADED` rather than a fabricated spike.
+
+**Interface identity.** When protocol ifIndex changes but Platform reconciles the same canonical interface, UI history remains continuous and may expose the old/new protocol index in provenance/audit rather than presenting a duplicate interface.
+
+**MIB Studio.** The Studio provides library/upload, dependency/import status, compile errors with module/location where possible, OID tree/search, textual conventions, enums, tables/indexes, notifications, unresolved numeric OIDs, authorized sample-device GET/WALK/BULKWALK, raw-versus-decoded preview, semantic mapping, provenance/licensing/redistribution metadata and controlled creation/update of the applicable Capability/Device Pack. Uploading a MIB does not automatically activate polling. Specifying MIB Studio behavior does not claim the Studio runtime is already implemented/certified.
+
+**Polling policy.** Monitoring Profile/Adaptive Polling UI exposes normal/adaptive interval, cooldown, maximum duration, target scope, retry/bulk policy where configurable, projected Sensor impact and effective inherited policy. The normal SNMP operational-metric default is **5 minutes**; the UI must make clear that this does not require every available OID every five minutes and that availability/liveness remains a separate plane. Unsafe settings are warned or blocked by capacity/policy.
+
+**SNMP SET.** Routine SNMP Test/monitoring UI is read-only. Any supported SET action appears only in an explicitly privileged NCM/remediation workflow with authorization, reason/ticket/approval where required, pre/post value evidence and audit.
+
 
 ## 4. Dashboard Studio
 
@@ -2167,6 +2198,8 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Investigate
 - Ping/Traceroute where applicable
 - Agent/WinRM/SSH test
+- Request bounded Endpoint Diagnostic Snapshot where supported
+- View automatic/manual EDS history, status, trigger and missing evidence
 - Create maintenance
 - View processes/services
 - View RCA
@@ -2268,6 +2301,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Hardware
 - Logs
 - Events
+- Diagnostics / Evidence
 - RCA
 - Audit
 
@@ -2311,7 +2345,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
-**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
+**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion. The Diagnostics/Evidence view shows EDS as Troubleshoot / Live Evidence / Investigation results for Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT`, including job state, capture status (`COMPLETE/PARTIAL/FAILED/SUPPRESSED`), trigger/policy/authority provenance, source mode/vantage, capture age, evidence categories and explicit missing/denied/suppressed evidence. Endpoint capture-eligibility indicators and endpoint evidence are visually separated from Core RCA conclusions and must not be presented as authoritative host DOWN or independent root cause.
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
