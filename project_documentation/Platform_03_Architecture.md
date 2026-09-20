@@ -881,7 +881,7 @@ Upgrade architecture uses preflight, backup, compatibility checks, Sensor drains
 | ADR-015 | Core/Sensor 80% storage protection mandatory | Accepted |
 | ADR-016 | UI HTTPS only, no TCP/80 application listener | Accepted |
 | ADR-017 | DR architecture mandatory v1.0 | Accepted |
-| ADR-018 | Full always-on DPI and mandatory proprietary full-bytecode APM agents excluded from initial scope; OTel-native traces/service graphs/cross-signal observability are P0 under Platform_24 | Accepted / reconciled 2026-09-19 |
+| ADR-018 | Full always-on DPI and mandatory proprietary full-bytecode APM agents excluded from initial scope; OTel-native traces/service graphs/cross-signal observability are P0 under Platform_26 | Accepted / reconciled 2026-09-19 |
 | ADR-019 | Full Master/Regional Core federation future only | Accepted |
 | ADR-020 | Excessive microservice decomposition avoided in small Core | Accepted |
 | ADR-021 | Exact two-node Kafka/ClickHouse failover mechanism requires P0 engineering spike | Open implementation decision |
@@ -1037,7 +1037,7 @@ The v1 document listed only names. The v2 architecture freezes how OSS is used a
 | OSS-047 | Cloud | AWS API/monitoring | AWS SDK for Go v2 | Apache-2.0 | USE/WRAP | Cloud Sensor | AWS inventory/monitoring API access. | Platform owns entity normalization and policy. Version-level dependency scan mandatory. |
 | OSS-048 | Cloud | Azure API/monitoring | Azure SDK for Go | MIT / component-specific review | USE/WRAP | Cloud Sensor | Azure inventory/monitoring APIs. | Version-level component/license scan required. |
 | OSS-049 | Cloud | GCP API/monitoring | Google Cloud Go | Apache-2.0 | USE/WRAP | Cloud Sensor | GCP APIs and monitoring integrations. | Platform owns entity normalization and policy. |
-| OSS-050 | Cloud | OCI API/monitoring | Oracle OCI SDK for Go (`github.com/oracle/oci-go-sdk/v65`) | UPL-1.0 OR Apache-2.0 top-level; transitive review mandatory | CANDIDATE/P0 ADMISSION | Cloud Sensor | OCI tenancy/compartment/resource APIs and supported principal/signing flows. | Platform_24 makes OCI a day-one Cloud Observability GA provider root. Exact version, transitive/bundled licence, CVE, SBOM and performance review are mandatory before shipment; do not implement an unaudited replacement merely to bypass admission. |
+| OSS-050 | Cloud | OCI API/monitoring | Oracle OCI SDK for Go (`github.com/oracle/oci-go-sdk/v65`) | UPL-1.0 OR Apache-2.0 top-level; transitive review mandatory | CANDIDATE/P0 ADMISSION | Cloud Sensor | OCI tenancy/compartment/resource APIs and supported principal/signing flows. | Platform_26 makes OCI a day-one Cloud Observability GA provider root. Exact version, transitive/bundled licence, CVE, SBOM and performance review are mandatory before shipment; do not implement an unaudited replacement merely to bypass admission. |
 | OSS-060 | NCM | Network task orchestration | Nornir | Apache-2.0 | USE/WRAP | NCM Worker | Parallel inventory/task orchestration for network automation where Python NCM workers are used. | Platform owns tenancy, approvals, job safety, scheduling and audit. |
 | OSS-061 | NCM | Network CLI | scrapli | MIT | USE/WRAP | NCM Worker | Fast sync/async network device connections and command execution. | Platform owns device packs, credentials, RBAC and session policy. |
 | OSS-062 | NCM | Configuration load/diff/commit | scrapli_cfg | MIT | USE/WRAP | NCM Worker | Config prepare/load/diff/commit operations. | Platform owns approval, rollback workflow, compliance and evidence. |
