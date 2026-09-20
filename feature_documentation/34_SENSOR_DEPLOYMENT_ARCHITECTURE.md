@@ -1,7 +1,7 @@
 # Sensor Deployment Architecture
 
-**Class:** Derived feature brief — non-authoritative  
-**Canonical base:** Platform Sensor/Core architecture  
+**Class:** Derived feature brief — non-authoritative
+**Canonical base:** Platform Sensor/Core architecture
 **Architecture enhancement:** pending Mother Reference reconciliation; explicitly requested product direction.
 
 ## Decision objective

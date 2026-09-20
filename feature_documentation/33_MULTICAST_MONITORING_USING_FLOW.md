@@ -1,7 +1,7 @@
 # Multicast Monitoring using Flow
 
-**Class:** Derived feature brief — non-authoritative  
-**Primary sources:** Flow/NTA requirements in Platform_02/23 plus network/topology/RCA architecture  
+**Class:** Derived feature brief — non-authoritative
+**Primary sources:** Flow/NTA requirements in Platform_02/23 plus network/topology/RCA architecture
 **Enhancement state:** pending Mother Reference reconciliation.
 
 ## Product objective

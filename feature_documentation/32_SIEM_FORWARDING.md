@@ -1,8 +1,8 @@
 # SIEM Forwarding
 
-**Class:** Derived feature brief — non-authoritative  
-**Canonical sources:** Platform_04, 10, 17, 18, 23  
-**Draft enhancement:** PR #67  
+**Class:** Derived feature brief — non-authoritative
+**Canonical sources:** Platform_04, 10, 17, 18, 23
+**Draft enhancement:** PR #67
 **Pending correction:** central connector-runtime forwarding is the default; direct Sensor->SIEM is optional/evidence-gated.
 
 ## Product objective

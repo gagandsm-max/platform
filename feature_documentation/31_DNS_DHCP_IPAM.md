@@ -1,6 +1,6 @@
 # DNS / DHCP / IPAM
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 09, 10, 20, 22, 23
 
 ## Product objective
