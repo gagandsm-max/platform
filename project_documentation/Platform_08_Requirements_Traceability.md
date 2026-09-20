@@ -119,9 +119,9 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-INF-005 | Storage and SAN/FC monitoring | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-006 | UPS/PDU/environment/power/cooling/rack sensors | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-007 | Database monitoring packs + generic SQL query monitor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-INF-008 | AWS/Azure/GCP/OCI monitoring; detailed day-one provider-root and Cloud Service Pack requirements are governed by Platform_24 / REQ-CLOBS-* | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-INF-008 | AWS/Azure/GCP/OCI monitoring; detailed day-one provider-root and Cloud Service Pack requirements are governed by Platform_26 / REQ-CLOBS-* | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-009 | Kubernetes/Docker/container monitoring | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-INF-010 | OpenTelemetry metrics/logs/traces are P0; proprietary full-bytecode APM agents are not mandatory. Detailed cross-signal/service-graph requirements are governed by Platform_24 / REQ-CLOBS-* | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-INF-010 | OpenTelemetry metrics/logs/traces are P0; proprietary full-bytecode APM agents are not mandatory. Detailed cross-signal/service-graph requirements are governed by Platform_26 / REQ-CLOBS-* | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-011 | Identity operational monitoring: AD/LDAP/Kerberos/RADIUS/TACACS+/M365/Exchange | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-012 | Synthetic monitoring ICMP/TCP/DNS/HTTP/HTTPS/API/TLS | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
