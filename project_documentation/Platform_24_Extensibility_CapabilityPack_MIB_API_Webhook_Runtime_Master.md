@@ -1,7 +1,7 @@
 # Platform — Extensibility, Capability Pack, MIB, API & Webhook Runtime Master
 
 **Document ID:** PLATFORM-EXTENSIBILITY-001  
-**Version:** Candidate 3.2.3 — subject to independent review  
+**Version:** 3.2.2  
 **Status:** **Candidate Specialized Mother Reference — Draft PR for independent challenge/reconciliation**  
 **Product:** Platform  
 **Change class:** Candidate additive/corrective architecture contract for review against current `main`; no existing requirement is intentionally weakened
@@ -12,7 +12,7 @@
 
 **Proposed filename:** `Platform_24_Extensibility_CapabilityPack_MIB_API_Webhook_Runtime_Master.md`
 
-This document is a candidate v3.2.3 specialized master for Platform extensibility: new SNMP MIBs, new device/vendor/model/firmware monitoring, REST/OpenAPI connectors, Capability Packs, outbound/inbound/callback webhooks, their persistence, distribution, security, testing, UI and operations.
+This document is a candidate v3.2.2 specialized master for Platform extensibility: new SNMP MIBs, new device/vendor/model/firmware monitoring, REST/OpenAPI connectors, Capability Packs, outbound/inbound/callback webhooks, their persistence, distribution, security, testing, UI and operations.
 
 It follows the consolidated-specialized-master model used by `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23`. `Platform_23` remains authoritative for the single Capability Pack architecture and dimensional certification; this candidate adds detailed extensibility authoring/runtime contracts and must be reconciled against current implementation before merge. It adds explicit contracts where the v3.2.2 mother set was directionally correct but insufficiently detailed to prevent implementation agents from inventing incompatible lifecycle, database, API, rollout, webhook or security behavior.
 
@@ -68,7 +68,7 @@ This document **does not** select a new database, mandatory microservice, arbitr
 
 ## 3. Formal product requirements
 
-The following are candidate v3.2.3 PRD supplements pending independent review and reconciliation.
+The following are candidate v3.2.2 PRD supplements pending independent review and reconciliation.
 
 | PRD ID | Requirement |
 |---|---|
@@ -1309,7 +1309,7 @@ HA behavior follows Platform Active/Standby Core authority. Sensor keeps valid r
 
 ## 14. Formal requirements traceability supplement
 
-The legacy base RTM requirements `REQ-EXT-001` through `REQ-EXT-007` remain valid umbrella requirements. This section provides the granular v3.2.3 engineering truth required to prove them complete.
+The legacy base RTM requirements `REQ-EXT-001` through `REQ-EXT-007` remain valid umbrella requirements. This section provides the granular v3.2.2 engineering truth required to prove them complete.
 
 | REQ ID | Priority | Governing PRD | Primary governing sections | Required evidence class |
 |---|---|---|---|---|
@@ -1388,7 +1388,7 @@ The legacy base RTM requirements `REQ-EXT-001` through `REQ-EXT-007` remain vali
 
 ### 14.1 Legacy umbrella mapping
 
-| Legacy ID | v3.2.3 granular coverage |
+| Legacy ID | v3.2.2 granular coverage |
 |---|---|
 | `REQ-EXT-001` MIB Studio | `REQ-EXTL-P0-006/007/008/024/029/030/035`, `REQ-EXTL-P1-004/007/008/010/011/017/018/022` plus applicable security/operations requirements |
 | `REQ-EXT-002` API Studio | `REQ-EXTL-P0-009/010/011/023/024/026/028/030/033/034/035`, `REQ-EXTL-P1-005/012/013/014/016/022` |
