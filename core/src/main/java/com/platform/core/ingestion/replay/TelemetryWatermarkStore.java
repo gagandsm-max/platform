@@ -36,6 +36,7 @@ public interface TelemetryWatermarkStore {
     ReplayReservation reserveBatch(
             UUID tenantId,
             String sensorId,
+            String streamId,
             long firstSeq,
             long lastSeq,
             String checksum,
@@ -49,6 +50,7 @@ public interface TelemetryWatermarkStore {
     void finalizeReservedBatch(
             UUID tenantId,
             String sensorId,
+            String streamId,
             long firstSeq,
             long lastSeq,
             String checksum,
