@@ -116,7 +116,7 @@ For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`,
 
 For enterprise-monitoring-coverage / Capability Pack capabilities governed by `Platform_23`, Definition of Done also includes dimensional certification evidence, pack compatibility/version evidence, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior and the formal `REQ-EMC-*` acceptance evidence. Specification of a technology family is not certification.
 
-For cloud/full-stack observability capabilities governed by `Platform_24`, Definition of Done also includes the applicable `REQ-CLOBS-*` evidence, cross-signal canonical identity, tenant isolation, cloud credential/permission negative cases, provider throttling/reconciliation, cardinality/sampling controls, connector self-health, partial/stale UI states, data-retention/storage impact and dimensional Cloud Service Pack certification. A listed cloud service is not “ready” until the required pack/runtime and certification evidence exist.
+For cloud/full-stack observability capabilities governed by `Platform_26`, Definition of Done also includes the applicable `REQ-CLOBS-*` evidence, cross-signal canonical identity, tenant isolation, cloud credential/permission negative cases, provider throttling/reconciliation, cardinality/sampling controls, connector self-health, partial/stale UI states, data-retention/storage impact and dimensional Cloud Service Pack certification. A listed cloud service is not “ready” until the required pack/runtime and certification evidence exist.
 
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
@@ -161,7 +161,7 @@ For cloud/full-stack observability capabilities governed by `Platform_24`, Defin
 - Named products in `Platform_23` are certification targets, not Core hard-coding, shipped packs or achieved certification.
 - Coverage metrics remain distinct (architecture/specification/implementation/pack/certification/integration). Specified is not implemented; tested is not certified; certified is not deployed.
 - OEM/customer extensions use supported pack/SDK mechanisms. Core forks are prohibited.
-- Always-on full DPI, unrestricted SIEM replacement, broad BMS/DCIM and uncontrolled automated NCM remain excluded or deferred as recorded in `Platform_23`. Mandatory proprietary full-bytecode APM agents are not P0, while OTel-native traces/service graphs are P0 under `Platform_24`.
+- Always-on full DPI, unrestricted SIEM replacement, broad BMS/DCIM and uncontrolled automated NCM remain excluded or deferred as recorded in `Platform_23`. Mandatory proprietary full-bytecode APM agents are not P0, while OTel-native traces/service graphs are P0 under `Platform_26`.
 
 ## v3.2.2 cloud & full-stack observability safeguards
 
