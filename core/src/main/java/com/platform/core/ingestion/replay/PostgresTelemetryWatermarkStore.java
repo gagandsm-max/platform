@@ -246,7 +246,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
 
         List<ReplayRow> rows = jdbcTemplate.query(
                 """
-                SELECT acked_through_sequence, last_first_sequence, last_last_sequence,
+                SELECT stream_id, acked_through_sequence, last_first_sequence, last_last_sequence,
                        last_checksum, pending_first_sequence, pending_last_sequence,
                        pending_checksum
                   FROM platform.sensor_telemetry_watermark
