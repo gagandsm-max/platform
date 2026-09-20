@@ -214,7 +214,7 @@ Stateful service containers must have bounded development defaults and named vol
 
 Docker volumes and container logs are included in workstation disk monitoring guidance. Development instructions shall include commands to identify large images/volumes, safely prune disposable build artifacts and retain named volumes that contain intentional development state. Automated scripts must never indiscriminately prune all Docker data on a shared development laptop.
 
-## 15. Cloud & full-stack observability sizing supplement — Platform_24
+## 15. Cloud & full-stack observability sizing supplement — Platform_26
 
 Cloud/full-stack workloads are not safely sized by resource count alone. Capacity planning and certification shall additionally model:
 
