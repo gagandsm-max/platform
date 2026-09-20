@@ -70,4 +70,4 @@ Support teams should first use Platform Health/Audit/Support Bundle rather than 
 
 ## 5. Enterprise log/forwarding operations supplement
 
-Platform_24-controlled log source/parser/route/destination configuration participates in normal backup, upgrade and rollback checks. If a collector helper becomes a packaged dependency, offline installation, exact version, service lifecycle, upgrade/rollback and support-bundle diagnostics are mandatory. Operations must preserve distinct health for source collection, parser/normalization, storage and external forwarding so a SIEM outage is not represented as monitored-target failure.
+Platform_25-controlled log source/parser/route/destination configuration participates in normal backup, upgrade and rollback checks. If a collector helper becomes a packaged dependency, offline installation, exact version, service lifecycle, upgrade/rollback and support-bundle diagnostics are mandatory. Operations must preserve distinct health for source collection, parser/normalization, storage and external forwarding so a SIEM outage is not represented as monitored-target failure.
