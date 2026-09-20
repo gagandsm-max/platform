@@ -301,7 +301,7 @@ The SNMP worker family contains logical components, not necessarily separate pro
 - **Typed Normalizer** — converts varbinds to numeric/state/counter/inventory/topology/quality observations without losing BER/value semantics;
 - **Counter Processor** — exact counter storage identity plus wrap/reset/discontinuity/rate derivation;
 - **SNMP Health Reporter** — per-device/profile poll success, latency, retries, exception/auth/timeout/tooBig counts, freshness and worker/backlog state;
-- **Trap/Inform Receiver** — source/security validation, durable local acceptance/accounting, MIB/Pack decode, storm control, canonical event production and Inform acknowledgement according to the durable-acceptance contract.
+- **Trap/Inform Receiver** — source/security validation, bounded pre-ACK storm admission/accounting, durable local acceptance (accepted raw event or durable storm-aggregation/accounting record), Inform acknowledgement, then post-ACK MIB/Pack semantic enrichment, entity resolution and semantic dedup/correlation.
 
 Routine polling executes in the NETWORK_POLL class. Trap/Inform reception executes in the STREAMING class/role where separated. Neither may consume unbounded workers/queues or starve the other.
 

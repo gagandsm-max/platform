@@ -372,25 +372,31 @@ Raw Counter64 remains exact through acceptance/persistence; floating-point rate/
 sequenceDiagram
   participant D as Device
   participant S as Streaming/Event Sensor
-  participant M as MIB/Capability Pack Runtime
-  participant Q as Storm / Dedup Guard
+  participant A as Pre-ACK Storm Admission
   participant SP as Durable Event Spool
+  participant M as MIB/Capability Pack Runtime
+  participant Q as Post-ACK Semantic Dedup
   participant I as Ingestion
   participant K as Kafka
   participant C as Correlation / Alert Evidence
 
   D->>S: SNMP trap or inform
-  S->>S: Capture source/version/security/time + validate bounds
-  S->>S: Bounded parse + security + source/tenant attribution
+  S->>S: Bounded BER/protocol parse
+  S->>S: Configured security validation
+  S->>S: Source/tenant authorization and attribution
+  S->>A: Bounded pre-ACK storm admission/accounting
   alt Durable local acceptance/accounting succeeds
-    S->>SP: Preserve raw typed notification + durable accept/aggregate
+    S->>SP: Durable accepted raw event OR durable storm-aggregation/accounting record
     alt Inform
       S-->>D: Inform acknowledgement (local accepted/accounted)
+    else Trap
+      Note over S,D: Trap remains unacknowledged
     end
-    S->>M: Resolve OIDs, notification and entity semantics
-    M-->>S: Structured event + provenance + source trust
-    S->>Q: Fingerprint / per-source rate policy
-    Q-->>S: Accept, aggregate or policy-drop with counters
+    S->>M: MIB/Pack semantic enrichment
+    M-->>S: Structured semantics + provenance
+    S->>S: Final entity resolution
+    S->>Q: Semantic dedup/correlation
+    Q-->>S: Canonical event / aggregate counters
     S->>I: Canonical event batch
     I->>K: event.trap.v1
     K->>C: Evidence correlation/qualification
@@ -399,13 +405,26 @@ sequenceDiagram
   end
 ```
 
-v1/v2c trap source identity is weak evidence and never independently proves device/link failure. Trap storms retain first/last seen, count and affected-source context. Every rate-limit/drop decision is measurable.
+Conceptual Inform path:
 
-SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded BER/protocol parsing, configured SNMP security validation and sufficient source/tenant attribution, while preserving the raw typed notification. MIB/Capability Pack enrichment, final entity resolution, alert correlation, Core delivery, Kafka persistence, ClickHouse persistence and incident creation are **not** ACK prerequisites. Inform ACK means `LOCAL RECEIVER ACCEPTED/ACCOUNTED` only. This boundary is distinct from the Sensor→Core telemetry ACK model.
+```text
+Device
+→ Sensor parse/security/source validation
+→ bounded storm admission/accounting
+→ durable raw accepted/aggregate record
+→ Inform ACK
+→ MIB/Pack semantic enrichment
+→ entity resolution / semantic storm-dedup / correlation
+→ ingestion
+```
+
+v1/v2c trap source identity is weak evidence and never independently proves device/link failure. Pre-ACK admission/accounting and post-ACK semantic dedup retain first/last seen, count and affected-source context. Every rate-limit/drop decision is measurable.
+
+SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded BER/protocol parsing, configured SNMP security validation, sufficient source/tenant attribution and the bounded pre-ACK storm admission/accounting decision, while preserving the raw typed notification. MIB/Capability Pack enrichment, final entity resolution, semantic dedup/correlation, alert correlation, Core delivery, Kafka persistence, ClickHouse persistence and incident creation are **not** ACK prerequisites. Inform ACK means `LOCAL RECEIVER ACCEPTED/ACCOUNTED` only. This boundary is distinct from the Sensor→Core telemetry ACK model.
 
 ---
 
-## 14. Flow DF-013## 14. Flow DF-013 — Flow ingestion and enrichment
+## 14. Flow DF-013 — Flow ingestion and enrichment
 
 ```mermaid
 sequenceDiagram

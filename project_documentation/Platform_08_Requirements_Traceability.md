@@ -116,7 +116,7 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-SNMP-002 | Exact Counter32/Counter64 preservation; no Float64 precision loss before derivation | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-003 | Counter wrap/reset/discontinuity and actual-elapsed-time rate semantics | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-004 | Prefer certified high-capacity counters for high-speed interfaces | — | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-SNMP-005 | Stable interface identity independent of ifIndex alone | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-005 | Stable interface identity independent of ifIndex alone | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-006 | Production Sensor scheduler/runtime/fencing/durable SNMP path | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-007 | Governed Credential Profile resolution with no secret leakage/generic durable secret payloads | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-008 | SNMPv3 strong-default posture; legacy algorithms/protocols explicit and audited | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -132,11 +132,11 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | REQ-SNMP-018 | Per-device/profile SNMP data quality and monitoring-degraded semantics | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-019 | SNMP SET separated into privileged NCM/remediation path | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-020 | Existing PostgreSQL/ClickHouse/Kafka architecture supports typed SNMP stores; no new DB | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-SNMP-021 | Protocol-faithful certification across security, engine/time, malformed, counter, identity, trap and failure/replay cases | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-021 | Protocol-faithful certification across security, engine/time, malformed, counter, identity, trap and failure/replay cases | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-022 | SNMP collection failure remains distinct from device/service failure under Alert Evidence contracts | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-SNMP-023 | Five-minute normal SNMP operational-metric default; Cap Pack-driven object selection; liveness/event planes remain distinct | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-023 | Five-minute normal SNMP operational-metric default; Cap Pack-driven object selection; liveness/event planes remain distinct | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-BRD column uses the existing RTM marker `—` where no direct BRD business outcome substantively governs the detailed engineering mechanics. Direct BRD coverage is retained only for identity/continuity, Sensor collection durability, credential/security posture, trap/inform product scope with storm/false-alert outcomes, MIB/Device Pack studios, discovery/preflight diagnosability, in-context troubleshooting usability, monitoring-quality/false-alert outcomes, NCM privileged separation, existing data-plane architecture, certification intent, monitoring-versus-target failure separation, and the Founder-fixed five-minute operational default.
+BRD column uses the existing RTM marker `—` where no direct BRD business outcome substantively governs the detailed engineering mechanics. Direct BRD coverage is retained only where the BRD itself substantively governs the outcome (for example Sensor collection durability, credential/security posture, trap/inform product scope with storm/false-alert outcomes, MIB/Device Pack studios, discovery/preflight diagnosability, in-context troubleshooting usability, monitoring-quality/false-alert outcomes, NCM privileged separation, existing data-plane architecture, and monitoring-versus-target failure separation). Interface-identity reconciliation mechanics, protocol-faithful certification case matrices and the Founder-fixed five-minute SNMP default remain valid PRD/Decision/REQ rows without inventing BRD text.
 
 
 ### Infrastructure/Cloud

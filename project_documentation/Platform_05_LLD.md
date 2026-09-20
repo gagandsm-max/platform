@@ -843,7 +843,29 @@ No default `public` community fallback is permitted.
 
 ### 12.8 SNMP trap/inform receiver
 
-Trap/inform packet → transport/source capture → version/security validation → durable local acceptance/accounting → MIB/Capability Pack resolve → source/entity correlation → fingerprint/storm control → canonical event → durable event pipeline → evidence qualification.
+Authoritative successful Inform path:
+
+```text
+receive Inform
+→ bounded BER/protocol parse
+→ configured security validation
+→ source/tenant authorization and attribution
+→ bounded pre-ACK storm admission/accounting decision
+→ durable local accepted event
+   OR durable local bounded storm-aggregation/accounting record
+→ successful Inform ACK
+→ MIB/Capability Pack semantic enrichment
+→ final entity resolution
+→ semantic dedup/correlation
+→ Core/Kafka/ClickHouse/Alert Evidence downstream
+```
+
+Trap path is the same through parse/security/attribution and durable acceptance/accounting, but Trap remains unacknowledged protocol behavior.
+
+Distinguish:
+
+1. **pre-ACK bounded storm admission/accounting** — the admission/accounting decision that determines whether the notification is durably accepted (accepted raw event **or** durable bounded storm-aggregation/accounting record) and therefore whether a successful Inform ACK may be sent;
+2. **post-ACK semantic dedup/correlation** — MIB/Capability Pack enrichment, final entity resolution and semantic fingerprinting/correlation that may proceed after ACK from the durably preserved source record.
 
 For v1/v2c UDP traps, source IP/community/enterprise OID are evidence and do not constitute strong cryptographic identity. SNMPv3 notifications validate USM/security configuration where enabled.
 
@@ -854,16 +876,17 @@ For v1/v2c UDP traps, source IP/community/enterprise OID are evidence and do not
 1. perform bounded BER/protocol parsing;
 2. validate configured SNMP security;
 3. establish sufficient source/tenant authorization and attribution to determine acceptance;
-4. preserve the raw typed notification including OIDs, raw/typed values, protocol/security metadata, source, timestamp and provenance;
-5. perform durable local acceptance/accounting (durable accepted event **or** durable bounded storm-aggregation/accounting decision).
+4. perform the bounded pre-ACK storm admission/accounting decision that affects durable acceptance;
+5. preserve the raw typed notification including OIDs, raw/typed values, protocol/security metadata, source, timestamp and provenance;
+6. perform durable local acceptance/accounting (durable accepted event **or** durable bounded storm-aggregation/accounting record).
 
-Only after durable local acceptance/accounting succeeds may Platform send a successful Inform ACK. MIB/Capability Pack semantic enrichment, final entity resolution, alert correlation, Core delivery, Kafka persistence, ClickHouse persistence and incident creation are **not** prerequisites for protocol ACK. Semantic enrichment may proceed after ACK from the durably preserved source event. If Platform cannot durably accept/account the Inform, it must **not** falsely return successful acceptance.
+Only after durable local acceptance/accounting succeeds may Platform send a successful Inform ACK. MIB/Capability Pack semantic enrichment, final entity resolution, semantic dedup/correlation, alert correlation, Core delivery, Kafka persistence, ClickHouse persistence and incident creation are **not** prerequisites for protocol ACK. Semantic enrichment and semantic dedup/correlation may proceed after ACK from the durably preserved source event. If Platform cannot durably accept/account the Inform, it must **not** falsely return successful acceptance.
 
 Inform ACK means `LOCAL RECEIVER ACCEPTED/ACCOUNTED`. It does **not** mean Core completed, Kafka completed, ClickHouse completed, alert generated or incident generated. This boundary is distinct from the Sensor→Core telemetry ACK model.
 
-Certification must cover receiver restart, disk/storage pressure, retransmission, duplicate Inform, storm aggregation, failed durable acceptance and enrichment unavailable after durable acceptance.
+Certification must cover receiver restart, disk/storage pressure, retransmission, duplicate Inform, pre-ACK storm admission/aggregation, failed durable acceptance and enrichment unavailable after durable acceptance.
 
-Per-source/event fingerprinting, token-bucket/rate controls, first/last seen and occurrence counts prevent link-flap/event storms from creating alert floods. Drops/rate-limit interventions are counted and visible.
+Pre-ACK admission/accounting and post-ACK semantic dedup controls retain first/last seen, occurrence counts and measurable drop/rate-limit interventions so link-flap/event storms cannot create alert floods.
 
 ### 12.9 SNMP SET separation
 
