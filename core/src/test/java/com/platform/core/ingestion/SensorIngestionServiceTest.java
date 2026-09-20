@@ -46,7 +46,7 @@ class SensorIngestionServiceTest {
         metrics = new IngestionMetrics();
         service = new SensorIngestionService(validator, authorityResolver, watermarkStore, kafkaProducer, metrics);
         when(watermarkStore.reserveBatch(
-                any(), anyString(), anyLong(), anyLong(), anyString(), anyString()))
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString()))
                 .thenReturn(ReplayReservation.reserved(0));
     }
 
@@ -96,10 +96,10 @@ class SensorIngestionServiceTest {
 
         verify(kafkaProducer, times(1)).publishBatchTransactionally(observations);
         verify(watermarkStore, times(1)).reserveBatch(
-                eq(tenantId), eq("sensor-net-01"), eq(100L), eq(105L), eq("sum-123"), eq("b-1")
+                eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-123"), eq("b-1")
         );
         verify(watermarkStore, times(1)).finalizeReservedBatch(
-                eq(tenantId), eq("sensor-net-01"), eq(100L), eq(105L), eq("sum-123"), eq("b-1")
+                eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-123"), eq("b-1")
         );
     }
 
@@ -116,7 +116,7 @@ class SensorIngestionServiceTest {
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
         when(watermarkStore.reserveBatch(
-                tenantId, "sensor-net-01", 100L, 105L, "sum-123", "b-1"))
+                tenantId, "sensor-net-01", "epoch-1", 100L, 105L, "sum-123", "b-1"))
                 .thenReturn(ReplayReservation.alreadyAcked(105L));
 
         TelemetryAckResponse ack = service.ingestTelemetry(rawBody, req, "b-1", cert);
@@ -129,7 +129,7 @@ class SensorIngestionServiceTest {
         // Exact accepted replay does not republish and does not finalize again.
         verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
         verify(watermarkStore, never()).finalizeReservedBatch(
-                any(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
     }
 
     @Test
@@ -145,7 +145,7 @@ class SensorIngestionServiceTest {
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
         when(watermarkStore.reserveBatch(
-                tenantId, "sensor-net-01", 100L, 105L, "sum-DIFFERENT", "b-1"))
+                tenantId, "sensor-net-01", "epoch-1", 100L, 105L, "sum-DIFFERENT", "b-1"))
                 .thenReturn(ReplayReservation.rejected(
                         105L, "ERR_IDEMPOTENCY_CONFLICT",
                         "sequence range was accepted/reserved with a different checksum"));
@@ -172,7 +172,7 @@ class SensorIngestionServiceTest {
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
         when(watermarkStore.reserveBatch(
-                tenantId, "sensor-net-01", 95L, 99L, "sum-old", "b-old"))
+                tenantId, "sensor-net-01", "epoch-1", 95L, 99L, "sum-old", "b-old"))
                 .thenReturn(ReplayReservation.rejected(
                         105L, "ERR_SEQUENCE_REGRESSION", "sequence already accepted"));
 
@@ -198,7 +198,7 @@ class SensorIngestionServiceTest {
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
         when(watermarkStore.reserveBatch(
-                tenantId, "sensor-net-01", 120L, 125L, "sum-gap", "b-gap"))
+                tenantId, "sensor-net-01", "epoch-1", 120L, 125L, "sum-gap", "b-gap"))
                 .thenReturn(ReplayReservation.rejected(
                         105L, "ERR_SEQUENCE_GAP", "unexpected sequence gap"));
 
@@ -208,6 +208,39 @@ class SensorIngestionServiceTest {
         assertEquals("ERR_SEQUENCE_GAP", ex.getCode());
 
         verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
+    }
+
+    @Test
+    void testUnexpectedDurableStreamChangeRejectsBeforeKafka() {
+        X509Certificate cert = createMockCert("sensor-net-01");
+        TelemetryBatchRequest req = new TelemetryBatchRequest(
+                1, "sensor-net-01", "stream-new", "b-stream-change",
+                1, 1, "sum-stream-change", List.of());
+        byte[] rawBody = "{}".getBytes();
+
+        List<CanonicalObservation> observations = List.of(
+                new CanonicalObservation(
+                        tenantId.toString(), entityId.toString(), "cpu.util",
+                        "sensor-net-01", Instant.now(), 42.0, 1, 0,
+                        "stream-new:1", "snmp")
+        );
+        when(validator.resolveAuthority(cert)).thenReturn(testScope);
+        when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
+        when(watermarkStore.reserveBatch(
+                tenantId, "sensor-net-01", "stream-new",
+                1L, 1L, "sum-stream-change", "b-stream-change"))
+                .thenReturn(ReplayReservation.rejected(
+                        105L, "ERR_SENSOR_STREAM_CHANGED",
+                        "explicit continuity reset/re-enrollment is required"));
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                service.ingestTelemetry(rawBody, req, "b-stream-change", cert));
+
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        assertEquals("ERR_SENSOR_STREAM_CHANGED", ex.getCode());
+        verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
+        verify(watermarkStore, never()).finalizeReservedBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
     }
 
     @Test
@@ -232,7 +265,7 @@ class SensorIngestionServiceTest {
 
         // Reservation remains pending for exact retry; ACK watermark MUST NOT finalize.
         verify(watermarkStore, never()).finalizeReservedBatch(
-                any(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
     }
 
     @Test
@@ -251,14 +284,14 @@ class SensorIngestionServiceTest {
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
         when(watermarkStore.reserveBatch(
-                tenantId, "sensor-net-01", 100L, 105L, "sum-fault", "b-fault"))
+                tenantId, "sensor-net-01", "epoch-1", 100L, 105L, "sum-fault", "b-fault"))
                 .thenReturn(ReplayReservation.reserved(99L))
                 .thenReturn(ReplayReservation.retryPending(99L));
 
         doThrow(new RuntimeException("PostgreSQL connection terminated unexpectedly"))
                 .doNothing()
                 .when(watermarkStore).finalizeReservedBatch(
-                        eq(tenantId), eq("sensor-net-01"), eq(100L), eq(105L),
+                        eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L),
                         eq("sum-fault"), eq("b-fault"));
 
         // Ingestion call 1 fails -> NO ACK to Sensor!
@@ -275,10 +308,10 @@ class SensorIngestionServiceTest {
         // Kafka published twice (at-least-once replay with identical deterministic observation IDs)
         verify(kafkaProducer, times(2)).publishBatchTransactionally(observations);
         verify(watermarkStore, times(2)).reserveBatch(
-                eq(tenantId), eq("sensor-net-01"), eq(100L), eq(105L), eq("sum-fault"), eq("b-fault")
+                eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-fault"), eq("b-fault")
         );
         verify(watermarkStore, times(2)).finalizeReservedBatch(
-                eq(tenantId), eq("sensor-net-01"), eq(100L), eq(105L), eq("sum-fault"), eq("b-fault")
+                eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-fault"), eq("b-fault")
         );
     }
 
@@ -327,8 +360,8 @@ class SensorIngestionServiceTest {
         verify(kafkaProducer, never()).publishBatchTransactionally(any());
         // Prove 9: invalid source data never reaches durable replay reservation/finalization.
         verify(watermarkStore, never()).reserveBatch(
-                any(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
         verify(watermarkStore, never()).finalizeReservedBatch(
-                any(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
     }
 }
