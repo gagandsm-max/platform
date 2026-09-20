@@ -174,3 +174,27 @@ Applicable implementation may not be represented as production-ready until evide
 - dedicated local/private inference provider outage (when that optional mode is enabled) proving no impact on collection, alerting, incidents, deterministic RCA, Core HA or data durability; and proving that mode is not required for EDS/base monitoring.
 
 No fixed endpoint-overhead number is asserted by documentation alone. Release certification records measured idle and triggered overhead per supported OS/profile and establishes the admissible envelope. Specified ≠ implemented ≠ tested ≠ certified ≠ deployed.
+
+
+## 7. Enterprise SNMP quality and certification supplement
+
+A release or Capability Pack shall not claim production SNMP support merely because GoSNMP unit tests, a single v2c GET, or an isolated Sensor spool test passes. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
+
+Current known implementation foundations may include GoSNMP protocol support, BER typed values, exact Counter64 Sensor-side serialization and bounded Sensor spool primitives. Production gaps that must not be overstated as complete include, among others: SNMP production scheduler wiring; governed production Credential Profile resolution in discovery/polling; complete typed Core ingestion; exact Counter64 end-to-end Core/Kafka/ClickHouse path; trap/inform production runtime and durable Inform acceptance; MIB Studio/gosmi runtime; interface reconciliation runtime; adaptive polling runtime; full SNMP Test UI; and full Monitoring Quality UI.
+
+Required evidence, as applicable to the declared certification dimensions, includes:
+
+- **Protocol/security:** v1, v2c and v3; noAuthNoPriv/authNoPriv/authPriv; certified SHA-2/AES combinations; explicit legacy MD5/SHA-1/DES cases; context; engineID/boots/time synchronization; unknownEngineID/notInTimeWindow recovery; no silent security downgrade.
+- **Operations:** GET, GETNEXT, GETBULK, WALK/BULKWALK; malformed/partial responses; tooBig; controlled bulk-size reduction/fallback; cancellation; deadline; bounded retry/backoff; deterministic poll spreading across the configured interval (normal operational default 5 minutes unless overridden).
+- **Credentials:** Credential Profile USE without REVEAL; no secret in logs/Kafka/ClickHouse/audit/support bundles; no default community; concurrent tenants/jobs cannot share credential state.
+- **Typed values:** INTEGER, unsigned/gauge/timeticks, Counter32, Counter64, octets/text, OID, IP address, bit string, NULL and protocol exceptions are normalized to their valid semantic classes rather than incorrectly rejected or coerced.
+- **Counter correctness:** exact Counter64 above 2^53; Counter32 wrap; device reboot/reset; interface discontinuity; missed poll/irregular elapsed interval; derived rate/utilization; invalid interval produces explicit degraded/unknown quality.
+- **Identity:** ifIndex change without false interface duplication; ambiguous interface evidence enters reconciliation/quality state; canonical history/SLA continuity is preserved when identity is proven.
+- **Discovery/preflight:** selected-Sensor execution, governed credential resolution, sysObjectID/sysName/sysDescr identity, actionable timeout/auth/authz/context/MIB errors and no hard-coded community.
+- **Runtime/durability:** Core assignment/fence → Sensor scheduler → SNMP executor → durable spool → ingestion → Kafka → typed persistence; Core/WAN interruption, Sensor restart and replay/duplicate cases are proven.
+- **Trap/Inform:** v1/v2c/v3 notification decoding, source/security attribution, malformed packets, trap storm/fingerprint/rate control; Inform durable local acceptance/accounting before ACK; receiver restart; disk/storage pressure; retransmission; duplicate Inform; failed durable acceptance; enrichment unavailable after durable acceptance; and no direct trap→alert shortcut.
+- **Capacity:** representative device/interface/OID distributions, GETBULK response sizes, RTT/loss/timeouts, retries, SNMPv3 CPU cost, scheduler queue age, adaptive-poll bursts and trap EPS under simultaneous certified monitoring workload.
+- **UX:** SNMP Test shows Sensor/vantage, separated reachability/auth/authz/object-support outcomes, raw+resolved OID/value, stable error/remediation and no secrets; poll-health UI exposes freshness, failures and monitoring degradation.
+- **Security/NCM:** routine monitoring remains read-only; SET is unavailable from normal polling/test paths and any certified SET action proves NCM/remediation authorization, pre/post verification and audit.
+
+False-alert regression shall include: SNMP failure while ICMP/API/neighbor/path evidence remains healthy → `MONITORING_DEGRADED`/appropriate semantic state, not authoritative `DEVICE_DOWN`.

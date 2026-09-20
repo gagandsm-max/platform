@@ -319,6 +319,41 @@ Sensor isolates workloads into bounded worker pools:
 
 A high-rate Flow workload must not starve SNMP polling or NCM safety tasks.
 
+### 8.2.1 SNMP execution architecture
+
+SNMP scheduled polling is a **Network Sensor data-plane capability** coordinated by Core control state. The production path is:
+
+```text
+Core policy / assignment / Credential Profile reference
+        ↓
+Sensor scheduler + fenced assignment
+        ↓
+Capability Pack poll plan
+        ↓
+SNMP Poll Planner
+        ↓
+GoSNMP adapter
+        ↓
+typed varbind normalization
+        ↓
+durable Sensor spool
+        ↓
+Core ingestion / Kafka
+        ↓
+ClickHouse + graph/inventory/state consumers
+```
+
+Protocol-library code is not independently authoritative product behavior. The Sensor runtime owns worker isolation, leases/fencing, timeout/cancellation, durability and capacity; the network/SNMP layer owns protocol semantics, poll planning, error classification and typed normalization; Capability Packs own vendor/product mappings; Core owns policy, assignment, credential authorization and canonical downstream contracts.
+
+Poll planning is capability-aware and bounded. It may adapt GET/GETNEXT/GETBULK/WALK grouping, max repetitions, timeout/retry and controlled fallback using Device Pack compatibility, observed `tooBig`/timeout behavior, RTT and Sensor budget. Scheduling uses deterministic spreading across the configured interval and bounded per-device concurrency so eligible work is distributed rather than aligned at minute boundaries. Restart or Sensor reassignment must not intentionally reshape the entire estate into a burst. The exact generic scheduler algorithm is governed separately; SNMP must remain compatible with it.
+
+The normal scheduled SNMP operational-metric default is **5 minutes**. That default does **not** mean every available OID is polled every five minutes. Collection remains monitor-definition / Capability-Pack driven. Availability/liveness is a separate plane and may normally use approximately 60 seconds according to policy. Event/streaming telemetry remains event/stream driven.
+
+Adaptive SNMP polling may temporarily accelerate cadence under explicit reason/audit with minimum safe interval, bounded duration, cooldown, maximum promoted targets and Sensor capacity guardrails. A broad outage must not accelerate thousands of affected devices into a retry/poll storm. `NO DATA != DEVICE DOWN` remains invariant.
+
+SNMP trap/inform reception is a Streaming/Event Sensor capability when event volume warrants separation. It is independently budgeted from routine polling.
+
+
 ### 8.3 Sensor local storage
 
 The Sensor stores only operational state required for continuity:
@@ -424,6 +459,22 @@ Every normalized metric should derive from a Monitor Definition containing at le
 - Device Pack provenance.
 
 Protocol source does not dictate dashboard semantics. SNMP/REST/WMI/gNMI can normalize to the same semantic metric.
+
+### 10.3 SNMP typed evidence and identity
+
+SNMP does not normalize into a numeric-only pipe. Varbinds and notifications may become:
+
+- exact counter observations;
+- numeric gauges/measurements;
+- state observations;
+- inventory facts;
+- topology/relationship facts;
+- operational events/traps;
+- collection-quality/exception evidence.
+
+Raw `Counter32`/`Counter64` identity and exact integer value are preserved before delta/rate derivation. A floating-point rate is a **derived metric**, not a substitute for the authoritative raw counter. Counter wrap/reset/discontinuity uses source type, prior sample, elapsed time, `sysUpTime`, `ifCounterDiscontinuityTime` or equivalent evidence where available.
+
+Interface identity is canonical and temporal. `ifIndex` is an observation/index, not permanent identity; reconciliation uses stable evidence such as ifName, ifDescr, ifAlias, MAC, entPhysical/slot-port and Device Pack rules so history survives legitimate index renumbering.
 
 ---
 
@@ -685,6 +736,8 @@ NetBox-like external tools may integrate, but Platform IPAM remains coherent wit
 Raw → configurable rollup resolutions → longer-term aggregates → optional archive.
 
 For numeric values store relevant min/max/avg/count/first/last/percentile. Counters use delta/rate semantics. States use availability/duration/transition semantics.
+
+Raw SNMP counters that can exceed IEEE-754 exact-integer range require exact unsigned storage semantics (for example ClickHouse `UInt64`) or an equivalently exact representation. They must not be coerced into `Float64` before delta/reset logic. State, inventory and topology facts remain separate from numeric metric storage even when collected in the same SNMP transaction. A logical exact-counter family is required; a dedicated Kafka topic name is an implementation option when an equivalently typed contract is proven.
 
 ### 21.3 Query resolution selection
 
@@ -1015,7 +1068,7 @@ The v1 document listed only names. The v2 architecture freezes how OSS is used a
 | OSS-012 | Expressions | Safe expression language | CEL (cel-java / cel-go) | Apache-2.0 | USE | Core/Sensor | Threshold formulas, dynamic groups, constrained policy expressions and safe user-defined conditions. | Use non-Turing-complete CEL rather than arbitrary Python/JavaScript in customer policy paths. Platform defines allowed variables/functions/cost limits. |
 | OSS-013 | Data Interchange | Columnar in-memory interchange | Apache Arrow | Apache-2.0 with bundled third-party notices | OPTIONAL | Core/Analytics | Efficient analytical interchange where it materially reduces copies/serialization. | Only introduce where benchmark justifies it. |
 | OSS-014 | Search | Optional dedicated full-text search | OpenSearch | Apache-2.0 | OPTIONAL-LATER | Core | Add only if customer log search requirements exceed ClickHouse text-search capability. | Not mandatory in V1 to keep footprint low. Elasticsearch is not the core store. |
-| OSS-020 | Network Collection | SNMP v1/v2c/v3 | GoSNMP | BSD-style | USE/WRAP | Sensor | SNMP Get/GetNext/GetBulk/Walk/Set and traps/informs protocol engine. | Do not reimplement BER/SNMP. Platform owns scheduling, credential profiles, normalization, validation, retry and policy. |
+| OSS-020 | Network Collection | SNMP v1/v2c/v3 | GoSNMP | BSD-style | USE/WRAP | Sensor | SNMP Get/GetNext/GetBulk/Walk plus protocol support for certified notifications and privileged SET. | Do not reimplement BER/SNMP. Platform owns scheduling, Credential Profiles, Poll Planner, typed normalization, validation, retry and policy; routine monitoring is read-only. |
 | OSS-021 | Network Collection | MIB parsing | gosmi | MIT | USE/WRAP | Core Studio/Sensor build tooling | Parse SMIv1/v2 MIBs for MIB Studio, OID metadata, enums, tables and notifications. | Platform owns MIB provenance, dependency workflow, metric semantics, Device Pack generation and redistribution controls. |
 | OSS-022 | Network Collection | NetFlow/IPFIX/sFlow parsing | GoFlow2 | BSD-3-Clause | USE/WRAP | Streaming Sensor | Decode NetFlow v5/v9, IPFIX and sFlow. | Platform owns enrichment, canonical flow schema, cardinality controls, Kafka publishing and analytics. |
 | OSS-023 | Network Collection | ICMP | golang.org/x/net/icmp | BSD-3-Clause | USE | Sensor/Agent | ICMP echo and low-level packet operations. | Platform owns scheduling, statistics, validation workflows, jitter/loss aggregation and path correlation. |

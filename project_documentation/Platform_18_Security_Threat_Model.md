@@ -6,19 +6,19 @@
 
 ## 1. Assets
 
-Credentials, certificates/private keys, tenant data, telemetry, network configurations, privileged CLI/NCM access, audit records, licensing, AI context and software supply chain.
+Credentials, certificates/private keys, tenant data, telemetry, **SNMP communities/v3 auth/privacy secrets, MIB/Capability Pack mappings, trap source/security context**, network configurations, privileged CLI/NCM access, audit records, licensing, AI context and software supply chain.
 
 ## 2. Trust boundaries
 
-Browser↔Core; Sensor/Agent↔Core ingestion/control; Core↔data services; Core↔ITSM/cloud/AI; NCM worker↔managed device; package/update channel; tenant boundary; HA peer boundary.
+Browser↔Core; Sensor/Agent↔Core ingestion/control; **Network/Streaming Sensor↔SNMP-managed device/notification source**; Core↔data services; Core↔ITSM/cloud/AI; NCM worker↔managed device; package/update channel; tenant boundary; HA peer boundary.
 
 ## 3. Threat classes
 
-Spoofed Sensor/Agent enrollment, credential theft, tenant breakout, command injection, malicious Device Pack/connector, supply-chain dependency compromise, Kafka/event spoofing, replay, insecure legacy protocol misuse, log secret leakage, storage exhaustion, privilege escalation, destructive NCM action, poisoned AI context, GNN/AI over-trust, malicious upgrade, arbitrary-target diagnostic abuse/SSRF-like pivoting, cross-tenant diagnostic execution, diagnostic amplification/resource exhaustion, CLI session hijack, one-time credential capture/persistence, command-policy bypass and investigation-evidence tampering.
+Spoofed Sensor/Agent enrollment, credential theft, tenant breakout, command injection, malicious Device Pack/connector, supply-chain dependency compromise, Kafka/event spoofing, replay, insecure legacy protocol misuse, **SNMP community/auth/privacy secret leakage, SNMPv3 downgrade/misconfiguration, engineID/time-window abuse or confusion, forged v1/v2c traps, trap/inform floods, malicious/oversized varbind or MIB content, OID/poll amplification, unbounded GETBULK/WALK, credential cross-tenant reuse, arbitrary SNMP SET/configuration mutation, counter/identity poisoning**, log secret leakage, storage exhaustion, privilege escalation, destructive NCM action, poisoned AI context, GNN/AI over-trust, malicious upgrade, arbitrary-target diagnostic abuse/SSRF-like pivoting, cross-tenant diagnostic execution, diagnostic amplification/resource exhaustion, CLI session hijack, one-time credential capture/persistence, command-policy bypass and investigation-evidence tampering.
 
 ## 4. Key mitigations
 
-mTLS identity, single-use enrollment tokens, encrypted secret storage, server-side RBAC/resource scope, maker-checker, command policy, signed packages, SBOM/provenance, audit, bounded inputs/queries, schema validation, content redaction, data-quality/confidence handling, AI tool guardrails, INCONCLUSIVE RCA state, canonical-target authorization, Sensor/Agent-mediated diagnostics rather than browser-direct target sockets, hard diagnostic timeout/rate/concurrency/fan-out limits, cancellation, source/vantage provenance, ephemeral one-time CLI credentials, WebSocket/session binding and expiry, step-up controls for privileged commands, tamper-evident investigation/audit references and separation of monitored versus on-demand evidence.
+mTLS identity, single-use enrollment tokens, encrypted secret storage, server-side RBAC/resource scope, maker-checker, command policy, signed packages, SBOM/provenance, audit, bounded inputs/queries, schema validation, content redaction, data-quality/confidence handling, **governed Credential Profile references, secret-redacted SNMP jobs, preferred v3 authPriv SHA-2/AES policy, explicit legacy-mode warning/audit, bounded OIDs/results/GETBULK/WALK/retries, per-device worker limits, trap source/security classification, trap storm/rate controls, Inform durable local acceptance before ACK, MIB provenance/dependency validation, typed exception/counter quality, interface-identity reconciliation and separation of SNMP SET into privileged NCM/remediation**, AI tool guardrails, INCONCLUSIVE RCA state, canonical-target authorization, Sensor/Agent-mediated diagnostics rather than browser-direct target sockets, hard diagnostic timeout/rate/concurrency/fan-out limits, cancellation, source/vantage provenance, ephemeral one-time CLI credentials, WebSocket/session binding and expiry, step-up controls for privileged commands, tamper-evident investigation/audit references and separation of monitored versus on-demand evidence.
 
 ## 5. Development threat controls
 

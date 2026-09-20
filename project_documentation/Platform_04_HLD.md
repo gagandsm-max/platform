@@ -291,14 +291,37 @@ flowchart TB
 
 Each worker class has bounded concurrency/queues. High-rate event receivers and NCM have independent limits so they cannot exhaust polling resources.
 
+### 5.1.1 SNMP polling and event subsystems
+
+The SNMP worker family contains logical components, not necessarily separate processes:
+
+- **SNMP Job Adapter** — accepts fenced Core/Sensor scheduler jobs containing tenant/entity/assignment context and Credential Profile reference/authorized secret delivery context;
+- **Poll Planner** — converts Capability Pack monitor definitions into bounded GET/GETNEXT/GETBULK/WALK operations with compatibility-aware bulk sizing and controlled fallback;
+- **GoSNMP Adapter** — protocol/session/security implementation with cancellation, timeout, retry and stable error classification;
+- **Typed Normalizer** — converts varbinds to numeric/state/counter/inventory/topology/quality observations without losing BER/value semantics;
+- **Counter Processor** — exact counter storage identity plus wrap/reset/discontinuity/rate derivation;
+- **SNMP Health Reporter** — per-device/profile poll success, latency, retries, exception/auth/timeout/tooBig counts, freshness and worker/backlog state;
+- **Trap/Inform Receiver** — source/security validation, durable local acceptance/accounting, MIB/Pack decode, storm control, canonical event production and Inform acknowledgement according to the durable-acceptance contract.
+
+Routine polling executes in the NETWORK_POLL class. Trap/Inform reception executes in the STREAMING class/role where separated. Neither may consume unbounded workers/queues or starve the other.
+
+Credential values are not part of customer-visible job/history contracts. Core supplies or authorizes least-privilege Credential Profile use; the Sensor materializes only the minimum secret required for execution and never exposes it through telemetry, logs or support output. `USE` does not mean `REVEAL`.
+
+Normal scheduled SNMP operational metrics default to a **5-minute** interval unless a more specific inherited policy/monitor definition overrides it. That default does not require every available OID every five minutes. Deterministic spreading distributes eligible work across the interval so fleet polls do not align at minute boundaries; restart/reassignment must not intentionally create a boundary storm. Availability/liveness remains a separate plane.
+
+
 ### 5.2 Device Pack runtime
 
 Device Pack runtime resolves:
 
 - identification;
-- protocol mappings;
-- normalized metric keys;
+- protocol mappings and SNMP poll definitions;
+- scalar/table/index strategy and GET/GETBULK compatibility hints;
+- normalized metric/state/inventory/topology keys;
+- enum/bit mappings, units and counter/rate semantics;
+- trap/inform notification rules;
 - topology relationships;
+- diagnostics and MIB/OID metadata;
 - CLI prompts/parsers;
 - NCM commands;
 - alert/RCA semantics;
@@ -416,6 +439,7 @@ Synchronous vs asynchronous commit policy is an engineering benchmark/availabili
 ### 9.1 Table families
 
 - `metric_numeric`
+- `metric_counter` (exact unsigned raw counters + counter provenance/discontinuity metadata; logical family)
 - `metric_state`
 - `network_flow`
 - `event_raw`
@@ -452,6 +476,7 @@ Because the product requires two Core nodes and no mandatory third quorum node, 
 Logical topics include:
 
 - `telemetry.numeric.v1`
+- `telemetry.counter.v1` (optional dedicated topic realizing the exact-counter family when needed; equivalently typed payloads are acceptable when precision/ordering/schema evolution remain proven)
 - `telemetry.state.v1`
 - `network.flow.v1`
 - `event.syslog.v1`
@@ -1106,7 +1131,7 @@ The following cross-cutting capabilities are mandatory where applicable and must
 
 | Worker family | OSS foundation | Platform worker responsibilities |
 |---|---|---|
-| SNMP | GoSNMP | scheduling, credential ref, bulk planning, normalized metrics, retry/qualification |
+| SNMP | GoSNMP | scheduling, governed credential ref/use, capability-aware bulk planning, typed numeric/state/counter/inventory/topology normalization, retry/error classification, poll quality and qualification evidence |
 | MIB | gosmi | compiled Device Pack metadata; runtime avoids reparsing MIB for every poll |
 | Flow | GoFlow2 | parser + canonical flow publication |
 | ICMP/path | x/net/icmp | probe scheduling and measurements |
