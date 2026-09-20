@@ -1,10 +1,10 @@
 # Platform — CI/CD, Packaging & Distribution Master
 
 **Document ID:** PLATFORM-RELEASEENG-001
-**Version:** 3.2.1
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
-**Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
+**Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the dedicated Sensor-role packaging contract. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 
 ## 1. Purpose
 
@@ -59,6 +59,8 @@ ORT/Syft/Trivy/ScanCode or approved equivalents run according to the OSS catalog
 ## 1. Linux artifacts
 
 Core, Sensor and Linux Agent each produce `.deb` and `.rpm`. They are separate packages and may version independently within compatibility rules.
+
+There is **one production Sensor package/codebase**. Network, Infrastructure, FLOW, LOG and other approved Sensor roles are selected through governed enrollment/effective configuration; dedicated Flow/Log isolation does not create separate Flow-Sensor or Log-Sensor package families. Package/install tests shall prove a role-gated Sensor starts only permitted modules and rejects incompatible assignments/listeners. A development-only mixed role, if shipped, is visibly not production certified.
 
 ## 2. Linux filesystem contract
 
