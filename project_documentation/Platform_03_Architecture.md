@@ -27,7 +27,7 @@ The architecture is governed by the following constraints already decided:
 - UI is HTTPS only and does not expose an application endpoint on TCP/80.
 - Core and Sensor managed storage have a mandatory 80% storage-protection watermark.
 - DR capability is required in v1.0.
-- Full always-on DPI and mandatory proprietary full-bytecode APM agents are excluded initially. OpenTelemetry-native metrics, logs and traces, service graphs and cross-signal investigation are P0 under `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`.
+- Full always-on DPI and mandatory proprietary full-bytecode APM agents are excluded initially. OpenTelemetry-native metrics, logs and traces, service graphs and cross-signal investigation are P0 under `Platform_26_Cloud_and_Full_Stack_Observability_Master.md`.
 - Gemini is accessed through an AI Gateway; causal RCA is not LLM-only.
 - Platform is independent from ThoughtData and NetAI and must not reuse their proprietary implementation assets.
 
