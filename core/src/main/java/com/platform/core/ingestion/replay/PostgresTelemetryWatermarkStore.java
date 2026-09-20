@@ -1,6 +1,7 @@
 package com.platform.core.ingestion.replay;
 
-import org.springframework.beans.factory.annotation.Qualifier;\nimport org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -20,7 +21,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
 
     public PostgresTelemetryWatermarkStore(
             JdbcTemplate jdbcTemplate,
-            PlatformTransactionManager transactionManager
+            @Qualifier("transactionManager") PlatformTransactionManager transactionManager
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
