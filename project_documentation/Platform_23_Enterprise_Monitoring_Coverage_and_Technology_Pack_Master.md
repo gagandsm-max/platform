@@ -258,7 +258,7 @@ Tomcat; WebSphere; WebLogic; JBoss / WildFly; IIS; .NET; Node.js; SAP NetWeaver;
 
 Metrics/capabilities may include: request rate; errors; latency; thread pools; connection pools; heap; GC; sessions; queues; oldest message; DLQ; consumers; throttle state.
 
-This does **not** require proprietary full-bytecode APM agents. OpenTelemetry-native metrics/logs/traces, service graphs and cross-signal investigation are native P0 observability under `Platform_24`; external/proprietary APM products remain Integration Pack targets where customers use them.
+This does **not** require proprietary full-bytecode APM agents. OpenTelemetry-native metrics/logs/traces, service graphs and cross-signal investigation are native P0 observability under `Platform_26`; external/proprietary APM products remain Integration Pack targets where customers use them.
 
 `Platform_21` already requires middleware Packs/connectors. This master owns coverage catalogue, dimensional certification and pack-class contract for that family.
 
@@ -266,7 +266,7 @@ This does **not** require proprietary full-bytecode APM agents. OpenTelemetry-na
 
 AWS; Azure; GCP; OCI use normalized Platform-owned cloud entity/state contracts. Vendor identifiers never override tenant/entity authority.
 
-`Platform_26_Cloud_and_Full_Stack_Observability_Master.md` governs the P0 day-one Cloud Observability GA baseline, mandatory provider-root onboarding, service-family coverage, serverless, cloud-network, traces/logs/events, quotas/autoscaling, connector health and coverage/blind-spot behavior. All provider/service implementations remain **Cloud Service Pack profiles under this document's single Capability Pack architecture**. Exact provider service/version/region coverage is represented by the machine-readable compatibility/certification model; listing a service in Platform_24 is a GA certification target, not proof that it is already implemented or certified.
+`Platform_26_Cloud_and_Full_Stack_Observability_Master.md` governs the P0 day-one Cloud Observability GA baseline, mandatory provider-root onboarding, service-family coverage, serverless, cloud-network, traces/logs/events, quotas/autoscaling, connector health and coverage/blind-spot behavior. All provider/service implementations remain **Cloud Service Pack profiles under this document's single Capability Pack architecture**. Exact provider service/version/region coverage is represented by the machine-readable compatibility/certification model; listing a service in Platform_26 is a GA certification target, not proof that it is already implemented or certified.
 
 ### 8.9 SaaS / security SaaS
 
@@ -500,7 +500,7 @@ Each `REQ-EMC-*` owns the corresponding `PRD-EMC-*`. Implementation status for a
 | `REQ-EMC-004` | `PRD-EMC-004` | PRD, Architecture, Quality | Middleware/application-platform packs with collector-health separation and no bytecode APM implication |
 | `REQ-EMC-005` | `PRD-EMC-005` | PRD, Architecture, Quality | Relational and NoSQL/data-platform packs with canonical entities and dimensional certification |
 | `REQ-EMC-006` | `PRD-EMC-006` | PRD, Architecture, Quality | Backup/data-protection family with canonical job states and restore-test evidence distinct from job success |
-| `REQ-EMC-007` | `PRD-EMC-007` | Architecture, HLD, Quality | AWS/Azure/GCP/OCI normalized contracts; vendor IDs do not override tenant/entity authority; Cloud Observability GA additionally satisfies Platform_24 day-one provider-root/service-family certification evidence |
+| `REQ-EMC-007` | `PRD-EMC-007` | Architecture, HLD, Quality | AWS/Azure/GCP/OCI normalized contracts; vendor IDs do not override tenant/entity authority; Cloud Observability GA additionally satisfies Platform_26 day-one provider-root/service-family certification evidence |
 | `REQ-EMC-008` | `PRD-EMC-008` | PRD, Architecture | SaaS Monitoring Pack class cross-referenced to `Platform_19`; no duplicate OIV mechanics |
 | `REQ-EMC-009` | `PRD-EMC-009` | PRD, Architecture, Quality | Scheduled/batch job canonical model, states and SLA-window risk metrics |
 | `REQ-EMC-010` | `PRD-EMC-010` | PRD, Security, Quality | Optional EUC/VDI packs with privacy tests proving prohibited surveillance fields are absent |
@@ -535,11 +535,11 @@ This PR performs **EMC-0** only.
 |---|---|
 | Always-on full DPI | Deferred |
 | Unrestricted SIEM replacement | Excluded |
-| Mandatory proprietary full-bytecode APM agents | Excluded from P0; OTel-native traces/service graphs are native P0 under Platform_24; proprietary/external APM integrates through Integration Packs |
+| Mandatory proprietary full-bytecode APM agents | Excluded from P0; OTel-native traces/service graphs are native P0 under Platform_26; proprietary/external APM integrates through Integration Packs |
 | Broad BMS/DCIM | Deferred |
-| Cloud FinOps / cost observability | P1 under Platform_24 using provider billing evidence and FOCUS-compatible normalization where practical; Platform does not become a billing system |
+| Cloud FinOps / cost observability | P1 under Platform_26 using provider billing evidence and FOCUS-compatible normalization where practical; Platform does not become a billing system |
 | EUC/VDI | Optional / lower priority |
-| Vendor-specific pack implementation | Future implementation/certification work (EMC-1+); Platform_24 Cloud Observability GA requires its mandatory provider roots/service families to be certified before that GA claim |
+| Vendor-specific pack implementation | Future implementation/certification work (EMC-1+); Platform_26 Cloud Observability GA requires its mandatory provider roots/service families to be certified before that GA claim |
 | Uncontrolled automated NCM | Prohibited |
 | Core forks for customer extensions | Prohibited |
 | New Core service or database for packs | Prohibited by default |
