@@ -243,9 +243,41 @@ class IngestionValidatorTest {
         assertEquals("sensor-net-01", first.sensorId());
         assertEquals(1234567.0, first.value());
         assertEquals(1, first.quality());
-        String expectedSequenceId = tenantId + ":sensor-net-01:epoch-1:105:0:.1.3.6.1.2.1.1.3.0";
+        String expectedSequenceId = tenantId + ":sensor-net-01:105:0:.1.3.6.1.2.1.1.3.0";
         assertEquals(expectedSequenceId, first.sequenceId());
         assertEquals("snmp", first.sourceProtocol());
+    }
+
+    @Test
+    void testLogicalObservationIdentitySurvivesSensorProcessRestart() throws Exception {
+        String recordJson = "{\"sequence\":105,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\"," +
+                "\"entityId\":\"" + entityId + "\"," +
+                "\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\"," +
+                "\"quality\":\"GOOD\"," +
+                "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":1234567}}]}}}";
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+
+        String firstJson = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-before-restart\",\"batchId\":\"b-1\",\"firstSequence\":105,\"lastSequence\":105,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        String retryJson = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-after-restart\",\"batchId\":\"b-2\",\"firstSequence\":105,\"lastSequence\":105,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+
+        TelemetryBatchRequest firstRequest = objectMapper.readValue(firstJson, TelemetryBatchRequest.class);
+        TelemetryBatchRequest retryRequest = objectMapper.readValue(retryJson, TelemetryBatchRequest.class);
+
+        List<CanonicalObservation> first = validator.validateAndExtract(
+                firstJson.getBytes(StandardCharsets.UTF_8), firstRequest, testScope);
+        List<CanonicalObservation> retry = validator.validateAndExtract(
+                retryJson.getBytes(StandardCharsets.UTF_8), retryRequest, testScope);
+
+        assertEquals(first.get(0).sequenceId(), retry.get(0).sequenceId(),
+                "process bootEpoch must not change the durable logical observation identity");
     }
 
     @Test
