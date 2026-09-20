@@ -461,7 +461,7 @@ PostgreSQL owns transactional/control-plane state such as:
 - credential references and permission profiles;
 - provider/service-pack bindings and versions;
 - monitoring/profile assignments;
-- durable collection/reconciliation cursors when correctness requires persistence;
+- durable collection/reconciliation cursors/checkpoints when correctness requires persistence; a cursor/page token/watermark advances only after the corresponding normalized inventory/current-state mutations and required durable event/evidence intents have crossed their authoritative persistence boundary;
 - canonical resource/service identity and stable aliases;
 - current governed ownership/group/tag metadata;
 - ephemeral-parent activation policy;
@@ -592,6 +592,8 @@ Existing Platform tables shall be reused rather than forked where semantics alre
 - Trace-ID, error/status and selected semantic-convention fields may use materialized/data-skipping indexes after benchmark; arbitrary attribute keys must not generate unbounded indexes/materialized columns.
 - Every high-volume table has a signal-specific TTL/retention class compatible with Platform_11 storage protection. Incident/legal-hold pinning uses the existing protected-evidence mechanism.
 - Late/out-of-order, replay and duplicate cloud/trace events are handled using existing ingestion idempotency/event-time semantics; a provider retry must not create duplicate incident effects.
+- Provider pagination/cursor/checkpoint state is never advanced merely because a remote page was fetched or decoded. The checkpoint advances only after every item in that page has been durably represented as an authoritative current-state mutation, a durable event/evidence intent, or an explicit classified rejection/drop disposition. Page replay after crash is idempotent; premature checkpoint advancement and silent page skip are release-blocking data-integrity defects.
+- Full/reconciliation scans use generation/run identity and explicit completion markers where deletion/disappearance inference depends on seeing the complete scope. A partial/aborted scan must not be mistaken for an authoritative completed inventory and must not mass-delete or retire unseen resources.
 - P1 cost/RUM/profile retention and access policies are independent from operational metrics/logs/traces and may be disabled without breaking P0 monitoring.
 - Schema evolution uses versioned events and normal database migrations; provider API field changes do not directly mutate canonical schemas without normalization/version handling.
 
@@ -603,11 +605,12 @@ Existing Platform tables shall be reused rather than forked where semantics alre
 UI Add Cloud Environment
 → Core validates tenant/RBAC + stores protected credential reference
 → Cloud/API Sensor executes identity/permission/network preflight
-→ provider hierarchy/resource discovery
+→ provider hierarchy/resource discovery (paged/cursor-bounded)
 → normalize identity + reconcile canonical entities/relationships
-→ PostgreSQL current/control state
-→ inventory/change events through Kafka where applicable
-→ ClickHouse historical evidence
+→ atomically/transactionally persist PostgreSQL current/control mutations plus durable next-page/reconciliation checkpoint only after the page is accounted for
+→ materialize/emit required inventory/change event intents through the governed durable event boundary
+→ commit/advance provider cursor only after durable acceptance; crash before commit replays the page idempotently
+→ ClickHouse historical evidence through replay-safe consumers where applicable
 → Graph / Coverage / UI verification
 ```
 
@@ -857,7 +860,7 @@ At minimum test:
 - wrong/expired/insufficient permissions;
 - organization-scale hierarchy discovery;
 - provider API throttling and Retry-After behavior;
-- cursor/pagination interruption and resume;
+- cursor/pagination interruption and resume, including crash before/after page persistence and checkpoint advancement, proving no silent page skip, bounded duplicate replay and no partial-scan mass deletion;
 - event loss followed by reconciliation repair;
 - duplicate/replayed provider events;
 - region/account partial failure;
