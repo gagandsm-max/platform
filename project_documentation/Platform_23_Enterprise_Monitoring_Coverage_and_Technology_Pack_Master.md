@@ -266,7 +266,7 @@ This does **not** require proprietary full-bytecode APM agents. OpenTelemetry-na
 
 AWS; Azure; GCP; OCI use normalized Platform-owned cloud entity/state contracts. Vendor identifiers never override tenant/entity authority.
 
-`Platform_24_Cloud_and_Full_Stack_Observability_Master.md` governs the P0 day-one Cloud Observability GA baseline, mandatory provider-root onboarding, service-family coverage, serverless, cloud-network, traces/logs/events, quotas/autoscaling, connector health and coverage/blind-spot behavior. All provider/service implementations remain **Cloud Service Pack profiles under this document's single Capability Pack architecture**. Exact provider service/version/region coverage is represented by the machine-readable compatibility/certification model; listing a service in Platform_24 is a GA certification target, not proof that it is already implemented or certified.
+`Platform_26_Cloud_and_Full_Stack_Observability_Master.md` governs the P0 day-one Cloud Observability GA baseline, mandatory provider-root onboarding, service-family coverage, serverless, cloud-network, traces/logs/events, quotas/autoscaling, connector health and coverage/blind-spot behavior. All provider/service implementations remain **Cloud Service Pack profiles under this document's single Capability Pack architecture**. Exact provider service/version/region coverage is represented by the machine-readable compatibility/certification model; listing a service in Platform_24 is a GA certification target, not proof that it is already implemented or certified.
 
 ### 8.9 SaaS / security SaaS
 
