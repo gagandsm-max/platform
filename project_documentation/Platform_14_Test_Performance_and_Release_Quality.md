@@ -169,6 +169,11 @@ Required evidence, as applicable to the declared protocol/profile, includes:
 - **Data quality:** socket/kernel drops where observable, receiver queue drops, malformed/unsupported, template misses, sequence gaps, rate limits, sampling unknown, clock skew, spool/storage pressure and downstream rejection/lag are distinguishable.
 - **Fairness/resource safety:** one exporter or template/cardinality storm cannot monopolize Flow Sensor workers/memory/queue/disk; Flow/Log role isolation prevents starvation of Network monitoring.
 - **Temporal enrichment:** DHCP/IPAM/entity/hostname/DNS/user/session/site/ASN/Geo/cloud/application changes do not rewrite historical identity incorrectly; conflicts preserve uncertainty; directory membership without session evidence cannot assert user attribution.
+
+- **Enrichment hot-path safety:** load tests prove there is no LDAP/AD query per Flow record, no live DNS lookup per destination Flow and no external GeoIP/ASN API lookup per Flow record; offline enrichment datasets retain governed version/licence/hash/provenance.
+- **Onboarding/preflight:** Flow Sensor/exporter activation tests prove role, source admission, protocol/version, template/options, decode, sampling, sequence, time quality and capacity/storage readiness are visible before activation, with actionable failure states.
+- **Self-observability:** Flow Sensor tests verify datagram/record/byte rates, active exporters/domains, template misses/churn, sampling, sequence gaps/resets, socket/queue drops, decode latency/failures, spool/upload/replay and resource telemetry are reported without fabricated healthy state.
+
 - **Privacy:** domain/application is not presented as URL; no fabricated path/query; public-IP Geo is approximate; user-attributed Flow access/export obeys permission/audit and surveillance restrictions.
 - **Observation points:** replay of the same source record can dedupe; legitimate multi-exporter/interface observations are retained and are not globally five-tuple-deduplicated.
 - **Coverage:** compatible SNMP/interface counter comparison accounts for sampling/direction/observation point and yields qualified Flow Coverage/consistency, including UNKNOWN when comparison is invalid.
