@@ -10,9 +10,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Repository
 public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore {
+
+    private static final Pattern DURABLE_STREAM_ID = Pattern.compile("^stream-[0-9a-f]{32}$");
 
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
@@ -66,6 +69,13 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
             String checksum,
             String batchId
     ) {
+        if (streamId == null || !DURABLE_STREAM_ID.matcher(streamId).matches()) {
+            return ReplayReservation.rejected(
+                    0,
+                    "ERR_TELEMETRY_STREAM_ID_INVALID",
+                    "Telemetry stream identity is not a durable Sensor spool generation"
+            );
+        }
         ReplayReservation result = transactionTemplate.execute(status ->
                 reserveBatchInTransaction(tenantId, sensorId, streamId, firstSeq, lastSeq, checksum, batchId));
         if (result == null) {
@@ -109,6 +119,13 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
         );
 
         if (rows.isEmpty()) {
+            if (firstSeq != 1) {
+                return ReplayReservation.rejected(
+                        0,
+                        "ERR_SEQUENCE_GAP",
+                        "New telemetry stream must begin at sequence 1; received firstSequence " + firstSeq
+                );
+            }
             jdbcTemplate.update(
                     """
                     INSERT INTO platform.sensor_telemetry_watermark (
