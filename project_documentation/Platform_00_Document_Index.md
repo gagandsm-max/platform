@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-20 — v3.2.2 Mother Reference specialized-master number-allocation governance
+**Last reconciliation:** 2026-09-20 — v3.2.2 enterprise SNMP correctness and usability reconciliation (preserves specialized-master number-allocation governance)
 
 ## 1. Authority
 
@@ -132,6 +132,17 @@ EDS is the product-facing name for a specialized diagnostic type/profile (`ENDPO
 An optional dedicated local/private inference provider is a **conditional** compute-isolation boundary: **if** that provider mode is supported/enabled, its isolation/security/non-authority requirements are mandatory. It is not required to deliver Linux/Windows monitoring, SSH/WinRM/WMI/CIM, EDS, deterministic Core RCA or normal Platform operation. It is not a third Core, owns no authoritative Platform state and may fail or be absent without affecting deterministic monitoring/RCA. Existing on-Core local inference remains optional and allowed only inside the certified `Platform_11` non-interference envelope. All-AI-disabled remains a supported deterministic mode.
 
 This reconciliation updates existing base/specialized masters and keeps the authoritative set at **25 files** and version **v3.2.2**. No `Platform_24` / `Platform_25` document is introduced.
+
+### 4.6 2026-09-20 enterprise SNMP correctness and usability reconciliation
+
+This v3.2.2 reconciliation strengthens the existing SNMP product contract **without adding a new Mother Reference file, database, protocol engine, microservice or extensibility framework**. SNMP remains governed through the existing base masters: `Platform_02` product behavior; `Platform_03` architecture; `Platform_04` subsystem ownership; `Platform_05` concrete SNMP/data contracts; `Platform_06` dataflows; `Platform_09` UI/UX; `Platform_10` protocol/security/credential rules; `Platform_11` capacity; `Platform_14` quality/certification; `Platform_17` API/event/data ownership; `Platform_18` threat model; `Platform_22` evidence-qualified alerting; and `Platform_23` Capability Pack certification.
+
+The reconciliation closes correctness gaps around exact Counter64 handling, typed SNMP evidence, counter wrap/reset/discontinuity and rate semantics, stable interface identity, production scheduler/runtime wiring, governed credential resolution, adaptive/bulk poll planning, trap/inform durable-acceptance semantics and storm control, MIB/Capability Pack execution, customer SNMP diagnostics and privileged separation of SNMP SET from routine polling.
+
+The normal scheduled SNMP **operational metric** default is **5 minutes**. That default does **not** require polling every available OID every five minutes; collection remains monitor-definition / Capability-Pack driven. Availability/liveness remains a separate plane and may normally use approximately 60 seconds according to policy. Event/streaming telemetry remains event/stream driven. Broader cross-technology freshness/cost scheduling architecture is out of scope for this reconciliation.
+
+The authoritative file count remains **25 files**, the highest merged specialized master remains `Platform_23`, and the product-document version remains **v3.2.2**. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Specification does not imply implementation or certification.
+
 ## 5. Precedence
 
 When requirements appear to conflict:
@@ -174,6 +185,8 @@ Conflicts require documented change control; implementation must not silently ch
 - Graph-grounded hybrid RCA; GNN is an augmenting scorer, not causal proof; `INCONCLUSIVE` is required.
 - Native Platform dashboard/UI; no embedded Grafana.
 - Core and Sensor managed-storage 80% protection watermark is mandatory.
+- SNMP is a typed evidence source rather than a numeric-only transport. Exact raw counters, state/inventory/topology facts and collection-quality outcomes remain semantically distinct; a failed SNMP poll alone does not prove device failure.
+- Routine SNMP monitoring is read-only. SNMP SET, when implemented, is a privileged NCM/remediation action subject to authorization, policy/approval, pre/post verification and audit rather than an ordinary polling operation.
 - Customer controls raw retention, rollups, archive and allowed purge priority.
 - DR capability required in v1.0; contractual RPO/RTO remain TBD until frozen.
 - Gemini through AI Gateway initially; deterministic/causal RCA remains independent.

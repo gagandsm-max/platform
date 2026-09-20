@@ -325,50 +325,102 @@ Assignment/fencing version prevents obsolete Sensor from continuing a superseded
 
 ---
 
-## 12. Flow DF-011 — SNMP metric ingestion
+## 12. Flow DF-011 — SNMP polling, typed normalization and exact-counter ingestion
 
 ```mermaid
 sequenceDiagram
+  participant C as Core Policy / Scheduler
+  participant V as Credential Authority
   participant S as Network Sensor
+  participant P as Capability Pack / Poll Planner
   participant D as Device
   participant SP as Local Spool
   participant I as Ingestion Gateway
   participant K as Kafka
-  participant CH as ClickHouse
-  participant AE as Alert Engine
+  participant CH as ClickHouse / Graph Consumers
+  participant AE as Alert Evidence
 
-  S->>D: SNMP GET/GETBULK
-  D-->>S: Varbind response
-  S->>S: Device Pack mapping + normalization + quality
-  S->>SP: Durable canonical batch
+  C->>S: Fenced SNMP job + entity/profile/credential reference
+  S->>V: Resolve authorized Credential Profile use
+  V-->>S: Minimum execution secret/context
+  S->>P: Build bounded poll plan
+  P-->>S: GET/GETNEXT/GETBULK/WALK groups + limits
+  S->>D: SNMP request(s)
+  D-->>S: Typed varbind response / protocol exception
+  S->>S: Preserve BER/raw exact values + classify errors
+  S->>P: Apply Pack enum/table/counter/inventory/topology semantics
+  P-->>S: Numeric + exact counter + state + inventory + topology + quality facts
+  S->>S: Counter reset/wrap/discontinuity evaluation where sufficient evidence exists
+  S->>SP: Durable typed canonical batch
   S->>I: mTLS batch
-  I->>K: telemetry.numeric/state
-  K->>CH: Storage consumer
-  K->>AE: Evaluation consumer
+  I->>K: typed telemetry/state/inventory/topology/quality streams
+  K->>CH: Persist exact/raw + derived facts to appropriate schema
+  K->>AE: Evidence/quality inputs
   I-->>S: Durable acceptance watermark
   S->>SP: Release acknowledged segment
 ```
 
+A single unsupported optional OID may produce explicit `NO_SUCH_OBJECT/INSTANCE` quality evidence without forcing unrelated valid observations in the same logical poll to become invalid. Pack policy decides whether a mandatory OID failure degrades the monitor.
+
+Raw Counter64 remains exact through acceptance/persistence; floating-point rate/utilization is derived only after exact delta/reset/discontinuity logic. Normal scheduled SNMP operational metrics default to **5 minutes** unless a more specific inherited policy/monitor definition overrides; that default does not poll every available OID every five minutes.
+
 ---
 
-## 13. Flow DF-012 — SNMP trap/event ingestion
+## 13. Flow DF-012 — SNMP trap/inform ingestion and storm control
 
 ```mermaid
 sequenceDiagram
   participant D as Device
-  participant S as Sensor
-  participant M as MIB/Device Pack Runtime
+  participant S as Streaming/Event Sensor
+  participant A as Pre-ACK Storm Admission
+  participant SP as Durable Event Spool
+  participant M as MIB/Capability Pack Runtime
+  participant Q as Post-ACK Semantic Dedup
   participant I as Ingestion
   participant K as Kafka
-  participant C as Correlation
+  participant C as Correlation / Alert Evidence
 
-  D->>S: SNMP trap/inform
-  S->>M: Decode security/OIDs
-  M-->>S: Structured event + entity/semantic mapping
-  S->>I: Canonical event
-  I->>K: event.trap.v1
-  K->>C: Event correlation/qualification
+  D->>S: SNMP trap or inform
+  S->>S: Bounded BER/protocol parse
+  S->>S: Configured security validation
+  S->>S: Source/tenant authorization and attribution
+  S->>A: Bounded pre-ACK storm admission/accounting
+  alt Durable local acceptance/accounting succeeds
+    S->>SP: Durable accepted raw event OR durable storm-aggregation/accounting record
+    alt Inform
+      S-->>D: Inform acknowledgement (local accepted/accounted)
+    else Trap
+      Note over S,D: Trap remains unacknowledged
+    end
+    S->>M: MIB/Pack semantic enrichment
+    M-->>S: Structured semantics + provenance
+    S->>S: Final entity resolution
+    S->>Q: Semantic dedup/correlation
+    Q-->>S: Canonical event / aggregate counters
+    S->>I: Canonical event batch
+    I->>K: event.trap.v1
+    K->>C: Evidence correlation/qualification
+  else Durable local acceptance/accounting fails
+    Note over S,D: No successful Inform ACK
+  end
 ```
+
+Conceptual Inform path:
+
+```text
+Device
+→ Sensor parse/security/source validation
+→ bounded storm admission/accounting
+→ durable raw accepted/aggregate record
+→ Inform ACK
+→ MIB/Pack semantic enrichment
+→ entity resolution / semantic storm-dedup / correlation
+→ ingestion
+```
+
+v1/v2c trap source identity is weak evidence and never independently proves device/link failure. Pre-ACK admission/accounting and post-ACK semantic dedup retain first/last seen, count and affected-source context. Every rate-limit/drop decision is measurable.
+
+SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded BER/protocol parsing, configured SNMP security validation, sufficient source/tenant attribution and the bounded pre-ACK storm admission/accounting decision, while preserving the raw typed notification. MIB/Capability Pack enrichment, final entity resolution, semantic dedup/correlation, alert correlation, Core delivery, Kafka persistence, ClickHouse persistence and incident creation are **not** ACK prerequisites. Inform ACK means `LOCAL RECEIVER ACCEPTED/ACCOUNTED` only. This boundary is distinct from the Sensor→Core telemetry ACK model.
 
 ---
 

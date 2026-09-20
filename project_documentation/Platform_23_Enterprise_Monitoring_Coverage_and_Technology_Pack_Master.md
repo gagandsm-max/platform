@@ -168,6 +168,13 @@ A Capability Pack, where applicable, declares:
 - certification metadata
 - provenance
 - signature/integrity requirements
+- SNMP poll definitions/scalar-table-index metadata where applicable
+- MIB/OID references and unresolved-numeric-OID declarations where applicable
+- enum/bit/state mappings where applicable
+- exact counter width/rate/reset/discontinuity semantics where applicable
+- GETBULK/GETNEXT compatibility and bounded poll-planning hints where applicable
+- trap/inform notification mappings, source-trust expectations and storm fingerprint hints where applicable
+- SNMP diagnostic declarations and declared privileged SET/NCM actions where applicable
 
 Device / Network Packs continue to satisfy existing Device Pack identification, mapping, provenance and test-lab contracts. They gain the Capability Pack identity/lifecycle/certification envelope without a second schema family.
 
@@ -216,6 +223,10 @@ Families below are coverage targets. Vendor implementations remain packs/certifi
 Routers; switches; WLAN; firewalls; load balancers / ADC; SD-WAN; DNS; DHCP; PKI/certificate services; flow/NTA; NCM; IPAM; path analysis; topology.
 
 SD-WAN canonical-model mechanics already owned by `Platform_21` are not duplicated here. This family supplies monitoring-coverage and pack-certification classification.
+
+For SNMP-capable network packs, certification is object/semantic aware rather than "SNMP reachable." A pack may declare and separately certify device identity, interface inventory/state, exact high-capacity counters/rates, CPU/memory/environment, routing/neighbor/topology facts, trap/inform semantics, diagnostics and privileged NCM actions. Pack mappings must distinguish raw counter/state/inventory/topology/event evidence and declare firmware/model compatibility where vendor behavior differs. Normal operational-metric cadence defaults to **5 minutes** unless a pack/monitor definition specifies otherwise; packs must not imply that every available OID is polled at that default.
+
+A pack shall not use `ifIndex` as the sole permanent interface identity. Where a vendor provides stronger stable interface/component identifiers, the pack declares them and their reconciliation precedence.
 
 ### 8.2 Servers / operating systems
 
@@ -498,6 +509,8 @@ Certification evidence requirements (family-specific gates; generic test strateg
 **Security:** minimum privileges; credential handling; secret protection; TLS; tenant isolation.
 
 **Diagnostics:** each declared diagnostic action/workflow proves target scoping, supported-version behavior, safe/read-only versus privileged classification, parameter bounds, normalized result/error mapping, timeout/cancellation, credential handling, audit, resource budget and negative cases. Multi-vantage-capable diagnostics prove independent source provenance and contradiction preservation. A technology is not certified for a diagnostic merely because the generic Platform diagnostic engine exists.
+
+**SNMP where declared:** v1/v2c/v3 security compatibility; selected-Sensor credential/preflight; exact Counter64; Counter32 wrap; reboot/reset/discontinuity; irregular sample interval; scalar/table/index mapping; noSuch/partial-object behavior; GETBULK tooBig/fallback; ifIndex/interface reconciliation; trap/inform source/security/storm behavior; Inform durable local acceptance before ACK; diagnostics; and read-only monitoring versus privileged SET separation.
 
 **Failure:** timeout; malformed response; API rate limit; partial response; stale telemetry; expired/invalid credentials.
 

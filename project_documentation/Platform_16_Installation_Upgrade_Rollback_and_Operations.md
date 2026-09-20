@@ -1,10 +1,10 @@
 # Platform — Installation, Upgrade, Rollback & Operational Runbooks
 
 **Document ID:** PLATFORM-OPSINSTALL-001
-**Version:** 3.2.1
+**Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
-**Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
+**Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the v3.2.2 enterprise-SNMP operational-runbook supplement. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 
 ## 1. Purpose
 
@@ -57,7 +57,7 @@ Every installer returns stable error code, writes sanitized install log and poin
 
 ## 1. Required runbooks
 
-Core process failure; repeated crash loop; HA failover; Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation.
+Core process failure; repeated crash loop; HA failover; Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; **SNMP poll backlog/degradation; SNMPv3 authentication/engine/time-window failure; SNMP credential rotation; GETBULK/tooBig incompatibility; counter reset/discontinuity anomaly; trap/inform storm or receiver failure; MIB/Capability Pack mapping failure; interface-identity reconciliation conflict**; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation.
 
 ## 2. Runbook structure
 
@@ -66,3 +66,28 @@ Every runbook states trigger, impact, immediate safety action, diagnostic eviden
 ## 3. Logging
 
 Support teams should first use Platform Health/Audit/Support Bundle rather than ad-hoc shell access. Shell commands are documented only where necessary and must not expose secrets.
+
+
+## 4. SNMP operational runbook supplement — v3.2.2
+
+SNMP operational diagnostics use Platform Health, device/profile Monitoring Quality and the in-product SNMP Test before ad-hoc shell tools where possible.
+
+Runbooks shall distinguish at minimum:
+
+- target/path unreachable versus SNMP protocol unavailable;
+- timeout versus wrong community/v3 username/auth/privacy/context versus authorization/no-access;
+- `unknownEngineID` / `notInTimeWindow` / reboot-time resynchronization;
+- `tooBig` / bulk-planning incompatibility versus general timeout;
+- unsupported optional OID versus mandatory Pack mapping failure;
+- raw counter wrap/reset/discontinuity versus genuine traffic-rate change;
+- interface ifIndex renumbering versus genuine interface replacement;
+- routine trap burst versus sustained trap storm/receiver overload;
+- trap/Inform receiver loss versus monitored-device operational failure;
+- Inform durable-acceptance failure versus enrichment/downstream pipeline lag;
+- Credential Profile rotation/application drift;
+- MIB compile/dependency/provenance failure;
+- Sensor worker/backlog/capacity pressure.
+
+Remediation must not insert hard-coded communities or downgrade SNMP security silently. Any temporary legacy mode change is authorized/audited and verified. Routine runbooks do not use SNMP SET; configuration-changing SET belongs to approved NCM/remediation procedure.
+
+Support bundles include sanitized SNMP component health, poll-plan/profile/version identifiers, stable error counts, queue/backlog, last success/failure, trap receiver/storm counters, counter-quality statistics and MIB/Pack version/provenance references, but never community/auth/privacy secret values.

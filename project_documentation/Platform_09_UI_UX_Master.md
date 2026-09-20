@@ -99,6 +99,37 @@ Platform shall optimize NOC workflow around **observe → verify → diagnose �
 
 **Safety and capacity.** Every on-demand action is tenant/resource scoped, audited and bounded by timeout/rate/concurrency/cancellation. Browser clients do not directly open device sockets. Interactive worker budgets cannot starve routine polling.
 
+### 3.5 SNMP operational experience
+
+**SNMP Test.** From an authorized network entity/interface, `SNMP Test` opens in the Troubleshoot workspace and defaults to the assigned eligible Sensor. It shows target, port, Sensor/vantage, SNMP version and Credential Profile **name/reference only**. It must never display community/auth/privacy secrets.
+
+The test separates:
+
+- network/protocol reachability;
+- SNMP response;
+- authentication;
+- authorization;
+- version/security compatibility;
+- MIB/object support;
+- collection quality.
+
+Where permitted it supports bounded GET, WALK and BULKWALK with explicit OID/root selection and safe result limits. Results show raw numeric OID, MIB-resolved name when available, raw typed value, decoded/normalized value, response time, retries, error/status code, quality/provenance and remediation. Identity quick-test includes applicable `sysObjectID`, `sysName`, `sysDescr`, `sysUpTime` and engine identity evidence.
+
+Stable customer outcomes distinguish timeout/path, unknown v3 user, auth mismatch, privacy/decryption mismatch, unsupported security, context mismatch, authorization/no-access, noSuchObject/noSuchInstance, tooBig and malformed response rather than flattening all failures to "SNMP failed."
+
+**SNMP Monitoring Quality.** Device/profile views expose poll success rate, duration, attempted/successful OIDs, retry/timeout/auth/authz/tooBig/noSuch counts, freshness/staleness, expected-vs-received samples, last success and assigned Sensor. `DEVICE HEALTHY + SNMP MONITORING DEGRADED` is a valid display state.
+
+**Counter explanation.** Interface metric detail can show raw counter samples, actual sample interval, reset/wrap/discontinuity quality and derived rate/utilization explanation for authorized troubleshooting. Invalid/ambiguous counter intervals show `UNKNOWN/DEGRADED` rather than a fabricated spike.
+
+**Interface identity.** When protocol ifIndex changes but Platform reconciles the same canonical interface, UI history remains continuous and may expose the old/new protocol index in provenance/audit rather than presenting a duplicate interface.
+
+**MIB Studio.** The Studio provides library/upload, dependency/import status, compile errors with module/location where possible, OID tree/search, textual conventions, enums, tables/indexes, notifications, unresolved numeric OIDs, authorized sample-device GET/WALK/BULKWALK, raw-versus-decoded preview, semantic mapping, provenance/licensing/redistribution metadata and controlled creation/update of the applicable Capability/Device Pack. Uploading a MIB does not automatically activate polling. Specifying MIB Studio behavior does not claim the Studio runtime is already implemented/certified.
+
+**Polling policy.** Monitoring Profile/Adaptive Polling UI exposes normal/adaptive interval, cooldown, maximum duration, target scope, retry/bulk policy where configurable, projected Sensor impact and effective inherited policy. The normal SNMP operational-metric default is **5 minutes**; the UI must make clear that this does not require every available OID every five minutes and that availability/liveness remains a separate plane. Unsafe settings are warned or blocked by capacity/policy.
+
+**SNMP SET.** Routine SNMP Test/monitoring UI is read-only. Any supported SET action appears only in an explicitly privileged NCM/remediation workflow with authorization, reason/ticket/approval where required, pre/post value evidence and audit.
+
+
 ## 4. Dashboard Studio
 
 Dashboard library scopes: My, Team, Shared, Tenant/Customer, System and folders/groups. Actions: create, clone, move, rename, share, import/export, permissions, delete, variables and reusable panels. Editor supports drag/resize/duplicate/copy panels, undo/redo and preview. Panel editor tabs: Data, Query, Transformation, Visualization, Thresholds, Links, Overrides, Permissions. Panel types: stat, gauge, time series, bar, pie, table, heatmap, histogram, status grid, Sankey, topology, geo, text, alert list, incident list, RCA and domain-specific visualizations.

@@ -116,6 +116,12 @@ Platform must compute a workload score using at least:
 - metrics/OIDs/entities/interface count;
 - poll/subscription interval;
 - SNMP GET/BULK plan and timeout/retry behavior;
+- SNMP scalar/table mix, average/max OIDs per poll, GETBULK repetitions/response bytes and fallback frequency;
+- SNMPv3 security CPU cost and session/engine-discovery behavior;
+- Counter32/Counter64 raw + derived-rate processing cost;
+- trap/inform EPS, notification size, decode/MIB cost and storm-control rate;
+- adaptive-poll target count, accelerated interval, duration/cooldown and worst-case burst;
+- MIB/Capability Pack mapping cost and interface/entity cardinality;
 - RTT, packet loss and timeout rate;
 - gNMI stream rate;
 - REST calls and response size;
@@ -152,6 +158,10 @@ Customer modes: **Automatic (recommended)**, **Automatic with Approval**, **Manu
 The 8 vCPU/16 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; and Flow/syslog below dedicated-streaming threshold. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
 
 A separate Heavy Network Workload profile covers high-interface, aggressive polling, heavy routing, gNMI, API/NCM and high-rate stream cases.
+
+SNMP benchmark evidence shall additionally publish poll operations/sec, OIDs/sec, successful/timeout/auth-failure mix, GETBULK response-size distribution, average/peak poll duration, retry rate, scheduler queue age, exact-counter/rate cost, trap/inform EPS and CPU/RAM/network usage. Fleet tests use deterministic poll spreading across the configured interval (normal operational default **5 minutes** unless overridden); a synchronized all-device minute-boundary is not an acceptable benchmark profile unless explicitly testing storm resilience.
+
+Adaptive polling is capacity-accounted separately. Its configured maximum targets/interval/duration must preserve normal polling freshness and HA reserve. High-rate trap/event load may require Streaming/Event Sensor separation rather than consuming Network Poll workers.
 
 ## 9. Core storage sizing model
 
