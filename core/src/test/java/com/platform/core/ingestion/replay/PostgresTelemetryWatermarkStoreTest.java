@@ -153,8 +153,8 @@ class PostgresTelemetryWatermarkStoreTest {
                 """, tenantId2);
 
         assertEquals(ReplayReservation.Status.RESERVED,
-                store.reserveBatch(tenantId, streamId, sensorId, 1L, 5L, "t1-a", "t1-a").status());
-        store.finalizeReservedBatch(tenantId, streamId, sensorId, 1L, 5L, "t1-a", "t1-a");
+                store.reserveBatch(tenantId, sensorId, streamId, 1L, 5L, "t1-a", "t1-a").status());
+        store.finalizeReservedBatch(tenantId, sensorId, streamId, 1L, 5L, "t1-a", "t1-a");
 
         ReplayReservation regression = store.reserveBatch(
                 tenantId, sensorId, streamId, 4L, 4L, "t1-old", "t1-old");
