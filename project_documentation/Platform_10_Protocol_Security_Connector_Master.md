@@ -59,7 +59,7 @@
 
 ### 3.1 Cloud onboarding and preflight security
 
-Normal customer cloud onboarding is UI-driven through **Administration → Integrations → Cloud → Add Cloud Environment** as governed by `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`. Before activation the selected Cloud/API Sensor path shall test provider identity, required/optional permissions, DNS/TLS/proxy/API reachability, hierarchy discovery, selected service-pack prerequisites, provider rate/quota visibility and material unsupported signals. Permission gaps are explicit and actionable; a partial permission set does not silently become full coverage.
+Normal customer cloud onboarding is UI-driven through **Administration → Integrations → Cloud → Add Cloud Environment** as governed by `Platform_26_Cloud_and_Full_Stack_Observability_Master.md`. Before activation the selected Cloud/API Sensor path shall test provider identity, required/optional permissions, DNS/TLS/proxy/API reachability, hierarchy discovery, selected service-pack prerequisites, provider rate/quota visibility and material unsupported signals. Permission gaps are explicit and actionable; a partial permission set does not silently become full coverage.
 
 Provider-native short-lived/delegated identity is preferred over reusable static credentials. Reusable secret material is never returned to the browser after creation, must remain tenant/scope constrained, and is subject to rotation/last-verified/audit controls. Cloud connector/API failure produces connector-health degradation and freshness loss; it must not by itself assert that managed resources are DOWN.
 
