@@ -102,7 +102,7 @@ For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`,
 
 For enterprise-monitoring-coverage / Capability Pack capabilities governed by `Platform_23`, Definition of Done also includes dimensional certification evidence, pack compatibility/version evidence, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior and the formal `REQ-EMC-*` acceptance evidence. Specification of a technology family is not certification.
 
-For integration/automation capabilities governed by `Platform_24`, Definition of Done also includes connector capability/version evidence, external-binding lifecycle/race/idempotency tests, payload/data-boundary verification, tenant isolation, remote-state conflict handling, automation risk/approval/revalidation/rollback evidence, queue/circuit observability, resource regression evidence and the formal `REQ-IAX-*` acceptance evidence. External execution success is not monitored recovery.
+For integration/automation capabilities governed by `Platform_27`, Definition of Done also includes connector capability/version evidence, external-binding lifecycle/race/idempotency tests, payload/data-boundary verification, tenant isolation, remote-state conflict handling, automation risk/approval/revalidation/rollback evidence, queue/circuit observability, resource regression evidence and the formal `REQ-IAX-*` acceptance evidence. External execution success is not monitored recovery.
 
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
