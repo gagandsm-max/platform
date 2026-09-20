@@ -871,6 +871,32 @@ Use classified retryability, bounded exponential backoff with jitter, `Retry-Aft
 
 Authentication/authorization/schema failures are not blindly retried as transient failures.
 
+
+### 17.5 Durable state ownership and delivery boundary
+
+Integration control/lifecycle state is **PostgreSQL-authoritative**. At minimum, connector instances/configuration versions, typed external-object bindings, lifecycle versions, outbound delivery intents, attempt state, dead-letter state, reconciliation tasks and replay-job metadata are durably persisted there. Valkey may accelerate reconstructable lookup/rate state but is never the only copy of a pending external operation.
+
+For incident/ticket/automation lifecycle delivery, creation of an authoritative Platform state transition and its outbound integration intent shall use a **transactional outbox or equivalent single-PostgreSQL atomic boundary**. A Core crash after committing the Platform state but before remote delivery must leave a durable delivery intent that a restarted worker can reclaim. A Core crash before that transaction commits must not expose a phantom queued operation.
+
+Workers claim bounded work with concurrency-safe leasing/locking, persist attempt/result state, and only mark an item delivered when the connector contract proves the required remote acceptance boundary. HTTP/TLS write success alone is not remote-object confirmation when the response is ambiguous. Ambiguous create/update outcomes enter reconciliation rather than blind duplicate creation.
+
+Kafka may carry internal notifications/wakeups derived from committed integration state, but it is **not the sole source of truth for external-object binding or lifecycle delivery state**. ClickHouse may retain high-volume historical delivery/health/audit analytics after the authoritative state transition; it is not the control queue. High-rate telemetry/log forwarding uses its separately governed streaming/queue contracts and must not overload the transactional ITSM/control outbox.
+
+Dead-letter and replay are state transitions over the original durable delivery identity. Replay creates a new bounded attempt/replay job while preserving the original binding, lifecycle version, actor/reason, provenance and audit linkage. Deleting or expiring queue records before their terminal/audited disposition is prohibited.
+
+The externally visible success boundary is explicit per connector capability:
+
+```text
+PLATFORM_STATE_COMMITTED
+ -> DELIVERY_INTENT_DURABLE
+ -> WORK_CLAIMED
+ -> REMOTE_REQUEST_SENT
+ -> REMOTE_ACCEPTANCE_CONFIRMED | AMBIGUOUS | RETRYABLE_FAILURE | TERMINAL_FAILURE
+ -> BINDING/DELIVERY_STATE_COMMITTED
+```
+
+No UI/API may report an external object as created/updated merely because the request was queued or a socket/HTTP write completed.
+
 ---
 
 ## 18. Security and egress controls
