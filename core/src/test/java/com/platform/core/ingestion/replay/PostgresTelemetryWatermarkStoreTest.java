@@ -25,6 +25,7 @@ class PostgresTelemetryWatermarkStoreTest {
     private PostgresTestSupport pg;
     private PostgresTelemetryWatermarkStore store;
     private final UUID tenantId = UUID.fromString("018f0e0a-0000-7000-8000-000000000001");
+    private final String streamId = "stream-00112233445566778899aabbccddeeff";
 
     @BeforeEach
     void setUp() throws Exception {
@@ -80,16 +81,17 @@ class PostgresTelemetryWatermarkStoreTest {
         String sensorId = "sensor-reservation-01";
 
         ReplayReservation first = store.reserveBatch(
-                tenantId, sensorId, 1L, 10L, "checksum-a", "batch-a");
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a");
         assertEquals(ReplayReservation.Status.RESERVED, first.status());
         assertEquals(0L, first.ackedThroughSequence());
 
         Map<String, Object> pending = pg.jdbc().queryForMap("""
-                SELECT acked_through_sequence, pending_first_sequence, pending_last_sequence,
+                SELECT stream_id, acked_through_sequence, pending_first_sequence, pending_last_sequence,
                        pending_checksum, pending_batch_id
                   FROM platform.sensor_telemetry_watermark
                  WHERE tenant_id=? AND sensor_id=?
                 """, tenantId, sensorId);
+        assertEquals(streamId, pending.get("stream_id"));
         assertEquals(0L, ((Number) pending.get("acked_through_sequence")).longValue());
         assertEquals(1L, ((Number) pending.get("pending_first_sequence")).longValue());
         assertEquals(10L, ((Number) pending.get("pending_last_sequence")).longValue());
@@ -97,21 +99,21 @@ class PostgresTelemetryWatermarkStoreTest {
         assertEquals("batch-a", pending.get("pending_batch_id"));
 
         ReplayReservation exactPendingRetry = store.reserveBatch(
-                tenantId, sensorId, 1L, 10L, "checksum-a", "batch-a-retry");
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a-retry");
         assertEquals(ReplayReservation.Status.RETRY_PENDING, exactPendingRetry.status());
 
         ReplayReservation conflictingPending = store.reserveBatch(
-                tenantId, sensorId, 1L, 10L, "checksum-tampered", "batch-tampered");
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-tampered", "batch-tampered");
         assertEquals(ReplayReservation.Status.REJECTED, conflictingPending.status());
         assertEquals("ERR_IDEMPOTENCY_CONFLICT", conflictingPending.rejectionCode());
 
         ReplayReservation outOfOrderWhilePending = store.reserveBatch(
-                tenantId, sensorId, 11L, 20L, "checksum-b", "batch-b");
+                tenantId, sensorId, streamId, 11L, 20L, "checksum-b", "batch-b");
         assertEquals(ReplayReservation.Status.REJECTED, outOfOrderWhilePending.status());
         assertEquals("ERR_PREVIOUS_BATCH_PENDING", outOfOrderWhilePending.rejectionCode());
 
         store.finalizeReservedBatch(
-                tenantId, sensorId, 1L, 10L, "checksum-a", "batch-a");
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a");
 
         Map<String, Object> finalized = pg.jdbc().queryForMap("""
                 SELECT acked_through_sequence, last_first_sequence, last_last_sequence,
@@ -131,13 +133,13 @@ class PostgresTelemetryWatermarkStoreTest {
         assertNull(finalized.get("pending_reserved_at"));
 
         ReplayReservation alreadyAcked = store.reserveBatch(
-                tenantId, sensorId, 1L, 10L, "checksum-a", "batch-a-replay");
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a-replay");
         assertEquals(ReplayReservation.Status.ALREADY_ACKED, alreadyAcked.status());
         assertEquals(10L, alreadyAcked.ackedThroughSequence());
 
         // Finalize is itself idempotent for the exact accepted batch.
         assertDoesNotThrow(() -> store.finalizeReservedBatch(
-                tenantId, sensorId, 1L, 10L, "checksum-a", "batch-a-replay"));
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a-replay"));
     }
 
     @Test
@@ -151,22 +153,28 @@ class PostgresTelemetryWatermarkStoreTest {
                 """, tenantId2);
 
         assertEquals(ReplayReservation.Status.RESERVED,
-                store.reserveBatch(tenantId, sensorId, 1L, 5L, "t1-a", "t1-a").status());
-        store.finalizeReservedBatch(tenantId, sensorId, 1L, 5L, "t1-a", "t1-a");
+                store.reserveBatch(tenantId, streamId, sensorId, 1L, 5L, "t1-a", "t1-a").status());
+        store.finalizeReservedBatch(tenantId, streamId, sensorId, 1L, 5L, "t1-a", "t1-a");
 
         ReplayReservation regression = store.reserveBatch(
-                tenantId, sensorId, 4L, 4L, "t1-old", "t1-old");
+                tenantId, sensorId, streamId, 4L, 4L, "t1-old", "t1-old");
         assertEquals(ReplayReservation.Status.REJECTED, regression.status());
         assertEquals("ERR_SEQUENCE_REGRESSION", regression.rejectionCode());
 
         ReplayReservation gap = store.reserveBatch(
-                tenantId, sensorId, 7L, 7L, "t1-gap", "t1-gap");
+                tenantId, sensorId, streamId, 7L, 7L, "t1-gap", "t1-gap");
         assertEquals(ReplayReservation.Status.REJECTED, gap.status());
         assertEquals("ERR_SEQUENCE_GAP", gap.rejectionCode());
 
+        ReplayReservation changedStream = store.reserveBatch(
+                tenantId, sensorId, "stream-ffeeddccbbaa99887766554433221100",
+                6L, 6L, "new-stream", "new-stream");
+        assertEquals(ReplayReservation.Status.REJECTED, changedStream.status());
+        assertEquals("ERR_SENSOR_STREAM_CHANGED", changedStream.rejectionCode());
+
         // Same sensor identifier in another tenant is an independent replay domain.
         ReplayReservation otherTenant = store.reserveBatch(
-                tenantId2, sensorId, 1L, 1L, "t2-a", "t2-a");
+                tenantId2, sensorId, streamId, 1L, 1L, "t2-a", "t2-a");
         assertEquals(ReplayReservation.Status.RESERVED, otherTenant.status());
         assertEquals(0L, otherTenant.ackedThroughSequence());
     }
