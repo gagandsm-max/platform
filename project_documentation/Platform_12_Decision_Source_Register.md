@@ -216,7 +216,7 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 
 | Decision | Classification | Governing statement |
 |---|---|---|
-| Integration/automation packaging | ARCH-DELEGATED | `Platform_24_Integration_Automation_and_Ecosystem_Master.md` is the consolidated specialized master for ITSM lifecycle, connector certification, external bindings/synchronization, external automation, Monitoring-as-Code and related ecosystem interoperability. |
+| Integration/automation packaging | ARCH-DELEGATED | `Platform_27_Integration_Automation_and_Ecosystem_Master.md` is the consolidated specialized master for ITSM lifecycle, connector certification, external bindings/synchronization, external automation, Monitoring-as-Code and related ecosystem interoperability. |
 | Integration “Fabric” boundary | ARCH-DELEGATED | “Integration & Automation Fabric” is a logical capability domain extending the existing modular Integration Service, NCM/remediation and Capability Pack / Integration Pack model. No mandatory new microservice/process is created without scaling, security or lifecycle evidence. |
 | ITSM default external identity | ARCH-DELEGATED | Incident-oriented ITSM integrations default to one external incident per stable Platform incident. Alert/event modes remain configurable. RCA may influence updates/routing but is not the authoritative binding identity because RCA can change as evidence arrives. |
 | External-object synchronization | ARCH-DELEGATED | Replace long-term single `itsm_ref` semantics with tenant-scoped typed external-object bindings, explicit state/field authority, origin/version loop prevention and race-safe lifecycle ordering. Remote ticket closure never changes Platform monitoring health. |
