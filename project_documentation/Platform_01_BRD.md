@@ -106,7 +106,7 @@ Platform shall provide, directly or through approved extensibility frameworks:
 - Storage and SAN/fabric monitoring.
 - Database monitoring.
 - Kubernetes/container monitoring.
-- AWS, Azure, GCP and OCI cloud monitoring, with the first Cloud Observability GA requiring certified day-one provider-root onboarding, inventory, health, change/event, network, quota and high-value managed-service coverage as governed by `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`.
+- AWS, Azure, GCP and OCI cloud monitoring, with the first Cloud Observability GA requiring certified day-one provider-root onboarding, inventory, health, change/event, network, quota and high-value managed-service coverage as governed by `Platform_26_Cloud_and_Full_Stack_Observability_Master.md`.
 - OpenTelemetry metrics, logs and traces as core P0 observability signals, including service/resource correlation and cross-signal investigation. Platform does not require proprietary full-bytecode APM agents as a prerequisite for P0.
 - Synthetic ICMP/TCP/DNS/HTTP/HTTPS/API/TLS tests.
 - DNS/DHCP/NTP monitoring.
