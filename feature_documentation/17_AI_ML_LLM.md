@@ -1,7 +1,7 @@
 # AI / ML / LLM
 
-**Class:** Derived feature brief — non-authoritative  
-**Primary sources:** Platform_02, 03, 19, 22, 23  
+**Class:** Derived feature brief — non-authoritative
+**Primary sources:** Platform_02, 03, 19, 22, 23
 **Merged enhancement:** PR #68 local-intelligence placement rules.
 
 ## Product objective

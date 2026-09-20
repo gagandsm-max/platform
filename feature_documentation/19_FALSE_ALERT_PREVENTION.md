@@ -1,6 +1,6 @@
 # False Alert Prevention
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 09, 19, 22
 
 ## Product objective

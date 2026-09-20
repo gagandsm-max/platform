@@ -1,6 +1,6 @@
 # Root Cause Analysis (RCA)
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 03, 19, 22
 
 ## Product objective

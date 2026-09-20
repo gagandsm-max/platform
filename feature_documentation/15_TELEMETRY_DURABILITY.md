@@ -1,7 +1,7 @@
 # Telemetry Durability
 
-**Class:** Derived feature brief — non-authoritative  
-**Primary sources:** Platform_03, 04, 05, 06, 11, 14, 17  
+**Class:** Derived feature brief — non-authoritative
+**Primary sources:** Platform_03, 04, 05, 06, 11, 14, 17
 **Related pending work:** Agent/Sensor reliability reconciliation may strengthen generic ACK/gap semantics.
 
 ## Product objective

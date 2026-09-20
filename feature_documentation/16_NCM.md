@@ -1,6 +1,6 @@
 # Network Configuration Management (NCM)
 
-**Class:** Derived feature brief — non-authoritative  
+**Class:** Derived feature brief — non-authoritative
 **Primary sources:** Platform_02, 05, 09, 10, 18, 19, 23
 
 ## Product objective
