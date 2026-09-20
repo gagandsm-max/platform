@@ -1304,6 +1304,11 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Exporter management:** `Settings → Data Sources → Flow Exporters` (or current navigation equivalent) shows exporter, protocol/version, assigned Flow Sensor, last record, record/byte rate, observation domains, sampling, templates, sequence gaps, decode/socket/queue drops and quality. Unknown exporters remain quarantined/pending according to policy until mapped/approved.
 
+**Flow Sensor and exporter onboarding/preflight:** Flow Sensor provisioning uses the common Sensor package but requires an explicit governed Flow role. Exporter/source onboarding is separate from Sensor enrollment. Before activation, authorized users can verify packets/datagrams received, detected protocol/version, exporter identity, observation domain/engine, template/options receipt and validity, record decode success, sampling state, sequence state/gaps, interface mapping availability, source-time quality, estimated records/sec/ingress bandwidth and Sensor capacity/storage readiness. Failure to pass preflight is visible and does not silently activate the source.
+
+**Enrichment explainability:** Every derived endpoint/user/domain/application/Geo/ASN/cloud association shown in Flow must expose, subject to RBAC, its value, evidence source(s), observed/effective time, dataset/source version, quality/confidence and conflicting evidence where applicable. Prefer per-association/per-field quality to one global Flow confidence score.
+
+
 **Template Explorer:** For NetFlow v9/IPFIX show exporter/observation domain, template ID/type/hash/generation, fields and enterprise IEs, first/last seen, validity/withdrawal/expiry, dependent data-record counts and template-miss/error counters.
 
 **Interface workflow:** From an interface utilization view, `Investigate Traffic` opens Flow prefiltered to the canonical device/interface and selected time range, exposing top conversations/sources/destinations/applications/protocols/sites/QoS plus Flow Coverage evidence where available.
