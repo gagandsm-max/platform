@@ -37,8 +37,7 @@ ALTER TABLE platform.sensor_telemetry_watermark
 
 ALTER TABLE platform.sensor_telemetry_watermark
     ADD CONSTRAINT chk_sensor_telemetry_stream_id CHECK (
-        stream_id IS NULL OR (
-            length(stream_id) BETWEEN 1 AND 128
-            AND stream_id = btrim(stream_id)
-        )
+        stream_id IS NULL OR stream_id ~ '^stream-[0-9a-f]{32}
+    );
+
     );
