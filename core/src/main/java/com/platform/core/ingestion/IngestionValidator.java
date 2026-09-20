@@ -588,11 +588,13 @@ public class IngestionValidator {
                         );
                     }
 
-                    // P0-5: Stable logical observation identity:
-                    // <tenantId>:<sensorId>:<bootEpoch>:<sequence>:<ordinal>:<metricId>
+                    // P0 replay identity: derive from durable spool coordinates, not process bootEpoch.
+                    // bootEpoch changes on every Sensor process start while the durable spool sequence survives
+                    // restart; including it would turn the same unacknowledged record into a new logical
+                    // observation after restart and defeat downstream idempotency.
+                    // <tenantId>:<sensorId>:<sequence>:<ordinal>:<metricId>
                     String stableSeqId = authoritativeTenantId + ":"
                             + authoritativeSensorId + ":"
-                            + batch.bootEpoch() + ":"
                             + sequence + ":"
                             + ordinal + ":"
                             + metricId;
@@ -628,7 +630,6 @@ public class IngestionValidator {
                     if (Double.isFinite(val)) {
                         String stableSeqId = authoritativeTenantId + ":"
                                 + authoritativeSensorId + ":"
-                                + batch.bootEpoch() + ":"
                                 + sequence + ":0:"
                                 + metricId;
 
