@@ -47,7 +47,7 @@ All contracts are tenant/resource scoped server-side, use stable error codes/cor
 
 ### 2.2 Cloud and full-stack observability API contracts
 
-The versioned API surface shall expose typed resource families for cloud provider connections, hierarchy/scope discovery, credential/permission preflight, cloud resource/service query, connector health/rate budget, observability coverage/blind spots, traces/cross-signal pivots, service graph, cloud changes/events, quotas/autoscaling and SLO/service state as governed by `Platform_24_Cloud_and_Full_Stack_Observability_Master.md`.
+The versioned API surface shall expose typed resource families for cloud provider connections, hierarchy/scope discovery, credential/permission preflight, cloud resource/service query, connector health/rate budget, observability coverage/blind spots, traces/cross-signal pivots, service graph, cloud changes/events, quotas/autoscaling and SLO/service state as governed by `Platform_26_Cloud_and_Full_Stack_Observability_Master.md`.
 
 Cloud connection create/update requests carry provider, tenant-scoped hierarchy scope, credential reference/auth mode, selected Cloud/API Sensor pool, selected Capability/Cloud Service Packs, include/exclude filters, collection policy and parent-scope ephemeral activation policy. Secret values are accepted only through protected credential-binding operations and are never returned by normal read APIs.
 
