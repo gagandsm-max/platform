@@ -176,6 +176,64 @@ class PostgresTelemetryWatermarkStoreTest {
     }
 
     @Test
+    void legacyUnboundWatermarkBindsOnlyAfterValidContinuation() {
+        String sensorId = "sensor-legacy-upgrade";
+        pg.jdbc().update("""
+                INSERT INTO platform.sensor_telemetry_watermark (
+                    tenant_id, sensor_id, acked_through_sequence,
+                    last_first_sequence, last_last_sequence, last_checksum,
+                    last_batch_id, updated_at
+                ) VALUES (?, ?, 5, 1, 5, 'legacy-checksum', 'legacy-batch', CURRENT_TIMESTAMP)
+                """, tenantId, sensorId);
+
+        ReplayReservation invalidGap = store.reserveBatch(
+                tenantId, sensorId, streamId,
+                7L, 7L, "gap-checksum", "gap-batch");
+        assertEquals(ReplayReservation.Status.REJECTED, invalidGap.status());
+        assertEquals("ERR_SEQUENCE_GAP", invalidGap.rejectionCode());
+        assertNull(pg.jdbc().queryForObject(
+                "SELECT stream_id FROM platform.sensor_telemetry_watermark WHERE tenant_id=? AND sensor_id=?",
+                String.class,
+                tenantId,
+                sensorId
+        ), "invalid continuation must not bind the legacy row to a stream");
+
+        ReplayReservation validNext = store.reserveBatch(
+                tenantId, sensorId, streamId,
+                6L, 6L, "next-checksum", "next-batch");
+        assertEquals(ReplayReservation.Status.RESERVED, validNext.status());
+        assertEquals(streamId, pg.jdbc().queryForObject(
+                "SELECT stream_id FROM platform.sensor_telemetry_watermark WHERE tenant_id=? AND sensor_id=?",
+                String.class,
+                tenantId,
+                sensorId
+        ));
+    }
+
+    @Test
+    void databaseRejectsPartialPendingReservationState() {
+        String sensorId = "sensor-partial-pending";
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () ->
+                pg.jdbc().update("""
+                        INSERT INTO platform.sensor_telemetry_watermark (
+                            tenant_id, sensor_id, stream_id, acked_through_sequence,
+                            last_first_sequence, last_last_sequence, last_checksum,
+                            pending_first_sequence, pending_last_sequence,
+                            pending_checksum, pending_reserved_at
+                        ) VALUES (?, ?, ?, 0, 0, 0, '', 1, 1, 'checksum', CURRENT_TIMESTAMP)
+                        """, tenantId, sensorId, streamId)
+        );
+
+        Integer rows = pg.jdbc().queryForObject(
+                "SELECT count(*) FROM platform.sensor_telemetry_watermark WHERE tenant_id=? AND sensor_id=?",
+                Integer.class,
+                tenantId,
+                sensorId
+        );
+        assertEquals(0, rows);
+    }
+
+    @Test
     void concurrentExactReservationSerializesToOneOwnerAndSafeRetries() throws Exception {
         String sensorId = "sensor-concurrent-01";
         int workers = 8;
