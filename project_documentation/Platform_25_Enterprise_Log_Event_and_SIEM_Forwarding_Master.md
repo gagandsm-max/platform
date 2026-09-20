@@ -27,7 +27,7 @@ It defines one coherent product capability spanning Syslog; Linux/application fi
 | Platform_20 | governed onboarding identity/approval/notifications where reused |
 | Platform_22 | telemetry trust, Alert Evidence Contracts, evidence-qualified alerts, RCA/AI assurance |
 | Platform_23 | Capability Pack classification/certification; vendor-specific log mappings belong in packs |
-| Platform_24 (this master) | unified log source/product model, collection semantics, parser/fingerprint/data-quality contract, Log Explorer, routing/forwarding behavior, SIEM destination lifecycle and class-specific acceptance |
+| Platform_25 (this master) | unified log source/product model, collection semantics, parser/fingerprint/data-quality contract, Log Explorer, routing/forwarding behavior, SIEM destination lifecycle and class-specific acceptance |
 
 This master may add behavior where older documents are silent. It must not silently override explicit higher-precedence requirements.
 
