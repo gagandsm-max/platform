@@ -2,8 +2,8 @@ package com.platform.core.ingestion.replay;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -15,9 +15,17 @@ import java.util.UUID;
 public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore {
 
     private final JdbcTemplate jdbcTemplate;
+    private final TransactionTemplate transactionTemplate;
 
-    public PostgresTelemetryWatermarkStore(JdbcTemplate jdbcTemplate) {
+    public PostgresTelemetryWatermarkStore(
+            JdbcTemplate jdbcTemplate,
+            PlatformTransactionManager transactionManager
+    ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.transactionTemplate.setPropagationBehavior(
+                org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW
+        );
     }
 
     @Override
@@ -49,8 +57,23 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
     }
 
     @Override
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ReplayReservation reserveBatch(
+            UUID tenantId,
+            String sensorId,
+            long firstSeq,
+            long lastSeq,
+            String checksum,
+            String batchId
+    ) {
+        ReplayReservation result = transactionTemplate.execute(status ->
+                reserveBatchInTransaction(tenantId, sensorId, firstSeq, lastSeq, checksum, batchId));
+        if (result == null) {
+            throw new IllegalStateException("Telemetry replay reservation transaction returned no result");
+        }
+        return result;
+    }
+
+    private ReplayReservation reserveBatchInTransaction(
             UUID tenantId,
             String sensorId,
             long firstSeq,
@@ -174,8 +197,19 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
     }
 
     @Override
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void finalizeReservedBatch(
+            UUID tenantId,
+            String sensorId,
+            long firstSeq,
+            long lastSeq,
+            String checksum,
+            String batchId
+    ) {
+        transactionTemplate.executeWithoutResult(status ->
+                finalizeReservedBatchInTransaction(tenantId, sensorId, firstSeq, lastSeq, checksum, batchId));
+    }
+
+    private void finalizeReservedBatchInTransaction(
             UUID tenantId,
             String sensorId,
             long firstSeq,
