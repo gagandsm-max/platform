@@ -51,3 +51,36 @@ Additional threats and mandatory controls:
 - Scheduler assignments remain fenced/versioned and tenant-scoped; adaptive/event-triggered refresh is bounded and authorized.
 - Webhooks/API Studio require signature/auth, replay protection, SSRF/egress controls, secret handling, tenant binding and rate limits.
 - ITSM inbound callbacks are signed/authenticated; remote ticket state cannot override Platform health authority.
+
+## 8. Regional Sensor / enrollment / transport threat extension
+
+Additional threats:
+
+- stolen/replayed Sensor or Agent enrollment token;
+- enrollment authority used for the wrong tenant/Region/Site/Pool/role;
+- Core receiving or persisting endpoint private-key material;
+- certificate/SAN verification disabled for IP/VIP bootstrap convenience;
+- stale Sensor-pool membership or Agent assignment regaining authority;
+- rogue Sensor claiming another tenant/site/pool;
+- plaintext Platform-owned telemetry/control interception, tampering or credential exposure;
+- downgrade from mTLS/encrypted Platform transport to insecure mode;
+- capacity-placement manipulation that intentionally overloads one Sensor/failure domain.
+
+Mandatory controls:
+
+- short-lived single-use enrollment authority with tenant/deployment and optional Region/Site/Pool/role scope;
+- endpoint-local private-key generation and proof-of-possession; Core stores only public certificate/credential metadata required for trust;
+- CA/trust and DNS/IP SAN verification remain enabled; bootstrap fails closed on mismatch;
+- unique Sensor/Agent service identity, revocation/rotation and auditable lifecycle;
+- monotonically advancing assignment/membership generations with stale/replayed authority rejection;
+- server-side tenant/site/pool/capability authorization before assignment or telemetry acceptance;
+- encrypted authenticated Platform-owned control/telemetry channels; mTLS remains required where specified;
+- **no production plaintext Sensor↔Core or Agent↔Sensor mode is approved by this reconciliation**;
+- insecure monitored-device protocols are explicit legacy compatibility modes and cannot downgrade Platform-owned trust boundaries;
+- placement/capacity inputs are bounded, authoritative and auditable.
+
+## 9. RCA evidence-poisoning / causal-integrity extension
+
+Threats include forged chronology, stale topology, malicious or compromised Capability Pack causal rules, poisoned Similar Incident history, fabricated recovery evidence, confidence manipulation and cross-tenant hypothesis/evidence references.
+
+Controls require immutable evidence references, tenant/RBAC authorization on every evidence lookup, event-time + ingest-time provenance, rule/model/version provenance, explicit contradictory/missing evidence, immutable RCA revisions, bounded counterfactual reasoning, shared-risk provenance/confidence and preservation of `INCONCLUSIVE`. LLM/GNN output remains non-authoritative causal assistance and cannot rewrite source evidence or execute remediation directly.
