@@ -180,7 +180,7 @@ No fixed endpoint-overhead number is asserted by documentation alone. Release ce
 
 A release or Capability Pack shall not claim production SNMP support merely because GoSNMP unit tests, a single v2c GET, or an isolated Sensor spool test passes. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
 
-Current known implementation foundations may include GoSNMP protocol support, BER typed values, exact Counter64 Sensor-side serialization and bounded Sensor spool primitives. Production gaps that must not be overstated as complete include, among others: SNMP production scheduler wiring; governed production Credential Profile resolution in discovery/polling; complete typed Core ingestion; exact Counter64 end-to-end Core/Kafka/ClickHouse path; trap/inform production runtime and durable Inform acceptance; MIB Studio/gosmi runtime; interface reconciliation runtime; adaptive polling runtime; full SNMP Test UI; and full Monitoring Quality UI.
+Current known implementation foundations include GoSNMP protocol support, BER typed values, bounded Sensor spool primitives, and—after PR #84—the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path with `UInt64` persistence, replay-safe canonical collapse and full unsigned-boundary tests. That raw path is **IMPLEMENTED+TESTED**, not yet benchmarked/certified. Production gaps that must not be overstated as complete include, among others: SNMP production scheduler wiring; governed production Credential Profile resolution in discovery/polling; complete typed Core ingestion for all SNMP semantic classes; derived Counter32/Counter64 delta/rate/reset/wrap/discontinuity logic; trap/inform production runtime and durable Inform acceptance; MIB Studio/gosmi runtime; interface reconciliation runtime; adaptive polling runtime; full SNMP Test UI; and full Monitoring Quality UI.
 
 Required evidence, as applicable to the declared certification dimensions, includes:
 
@@ -217,3 +217,44 @@ Required evidence includes: source values > 2^53; near UInt64 maximum; reset; re
 ### 8.4 Two-Core HA
 
 HA certification gates remain explicit and unmet until evidence exists. Do not invent passing evidence. Status remains SPECIFIED / P0 / NOT PRODUCTION CERTIFIED.
+
+## 9. Unified RCA and regional Sensor/provisioning certification supplement — v3.2.2
+
+### 9.1 RCA/correlation
+
+Before RCA/correlation is certified, deterministic fixtures must prove:
+
+- one canonical incident/RCA authority across network, infrastructure, storage, virtualization, database, cloud and service evidence;
+- explicit competing hypotheses, causal roles, support/contradiction/missing evidence and rejection reasons;
+- immutable/reproducible RCA revisions after late evidence, topology/change updates and recovery;
+- first causal event versus first alert ordering;
+- counterfactual expected-effect checks;
+- recovery evidence strengthens/weakens hypotheses without creating post-hoc certainty;
+- redundancy-success cases do not become false service outages;
+- shared-risk relationships require provenance/confidence/temporal validity;
+- stale topology, clock skew, out-of-order, duplicate/replayed and missing evidence;
+- deterministic cross-domain chains including ToR, iSCSI/NFS/SAN, hypervisor contention, DNS/AAA, PDU/power and Sensor-failure scenarios;
+- bounded graph neighborhood/time/evidence fan-out/concurrency/timeout under incident storms;
+- machine confidence is measured separately from validated correctness;
+- tenant-scoped human feedback cannot directly mutate production rules/models.
+
+Quality reporting includes root-cause precision, false-root rate, appropriate-inconclusive rate, time-to-root-candidate, correlation latency, evidence completeness, blast-radius accuracy and recovery-validation result where applicable. No universal acceptance percentage is invented here.
+
+### 9.2 Region / Sensor Pool / enrollment / secure transport
+
+Certification must include:
+
+- Region/Site/Pool tenant-isolation and lifecycle/migration tests;
+- placement against role/capability/capacity/failure-domain policy;
+- generation/fencing under concurrent reassignment, restart and failover;
+- Sensor and Agent short-lived/single-use token success, expiry, replay, wrong-scope and revoked cases;
+- local key generation / proof-of-possession with no private key in Core DB, logs, audit, support bundle or events;
+- certificate rotation/revocation and DNS/IP/VIP SAN/trust failures;
+- no certificate-verification bypass;
+- no production plaintext Sensor↔Core or Agent↔Sensor transport path;
+- legacy monitored-device insecure protocols cannot downgrade Platform-owned transport;
+- Agent normal telemetry remains assigned-Sensor mediated after bootstrap;
+- pool capacity/rebalance under Sensor loss and recovery without duplicate ownership;
+- resource-efficiency benchmarks measure CPU/RAM/network/storage before increasing certified hardware profiles.
+
+Specified ≠ implemented ≠ tested ≠ benchmarked ≠ certified ≠ deployed.

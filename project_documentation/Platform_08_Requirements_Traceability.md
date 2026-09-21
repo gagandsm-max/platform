@@ -113,7 +113,7 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | REQ-SNMP-001 | Typed SNMP numeric/counter/state/inventory/topology/quality evidence | — | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-SNMP-002 | Exact Counter32/Counter64 preservation; no Float64 precision loss before derivation (SPECIFIED; current Core path still float-backed — P0 gap) | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-002 | Exact Counter32/Counter64 preservation; no Float64 precision loss before derivation (**raw Counter64 path IMPLEMENTED+TESTED after PR #84; derived rate/reset/discontinuity and certification remain open**) | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-003 | Counter wrap/reset/discontinuity and actual-elapsed-time rate semantics | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-004 | Prefer certified high-capacity counters for high-speed interfaces | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-005 | Stable interface identity independent of ifIndex alone | — | ✓ | ✓ | ✓ | ✓ | ✓ |

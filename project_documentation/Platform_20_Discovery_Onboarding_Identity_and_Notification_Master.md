@@ -71,6 +71,12 @@ The following IDs are authoritative PRD supplements for v3.2.2.
 | `PRD-ONB-012` | Operational Alerts/Incidents and Platform/workflow notifications are distinct domain objects. The Notification Center may surface both, but shall preserve source/type, priority/severity, acknowledgement/read state and links to the underlying object. |
 | `PRD-ONB-013` | Material discovery drift such as a new entity, sustained disappearance, identity conflict, unexpected site/ownership movement or a newly observed critical relationship may notify according to policy; routine rediscovery churn, transient dynamic-IP changes and high-volume scan/reconnect storms shall be deduplicated/rate-limited. |
 | `PRD-ONB-014` | Discovery/enrollment workflows shall enforce credential scope, probe/rate bounds, tenant isolation, enrollment-token controls, unique Agent mTLS identity, audit, and safe handling of unauthorized/rogue candidates. |
+| `PRD-ONB-015` | Platform shall support an optional customer-defined Region locality layer and first-class Sensor Pools. Regions are tenant-scoped logical/locality groupings, are not hard-coded to vendor/geographic names, and may contain Sites; Sensor Pools express placement scope, role/capability, capacity, health and failure-domain policy. |
+| `PRD-ONB-016` | Core shall own authoritative Sensor Pool membership/placement and Agent→Sensor assignment with monotonically advancing generation/fencing semantics so stale or superseded assignments cannot regain authority after reassignment/failover. |
+| `PRD-ONB-017` | Production Sensor bootstrap shall use a short-lived single-use scoped enrollment authority. The Sensor generates its private key locally, proves possession through an authenticated CSR/enrollment exchange, receives/binds its service certificate and authoritative Core endpoint/assignment, and never transmits or stores a reusable private key in Core. |
+| `PRD-ONB-018` | Production Agent bootstrap shall use the same identity principles: short-lived scoped enrollment, local private-key generation, unique Agent certificate identity, explicit tenant/site/entity association and authoritative Agent→Sensor assignment. Normal Agent telemetry remains Agent→assigned Sensor→Core rather than hairpinning through Core. |
+| `PRD-ONB-019` | Platform-owned Sensor↔Core and Agent↔Sensor control/telemetry trust boundaries shall remain authenticated and encrypted; mTLS remains the default/required production mechanism where currently specified. A plaintext Platform transport mode is not approved by this reconciliation. Legacy insecure monitored-device protocols may be supported only as explicitly labelled compatibility modes and do not weaken Platform-owned channels. |
+| `PRD-ONB-020` | Sensor/Agent provisioning and placement shall be capacity-aware and locality-aware without making hardware increases the first response to load. Core shall prefer bounded workload placement, batching/data-path efficiency and healthy eligible pools before requiring larger resource profiles; capacity certification remains owned by Platform_11/14. |
 
 ### 3.1 Supported candidate sources
 
@@ -197,6 +203,16 @@ External email/Teams/Slack/PagerDuty/etc. delivery remains owned by the Integrat
 
 Recipient expansion and retrieval are server-side authorized. Generation uses deterministic dedupe keys, bounded fan-out and rate limits.
 
+### 4.4 Region / Sensor Pool and placement architecture
+
+Region is an optional tenant-scoped locality/organizational layer used for placement, policy and operator context. Region names are customer-defined and do not create a second tenant/security boundary. Sites remain concrete monitored-estate locations; deployments may omit Region where it adds no value.
+
+Sensor Pool is the Core-owned placement abstraction over one or more eligible Sensors. Pool eligibility combines tenant/scope, Region/Site affinity where configured, Sensor role/capabilities, capacity/headroom, health/maintenance state and failure-domain policy. A pool may be site-local or broader when policy explicitly permits.
+
+Core remains the only assignment authority. Pool membership and Agent→Sensor assignment use monotonically advancing generations/fences so a stale Sensor or Agent cannot regain ownership after reassignment, restart or failover. Sensors execute current authorized desired state; they do not elect ownership independently.
+
+Provisioning must prefer efficient placement and bounded workload controls before raising certified hardware requirements, but may never trade away freshness, telemetry durability, security or tenant isolation.
+
 ---
 
 ## 5. HLD subsystem and ownership contract
@@ -253,6 +269,12 @@ Secure bootstrap establishes unique Agent identity/certificate. Core selects an 
 Default state is `PENDING_APPROVAL`. The provisional Sensor association does **not** activate commercial/licence consumption, customer operational alerts, the normal monitoring profile or recurring monitored workload. Normal monitoring/test workload becomes active only after explicit authorized **Approve** or trusted auto-approval and the normal entitlement/capacity/policy checks. Activation retains or re-evaluates the provisional assignment through the same Sensor Control assignment/versioning mechanism; no second Sensor authority exists.
 
 `UNMANAGED` may retain bounded management identity/inventory visibility without full monitoring. `REJECTED` unauthorized enrollment revokes/invalidates identity as policy requires. `EXCLUDED` is a persistent/permanent automatic-onboarding exclusion and remains effective across rediscovery, Agent reconnect, later scans and passage of time until an explicit authorized audited administrative action removes/reopens it.
+
+### 5.5 Sensor Control / Placement ownership
+
+Sensor Control owns Region/Site/Pool-aware eligibility, membership state, placement generations, drain/maintenance state, Sensor reassignment and Agent→Sensor assignment. Provisioning/Onboarding requests placement and receives an authoritative result; it does not maintain a second placement registry.
+
+Enrollment/Identity owns bootstrap authority validation and certificate binding. Sensor Runtime owns execution of the assignment currently authorized by Core. Capacity policy remains governed by Platform_11/14 evidence and Sensor self-observability.
 
 ---
 
@@ -384,6 +406,14 @@ Where asynchronous events are needed:
 
 Events carry schema version, tenant, source identity, event ID, event/ingest time, provenance/quality where applicable and correlation ID. Producers/consumers are replay/idempotency safe. No secret credential material is emitted.
 
+### 6.7 Region / Sensor Pool / bootstrap control state
+
+The canonical field-level Region, Sensor Pool, membership, Agent assignment and enrollment-control contract is owned by `Platform_17_API_Event_and_Data_Model_Contracts.md`. Platform_20 owns lifecycle and product semantics; implementations must not fork duplicate schemas.
+
+Mutations are tenant-scoped, optimistic-concurrency/idempotency safe and audited. Assignment/membership generations only advance. Enrollment material is single-use/short-lived; endpoint private keys are generated locally and are prohibited from normal Core persistence, events, audit payloads and support output.
+
+Lifecycle events may extend the existing Sensor/Agent control families with Region/Pool/placement references, but must carry tenant, generation/revision, event/ingest time and correlation provenance. No event grants authority merely because it contains a claimed pool or assignment.
+
 ---
 
 ## 7. End-to-end dataflows
@@ -464,6 +494,36 @@ Notification generation resolves source object -> tenant/resource scope -> eligi
 
 Conflicting Agent/certificate/stable-host identifiers, simultaneous improbable heartbeats or reinstall/reimage evidence enters `REVIEW_REQUIRED`/`SECURITY_HOLD`. Core does not silently merge or create a second independent active binding. Authorized reconciliation records evidence, actor/comment and resulting binding; revoked identities are denied subsequently.
 
+### DF-ONB-005 — Sensor bootstrap, pool placement and fenced Agent assignment
+
+```mermaid
+sequenceDiagram
+  participant I as Installer / Endpoint
+  participant E as Enrollment
+  participant SC as Sensor Control / Placement
+  participant S as Sensor
+  participant A as Agent
+
+  I->>E: Stable Core endpoint + short-lived scoped enrollment authority
+  I->>I: Generate private key locally
+  I->>E: CSR/proof-of-possession + scoped bootstrap request
+  E->>SC: Validate tenant/Region/Site/Pool/role eligibility
+  SC-->>E: Authoritative Sensor identity/placement generation
+  E-->>I: Bound certificate + authorized control endpoint metadata
+  Note over I,E: CA/SAN identity verification remains enabled; no plaintext fallback
+  A->>E: Agent enrollment with local key + scoped authority
+  E->>SC: Request eligible Agent→Sensor assignment
+  SC-->>A: Sensor endpoint + monotonically advancing assignment generation
+  A->>S: mTLS control/telemetry using current generation
+  S->>SC: Health/capacity/assignment state
+  alt Sensor degraded/drained/reassigned
+    SC-->>A: New Sensor assignment with higher generation
+    A->>S: Old generation rejected / new assignment activated
+  end
+```
+
+Normal Agent telemetry remains Agent→assigned Sensor→Core. Enrollment/bootstrap does not authorize a direct normal Agent→Core telemetry bypass.
+
 ---
 
 ## 8. UI/UX requirements
@@ -536,11 +596,25 @@ Routine identical observations, transient address changes and repeated scan/reco
 
 ---
 
+### 8.5 Region / Sensor Pool and provisioning UX
+
+Where Region is enabled for a tenant, onboarding/provisioning surfaces expose **Region → Site → Sensor Pool → Sensor** as locality/placement context without forcing every deployment to use every level. Region names are customer-defined; examples such as EMEA/APAC/AMERICAS are not product enums.
+
+Sensor Pool administration shows pool scope, eligible Sensor roles/capabilities, capacity/headroom, health/degraded state, failure-domain/placement policy and current assignment counts. Operators may request placement/reassignment only through authorized Core control APIs; the UI never mutates Sensor-local ownership directly.
+
+Sensor/Agent bootstrap workflows accept only the minimum bootstrap information needed to reach the trusted Platform endpoint plus a short-lived scoped enrollment token/authority. The UI/installer never asks customers to paste implementation-internal service URLs when the stable Core endpoint can be supplied.
+
+---
+
 ## 9. Protocol, enrollment and security requirements
 
 - Discovery profiles are tenant/site/scope constrained and rate/burst bounded.
 - Discovery Credential Profiles retain normal `USE` authorization; review users do not gain secret access because a candidate was found.
 - Agent enrollment tokens are short-lived/single-use and scoped to tenant/deployment plus optional site/profile/auto-approval policy.
+- Sensor enrollment tokens/authorities are likewise short-lived/single-use and scoped to tenant/deployment plus optional Region/Site/Pool/role constraints.
+- Sensor and Agent private keys are generated and retained locally; Core receives proof/CSR/public-certificate material, never a reusable private key.
+- Endpoint bootstrap may use DNS name or IP/VIP only when certificate identity validation is correct for that endpoint (for example SAN coverage); hostname/certificate verification is never disabled to make bootstrap easier.
+- Platform-owned Sensor↔Core and Agent↔Sensor control/telemetry channels remain encrypted and mutually authenticated in production. Plaintext is not an approved optimization path; monitored-device legacy protocols remain a separate compatibility concern.
 - Successful bootstrap establishes unique `agent_id` + mTLS certificate identity and may establish the provisional Sensor association required for authenticated onboarding/control transport.
 - Pre-approval Agent→Sensor traffic is limited to enrollment/control/bootstrap validation and bounded health/bootstrap evidence; it does not authorize normal monitoring, licence activation, normal monitoring profiles or customer operational alerts.
 - Full monitoring remains pending review by default; trusted auto-approval may activate only after normal identity/preflight/entitlement/capacity/policy/audit checks using the same Sensor Control authority.
@@ -594,6 +668,12 @@ Mandatory regression coverage includes:
 15. Decision comments are safely rendered and cannot inject executable UI/script content.
 16. `EXCLUDED` candidates remain permanently excluded across rediscovery, Agent reconnect, scans and time passage; only an explicit authorized audited remove/reopen action reverses the exclusion.
 17. Lifecycle persistence and transitions represent `ACTIVE -> DECOMMISSION_REQUESTED -> DECOMMISSIONED`; optional `RETIRED` state, where used, occurs only after decommissioning.
+18. Region/Site/Pool placement enforces tenant scope and eligible role/capacity/failure-domain policy; a Region rename/reparent does not silently change tenant authority.
+19. Sensor bootstrap token replay, expiry, wrong tenant/site/pool/role and certificate/key-possession failures are denied and audited; private key material never appears in Core persistence/logs/support evidence.
+20. Agent assignment generation/fencing rejects stale/replayed/superseded Agent→Sensor assignments after reassignment/failover.
+21. Certificate validation remains enabled for DNS and IP/VIP bootstrap forms; missing/mismatched SAN/trust fails closed.
+22. Security-negative tests prove no production plaintext Sensor↔Core or Agent↔Sensor path exists and legacy monitored-device plaintext protocols cannot downgrade Platform-owned transport.
+23. Capacity/placement tests prove Core prefers healthy eligible pools and bounded workload/data-path controls before declaring larger hardware necessary, without violating freshness/durability.
 
 A tenant-isolation leak through onboarding/notifications, approval bypass, or identity collision/merge that can bind one customer's endpoint incorrectly is a release blocker under existing tenant/security/data-integrity gates.
 
@@ -613,6 +693,8 @@ Required runbooks/additions:
 - auto-approval policy disable/rollback.
 
 Support evidence includes candidate/Agent/entity IDs, correlation IDs, lifecycle/revision, decision/audit references, notification IDs/dedupe keys and sanitized identity facts. Credentials/private keys are never exposed.
+
+**Current implementation truth:** `sensor/internal/identity/http_enrollment.go` still models a legacy enrollment response containing `privateKeyPem` from Core. That runtime path is **NON-CONFORMANT with PRD-ONB-017/018 and REQ-ONB-016/017** and remains an implementation gap. It must be replaced by endpoint-local key generation plus CSR/proof-of-possession before Sensor/Agent bootstrap can be classified IMPLEMENTED/TESTED against this architecture. This documentation change does not claim that migration is complete.
 
 Operational self-monitoring includes candidate queue depth/age, review backlog, identity-conflict count, notification generation/delivery lag, dedupe/rate-limit drops, recipient expansion failures and storage/query health for current notification state.
 
@@ -635,6 +717,12 @@ Operational self-monitoring includes candidate queue depth/age, review backlog, 
 | `REQ-ONB-011` | Alerts/Incidents remain distinct from Platform/workflow notifications | `PRD-ONB-012` | §§4–7 | §8 |
 | `REQ-ONB-012` | Material discovery drift notifications are policy-driven and storm-bounded | `PRD-ONB-013` | §§4–7 | §§8,11,12 |
 | `REQ-ONB-013` | Discovery/enrollment credential scope, bounds, rogue-candidate protection, audit and tenant isolation | `PRD-ONB-014` | §§4–7 | §§9–11 |
+| `REQ-ONB-014` | Customer-defined Region + first-class Sensor Pool locality/placement semantics | `PRD-ONB-015` | §§4–7 | §§8.5,11,12 |
+| `REQ-ONB-015` | Core-authoritative pool membership and Agent→Sensor generation/fencing | `PRD-ONB-016` | §§4–7 | §§9–12 |
+| `REQ-ONB-016` | Sensor bootstrap uses scoped single-use enrollment + local key generation + certificate binding | `PRD-ONB-017` | §§4–7 | §§9–12 |
+| `REQ-ONB-017` | Agent bootstrap and normal Agent→Sensor→Core assignment semantics | `PRD-ONB-018` | §§4–7 | §§8.5–12 |
+| `REQ-ONB-018` | Platform-owned Sensor/Core and Agent/Sensor channels remain encrypted/authenticated; no approved plaintext production mode | `PRD-ONB-019` | §§4–7 | §§9–11 |
+| `REQ-ONB-019` | Provisioning/placement efficiency and capacity-aware pool selection without hardware-first scaling | `PRD-ONB-020` | §§4–7 | §§8.5,11,12 |
 
 ### 13.1 Definition of done
 

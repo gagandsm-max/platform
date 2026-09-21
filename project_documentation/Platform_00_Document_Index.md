@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-21 — v3.2.2 final handoff architecture baseline (display timezone, generic scheduler/freshness, Counter64/HA/Sensor-role/Flow-Log-Cloud-Extensibility-ITSM contract freeze; no new specialized master)
+**Last reconciliation:** 2026-09-21 — v3.2.2 final handoff + unified RCA / regional Sensor-provisioning reconciliation, including verified PR #84 Counter64 implementation truth; no new specialized master
 
 ## 1. Authority
 
@@ -155,6 +155,22 @@ PR #81 telemetry durability (durable stream identity + reserve→Kafka→finaliz
 
 Authoritative file count remains **25**, highest specialized master remains `Platform_23`, product-document version remains **v3.2.2**. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
 
+### 4.8 2026-09-21 unified RCA and regional Sensor/provisioning reconciliation
+
+This v3.2.2 reconciliation independently challenged the external **Unified Correlation & RCA** and **Core Efficiency / Regional Sensor / Provisioning / Transport** handoffs against current canonical architecture.
+
+Accepted RCA deltas strengthen the existing `Platform_22` authority: one unified RCA engine over the canonical temporal graph; explicit causal roles/hypotheses; immutable progressive revisions; bounded counterfactual and recovery validation; redundancy/shared-risk semantics; progressive RCA UI; deterministic cross-domain/fault-injection certification and tenant-scoped human ground truth. Existing evidence qualification, contradictions, `INCONCLUSIVE`, Flight Recorder, Similar Incident, GNN/LLM boundaries and graph architecture remain authoritative rather than being duplicated.
+
+Accepted Sensor/provisioning deltas strengthen the existing `Platform_20` onboarding/control family: optional customer-defined Region, first-class Sensor Pools, Core-authoritative capacity/locality placement, generation/fencing, short-lived single-use Sensor/Agent bootstrap, endpoint-local key generation, normal Agent→Sensor→Core telemetry and explicit bootstrap endpoint/certificate validation.
+
+The proposed plaintext Platform transport direction was **rejected** for production Platform-owned Sensor↔Core and Agent↔Sensor trust boundaries. Existing authenticated encrypted transport/mTLS requirements remain. Legacy insecure monitored-device protocols remain separately governed compatibility modes and cannot downgrade Platform-owned channels.
+
+The resource-efficiency principle is accepted as an engineering constraint: optimize measured algorithms/data paths/queries/schemas/batching/unnecessary work before increasing certified hardware, without weakening correctness, durability, security or freshness.
+
+Implementation truth is also reconciled to verified current `main`: PR #84 established the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path as **IMPLEMENTED+TESTED**. Derived counter delta/rate/reset/wrap/discontinuity behavior remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**.
+
+This reconciliation updates existing Mother References and keeps the authoritative set at **25 files**, version **v3.2.2**, highest specialized master **Platform_23**. No `Platform_24` is introduced.
+
 ## 5. Precedence
 
 When requirements appear to conflict:
@@ -232,7 +248,7 @@ Conflicts require documented change control; implementation must not silently ch
 - Optional dedicated local/private inference is an AI-Gateway provider, not a third Core/HA authority or authoritative data store; deterministic Platform operation does not depend on it.
 - Authoritative system/event/telemetry instants are absolute UTC; interactive display uses IANA zones with precedence override → user preference → browser local → tenant.timezone → UTC; display preference never rewrites operational policy timezones; host OS timezone is non-authoritative.
 - Recurring monitoring uses Core schedule/placement authority plus Sensor durable local desired-state execution; Monitor Group, Scheduling Class and Execution Class remain distinct; cadence and freshness are both required; deterministic phase spreading and failure-domain backoff are mandatory architecture.
-- Exact Counter64 end-to-end remains a P0 implementation gap on current main (Sensor encode present; Core numeric path still float-backed with unsafe Counter64 rejection).
+- Exact raw Counter64 Sensor→Core→Kafka→ClickHouse transport/persistence is **IMPLEMENTED+TESTED** on current main after PR #84, including full unsigned-64 boundary coverage and replay-safe `UInt64` persistence; benchmarking/certification/deployment remain open, and derived delta/rate/reset/wrap/discontinuity semantics remain a P0 implementation gap.
 - Exactly-two-Core Active/Standby HA remains P0 and not production-certified; no Patroni/repmgr/ClickHouse Keeper/Raft/Consul/etcd third-coordination selection is made by this baseline.
 - Standard production Sensor roles are NETWORK, INFRASTRUCTURE, FLOW and LOG; SYNTHETIC and CLOUD_API are conditional dedicated roles; COMBINED is lab/dev/small-deployment unless separately certified; runtime STREAMING_EVENT requires product/runtime reconciliation toward FLOW/LOG.
 - PR #81 Sensor telemetry durability is canonical at-least-once; concurrent pending-reservation republish amplification is P1 hardening, not a new datastore.

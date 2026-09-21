@@ -251,16 +251,19 @@ Where calendar bucketing depends on local day/week/month/business-day boundaries
 
 Logical user preference field `display_timezone` (nullable IANA identifier) is an implementation requirement on the existing user preference/profile surface. This documentation baseline does **not** allocate a PostgreSQL migration number. Existing `tenant.timezone` remains the tenant fallback. Host OS timezone is non-authoritative.
 
-## 6. Counter64 / exact-counter implementation-truth freeze — v3.2.2 handoff baseline
+## 6. Counter64 / exact-counter implementation truth — v3.2.2 current main after PR #84
 
 Architecture requires exact Counter64 end-to-end. Current merged implementation truth:
 
-- Sensor can encode exact Counter64 source values;
-- Core ordinary numeric canonical path currently uses floating-point (`double`) for numeric observation values;
-- Counter64 values above the IEEE-754 exact-integer range are rejected rather than silently rounded;
-- therefore exact Counter64 is **SPECIFIED** but **NOT END-TO-END IMPLEMENTED/CERTIFIED**.
+- Sensor preserves Counter64 as an exact unsigned decimal source value;
+- Core canonicalization uses a dedicated exact counter representation separate from the ordinary floating-point numeric observation path;
+- accepted wire form is a validated decimal string and non-canonical/ambiguous representations fail closed;
+- Kafka serializes raw Counter64 without JSON/JavaScript Number semantics;
+- ClickHouse persists raw exact values in a dedicated `UInt64` path and exposes replay-safe canonical reads;
+- tests cover values around `2^53`, the Java signed-long boundary and through `18446744073709551615` (`2^64-1`), plus restart/replay/idempotent migration behavior;
+- therefore the **raw exact Counter64 transport/persistence path is IMPLEMENTED and TESTED**, but remains **NOT BENCHMARKED / NOT CERTIFIED / NOT DEPLOYED**.
 
-Future P0 implementation must preserve full unsigned 64-bit source truth. Core representation must not rely on Java signed `long` alone. Acceptable families include BigInteger/unsigned abstraction, validated decimal unsigned representation, or other exact unsigned-64 representation. Wire/Kafka/JSON must not rely on JSON/JavaScript `Number` for raw Counter64. ClickHouse raw-counter storage should use `UInt64` or an equivalently exact type. Derived rate/utilization may be floating-point only AFTER exact delta/reset/discontinuity processing. A decrease is not automatically a wrap; discontinuity/reboot/source evidence is evaluated first.
+The ordinary numeric measurement path may remain floating-point because it is semantically separate from the authoritative raw counter family. Derived delta/rate/utilization may use floating-point only AFTER exact delta/reset/discontinuity processing. That derived Counter32/Counter64 reset/wrap/discontinuity/rate layer remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**. A decrease is not automatically a wrap; discontinuity/reboot/source evidence is evaluated first.
 
 ## 7. Telemetry durability / ACK contract note — PR #81 canonical
 
@@ -275,3 +278,95 @@ validate complete source batch
 ```
 
 Semantics are **at-least-once**, not exactly-once. Duplicate Kafka publication of the same stable logical observation identity is tolerated; canonical ClickHouse reads must not expose duplicate logical numeric observations. Concurrent exact HTTP retries while a reservation is `RETRY_PENDING` may amplify republish volume; that is a recorded **P1** hardening concern under the normal serialized Sensor uploader path. No distributed publisher lease/service is introduced by this documentation baseline.
+
+## 8. Unified correlation / RCA contract supplement — v3.2.2
+
+The existing Incident/Graph/RCA authority remains singular. Domain-specific rules normalize into the same contracts; they do not create separate network/storage/infrastructure RCA truth stores.
+
+A versioned RCA result exposes at minimum:
+
+```text
+incident_id
+rca_revision_id
+revision_number
+status PENDING | PROBABLE | DETERMINED | INCONCLUSIVE | SUPERSEDED
+root_entity_id optional
+first_causal_evidence_at optional
+first_alert_at optional
+trust_level CONFIRMED | HIGH | MEDIUM | LOW | INCONCLUSIVE
+machine_confidence optional calibrated value
+evidence_coverage
+blast_radius_ref optional
+supporting_evidence_refs[]
+contradictory_evidence_refs[]
+missing_evidence[]
+rejected_hypotheses[]
+recovery_validation optional
+rule_model_provenance[]
+created_at
+supersedes_revision_id optional
+recompute_reason optional
+```
+
+Each hypothesis is independently addressable and carries candidate entity/change, causal role, state, support/contradiction/missing evidence, expected effects/counterfactual checks, rejection reason where applicable, trust/confidence and rule/model version provenance. Causal-role vocabulary is:
+
+```text
+PRIMARY_CAUSE | CONTRIBUTING_CAUSE | AMPLIFIER | SYMPTOM |
+CONSEQUENCE | MONITORING_FAILURE | UNKNOWN
+```
+
+Late evidence, topology/change updates and recovery may create a new immutable RCA revision. Consumers must never mutate historical evidence/reasoning in place merely to present the newest conclusion.
+
+RCA events carry tenant, incident, revision, schema version, event time, ingest time and correlation/provenance. Replayed identical revision events are idempotent. Alert/incident correlation must preserve child-event references rather than deleting evidence after compression.
+
+## 9. Region, Sensor Pool and enrollment-control contract supplement — v3.2.2
+
+Logical control resources are additive to the existing tenant/site/Sensor/Agent model:
+
+```text
+region:
+  region_id
+  tenant_id
+  display_name
+  parent/metadata optional
+  lifecycle_state
+  created_at / updated_at
+
+sensor_pool:
+  pool_id
+  tenant_id
+  region_id optional
+  site_id optional
+  display_name
+  allowed_roles[]
+  capability_constraints[]
+  placement_policy
+  failure_domain_policy
+  capacity_policy_ref
+  lifecycle_state
+  revision
+
+sensor_pool_membership / placement:
+  sensor_id
+  pool_id
+  generation
+  state
+  effective_at
+  revoked_at optional
+
+agent_sensor_assignment:
+  agent_id
+  sensor_id
+  generation
+  state
+  effective_at
+  revoked_at optional
+```
+
+Region is customer-defined and optional; it is not a fixed geography enum. A Sensor Pool may be site-local or broader when policy explicitly allows, but every placement remains tenant-scoped.
+
+Sensor bootstrap uses a short-lived single-use enrollment authority scoped to tenant/deployment and optional Region/Site/Pool/role constraints. The Sensor generates its keypair locally and submits proof/CSR material; Core never receives reusable Sensor private-key material. Successful enrollment binds Sensor identity/certificate and returns only authorized endpoint/control metadata.
+
+Agent bootstrap follows the same local-key/short-lived-authority model and results in an authoritative generation-fenced Agent→Sensor assignment. Normal telemetry remains Agent→assigned Sensor→Core.
+
+Stable Core endpoint contracts may use DNS or IP/VIP only with normal certificate trust/identity verification. APIs/installers must not require disabling hostname/SAN validation. Production Platform-owned Sensor↔Core and Agent↔Sensor control/telemetry contracts have no plaintext compatibility mode under this baseline.
