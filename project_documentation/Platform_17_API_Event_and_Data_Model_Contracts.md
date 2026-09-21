@@ -251,16 +251,19 @@ Where calendar bucketing depends on local day/week/month/business-day boundaries
 
 Logical user preference field `display_timezone` (nullable IANA identifier) is an implementation requirement on the existing user preference/profile surface. This documentation baseline does **not** allocate a PostgreSQL migration number. Existing `tenant.timezone` remains the tenant fallback. Host OS timezone is non-authoritative.
 
-## 6. Counter64 / exact-counter implementation-truth freeze — v3.2.2 handoff baseline
+## 6. Counter64 / exact-counter implementation truth — v3.2.2 current main after PR #84
 
 Architecture requires exact Counter64 end-to-end. Current merged implementation truth:
 
-- Sensor can encode exact Counter64 source values;
-- Core ordinary numeric canonical path currently uses floating-point (`double`) for numeric observation values;
-- Counter64 values above the IEEE-754 exact-integer range are rejected rather than silently rounded;
-- therefore exact Counter64 is **SPECIFIED** but **NOT END-TO-END IMPLEMENTED/CERTIFIED**.
+- Sensor preserves Counter64 as an exact unsigned decimal source value;
+- Core canonicalization uses a dedicated exact counter representation separate from the ordinary floating-point numeric observation path;
+- accepted wire form is a validated decimal string and non-canonical/ambiguous representations fail closed;
+- Kafka serializes raw Counter64 without JSON/JavaScript Number semantics;
+- ClickHouse persists raw exact values in a dedicated `UInt64` path and exposes replay-safe canonical reads;
+- tests cover values around `2^53`, the Java signed-long boundary and through `18446744073709551615` (`2^64-1`), plus restart/replay/idempotent migration behavior;
+- therefore the **raw exact Counter64 transport/persistence path is IMPLEMENTED and TESTED**, but remains **NOT BENCHMARKED / NOT CERTIFIED / NOT DEPLOYED**.
 
-Future P0 implementation must preserve full unsigned 64-bit source truth. Core representation must not rely on Java signed `long` alone. Acceptable families include BigInteger/unsigned abstraction, validated decimal unsigned representation, or other exact unsigned-64 representation. Wire/Kafka/JSON must not rely on JSON/JavaScript `Number` for raw Counter64. ClickHouse raw-counter storage should use `UInt64` or an equivalently exact type. Derived rate/utilization may be floating-point only AFTER exact delta/reset/discontinuity processing. A decrease is not automatically a wrap; discontinuity/reboot/source evidence is evaluated first.
+The ordinary numeric measurement path may remain floating-point because it is semantically separate from the authoritative raw counter family. Derived delta/rate/utilization may use floating-point only AFTER exact delta/reset/discontinuity processing. That derived Counter32/Counter64 reset/wrap/discontinuity/rate layer remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**. A decrease is not automatically a wrap; discontinuity/reboot/source evidence is evaluated first.
 
 ## 7. Telemetry durability / ACK contract note — PR #81 canonical
 
