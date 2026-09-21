@@ -124,7 +124,7 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
-    entrypoint: ["/bin/bash", "/migrations/V002__metric_numeric_replay_identity.sh"]
+    entrypoint: ["/bin/bash", "/migrations/run-all.sh"]
     cpus: 0.5
     mem_limit: 256m
     deploy:

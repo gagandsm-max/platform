@@ -1,7 +1,10 @@
 package com.platform.core.ingestion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.core.ingestion.dto.CanonicalCounterObservation;
 import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
+import java.math.BigInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -12,6 +15,7 @@ import org.springframework.kafka.support.SendResult;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -55,7 +59,7 @@ class KafkaTelemetryProducerTest {
             return callback.doInOperations(ops);
         });
 
-        assertDoesNotThrow(() -> producer.publishBatchTransactionally(List.of(obs1, obs2)));
+        assertDoesNotThrow(() -> producer.publishBatchTransactionally(TelemetryObservationBatch.ofNumeric(List.of(obs1, obs2))));
         verify(kafkaTemplate, times(1)).executeInTransaction(any());
         assertEquals(2, metrics.getRecordsAccepted());
     }
@@ -70,7 +74,7 @@ class KafkaTelemetryProducerTest {
         );
 
         IngestionException ex = assertThrows(IngestionException.class, () ->
-                producer.publishBatchTransactionally(List.of(obs)));
+                producer.publishBatchTransactionally(TelemetryObservationBatch.ofNumeric(List.of(obs))));
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, ex.getStatus());
         assertEquals("ERR_KAFKA_TRANSACTIONS_UNAVAILABLE", ex.getCode());
         verify(kafkaTemplate, never()).executeInTransaction(any());
@@ -104,7 +108,7 @@ class KafkaTelemetryProducerTest {
         });
 
         IngestionException ex = assertThrows(IngestionException.class, () ->
-                producer.publishBatchTransactionally(List.of(obs1, obs2)));
+                producer.publishBatchTransactionally(TelemetryObservationBatch.ofNumeric(List.of(obs1, obs2))));
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, ex.getStatus());
         assertEquals("ERR_KAFKA_PUBLICATION_FAILED", ex.getCode());
         assertEquals("Failed to atomically publish telemetry batch to Kafka cluster", ex.getMessage());
@@ -122,5 +126,37 @@ class KafkaTelemetryProducerTest {
         assertDoesNotThrow(context::refresh);
         assertNotNull(context.getBean(KafkaTelemetryProducer.class));
         context.close();
+    }
+
+    @Test
+    void mixedNumericAndCounterBatchPublishesInsideOneTransaction() throws Exception {
+        when(kafkaTemplate.isTransactional()).thenReturn(true);
+        AtomicInteger sends = new AtomicInteger();
+        when(kafkaTemplate.executeInTransaction(any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            org.springframework.kafka.core.KafkaOperations<String, String> ops =
+                    mock(org.springframework.kafka.core.KafkaOperations.class);
+            when(ops.send(anyString(), anyString(), anyString())).thenAnswer(send -> {
+                sends.incrementAndGet();
+                String payload = send.getArgument(2);
+                assertFalse(payload.contains("1.8446744073709552E19"));
+                if (payload.contains("COUNTER64") || payload.contains("counterValue")) {
+                    assertTrue(payload.contains("\"counterValue\":\"18446744073709551615\""));
+                    assertEquals("seq-c", send.getArgument(1));
+                }
+                return CompletableFuture.completedFuture(null);
+            });
+            return invocation.getArgument(0, org.springframework.kafka.core.KafkaOperations.OperationsCallback.class)
+                    .doInOperations(ops);
+        });
+
+        CanonicalObservation gauge = new CanonicalObservation(
+                "t", "e", "cpu", "s", Instant.now(), 1.25, 1, 0, "seq-g", "snmp");
+        CanonicalCounterObservation counter = new CanonicalCounterObservation(
+                "t", "e", "ifHCInOctets", "s", Instant.now(),
+                new BigInteger("18446744073709551615"), 1, 0, "seq-c", "snmp");
+        producer.publishBatchTransactionally(new TelemetryObservationBatch(List.of(gauge), List.of(counter)));
+        assertEquals(2, sends.get());
+        verify(kafkaTemplate, times(1)).executeInTransaction(any());
     }
 }

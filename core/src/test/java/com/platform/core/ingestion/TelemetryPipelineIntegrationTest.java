@@ -5,7 +5,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.platform.core.ingestion.authority.FailClosedSensorAuthorityResolver;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.authority.TestSensorAuthorityResolver;
+import com.platform.core.ingestion.dto.CanonicalCounterObservation;
 import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.ingestion.dto.TelemetryAckResponse;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
 import com.platform.core.ingestion.replay.TelemetryWatermarkStore;
@@ -176,9 +178,9 @@ public class TelemetryPipelineIntegrationTest {
             X509Certificate cert = mock(X509Certificate.class);
             when(cert.getSubjectX500Principal()).thenReturn(new javax.security.auth.x500.X500Principal("CN=" + sensorId));
             TelemetryBatchRequest req = new TelemetryBatchRequest(1, sensorId, "ep-1", "b-10", 10, 10, "chk-10", List.of());
-            List<CanonicalObservation> obsList = List.of(
+            TelemetryObservationBatch obsList = TelemetryObservationBatch.ofNumeric(List.of(
                     new CanonicalObservation(tenantId.toString(), entityId.toString(), "metric", sensorId, Instant.now(), 1.0, 1, 0, "10", "snmp")
-            );
+            ));
 
             when(validator.resolveAuthority(cert)).thenReturn(scope);
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
@@ -191,7 +193,7 @@ public class TelemetryPipelineIntegrationTest {
 
             assertEquals("ACCEPTED", ack.status());
             assertEquals(10L, ack.acceptedThroughSequence());
-            verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
+            verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
             verify(watermarkStore, never()).finalizeReservedBatch(
                     any(), any(), any(), anyLong(), anyLong(), any(), any());
         }
@@ -202,9 +204,9 @@ public class TelemetryPipelineIntegrationTest {
             X509Certificate cert = mock(X509Certificate.class);
             when(cert.getSubjectX500Principal()).thenReturn(new javax.security.auth.x500.X500Principal("CN=" + sensorId));
             TelemetryBatchRequest req = new TelemetryBatchRequest(1, sensorId, "ep-1", "b-10-tampered", 10, 10, "chk-DIFFERENT", List.of());
-            List<CanonicalObservation> obsList = List.of(
+            TelemetryObservationBatch obsList = TelemetryObservationBatch.ofNumeric(List.of(
                     new CanonicalObservation(tenantId.toString(), entityId.toString(), "metric", sensorId, Instant.now(), 1.0, 1, 0, "10", "snmp")
-            );
+            ));
 
             when(validator.resolveAuthority(cert)).thenReturn(scope);
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
@@ -220,7 +222,7 @@ public class TelemetryPipelineIntegrationTest {
 
             assertEquals("ERR_IDEMPOTENCY_CONFLICT", ex.getCode());
             assertEquals(HttpStatus.CONFLICT, ex.getStatus());
-            verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
+            verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
         }
 
         @Test
@@ -229,9 +231,9 @@ public class TelemetryPipelineIntegrationTest {
             X509Certificate cert = mock(X509Certificate.class);
             when(cert.getSubjectX500Principal()).thenReturn(new javax.security.auth.x500.X500Principal("CN=" + sensorId));
             TelemetryBatchRequest req = new TelemetryBatchRequest(1, sensorId, "ep-1", "b-5", 5, 5, "chk-5", List.of());
-            List<CanonicalObservation> obsList = List.of(
+            TelemetryObservationBatch obsList = TelemetryObservationBatch.ofNumeric(List.of(
                     new CanonicalObservation(tenantId.toString(), entityId.toString(), "metric", sensorId, Instant.now(), 1.0, 1, 0, "5", "snmp")
-            );
+            ));
 
             when(validator.resolveAuthority(cert)).thenReturn(scope);
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
@@ -255,9 +257,9 @@ public class TelemetryPipelineIntegrationTest {
             X509Certificate cert = mock(X509Certificate.class);
             when(cert.getSubjectX500Principal()).thenReturn(new javax.security.auth.x500.X500Principal("CN=" + sensorId));
             TelemetryBatchRequest req = new TelemetryBatchRequest(1, sensorId, "ep-1", "b-12", 12, 12, "chk-12", List.of());
-            List<CanonicalObservation> obsList = List.of(
+            TelemetryObservationBatch obsList = TelemetryObservationBatch.ofNumeric(List.of(
                     new CanonicalObservation(tenantId.toString(), entityId.toString(), "metric", sensorId, Instant.now(), 1.0, 1, 0, "12", "snmp")
-            );
+            ));
 
             when(validator.resolveAuthority(cert)).thenReturn(scope);
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
@@ -293,9 +295,9 @@ public class TelemetryPipelineIntegrationTest {
             X509Certificate cert = mock(X509Certificate.class);
             when(cert.getSubjectX500Principal()).thenReturn(new javax.security.auth.x500.X500Principal("CN=" + sensorId));
             TelemetryBatchRequest req = new TelemetryBatchRequest(1, sensorId, "ep-1", "b-1", 1, 1, "chk-1", List.of());
-            List<CanonicalObservation> obsList = List.of(
+            TelemetryObservationBatch obsList = TelemetryObservationBatch.ofNumeric(List.of(
                     new CanonicalObservation(tenantId.toString(), entityId.toString(), "metric", sensorId, Instant.now(), 1.0, 1, 0, "1", "snmp")
-            );
+            ));
 
             when(validator.resolveAuthority(cert)).thenReturn(scope);
             when(validator.validateAndExtract(any(), eq(req), eq(scope))).thenReturn(obsList);
@@ -303,7 +305,7 @@ public class TelemetryPipelineIntegrationTest {
                     tenantId, sensorId, "ep-1", 1L, 1L, "chk-1", "b-1"))
                     .thenReturn(ReplayReservation.reserved(0L));
             doThrow(new IngestionException(HttpStatus.SERVICE_UNAVAILABLE, "ERR_KAFKA_PUBLISH_FAILED", "Broker connection failed"))
-                    .when(kafkaProducer).publishBatchTransactionally(anyList());
+                    .when(kafkaProducer).publishBatchTransactionally(any(TelemetryObservationBatch.class));
 
             IngestionException ex = assertThrows(IngestionException.class, () ->
                     service.ingestTelemetry("{}".getBytes(), req, "b-1", cert)
@@ -334,6 +336,60 @@ public class TelemetryPipelineIntegrationTest {
             verify(clickHouseClient, times(1)).insertNumericBatch(List.of(obs));
             verify(ack, times(1)).acknowledge();
             assertEquals(Status.UP, healthIndicator.health().getStatus());
+        }
+
+        @Test
+        @DisplayName("ClickHouse consumer writes exact Counter64 and commits Kafka offset")
+        void testClickHouseConsumerCounter64Success() throws Exception {
+            ClickHouseClient clickHouseClient = mock(ClickHouseClient.class);
+            IngestionMetrics metrics = new IngestionMetrics();
+            TelemetryConsumerHealthIndicator healthIndicator = new TelemetryConsumerHealthIndicator(metrics);
+            ClickHouseTelemetryConsumer consumer = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics);
+
+            Acknowledgment ack = mock(Acknowledgment.class);
+            CanonicalCounterObservation counter = new CanonicalCounterObservation(
+                    tenantId.toString(), entityId.toString(), ".1.3.6.1.2.1.31.1.1.1.6.1", sensorId,
+                    Instant.now(), new java.math.BigInteger("18446744073709551615"), 1, 0, "seq-c64", "snmp"
+            );
+            String jsonPayload = objectMapper.writeValueAsString(counter);
+            assertTrue(jsonPayload.contains("\"counterValue\":\"18446744073709551615\""));
+            ConsumerRecord<String, String> record = new ConsumerRecord<>(
+                    "platform.telemetry.canonical", 0, 101L, "seq-c64", jsonPayload);
+
+            consumer.consume(record, ack);
+
+            verify(clickHouseClient, times(1)).insertCounterBatch(List.of(counter));
+            verify(ack, times(1)).acknowledge();
+            assertEquals(Status.UP, healthIndicator.health().getStatus());
+        }
+
+        @Test
+        @DisplayName("ClickHouse consumer rejects ambiguous Counter64 payload without offset acknowledgment")
+        void testClickHouseConsumerCounter64AmbiguousValueNoAck() throws Exception {
+            ClickHouseClient clickHouseClient = mock(ClickHouseClient.class);
+            IngestionMetrics metrics = new IngestionMetrics();
+            ClickHouseTelemetryConsumer consumer = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics);
+
+            Acknowledgment ack = mock(Acknowledgment.class);
+            CanonicalCounterObservation counter = new CanonicalCounterObservation(
+                    tenantId.toString(), entityId.toString(), ".1.3.6.1.2.1.31.1.1.1.6.1", sensorId,
+                    Instant.now(), new java.math.BigInteger("9007199254740993"), 1, 0, "seq-c64-ambiguous", "snmp"
+            );
+            com.fasterxml.jackson.databind.node.ObjectNode root =
+                    (com.fasterxml.jackson.databind.node.ObjectNode) objectMapper.valueToTree(counter);
+            root.put("value", 1L);
+
+            ConsumerRecord<String, String> record = new ConsumerRecord<>(
+                    "platform.telemetry.canonical", 0, 102L, "seq-c64-ambiguous",
+                    objectMapper.writeValueAsString(root));
+
+            IngestionException ex = assertThrows(IngestionException.class, () ->
+                    consumer.consume(record, ack)
+            );
+
+            assertEquals("ERR_KAFKA_POISON_EVENT", ex.getCode());
+            verify(ack, never()).acknowledge();
+            verifyNoInteractions(clickHouseClient);
         }
 
         @Test

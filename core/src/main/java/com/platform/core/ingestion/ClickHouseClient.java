@@ -1,6 +1,7 @@
 package com.platform.core.ingestion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.core.ingestion.dto.CanonicalCounterObservation;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,27 +82,68 @@ public class ClickHouseClient {
             body.append(objectMapper.writeValueAsString(row)).append("\n");
         }
 
-        URI uri = URI.create(baseUrl + "/?query=INSERT+INTO+platform.metric_numeric_raw+FORMAT+JSONEachRow");
+        postInsert("platform.metric_numeric_raw", body.toString(), observations.size(), startTime);
+    }
+
+    /**
+     * Inserts exact Counter64 rows. The UInt64 value is sent as a decimal string so
+     * HTTP JSON cannot lose precision above 2^53.
+     */
+    public void insertCounterBatch(List<CanonicalCounterObservation> observations) throws Exception {
+        if (observations == null || observations.isEmpty()) {
+            return;
+        }
+
+        long startTime = System.currentTimeMillis();
+        StringBuilder body = new StringBuilder();
+        for (CanonicalCounterObservation obs : observations) {
+            Objects.requireNonNull(obs.tenantId(), "Counter observation tenantId must not be null");
+            Objects.requireNonNull(obs.entityId(), "Counter observation entityId must not be null");
+            Objects.requireNonNull(obs.metricId(), "Counter observation metricId must not be null");
+            Objects.requireNonNull(obs.sensorId(), "Counter observation sensorId must not be null");
+            Objects.requireNonNull(obs.timestamp(), "Counter observation timestamp must not be null");
+            Objects.requireNonNull(obs.sequenceId(), "Counter observation sequenceId must not be null");
+            Objects.requireNonNull(obs.sourceProtocol(), "Counter observation sourceProtocol must not be null");
+            Objects.requireNonNull(obs.counterValue(), "Counter observation counterValue must not be null");
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("tenant_id", obs.tenantId());
+            row.put("entity_id", obs.entityId());
+            row.put("metric_id", obs.metricId());
+            row.put("sensor_id", obs.sensorId());
+            row.put("ts", CH_TIMESTAMP_FORMAT.format(obs.timestamp()));
+            row.put("value", obs.counterValue());
+            row.put("quality", obs.quality());
+            row.put("flags", obs.flags());
+            row.put("sequence_id", obs.sequenceId());
+            row.put("source_protocol", obs.sourceProtocol());
+
+            body.append(objectMapper.writeValueAsString(row)).append("\n");
+        }
+
+        postInsert("platform.metric_counter_raw", body.toString(), observations.size(), startTime);
+    }
+
+    private void postInsert(String table, String jsonEachRowBody, int count, long startTime) throws Exception {
+        URI uri = URI.create(baseUrl + "/?query=INSERT+INTO+" + table + "+FORMAT+JSONEachRow");
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(uri)
                 .timeout(Duration.ofSeconds(10))
                 .header("Authorization", authHeader)
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonEachRowBody, StandardCharsets.UTF_8))
                 .build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
-            // ClickHouse response bodies can contain data-dependent diagnostics. Never propagate
-            // those bodies into application exceptions, health state, or Kafka framework logs.
             String failureCode = "CLICKHOUSE_HTTP_" + response.statusCode();
             metrics.recordClickHouseFailure(failureCode);
             throw new RuntimeException("ClickHouse insert failed with status " + response.statusCode());
         }
 
         long durationMs = System.currentTimeMillis() - startTime;
-        metrics.recordClickHouseInsert(observations.size(), durationMs);
-        log.debug("Successfully inserted {} observations into ClickHouse platform.metric_numeric_raw ({}ms)",
-                observations.size(), durationMs);
+        metrics.recordClickHouseInsert(count, durationMs);
+        log.debug("Successfully inserted {} observations into ClickHouse {} ({}ms)",
+                count, table, durationMs);
     }
 }

@@ -5,6 +5,7 @@ import com.platform.core.ingestion.authority.SensorAuthorityResolver;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.authority.TestSensorAuthorityResolver;
 import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.ingestion.dto.TelemetryAckResponse;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
 import com.platform.core.ingestion.replay.TelemetryWatermarkStore;
@@ -63,9 +64,9 @@ class SensorIngestionServiceTest {
         TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-1", 100, 105, "sum-123", List.of());
         byte[] rawBody = "{}".getBytes();
 
-        List<CanonicalObservation> observations = List.of(
+        TelemetryObservationBatch observations = TelemetryObservationBatch.ofNumeric(List.of(
                 new CanonicalObservation(tenantId.toString(), entityId.toString(), "cpu.util", "sensor-net-01", Instant.now(), 42.0, 1, 0, "105", "snmp")
-        );
+        ));
         when(validator.resolveAuthority(cert)).thenReturn(testScope);
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
@@ -81,9 +82,9 @@ class SensorIngestionServiceTest {
         TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-1", 100, 105, "sum-123", List.of());
         byte[] rawBody = "{}".getBytes();
 
-        List<CanonicalObservation> observations = List.of(
+        TelemetryObservationBatch observations = TelemetryObservationBatch.ofNumeric(List.of(
                 new CanonicalObservation(tenantId.toString(), entityId.toString(), "cpu.util", "sensor-net-01", Instant.now(), 42.0, 1, 0, "105", "snmp")
-        );
+        ));
         when(validator.resolveAuthority(cert)).thenReturn(testScope);
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
@@ -109,9 +110,9 @@ class SensorIngestionServiceTest {
         TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-1", 100, 105, "sum-123", List.of());
         byte[] rawBody = "{}".getBytes();
 
-        List<CanonicalObservation> observations = List.of(
+        TelemetryObservationBatch observations = TelemetryObservationBatch.ofNumeric(List.of(
                 new CanonicalObservation(tenantId.toString(), entityId.toString(), "cpu.util", "sensor-net-01", Instant.now(), 42.0, 1, 0, "105", "snmp")
-        );
+        ));
         when(validator.resolveAuthority(cert)).thenReturn(testScope);
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
@@ -127,7 +128,7 @@ class SensorIngestionServiceTest {
         assertEquals("sensor-net-01", ack.sensorIdentity());
 
         // Exact accepted replay does not republish and does not finalize again.
-        verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
         verify(watermarkStore, never()).finalizeReservedBatch(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
     }
@@ -138,9 +139,9 @@ class SensorIngestionServiceTest {
         TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-1", 100, 105, "sum-DIFFERENT", List.of());
         byte[] rawBody = "{}".getBytes();
 
-        List<CanonicalObservation> observations = List.of(
+        TelemetryObservationBatch observations = TelemetryObservationBatch.ofNumeric(List.of(
                 new CanonicalObservation(tenantId.toString(), entityId.toString(), "cpu.util", "sensor-net-01", Instant.now(), 42.0, 1, 0, "105", "snmp")
-        );
+        ));
         when(validator.resolveAuthority(cert)).thenReturn(testScope);
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
@@ -155,7 +156,7 @@ class SensorIngestionServiceTest {
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         assertEquals("ERR_IDEMPOTENCY_CONFLICT", ex.getCode());
 
-        verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
     }
 
     @Test
@@ -165,9 +166,9 @@ class SensorIngestionServiceTest {
         TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-old", 95, 99, "sum-old", List.of());
         byte[] rawBody = "{}".getBytes();
 
-        List<CanonicalObservation> observations = List.of(
+        TelemetryObservationBatch observations = TelemetryObservationBatch.ofNumeric(List.of(
                 new CanonicalObservation(tenantId.toString(), entityId.toString(), "cpu.util", "sensor-net-01", Instant.now(), 42.0, 1, 0, "99", "snmp")
-        );
+        ));
         when(validator.resolveAuthority(cert)).thenReturn(testScope);
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
@@ -181,7 +182,7 @@ class SensorIngestionServiceTest {
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         assertEquals("ERR_SEQUENCE_REGRESSION", ex.getCode());
 
-        verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
     }
 
     @Test
@@ -191,9 +192,9 @@ class SensorIngestionServiceTest {
         TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-gap", 120, 125, "sum-gap", List.of());
         byte[] rawBody = "{}".getBytes();
 
-        List<CanonicalObservation> observations = List.of(
+        TelemetryObservationBatch observations = TelemetryObservationBatch.ofNumeric(List.of(
                 new CanonicalObservation(tenantId.toString(), entityId.toString(), "cpu.util", "sensor-net-01", Instant.now(), 42.0, 1, 0, "125", "snmp")
-        );
+        ));
         when(validator.resolveAuthority(cert)).thenReturn(testScope);
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
@@ -207,7 +208,7 @@ class SensorIngestionServiceTest {
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         assertEquals("ERR_SEQUENCE_GAP", ex.getCode());
 
-        verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
     }
 
     @Test
@@ -218,12 +219,12 @@ class SensorIngestionServiceTest {
                 1, 1, "sum-stream-change", List.of());
         byte[] rawBody = "{}".getBytes();
 
-        List<CanonicalObservation> observations = List.of(
+        TelemetryObservationBatch observations = TelemetryObservationBatch.ofNumeric(List.of(
                 new CanonicalObservation(
                         tenantId.toString(), entityId.toString(), "cpu.util",
                         "sensor-net-01", Instant.now(), 42.0, 1, 0,
                         "stream-new:1", "snmp")
-        );
+        ));
         when(validator.resolveAuthority(cert)).thenReturn(testScope);
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
         when(watermarkStore.reserveBatch(
@@ -238,7 +239,7 @@ class SensorIngestionServiceTest {
 
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         assertEquals("ERR_SENSOR_STREAM_CHANGED", ex.getCode());
-        verify(kafkaProducer, never()).publishBatchTransactionally(anyList());
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
         verify(watermarkStore, never()).finalizeReservedBatch(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
     }
@@ -249,9 +250,9 @@ class SensorIngestionServiceTest {
         TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-2", 1, 1, "sum-fail", List.of());
         byte[] rawBody = "{}".getBytes();
 
-        List<CanonicalObservation> observations = List.of(
+        TelemetryObservationBatch observations = TelemetryObservationBatch.ofNumeric(List.of(
                 new CanonicalObservation(tenantId.toString(), entityId.toString(), "cpu.util", "sensor-net-01", Instant.now(), 42.0, 1, 0, "1", "snmp")
-        );
+        ));
         when(validator.resolveAuthority(cert)).thenReturn(testScope);
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
@@ -277,9 +278,9 @@ class SensorIngestionServiceTest {
         TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-fault", 100, 105, "sum-fault", List.of());
         byte[] rawBody = "{}".getBytes();
 
-        List<CanonicalObservation> observations = List.of(
+        TelemetryObservationBatch observations = TelemetryObservationBatch.ofNumeric(List.of(
                 new CanonicalObservation(tenantId.toString(), entityId.toString(), "cpu.util", "sensor-net-01", Instant.now(), 42.0, 1, 0, "105", "snmp")
-        );
+        ));
         when(validator.resolveAuthority(cert)).thenReturn(testScope);
         when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
 
@@ -357,7 +358,7 @@ class SensorIngestionServiceTest {
         assertEquals("ERR_NON_NUMERIC_RECORD", ex.getCode());
 
         // Prove 8: No Kafka publication
-        verify(kafkaProducer, never()).publishBatchTransactionally(any());
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
         // Prove 9: invalid source data never reaches durable replay reservation/finalization.
         verify(watermarkStore, never()).reserveBatch(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());

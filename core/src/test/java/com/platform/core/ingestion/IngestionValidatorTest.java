@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.authority.FailClosedSensorAuthorityResolver;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.authority.TestSensorAuthorityResolver;
+import com.platform.core.ingestion.dto.CanonicalCounterObservation;
 import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
+import java.math.BigInteger;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -164,8 +167,8 @@ class IngestionValidatorTest {
     }
 
     @Test
-    void testCounter64PrecisionExceededRejected() throws Exception {
-        // 2^64 - 1 exceeds float64 exact representable precision (2^53 - 1)
+    void testCounter64ExactMaxPreserved() throws Exception {
+        // Full UInt64 max must be preserved exactly as Counter64.
         String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
                 "\"tenantId\":\"" + tenantId + "\"," +
                 "\"entityId\":\"" + entityId + "\"," +
@@ -182,10 +185,10 @@ class IngestionValidatorTest {
                 + sb + "\",\"records\":[" + recordJson + "]}";
         TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
 
-        IngestionException ex = assertThrows(IngestionException.class, () ->
-                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
-        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
-        assertEquals("ERR_NUMERIC_PRECISION_EXCEEDED", ex.getCode());
+        TelemetryObservationBatch batch = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
+        assertEquals(0, batch.numericObservations().size());
+        assertEquals(1, batch.counterObservations().size());
+        assertEquals("18446744073709551615", batch.counterObservations().get(0).counterValue());
     }
 
     @Test
@@ -232,11 +235,11 @@ class IngestionValidatorTest {
                 + sb + "\",\"records\":[" + recordJson + "]}";
         TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
 
-        List<CanonicalObservation> obs = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
+        TelemetryObservationBatch obsBatch = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
 
-        assertNotNull(obs);
-        assertEquals(1, obs.size());
-        CanonicalObservation first = obs.get(0);
+        assertNotNull(obsBatch);
+        assertEquals(1, obsBatch.numericObservations().size());
+        CanonicalObservation first = obsBatch.numericObservations().get(0);
         assertEquals(tenantId.toString(), first.tenantId());
         assertEquals(entityId.toString(), first.entityId());
         assertEquals(".1.3.6.1.2.1.1.3.0", first.metricId());
@@ -280,16 +283,16 @@ class IngestionValidatorTest {
         TelemetryBatchRequest restartRequest = objectMapper.readValue(processRestartRetryJson, TelemetryBatchRequest.class);
         TelemetryBatchRequest recreatedRequest = objectMapper.readValue(recreatedSpoolJson, TelemetryBatchRequest.class);
 
-        List<CanonicalObservation> first = validator.validateAndExtract(
+        TelemetryObservationBatch first = validator.validateAndExtract(
                 firstJson.getBytes(StandardCharsets.UTF_8), firstRequest, testScope);
-        List<CanonicalObservation> retry = validator.validateAndExtract(
+        TelemetryObservationBatch retry = validator.validateAndExtract(
                 processRestartRetryJson.getBytes(StandardCharsets.UTF_8), restartRequest, testScope);
-        List<CanonicalObservation> recreated = validator.validateAndExtract(
+        TelemetryObservationBatch recreated = validator.validateAndExtract(
                 recreatedSpoolJson.getBytes(StandardCharsets.UTF_8), recreatedRequest, testScope);
 
-        assertEquals(first.get(0).sequenceId(), retry.get(0).sequenceId(),
+        assertEquals(first.numericObservations().get(0).sequenceId(), retry.numericObservations().get(0).sequenceId(),
                 "Sensor process restart must retain the durable spool generation identity");
-        assertNotEquals(first.get(0).sequenceId(), recreated.get(0).sequenceId(),
+        assertNotEquals(first.numericObservations().get(0).sequenceId(), recreated.numericObservations().get(0).sequenceId(),
                 "a recreated spool generation must not collide with historical sequence identity");
     }
 
@@ -391,10 +394,10 @@ class IngestionValidatorTest {
                 + sb + "\",\"records\":[" + rec2 + "," + rec1 + "]}";
         TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
 
-        List<CanonicalObservation> obs = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
-        assertEquals(2, obs.size());
-        assertEquals(10.0, obs.get(0).value());
-        assertEquals(20.0, obs.get(1).value());
+        TelemetryObservationBatch obs = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
+        assertEquals(2, obs.numericObservations().size());
+        assertEquals(10.0, obs.numericObservations().get(0).value());
+        assertEquals(20.0, obs.numericObservations().get(1).value());
     }
 
     @Test
@@ -658,11 +661,11 @@ class IngestionValidatorTest {
                 + sb + "\",\"records\":[" + recordJson + "]}";
         TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
 
-        List<CanonicalObservation> obs = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
+        TelemetryObservationBatch obs = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
         assertNotNull(obs);
-        assertEquals(1, obs.size());
-        assertEquals(12345.0, obs.get(0).value());
-        assertEquals(".1.3.6.1.2.1.1.3.0", obs.get(0).metricId());
+        assertEquals(1, obs.numericObservations().size());
+        assertEquals(12345.0, obs.numericObservations().get(0).value());
+        assertEquals(".1.3.6.1.2.1.1.3.0", obs.numericObservations().get(0).metricId());
     }
 
     @Test
@@ -687,20 +690,134 @@ class IngestionValidatorTest {
                 + sb + "\",\"records\":[" + recordJson + "]}";
         TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
 
-        List<CanonicalObservation> obs = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
+        TelemetryObservationBatch obs = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
         assertNotNull(obs);
+        assertEquals(2, obs.numericObservations().size());
+        assertEquals(1, obs.counterObservations().size());
         assertEquals(3, obs.size());
 
-        assertEquals(".1.3.6.1.2.1.1.3.0", obs.get(0).metricId());
-        assertEquals(12345.0, obs.get(0).value());
-        assertTrue(obs.get(0).sequenceId().endsWith(":0:.1.3.6.1.2.1.1.3.0"));
+        assertEquals(".1.3.6.1.2.1.1.3.0", obs.numericObservations().get(0).metricId());
+        assertEquals(12345.0, obs.numericObservations().get(0).value());
+        assertTrue(obs.numericObservations().get(0).sequenceId().endsWith(":0:.1.3.6.1.2.1.1.3.0"));
 
-        assertEquals(".1.3.6.1.2.1.2.2.1.10.1", obs.get(1).metricId());
-        assertEquals(42.0, obs.get(1).value());
-        assertTrue(obs.get(1).sequenceId().endsWith(":1:.1.3.6.1.2.1.2.2.1.10.1"));
+        assertEquals(".1.3.6.1.2.1.2.2.1.10.1", obs.numericObservations().get(1).metricId());
+        assertEquals(42.0, obs.numericObservations().get(1).value());
+        assertTrue(obs.numericObservations().get(1).sequenceId().endsWith(":1:.1.3.6.1.2.1.2.2.1.10.1"));
 
-        assertEquals(".1.3.6.1.2.1.31.1.1.1.10.1", obs.get(2).metricId());
-        assertEquals(99999999.0, obs.get(2).value());
-        assertTrue(obs.get(2).sequenceId().endsWith(":2:.1.3.6.1.2.1.31.1.1.1.10.1"));
+        assertEquals(".1.3.6.1.2.1.31.1.1.1.10.1", obs.counterObservations().get(0).metricId());
+        assertEquals("99999999", obs.counterObservations().get(0).counterValue());
+        assertTrue(obs.counterObservations().get(0).sequenceId().endsWith(":2:.1.3.6.1.2.1.31.1.1.1.10.1"));
+    }
+
+    @Test
+    void testCounter64ValidBoundaryValuesExact() throws Exception {
+        String[] values = {
+                "0", "1", "9007199254740991", "9007199254740992", "9007199254740993",
+                "9223372036854775807", "9223372036854775808", "18446744073709551614", "18446744073709551615"
+        };
+        for (String value : values) {
+            String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                    "\"tenantId\":\"" + tenantId + "\"," +
+                    "\"entityId\":\"" + entityId + "\"," +
+                    "\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                    "\"protocol\":\"SNMP\"," +
+                    "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.31.1.1.1.6.1\",\"status\":\"VALUE\",\"value\":{\"counter64\":\"" + value + "\"}}]}}}";
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) sb.append(String.format("%02x", b));
+            String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-" + value + "\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                    + sb + "\",\"records\":[" + recordJson + "]}";
+            TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+            TelemetryObservationBatch batch = validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope);
+            assertEquals(1, batch.counterObservations().size(), "value=" + value);
+            assertEquals(value, batch.counterObservations().get(0).counterValue());
+            assertEquals(new BigInteger(value), batch.counterObservations().get(0).exactValue());
+        }
+    }
+
+    @Test
+    void testCounter64InvalidBoundariesRejected() throws Exception {
+        String[] invalid = {"-1", "+1", " 1", "1 ", "18446744073709551616", "abc", "1.5", "1e19", ""};
+        for (String value : invalid) {
+            String counterJson = value.isEmpty() ? "\"\"" : "\"" + value + "\"";
+            String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                    "\"tenantId\":\"" + tenantId + "\"," +
+                    "\"entityId\":\"" + entityId + "\"," +
+                    "\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                    "\"protocol\":\"SNMP\"," +
+                    "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.31.1.1.1.6.1\",\"status\":\"VALUE\",\"value\":{\"counter64\":" + counterJson + "}}]}}}";
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) sb.append(String.format("%02x", b));
+            String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-bad\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                    + sb + "\",\"records\":[" + recordJson + "]}";
+            TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+            IngestionException ex = assertThrows(IngestionException.class, () ->
+                    validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope),
+                    "expected reject for " + value);
+            assertEquals("ERR_MALFORMED_COUNTER64", ex.getCode(), "value=" + value);
+        }
+    }
+
+    @Test
+    void testCounter64KindMismatchRejected() throws Exception {
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\"," +
+                "\"entityId\":\"" + entityId + "\"," +
+                "\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\"," +
+                "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.31.1.1.1.6.1\",\"status\":\"VALUE\",\"value\":{\"kind\":\"INTEGER\",\"counter64\":\"9007199254740993\"}}]}}}";
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-kind\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals("ERR_VALUE_KIND_MISMATCH", ex.getCode());
+    }
+
+    @Test
+    void testCounter64MultipleNumericFieldsRejected() throws Exception {
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\"," +
+                "\"entityId\":\"" + entityId + "\"," +
+                "\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\"," +
+                "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.31.1.1.1.6.1\",\"status\":\"VALUE\",\"value\":{\"kind\":\"COUNTER64\",\"integer\":1,\"counter64\":\"2\"}}]}}}";
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-ambiguous\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals("ERR_AMBIGUOUS_NUMERIC_VALUE", ex.getCode());
+    }
+
+    @Test
+    void testCounter64JsonNumberRejected() throws Exception {
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\"," +
+                "\"entityId\":\"" + entityId + "\"," +
+                "\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\"," +
+                "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.31.1.1.1.6.1\",\"status\":\"VALUE\",\"value\":{\"counter64\":18446744073709551615}}]}}}";
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-num\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals("ERR_COUNTER64_JSON_NUMBER", ex.getCode());
     }
 }

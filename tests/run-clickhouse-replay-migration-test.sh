@@ -65,8 +65,22 @@ SQL
 
 run_migration() {
   docker rm -f "$MIGRATOR" >/dev/null 2>&1 || true
-  docker run --rm     --name "$MIGRATOR"     --network "$NETWORK"     -e CLICKHOUSE_HOST="$SERVER"     -e CLICKHOUSE_NATIVE_PORT=9000     -e CLICKHOUSE_DB=platform     -e CLICKHOUSE_USER="$USER"     -e CLICKHOUSE_PASSWORD="$PASSWORD"     -v "$ROOT_DIR/deploy/docker/clickhouse/migrations:/migrations:ro"     --entrypoint /bin/bash     "$CH_IMAGE"     /migrations/V002__metric_numeric_replay_identity.sh
+  docker run --rm     --name "$MIGRATOR"     --network "$NETWORK"     -e CLICKHOUSE_HOST="$SERVER"     -e CLICKHOUSE_NATIVE_PORT=9000     -e CLICKHOUSE_DB=platform     -e CLICKHOUSE_USER="$USER"     -e CLICKHOUSE_PASSWORD="$PASSWORD"     -v "$ROOT_DIR/deploy/docker/clickhouse/migrations:/migrations:ro"     --entrypoint /bin/bash     "$CH_IMAGE"     /migrations/run-all.sh
 }
+
+run_v003_only() {
+  docker rm -f "$MIGRATOR" >/dev/null 2>&1 || true
+  docker run --rm     --name "$MIGRATOR"     --network "$NETWORK"     -e CLICKHOUSE_HOST="$SERVER"     -e CLICKHOUSE_NATIVE_PORT=9000     -e CLICKHOUSE_DB=platform     -e CLICKHOUSE_USER="$USER"     -e CLICKHOUSE_PASSWORD="$PASSWORD"     -v "$ROOT_DIR/deploy/docker/clickhouse/migrations:/migrations:ro"     --entrypoint /bin/bash     "$CH_IMAGE"     /migrations/V003__metric_counter_exact_uint64.sh
+}
+
+assert_counter_target() {
+  [[ "$(ch "SELECT engine FROM system.tables WHERE database='platform' AND name='metric_counter_raw' FORMAT TSV")" == "ReplacingMergeTree" ]]     || fail "metric_counter_raw is not ReplacingMergeTree"
+  [[ "$(ch "SELECT type FROM system.columns WHERE database='platform' AND table='metric_counter_raw' AND name='value' FORMAT TSV")" == "UInt64" ]]     || fail "metric_counter_raw.value is not UInt64"
+  [[ "$(ch "SELECT engine FROM system.tables WHERE database='platform' AND name='metric_counter' FORMAT TSV")" == "View" ]]     || fail "metric_counter is not canonical View"
+  ddl="$(ch "SELECT create_table_query FROM system.tables WHERE database='platform' AND name='metric_counter' FORMAT TSV")"
+  [[ "$ddl" == *"metric_counter_raw FINAL"* ]] || fail "canonical metric_counter view does not use FINAL"
+}
+
 
 assert_target() {
   [[ "$(ch "SELECT engine FROM system.tables WHERE database='platform' AND name='metric_numeric_raw' FORMAT TSV")" == "ReplacingMergeTree" ]]     || fail "metric_numeric_raw is not ReplacingMergeTree"
@@ -173,5 +187,42 @@ run_migration
 assert_target
 [[ "$(ch "SELECT count() FROM metric_numeric WHERE metric_id LIKE 'recovery.%'")" == "2" ]] || fail "partial-cutover recovery did not restore both legacy rows"
 [[ "$(ch "SELECT count() FROM system.tables WHERE database='platform' AND name='metric_numeric_v002_legacy'")" == "0" ]] || fail "legacy backup remained after verified recovery"
+
+log "verify exact Counter64 schema + UInt64 round-trip + replay collapse"
+assert_counter_target
+SEQ_C64="tenant-c64:sensor-c64:stream-c64:1:0:ifHCInOctets"
+TS_C64="2026-09-21 04:00:00.000"
+ch "INSERT INTO metric_counter_raw (tenant_id, entity_id, metric_id, sensor_id, ts, value, quality, flags, sequence_id, source_protocol) VALUES
+('t1','e1','ifHCInOctets','s1', '${TS_C64}', 9007199254740993, 1, 0, '${SEQ_C64}', 'snmp'),
+('t1','e1','ifHCInOctets','s1', '${TS_C64}', 9223372036854775808, 1, 0, '${SEQ_C64}-b', 'snmp'),
+('t1','e1','ifHCInOctets','s1', '${TS_C64}', 18446744073709551615, 1, 0, '${SEQ_C64}-c', 'snmp')"
+[[ "$(ch "SELECT value FROM metric_counter WHERE sequence_id='${SEQ_C64}' FORMAT TSV")" == "9007199254740993" ]] \
+  || fail "Counter64 >2^53 not exact"
+[[ "$(ch "SELECT value FROM metric_counter WHERE sequence_id='${SEQ_C64}-b' FORMAT TSV")" == "9223372036854775808" ]] \
+  || fail "Counter64 >Long.MAX_VALUE not exact"
+[[ "$(ch "SELECT value FROM metric_counter WHERE sequence_id='${SEQ_C64}-c' FORMAT TSV")" == "18446744073709551615" ]] \
+  || fail "Counter64 UInt64 max not exact"
+
+# Duplicate physical replay of max value; canonical view collapses to one.
+# Identical ORDER BY key (including ts) is required for ReplacingMergeTree + FINAL.
+ch "INSERT INTO metric_counter_raw (tenant_id, entity_id, metric_id, sensor_id, ts, value, quality, flags, sequence_id, source_protocol) VALUES
+('t1','e1','ifHCInOctets','s1', '${TS_C64}', 18446744073709551615, 1, 0, '${SEQ_C64}-c', 'snmp')"
+[[ "$(ch "SELECT count() FROM metric_counter_raw WHERE sequence_id='${SEQ_C64}-c'")" == "2" ]] \
+  || fail "expected two physical Counter64 replay rows"
+[[ "$(ch "SELECT count() FROM metric_counter WHERE sequence_id='${SEQ_C64}-c'")" == "1" ]] \
+  || fail "canonical Counter64 view did not collapse replay"
+
+log "restart ClickHouse and verify Counter64 canonical read survives"
+docker restart "$SERVER" >/dev/null
+wait_ch
+assert_counter_target
+[[ "$(ch "SELECT value FROM metric_counter WHERE sequence_id='${SEQ_C64}-c' FORMAT TSV")" == "18446744073709551615" ]] \
+  || fail "Counter64 exact value lost after restart"
+[[ "$(ch "SELECT count() FROM metric_counter WHERE sequence_id='${SEQ_C64}-c'")" == "1" ]] \
+  || fail "Counter64 canonical collapse lost after restart"
+
+log "rerun V003 idempotently"
+run_v003_only
+assert_counter_target
 
 log "PASS"
