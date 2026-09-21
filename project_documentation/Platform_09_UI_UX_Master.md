@@ -7024,3 +7024,36 @@ Required UI behavior:
 - audit trail.
 
 Capability Pack / dimensional-certification operator views, when later specified, are supplements governed by `Platform_23` and must not be invented as a parallel screen catalogue here.
+
+## 10. v3.2.2 RCA and regional Sensor administration amendment — 2026-09-21
+
+### 10.1 RCA / Investigation progressive disclosure
+
+Normative owner: `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`.
+
+The existing RCA/Incident/Investigation surfaces shall present, in progressive disclosure order:
+
+1. current conclusion or `INCONCLUSIVE`;
+2. severity separately from causal trust/confidence;
+3. first causal evidence separately from first alert;
+4. blast radius / affected services;
+5. supporting evidence;
+6. contradictory and missing evidence;
+7. rejected/superseded hypotheses with reason;
+8. timeline, relevant changes and topology/causal graph;
+9. correlated child alerts/evidence;
+10. recovery validation;
+11. Similar Incident / Flight Recorder references where available;
+12. authorized next diagnostic/runbook/remediation proposal.
+
+Prior RCA revisions remain accessible from history; a later machine conclusion must not silently replace the reasoning visible for an earlier revision.
+
+### 10.2 Region / Sensor Pool administration
+
+Normative owner: `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`.
+
+Administration → Sensors/Pools shall expose optional customer-defined Region, Site, Sensor Pool and Sensor placement context. Region names are customer-defined and are not fixed geography enums.
+
+Pool views show at minimum scope, role/capability eligibility, health, capacity/headroom, failure-domain/placement policy, members, assignment counts and degraded/maintenance state. Reassignment/drain actions display generation/state and remain server-authorized/audited.
+
+Sensor/Agent enrollment UX shows token/authority expiry and resulting certificate/assignment state but never private keys or reusable secrets. DNS or IP/VIP bootstrap errors surface trust/SAN mismatch explicitly; the UI must not offer “disable certificate verification” or plaintext Platform transport as a production workaround.
