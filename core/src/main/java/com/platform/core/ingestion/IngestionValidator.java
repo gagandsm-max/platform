@@ -609,7 +609,7 @@ public class IngestionValidator {
                                             + " Counter64 must be a decimal string, not a JSON Number"
                             );
                         }
-                        String c64Str = c64Node.asText().trim();
+                        String c64Str = c64Node.asText();
                         if (c64Str.isEmpty()) {
                             throw new IngestionException(
                                     HttpStatus.BAD_REQUEST,
