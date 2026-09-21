@@ -138,6 +138,9 @@ Core-01 runs the complete Core stack. Sensors are separate installs and remain r
 
 ### 4.2 Two-node HA deployment
 
+**Status:** SPECIFIED / **P0** / **NOT PRODUCTION CERTIFIED**. Exactly two full Core nodes Active/Standby remains fixed architecture and must not be downgraded to P1. Unresolved P0 work includes active authority/fencing, service fencing generation, Kafka consumer ownership, PostgreSQL replication/failover/fencing/rewind, ClickHouse replication/promotion/fencing, stable Core endpoint/VIP, Sensor reconnect/re-anchor, Sensor assignment ownership/lease/fencing, push-protocol continuity, split-brain failure behavior, RPO/RTO, failover under load and backlog replay. Exact mechanism selection is a dedicated P0 engineering spike constrained by exactly two Core nodes, no silent split-brain, minimal operational complexity and no unnecessary third full Core. This baseline does **not** select Patroni, repmgr, ClickHouse Keeper, Raft, Consul, etcd or a third coordination service.
+
+
 ```mermaid
 flowchart TB
     USERS[Users / Agents / Sensors] --> VIP[Stable Core HA Endpoint / VIP]
@@ -288,6 +291,9 @@ This is an explicit technical risk area and requires failure testing before GA.
 ## 8. Sensor architecture
 
 ### 8.1 Sensor runtime
+
+Production Sensor deployment-role direction: standard `NETWORK`, `INFRASTRUCTURE`, `FLOW`, `LOG`; conditional dedicated `SYNTHETIC` / `CLOUD_API`; `COMBINED` for lab/dev/small deployments unless separately certified. Current runtime `STREAMING_EVENT` is an implementation/general streaming role requiring **IMPLEMENTATION RECONCILIATION** toward explicit FLOW/LOG product roles. One Universal Sensor codebase.
+
 
 Recommended language: Go.
 
@@ -472,7 +478,9 @@ SNMP does not normalize into a numeric-only pipe. Varbinds and notifications may
 - operational events/traps;
 - collection-quality/exception evidence.
 
-Raw `Counter32`/`Counter64` identity and exact integer value are preserved before delta/rate derivation. A floating-point rate is a **derived metric**, not a substitute for the authoritative raw counter. Counter wrap/reset/discontinuity uses source type, prior sample, elapsed time, `sysUpTime`, `ifCounterDiscontinuityTime` or equivalent evidence where available.
+Raw `Counter32`/`Counter64` identity and exact integer value are preserved before delta/rate derivation. A floating-point rate is a **derived metric**, not a substitute for the authoritative raw counter. Counter wrap/reset/discontinuity uses source type, prior sample, elapsed time, `sysUpTime`, `ifCounterDiscontinuityTime` or equivalent evidence where available. A decrease is **not** automatically treated as `2^64` wrap; discontinuity/reboot/interface-recreation/source evidence is evaluated first and wrap is inferred only where protocol/quality evidence permits.
+
+**Implementation truth (current main):** Sensor can encode exact Counter64; Core ordinary numeric canonical path still uses floating-point; unsafe Counter64 above IEEE-754 exact-integer range is rejected rather than silently rounded. Exact Counter64 is therefore **SPECIFIED** but **NOT END-TO-END IMPLEMENTED/CERTIFIED** (P0). Future Core representation must preserve full unsigned 64-bit truth (not Java signed `long` alone); wire/Kafka/JSON must not rely on JSON/JavaScript Number for raw Counter64; ClickHouse raw counters should use `UInt64` or equivalent. Dedicated Kafka topic remains optional if a typed existing contract proves equivalent correctness. No new datastore.
 
 Interface identity is canonical and temporal. `ifIndex` is an observation/index, not permanent identity; reconciliation uses stable evidence such as ifName, ifDescr, ifAlias, MAC, entPhysical/slot-port and Device Pack rules so history survives legitimate index renumbering.
 
@@ -979,6 +987,50 @@ Architecture is accepted for implementation only when engineering plans explicit
 ---
 
 ## 32. Explicit architecture TBDs
+
+
+
+## 35A. Display timezone architecture — v3.2.2 handoff
+
+Authoritative system/event/telemetry/audit/RCA/replay/ingestion-ordering instants remain absolute UTC. Storage and M2M contracts use UTC-capable RFC3339/ISO-8601. Interactive UI display resolves an effective IANA zone:
+
+```text
+explicit dashboard/view/session override
+→ saved user display_timezone preference
+→ browser/device local IANA timezone
+→ tenant.timezone
+→ UTC
+```
+
+Operational policy timezones (maintenance, SLA/business calendar, scheduled-report execution, business-hours) are separate fields. Display preference never rewrites them. Host OS timezone of Core/Sensor/Agent is not product authority.
+
+## 35B. Generic recurring scheduling / freshness architecture — v3.2.2 handoff
+
+No scheduler microservice. Core owns desired schedule/policy, placement, recurring assignment and generation/fencing. Sensor executes currently authorized work and retains durable recurring desired-state for temporary Core outage/failover.
+
+Do not conflate Monitor Group, Scheduling Class and Execution Class. Recurring definitions require cadence **and** freshness. Deterministic versionable 64-bit phase spreading uses stable inputs (tenant/assignment/entity/monitor definition) and must not make Sensor identity dominant. Admission order: priority/scheduling class → freshness urgency → fairness → cost/capacity. Bound concurrency; coalesce/skip missed cycles with quality evidence; never invent historical samples.
+
+Failure-domain backoff, resource-pressure deferral and recovery ramp (liveness → critical → operational → detail → topology → inventory) are mandatory. Adaptive/event refresh is bounded by min interval, duration, cooldown, max targets, capacity, tenant policy, audit reason and automatic reversion. Agent local gauge sampling (~30–60s) may forward governed lower-rate summaries; never average raw monotonic counters.
+
+Capability Pack contracts carry applicable cadence/freshness/cost semantics. Self-monitoring must expose scheduler, queue depth, freshness debt, ingestion lag, dropped telemetry, replay state, spool, Kafka, PostgreSQL, ClickHouse, resource pressure, dependency health, integration forwarding and Flow/Log health coherently in Administration/Health UI without inventing a new monitoring database.
+
+## 35C. Closed-domain architecture ownership — no new specialized master
+
+Flow/NTA strengthens Network/Flow contracts under existing `REQ-NET-004` authority. Log/SIEM strengthens syslog/OTLP/application/OS/container/cloud/custom governed log contracts under existing network/integration/data owners; Platform is not a full SIEM replacement and does not mandate Elasticsearch/OpenSearch/Loki. Cloud/full-stack strengthens `REQ-INF-008..010` (AWS/Azure/GCP/OCI roots). Extensibility/API Studio/Webhook strengthens `REQ-EXT-001..007` under the single Capability Pack architecture. ITSM/Automation strengthens `REQ-INT-001..005`. **SPECIALIZED MASTER NOT REQUIRED AT THIS BASELINE** for these domains; `Platform_23` remains the highest specialized master.
+
+## 35D. Telemetry durability architecture note — PR #81
+
+Canonical Sensor telemetry durability:
+
+```text
+durable spool stream identity
+→ PostgreSQL pending reservation
+→ Kafka transactional publish
+→ PostgreSQL finalize
+→ Sensor ACK
+```
+
+At-least-once. Concurrent pending-reservation HTTP retries may amplify Kafka republish (P1 hardening). PR #59 insert-token/dedupe-window correctness is superseded; bounded Kafka→ClickHouse micro-batching remains future P1 performance work after benchmark.
 
 1. Exact two-Core Kafka failover implementation and acceptance model.
 2. Exact two-Core ClickHouse synchronization/failover implementation.

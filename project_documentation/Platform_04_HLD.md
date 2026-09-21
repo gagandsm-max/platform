@@ -1292,3 +1292,13 @@ Core owns:
 ### 36.4 Local/private inference provider boundary
 
 **If** AI Gateway targets a separate local/private inference provider, that mode is an optional/conditional inference boundary only: no scheduling authority, no HA quorum role, no direct telemetry ingestion authority and no durable control-plane ownership. It is not required for EDS or base monitoring. All-AI-disabled remains supported.
+
+
+## 34A. Display timezone / scheduling / role ownership — v3.2.2 handoff
+
+- **UI shell / preferences:** owns interactive timezone indicator, IANA picker, Local/Tenant Default/UTC shortcuts, saved `display_timezone`, session/view override and report timezone disclosure (`Platform_09`).
+- **Core control plane:** owns schedule/policy desired-state, placement, assignment generation/fencing, tenant timezone fallback and user preference persistence APIs.
+- **Sensor runtime/scheduler:** owns execution of authorized recurring work, durable local desired-state, deterministic due-time evaluation, admission/backoff/recovery behavior and role-capability gating (`NETWORK`/`INFRASTRUCTURE`/`FLOW`/`LOG` product direction; runtime `STREAMING_EVENT` reconciliation required).
+- **Capability Pack:** owns monitor cadence/freshness/cost declarations consumed by the scheduler.
+- **Integrations:** own ITSM/webhook delivery queues separately from API Studio monitoring collection.
+- **HA/fencing:** Active/Standby ownership remains P0 uncertified; no third coordination service selected here.

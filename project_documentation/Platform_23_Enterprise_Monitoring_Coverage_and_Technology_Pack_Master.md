@@ -598,3 +598,7 @@ The v1 exactly-two-Core Active/Standby topology remains a current fixed Mother R
 ## 27. Implementation-status disclaimer
 
 At creation, this document is EMC-0 requirements/architecture authority only. It does not assert that any `PRD-EMC-*` or `REQ-EMC-*` capability has been implemented, benchmarked, pack-certified, customer-certified or released. Implementation status must be established from exact source, executable tests, CI/runtime evidence, pack certification evidence and release records.
+
+## Final handoff baseline note — 2026-09-21
+
+`Platform_23` remains the highest specialized Mother Reference. The 2026-09-21 architecture review determined **SPECIALIZED MASTER NOT REQUIRED AT THIS BASELINE** for Flow, Logs, Cloud, Extensibility or ITSM; those domains strengthen existing owners. Capability Pack remains the single extension architecture. Dimensional certification and `SPECIFIED != IMPLEMENTED != CERTIFIED` classification remain mandatory.

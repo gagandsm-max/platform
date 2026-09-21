@@ -94,8 +94,8 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | REQ-NET-001 | SNMP v1/v2c/v3 with customer-configurable auth/privacy/security protocols | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-002 | ICMP/traceroute/TCP/DNS/TLS/HTTP probes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-NET-003 | SNMP traps/informs and syslog | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-NET-004 | NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-NET-003 | SNMP traps/informs and syslog; durable log routing/forwarding health, redaction and SIEM-outage isolation from base monitoring | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-NET-004 | NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow with exporter/tenant authority, template/sampling/sequence evidence, enrichment provenance, privacy/RBAC and Flow≠traffic/down semantics | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-005 | NETCONF/RESTCONF/gNMI/gRPC/streaming | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-006 | SSH/CLI; Telnet legacy disabled by default and audited | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-NET-007 | CDP/LLDP/ARP/FDB discovery/topology | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -113,7 +113,7 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | REQ-SNMP-001 | Typed SNMP numeric/counter/state/inventory/topology/quality evidence | — | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-SNMP-002 | Exact Counter32/Counter64 preservation; no Float64 precision loss before derivation | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SNMP-002 | Exact Counter32/Counter64 preservation; no Float64 precision loss before derivation (SPECIFIED; current Core path still float-backed — P0 gap) | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-003 | Counter wrap/reset/discontinuity and actual-elapsed-time rate semantics | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-004 | Prefer certified high-capacity counters for high-speed interfaces | — | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-SNMP-005 | Stable interface identity independent of ifIndex alone | — | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -139,6 +139,36 @@ Every requirement is expected to appear in the BRD/PRD at the appropriate level 
 BRD column uses the existing RTM marker `—` where no direct BRD business outcome substantively governs the detailed engineering mechanics. Direct BRD coverage is retained only where the BRD itself substantively governs the outcome (for example Sensor collection durability, credential/security posture, trap/inform product scope with storm/false-alert outcomes, MIB/Device Pack studios, discovery/preflight diagnosability, in-context troubleshooting usability, monitoring-quality/false-alert outcomes, NCM privileged separation, existing data-plane architecture, and monitoring-versus-target failure separation). Interface-identity reconciliation mechanics, protocol-faithful certification case matrices and the Founder-fixed five-minute SNMP default remain valid PRD/Decision/REQ rows without inventing BRD text.
 
 
+
+
+### Display timezone
+
+| ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| REQ-TIME-001 | UTC absolute instants as authoritative source-of-truth timestamps | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-TIME-002 | Per-user IANA display timezone with browser/device-local default on first use | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-TIME-003 | Precedence: override → user preference → browser local → tenant.timezone → UTC; URL/saved-view override persistence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-TIME-004 | Strict separation of display timezone from operational policy timezones; host OS timezone non-authoritative | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-TIME-005 | DST/report/query/shared-view correctness and certification (incl. half/quarter-hour zones) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+BRD coverage for TIME is limited to user/business outcomes (cross-region interpretation, no silent operational rewrite, report disclosure). Detailed IANA/DST/query mechanics are PRD/Architecture/LLD/Test governed without inventing additional BRD prose.
+
+### Generic scheduling / freshness
+
+| ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| REQ-SCHED-001 | Core schedule authority + Sensor durable local desired-state; no scheduler microservice / dual authority | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SCHED-002 | Monitor Group vs Scheduling Class vs Execution Class separation | — | ✓ | ✓ | ✓ | ✓ | — |
+| REQ-SCHED-003 | Cadence and freshness both required on recurring definitions | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SCHED-004 | Deterministic versionable 64-bit phase spreading with reassignment-stable inputs | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SCHED-005 | Admission order: class → freshness → fairness → cost/capacity | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SCHED-006 | Bounded concurrency / no unbounded self-overlap; coalesce/skip missed cycles with quality evidence | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SCHED-007 | Dependency/failure-domain backoff and monitoring-path degradation (`No Data != Device Down`) | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SCHED-008 | Resource-pressure deferral, recovery ramp, bounded adaptive/event refresh | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-SCHED-009 | Capability Pack cadence/freshness/cost contract + Agent local gauge summary semantics (no counter averaging) | — | ✓ | ✓ | ✓ | ✓ | — |
+
+Low-level scheduling mechanics intentionally use RTM marker `—` in the BRD column; no artificial BRD text is invented solely to create checkmarks.
+
 ### Infrastructure/Cloud
 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
@@ -150,9 +180,9 @@ BRD column uses the existing RTM marker `—` where no direct BRD business outco
 | REQ-INF-005 | Storage and SAN/FC monitoring | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-006 | UPS/PDU/environment/power/cooling/rack sensors | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-007 | Database monitoring packs + generic SQL query monitor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-INF-008 | AWS/Azure/GCP monitoring | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-INF-008 | AWS/Azure/GCP/OCI cloud monitoring with hierarchy/ephemeral lifecycle, quota/throttle/freshness, connector self-health; vendor IDs never override tenant/entity authority | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-009 | Kubernetes/Docker/container monitoring | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-INF-010 | OpenTelemetry metrics/logs; no full APM initially | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-INF-010 | OpenTelemetry metrics/logs/traces contract without mandatory proprietary/full-bytecode APM | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-011 | Identity operational monitoring: AD/LDAP/Kerberos/RADIUS/TACACS+/M365/Exchange | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-012 | Synthetic monitoring ICMP/TCP/DNS/HTTP/HTTPS/API/TLS | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
@@ -160,8 +190,8 @@ BRD column uses the existing RTM marker `—` where no direct BRD business outco
 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| REQ-EXT-001 | MIB Studio upload/import/dependency/OID tree/test/device pack generation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-EXT-002 | API Studio REST/OpenAPI/Swagger/schema inference/mapping/test | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-EXT-001 | MIB Studio upload/import/revision/provenance/licensing/dependency/compile/test/OID-table-notification mapping/firmware compatibility and device pack generation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-EXT-002 | API Studio monitoring-source collection (schema/auth/pagination/mapping/rate/cadence/freshness/schema-drift/provenance) distinct from integration delivery; inbound/outbound/callback webhooks with auth/replay/SSRF/egress/idempotency | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-EXT-003 | Device Pack canonical package across SNMP/REST/gNMI/CLI/NCM/topology/alerts/RCA/dashboards | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-EXT-004 | Device Packs signed/versioned/exportable/importable/rollback capable | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-EXT-005 | Device Pack certification levels: Official/Partner/Customer/Experimental | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -270,10 +300,10 @@ BRD column uses the existing RTM marker `—` where no direct BRD business outco
 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| REQ-INT-001 | ServiceNow/BMC/ServiceDesk Plus/SummitAI/Freshservice/Jira SM/generic REST ITSM | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-INT-001 | ServiceNow/BMC/ServiceDesk Plus/SummitAI/Freshservice/Jira SM/generic REST ITSM with binding, certification, preflight, mapping/preview, idempotency and callback auth; external ticket state does not override Platform health | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INT-002 | Email/Teams/Slack/WhatsApp/webhook/SMS/PagerDuty channels | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INT-003 | Bidirectional ITSM field/state/note synchronization where API allows | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-INT-004 | Durable outbound integration queue/retry/idempotency/health | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-INT-004 | Durable outbound integration queue/retry/idempotency/dead-letter/pause-drain-replay health | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INT-005 | Integration Test Sandbox before production enablement | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-GOV-001 | Append-only/tamper-evident structured audit, SIEM export and protected retention | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-GOV-002 | RBAC + resource scope + conditions; explicit deny wins | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -426,3 +456,7 @@ Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack complete
 | SVC-RECOVERY-001 | Recoverable crashes trigger supervised restart; persistent crash loops remain visible/diagnosable | §21.3 | PRD-SVC-001 | §34.4 | §35.4 | §71.3/71.4 | DF-091/092 |
 | LOG-STRUCT-001 | All components maintain structured lifecycle/failure/health logs with correlation IDs and secret redaction | §21.4 | PRD-LOG-001 | §34.5 | §35.4 | §71.5/71.6 | DF-090..093 |
 | DEV-WIN-CERT-001 | Windows-specific service/MSI/reboot certification uses isolated Windows runner/VM despite Docker-first development | §21.1/21.2 | PRD-PKG-001 | §34.6 | §35.5 | §71.4 | DF-092/093 |
+
+## Handoff baseline note — 2026-09-21
+
+This RTM revision adds `REQ-TIME-*` and `REQ-SCHED-*` only. Flow/Log/Cloud/Extensibility/ITSM strengthen existing owners rather than creating parallel namespaces. No `Platform_24+` specialized master is required at this baseline. Implementation truth classification (`SPECIFIED`/`IMPLEMENTED`/`TESTED`/`BENCHMARKED`/`CERTIFIED`/`DEPLOYED`) must be preserved for Counter64, HA, scheduler, timezone persistence, FLOW/LOG roles and remaining enterprise runtimes.

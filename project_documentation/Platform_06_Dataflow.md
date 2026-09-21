@@ -2085,3 +2085,42 @@ Core evidence/RCA context
 ```
 
 **If** the dedicated inference provider is supported/enabled, it has no direct Agent/Sensor/device credential path and owns no authoritative Platform state. Its outage returns AI unavailable/degraded state while deterministic monitoring/RCA continues. The provider is not required for EDS or base monitoring.
+
+
+## 80A. Flow DF-SCHED-001 — Recurring schedule execution
+
+```text
+Core desired policy
+→ placement/assignment generation + fencing
+→ Sensor durable recurring desired state
+→ deterministic due-time (cadence + phase)
+→ admission (class → freshness → fairness → cost/capacity)
+→ execution
+→ durable observation
+→ upload (reserve → Kafka → finalize → ACK)
+```
+
+Missed cycles coalesce/skip with quality evidence. No fabricated historical samples. No infinite catch-up.
+
+## 80B. Flow DF-SCHED-002 — Failure-domain recovery
+
+```text
+collection failure
+→ qualify target vs dependency vs source/collector health
+→ bounded retry / dependency-aware backoff
+→ cheap recovery probe
+→ staged recovery ramp (liveness → critical → operational → detail → topology → inventory)
+```
+
+`No Data != Device Down`. Broad site/controller/API outages must not stampede expensive retries.
+
+## 80C. Flow DF-TIME-001 — Display timezone rendering
+
+```text
+UTC instant (authoritative)
+→ authorized query
+→ resolve effective display IANA zone (override → user preference → browser local → tenant.timezone → UTC)
+→ render / calendar group
+```
+
+Underlying stored instant remains UTC. Display flow must not mutate telemetry, alerts, SLA/maintenance schedules or other operational policy timezones.

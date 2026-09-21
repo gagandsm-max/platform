@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-20 — v3.2.2 enterprise SNMP correctness and usability reconciliation (preserves specialized-master number-allocation governance)
+**Last reconciliation:** 2026-09-21 — v3.2.2 final handoff architecture baseline (display timezone, generic scheduler/freshness, Counter64/HA/Sensor-role/Flow-Log-Cloud-Extensibility-ITSM contract freeze; no new specialized master)
 
 ## 1. Authority
 
@@ -143,6 +143,18 @@ The normal scheduled SNMP **operational metric** default is **5 minutes**. That 
 
 The authoritative file count remains **25 files**, the highest merged specialized master remains `Platform_23`, and the product-document version remains **v3.2.2**. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Specification does not imply implementation or certification.
 
+### 4.7 2026-09-21 final handoff architecture reconciliation
+
+This v3.2.2 documentation baseline freezes implementation-honest architecture before control-plane handover. It does **not** add a specialized master, runtime feature, migration, dependency, datastore or mandatory microservice.
+
+Closed-domain reconciliation decision: Flow/NTA, Log/SIEM, Cloud/full-stack, Extensibility/API Studio/Webhook and ITSM/Automation requirements remain inside existing owners (`REQ-NET-*`, `REQ-INF-*`, `REQ-EXT-*`, `REQ-INT-*` and related PRD/Architecture sections). **SPECIALIZED MASTER NOT REQUIRED AT THIS BASELINE** for those domains. This does not permanently prohibit a later master if future scope genuinely justifies one under PR #78 number-allocation governance.
+
+Founder-fixed **Display Time Zone** behavior is specified as UTC source-of-truth instants plus per-user IANA display preference with explicit precedence and strict separation from operational-policy timezones. Generic recurring **scheduling/freshness** architecture extends Core placement/Sensor scheduler/Capability Pack contracts without a scheduler microservice. Exact Counter64 remains **SPECIFIED / P0 / NOT END-TO-END IMPLEMENTED**. Exactly-two-Core Active/Standby HA remains **SPECIFIED / P0 / NOT PRODUCTION CERTIFIED**. Sensor production-role direction reconciles NETWORK/INFRASTRUCTURE/FLOW/LOG with conditional SYNTHETIC/CLOUD_API and lab COMBINED; runtime `STREAMING_EVENT` requires implementation reconciliation and is not the final product substitute for FLOW/LOG.
+
+PR #81 telemetry durability (durable stream identity + reserve→Kafka→finalize→ACK) is canonical **at-least-once**. Concurrent HTTP retry amplification is recorded as P1 hardening. Old PR #59 insert-token/dedupe-window correctness is superseded; only bounded Kafka→ClickHouse micro-batching remains as future P1 performance work after benchmark.
+
+Authoritative file count remains **25**, highest specialized master remains `Platform_23`, product-document version remains **v3.2.2**. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
+
 ## 5. Precedence
 
 When requirements appear to conflict:
@@ -218,6 +230,12 @@ Conflicts require documented change control; implementation must not silently ch
 - Endpoint Diagnostic Snapshot is a bounded typed evidence-acquisition capability triggered by qualified policy state or authorized investigation; endpoint evidence informs but does not replace Core-authoritative cross-domain RCA.
 - Normal monitored Agents and Sensors do not host an LLM/GNN/foundation-model runtime for EDS; endpoint-local intelligence is deterministic/bounded statistical logic only.
 - Optional dedicated local/private inference is an AI-Gateway provider, not a third Core/HA authority or authoritative data store; deterministic Platform operation does not depend on it.
+- Authoritative system/event/telemetry instants are absolute UTC; interactive display uses IANA zones with precedence override → user preference → browser local → tenant.timezone → UTC; display preference never rewrites operational policy timezones; host OS timezone is non-authoritative.
+- Recurring monitoring uses Core schedule/placement authority plus Sensor durable local desired-state execution; Monitor Group, Scheduling Class and Execution Class remain distinct; cadence and freshness are both required; deterministic phase spreading and failure-domain backoff are mandatory architecture.
+- Exact Counter64 end-to-end remains a P0 implementation gap on current main (Sensor encode present; Core numeric path still float-backed with unsafe Counter64 rejection).
+- Exactly-two-Core Active/Standby HA remains P0 and not production-certified; no Patroni/repmgr/ClickHouse Keeper/Raft/Consul/etcd third-coordination selection is made by this baseline.
+- Standard production Sensor roles are NETWORK, INFRASTRUCTURE, FLOW and LOG; SYNTHETIC and CLOUD_API are conditional dedicated roles; COMBINED is lab/dev/small-deployment unless separately certified; runtime STREAMING_EVENT requires product/runtime reconciliation toward FLOW/LOG.
+- PR #81 Sensor telemetry durability is canonical at-least-once; concurrent pending-reservation republish amplification is P1 hardening, not a new datastore.
 
 ## 7. OSS governance
 
@@ -242,15 +260,21 @@ A new requirement is considered incorporated only when it has an ID, affected-la
 
 ## 9. Explicit unresolved/P0 items
 
-Authoritative list is `Platform_12_Decision_Source_Register.md` §5. Restated here for navigation:
+Authoritative list is `Platform_12_Decision_Source_Register.md` §5 and the 2026-09-21 handoff priority freeze. Restated here for navigation:
 
+- exact Counter64 typed pipeline (Sensor→Core→Kafka→ClickHouse) preserving full unsigned 64-bit source truth;
+- display timezone persistence/API/UI behavior (`display_timezone` preference, precedence, DST/report correctness);
+- generic recurring scheduling/freshness/deterministic spreading and production scheduler wiring (including SNMP);
+- failure-domain backoff, recovery ramp and resource-pressure deferral behavior;
 - exact two-Core Kafka implementation/failover while honoring no third full Core;
 - exact two-Core ClickHouse replication/promotion/fencing design;
 - exact PostgreSQL two-Core failover/fencing/rewind mechanics;
 - exact Core service fencing/VIP implementation and failure matrix;
+- Sensor ownership/lease/fencing and push-protocol HA continuity;
+- Flow/NTA production runtime and FLOW-role certification; LOG production role/runtime reconciliation;
 - final contractual DR RPO/RTO and data-loss objectives;
 - final SNWP-2500-v1 metric/interface/event mix and certified performance results;
-- Streaming Sensor certified Flow records/sec and Syslog EPS;
+- Streaming/Flow Sensor certified Flow records/sec and Syslog EPS;
 - exact GNN model architecture, training labels, inference latency, CPU/GPU footprint and production enablement threshold;
 - final compliance certification program/scope and achieved certifications;
 - exact product SKUs/licensing quantities beyond the agreed behavioral rules.

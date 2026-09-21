@@ -43,3 +43,11 @@ Additional threats and mandatory controls:
 | Local/private LLM reaches device credentials or control plane | AI Gateway mediation, bounded authorized context, no credential forwarding, deterministic tool firewall, no direct Agent/Sensor/device network authority |
 | Optional inference node becomes hidden third Core/state authority | No authoritative database/quorum/fencing role, stateless inference boundary, explicit failure isolation and authentication only through approved AI Gateway contract; mode is conditional and not required for EDS/base monitoring |
 | Model/runtime compromise affects monitoring | Model/runtime supply-chain validation, sandbox/resource limits, optional-service isolation, no mandatory dependency for deterministic monitoring/RCA |
+
+
+## Display timezone / scheduler / extensibility / ITSM threat notes — v3.2.2 handoff
+
+- Timezone preferences are tenant/user scoped; invalid IANA zones are rejected; display preference cannot modify operational policy without separate authorization.
+- Scheduler assignments remain fenced/versioned and tenant-scoped; adaptive/event-triggered refresh is bounded and authorized.
+- Webhooks/API Studio require signature/auth, replay protection, SSRF/egress controls, secret handling, tenant binding and rate limits.
+- ITSM inbound callbacks are signed/authenticated; remote ticket state cannot override Platform health authority.

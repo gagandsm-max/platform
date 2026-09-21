@@ -927,6 +927,9 @@ Raw sockets/capabilities should use minimal Linux capabilities rather than runni
 
 ## 14. Flow LLD
 
+Flow LLD must cover NetFlow v5/v9, IPFIX, sFlow and vendor/J-Flow where applicable; configured exporter/source/tenant authority (packet source IP alone is insufficient); template lifecycle; sampling provenance; sequence/gap/reset; UDP pre-acceptance loss; observation point; direction; duplicate/exporter-HA; raw-before-enrichment; temporal IP/entity mapping; enrichment confidence/provenance; privacy/RBAC for user-attributed Flow. ClickHouse remains analytics authority. Production high-volume path uses FLOW role.
+
+
 ### 14.1 Receiver
 
 Streaming Sensor/Network Sensor receives datagrams/streams and tracks exporter/template state.
@@ -961,6 +964,9 @@ No silent drop: every intentional/forced drop must be counted and surfaced.
 ---
 
 ## 15. Syslog/event LLD
+
+Log/SIEM contracts cover Syslog, OTLP logs, application/OS/container/cloud and custom governed log ingestion with multiline boundaries, parser provenance, malformed/partial quality, secret/PII minimization/redaction, tenant/source attribution, durable routing, per-destination independent forwarding queues where required, bounded retry/backoff, dead-letter/quarantine, replay and forwarding health. SIEM destination outage must not block base monitoring. Platform is not a full SIEM replacement; Elasticsearch/OpenSearch/Loki are not mandatory. High-volume production Log uses LOG role.
+
 
 Parse transport metadata, PRI/facility/severity, timestamp, hostname/source, message and structured data. Apply Device Pack/parser rules, sensitive-field policy and entity correlation.
 
@@ -2694,3 +2700,22 @@ It must not convert an indicator into unsupported causal prose such as declaring
 ### 72.7 Local intelligence runtime boundary
 
 No LLM/GNN/foundation-model runtime is packaged into normal Agent or Sensor EDS. Tier-0 endpoint intelligence is deterministic/bounded statistical capture-eligibility and evidence logic in the existing runtime. Tier-1/2 intelligence follows `Platform_22` and `Platform_11` resource governance and remains optional; a dedicated inference provider is not an EDS release prerequisite.
+
+
+## 71A. Display timezone logical preference — v3.2.2 handoff
+
+Logical user preference field:
+
+```text
+display_timezone  NULL | IANA TZDB identifier
+```
+
+Persisted on the existing user preference/profile architecture. Nullable means “no saved preference → resolve browser/device local, then tenant.timezone, then UTC”. This documentation baseline allocates **no** PostgreSQL migration number. Existing `tenant.timezone` remains the tenant fallback. Invalid IANA identifiers are rejected.
+
+## 71B. Scheduler logical contracts — v3.2.2 handoff
+
+Recurring desired-state records carry at minimum: tenant, assignment identity, target entity, monitor definition, scheduling class, execution class, nominal cadence, freshness deadline, deterministic phase inputs/version, generation/fence, and quality/overrun counters. Phase calculation is a versionable deterministic 64-bit function. Exact hash library is not frozen here.
+
+## 71C. Redundant identifier index — P2 hygiene note
+
+V001 unique constraint `uq_identifier_resolution (tenant_id, namespace, identifier_type, identifier_value)` already creates a unique btree. Secondary index `idx_identifier_lookup` on the same columns is redundant unless current query evidence proves otherwise. Future **P2** forward-only DB hygiene only. **No migration number is reserved** by this baseline; never rewrite V001–V009 in place.

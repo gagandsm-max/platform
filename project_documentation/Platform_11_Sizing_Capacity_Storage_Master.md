@@ -275,3 +275,7 @@ It:
 - is not an EDS release prerequisite.
 
 Exact CPU/RAM/GPU/model combinations are release-certified profiles, not universal minimums. No dedicated inference hardware is required for Platform base operation.
+
+## Scheduler / freshness capacity notes — v3.2.2 handoff
+
+Admission and MWU accounting must observe CPU, RAM, spool/disk horizon, queue depth, execution latency, timeout/error rate, upload backlog and freshness debt. Low-priority work may defer only inside governed freshness limits. Protect liveness, recovery, critical operational monitoring and authority/control work. Adaptive/event storms must not accelerate unbounded populations. No new monitoring datastore is invented for self-observability.
