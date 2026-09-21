@@ -40,6 +40,12 @@ class CanonicalCounterObservationTest {
         assertThrows(IllegalArgumentException.class,
                 () -> CanonicalCounterObservation.parseExactUnsigned64("18446744073709551616"));
         assertThrows(IllegalArgumentException.class,
+                () -> CanonicalCounterObservation.parseExactUnsigned64("+1"));
+        assertThrows(IllegalArgumentException.class,
+                () -> CanonicalCounterObservation.parseExactUnsigned64(" 1"));
+        assertThrows(IllegalArgumentException.class,
+                () -> CanonicalCounterObservation.parseExactUnsigned64("1 "));
+        assertThrows(IllegalArgumentException.class,
                 () -> CanonicalCounterObservation.parseExactUnsigned64("1.5"));
         assertThrows(IllegalArgumentException.class,
                 () -> CanonicalCounterObservation.parseExactUnsigned64("1e10"));
