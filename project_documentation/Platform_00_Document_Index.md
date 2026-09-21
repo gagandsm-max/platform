@@ -155,6 +155,20 @@ PR #81 telemetry durability (durable stream identity + reserve→Kafka→finaliz
 
 Authoritative file count remains **25**, highest specialized master remains `Platform_23`, product-document version remains **v3.2.2**. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
 
+### 4.8 2026-09-21 unified RCA and regional Sensor/provisioning reconciliation
+
+This v3.2.2 reconciliation independently challenged the external **Unified Correlation & RCA** and **Core Efficiency / Regional Sensor / Provisioning / Transport** handoffs against current canonical architecture.
+
+Accepted RCA deltas strengthen the existing `Platform_22` authority: one unified RCA engine over the canonical temporal graph; explicit causal roles/hypotheses; immutable progressive revisions; bounded counterfactual and recovery validation; redundancy/shared-risk semantics; progressive RCA UI; deterministic cross-domain/fault-injection certification and tenant-scoped human ground truth. Existing evidence qualification, contradictions, `INCONCLUSIVE`, Flight Recorder, Similar Incident, GNN/LLM boundaries and graph architecture remain authoritative rather than being duplicated.
+
+Accepted Sensor/provisioning deltas strengthen the existing `Platform_20` onboarding/control family: optional customer-defined Region, first-class Sensor Pools, Core-authoritative capacity/locality placement, generation/fencing, short-lived single-use Sensor/Agent bootstrap, endpoint-local key generation, normal Agent→Sensor→Core telemetry and explicit bootstrap endpoint/certificate validation.
+
+The proposed plaintext Platform transport direction was **rejected** for production Platform-owned Sensor↔Core and Agent↔Sensor trust boundaries. Existing authenticated encrypted transport/mTLS requirements remain. Legacy insecure monitored-device protocols remain separately governed compatibility modes and cannot downgrade Platform-owned channels.
+
+The resource-efficiency principle is accepted as an engineering constraint: optimize measured algorithms/data paths/queries/schemas/batching/unnecessary work before increasing certified hardware, without weakening correctness, durability, security or freshness.
+
+This reconciliation updates existing Mother References and keeps the authoritative set at **25 files**, version **v3.2.2**, highest specialized master **Platform_23**. No `Platform_24` is introduced.
+
 ## 5. Precedence
 
 When requirements appear to conflict:
