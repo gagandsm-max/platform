@@ -364,6 +364,35 @@ public class TelemetryPipelineIntegrationTest {
         }
 
         @Test
+        @DisplayName("ClickHouse consumer rejects ambiguous Counter64 payload without offset acknowledgment")
+        void testClickHouseConsumerCounter64AmbiguousValueNoAck() throws Exception {
+            ClickHouseClient clickHouseClient = mock(ClickHouseClient.class);
+            IngestionMetrics metrics = new IngestionMetrics();
+            ClickHouseTelemetryConsumer consumer = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics);
+
+            Acknowledgment ack = mock(Acknowledgment.class);
+            CanonicalCounterObservation counter = new CanonicalCounterObservation(
+                    tenantId.toString(), entityId.toString(), ".1.3.6.1.2.1.31.1.1.1.6.1", sensorId,
+                    Instant.now(), new java.math.BigInteger("9007199254740993"), 1, 0, "seq-c64-ambiguous", "snmp"
+            );
+            com.fasterxml.jackson.databind.node.ObjectNode root =
+                    (com.fasterxml.jackson.databind.node.ObjectNode) objectMapper.valueToTree(counter);
+            root.put("value", 1L);
+
+            ConsumerRecord<String, String> record = new ConsumerRecord<>(
+                    "platform.telemetry.canonical", 0, 102L, "seq-c64-ambiguous",
+                    objectMapper.writeValueAsString(root));
+
+            IngestionException ex = assertThrows(IngestionException.class, () ->
+                    consumer.consume(record, ack)
+            );
+
+            assertEquals("ERR_KAFKA_POISON_EVENT", ex.getCode());
+            verify(ack, never()).acknowledge();
+            verifyNoInteractions(clickHouseClient);
+        }
+
+        @Test
         @DisplayName("ClickHouse consumer rejects poison message without offset acknowledgment")
         void testClickHouseConsumerPoisonMessageNoAck() {
             ClickHouseClient clickHouseClient = mock(ClickHouseClient.class);
