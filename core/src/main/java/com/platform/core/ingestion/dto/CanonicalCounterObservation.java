@@ -77,17 +77,15 @@ public record CanonicalCounterObservation(
         if (decimal == null) {
             throw new IllegalArgumentException("counterValue must not be null");
         }
-        String trimmed = decimal.trim();
-        if (trimmed.isEmpty()) {
+        if (decimal.isEmpty()) {
             throw new IllegalArgumentException("counterValue must not be empty");
         }
-        if (trimmed.indexOf('.') >= 0 || trimmed.indexOf('e') >= 0 || trimmed.indexOf('E') >= 0
-                || trimmed.indexOf('+') > 0) {
-            throw new IllegalArgumentException("counterValue must be plain decimal");
+        if (!decimal.matches("^[0-9]+$")) {
+            throw new IllegalArgumentException("counterValue must be unsigned decimal digits only");
         }
         BigInteger value;
         try {
-            value = new BigInteger(trimmed);
+            value = new BigInteger(decimal);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("counterValue is not a valid integer", e);
         }
