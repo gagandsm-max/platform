@@ -125,9 +125,10 @@ public class ClickHouseTelemetryConsumer {
             if (counter.counterValue() == null || counter.counterValue().isBlank()) {
                 throw new IllegalArgumentException("Counter64 payload missing counterValue");
             }
-            // Reject float-backed aliases for Counter64.
-            if (root.has("value") && root.get("value").isFloatingPointNumber()) {
-                throw new IllegalArgumentException("Counter64 payload must not use floating-point value");
+            // Counter64 has one authoritative exact value field. Any ordinary numeric
+            // value alias makes the event ambiguous and must fail closed.
+            if (root.has("value")) {
+                throw new IllegalArgumentException("Counter64 payload must not also contain numeric value");
             }
             return () -> {
                 try {
