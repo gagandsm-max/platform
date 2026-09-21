@@ -167,6 +167,8 @@ The proposed plaintext Platform transport direction was **rejected** for product
 
 The resource-efficiency principle is accepted as an engineering constraint: optimize measured algorithms/data paths/queries/schemas/batching/unnecessary work before increasing certified hardware, without weakening correctness, durability, security or freshness.
 
+Implementation truth is also reconciled to verified current `main`: PR #84 established the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path as **IMPLEMENTED+TESTED**. Derived counter delta/rate/reset/wrap/discontinuity behavior remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**.
+
 This reconciliation updates existing Mother References and keeps the authoritative set at **25 files**, version **v3.2.2**, highest specialized master **Platform_23**. No `Platform_24` is introduced.
 
 ## 5. Precedence
