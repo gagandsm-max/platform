@@ -245,6 +245,41 @@ class AuthorizationRouteMapperIdentifierTest {
         assertDenied(tenantPathOnly, "PUT", base + "/fixture.fictional.base/versions/1.0.0");
     }
 
+    @Test
+    void recurringScheduleRoutesRequireDedicatedPermissions() {
+        PrincipalContext reader = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.MONITORING_SCHEDULE_READ,
+                        ResourceScope.tenantWide(ResourceType.TENANT)
+                )
+        );
+        PrincipalContext manager = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.MONITORING_SCHEDULE_MANAGE,
+                        ResourceScope.tenantWide(ResourceType.TENANT)
+                )
+        );
+        PrincipalContext tenantPathOnly = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.TENANT_READ,
+                        ResourceScope.tenantWide(ResourceType.TENANT)
+                )
+        );
+
+        String path = "/api/v1/tenants/" + TENANT + "/sensors/sensor-01/recurring-assignments";
+        assertAllowed(reader, "GET", path);
+        assertDenied(reader, "PUT", path);
+        assertAllowed(manager, "PUT", path);
+        assertDenied(tenantPathOnly, "GET", path);
+        assertDenied(tenantPathOnly, "PUT", path);
+    }
+
     private static PrincipalContext principal(UUID tenantScope, PermissionGrant... grants) {
         return new PrincipalContext(
                 "subject",

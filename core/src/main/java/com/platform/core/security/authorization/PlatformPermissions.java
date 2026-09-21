@@ -43,6 +43,9 @@ public final class PlatformPermissions {
     public static final Permission CAPABILITY_PACK_READ = Permission.of("capability_pack.read");
     public static final Permission CAPABILITY_PACK_MANAGE = Permission.of("capability_pack.manage");
 
+    public static final Permission MONITORING_SCHEDULE_READ = Permission.of("monitoring_schedule.read");
+    public static final Permission MONITORING_SCHEDULE_MANAGE = Permission.of("monitoring_schedule.manage");
+
     private PlatformPermissions() {
     }
 }

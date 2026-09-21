@@ -38,7 +38,9 @@ public final class PermissionResourceBindings {
             Map.entry(PlatformPermissions.CREDENTIAL_EDIT, ResourceType.CREDENTIAL),
             Map.entry(PlatformPermissions.CREDENTIAL_REVEAL, ResourceType.CREDENTIAL),
             Map.entry(PlatformPermissions.CAPABILITY_PACK_READ, ResourceType.TENANT),
-            Map.entry(PlatformPermissions.CAPABILITY_PACK_MANAGE, ResourceType.TENANT)
+            Map.entry(PlatformPermissions.CAPABILITY_PACK_MANAGE, ResourceType.TENANT),
+            Map.entry(PlatformPermissions.MONITORING_SCHEDULE_READ, ResourceType.TENANT),
+            Map.entry(PlatformPermissions.MONITORING_SCHEDULE_MANAGE, ResourceType.TENANT)
     );
 
     private PermissionResourceBindings() {

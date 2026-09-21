@@ -210,6 +210,10 @@ func (c *Client) doJSONWithConflictCodes(ctx context.Context, method, path strin
 			return newError(CodePackStateStale, "Core rejected applied-state as stale", nil, false)
 		case string(CodePackChecksumMismatch):
 			return newError(CodePackChecksumMismatch, "Core rejected applied-state checksum", nil, false)
+		case string(CodeRecurringStateStale):
+			return newError(CodeRecurringStateStale, "Core rejected recurring applied-state as stale", nil, false)
+		case string(CodeRecurringChecksumMismatch):
+			return newError(CodeRecurringChecksumMismatch, "Core rejected recurring applied-state checksum", nil, false)
 		}
 		return classifyStatus(resp.StatusCode)
 	}

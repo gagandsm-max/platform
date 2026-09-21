@@ -40,5 +40,9 @@ public final class AuditActions {
     public static final AuditAction CAPABILITY_PACK_SENSOR_ASSIGN = new AuditAction("capabilitypack.sensor.assign");
     public static final AuditAction CAPABILITY_PACK_SENSOR_UNASSIGN = new AuditAction("capabilitypack.sensor.unassign");
 
+    /** Recurring schedule Sensor assignment (desired-state distribution; no secrets). */
+    public static final AuditAction RECURRING_SCHEDULE_SENSOR_REPLACE =
+            new AuditAction("recurringschedule.sensor.replace");
+
     private AuditActions() {}
 }

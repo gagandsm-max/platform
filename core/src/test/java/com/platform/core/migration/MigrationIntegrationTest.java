@@ -55,16 +55,17 @@ class MigrationIntegrationTest {
                                      'sensor','sensor_certificate_credential','sensor_allowed_entity',
                                      'agent','agent_certificate_credential','agent_sensor_assignment',
                                      'tenant_capability_pack','tenant_capability_pack_activation',
-                                     'sensor_capability_pack_assignment','sensor_capability_pack_state')
+                                     'sensor_capability_pack_assignment','sensor_capability_pack_state',
+                                     'sensor_recurring_assignment','sensor_recurring_state')
                 """,
                 Integer.class
         );
-        assertEquals(26, tables);
+        assertEquals(28, tables);
 
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, checksum FROM platform.schema_history ORDER BY version"
         );
-        assertEquals(9, history.size());
+        assertEquals(10, history.size());
         assertEquals("V001", history.get(0).get("version"));
         assertEquals("V002", history.get(1).get("version"));
         assertEquals("V003", history.get(2).get("version"));
@@ -74,11 +75,12 @@ class MigrationIntegrationTest {
         assertEquals("V007", history.get(6).get("version"));
         assertEquals("V008", history.get(7).get("version"));
         assertEquals("V009", history.get(8).get("version"));
+        assertEquals("V010", history.get(9).get("version"));
         String checksum = String.valueOf(history.get(0).get("checksum"));
         assertTrue(checksum.matches("[a-f0-9]{64}"));
 
         pg.migrate();
-        assertEquals(9, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(10, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
 
         jdbc.update("UPDATE platform.schema_history SET checksum='deadbeef' WHERE version='V001'");
         MigrationException ex = assertThrows(MigrationException.class, pg::migrate);
@@ -188,10 +190,11 @@ class MigrationIntegrationTest {
 
         // 10. Assert restart is idempotent and does not alter data
         pg.migrate();
-        assertEquals(9, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(10, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
 
-        // 11. V001→V009 upgrade must materialize Sensor/Agent Control/Capability Pack and replay-reservation schema
+        // 11. V001→V010 upgrade must materialize Sensor/Agent Control/Capability Pack,
+        // replay-reservation and recurring-schedule schema
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V004'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
@@ -204,6 +207,8 @@ class MigrationIntegrationTest {
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V008'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V009'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V010'", Integer.class));
         Integer sensorControlTables = jdbc.queryForObject(
                 """
                 SELECT COUNT(*) FROM information_schema.tables
@@ -233,6 +238,15 @@ class MigrationIntegrationTest {
                 Integer.class
         );
         assertEquals(4, capabilityPackTables);
+        Integer recurringTables = jdbc.queryForObject(
+                """
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema='platform'
+                  AND table_name IN ('sensor_recurring_assignment','sensor_recurring_state')
+                """,
+                Integer.class
+        );
+        assertEquals(2, recurringTables);
     }
 
     @Test
@@ -303,6 +317,10 @@ class MigrationIntegrationTest {
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V007'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V008'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V009'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V010'", Integer.class));
         assertEquals("uuid", jdbc.queryForObject("""
                 SELECT data_type FROM information_schema.columns
                  WHERE table_schema='platform' AND table_name='tenant' AND column_name='tenant_id'

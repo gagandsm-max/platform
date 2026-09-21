@@ -182,6 +182,15 @@ public class AuthorizationRouteMapper {
             }
             return null;
         }
+        if (remainder.startsWith("/sensors/") && remainder.contains("/recurring-assignments")) {
+            if (isGet) {
+                return PlatformPermissions.MONITORING_SCHEDULE_READ;
+            }
+            if (isPut) {
+                return PlatformPermissions.MONITORING_SCHEDULE_MANAGE;
+            }
+            return null;
+        }
         return null;
     }
 
