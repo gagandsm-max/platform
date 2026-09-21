@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
 **Product:** Platform  
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-21 — v3.2.2 final handoff architecture baseline (display timezone, generic scheduler/freshness, Counter64/HA/Sensor-role/Flow-Log-Cloud-Extensibility-ITSM contract freeze; no new specialized master)
+**Last reconciliation:** 2026-09-21 — v3.2.2 final handoff + unified RCA / regional Sensor-provisioning reconciliation, including verified PR #84 Counter64 implementation truth; no new specialized master
 
 ## 1. Authority
 
@@ -248,7 +248,7 @@ Conflicts require documented change control; implementation must not silently ch
 - Optional dedicated local/private inference is an AI-Gateway provider, not a third Core/HA authority or authoritative data store; deterministic Platform operation does not depend on it.
 - Authoritative system/event/telemetry instants are absolute UTC; interactive display uses IANA zones with precedence override → user preference → browser local → tenant.timezone → UTC; display preference never rewrites operational policy timezones; host OS timezone is non-authoritative.
 - Recurring monitoring uses Core schedule/placement authority plus Sensor durable local desired-state execution; Monitor Group, Scheduling Class and Execution Class remain distinct; cadence and freshness are both required; deterministic phase spreading and failure-domain backoff are mandatory architecture.
-- Exact Counter64 end-to-end remains a P0 implementation gap on current main (Sensor encode present; Core numeric path still float-backed with unsafe Counter64 rejection).
+- Exact raw Counter64 Sensor→Core→Kafka→ClickHouse transport/persistence is **IMPLEMENTED+TESTED** on current main after PR #84, including full unsigned-64 boundary coverage and replay-safe `UInt64` persistence; benchmarking/certification/deployment remain open, and derived delta/rate/reset/wrap/discontinuity semantics remain a P0 implementation gap.
 - Exactly-two-Core Active/Standby HA remains P0 and not production-certified; no Patroni/repmgr/ClickHouse Keeper/Raft/Consul/etcd third-coordination selection is made by this baseline.
 - Standard production Sensor roles are NETWORK, INFRASTRUCTURE, FLOW and LOG; SYNTHETIC and CLOUD_API are conditional dedicated roles; COMBINED is lab/dev/small-deployment unless separately certified; runtime STREAMING_EVENT requires product/runtime reconciliation toward FLOW/LOG.
 - PR #81 Sensor telemetry durability is canonical at-least-once; concurrent pending-reservation republish amplification is P1 hardening, not a new datastore.
