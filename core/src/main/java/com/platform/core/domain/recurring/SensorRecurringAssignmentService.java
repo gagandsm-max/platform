@@ -7,6 +7,9 @@ import com.platform.core.security.audit.AuditCategory;
 import com.platform.core.security.audit.AuditOutcome;
 import com.platform.core.security.http.PlatformSecurityContext;
 import com.platform.core.security.http.SecurityAuditEmitter;
+import com.platform.core.sensorcontrol.SensorControlRepository;
+import com.platform.core.sensorcontrol.SensorLifecycleStatus;
+import com.platform.core.sensorcontrol.SensorPrincipal;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,8 +30,13 @@ import java.util.UUID;
  * Sensor FOR UPDATE → CAS expectedGeneration → mutate → recompute checksum →
  * increment desired generation if changed.
  *
- * <p>Slice A: admin may assign any entity_id; Sensor {@code getDesiredState} is scoped by
- * mTLS sensor id so only that Sensor's rows are returned (entity allowlist not enforced here).
+ * <p>Entity authority reuses canonical Sensor Control ({@code allow_all_tenant_entities} /
+ * {@code sensor_allowed_entity}). Entity identity is canonical UUID. Assignments that lose
+ * entity scope are stripped and generation is bumped before Sensor pull (fail closed).
+ *
+ * <p>SNMP {@code target} remains unresolved ({@code BLOCKED_CANONICAL_TARGET_RESOLUTION}).
+ * Credential Profile materialization remains unresolved
+ * ({@code BLOCKED_CREDENTIAL_PROFILE_RUNTIME}).
  */
 @Service
 public class SensorRecurringAssignmentService {
@@ -38,15 +46,20 @@ public class SensorRecurringAssignmentService {
     public static final String ERR_GENERATION_CONFLICT = "RECURRING_SCHEDULE_SENSOR_GENERATION_CONFLICT";
     public static final String ERR_STATE_STALE = "ERR_SENSOR_RECURRING_STATE_STALE";
     public static final String ERR_CHECKSUM_MISMATCH = "ERR_SENSOR_RECURRING_CHECKSUM_MISMATCH";
+    public static final String ERR_SENSOR_ENTITY_INVALID = "ERR_SENSOR_ENTITY_INVALID";
+    public static final String ERR_ENTITY_SCOPE_UNAUTHORIZED = "ERR_ENTITY_SCOPE_UNAUTHORIZED";
 
     private final SensorRecurringAssignmentRepository assignmentRepository;
+    private final SensorControlRepository sensorControlRepository;
     private final SecurityAuditEmitter auditEmitter;
 
     public SensorRecurringAssignmentService(
             SensorRecurringAssignmentRepository assignmentRepository,
+            SensorControlRepository sensorControlRepository,
             SecurityAuditEmitter auditEmitter
     ) {
         this.assignmentRepository = Objects.requireNonNull(assignmentRepository, "assignmentRepository");
+        this.sensorControlRepository = Objects.requireNonNull(sensorControlRepository, "sensorControlRepository");
         this.auditEmitter = Objects.requireNonNull(auditEmitter, "auditEmitter");
     }
 
@@ -111,10 +124,11 @@ public class SensorRecurringAssignmentService {
         }
 
         MutationContext ctx = beginMutation(tenantId, sensorId, expectedGeneration);
+        EntityAuthorityScope scope = requireEntityAuthorityScope(tenantId, sensorId);
 
         String actor = PlatformSecurityContext.requirePrincipal().subjectId();
         Instant now = Instant.now();
-        List<RecurringAssignment> nextRows = validateAndBuildRows(tenantId, sensorId, inputs, actor, now);
+        List<RecurringAssignment> nextRows = validateAndBuildRows(tenantId, sensorId, inputs, scope, actor, now);
         List<SensorRecurringDesiredChecksum.AssignmentDigest> digests = nextRows.stream()
                 .map(SensorRecurringAssignmentRepository::toDigest)
                 .toList();
@@ -149,15 +163,69 @@ public class SensorRecurringAssignmentService {
         return snapshot(tenantId, sensorId, next);
     }
 
-    @Transactional(value = "transactionManager", readOnly = true)
+    /**
+     * Sensor pull. Strips assignments that lost entity scope and bumps desired generation
+     * so revoked allowlists cannot continue to authorize new desired state.
+     */
+    @Transactional("transactionManager")
     public SensorRecurringDesiredState getDesiredState(UUID tenantId, String sensorId) {
-        RecurringState state = assignmentRepository.findState(tenantId, sensorId)
+        if (!assignmentRepository.lockTenantForUpdate(tenantId)) {
+            throw new DomainException("TENANT_NOT_FOUND", "Tenant not found");
+        }
+        Optional<String> sensorStatus = assignmentRepository.lockSensorForUpdate(tenantId, sensorId);
+        if (sensorStatus.isEmpty()) {
+            throw new DomainException(ERR_SENSOR_NOT_FOUND, "Sensor not found");
+        }
+        if (!"ACTIVE".equals(sensorStatus.get())) {
+            throw new DomainException(ERR_SENSOR_NOT_ACTIVE, "Sensor is not ACTIVE");
+        }
+
+        RecurringState state = assignmentRepository.findStateForUpdate(tenantId, sensorId)
                 .orElse(RecurringState.neverMutated(tenantId, sensorId));
         if (state.desiredGeneration() == 0L) {
             return new SensorRecurringDesiredState(
                     0L, null, state.appliedGeneration(), state.appliedChecksum(), List.of());
         }
+
+        EntityAuthorityScope scope = requireEntityAuthorityScope(tenantId, sensorId);
         List<RecurringAssignment> rows = assignmentRepository.listAssignments(tenantId, sensorId);
+        List<RecurringAssignment> authorized = new ArrayList<>(rows.size());
+        List<String> revokedAssignmentIds = new ArrayList<>();
+        for (RecurringAssignment row : rows) {
+            if (isEntityAuthorized(scope, row.entityId())) {
+                authorized.add(row);
+            } else {
+                revokedAssignmentIds.add(row.assignmentId());
+            }
+        }
+
+        if (!revokedAssignmentIds.isEmpty()) {
+            for (String assignmentId : revokedAssignmentIds) {
+                assignmentRepository.deleteAssignment(tenantId, sensorId, assignmentId);
+            }
+            List<SensorRecurringDesiredChecksum.AssignmentDigest> digests = authorized.stream()
+                    .map(SensorRecurringAssignmentRepository::toDigest)
+                    .toList();
+            String nextChecksum = SensorRecurringDesiredChecksum.compute(digests);
+            Instant now = Instant.now();
+            String actor = "system:entity-scope-reconcile";
+            MutationContext ctx = new MutationContext(state);
+            state = persistDesired(tenantId, sensorId, ctx, nextChecksum, actor, now, true);
+            auditEmitter.emitControlEvent(
+                    AuditCategory.SECURITY_ADMINISTRATION,
+                    AuditActions.RECURRING_SCHEDULE_SENSOR_REPLACE,
+                    AuditOutcome.SUCCESS,
+                    tenantId,
+                    "RECURRING_SCHEDULE_ENTITY_SCOPE_RECONCILE",
+                    Map.of(
+                            "sensor_id", sensorId,
+                            "revoked_count", Integer.toString(revokedAssignmentIds.size()),
+                            "desired_generation", Long.toString(state.desiredGeneration())
+                    )
+            );
+            rows = authorized;
+        }
+
         if (rows.size() > RecurringScheduleBounds.MAX_ASSIGNMENTS) {
             throw new DomainException(
                     "RECURRING_SCHEDULE_SNAPSHOT_INVALID",
@@ -245,6 +313,7 @@ public class SensorRecurringAssignmentService {
             UUID tenantId,
             String sensorId,
             List<AssignmentInput> inputs,
+            EntityAuthorityScope scope,
             String actor,
             Instant now
     ) {
@@ -258,7 +327,8 @@ public class SensorRecurringAssignmentService {
             if (!seen.add(assignmentId)) {
                 throw new DomainException("VALIDATION_FAILED", "duplicate assignmentId");
             }
-            String entityId = RecurringScheduleBounds.requireId("entityId", input.entityId());
+            UUID entityUuid = requireAuthorizedEntity(scope, input.entityId());
+            String entityId = entityUuid.toString();
             String monitorDefinitionId = RecurringScheduleBounds.requireId(
                     "monitorDefinitionId", input.monitorDefinitionId());
             String schedulingClass = RecurringScheduleBounds.requireClass(
@@ -303,6 +373,62 @@ public class SensorRecurringAssignmentService {
             ));
         }
         return rows;
+    }
+
+    private EntityAuthorityScope requireEntityAuthorityScope(UUID tenantId, String sensorId) {
+        SensorPrincipal principal = sensorControlRepository.findPrincipalByTenantAndId(tenantId, sensorId)
+                .orElseThrow(() -> new DomainException(ERR_SENSOR_NOT_FOUND, "Sensor not found"));
+        if (principal.status() != SensorLifecycleStatus.ACTIVE) {
+            throw new DomainException(ERR_SENSOR_NOT_ACTIVE, "Sensor is not ACTIVE");
+        }
+        if (!principal.tenantId().equals(tenantId)) {
+            throw new DomainException(ERR_SENSOR_NOT_FOUND, "Sensor not found");
+        }
+        Set<UUID> allowed = principal.allowAllTenantEntities()
+                ? Set.of()
+                : Set.copyOf(sensorControlRepository.listAllowedEntityIds(tenantId, sensorId));
+        return new EntityAuthorityScope(tenantId, principal.allowAllTenantEntities(), allowed);
+    }
+
+    private UUID requireAuthorizedEntity(EntityAuthorityScope scope, String rawEntityId) {
+        UUID entityId = requireEntityUuid(rawEntityId);
+        if (!sensorControlRepository.entityExists(scope.tenantId(), entityId)) {
+            throw new DomainException(ERR_SENSOR_ENTITY_INVALID, "Entity not found in tenant: " + entityId);
+        }
+        if (scope.allowAllTenantEntities()) {
+            return entityId;
+        }
+        if (!scope.allowedEntityIds().contains(entityId)) {
+            throw new DomainException(
+                    ERR_ENTITY_SCOPE_UNAUTHORIZED,
+                    "Entity is not authorized for this Sensor: " + entityId);
+        }
+        return entityId;
+    }
+
+    private boolean isEntityAuthorized(EntityAuthorityScope scope, String entityIdText) {
+        final UUID entityId;
+        try {
+            entityId = UUID.fromString(entityIdText);
+        } catch (IllegalArgumentException | NullPointerException ex) {
+            return false;
+        }
+        if (!sensorControlRepository.entityExists(scope.tenantId(), entityId)) {
+            return false;
+        }
+        if (scope.allowAllTenantEntities()) {
+            return true;
+        }
+        return scope.allowedEntityIds().contains(entityId);
+    }
+
+    private static UUID requireEntityUuid(String rawEntityId) {
+        String id = RecurringScheduleBounds.requireId("entityId", rawEntityId);
+        try {
+            return UUID.fromString(id);
+        } catch (IllegalArgumentException ex) {
+            throw new DomainException(ERR_SENSOR_ENTITY_INVALID, "entityId must be a canonical UUID");
+        }
     }
 
     private MutationContext beginMutation(UUID tenantId, String sensorId, long expectedGeneration) {
@@ -388,5 +514,16 @@ public class SensorRecurringAssignmentService {
     }
 
     private record MutationContext(RecurringState state) {
+    }
+
+    private record EntityAuthorityScope(
+            UUID tenantId,
+            boolean allowAllTenantEntities,
+            Set<UUID> allowedEntityIds
+    ) {
+        EntityAuthorityScope {
+            Objects.requireNonNull(tenantId, "tenantId");
+            Objects.requireNonNull(allowedEntityIds, "allowedEntityIds");
+        }
     }
 }

@@ -13,6 +13,10 @@ import com.platform.core.security.identity.IdentityProviderType;
 import com.platform.core.security.identity.PlatformSubject;
 import com.platform.core.security.identity.ProviderInstanceId;
 import com.platform.core.security.identity.ResolvedAuthenticatedIdentity;
+import com.platform.core.sensorcontrol.SensorControlRepository;
+import com.platform.core.sensorcontrol.SensorLifecycleStatus;
+import com.platform.core.sensorcontrol.SensorPrincipal;
+import com.platform.core.sensorcontrol.SensorRole;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,17 +44,24 @@ import static org.mockito.Mockito.when;
 class SensorRecurringAssignmentServiceTest {
 
     private static final UUID TENANT = UUID.fromString("018f0e0a-0000-7000-8000-0000000000a1");
+    private static final UUID OTHER_TENANT = UUID.fromString("018f0e0a-0000-7000-8000-0000000000b2");
+    private static final UUID ENTITY_A = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e1");
+    private static final UUID ENTITY_B = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e2");
+    private static final UUID ENTITY_OTHER_TENANT = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e9");
+    private static final UUID ENTITY_MISSING = UUID.fromString("018f0e0a-0000-7000-8000-0000000000ee");
     private static final String SENSOR = "sensor-01";
 
     private SensorRecurringAssignmentRepository repository;
+    private SensorControlRepository sensorControlRepository;
     private SecurityAuditEmitter auditEmitter;
     private SensorRecurringAssignmentService service;
 
     @BeforeEach
     void setUp() {
         repository = mock(SensorRecurringAssignmentRepository.class);
+        sensorControlRepository = mock(SensorControlRepository.class);
         auditEmitter = mock(SecurityAuditEmitter.class);
-        service = new SensorRecurringAssignmentService(repository, auditEmitter);
+        service = new SensorRecurringAssignmentService(repository, sensorControlRepository, auditEmitter);
         authenticateAs("admin-user");
     }
 
@@ -62,11 +73,13 @@ class SensorRecurringAssignmentServiceTest {
     @Test
     void replaceAssignmentsRejectsForbiddenSecretKeysInProtocolParamsJson() {
         stubActiveMutationLocks(0L);
+        stubRestrictedSensorAllowlist(Set.of(ENTITY_A));
+        when(sensorControlRepository.entityExists(TENANT, ENTITY_A)).thenReturn(true);
 
         SensorRecurringAssignmentService.AssignmentInput input =
                 new SensorRecurringAssignmentService.AssignmentInput(
                         "assign-1",
-                        "entity-1",
+                        ENTITY_A.toString(),
                         "mon-1",
                         "LIVENESS",
                         "NETWORK_POLL",
@@ -94,6 +107,8 @@ class SensorRecurringAssignmentServiceTest {
     @Test
     void replaceAssignmentsRejectsAuthSecretKeyVariants() {
         stubActiveMutationLocks(0L);
+        stubRestrictedSensorAllowlist(Set.of(ENTITY_A));
+        when(sensorControlRepository.entityExists(TENANT, ENTITY_A)).thenReturn(true);
 
         String json = "{\"target\":\"127.0.0.1\",\"port\":161,\"version\":\"3\",\"operation\":\"GET\","
                 + "\"oids\":[\".1.3.6.1.2.1.1.3.0\"],\"timeoutMs\":1000,"
@@ -103,7 +118,7 @@ class SensorRecurringAssignmentServiceTest {
 
         SensorRecurringAssignmentService.AssignmentInput input =
                 new SensorRecurringAssignmentService.AssignmentInput(
-                        "assign-1", "entity-1", "mon-1", "LIVENESS", "NETWORK_POLL",
+                        "assign-1", ENTITY_A.toString(), "mon-1", "LIVENESS", "NETWORK_POLL",
                         60_000L, 90_000L, 1, 5_000L, "cred-1", "SNMP", null, json);
 
         DomainException ex = assertThrows(DomainException.class,
@@ -124,25 +139,130 @@ class SensorRecurringAssignmentServiceTest {
     @Test
     void replaceAssignmentsPersistsCanonicalRowsAndIncrementsGeneration() {
         stubActiveMutationLocks(0L);
+        stubRestrictedSensorAllowlist(Set.of(ENTITY_A));
+        when(sensorControlRepository.entityExists(TENANT, ENTITY_A)).thenReturn(true);
         when(repository.listAssignmentDigests(TENANT, SENSOR)).thenReturn(List.of());
         when(repository.listAssignments(TENANT, SENSOR)).thenReturn(List.of());
 
-        SnmpParams.SnmpLimits limits = new SnmpParams.SnmpLimits(16, 100, 10, 100, 65_536);
-        SnmpParams snmp = new SnmpParams(
-                "127.0.0.1", 161, "2c", "GET", List.of(".1.3.6.1.2.1.1.3.0"), 1_000L, limits);
-        SensorRecurringAssignmentService.AssignmentInput input =
-                new SensorRecurringAssignmentService.AssignmentInput(
-                        "assign-1", "entity-1", "mon-1", "LIVENESS", "NETWORK_POLL",
-                        60_000L, 90_000L, 1, 5_000L, "cred-1", "SNMP", snmp, null);
-
-        service.replaceAssignments(TENANT, SENSOR, 0L, List.of(input));
+        service.replaceAssignments(TENANT, SENSOR, 0L, List.of(validInput(ENTITY_A)));
 
         ArgumentCaptor<RecurringAssignment> rowCaptor = ArgumentCaptor.forClass(RecurringAssignment.class);
         verify(repository).deleteAllAssignments(TENANT, SENSOR);
         verify(repository).insertAssignment(rowCaptor.capture());
         assertEquals("assign-1", rowCaptor.getValue().assignmentId());
+        assertEquals(ENTITY_A.toString(), rowCaptor.getValue().entityId());
         assertTrue(rowCaptor.getValue().protocolParamsJson().contains("\"target\":\"127.0.0.1\""));
         verify(repository).upsertDesiredState(eq(TENANT), eq(SENSOR), eq(1L), anyString(), eq("admin-user"), any());
+    }
+
+    @Test
+    void replaceAssignmentsRejectsNonUuidEntityId() {
+        stubActiveMutationLocks(0L);
+        stubRestrictedSensorAllowlist(Set.of(ENTITY_A));
+
+        DomainException ex = assertThrows(DomainException.class,
+                () -> service.replaceAssignments(TENANT, SENSOR, 0L, List.of(
+                        new SensorRecurringAssignmentService.AssignmentInput(
+                                "assign-1", "entity-opaque", "mon-1", "LIVENESS", "NETWORK_POLL",
+                                60_000L, 90_000L, 1, 5_000L, "cred-1", "SNMP", sampleSnmp(), null))));
+        assertEquals(SensorRecurringAssignmentService.ERR_SENSOR_ENTITY_INVALID, ex.getCode());
+        verify(repository, never()).insertAssignment(any());
+    }
+
+    @Test
+    void replaceAssignmentsRejectsNonexistentEntity() {
+        stubActiveMutationLocks(0L);
+        stubAllowAllSensor();
+        when(sensorControlRepository.entityExists(TENANT, ENTITY_MISSING)).thenReturn(false);
+
+        DomainException ex = assertThrows(DomainException.class,
+                () -> service.replaceAssignments(TENANT, SENSOR, 0L, List.of(validInput(ENTITY_MISSING))));
+        assertEquals(SensorRecurringAssignmentService.ERR_SENSOR_ENTITY_INVALID, ex.getCode());
+    }
+
+    @Test
+    void replaceAssignmentsRejectsCrossTenantEntity() {
+        stubActiveMutationLocks(0L);
+        stubAllowAllSensor();
+        // Other-tenant entity is not present under this tenant_id predicate.
+        when(sensorControlRepository.entityExists(TENANT, ENTITY_OTHER_TENANT)).thenReturn(false);
+
+        DomainException ex = assertThrows(DomainException.class,
+                () -> service.replaceAssignments(TENANT, SENSOR, 0L, List.of(validInput(ENTITY_OTHER_TENANT))));
+        assertEquals(SensorRecurringAssignmentService.ERR_SENSOR_ENTITY_INVALID, ex.getCode());
+        verify(sensorControlRepository, never()).entityExists(eq(OTHER_TENANT), any());
+    }
+
+    @Test
+    void replaceAssignmentsRejectsValidTenantEntityNotOnRestrictedAllowlist() {
+        stubActiveMutationLocks(0L);
+        stubRestrictedSensorAllowlist(Set.of(ENTITY_A));
+        when(sensorControlRepository.entityExists(TENANT, ENTITY_B)).thenReturn(true);
+
+        DomainException ex = assertThrows(DomainException.class,
+                () -> service.replaceAssignments(TENANT, SENSOR, 0L, List.of(validInput(ENTITY_B))));
+        assertEquals(SensorRecurringAssignmentService.ERR_ENTITY_SCOPE_UNAUTHORIZED, ex.getCode());
+        verify(repository, never()).insertAssignment(any());
+    }
+
+    @Test
+    void replaceAssignmentsAllowsEntityOnRestrictedAllowlist() {
+        stubActiveMutationLocks(0L);
+        stubRestrictedSensorAllowlist(Set.of(ENTITY_A));
+        when(sensorControlRepository.entityExists(TENANT, ENTITY_A)).thenReturn(true);
+        when(repository.listAssignmentDigests(TENANT, SENSOR)).thenReturn(List.of());
+        when(repository.listAssignments(TENANT, SENSOR)).thenReturn(List.of());
+
+        service.replaceAssignments(TENANT, SENSOR, 0L, List.of(validInput(ENTITY_A)));
+        verify(repository).insertAssignment(any());
+    }
+
+    @Test
+    void replaceAssignmentsAllowsAnyTenantEntityWhenAllowAll() {
+        stubActiveMutationLocks(0L);
+        stubAllowAllSensor();
+        when(sensorControlRepository.entityExists(TENANT, ENTITY_B)).thenReturn(true);
+        when(repository.listAssignmentDigests(TENANT, SENSOR)).thenReturn(List.of());
+        when(repository.listAssignments(TENANT, SENSOR)).thenReturn(List.of());
+
+        service.replaceAssignments(TENANT, SENSOR, 0L, List.of(validInput(ENTITY_B)));
+        verify(repository).insertAssignment(any());
+        verify(sensorControlRepository, never()).listAllowedEntityIds(any(), any());
+    }
+
+    @Test
+    void replaceAssignmentsRejectsInactiveSensor() {
+        when(repository.lockTenantForUpdate(TENANT)).thenReturn(true);
+        when(repository.findSensorStatus(TENANT, SENSOR)).thenReturn(Optional.of("DISABLED"));
+
+        DomainException ex = assertThrows(DomainException.class,
+                () -> service.replaceAssignments(TENANT, SENSOR, 0L, List.of(validInput(ENTITY_A))));
+        assertEquals(SensorRecurringAssignmentService.ERR_SENSOR_NOT_ACTIVE, ex.getCode());
+    }
+
+    @Test
+    void getDesiredStateReconcilesRevokedAllowlistAndBumpsGeneration() {
+        when(repository.lockTenantForUpdate(TENANT)).thenReturn(true);
+        when(repository.lockSensorForUpdate(TENANT, SENSOR)).thenReturn(Optional.of("ACTIVE"));
+        when(repository.findStateForUpdate(TENANT, SENSOR)).thenReturn(Optional.of(
+                new RecurringState(TENANT, SENSOR, 2L, "a".repeat(64), 1L, "b".repeat(64),
+                        Instant.now(), "actor", Instant.now())));
+        stubRestrictedSensorAllowlist(Set.of(ENTITY_A));
+        when(sensorControlRepository.entityExists(TENANT, ENTITY_A)).thenReturn(true);
+        when(sensorControlRepository.entityExists(TENANT, ENTITY_B)).thenReturn(true);
+
+        RecurringAssignment keep = sampleAssignment("assign-keep", ENTITY_A);
+        RecurringAssignment drop = sampleAssignment("assign-drop", ENTITY_B);
+        when(repository.listAssignments(TENANT, SENSOR)).thenReturn(List.of(keep, drop));
+
+        SensorRecurringDesiredState desired = service.getDesiredState(TENANT, SENSOR);
+
+        verify(repository).deleteAssignment(TENANT, SENSOR, "assign-drop");
+        verify(repository).upsertDesiredState(eq(TENANT), eq(SENSOR), eq(3L), anyString(),
+                eq("system:entity-scope-reconcile"), any());
+        assertEquals(3L, desired.generation());
+        assertEquals(1, desired.definitions().size());
+        assertEquals("assign-keep", desired.definitions().get(0).assignmentId());
     }
 
     @Test
@@ -172,6 +292,41 @@ class SensorRecurringAssignmentServiceTest {
                             desiredGeneration - 1, "b".repeat(64),
                             Instant.now(), "actor", Instant.now())));
         }
+    }
+
+    private void stubRestrictedSensorAllowlist(Set<UUID> allowed) {
+        Instant now = Instant.now();
+        when(sensorControlRepository.findPrincipalByTenantAndId(TENANT, SENSOR)).thenReturn(Optional.of(
+                new SensorPrincipal(SENSOR, TENANT, null, SensorRole.NETWORK, SensorLifecycleStatus.ACTIVE,
+                        false, now, now)));
+        when(sensorControlRepository.listAllowedEntityIds(TENANT, SENSOR)).thenReturn(allowed);
+    }
+
+    private void stubAllowAllSensor() {
+        Instant now = Instant.now();
+        when(sensorControlRepository.findPrincipalByTenantAndId(TENANT, SENSOR)).thenReturn(Optional.of(
+                new SensorPrincipal(SENSOR, TENANT, null, SensorRole.NETWORK, SensorLifecycleStatus.ACTIVE,
+                        true, now, now)));
+    }
+
+    private static SensorRecurringAssignmentService.AssignmentInput validInput(UUID entityId) {
+        return new SensorRecurringAssignmentService.AssignmentInput(
+                "assign-1", entityId.toString(), "mon-1", "LIVENESS", "NETWORK_POLL",
+                60_000L, 90_000L, 1, 5_000L, "cred-1", "SNMP", sampleSnmp(), null);
+    }
+
+    private static SnmpParams sampleSnmp() {
+        SnmpParams.SnmpLimits limits = new SnmpParams.SnmpLimits(16, 100, 10, 100, 65_536);
+        return new SnmpParams(
+                "127.0.0.1", 161, "2c", "GET", List.of(".1.3.6.1.2.1.1.3.0"), 1_000L, limits);
+    }
+
+    private static RecurringAssignment sampleAssignment(String assignmentId, UUID entityId) {
+        return new RecurringAssignment(
+                TENANT, SENSOR, assignmentId, entityId.toString(), "mon-1",
+                "LIVENESS", "NETWORK_POLL", 60_000L, 90_000L, 1, 5_000L, "cred-1", "SNMP",
+                RecurringScheduleBounds.canonicalizeSnmpJson(sampleSnmp()),
+                "actor", Instant.now());
     }
 
     private static void authenticateAs(String subjectId) {

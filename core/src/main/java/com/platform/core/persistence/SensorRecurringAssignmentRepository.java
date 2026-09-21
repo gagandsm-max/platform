@@ -203,6 +203,16 @@ public class SensorRecurringAssignmentRepository {
                 Map.of("tenantId", tenantId, "sensorId", sensorId));
     }
 
+    public int deleteAssignment(UUID tenantId, String sensorId, String assignmentId) {
+        return jdbc.update("""
+                DELETE FROM platform.sensor_recurring_assignment
+                 WHERE tenant_id = :tenantId
+                   AND sensor_id = :sensorId
+                   AND assignment_id = :assignmentId
+                """,
+                Map.of("tenantId", tenantId, "sensorId", sensorId, "assignmentId", assignmentId));
+    }
+
     public void insertAssignment(RecurringAssignment assignment) {
         jdbc.update("""
                 INSERT INTO platform.sensor_recurring_assignment
