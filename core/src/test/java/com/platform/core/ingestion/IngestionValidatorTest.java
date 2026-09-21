@@ -738,7 +738,7 @@ class IngestionValidatorTest {
 
     @Test
     void testCounter64InvalidBoundariesRejected() throws Exception {
-        String[] invalid = {"-1", "18446744073709551616", "abc", "1.5", "1e19", ""};
+        String[] invalid = {"-1", "+1", " 1", "1 ", "18446744073709551616", "abc", "1.5", "1e19", ""};
         for (String value : invalid) {
             String counterJson = value.isEmpty() ? "\"\"" : "\"" + value + "\"";
             String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
@@ -759,6 +759,46 @@ class IngestionValidatorTest {
                     "expected reject for " + value);
             assertEquals("ERR_MALFORMED_COUNTER64", ex.getCode(), "value=" + value);
         }
+    }
+
+    @Test
+    void testCounter64KindMismatchRejected() throws Exception {
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\"," +
+                "\"entityId\":\"" + entityId + "\"," +
+                "\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\"," +
+                "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.31.1.1.1.6.1\",\"status\":\"VALUE\",\"value\":{\"kind\":\"INTEGER\",\"counter64\":\"9007199254740993\"}}]}}}";
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-kind\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals("ERR_VALUE_KIND_MISMATCH", ex.getCode());
+    }
+
+    @Test
+    void testCounter64MultipleNumericFieldsRejected() throws Exception {
+        String recordJson = "{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{" +
+                "\"tenantId\":\"" + tenantId + "\"," +
+                "\"entityId\":\"" + entityId + "\"," +
+                "\"collectedAt\":\"2026-09-09T10:00:00Z\"," +
+                "\"protocol\":\"SNMP\"," +
+                "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.31.1.1.1.6.1\",\"status\":\"VALUE\",\"value\":{\"kind\":\"COUNTER64\",\"integer\":1,\"counter64\":\"2\"}}]}}}";
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(recordJson.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\",\"batchId\":\"b-ambiguous\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + sb + "\",\"records\":[" + recordJson + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals("ERR_AMBIGUOUS_NUMERIC_VALUE", ex.getCode());
     }
 
     @Test
