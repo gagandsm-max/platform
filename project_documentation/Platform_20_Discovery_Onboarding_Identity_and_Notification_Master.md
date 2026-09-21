@@ -203,6 +203,16 @@ External email/Teams/Slack/PagerDuty/etc. delivery remains owned by the Integrat
 
 Recipient expansion and retrieval are server-side authorized. Generation uses deterministic dedupe keys, bounded fan-out and rate limits.
 
+### 4.4 Region / Sensor Pool and placement architecture
+
+Region is an optional tenant-scoped locality/organizational layer used for placement, policy and operator context. Region names are customer-defined and do not create a second tenant/security boundary. Sites remain concrete monitored-estate locations; deployments may omit Region where it adds no value.
+
+Sensor Pool is the Core-owned placement abstraction over one or more eligible Sensors. Pool eligibility combines tenant/scope, Region/Site affinity where configured, Sensor role/capabilities, capacity/headroom, health/maintenance state and failure-domain policy. A pool may be site-local or broader when policy explicitly permits.
+
+Core remains the only assignment authority. Pool membership and Agent→Sensor assignment use monotonically advancing generations/fences so a stale Sensor or Agent cannot regain ownership after reassignment, restart or failover. Sensors execute current authorized desired state; they do not elect ownership independently.
+
+Provisioning must prefer efficient placement and bounded workload controls before raising certified hardware requirements, but may never trade away freshness, telemetry durability, security or tenant isolation.
+
 ---
 
 ## 5. HLD subsystem and ownership contract
@@ -259,6 +269,12 @@ Secure bootstrap establishes unique Agent identity/certificate. Core selects an 
 Default state is `PENDING_APPROVAL`. The provisional Sensor association does **not** activate commercial/licence consumption, customer operational alerts, the normal monitoring profile or recurring monitored workload. Normal monitoring/test workload becomes active only after explicit authorized **Approve** or trusted auto-approval and the normal entitlement/capacity/policy checks. Activation retains or re-evaluates the provisional assignment through the same Sensor Control assignment/versioning mechanism; no second Sensor authority exists.
 
 `UNMANAGED` may retain bounded management identity/inventory visibility without full monitoring. `REJECTED` unauthorized enrollment revokes/invalidates identity as policy requires. `EXCLUDED` is a persistent/permanent automatic-onboarding exclusion and remains effective across rediscovery, Agent reconnect, later scans and passage of time until an explicit authorized audited administrative action removes/reopens it.
+
+### 5.5 Sensor Control / Placement ownership
+
+Sensor Control owns Region/Site/Pool-aware eligibility, membership state, placement generations, drain/maintenance state, Sensor reassignment and Agent→Sensor assignment. Provisioning/Onboarding requests placement and receives an authoritative result; it does not maintain a second placement registry.
+
+Enrollment/Identity owns bootstrap authority validation and certificate binding. Sensor Runtime owns execution of the assignment currently authorized by Core. Capacity policy remains governed by Platform_11/14 evidence and Sensor self-observability.
 
 ---
 
@@ -390,6 +406,14 @@ Where asynchronous events are needed:
 
 Events carry schema version, tenant, source identity, event ID, event/ingest time, provenance/quality where applicable and correlation ID. Producers/consumers are replay/idempotency safe. No secret credential material is emitted.
 
+### 6.7 Region / Sensor Pool / bootstrap control state
+
+The canonical field-level Region, Sensor Pool, membership, Agent assignment and enrollment-control contract is owned by `Platform_17_API_Event_and_Data_Model_Contracts.md`. Platform_20 owns lifecycle and product semantics; implementations must not fork duplicate schemas.
+
+Mutations are tenant-scoped, optimistic-concurrency/idempotency safe and audited. Assignment/membership generations only advance. Enrollment material is single-use/short-lived; endpoint private keys are generated locally and are prohibited from normal Core persistence, events, audit payloads and support output.
+
+Lifecycle events may extend the existing Sensor/Agent control families with Region/Pool/placement references, but must carry tenant, generation/revision, event/ingest time and correlation provenance. No event grants authority merely because it contains a claimed pool or assignment.
+
 ---
 
 ## 7. End-to-end dataflows
@@ -469,6 +493,36 @@ Notification generation resolves source object -> tenant/resource scope -> eligi
 ### DF-ONB-004 — Identity conflict/reinstall/clone
 
 Conflicting Agent/certificate/stable-host identifiers, simultaneous improbable heartbeats or reinstall/reimage evidence enters `REVIEW_REQUIRED`/`SECURITY_HOLD`. Core does not silently merge or create a second independent active binding. Authorized reconciliation records evidence, actor/comment and resulting binding; revoked identities are denied subsequently.
+
+### DF-ONB-005 — Sensor bootstrap, pool placement and fenced Agent assignment
+
+```mermaid
+sequenceDiagram
+  participant I as Installer / Endpoint
+  participant E as Enrollment
+  participant SC as Sensor Control / Placement
+  participant S as Sensor
+  participant A as Agent
+
+  I->>E: Stable Core endpoint + short-lived scoped enrollment authority
+  I->>I: Generate private key locally
+  I->>E: CSR/proof-of-possession + scoped bootstrap request
+  E->>SC: Validate tenant/Region/Site/Pool/role eligibility
+  SC-->>E: Authoritative Sensor identity/placement generation
+  E-->>I: Bound certificate + authorized control endpoint metadata
+  Note over I,E: CA/SAN identity verification remains enabled; no plaintext fallback
+  A->>E: Agent enrollment with local key + scoped authority
+  E->>SC: Request eligible Agent→Sensor assignment
+  SC-->>A: Sensor endpoint + monotonically advancing assignment generation
+  A->>S: mTLS control/telemetry using current generation
+  S->>SC: Health/capacity/assignment state
+  alt Sensor degraded/drained/reassigned
+    SC-->>A: New Sensor assignment with higher generation
+    A->>S: Old generation rejected / new assignment activated
+  end
+```
+
+Normal Agent telemetry remains Agent→assigned Sensor→Core. Enrollment/bootstrap does not authorize a direct normal Agent→Core telemetry bypass.
 
 ---
 
