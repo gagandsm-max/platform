@@ -7,6 +7,7 @@ import com.platform.core.ingestion.agentingress.dto.AgentTelemetryAckResponse;
 import com.platform.core.ingestion.agentingress.dto.AgentTelemetryBatchRequest;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.ingestion.replay.WatermarkState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -121,7 +122,7 @@ public class AgentIngestionService {
         }
 
         // At-least-once across Kafka+PG (not XA); Sensor retries on missing ACK.
-        kafkaProducer.publishBatchTransactionally(observations);
+        kafkaProducer.publishBatchTransactionally(TelemetryObservationBatch.ofNumeric(observations));
 
         watermarkStore.updateWatermark(
                 scope.tenantId(),

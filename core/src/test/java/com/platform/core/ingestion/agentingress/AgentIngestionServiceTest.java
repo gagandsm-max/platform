@@ -7,6 +7,7 @@ import com.platform.core.ingestion.agentingress.dto.AgentTelemetryAckResponse;
 import com.platform.core.ingestion.agentingress.dto.AgentTelemetryBatchRequest;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.ingestion.replay.WatermarkState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -76,7 +77,7 @@ class AgentIngestionServiceTest {
         assertEquals(12L, ack.acceptedThroughIngressSequence());
         assertEquals("batch-1", ack.batchId());
         assertEquals("corr-1", ack.correlationId());
-        verify(kafkaProducer, never()).publishBatchTransactionally(any());
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
         verify(watermarkStore, never()).updateWatermark(any(), any(), anyLong(), anyLong(), anyLong(), any(), any());
     }
 
@@ -143,7 +144,7 @@ class AgentIngestionServiceTest {
         AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, c);
         assertEquals(15L, ack.acceptedThroughIngressSequence());
         assertEquals("sensor-infra-01", ack.sensorId());
-        verify(kafkaProducer).publishBatchTransactionally(any());
+        verify(kafkaProducer).publishBatchTransactionally(any(TelemetryObservationBatch.class));
         verify(watermarkStore).updateWatermark(tenantId, "sensor-infra-01", 15L, 13L, 15L, "chk-new", "batch-1");
     }
 
@@ -167,6 +168,6 @@ class AgentIngestionServiceTest {
         AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, c);
         assertEquals("ACCEPTED", ack.status());
         assertEquals(15L, ack.acceptedThroughIngressSequence());
-        verify(kafkaProducer, times(2)).publishBatchTransactionally(any());
+        verify(kafkaProducer, times(2)).publishBatchTransactionally(any(TelemetryObservationBatch.class));
     }
 }

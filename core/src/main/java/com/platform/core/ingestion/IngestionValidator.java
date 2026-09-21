@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.authority.SensorAuthorityResolver;
 import com.platform.core.ingestion.authority.SensorScope;
+import com.platform.core.ingestion.dto.CanonicalCounterObservation;
 import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -30,8 +32,6 @@ public class IngestionValidator {
     public static final int MAX_RECORD_BYTES = 512 * 1024;
 
     // Maximum safe integer representable without precision loss in IEEE 754 64-bit float (2^53 - 1)
-    private static final BigInteger MAX_SAFE_COUNTER64 = BigInteger.valueOf((1L << 53) - 1);
-
     private final ObjectMapper objectMapper;
     private final SensorAuthorityResolver authorityResolver;
     private final IngestionMetrics metrics;
@@ -63,7 +63,7 @@ public class IngestionValidator {
         return authorityResolver.resolve(clientCert);
     }
 
-    public List<CanonicalObservation> validateAndExtract(
+    public TelemetryObservationBatch validateAndExtract(
             byte[] rawBody,
             TelemetryBatchRequest batch,
             SensorScope scope
@@ -79,7 +79,7 @@ public class IngestionValidator {
 
         try {
             validateBatchBounds(batch, rawBody, scope);
-            List<CanonicalObservation> observations = extractCanonicalObservations(batch, scope);
+            TelemetryObservationBatch observations = extractCanonicalObservations(batch, scope);
             if (observations.isEmpty()) {
                 throw new IngestionException(
                         HttpStatus.BAD_REQUEST,
@@ -335,8 +335,9 @@ public class IngestionValidator {
         }
     }
 
-    public List<CanonicalObservation> extractCanonicalObservations(TelemetryBatchRequest batch, SensorScope scope) {
-        List<CanonicalObservation> results = new ArrayList<>();
+    public TelemetryObservationBatch extractCanonicalObservations(TelemetryBatchRequest batch, SensorScope scope) {
+        List<CanonicalObservation> numericResults = new ArrayList<>();
+        List<CanonicalCounterObservation> counterResults = new ArrayList<>();
         String authoritativeTenantId = scope.tenantId().toString();
         String authoritativeSensorId = scope.sensorId();
 
@@ -345,7 +346,7 @@ public class IngestionValidator {
         sortedRecords.sort(Comparator.comparingLong(r -> r.path("sequence").asLong(0)));
 
         for (JsonNode recordNode : sortedRecords) {
-            int initialCount = results.size();
+            int initialCount = numericResults.size() + counterResults.size();
             long sequence = recordNode.path("sequence").asLong(0);
 
             // P0-3: Fail closed on non-numeric telemetry / unsupported record types
@@ -553,25 +554,64 @@ public class IngestionValidator {
                                     "Observation at sequence " + sequence + " ordinal " + ordinal + " has malformed unsigned value"
                             );
                         }
-                    } else if (valNode.hasNonNull("counter64")) {
-                        String c64Str = valNode.path("counter64").asText().trim();
-                        try {
-                            BigInteger u64 = new BigInteger(c64Str);
-                            if (u64.compareTo(BigInteger.ZERO) < 0 || u64.compareTo(MAX_SAFE_COUNTER64) > 0) {
-                                throw new IngestionException(
-                                        HttpStatus.BAD_REQUEST,
-                                        "ERR_NUMERIC_PRECISION_EXCEEDED",
-                                        "Counter64 value exceeds maximum safe representable float64 bounds: " + c64Str
-                                );
-                            }
-                            numericVal = u64.doubleValue();
-                        } catch (NumberFormatException nfe) {
+                    } else if (valNode.has("counter64")) {
+                        JsonNode c64Node = valNode.get("counter64");
+                        if (c64Node == null || c64Node.isNull()) {
                             throw new IngestionException(
                                     HttpStatus.BAD_REQUEST,
-                                    "ERR_MALFORMED_NUMERIC_VALUE",
-                                    "Invalid Counter64 integer representation: " + c64Str
+                                    "ERR_MALFORMED_COUNTER64",
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal + " has empty Counter64 value"
                             );
                         }
+                        if (!c64Node.isTextual()) {
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_COUNTER64_JSON_NUMBER",
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal
+                                            + " Counter64 must be a decimal string, not a JSON Number"
+                            );
+                        }
+                        String c64Str = c64Node.asText().trim();
+                        if (c64Str.isEmpty()) {
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_MALFORMED_COUNTER64",
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal + " has empty Counter64 value"
+                            );
+                        }
+                        final BigInteger exactCounter;
+                        try {
+                            exactCounter = CanonicalCounterObservation.parseExactUnsigned64(c64Str);
+                        } catch (IllegalArgumentException ex) {
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_MALFORMED_COUNTER64",
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal
+                                            + " has invalid Counter64 representation"
+                            );
+                        }
+
+                        String stableCounterSeqId = authoritativeTenantId + ":"
+                                + authoritativeSensorId + ":"
+                                + batch.bootEpoch() + ":"
+                                + sequence + ":"
+                                + ordinal + ":"
+                                + metricId;
+
+                        counterResults.add(new CanonicalCounterObservation(
+                                authoritativeTenantId,
+                                claimedEntityId,
+                                metricId,
+                                authoritativeSensorId,
+                                ts,
+                                exactCounter,
+                                qualityCode,
+                                0,
+                                stableCounterSeqId,
+                                "snmp"
+                        ));
+                        ordinal++;
+                        continue;
                     } else {
                         throw new IngestionException(
                                 HttpStatus.BAD_REQUEST,
@@ -600,7 +640,7 @@ public class IngestionValidator {
                             + ordinal + ":"
                             + metricId;
 
-                    results.add(new CanonicalObservation(
+                    numericResults.add(new CanonicalObservation(
                             authoritativeTenantId,
                             claimedEntityId,
                             metricId,
@@ -635,7 +675,7 @@ public class IngestionValidator {
                                 + sequence + ":0:"
                                 + metricId;
 
-                        results.add(new CanonicalObservation(
+                        numericResults.add(new CanonicalObservation(
                                 authoritativeTenantId,
                                 claimedEntityId,
                                 metricId,
@@ -672,7 +712,7 @@ public class IngestionValidator {
             // Every source spool record in an accepted batch must be completely accounted for.
             // If any source record contains unsupported telemetry or yields zero numeric observations,
             // reject the entire batch (fail closed at Sensor spool).
-            if (results.size() == initialCount) {
+            if (numericResults.size() + counterResults.size() == initialCount) {
                 throw new IngestionException(
                         HttpStatus.BAD_REQUEST,
                         "ERR_NON_NUMERIC_RECORD",
@@ -681,6 +721,6 @@ public class IngestionValidator {
             }
         }
 
-        return results;
+        return new TelemetryObservationBatch(numericResults, counterResults);
     }
 }

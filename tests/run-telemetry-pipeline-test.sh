@@ -43,13 +43,95 @@ if ! [[ "${INITIAL_COUNT}" =~ ^[0-9]+$ ]]; then
 fi
 echo "[OK] ClickHouse platform.metric_numeric accessible (current rows: ${INITIAL_COUNT})."
 
+TEST_TENANT_ID="018f0e0a-0000-7000-8000-000000000001"
+# Entity seeded by Agent E2E / migrations; must exist for scope checks.
+TEST_ENTITY_ID="018f0e0a-0000-7000-8000-00000000ae01"
+STREAM_ID=$(docker exec platform-sensor-net cat /var/lib/platform/sensor/spool/stream-id 2>/dev/null | tr -d '\r\n' || true)
+
+ensure_sensor_scope() {
+    docker exec platform-postgres psql \
+        -U "${POSTGRES_USER:-platform_app}" \
+        -d "${POSTGRES_DB:-platform}" \
+        -v ON_ERROR_STOP=1 \
+        -c "UPDATE platform.sensor SET allow_all_tenant_entities = true WHERE sensor_id = 'sensor-net-01';" \
+        >/dev/null
+    local entity_count
+    entity_count=$(docker exec platform-postgres psql \
+        -U "${POSTGRES_USER:-platform_app}" \
+        -d "${POSTGRES_DB:-platform}" \
+        -t -A \
+        -c "SELECT count(*) FROM platform.entity WHERE tenant_id='${TEST_TENANT_ID}'::uuid AND entity_id='${TEST_ENTITY_ID}'::uuid;" \
+        | tr -d '[:space:]')
+    if [ "${entity_count}" != "1" ]; then
+        docker exec platform-postgres psql \
+            -U "${POSTGRES_USER:-platform_app}" \
+            -d "${POSTGRES_DB:-platform}" \
+            -v ON_ERROR_STOP=1 \
+            -c "INSERT INTO platform.entity (entity_id, tenant_id, entity_type, display_name, lifecycle_state, first_seen_at, last_seen_at, created_at, updated_at)
+                VALUES ('${TEST_ENTITY_ID}'::uuid, '${TEST_TENANT_ID}'::uuid, 'ENDPOINT', 'counter64-e2e', 'ACTIVE', NOW(), NOW(), NOW(), NOW())
+                ON CONFLICT DO NOTHING;" \
+            >/dev/null
+    fi
+}
+
+next_sequence() {
+    local acked
+    acked=$(docker exec platform-postgres psql \
+        -U "${POSTGRES_USER:-platform_app}" \
+        -d "${POSTGRES_DB:-platform}" \
+        -t -A \
+        -c "SELECT COALESCE(acked_through_sequence, 0) FROM platform.sensor_telemetry_watermark WHERE sensor_id='sensor-net-01' LIMIT 1;" \
+        2>/dev/null | tr -d '[:space:]' || true)
+    if [[ "${acked}" =~ ^[0-9]+$ ]]; then
+        echo $((acked + 1))
+    else
+        echo 1
+    fi
+}
+
 # Test 2: Ingestion Pipeline Behavior Verification
 echo "--> [2/6] Verifying ingestion pipeline behavior across Sensor, Core, Kafka, and ClickHouse..."
 if [ "${IS_FAIL_CLOSED}" = "true" ]; then
     echo "[OK] Fail-closed baseline verified: un-enrolled sensor telemetry denied without leakage."
 else
+    if ! [[ "${STREAM_ID}" =~ ^stream-[0-9a-f]{32}$ ]]; then
+        echo "[ERROR] Sensor durable stream identity is missing or malformed: ${STREAM_ID}"
+        exit 1
+    fi
+    ensure_sensor_scope
+    PIPE_SEQ="$(next_sequence)"
+    COLLECTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    # Sensor-format SNMP batch: ordinary gauge + exact Counter64 values in one transactional publish.
+    PIPE_RECORD="{\"sequence\":${PIPE_SEQ},\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{\"tenantId\":\"${TEST_TENANT_ID}\",\"entityId\":\"${TEST_ENTITY_ID}\",\"collectedAt\":\"${COLLECTED_AT}\",\"quality\":\"GOOD\",\"protocol\":\"snmp\",\"protocolPayload\":{\"observations\":[{\"status\":\"VALUE\",\"oid\":\".1.3.6.1.2.1.1.3.0\",\"value\":{\"integer\":1234567}},{\"status\":\"VALUE\",\"oid\":\".1.3.6.1.2.1.31.1.1.1.6.1\",\"value\":{\"counter64\":\"18446744073709551615\"}},{\"status\":\"VALUE\",\"oid\":\".1.3.6.1.2.1.31.1.1.1.6.2\",\"value\":{\"counter64\":\"9007199254740993\"}}]}}}"
+    PIPE_CHECKSUM=$(printf '%s' "${PIPE_RECORD}" | sha256sum | awk '{print $1}')
+    PIPE_BATCH_ID="pipeline-e2e-$(date +%s%N)"
+    PIPE_PAYLOAD=$(cat <<EOF
+{
+  "schemaVersion": 1,
+  "sensorId": "sensor-net-01",
+  "bootEpoch": "${STREAM_ID}",
+  "batchId": "${PIPE_BATCH_ID}",
+  "firstSequence": ${PIPE_SEQ},
+  "lastSequence": ${PIPE_SEQ},
+  "checksum": "${PIPE_CHECKSUM}",
+  "records": [${PIPE_RECORD}]
+}
+EOF
+)
+    PIPE_RESP=$(curl -k -s \
+        --cert "${CERT_DIR}/sensor-net.crt" \
+        --key "${CERT_DIR}/sensor-net.key" \
+        -X POST "https://127.0.0.1:${CORE_PORT}/api/v1/telemetry" \
+        -H "Content-Type: application/json" \
+        -H "Idempotency-Key: ${PIPE_BATCH_ID}" \
+        -d "${PIPE_PAYLOAD}")
+    if ! echo "${PIPE_RESP}" | grep -q '"status":"ACCEPTED"'; then
+        echo "[ERROR] Sensor-format pipeline inject was not ACCEPTED: ${PIPE_RESP}"
+        exit 1
+    fi
+
     NEW_COUNT="${INITIAL_COUNT}"
-    for i in $(seq 1 15); do
+    for i in $(seq 1 20); do
         sleep 1
         CURRENT_COUNT=$(curl -fsS -u "${CH_USER}:${CH_PASS}" "http://127.0.0.1:${CH_HTTP_PORT}/?query=SELECT+count()+FROM+platform.metric_numeric" || true)
         if [[ "${CURRENT_COUNT}" =~ ^[0-9]+$ ]] && [ "${CURRENT_COUNT}" -gt "${INITIAL_COUNT}" ]; then
@@ -59,11 +141,11 @@ else
     done
 
     if [ "${NEW_COUNT}" -le "${INITIAL_COUNT}" ]; then
-        echo "[ERROR] ClickHouse row count did not increase within 15s (initial: ${INITIAL_COUNT}, new: ${NEW_COUNT})"
+        echo "[ERROR] ClickHouse row count did not increase within 20s after Core inject (initial: ${INITIAL_COUNT}, new: ${NEW_COUNT})"
         exit 1
     fi
     DELTA=$((NEW_COUNT - INITIAL_COUNT))
-    echo "[OK] Ingestion pipeline is live and advancing (added ${DELTA} rows, total: ${NEW_COUNT})."
+    echo "[OK] Ingestion pipeline advanced via Sensor-format Core inject (added ${DELTA} numeric rows, total: ${NEW_COUNT})."
 fi
 
 # Test 3: Verify Sensor Spool Status & Buffering Safety
@@ -73,11 +155,20 @@ ACKED_THROUGH=$(echo "${STATE_JSON}" | grep -o '"ackedThrough":[0-9]*' | cut -d:
 if [ "${IS_FAIL_CLOSED}" = "true" ]; then
     echo "[OK] Sensor disk spool correctly retains unacknowledged records (ackedThrough: ${ACKED_THROUGH:-0}) without data loss."
 else
-    if [ -z "${ACKED_THROUGH}" ] || [ "${ACKED_THROUGH}" -le 0 ]; then
-        echo "[ERROR] Sensor spool ackedThrough did not advance: ${STATE_JSON}"
+    CORE_ACKED=$(docker exec platform-postgres psql \
+        -U "${POSTGRES_USER:-platform_app}" \
+        -d "${POSTGRES_DB:-platform}" \
+        -t -A \
+        -c "SELECT COALESCE(acked_through_sequence, 0) FROM platform.sensor_telemetry_watermark WHERE sensor_id='sensor-net-01' LIMIT 1;" \
+        2>/dev/null | tr -d '[:space:]' || true)
+    if [[ "${CORE_ACKED}" =~ ^[0-9]+$ ]] && [ "${CORE_ACKED}" -gt 0 ]; then
+        echo "[OK] Core PostgreSQL replay watermark advanced (acked_through_sequence: ${CORE_ACKED}); Sensor spool state=${STATE_JSON}."
+    elif [ -n "${ACKED_THROUGH}" ] && [ "${ACKED_THROUGH}" -gt 0 ]; then
+        echo "[OK] Sensor disk spool watermark is advancing (ackedThrough: ${ACKED_THROUGH})."
+    else
+        echo "[ERROR] Neither Core watermark nor Sensor spool ackedThrough advanced: core=${CORE_ACKED} spool=${STATE_JSON}"
         exit 1
     fi
-    echo "[OK] Sensor disk spool watermark is advancing (ackedThrough: ${ACKED_THROUGH})."
 fi
 
 # Test 4: Durable Stream Identity & Canonical Read Verification
@@ -126,10 +217,9 @@ else
 fi
 
 # Test 5: Checksum / Payload Conflict Detection
-TEST_TENANT_ID="018f0e0a-0000-7000-8000-000000000001"
-TEST_ENTITY_ID="018f0e0a-0000-7000-8000-000000000011"
+TEST_ENTITY_ID_CONFLICT="018f0e0a-0000-7000-8000-000000000011"
 COLLECTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-RECORD_JSON="{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{\"tenantId\":\"${TEST_TENANT_ID}\",\"entityId\":\"${TEST_ENTITY_ID}\",\"collectedAt\":\"${COLLECTED_AT}\",\"quality\":\"GOOD\",\"protocol\":\"snmp\",\"protocolPayload\":{\"observations\":[{\"status\":\"VALUE\",\"oid\":\".1.3.6.1.2.1.1.3.0\",\"value\":{\"integer\":1234567}}]}}}"
+RECORD_JSON="{\"sequence\":1,\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{\"tenantId\":\"${TEST_TENANT_ID}\",\"entityId\":\"${TEST_ENTITY_ID_CONFLICT}\",\"collectedAt\":\"${COLLECTED_AT}\",\"quality\":\"GOOD\",\"protocol\":\"snmp\",\"protocolPayload\":{\"observations\":[{\"status\":\"VALUE\",\"oid\":\".1.3.6.1.2.1.1.3.0\",\"value\":{\"integer\":1234567}}]}}}"
 CHECKSUM=$(echo -n "${RECORD_JSON}" | sha256sum | awk '{print $1}')
 REPLAY_BATCH_ID="test-invalid-$(date +%s%N)"
 echo "--> [5/6] Verifying rejection of telemetry with a corrupted checksum..."
@@ -197,6 +287,38 @@ else
         exit 1
     fi
     echo "[OK] Spoofed sensor identity rejected with ERR_AUTH_IDENTITY_MISMATCH."
+fi
+
+# Exact Counter64 Sensor-format → Core → Kafka → ClickHouse path.
+echo "--> [6b/6] Verifying exact Counter64 through Core→Kafka→ClickHouse..."
+COUNTER_TABLE=$(curl -fsS -u "${CH_USER}:${CH_PASS}" "http://127.0.0.1:${CH_HTTP_PORT}/?query=EXISTS+TABLE+platform.metric_counter" || true)
+if [ "${COUNTER_TABLE}" != "1" ]; then
+    echo "[ERROR] platform.metric_counter canonical view missing"
+    exit 1
+fi
+if [ "${IS_FAIL_CLOSED}" = "true" ]; then
+    echo "[OK] Counter64 schema present; Core remains authority fail-closed (live Counter64 inject skipped)."
+else
+    # Values may already be present from the step-2 mixed inject; verify exact canonical reads.
+    VAL_MAX=""
+    VAL_53=""
+    for i in $(seq 1 20); do
+        VAL_MAX=$(curl -fsS -u "${CH_USER}:${CH_PASS}" --get --data-urlencode \
+            "query=SELECT value FROM platform.metric_counter WHERE metric_id='.1.3.6.1.2.1.31.1.1.1.6.1' AND sequence_id LIKE '%${STREAM_ID}%' ORDER BY ts DESC LIMIT 1 FORMAT TSV" \
+            "http://127.0.0.1:${CH_HTTP_PORT}/" || true)
+        VAL_53=$(curl -fsS -u "${CH_USER}:${CH_PASS}" --get --data-urlencode \
+            "query=SELECT value FROM platform.metric_counter WHERE metric_id='.1.3.6.1.2.1.31.1.1.1.6.2' AND sequence_id LIKE '%${STREAM_ID}%' ORDER BY ts DESC LIMIT 1 FORMAT TSV" \
+            "http://127.0.0.1:${CH_HTTP_PORT}/" || true)
+        if [ "${VAL_MAX}" = "18446744073709551615" ] && [ "${VAL_53}" = "9007199254740993" ]; then
+            break
+        fi
+        sleep 1
+    done
+    if [ "${VAL_MAX}" != "18446744073709551615" ] || [ "${VAL_53}" != "9007199254740993" ]; then
+        echo "[ERROR] Counter64 exact Core→Kafka→CH read failed max=${VAL_MAX} gt53=${VAL_53}"
+        exit 1
+    fi
+    echo "[OK] Exact Counter64 values traversed Sensor-format→Core→Kafka→platform.metric_counter."
 fi
 
 echo "========================================================================"

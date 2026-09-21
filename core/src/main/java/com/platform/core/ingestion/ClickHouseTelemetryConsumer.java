@@ -1,6 +1,8 @@
 package com.platform.core.ingestion;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.core.ingestion.dto.CanonicalCounterObservation;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
@@ -55,15 +57,14 @@ public class ClickHouseTelemetryConsumer {
             containerFactory = "telemetryKafkaListenerContainerFactory"
     )
     public void consume(ConsumerRecord<String, String> record, Acknowledgment acknowledgment) {
-        CanonicalObservation obs;
+        final Runnable insert;
         try {
-            obs = objectMapper.readValue(record.value(), CanonicalObservation.class);
+            insert = resolveInsert(record.value());
         } catch (Exception e) {
             String failureClass = e.getClass().getSimpleName();
             int payloadBytes = record.value() == null
                     ? 0
                     : record.value().getBytes(StandardCharsets.UTF_8).length;
-            // Never log record.value(), payload fragments, or e.getMessage() (may echo attacker content).
             log.error(
                     "Poison/malformed telemetry message from Kafka topic={} partition={} offset={} failureClass={} payloadBytes={} code={}",
                     record.topic(),
@@ -74,9 +75,6 @@ public class ClickHouseTelemetryConsumer {
                     ERR_KAFKA_POISON_EVENT
             );
             metrics.recordConsumerPoisonEvent(record.topic(), record.offset(), failureClass);
-            // Malformed/poison event must not silently disappear.
-            // Do NOT acknowledge; throw exception so offset does not progress past poison event.
-            // Do NOT attach parser/Jackson cause: DefaultErrorHandler may log the full cause chain.
             throw new IngestionException(
                     org.springframework.http.HttpStatus.BAD_REQUEST,
                     ERR_KAFKA_POISON_EVENT,
@@ -84,12 +82,10 @@ public class ClickHouseTelemetryConsumer {
             );
         }
 
-        // Bounded retry and backoff against ClickHouse
         Exception lastException = null;
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                clickHouseClient.insertNumericBatch(List.of(obs));
-                // Insertion succeeded: commit offset and update health
+                insert.run();
                 if (acknowledgment != null) {
                     acknowledgment.acknowledge();
                 }
@@ -110,11 +106,48 @@ public class ClickHouseTelemetryConsumer {
             }
         }
 
-        // Retries exhausted: do NOT acknowledge offset. Surface degraded state.
         String failureReason = "ClickHouse unavailable after " + maxRetries + " attempts: " + lastException.getMessage();
         metrics.recordConsumerDegraded(failureReason);
         log.error("ClickHouse retries exhausted for topic={} partition={} offset={}. Offset will NOT progress.",
                 record.topic(), record.partition(), record.offset(), lastException);
         throw new RuntimeException("ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset(), lastException);
+    }
+
+    private Runnable resolveInsert(String payload) throws Exception {
+        JsonNode root = objectMapper.readTree(payload);
+        if (root == null || !root.isObject()) {
+            throw new IllegalArgumentException("telemetry payload is not a JSON object");
+        }
+
+        String kind = root.path("observationKind").asText("").trim();
+        if (CanonicalCounterObservation.KIND.equals(kind) || root.hasNonNull("counterValue")) {
+            CanonicalCounterObservation counter = objectMapper.treeToValue(root, CanonicalCounterObservation.class);
+            if (counter.counterValue() == null || counter.counterValue().isBlank()) {
+                throw new IllegalArgumentException("Counter64 payload missing counterValue");
+            }
+            // Reject float-backed aliases for Counter64.
+            if (root.has("value") && root.get("value").isFloatingPointNumber()) {
+                throw new IllegalArgumentException("Counter64 payload must not use floating-point value");
+            }
+            return () -> {
+                try {
+                    clickHouseClient.insertCounterBatch(List.of(counter));
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            };
+        }
+
+        if (!root.has("value") || !root.get("value").isNumber()) {
+            throw new IllegalArgumentException("numeric telemetry payload missing numeric value");
+        }
+        CanonicalObservation obs = objectMapper.treeToValue(root, CanonicalObservation.class);
+        return () -> {
+            try {
+                clickHouseClient.insertNumericBatch(List.of(obs));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        };
     }
 }

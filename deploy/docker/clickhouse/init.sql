@@ -46,6 +46,36 @@ SELECT
     source_protocol
 FROM platform.metric_numeric_raw FINAL;
 
+-- Exact raw Counter64 storage. Replays may create duplicate physical rows; readers use
+-- the canonical FINAL view below. value is UInt64 — never Float64.
+CREATE TABLE IF NOT EXISTS platform.metric_counter_raw (
+    tenant_id String,
+    entity_id String,
+    metric_id String,
+    sensor_id String,
+    ts DateTime64(3, 'UTC'),
+    value UInt64,
+    quality UInt8,
+    flags UInt32,
+    sequence_id String,
+    source_protocol LowCardinality(String)
+) ENGINE = ReplacingMergeTree()
+ORDER BY (tenant_id, entity_id, metric_id, ts, sensor_id, sequence_id);
+
+CREATE VIEW IF NOT EXISTS platform.metric_counter AS
+SELECT
+    tenant_id,
+    entity_id,
+    metric_id,
+    sensor_id,
+    ts,
+    value,
+    quality,
+    flags,
+    sequence_id,
+    source_protocol
+FROM platform.metric_counter_raw FINAL;
+
 -- Initial health verification record
 INSERT INTO platform.health_verification (node_id, status) 
 VALUES ('bootstrap-node', 'HEALTHY');

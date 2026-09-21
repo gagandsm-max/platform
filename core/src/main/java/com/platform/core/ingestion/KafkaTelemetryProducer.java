@@ -1,7 +1,9 @@
 package com.platform.core.ingestion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.core.ingestion.dto.CanonicalCounterObservation;
 import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,14 +46,12 @@ public class KafkaTelemetryProducer {
     }
 
     /**
-     * Publishes all canonical observations of a batch in a single atomic Kafka transaction.
-     * All observations must commit together or the transaction is aborted.
-     *
-     * @param observations canonical observations belonging to one Sensor upload batch
-     * @throws IngestionException if transactions are not available or publication fails
+     * Publishes all numeric and Counter64 observations of a batch in one atomic Kafka transaction.
+     * Mixed batches remain inside the same transactional boundary (PR #81).
+     * Agent numeric-only callers should wrap with {@link TelemetryObservationBatch#ofNumeric(List)}.
      */
-    public void publishBatchTransactionally(List<CanonicalObservation> observations) {
-        if (observations == null || observations.isEmpty()) {
+    public void publishBatchTransactionally(TelemetryObservationBatch batch) {
+        if (batch == null || batch.isEmpty()) {
             return;
         }
 
@@ -67,29 +67,44 @@ public class KafkaTelemetryProducer {
         long startTime = System.currentTimeMillis();
         try {
             kafkaTemplate.executeInTransaction(operations -> {
-                for (CanonicalObservation obs : observations) {
-                    // P0-5: Consistently use deterministic logical observation identity as Kafka key
-                    String key = obs.sequenceId();
-                    try {
-                        String payload = objectMapper.writeValueAsString(obs);
-                        CompletableFuture<?> future = operations.send(topic, key, payload);
-                        future.get(timeoutSeconds, TimeUnit.SECONDS);
-                    } catch (Exception e) {
-                        throw new RuntimeException("Failed to send observation to Kafka topic=" + topic + " key=" + key + ": " + e.getMessage(), e);
+                try {
+                    for (CanonicalObservation obs : batch.numericObservations()) {
+                        sendOne(operations, obs.sequenceId(), objectMapper.writeValueAsString(obs));
                     }
+                    for (CanonicalCounterObservation obs : batch.counterObservations()) {
+                        sendOne(operations, obs.sequenceId(), objectMapper.writeValueAsString(obs));
+                    }
+                } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                    throw new RuntimeException("Failed to serialize telemetry observation for Kafka", e);
                 }
                 return true;
             });
-            metrics.recordKafkaPublish(observations.size(), System.currentTimeMillis() - startTime);
+            metrics.recordKafkaPublish(batch.size(), System.currentTimeMillis() - startTime);
         } catch (Exception e) {
             long duration = System.currentTimeMillis() - startTime;
             log.error("Kafka atomic batch publication failed after {}ms for topic={} count={}: {}",
-                    duration, topic, observations.size(), e.getMessage());
+                    duration, topic, batch.size(), e.getMessage());
             metrics.recordKafkaFailure(e.getMessage());
             throw new IngestionException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "ERR_KAFKA_PUBLICATION_FAILED",
                     "Failed to atomically publish telemetry batch to Kafka cluster",
+                    e
+            );
+        }
+    }
+
+    private void sendOne(
+            org.springframework.kafka.core.KafkaOperations<String, String> operations,
+            String key,
+            String payload
+    ) {
+        try {
+            CompletableFuture<?> future = operations.send(topic, key, payload);
+            future.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to send observation to Kafka topic=" + topic + " key=" + key + ": " + e.getMessage(),
                     e
             );
         }

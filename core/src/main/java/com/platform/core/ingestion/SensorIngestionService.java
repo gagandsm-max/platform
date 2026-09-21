@@ -2,9 +2,9 @@ package com.platform.core.ingestion;
 
 import com.platform.core.ingestion.authority.SensorAuthorityResolver;
 import com.platform.core.ingestion.authority.SensorScope;
-import com.platform.core.ingestion.dto.CanonicalObservation;
 import com.platform.core.ingestion.dto.TelemetryAckResponse;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.ingestion.replay.TelemetryWatermarkStore;
 import com.platform.core.ingestion.replay.ReplayReservation;
 import org.slf4j.Logger;
@@ -13,7 +13,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.security.cert.X509Certificate;
-import java.util.List;
 
 @Service
 public class SensorIngestionService {
@@ -59,7 +58,7 @@ public class SensorIngestionService {
         }
 
         // 2. Validate payload bounds, checksum, entity/tenant scope, and extract observations
-        List<CanonicalObservation> observations = validator.validateAndExtract(rawBody, request, scope);
+        TelemetryObservationBatch observations = validator.validateAndExtract(rawBody, request, scope);
 
         // 3. Durably reserve this exact sequence range/checksum in PostgreSQL BEFORE Kafka.
         // The reservation commits independently and survives a Core crash. This closes the
