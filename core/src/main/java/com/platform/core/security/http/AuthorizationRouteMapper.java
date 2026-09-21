@@ -162,6 +162,16 @@ public class AuthorizationRouteMapper {
                 }
                 return null;
             }
+            if (remainder.contains("/management-endpoints")) {
+                // Read uses entity.read; mutations use entity.update (no new permissions).
+                if (isGet) {
+                    return PlatformPermissions.ENTITY_READ;
+                }
+                if (isPost || isPut) {
+                    return PlatformPermissions.ENTITY_UPDATE;
+                }
+                return null;
+            }
             if (isGet) {
                 return PlatformPermissions.ENTITY_READ;
             }

@@ -40,5 +40,15 @@ public final class AuditActions {
     public static final AuditAction CAPABILITY_PACK_SENSOR_ASSIGN = new AuditAction("capabilitypack.sensor.assign");
     public static final AuditAction CAPABILITY_PACK_SENSOR_UNASSIGN = new AuditAction("capabilitypack.sensor.unassign");
 
+    /** Entity management endpoint (authoritative poll host; no credentials). */
+    public static final AuditAction ENTITY_MANAGEMENT_ENDPOINT_CREATE =
+            new AuditAction("entity.management_endpoint.create");
+    public static final AuditAction ENTITY_MANAGEMENT_ENDPOINT_ACTIVATE =
+            new AuditAction("entity.management_endpoint.activate");
+    public static final AuditAction ENTITY_MANAGEMENT_ENDPOINT_DEACTIVATE =
+            new AuditAction("entity.management_endpoint.deactivate");
+    public static final AuditAction ENTITY_MANAGEMENT_ENDPOINT_PRIMARY_CHANGE =
+            new AuditAction("entity.management_endpoint.primary_change");
+
     private AuditActions() {}
 }
