@@ -198,3 +198,22 @@ Required evidence, as applicable to the declared certification dimensions, inclu
 - **Security/NCM:** routine monitoring remains read-only; SET is unavailable from normal polling/test paths and any certified SET action proves NCM/remediation authorization, pre/post verification and audit.
 
 False-alert regression shall include: SNMP failure while ICMP/API/neighbor/path evidence remains healthy → `MONITORING_DEGRADED`/appropriate semantic state, not authoritative `DEVICE_DOWN`.
+
+
+## 8. Final handoff certification supplements — v3.2.2
+
+### 8.1 Display timezone
+
+Required evidence includes: Europe/London spring-forward and fall-back; America/New_York DST; Asia/Kolkata non-DST; half-hour and quarter-hour offsets; same event rendered in multiple zones; server-host timezone different from user and tenant; changing display timezone without changing policy evaluation; ambiguous/nonexistent wall-clock operational schedule input; report/export timezone disclosure; preference precedence and URL/saved-view override behavior.
+
+### 8.2 Generic scheduler / freshness
+
+Required evidence includes: 2,500-device scenario; deterministic distribution; restart; failover; 5,000 due-job recovery; broad site outage; API/controller outage; resource pressure; spool 80%; Core outage; rate limit; huge WLC; slow healthy devices; credential failure; event/adaptive storm; mass interval change; Sensor reassignment; clock skew; fairness; no duplicate scheduled work; no fleet herd; no synthetic historical samples.
+
+### 8.3 Counter64
+
+Required evidence includes: source values > 2^53; near UInt64 maximum; reset; reboot; discontinuity; legitimate wrap only where provable; irregular sample interval; Kafka serialization without JSON Number loss; ClickHouse raw exactness.
+
+### 8.4 Two-Core HA
+
+HA certification gates remain explicit and unmet until evidence exists. Do not invent passing evidence. Status remains SPECIFIED / P0 / NOT PRODUCTION CERTIFIED.

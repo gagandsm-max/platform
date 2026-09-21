@@ -91,3 +91,13 @@ Runbooks shall distinguish at minimum:
 Remediation must not insert hard-coded communities or downgrade SNMP security silently. Any temporary legacy mode change is authorized/audited and verified. Routine runbooks do not use SNMP SET; configuration-changing SET belongs to approved NCM/remediation procedure.
 
 Support bundles include sanitized SNMP component health, poll-plan/profile/version identifiers, stable error counts, queue/backlog, last success/failure, trap receiver/storm counters, counter-quality statistics and MIB/Pack version/provenance references, but never community/auth/privacy secret values.
+
+
+## Timezone / scheduler / HA operations notes — v3.2.2 handoff
+
+- IANA TZDB must be maintained as part of supported platform/runtime updates.
+- Host timezone does not define product semantics for telemetry, alerts, SLAs or schedules.
+- Schedule and timezone preference changes are auditable.
+- Scheduler recovery does not mass-catch-up missed history or fabricate samples.
+- Two-Core HA remains uncertified until Platform_14 gates pass; operators must not treat documentation as production HA certification.
+- No new infrastructure service is introduced by this baseline.

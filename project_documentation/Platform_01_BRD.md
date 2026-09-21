@@ -602,3 +602,12 @@ Core, Sensor and Linux Agent must start automatically at OS boot and recover fro
 ### 21.4 Diagnostic transparency
 
 Every component must maintain enough structured operational evidence for support and engineering to determine what failed, when, where, why, what was retried, whether recovery succeeded and what customer action is required. Logging must be useful but bounded, protected by retention/rotation and the 80% storage-safety policy. Secrets and credentials must not be logged.
+
+
+## 22. Display timezone and operational continuity outcomes — v3.2.2 handoff
+
+Operators and stakeholders must be able to view the same absolute event in their own local IANA timezone, the tenant default, UTC, or another supported zone without changing the underlying operational meaning of monitoring data.
+
+Changing a user's display timezone must not silently alter alert/SLA/maintenance schedules, polling behavior, or stored telemetry. Host/OS timezone of Core, Sensor or Agent hosts must not redefine product semantics when deployments move between regions.
+
+Shared dashboards/views and scheduled reports that render local wall-clock times must disclose the timezone used so cross-region teams can interpret the same evidence unambiguously.

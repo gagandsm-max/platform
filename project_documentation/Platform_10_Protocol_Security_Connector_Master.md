@@ -172,3 +172,10 @@ Default EDS excludes environment variables, arbitrary file content, packet paylo
 ### 9.5 AI boundary
 
 Agent/Sensor credentials, reusable secrets and unrestricted device-control capability are never provided to a local/private LLM provider. AI Gateway receives only bounded authorized evidence context and all tool/action authority remains deterministic Platform policy. Dedicated local/private inference, when supported, is conditional and not required for EDS or base monitoring.
+
+## Flow / Log / Webhook / ITSM connector security notes — v3.2.2 handoff
+
+- Flow: configured exporter/source/tenant authority; packet source IP alone is insufficient; sampling/template/sequence evidence retained; user-attributed Flow is privacy/RBAC sensitive.
+- Log forwarding: secret/PII minimization/redaction; per-destination queue isolation; SIEM outage must not block base monitoring.
+- Webhooks: signature/auth, replay protection, tenant/source binding, SSRF/egress allowlists, secrets, schema validation, rate limits, idempotency, audit; no arbitrary scripts.
+- ITSM callbacks: signed/authenticated inbound; remote ticket state cannot override Platform health authority.

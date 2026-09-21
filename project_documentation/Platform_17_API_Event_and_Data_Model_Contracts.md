@@ -21,15 +21,15 @@ retention classes and ingestion/data-integrity rules.
 
 > Consolidated from `Platform_19_API_and_Event_Contract_Master.md` v3.1. Requirements in this section remain normative.
 
-## 1. Purpose
+### 3.1 Purpose
 
 Defines compatibility rules for UI APIs, public automation APIs, Sensor/Agent control channels, internal gRPC/HTTPS ingestion and Kafka events.
 
-## 2. API principles
+### 3.2 API principles
 
 Versioned paths/contracts, server-side RBAC/tenant enforcement, idempotency keys for mutating bulk/job operations, pagination, query limits, correlation IDs, stable error codes and machine-readable remediation fields where appropriate.
 
-### 2.1 NOC troubleshooting API contracts
+#### 3.2.1 NOC troubleshooting API contracts
 
 The versioned API surface shall expose typed resource families for **Diagnostic Jobs, Live Evidence, Investigation Sessions and CLI Sessions**. Exact route strings are frozen in the generated OpenAPI contract before implementation/GA; clients must not depend on undocumented routes.
 
@@ -45,7 +45,7 @@ The versioned API surface shall expose typed resource families for **Diagnostic 
 
 All contracts are tenant/resource scoped server-side, use stable error codes/correlation IDs, and expose `DENIED`, `CAPACITY_LIMITED`, `TARGET_UNREACHABLE`, `CREDENTIAL_FAILURE`, `TIMEOUT`, `CANCELLED` and other protocol-specific normalized outcomes without leaking secrets.
 
-### 2.2 SNMP polling, diagnostic and typed-observation contracts
+#### 3.2.2 SNMP polling, diagnostic and typed-observation contracts
 
 SNMP scheduled-control contracts carry at minimum: tenant/entity, assignment key/version/fence, Sensor target, monitoring-profile/Capability-Pack version, operation/poll-plan reference or bounded operation set, Credential Profile reference/authorization context, timeout/retry/resource limits and correlation/job identity. **Reusable SNMP community/auth/privacy secret values are not part of public/customer-visible API schemas or general durable job-history records.**
 
@@ -68,13 +68,13 @@ For counters, the canonical contract preserves exact `uint32/uint64` source valu
 Inform notification contracts distinguish durable local receiver acceptance/accounting from downstream enrichment and Core/Kafka/ClickHouse/alert/incident completion. Successful Inform ACK is represented only after bounded parse, configured security validation, sufficient source/tenant attribution, bounded pre-ACK storm admission/accounting and durable local acceptance (accepted raw event or durable storm-aggregation/accounting record). MIB/Pack semantic enrichment, final entity resolution and semantic dedup/correlation may proceed after ACK; they are not ACK prerequisites.
 
 
-## 3. Sensor/Agent control contract
+### 3.3 Sensor/Agent control contract
 
 Enrollment establishes identity/certificate. Subsequent sessions authenticate with mTLS. Core sends versioned desired configuration/assignment; endpoint acknowledges applied version/checksum. Telemetry ingestion is asynchronous and replay-safe.
 
 For on-demand diagnostics, Core sends an authorized bounded execution request containing job/correlation ID, canonical target, diagnostic type, effective parameters, timeout/cancellation/fencing context and no reusable secret material beyond the minimum execution reference/token required by the worker. Sensor/Agent returns a typed per-vantage result with timestamps, evidence quality and normalized error/result code. Expired/replayed/fenced diagnostic jobs are rejected.
 
-## 4. Kafka event rules
+### 3.4 Kafka event rules
 
 Kafka is internal. Events include schema version, tenant, source identity, event ID/sequence where required, event time, ingest time, quality/provenance and payload. Producers/consumers must tolerate compatible schema evolution.
 
@@ -82,7 +82,7 @@ For SNMP, logical Kafka families distinguish at least numeric measurements, exac
 
 Diagnostic/investigation event families, where carried internally, include job/session ID, origin reference, canonical target/evidence reference, source/vantage, state transition, timestamps, quality/provenance, normalized result/error code and correlation ID. **Secrets, one-time credentials, reusable credential material and terminal keystroke payloads are prohibited from general Kafka/audit/analytics events.** Browser/UI live updates use an authenticated Platform UI channel; Kafka is never exposed directly to the browser.
 
-## 5. Compatibility
+### 3.5 Compatibility
 
 Breaking API/event changes require major contract version and migration window. Core must expose compatibility matrix for Sensor/Agent versions.
 
@@ -90,25 +90,25 @@ Breaking API/event changes require major contract version and migration window. 
 
 > Consolidated from `Platform_20_Data_Model_and_Schema_Master.md` v3.1. Requirements in this section remain normative.
 
-## 1. Ownership
+### 4.1 Ownership
 
 PostgreSQL owns transactional/control state: tenants, users/RBAC metadata, inventory/current entity state, policies, credentials metadata/references, licensing, **diagnostic job metadata, Investigation Session state/evidence references**, SNMP monitoring definitions/MIB metadata/Pack mappings/interface-reconciliation current state where applicable, other job metadata and configuration. ClickHouse owns high-volume historical metrics/flow/events/log/audit analytics, exact raw counter history/derived counter analytics, state history, trap/event history, telemetry-quality history and normalized diagnostic-result analytics where retention/query volume justifies it. Kafka transports events; Valkey stores cache/ephemeral state only. No separate diagnostics or SNMP database is introduced.
 
-## 2. Canonical identity
+### 4.2 Canonical identity
 
 Every monitored object maps to canonical tenant-scoped entity identity independent of protocol. IP is an attribute, not sole identity. Provenance and source protocol are retained.
 
 For interfaces, `ifIndex` is a protocol observation/index and may change. Canonical interface identity is reconciled from available stable evidence such as ifName/ifDescr/ifAlias, MAC, physical slot/port/entPhysical relationships, Device Pack stable identifiers and authorized operator reconciliation. Ambiguity is preserved as reconciliation/quality state rather than silent merge or duplicate creation.
 
-## 3. Schema migration
+### 4.3 Schema migration
 
 Migrations are versioned, automated, tested from supported upgrade origins and idempotent where practical. Destructive migrations require backup/rollback plan and explicit approval.
 
-## 4. Retention classes
+### 4.4 Retention classes
 
 Raw, rollup, incident, audit, configuration, **diagnostic/investigation evidence** and protected/legal-hold classes use different lifecycle policies. Investigation evidence linked to an incident/legal hold follows the applicable protected lifecycle; ephemeral one-time credentials are never a retention class. Emergency purge never treats all tables equally.
 
-## 5. Data integrity
+### 4.5 Data integrity
 
 Ingestion records support deduplication/idempotency and late/out-of-order data handling. Pipeline reconciliation detects produced/accepted/normalized/inserted/rejected discrepancies.
 
@@ -118,7 +118,7 @@ SNMP integrity additionally requires exact Counter64 preservation before derivat
 
 ---
 
-## 6. Endpoint Diagnostic Snapshot contracts — v3.2.2 reconciliation
+### 4.6 Endpoint Diagnostic Snapshot contracts — v3.2.2 reconciliation
 
 **EDS is a specialized diagnostic type/profile of the existing Diagnostic Job architecture**, not a second diagnostics framework, registry, scheduler, authorization system, investigation state machine or evidence store. Product-facing language may continue to use **Endpoint Diagnostic Snapshot (EDS)**; the authoritative API/event/data identity remains the Diagnostic Job contract in §1 with:
 
@@ -129,7 +129,7 @@ execution_mode            = AGENT | SSH | WINRM_WMI_CIM
 
 EDS create/request/result/cancellation/expiry/idempotency/fencing reuse the existing Diagnostic Job, Live Evidence and Investigation Session contracts. Free-form script stdout is not the canonical interface.
 
-### 6.1 Diagnostic Job profile extension for EDS
+#### 4.6.1 Diagnostic Job profile extension for EDS
 
 An EDS request is a Diagnostic Job create whose typed parameters extend the existing job contract. Minimum EDS-profile fields (in addition to canonical `diagnostic_job_id`, tenant, target entity, vantage, authorization, correlation/idempotency, timeout/expiry and investigation/incident association):
 
@@ -172,7 +172,7 @@ investigation_session_id    optional
 
 The receiving Agent/Sensor validates tenant/entity/assignment authority, **current Core-issued generation/fencing**, expiry, supported definition/version, idempotency and local resource policy before execution. Stale, revoked, expired, replayed or superseded authority must fail closed and must not publish evidence under obsolete authority.
 
-### 6.2 EDS capture result as subordinate Diagnostic Job evidence
+#### 4.6.2 EDS capture result as subordinate Diagnostic Job evidence
 
 EDS capture outcome is reported through the existing Diagnostic Job response/state and Live Evidence association. The job retains the canonical authorization/result vocabulary:
 
@@ -221,7 +221,7 @@ Each evidence item includes a stable evidence type/key, typed value/state, unit 
 
 `missing_evidence` identifies expected evidence that could not be obtained and the reason (`UNSUPPORTED|PRIVILEGE_DENIED|TIMEOUT|RESOURCE_GUARD|COLLECTOR_ERROR|POLICY_DENIED|NOT_AVAILABLE` or compatible versioned code). Suppressed, shortened, dropped, expired or storage-shed diagnostic evidence must remain explicit, observable and auditable; diagnostic protection must never silently destroy routine telemetry durability.
 
-### 6.3 EDS lifecycle events
+#### 4.6.3 EDS lifecycle events
 
 EDS does not invent a second event family for job lifecycle. Canonical Diagnostic Job / Live Evidence / Investigation events remain authoritative. EDS-profile events are profile annotations or compatible extensions of that family and carry `diagnostic_job_id`, tenant/entity/correlation/schema/timestamp fields plus definition/policy/authority provenance. Compatible names may include:
 
@@ -234,6 +234,44 @@ EDS does not invent a second event family for job lifecycle. Canonical Diagnosti
 
 Replayed duplicate requests/results are idempotently recognized and do not create duplicate authoritative evidence. New aliases must not fork an incompatible status machine.
 
-### 6.4 Causal boundary
+#### 4.6.4 Causal boundary
 
 EDS evidence may contain deterministic indicators but not an authoritative root-cause declaration. Core RCA references Diagnostic Job / Live Evidence IDs for EDS captures alongside topology, telemetry, changes, dependency and contradiction evidence. AI/LLM narrative output is a separate derived artifact with its own provenance and cannot mutate EDS facts.
+
+
+## 5. Display timezone and calendar-query contracts — v3.2.2 handoff baseline
+
+Authoritative source timestamps in public/internal APIs, Kafka events and datastore facts remain absolute UTC-capable RFC3339/ISO-8601 instants. Clients MUST NOT treat a rendered wall-clock string as source truth.
+
+Where calendar bucketing depends on local day/week/month/business-day boundaries, query requests MAY accept an explicit IANA timezone identifier. Responses that return local-calendar buckets MUST include:
+
+- bucket start/end as absolute instants;
+- the IANA timezone used for grouping;
+- enough metadata that a second viewer can reproduce the same buckets.
+
+Logical user preference field `display_timezone` (nullable IANA identifier) is an implementation requirement on the existing user preference/profile surface. This documentation baseline does **not** allocate a PostgreSQL migration number. Existing `tenant.timezone` remains the tenant fallback. Host OS timezone is non-authoritative.
+
+## 6. Counter64 / exact-counter implementation-truth freeze — v3.2.2 handoff baseline
+
+Architecture requires exact Counter64 end-to-end. Current merged implementation truth:
+
+- Sensor can encode exact Counter64 source values;
+- Core ordinary numeric canonical path currently uses floating-point (`double`) for numeric observation values;
+- Counter64 values above the IEEE-754 exact-integer range are rejected rather than silently rounded;
+- therefore exact Counter64 is **SPECIFIED** but **NOT END-TO-END IMPLEMENTED/CERTIFIED**.
+
+Future P0 implementation must preserve full unsigned 64-bit source truth. Core representation must not rely on Java signed `long` alone. Acceptable families include BigInteger/unsigned abstraction, validated decimal unsigned representation, or other exact unsigned-64 representation. Wire/Kafka/JSON must not rely on JSON/JavaScript `Number` for raw Counter64. ClickHouse raw-counter storage should use `UInt64` or an equivalently exact type. Derived rate/utilization may be floating-point only AFTER exact delta/reset/discontinuity processing. A decrease is not automatically a wrap; discontinuity/reboot/source evidence is evaluated first.
+
+## 7. Telemetry durability / ACK contract note — PR #81 canonical
+
+Canonical Sensor→Core telemetry durability remains:
+
+```text
+validate complete source batch
+→ PostgreSQL durable pending reservation
+→ Kafka transactional publication
+→ PostgreSQL finalize accepted watermark
+→ Sensor ACK
+```
+
+Semantics are **at-least-once**, not exactly-once. Duplicate Kafka publication of the same stable logical observation identity is tolerated; canonical ClickHouse reads must not expose duplicate logical numeric observations. Concurrent exact HTTP retries while a reservation is `RETRY_PENDING` may amplify republish volume; that is a recorded **P1** hardening concern under the normal serialized Sensor uploader path. No distributed publisher lease/service is introduced by this documentation baseline.

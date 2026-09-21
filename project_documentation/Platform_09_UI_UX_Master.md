@@ -50,6 +50,22 @@ Navigation entries are shown/hidden/read-only/action-limited according to RBAC, 
 - Platform notifications: Sensor, integration, report, licence, HA, approval and security conditions. The global per-user Notification Center/bell is governed by `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md`; this base catalogue is not the detailed owner.
 - Context help and user menu: profile, preferences, sessions, API tokens, theme, timezone, language and logout.
 
+
+## Display timezone UX — v3.2.2 handoff baseline
+
+The global shell and applicable operational screens shall expose:
+
+- a current effective timezone indicator;
+- a searchable IANA zone picker;
+- shortcuts: **Local** (browser/device), **Tenant Default** (`tenant.timezone`), **UTC**;
+- saved user preference (`display_timezone`);
+- temporary view/session override;
+- URL/saved-view preservation of an explicit override;
+- resolution without override per viewer preference precedence;
+- report/export timezone disclosure whenever local timestamps are rendered.
+
+Changing timezone updates labels and calendar grouping only. It must not rewrite underlying data identity, alert evaluation or operational policy schedules. Friendly current offsets may be shown as informational labels; canonical preference stores the IANA identifier.
+
 ### 2.3 Global navigation behavior
 
 - Breadcrumbs preserve tenant → region → site → group/service → entity context.

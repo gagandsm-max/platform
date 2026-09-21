@@ -165,15 +165,27 @@ Exact contractual RPO, RTO and automated/manual DR activation remain TBD and mus
 
 ### 6.1 Universal runtime and roles
 
-One Universal Sensor Runtime shall support selectable profiles:
+One Universal Sensor Runtime shall support selectable deployment roles. Product-facing production direction:
 
-- Network Sensor;
-- Infrastructure Sensor;
-- Combined Sensor;
-- Streaming/Event Sensor;
-- Synthetic Probe;
-- Cloud/API Sensor;
-- Edge Sensor Lite deployment profile.
+**Standard production roles**
+
+- `NETWORK`
+- `INFRASTRUCTURE`
+- `FLOW`
+- `LOG`
+
+**Conditional dedicated production roles**
+
+- `SYNTHETIC` — only where scale, security, network locality, API rate isolation or workload characteristics justify a dedicated role;
+- `CLOUD_API` — same justification bar for cloud/API-heavy collection.
+
+**Lab / constrained deployments**
+
+- `COMBINED` — lab, development, small deployment or non-high-volume use unless separately certified.
+
+**Runtime reconciliation**
+
+Current runtime also exposes `STREAMING_EVENT` as a general streaming/event role. That implementation role must **not** remain the final product-facing substitute for explicit `FLOW` and `LOG` production roles. Status: **IMPLEMENTATION RECONCILIATION REQUIRED**. Do not create multiple Sensor products/codebases.
 
 ### 6.2 Network Sensor responsibilities
 
@@ -206,9 +218,13 @@ Infrastructure Sensor shall support:
 - OpenTelemetry;
 - REST/API connectors.
 
-### 6.4 Streaming/Event Sensor
+### 6.4 Streaming/Event, Flow and Log Sensor roles
 
-High-volume NetFlow/IPFIX/sFlow/J-Flow, syslog, traps and high-rate OpenTelemetry/event ingestion shall move to dedicated Streaming/Event Sensor capacity when the workload would risk starving polling workers. The same runtime may serve smaller mixed deployments.
+High-volume production Flow ingestion uses the `FLOW` deployment role. High-volume production Log ingestion/forwarding uses the `LOG` deployment role. Lightweight flow/syslog below capacity thresholds may remain on Network/Infrastructure Sensors where policy permits.
+
+Current runtime `STREAMING_EVENT` remains an implementation/general streaming role pending reconciliation to the product-facing `FLOW`/`LOG` roles above.
+
+High-volume NetFlow/IPFIX/sFlow/J-Flow and high-rate log/event ingestion shall move to dedicated `FLOW`/`LOG` (or conditional dedicated) Sensor capacity when the workload would risk starving polling workers. Smaller mixed deployments may use `COMBINED` or lightweight ingestion on Network/Infrastructure Sensors within capacity limits.
 
 ### 6.5 Sensor local continuity
 
@@ -470,7 +486,7 @@ Platform shall support:
 | PRD ID | Requirement |
 |---|---|
 | `PRD-SNMP-001` | SNMP collection shall normalize into typed canonical evidence classes including numeric metrics, exact counters, state metrics, inventory facts, topology facts/events and collection-quality outcomes rather than forcing all varbinds into one numeric shape. |
-| `PRD-SNMP-002` | Raw Counter32/Counter64 values shall preserve exact integer semantics. Counter64 shall not be rejected or rounded merely because it exceeds IEEE-754 exact-integer range; derived rates may use floating-point after exact delta calculation. |
+| `PRD-SNMP-002` | Raw Counter32/Counter64 values shall preserve exact integer semantics. Counter64 shall not be rejected or rounded merely because it exceeds IEEE-754 exact-integer range; derived rates may use floating-point after exact delta calculation. **Implementation truth (current main):** Sensor can encode exact Counter64; Core ordinary numeric canonical path still uses floating-point; unsafe Counter64 above IEEE-754 exact-integer range is rejected rather than silently rounded. Exact Counter64 is therefore SPECIFIED but NOT end-to-end implemented/certified — remaining P0. |
 | `PRD-SNMP-003` | Counter processing shall handle wrap, reboot/reset, discontinuity and actual elapsed sample time. `sysUpTime` and `ifCounterDiscontinuityTime` or equivalent evidence shall be used where available; missed polls shall not fabricate nominal-interval rates. |
 | `PRD-SNMP-004` | High-capacity interface monitoring shall prefer applicable 64-bit interface counters and shall expose counter discontinuity/quality when rate derivation is invalid or uncertain. |
 | `PRD-SNMP-005` | Canonical interface identity shall not depend on `ifIndex` alone. Platform shall reconcile interface identity from stable evidence such as ifName/ifDescr/ifAlias/MAC/physical slot-port/entity data and retain history when ifIndex changes. |
@@ -528,19 +544,13 @@ Device Packs/telemetry shall support deep monitoring for:
 
 ### 11.4 Flow analytics
 
-Platform shall ingest NetFlow v5/v9, IPFIX, sFlow and compatible vendor flow formats and enrich flows with:
+Platform shall ingest NetFlow v5/v9, IPFIX, sFlow and compatible vendor/J-Flow formats under configured exporter/source/tenant authority. Packet source IP alone is not tenant authority.
 
-- entity/device/interface;
-- site/region;
-- IPAM/subnet;
-- VLAN/VRF;
-- ASN/BGP context;
-- cloud context;
-- service/application metadata when exporter provides it;
-- QoS context;
-- tenant.
+Required engineering contracts include: v9/IPFIX template lifecycle/cache/expiry/withdrawal; sampling factor/provenance; sequence/gap/reset evidence; UDP pre-acceptance loss visibility; observation point; ingress/egress/direction evidence; duplicate/exporter-HA semantics; raw evidence preserved before enrichment; temporal entity/IP mapping; DNS/DHCP/IPAM evidence; authenticated user/session evidence where available; ASN/Geo/cloud/SaaS enrichment with confidence/time/provenance.
 
-Views shall include top talkers, source/destination, conversations, protocols/ports, site-to-site, interfaces, ASN, matrices, Sankey, anomalies and capacity. Platform shall not claim deep L7 application visibility without exporter-provided metadata or future DPI capability.
+Directory membership alone does not prove historical IP ownership. Domain/application identity does not equal full URL. Public-IP Geo is approximate. User-attributed Flow requires privacy/RBAC controls. Flow Coverage may compare compatible Flow vs interface evidence. **No Flow ≠ no traffic**. Flow anomaly ≠ device down/root cause.
+
+Enrichment may include entity/device/interface, site/region, IPAM/subnet, VLAN/VRF, ASN/BGP, cloud, service/application metadata when exporter provides it, QoS and tenant. Views shall include top talkers, source/destination, conversations, protocols/ports, site-to-site, interfaces, ASN, matrices, Sankey, anomalies and capacity. Platform shall not claim deep L7 application visibility without exporter-provided metadata or future DPI capability. ClickHouse remains high-volume Flow analytics authority; no new datastore. Production high-volume Flow uses the `FLOW` deployment role.
 
 ---
 
@@ -610,6 +620,8 @@ Database credentials shall be scoped and protected. Arbitrary dangerous SQL shal
 
 ### 14.1 Cloud
 
+Cloud provider roots include AWS, Azure, GCP and OCI. Vendor identifiers never override Platform tenant/entity authority. Required concepts: cloud hierarchy discovery; ephemeral-child lifecycle/reconciliation; provider API quota/rate-budget governance; throttling; freshness/staleness; provider service-health; audit/change evidence; cloud-network evidence; quota/autoscaling evidence; canonical normalized entity/state; connector self-health. New cloud SDK dependencies remain Platform_07 governed and are not auto-approved.
+
 AWS, Azure and GCP integrations shall use supported provider APIs/SDKs and normalize accounts/subscriptions/projects, regions, networks, compute, storage, database and load-balancer entities.
 
 ### 14.2 Kubernetes
@@ -621,6 +633,8 @@ Cluster → Node → Namespace → Workload → Pod → Container → Service �
 Monitor node/pod/container health, CPU/memory, restarts, pending/failed state, events and capacity.
 
 ### 14.3 OpenTelemetry
+
+OpenTelemetry contract may include metrics, logs and traces without committing Platform to a mandatory proprietary/full-bytecode APM product. Full always-on APM remains excluded initially.
 
 Platform shall accept OTLP metrics and logs initially. Architecture shall be trace-ready, but full APM shall not be marketed until trace storage, analysis and UX are explicitly implemented and accepted.
 
@@ -643,6 +657,9 @@ HTTP/API tests shall support method, headers, authentication, body, expected sta
 ---
 
 ## 16. MIB Studio
+
+MIB Studio remains part of the single Capability Pack extension architecture (not a second pack registry/SDK). Required contracts include import, revision/version, provenance/licensing, dependencies, compile/test, OID/table/notification mapping and firmware/model compatibility.
+
 
 Required capabilities:
 
@@ -667,6 +684,11 @@ MIB provenance shall classify Platform Supplied, Customer Supplied, Partner Supp
 ---
 
 ## 17. API Studio
+
+API Studio collection runtime is **monitoring source collection**, distinct from external integration delivery queues. Required contracts include REST/API schema, authentication reference, pagination, extraction/mapping, rate-limit behavior, collection cadence/freshness, schema-drift handling and source provenance. Do not treat an outbound ITSM/webhook connector queue as the API monitoring scheduler.
+
+Webhook contracts distinguish inbound webhook, outbound webhook and callback, and require as applicable: authentication/signature verification, replay protection, tenant/source binding, SSRF/egress restrictions, allowlists, secret handling, schema validation, rate limits, idempotency and auditing. No arbitrary scripts. No second Pack registry/SDK.
+
 
 Wizard stages:
 
@@ -1186,6 +1208,32 @@ IPAM is integrated into the canonical graph and shall not be a separate competin
 
 ---
 
+
+
+## 37A. Display timezone requirements — v3.2.2 handoff
+
+| ID | Requirement |
+|---|---|
+| `PRD-TIME-001` | All authoritative system/event/telemetry timestamps shall remain absolute UTC instants in storage and machine-to-machine contracts (RFC3339/ISO-8601 capable). Rendered wall-clock strings are never source truth. |
+| `PRD-TIME-002` | Interactive display shall use named IANA TZDB identifiers. Where no saved preference exists, first use defaults to the browser/device local IANA timezone. Users may select zones such as Asia/Kolkata, Europe/London, America/New_York or UTC; fixed `UTC+X` offsets must not model DST-sensitive regions. |
+| `PRD-TIME-003` | Effective display timezone precedence is: explicit dashboard/view/session override → saved user `display_timezone` preference → browser/device local IANA zone → `tenant.timezone` → UTC. Explicit overrides may be preserved in URL/saved views; absence resolves per viewer preference. |
+| `PRD-TIME-004` | Changing display timezone shall update labels/calendar grouping only. It must not change telemetry timestamps, alert evaluation, thresholds, incident sequencing, RCA/correlation, polling/retry/freshness, SLA semantics, maintenance-window execution, business calendars, scheduled jobs, report execution schedules or automation schedules. Operational policies requiring wall-clock interpretation carry their own explicit IANA timezone. Host OS timezone is non-authoritative. |
+| `PRD-TIME-005` | Reports/exports that render local timestamps must disclose the timezone used. Scheduled reports separate execution/schedule timezone from render/display timezone. Calendar-bucket queries may accept an explicit IANA zone and must return unambiguous absolute bucket boundaries plus timezone metadata. DST and half/quarter-hour correctness are mandatory certification subjects. |
+
+## 37B. Generic scheduling and freshness requirements — v3.2.2 handoff
+
+| ID | Requirement |
+|---|---|
+| `PRD-SCHED-001` | Core owns desired monitoring schedule/policy, placement, recurring assignment and generation/fencing authority. Sensor owns execution of currently authorized work and shall retain durable recurring desired-state sufficient to continue safely during temporary Core outage/failover. No second independent schedule authority and no scheduler microservice. |
+| `PRD-SCHED-002` | Monitor Group (semantic/product grouping), Scheduling Class (priority/freshness behavior) and Execution Class (runtime worker/resource pool) shall remain distinct concepts. |
+| `PRD-SCHED-003` | Recurring monitoring definitions shall specify both nominal cadence and freshness/maximum staleness. The normal SNMP operational-metric default remains 5 minutes and does not mean all OIDs every five minutes. Availability/liveness remains a separate plane. |
+| `PRD-SCHED-004` | Eligible recurring work shall use a versionable deterministic 64-bit phase calculation so fleets do not stampede at clock boundaries. Phase inputs should remain stable across normal restart and preferably across Sensor reassignment; Sensor identity must not dominate where reassignment would reshuffle the estate. |
+| `PRD-SCHED-005` | Admission order shall be priority/scheduling class → freshness urgency/deadline → fairness → execution cost/capacity. Opaque ML shall not drive routine collection scheduling. Cost inputs remain bounded/explainable (protocol, operation, cardinality, duration, RTT, timeout/retry, payload size, API quota). |
+| `PRD-SCHED-006` | Concurrency shall be bounded by Sensor, execution class, protocol, target, tenant, site, subnet and controller/API as applicable. Identical recurring collections must not stack without bound. Missed cycles coalesce or skip per policy with quality/overrun evidence; never create infinite catch-up queues or fabricate historical samples. |
+| `PRD-SCHED-007` | Controller/site/API failure domains shall use bounded retry, dependency-aware backoff, circuit-breaker-like qualification, cheap recovery probes and explicit monitoring-path degradation. `No Data != Device Down` remains invariant. |
+| `PRD-SCHED-008` | Scheduler admission shall observe CPU/RAM/spool/queue/latency/error/upload-backlog/freshness-debt pressure. Recovery ramp order is liveness → recovering critical → normal operational → detail → topology/state → inventory/background. Adaptive and event-triggered refresh are capacity/authorization/cooldown/dedup bounded with automatic reversion. |
+| `PRD-SCHED-009` | Capability Pack contracts carry applicable cadence/freshness/cost semantics. Where valuable, Agents may sample gauges approximately every 30–60 seconds locally and forward governed lower-rate min/max/average/last/count summaries; raw monotonic counters must not be averaged; tiny-sample P95/P99 must not be represented as statistically meaningful. |
+
 ## 37. Reporting and SLA
 
 Report Studio shall support:
@@ -1200,7 +1248,7 @@ Report Studio shall support:
 - execution history/failures;
 - RBAC.
 
-SLA engine shall support customer-defined target, measurement window, business hours, maintenance exclusions, grace/qualification, partial/unknown state handling and drill-down to outage contributors.
+SLA engine shall support customer-defined target, measurement window, business hours, maintenance exclusions, grace/qualification, partial/unknown state handling and drill-down to outage contributors. SLA/business-calendar and scheduled-report **execution** timezones are explicit operational policy fields and are never rewritten by a user's display timezone preference. Every report/export that renders local timestamps shall disclose the timezone used; scheduled reports separate execution/schedule timezone from render/display timezone.
 
 Long-term SLA/report retention may differ from raw telemetry retention.
 
@@ -1224,6 +1272,8 @@ Supported adapters shall include architecture for:
 - SMS/PagerDuty adapters where configured.
 
 ITSM integration shall be bidirectional where the target API permits.
+
+Required connector contracts include: stable Platform incident ↔ external object binding; connector capability/version certification; guided preflight (DNS/TLS/proxy/auth/permissions); type-safe field mapping; required-field/state validation; payload preview before egress; idempotency keys; race-safe bidirectional lifecycle; signed/authenticated inbound callbacks; queue/retry/dead-letter health; pause/drain/replay; safe configuration promotion; credential rebinding; sanitized support evidence. External ticket closure/state/automation success does **not** prove monitored recovery or override Platform health. No arbitrary Python/JavaScript customer mapping runtime. No mandatory new Integration Fabric service.
 
 Ticket creation shall include root cause/confidence, affected scope, correlated alerts, evidence, config changes and recommended actions.
 
