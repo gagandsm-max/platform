@@ -89,6 +89,14 @@ Nothing in this document selects a commercial model/provider, vector database, m
 | `PRD-MIA-048` | P0 | EDS shall enforce per-endpoint concurrency, deadline, evidence-size/Top-N, frequency/cooldown and estate/storm budgets, and shall remain lower priority than routine monitoring/telemetry durability. Under endpoint, Sensor or Core pressure it shall queue, suppress, cancel or return `PARTIAL`/`SUPPRESSED` with explicit observable reason before creating a self-induced outage or silently destroying routine telemetry durability. |
 | `PRD-MIA-049` | P0 | Local intelligence placement shall be tiered: **Tier 0** deterministic endpoint trigger/evidence logic with no model runtime; **Tier 1** bounded/cold Core statistical/ML analytics that yield to protected monitoring; **Tier 2** optional LLM/embedding assistance through AI Gateway, either certified on-Core or isolated on an optional local/private inference provider. |
 | `PRD-MIA-050` | P0 | **If** an optional dedicated local/private inference node/provider is supported/enabled, it shall be stateless with respect to authoritative Platform control/telemetry state, shall not become a third Core/HA authority, shall receive only bounded authorized context through AI Gateway, and may fail or be absent without impairing collection, alerting, incident handling or deterministic RCA. That provider is not required for Linux/Windows monitoring, EDS or base Platform operation; Core-resident LLM remains optional; all-AI-disabled remains supported. |
+| `PRD-MIA-051` | P1 | Platform shall use one unified evidence/correlation/RCA authority over the canonical temporal operational graph. Network, infrastructure, storage, virtualization, database, cloud and service domains may contribute domain rules/features but shall not create independent competing RCA engines or causal truth stores. |
+| `PRD-MIA-052` | P1 | Every non-trivial RCA evaluation shall maintain an explicit hypothesis set with candidate cause, causal role, supporting evidence, contradictory evidence, missing expected evidence, rejection reason/status, confidence/trust level, affected scope and rule/model provenance. |
+| `PRD-MIA-053` | P1 | RCA shall be revisioned and progressive. Material late evidence, topology/change evidence or recovery evidence may create a new immutable result revision while preserving prior conclusions, evidence set, confidence change and recomputation reason; no prior revision is silently overwritten. |
+| `PRD-MIA-054` | P1 | Deterministic RCA rules shall support bounded counterfactual/expected-effect checks and recovery validation. Absence of an expected effect or stronger contradictory evidence shall reduce confidence or reject a hypothesis; recovery matching a hypothesis may strengthen it but shall not create post-hoc certainty when multiple changes occurred. |
+| `PRD-MIA-055` | P1 | RCA/correlation shall model redundancy and shared-risk/common-failure domains when evidence exists, distinguishing component failure with healthy redundancy, redundancy degradation, failover failure and actual service impact. Shared-risk relationships require provenance/confidence and shall not be invented. |
+| `PRD-MIA-056` | P1 | RCA presentation/API shall expose first causal evidence separately from first alert, correlated child evidence, rejected hypotheses, missing evidence, blast radius, relevant changes, recovery validation and optional Similar Incident/Flight Recorder references using progressive drill-down rather than an overloaded incident summary. |
+| `PRD-MIA-057` | P1 | RCA certification shall include deterministic positive, negative, contradictory, missing/stale/out-of-order/replayed-evidence and recovery scenarios across network, infrastructure and cross-domain failure chains, including redundancy-success cases that must not be misreported as service outage. |
+| `PRD-MIA-058` | P1 | Human final RCA/ground-truth feedback shall distinguish Correct, Partially Correct, Incorrect and Appropriate Inconclusive, remain tenant-scoped/audited/version-bound, and shall not directly retrain or mutate production rules/models without governed evaluation/promotion. |
 
 ---
 
@@ -391,6 +399,53 @@ Zero endpoint compute is not a meaningful technical requirement. The requirement
 No LLM, GNN or foundation-model runtime is permitted on normal monitored Agents or Sensors under this capability. Lightweight endpoint intelligence is deterministic/statistical capture-eligibility and evidence logic only. A dedicated local/private inference provider is optional/conditional and is not required for EDS or base monitoring.
 ---
 
+### 15.8 Unified correlation and revisioned RCA contract
+
+The **existing** Core Alert/Incident/Graph/RCA architecture remains the single authority. This reconciliation does not create a second graph database, a dedicated RCA microservice per domain, a vector database, a second incident framework or a new AI causal authority.
+
+A bounded RCA evaluation operates on an incident-relevant temporal subgraph and an explicit hypothesis set. A hypothesis records at minimum:
+
+```text
+hypothesis_id
+incident_id
+revision_id
+candidate_entity_id / candidate_change_id optional
+causal_role PRIMARY_CAUSE | CONTRIBUTING_CAUSE | AMPLIFIER | SYMPTOM | CONSEQUENCE | MONITORING_FAILURE | UNKNOWN
+status ACTIVE | REJECTED | SUPERSEDED | ACCEPTED | INCONCLUSIVE
+supporting_evidence_refs[]
+contradictory_evidence_refs[]
+missing_expected_evidence[]
+expected_effects[]
+rejection_reason optional
+confidence / trust_level
+blast_radius_ref
+rule_or_model_id + version
+created_at / evaluated_at
+```
+
+The naming above is the canonical logical vocabulary; implementation may map it to equivalent enums/records without creating another causal model.
+
+RCA is **revisioned**. A material new alert, delayed evidence, topology/change update or recovery signal may produce a new immutable revision. The current result points to the latest accepted machine revision while earlier revisions remain queryable for audit/explanation. Recompute is debounced and resource-bounded.
+
+Counterfactual checks are deterministic questions such as “if hypothesis X were true, which additional effects should be present?” Missing predicted effects, healthy independent paths/components or stronger alternative explanations reduce confidence or reject X. Recovery that reverses the predicted failure chain is positive evidence, not automatic proof.
+
+Redundancy-aware reasoning distinguishes:
+
+```text
+COMPONENT_FAILURE_REDUNDANCY_HEALTHY
+COMPONENT_FAILURE_REDUNDANCY_DEGRADED
+FAILOVER_FAILURE
+SERVICE_IMPACT
+```
+
+Shared-risk/common-failure relationships such as rack/chassis, PDU/UPS/power feed, ToR, carrier/circuit/SRLG, SAN fabric/controller, hypervisor, site/region and other known dependencies may contribute only when their provenance/confidence/temporality is available.
+
+The operator-facing result uses progressive disclosure: conclusion + trust/confidence + first causal evidence + blast radius first; then supporting/contradictory/missing evidence, rejected hypotheses, timeline/changes/topology, child alerts, recovery validation, Similar Incident, Flight Recorder and approved next diagnostic/runbook actions.
+
+The deterministic certification corpus expands the existing Platform_22 evaluation harness; it does not create a second QA framework. It must contain redundancy-success and cross-domain negative cases specifically to prevent false root-cause attribution.
+
+---
+
 ## 16. Security, privacy and air-gap requirements
 
 - Tenant identity and evidence authorization are enforced before retrieval, correlation, prompting or tool proposal.
@@ -457,6 +512,13 @@ No LLM, GNN or foundation-model runtime is permitted on normal monitored Agents 
 | `REQ-MIA-045` | P0 | `PRD-MIA-048`: resource/storm tests prove EDS yields before creating self-induced outage, preserves routine monitoring/telemetry durability and exposes explicit incomplete/suppressed/shed diagnostic evidence. |
 | `REQ-MIA-046` | P0 | `PRD-MIA-049`: placement tests prove Tier 0 endpoint logic works model-free, Tier 1 Core analytics can cold-start/yield, and Tier 2 LLM/embedding assistance can be disabled without monitoring/RCA collapse. |
 | `REQ-MIA-047` | P0 | `PRD-MIA-050`: dedicated local/private inference-provider tests prove isolation/non-authority requirements apply when that optional mode is enabled; prove no authoritative state ownership, no third-Core/HA role, bounded AI-Gateway context, safe failure/absence and that the mode is not required for EDS/base monitoring. |
+| `REQ-MIA-048` | P1 | `PRD-MIA-051/052`: tests prove one unified RCA authority, explicit hypothesis/causal-role records and preservation of supporting, contradictory, missing and rejection evidence across domain rule families. |
+| `REQ-MIA-049` | P1 | `PRD-MIA-053`: late/change/recovery evidence creates bounded immutable RCA revisions; prior revisions remain reproducible and recomputation reason/confidence deltas are queryable. |
+| `REQ-MIA-050` | P1 | `PRD-MIA-054`: counterfactual and recovery fixtures prove missing expected effects/contradictions reduce or reject a hypothesis and recovery evidence cannot manufacture certainty after unrelated simultaneous changes. |
+| `REQ-MIA-051` | P1 | `PRD-MIA-055`: redundancy/shared-risk fixtures distinguish healthy failover, degraded redundancy, failover failure and service impact; shared-risk edges require provenance/confidence/temporal validity. |
+| `REQ-MIA-052` | P1 | `PRD-MIA-056`: API/UI tests expose first causal evidence vs first alert, rejected hypotheses, missing evidence, child evidence, blast radius, change/recovery evidence and progressive drill-down without losing tenant/RBAC scope. |
+| `REQ-MIA-053` | P1 | `PRD-MIA-057`: deterministic RCA certification corpus covers network/infrastructure/cross-domain positive+negative chains, stale/out-of-order/replayed evidence, missing telemetry and recovery, including redundancy-success cases that must not become false service-outage root causes. |
+| `REQ-MIA-054` | P1 | `PRD-MIA-058`: operator ground-truth feedback is tenant-scoped, audited/version-bound, records correctness class/final cause where supplied and cannot directly mutate active rules/models. |
 
 ---
 
