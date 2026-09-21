@@ -510,16 +510,30 @@ public class IngestionValidator {
                         );
                     }
 
-                    // Check explicit value kind if present
+                    // Check explicit value kind if present. A discriminator must agree
+                    // with the single concrete numeric field; ambiguous typed values fail closed.
+                    String declaredKind = null;
                     if (valNode.hasNonNull("kind")) {
-                        String kind = valNode.path("kind").asText("").trim().toUpperCase();
-                        if (!"INTEGER".equals(kind) && !"UNSIGNED".equals(kind) && !"COUNTER64".equals(kind)) {
+                        declaredKind = valNode.path("kind").asText("").trim().toUpperCase();
+                        if (!"INTEGER".equals(declaredKind) && !"UNSIGNED".equals(declaredKind) && !"COUNTER64".equals(declaredKind)) {
                             throw new IngestionException(
                                     HttpStatus.BAD_REQUEST,
                                     "ERR_UNSUPPORTED_RECORD_TYPE",
-                                    "Observation at sequence " + sequence + " ordinal " + ordinal + " contains unsupported value kind: " + kind
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal + " contains unsupported value kind: " + declaredKind
                             );
                         }
+                    }
+
+                    int concreteNumericFields = (valNode.has("integer") ? 1 : 0)
+                            + (valNode.has("unsigned") ? 1 : 0)
+                            + (valNode.has("counter64") ? 1 : 0);
+                    if (concreteNumericFields > 1) {
+                        throw new IngestionException(
+                                HttpStatus.BAD_REQUEST,
+                                "ERR_AMBIGUOUS_NUMERIC_VALUE",
+                                "Observation at sequence " + sequence + " ordinal " + ordinal
+                                        + " contains multiple numeric value fields"
+                        );
                     }
 
                     // Reject text/string/bytes/opaque/ip/bits payload types
@@ -535,6 +549,14 @@ public class IngestionValidator {
 
                     Double numericVal = null;
                     if (valNode.hasNonNull("integer")) {
+                        if (declaredKind != null && !"INTEGER".equals(declaredKind)) {
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_VALUE_KIND_MISMATCH",
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal
+                                            + " declares kind " + declaredKind + " but carries integer"
+                            );
+                        }
                         if (valNode.path("integer").isIntegralNumber()) {
                             numericVal = valNode.path("integer").asDouble();
                         } else {
@@ -545,6 +567,14 @@ public class IngestionValidator {
                             );
                         }
                     } else if (valNode.hasNonNull("unsigned")) {
+                        if (declaredKind != null && !"UNSIGNED".equals(declaredKind)) {
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_VALUE_KIND_MISMATCH",
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal
+                                            + " declares kind " + declaredKind + " but carries unsigned"
+                            );
+                        }
                         if (valNode.path("unsigned").isIntegralNumber()) {
                             numericVal = valNode.path("unsigned").asDouble();
                         } else {
@@ -555,6 +585,14 @@ public class IngestionValidator {
                             );
                         }
                     } else if (valNode.has("counter64")) {
+                        if (declaredKind != null && !"COUNTER64".equals(declaredKind)) {
+                            throw new IngestionException(
+                                    HttpStatus.BAD_REQUEST,
+                                    "ERR_VALUE_KIND_MISMATCH",
+                                    "Observation at sequence " + sequence + " ordinal " + ordinal
+                                            + " declares kind " + declaredKind + " but carries counter64"
+                            );
+                        }
                         JsonNode c64Node = valNode.get("counter64");
                         if (c64Node == null || c64Node.isNull()) {
                             throw new IngestionException(
