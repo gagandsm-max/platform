@@ -150,6 +150,19 @@ Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certifi
 
 OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively.
 
+UI/OOB-manifest and recurring-Discovery quality evidence additionally covers, where implemented:
+
+- schema validation of System dashboard/workspace manifests and failure on unknown query/metric/action references;
+- proof that every shipped OOB panel resolves to authorized query/data contracts and renders Permission Restricted / Not Licensed / Query Limited / Partial / Stale / Monitoring Degraded without leaking hidden resource metadata;
+- visualization-threshold changes cannot mutate Alert/Validation Policy and alert-policy edits cannot silently mutate customer styling;
+- System-definition upgrade/restore/clone behavior preserves customer-owned definitions and revision rollback;
+- query cancellation, stale-response suppression, panel failure isolation, time/timezone correctness, accessibility, responsive/wallboard behavior and representative high-cardinality protection;
+- recurring Discovery exact edge semantics: monthly LAST_VALID_DAY, DST-gap forward resolution, ambiguous-time earlier-instant single execution, one-run missed-occurrence coalescing, pause/resume without catch-up, stale-generation pre-execution rejection, obsolete in-flight result fencing, immutable Run Once UTC instant, deterministic spreading, rate/concurrency bounds, Sensor placement, credential-scope failure, tenant isolation and large-estate scan-storm tests.
+
+A registry entry or JSON schema alone is not implementation/certification evidence.
+
+Before presentation architecture is considered stable, R1 certification exercises the representative cross-class set defined in Platform_09 §4.10. Evidence must prove the common envelope and applicable class-specific definitions without coercing console/entity/investigation/map/governance workspaces into dashboard grids. The same presentation-foundation gate includes one representative `REPORT_DEFINITION` (SLA Scheduled Report) and one representative `SAVED_VIEW` so QMC/VIS/context contracts are not certified against dashboards alone; tests cover scheduled execution independent of browser runtime, execution-vs-display timezone, allowed output formats, target/filter/sort/group/time-context persistence, URL/context compatibility, authorization re-evaluation and stale/deleted/unauthorized references. TEAM-scoped artifacts remain excluded from production certification until the Identity/Teams/RBAC tranche provides authoritative Team binding/revocation semantics.
+
 ---
 
 ## 7. Endpoint diagnostics and local-intelligence quality supplement — v3.2.2

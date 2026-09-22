@@ -77,6 +77,36 @@ The following IDs are authoritative PRD supplements for v3.2.2.
 | `PRD-ONB-018` | Production Agent bootstrap shall use the same identity principles: short-lived scoped enrollment, local private-key generation, unique Agent certificate identity, explicit tenant/site/entity association and authoritative Agent→Sensor assignment. Normal Agent telemetry remains Agent→assigned Sensor→Core rather than hairpinning through Core. |
 | `PRD-ONB-019` | Platform-owned Sensor↔Core and Agent↔Sensor control/telemetry trust boundaries shall remain authenticated and encrypted; mTLS remains the default/required production mechanism where currently specified. A plaintext Platform transport mode is not approved by this reconciliation. Legacy insecure monitored-device protocols may be supported only as explicitly labelled compatibility modes and do not weaken Platform-owned channels. |
 | `PRD-ONB-020` | Sensor/Agent provisioning and placement shall be capacity-aware and locality-aware without making hardware increases the first response to load. Core shall prefer bounded workload placement, batching/data-path efficiency and healthy eligible pools before requiring larger resource profiles; capacity certification remains owned by Platform_11/14. |
+| `PRD-ONB-021` | Platform shall support governed recurring Network Discovery schedules in addition to Run Now/one-time execution. Customer-safe schedules include Daily, Weekly and Monthly recurrence with explicit IANA timezone, start/effective date, pause/resume, next/last run, run history/failure state, max duration/rate/concurrency bounds, Sensor/Sensor-Pool placement, Credential Profile references, protocol/scope/exclusions and review/auto-approval policy. Ordinary users are not given unrestricted cron. Missed runs follow explicit skip/coalesce policy and deterministic spreading prevents fleet scan stampedes. |
+
+### 3.1A Governed recurring Discovery scheduling — `PRD-ONB-021`
+
+Discovery scheduling reuses the existing Core-owned scheduling authority; it does not create a second scheduler service.
+
+Supported customer-safe modes for the initial contract are:
+
+- **Run Now**;
+- **Run Once** from an explicit requested local wall-clock + IANA timezone, resolved once and persisted as the authoritative UTC execution instant while retaining the original wall-clock/timezone input for audit/display;
+- **Daily** at local wall-clock time + IANA timezone;
+- **Weekly** on selected weekday(s) + local time + IANA timezone;
+- **Monthly** on day 1–31 + local time + IANA timezone. When the requested day does not exist in a month, Platform uses **LAST_VALID_DAY** for that month and makes that behavior explicit in schedule UI/preview; there is no hidden skip and no user-selectable missing-day policy in the initial contract.
+
+Advanced recurrence is deferred unless a real customer requirement justifies it; unrestricted raw cron is not the default ordinary-user contract.
+
+The authoritative schedule/control state includes schedule identity, tenant, discovery profile/scope/exclusions, protocol set, Credential Profile references, Sensor/Sensor-Pool placement policy, recurrence/timezone, enabled/paused state, generation/revision, authoritative `next_run` UTC instant, last run, max duration, rate/concurrency limits, failure state and audit metadata. Run history is retained separately from the reusable schedule definition.
+
+Execution rules:
+
+- Core owns schedule desired state and generation/fencing; Sensor executes only currently authorized work;
+- recurring scans are deterministically spread and bounded so many tenants/sites do not align at the same minute boundary;
+- for a nonexistent local time during a DST forward transition, that occurrence runs once at the first valid local instant after the gap and the resolved UTC instant is recorded;
+- for an ambiguous local time during a DST fall-back transition, that occurrence runs exactly once at the **earlier** of the two valid instants;
+- after Core/scheduler unavailability, missed recurring occurrences **COALESCE to at most one** recovery execution; older missed occurrences are not replayed, and recovery executions remain deterministically spread/rate bounded to prevent a restart stampede;
+- pause never accumulates catch-up work. Resume computes the next scheduled occurrence strictly after resume time; an operator who wants immediate execution uses Run Now;
+- schedule edit/cancel advances generation. Queued or not-yet-started work from an obsolete generation must fail closed before execution. Work already in flight is cancellation-best-effort; any late obsolete-generation result is fenced from current schedule state and trusted auto-approval/activation and is retained only as auditable evidence unless explicitly reviewed;
+- discovery result remains candidate evidence and does not bypass governed review/entitlement/activation;
+- trusted auto-approval, where enabled, remains separately governed by `PRD-ONB-008`;
+- display timezone never changes recurrence or the persisted Run Once UTC execution instant.
 
 ### 3.1 Supported candidate sources
 
@@ -723,6 +753,7 @@ Operational self-monitoring includes candidate queue depth/age, review backlog, 
 | `REQ-ONB-017` | Agent bootstrap and normal Agent→Sensor→Core assignment semantics | `PRD-ONB-018` | §§4–7 | §§8.5–12 |
 | `REQ-ONB-018` | Platform-owned Sensor/Core and Agent/Sensor channels remain encrypted/authenticated; no approved plaintext production mode | `PRD-ONB-019` | §§4–7 | §§9–11 |
 | `REQ-ONB-019` | Provisioning/placement efficiency and capacity-aware pool selection without hardware-first scaling | `PRD-ONB-020` | §§4–7 | §§8.5,11,12 |
+| `REQ-ONB-020` | Governed recurring Discovery schedules with explicit timezone, bounds, placement, history, skip/coalesce and deterministic spread | `PRD-ONB-021` | §§3.1A,4–7 | §§8,11,12 |
 
 ### 13.1 Definition of done
 
