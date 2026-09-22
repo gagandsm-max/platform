@@ -150,6 +150,17 @@ Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certifi
 
 OIV, onboarding, enterprise-gap, monitoring-intelligence and enterprise-monitoring-coverage class-specific gates remain in `Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` respectively.
 
+UI/OOB-manifest and recurring-Discovery quality evidence additionally covers, where implemented:
+
+- schema validation of System dashboard/workspace manifests and failure on unknown query/metric/action references;
+- proof that every shipped OOB panel resolves to authorized query/data contracts and renders Permission Restricted / Not Licensed / Query Limited / Partial / Stale / Monitoring Degraded without leaking hidden resource metadata;
+- visualization-threshold changes cannot mutate Alert/Validation Policy and alert-policy edits cannot silently mutate customer styling;
+- System-definition upgrade/restore/clone behavior preserves customer-owned definitions and revision rollback;
+- query cancellation, stale-response suppression, panel failure isolation, time/timezone correctness, accessibility, responsive/wallboard behavior and representative high-cardinality protection;
+- recurring Discovery timezone/DST behavior, pause/resume, schedule edit generation, missed-run skip/coalesce, deterministic spreading, rate/concurrency bounds, Sensor placement, credential-scope failure, tenant isolation and large-estate scan-storm tests.
+
+A registry entry or JSON schema alone is not implementation/certification evidence.
+
 ---
 
 ## 7. Endpoint diagnostics and local-intelligence quality supplement — v3.2.2
