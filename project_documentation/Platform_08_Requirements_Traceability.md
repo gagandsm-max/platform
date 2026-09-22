@@ -276,6 +276,17 @@ Low-level scheduling mechanics intentionally use RTM marker `—` in the BRD col
 | REQ-UI-024 | Diagnostic jobs bounded by tenant/scope/target/rate/concurrency/timeout/cancellation and isolated from routine monitoring capacity | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-025 | AI may explain/suggest permitted next tests but cannot fabricate results or bypass authorization/execution controls | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
+#### UI/UX specialized-master supplement — v3.2.2
+
+The requirements below are owned by `Platform_09_UI_UX_Master.md` and quality-gated by `Platform_14_Test_Performance_and_Release_Quality.md`. They are intentionally not marked as retroactively covered by every older BRD/PRD/HLD/LLD/Dataflow row until those base documents are deliberately reconciled; this avoids false traceability.
+
+| ID | Requirement | Authoritative owner | Quality owner |
+|---|---|---|---|
+| `REQ-UI-026` | Explicit workspace class + versioned OOB System manifest for UI-001..UI-098 | Platform_09 §4.1/§5 | Platform_14 |
+| `REQ-UI-027` | OOB panel authority mapping: requirement→query/API→data source→permission/entitlement→state/query bounds→test | Platform_09 §4.1 | Platform_14 |
+| `REQ-UI-028` | Governed accessible visualization styling; presentation thresholds distinct from Alert/Validation Policy | Platform_09 §4.3 | Platform_14 |
+| `REQ-UI-029` | Recoverable/versioned System dashboards and rollback-capable mutable shared scopes | Platform_09 §4.2 | Platform_14 |
+
 ### Data lifecycle
 
 | ID | Requirement | BRD | PRD | Architecture | HLD | LLD | Dataflow |
