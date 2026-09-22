@@ -319,6 +319,47 @@ Late evidence, topology/change updates and recovery may create a new immutable R
 
 RCA events carry tenant, incident, revision, schema version, event time, ingest time and correlation/provenance. Replayed identical revision events are idempotent. Alert/incident correlation must preserve child-event references rather than deleting evidence after compression.
 
+## 8.1 Presentation query/metric and visualization authority supplement — v3.2.2
+
+Presentation definitions may reference governed query/metric/visualization metadata but do not themselves authorize arbitrary database execution.
+
+A logical **Presentation Query & Metric Catalogue** exposes versioned metadata sufficient for Dashboard/Report Studio and OOB manifests to discover safe query choices:
+
+```text
+query_or_metric_id
+version
+domain
+supported_entity_types[]
+value_type / semantic_type
+unit
+dimensions[]
+parameters[]
+allowed_aggregations[]
+allowed_groupings[]
+supported_rollups_or_resolutions[]
+time_semantics
+freshness_quality_fields[]
+permission_refs[]
+resource_scope_behavior
+entitlement_refs[]
+query_bounds:
+  max_time_range
+  max_rows
+  max_series_or_cardinality
+  scan_or_cost_class
+  timeout_class
+supported_transformations[]
+deprecation_or_compatibility
+```
+
+Exact physical storage is not frozen by this contract. The preferred starting point is schema-backed/versioned metadata consumed by existing Core/Query APIs. A separate catalogue microservice/database is not selected.
+
+A logical **Presentation Capability Registry** defines panel-type capabilities, visualization-settings vocabulary, field overrides, value/status mappings, presentation thresholds, accessibility constraints, responsive/wallboard capabilities and allowed action/drill-down classes. Presentation thresholds never mutate Alert/Validation Policy.
+
+The common workspace-manifest envelope references a typed class-specific definition. Dashboard-like classes may reference the current `DASHBOARD_DEFINITION`; console/entity/investigation/map/configuration/governance classes use their own bounded definitions when implemented.
+
+Current `TEAM` scope values in presentation schemas are not sufficient ownership authority. A Team-owned artifact requires an authoritative tenant-scoped Team binding from the future Identity/Teams/RBAC reconciliation; authorization is always re-evaluated server-side.
+
 ## 9. Region, Sensor Pool and enrollment-control contract supplement — v3.2.2
 
 Logical control resources are additive to the existing tenant/site/Sensor/Agent model:
