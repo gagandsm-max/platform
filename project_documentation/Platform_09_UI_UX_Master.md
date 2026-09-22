@@ -202,6 +202,247 @@ The proposed first-class Team object, effective-access inspector, directory mapp
 | `REQ-UI-027` | Every shipped OOB panel/widget maps to authoritative requirement, governed query/API, data source, permission/entitlement, state/no-data semantics, query bounds, drill-down/action and test evidence; unsupported/fake operational panels are prohibited. |
 | `REQ-UI-028` | Dashboard visualization styling is governed, accessible and panel-type appropriate; presentation thresholds/value mappings remain semantically separate from Alert/Validation Policy thresholds. |
 | `REQ-UI-029` | System dashboards/workspaces are versioned and recoverable across upgrades; customer clones are not silently overwritten; mutable Team/Tenant/Shared definitions retain rollback-capable revision history without implying mandatory maker-checker. |
+| `REQ-UI-030` | Platform uses a common workspace-manifest envelope for UI-001..UI-098 with a mandatory workspace class and typed class-specific definition reference; `DASHBOARD_DEFINITION` remains authoritative only for dashboard-like classes and is not stretched into a giant generic schema. |
+| `REQ-UI-031` | Dashboard/Report Studio references resolve through governed Presentation Query & Metric Catalogue and Presentation Capability Registry contracts; React must not invent query semantics, visualization settings, field overrides, value/status mappings or presentation thresholds. |
+| `REQ-UI-032` | `TEAM` presentation scope is reserved but not implementation-ready until an authoritative tenant-scoped Team identity/binding exists; a Team reference never grants resource authorization. |
+
+### 4.6 Workspace-manifest architecture
+
+The canonical presentation architecture is a **common workspace-manifest envelope + class-specific definition contracts**.
+
+The common envelope owns:
+
+- UI/workspace identity and version;
+- workspace class;
+- display name/domain/persona purpose;
+- navigation/context entry metadata;
+- tenant/resource/entitlement visibility references;
+- state/freshness/provenance behavior;
+- responsive/wallboard capability metadata;
+- System/customer ownership and recoverability metadata;
+- a typed `contentDefinitionRef`.
+
+Class-specific definition contracts own the interaction-specific body. Dashboard-like classes continue to use the existing `dashboard-definition.schema.json`. Operational Console, Entity Detail, Investigation, Configuration, Governance, Topology/Map, Platform Operations and other non-dashboard classes will receive the smallest typed contract required by their actual interaction model.
+
+Do **not** create one giant schema with hundreds of optional properties and do not coerce non-dashboard workspaces into `DASHBOARD_DEFINITION` merely to avoid defining the correct class contract.
+
+The existing React `workspace-registry.ts` remains implementation metadata, not the canonical persisted manifest authority. The schema-backed manifest family becomes authoritative as each class is implemented.
+
+### 4.7 TEAM scope readiness boundary
+
+Current dashboard/report schemas admit `scope=TEAM` but do not identify an authoritative tenant-scoped Team object. Therefore:
+
+- `TEAM` is currently a **reserved contract value**, not proof that Team ownership is production-ready;
+- no Team-scoped dashboard/report may become production-authoritative until the Identity/Access tranche defines stable `team_id`, tenant ownership, lifecycle, membership semantics, server-side authorization and revocation behavior;
+- future Team-owned definitions require an explicit Team binding, not inference from role name, directory group name, folder name or browser state;
+- current server authorization/resource scope checks remain authoritative regardless of presentation scope.
+
+Named follow-up architecture tranche:
+
+**Identity, Teams, RBAC, Resource Scope & NOC Work Ownership Reconciliation**
+
+It owns Team identity/lifecycle, directory-group mapping, effective access explanation, role/resource-scope binding, revocation/session-cache behavior, Team-owned dashboards/reports, My Work/Team Work assignment and NOC work ownership/routing. It must reconcile `TEAM` presentation semantics before Team-owned artifacts or queues are implementation-ready.
+
+### 4.8 Presentation Query & Metric Catalogue and Presentation Capability Registry
+
+Current `queryRef`, `dataSourceClassRef`, `visualizationSettingsRef`, `thresholdPolicyRef` and `fieldOverrideRefs` are correct indirections, but current source does not contain authoritative registries behind all of them.
+
+Architecture requires two governed logical catalogues, preferably schema-backed/static plus existing Core/Query-service APIs before any new service/database is considered:
+
+**Presentation Query & Metric Catalogue (QMC)**
+
+Minimum discoverable metadata:
+
+- stable query/metric identity and version;
+- data domain and supported entity types;
+- typed parameters and dimensions;
+- allowed aggregations/grouping/top-N/sort;
+- unit/type and semantic counter/gauge/state behavior;
+- available rollup/resolution and time semantics;
+- freshness/quality/provenance fields;
+- permission/resource-scope and entitlement references;
+- row/series/cardinality/time-range/scan bounds;
+- supported transformations/formulas where governed;
+- compatibility/deprecation metadata.
+
+Dashboard/Report Studio uses this catalogue to build bounded no-code/low-code queries. Ordinary users are not required to know SQL/ClickHouse syntax, and arbitrary browser-defined SQL/JavaScript/eval is not part of the base architecture.
+
+**Presentation Capability Registry (VIS)**
+
+Minimum metadata:
+
+- panel/visualization type;
+- allowed settings by panel type;
+- axis/unit/precision/legend/tooltip/stacking/palette capabilities;
+- field override capabilities;
+- value/status mapping contract;
+- presentation-threshold contract;
+- accessibility requirements;
+- responsive/wallboard capability;
+- supported drill-down/action classes.
+
+These are logical registries, not authorization systems and not justification for a new microservice.
+
+### 4.9 Dashboard enhancement proposal dispositions
+
+| Proposal | Decision | Architecture disposition |
+|---|---|---|
+| No-code query builder | ACCEPT WITH MODIFICATION | Uses QMC typed metadata and bounded server query contracts; no arbitrary SQL/JS by default. |
+| Cascading variables | ACCEPT | Typed, permission-filtered, bounded variable sources; URL/saved-view compatible. |
+| Synchronized crosshair/shared temporal interaction | ACCEPT WITH MODIFICATION | Shared runtime interaction bus for compatible panels only; no new service. |
+| Click-to-filter | ACCEPT | Context-preserving and permission-safe. |
+| Shared zoom | ACCEPT WITH MODIFICATION | Applies only to compatible temporal panels and updates governed time context. |
+| Pause/freeze | ACCEPT | Freezes presentation/query refresh only; never changes monitoring cadence. |
+| Annotation/event/change overlays | ACCEPT WITH MODIFICATION | RBAC/tenant scoped, bounded, provenance-bearing and time-window limited. |
+| Inspect Panel / provenance | ACCEPT | Shows governed query/data source/scope/freshness/resolution/limitations without leaking secrets or sensitive raw SQL. |
+| Wallboard playlist | DEFER | Useful after base wallboard runtime is stable; not a prerequisite for R1 architecture proof. |
+| First-class table behavior | ACCEPT | Server pagination/filter/sort, virtualization, columns, grouping, row actions, saved layout and freshness. |
+| Topology/map panel behavior | ACCEPT | Provenance-aware node/edge/map semantics; inferred relationships remain distinguishable. |
+| Import/export security | ACCEPT | Version/reference/tenant/permission/query-safety/content/size validation; no executable arbitrary code. |
+| Dashboard → Report | ACCEPT WITH MODIFICATION | Reuse governed query/presentation primitives; Report runtime remains separate from browser rendering. |
+| Dashboard → Alert Policy | ACCEPT WITH MODIFICATION | Panel context may seed governed policy creation; visualization threshold never becomes a hidden alert rule. |
+| Dashboard → Investigation | ACCEPT | Context/time/evidence references seed/open Investigation Session without duplicating authoritative data unnecessarily. |
+| Panel query-cost guardrails | ACCEPT | Time/rows/series/cardinality/scan/concurrency/timeout/cancellation/downsampling/Query Limited state. |
+| Representative dashboard certification set | ACCEPT | R1 proof set below must pass before freezing the rest of the 98 manifests. |
+
+### 4.10 Representative cross-class architecture proof set
+
+Before all 98 panel manifests are frozen, the common envelope, class-specific definitions, QMC/VIS contracts and runtime architecture must be proven against this deliberately diverse R1 set:
+
+```text
+UI-001 Executive / CIO Overview
+UI-003 NOC Command Center
+UI-009 Network Health Overview
+UI-010 Network Device Detail
+UI-017 Network Flow / Traffic Analytics
+UI-029 Infrastructure Health Overview
+UI-042 Database Estate Overview
+UI-048 Kubernetes Overview
+UI-055 Alert Console
+UI-057 Incident Detail
+UI-058 RCA / Investigation Workspace
+UI-066 IPAM Overview
+UI-073 Sensor Estate Overview
+UI-076 Telemetry Quality
+UI-083 Audit Explorer
+UI-088 Shift Handover
+UI-092 Data Pipeline Integrity
+```
+
+R1 proves schema/runtime fit across dashboard, wallboard, entity detail, analytics, console, investigation, governance, fleet and Platform-operations classes. Only after R1 is coherent are the remaining manifests frozen domain-by-domain.
+
+### 4.11 UI-001..UI-098 authoritative classification and coverage matrix
+
+Status legend:
+
+- **Manifest Status = CLASSIFIED; PANEL MANIFEST NOT FROZEN** — broad Platform_09 workspace specification exists and class is now authoritative; exact panel manifest awaits its governed contracts.
+- **Query/API Authority = PARTIAL / WORKSPACE RUNTIME PENDING** — the current UI registry marks all 98 `PENDING_BACKEND`; individual lower-level domain APIs may already exist, but no workspace is allowed to imply full runtime integration.
+- **WME** — common Workspace Manifest Envelope / applicable class-specific definition contract.
+- **QMC** — Presentation Query & Metric Catalogue.
+- **VIS** — Presentation Capability Registry.
+- **DOMAIN** — underlying authoritative domain APIs/data/authorization needed by that workspace.
+
+| UI ID | Workspace | Class | Manifest Status | Query/API Authority Status | Blocking Contract | Planned Phase |
+|---|---|---|---|---|---|---|
+| UI-001 | Executive / CIO Overview | `EXECUTIVE_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-002 | Global Operations Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-003 | NOC Command Center | `WALLBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-004 | Geographic Operations Map | `TOPOLOGY_MAP` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-005 | Business Service Health | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-006 | Site Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-007 | Branch Experience | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-008 | Branch Comparison | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-009 | Network Health Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-010 | Network Device Detail | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-011 | Interface Detail | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-012 | Critical Link | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-013 | Link Monitor | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-014 | Availability | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-015 | Network Performance | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-016 | Network Capacity | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-017 | Network Flow / Traffic Analytics | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-018 | Site-to-Site Traffic | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-019 | Routing Health | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-020 | BGP | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-021 | MPLS / VRF | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-022 | VXLAN / EVPN | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-023 | SD-WAN Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-024 | VPN | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-025 | WLAN Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-026 | VoIP / CUCM | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-027 | IP SLA / Network Assurance | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-028 | QoS / CBQoS | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-029 | Infrastructure Health Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-030 | Server Fleet | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-031 | Server Detail | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-032 | Process & Service | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-033 | Hardware / Out-of-Band | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-034 | Virtualization Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-035 | VMware | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-036 | Nutanix | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-037 | Hyper-V | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-038 | Proxmox | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-039 | Storage Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-040 | SAN Fabric | `TOPOLOGY_MAP` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-041 | Data Center Environmental | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-042 | Database Estate Overview | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-043 | Database Detail | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-044 | Multi-Cloud Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-045 | AWS Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-046 | Azure Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-047 | GCP Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-048 | Kubernetes Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-049 | Container Detail | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-050 | Synthetic Monitoring Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-051 | Synthetic Test Detail | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-052 | Certificate | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-053 | DNS / DHCP / NTP | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-054 | AD / Identity Infrastructure | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-055 | Alert Console | `OPERATIONAL_CONSOLE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-056 | Incident Console | `OPERATIONAL_CONSOLE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-057 | Incident Detail | `INVESTIGATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-058 | RCA / Investigation Workspace | `INVESTIGATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-059 | False Alert Qualification | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-060 | Maintenance & Suppression | `CONFIGURATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-061 | Change Timeline | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-062 | NCM Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-063 | Device Configuration | `CONFIGURATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-064 | NCM Compliance | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-065 | Configuration Change | `CONFIGURATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-066 | IPAM Overview | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-067 | Subnet Detail | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-068 | IP Conflict | `OPERATIONAL_CONSOLE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-069 | IPAM Capacity Forecast | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-070 | Capacity Planning Overview | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-071 | SLA | `REPORT_ANALYSIS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-072 | ISP / Carrier SLA | `REPORT_ANALYSIS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-073 | Sensor Estate Overview | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-074 | Sensor Detail | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-075 | Sensor Pool / HA | `PLATFORM_OPERATIONS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-076 | Telemetry Quality | `PLATFORM_OPERATIONS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-077 | Agent Estate | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-078 | Kafka / Data Pipeline Health | `PLATFORM_OPERATIONS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-079 | Core Database / Storage Health | `PLATFORM_OPERATIONS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-080 | Integration Health | `PLATFORM_OPERATIONS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-081 | ITSM Lifecycle | `OPERATIONAL_CONSOLE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-082 | Audit Overview | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-083 | Audit Explorer | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-084 | Access Governance | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-085 | CLI Session History | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-086 | Technology Lifecycle Risk | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-087 | Desired vs Actual / Configuration Drift | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-088 | Shift Handover | `OPERATIONAL_CONSOLE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-089 | Migration Studio | `CONFIGURATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-090 | Intelligence Quality | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-091 | Alert Policy Effectiveness | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-092 | Data Pipeline Integrity | `PLATFORM_OPERATIONS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
+| UI-093 | Storage & Retention | `PLATFORM_OPERATIONS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-094 | Usage & Licensing | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-095 | Housekeeping & Lifecycle Jobs | `PLATFORM_OPERATIONS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-096 | Post-Incident Review | `INVESTIGATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-097 | Runbook Library | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-098 | Device / Time Comparison | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+
 
 ## 5. Dashboard/workspace screen specifications
 
