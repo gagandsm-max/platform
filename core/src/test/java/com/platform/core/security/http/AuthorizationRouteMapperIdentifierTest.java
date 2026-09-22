@@ -245,6 +245,43 @@ class AuthorizationRouteMapperIdentifierTest {
         assertDenied(tenantPathOnly, "PUT", base + "/fixture.fictional.base/versions/1.0.0");
     }
 
+    @Test
+    void managementEndpointsUseEntityReadAndUpdate() {
+        PrincipalContext reader = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.ENTITY_READ,
+                        ResourceScope.named(ResourceType.ENTITY, Set.of(ENTITY))
+                )
+        );
+        PrincipalContext updater = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.ENTITY_UPDATE,
+                        ResourceScope.named(ResourceType.ENTITY, Set.of(ENTITY))
+                )
+        );
+        PrincipalContext noPerms = principal(TENANT);
+
+        String base = "/api/v1/tenants/" + TENANT + "/entities/" + ENTITY + "/management-endpoints";
+        assertAllowed(reader, "GET", base);
+        assertAllowed(reader, "GET", base + "/primary");
+        assertDenied(reader, "POST", base);
+        assertDenied(reader, "PUT", base + "/" + IDENTIFIER);
+
+        assertAllowed(updater, "POST", base);
+        assertAllowed(updater, "PUT", base + "/" + IDENTIFIER);
+        assertDenied(updater, "GET", base);
+
+        assertDenied(noPerms, "GET", base);
+        assertDenied(noPerms, "POST", base);
+
+        assertDenied(reader, "GET",
+                "/api/v1/tenants/" + TENANT + "/entities/" + OTHER_ENTITY + "/management-endpoints");
+    }
+
     private static PrincipalContext principal(UUID tenantScope, PermissionGrant... grants) {
         return new PrincipalContext(
                 "subject",
