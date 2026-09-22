@@ -161,6 +161,8 @@ UI/OOB-manifest and recurring-Discovery quality evidence additionally covers, wh
 
 A registry entry or JSON schema alone is not implementation/certification evidence.
 
+Before presentation architecture is considered stable, R1 certification exercises the representative cross-class set defined in Platform_09 §4.10. Evidence must prove the common envelope and applicable class-specific definitions without coercing console/entity/investigation/map/governance workspaces into dashboard grids. TEAM-scoped artifacts remain excluded from production certification until the Identity/Teams/RBAC tranche provides authoritative Team binding/revocation semantics.
+
 ---
 
 ## 7. Endpoint diagnostics and local-intelligence quality supplement — v3.2.2
