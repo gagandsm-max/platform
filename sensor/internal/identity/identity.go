@@ -255,10 +255,21 @@ func validateEnrollmentResponse(response EnrollmentResponse, localPrivateKeyPEM 
 	if !roots.AppendCertsFromPEM(response.CABundlePEM) {
 		return Identity{}, nil, fmt.Errorf("SENSOR_IDENTITY_CA_INVALID: trust bundle contains no usable CA certificate")
 	}
+	// Intermediate certificates may accompany the leaf in certificatePem.
+	// They are presentation-path material only — never promoted into Roots.
+	intermediates := x509.NewCertPool()
+	for i := 1; i < len(pair.Certificate); i++ {
+		intermediate, err := x509.ParseCertificate(pair.Certificate[i])
+		if err != nil {
+			return Identity{}, nil, fmt.Errorf("SENSOR_IDENTITY_CERTIFICATE_INVALID: intermediate certificate cannot be parsed")
+		}
+		intermediates.AddCert(intermediate)
+	}
 	if _, err := cert.Verify(x509.VerifyOptions{
-		Roots:       roots,
-		CurrentTime: now,
-		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		Roots:         roots,
+		Intermediates: intermediates,
+		CurrentTime:   now,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}); err != nil {
 		return Identity{}, nil, fmt.Errorf("SENSOR_IDENTITY_CERTIFICATE_UNTRUSTED: certificate does not chain to authorized CA bundle")
 	}

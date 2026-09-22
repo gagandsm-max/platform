@@ -133,6 +133,10 @@ func (t *HTTPEnrollmentTransport) Enroll(ctx context.Context, token []byte, requ
 	if err := decoder.Decode(&decoded); err != nil {
 		return EnrollmentResponse{}, fmt.Errorf("SENSOR_ENROLLMENT_RESPONSE_INVALID: Core enrollment response is invalid")
 	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return EnrollmentResponse{}, fmt.Errorf("SENSOR_ENROLLMENT_RESPONSE_INVALID: Core enrollment response contains trailing data")
+	}
 	if decoded.SensorID == "" || decoded.CertificatePEM == "" || decoded.CABundlePEM == "" {
 		return EnrollmentResponse{}, fmt.Errorf("SENSOR_ENROLLMENT_RESPONSE_INVALID: Core enrollment response is incomplete")
 	}

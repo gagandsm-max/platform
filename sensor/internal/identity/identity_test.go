@@ -265,6 +265,19 @@ func TestCSRSignatureAndPublicKeyMatchLocalKey(t *testing.T) {
 	if err := csr.CheckSignature(); err != nil {
 		t.Fatal(err)
 	}
+	if csr.Subject.CommonName != "" {
+		t.Fatalf("CSR CommonName must be empty, got %q", csr.Subject.CommonName)
+	}
+	if len(csr.DNSNames) != 0 || len(csr.IPAddresses) != 0 || len(csr.URIs) != 0 || len(csr.EmailAddresses) != 0 {
+		t.Fatalf("CSR must not claim SAN identity: dns=%v ip=%v uri=%v email=%v",
+			csr.DNSNames, csr.IPAddresses, csr.URIs, csr.EmailAddresses)
+	}
+	subject := strings.ToLower(csr.Subject.String())
+	for _, forbidden := range []string{"sensor", "tenant", "site", "pool", "platform-sensor-enrollment"} {
+		if strings.Contains(subject, forbidden) {
+			t.Fatalf("CSR subject encodes identity claim %q: %q", forbidden, csr.Subject.String())
+		}
+	}
 }
 
 func TestEnrollGeneratesLocalKeySendsCSRAndPersists(t *testing.T) {
@@ -520,5 +533,160 @@ func TestMetadataUnknownFieldRejected(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(store.dir, metadataFile), []byte(`{"sensorId":"x","unexpected":true}`), 0600)
 	if _, err := store.Load(); err == nil || !strings.Contains(err.Error(), "METADATA_INVALID") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func encodeCertPEM(ders ...[]byte) []byte {
+	var out []byte
+	for _, der := range ders {
+		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
+	}
+	return out
+}
+
+// makeIntermediateChainMaterial builds root → intermediate → leaf.
+// certificatePem is leaf+intermediate; caBundlePem is root only unless includeIntermediateInBundle.
+func makeIntermediateChainMaterial(t *testing.T, sensorID string, notBefore, notAfter time.Time) (
+	keyPEM []byte,
+	leafPlusIntermediate []byte,
+	rootBundle []byte,
+	wrongIntermediatePEM []byte,
+	leafOnly []byte,
+) {
+	t.Helper()
+	rootKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-root"},
+		NotBefore:             notBefore.Add(-time.Hour),
+		NotAfter:              notAfter.Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	rootDER, err := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootCert, err := x509.ParseCertificate(rootDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	intKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: "test-intermediate"},
+		NotBefore:             notBefore.Add(-time.Hour),
+		NotAfter:              notAfter.Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	intDER, err := x509.CreateCertificate(rand.Reader, intTemplate, rootCert, &intKey.PublicKey, rootKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intCert, err := x509.ParseCertificate(intDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wrongIntKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongIntTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(99),
+		Subject:               pkix.Name{CommonName: "wrong-intermediate"},
+		NotBefore:             notBefore.Add(-time.Hour),
+		NotAfter:              notAfter.Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	wrongIntDER, err := x509.CreateCertificate(rand.Reader, wrongIntTemplate, rootCert, &wrongIntKey.PublicKey, rootKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	leafKey, keyPEM, err := generateLocalEnrollmentKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(3),
+		Subject:      pkix.Name{CommonName: sensorID},
+		NotBefore:    notBefore,
+		NotAfter:     notAfter,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, intCert, &leafKey.PublicKey, intKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return keyPEM,
+		encodeCertPEM(leafDER, intDER),
+		encodeCertPEM(rootDER),
+		encodeCertPEM(leafDER, wrongIntDER),
+		encodeCertPEM(leafDER)
+}
+
+func TestPersistAcceptsRootIntermediateLeafChain(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore(t, now)
+	keyPEM, certChain, rootBundle, _, _ := makeIntermediateChainMaterial(t, "sensor-001", now.Add(-time.Minute), now.Add(time.Hour))
+	response := EnrollmentResponse{
+		SensorID:       "sensor-001",
+		CertificatePEM: certChain,
+		CABundlePEM:    rootBundle,
+	}
+	if _, err := store.Persist(response, keyPEM); err != nil {
+		t.Fatalf("enterprise chain rejected: %v", err)
+	}
+}
+
+func TestPersistRejectsMissingRequiredIntermediate(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore(t, now)
+	keyPEM, _, rootBundle, _, leafOnly := makeIntermediateChainMaterial(t, "sensor-001", now.Add(-time.Minute), now.Add(time.Hour))
+	response := EnrollmentResponse{
+		SensorID:       "sensor-001",
+		CertificatePEM: leafOnly,
+		CABundlePEM:    rootBundle,
+	}
+	if _, err := store.Persist(response, keyPEM); err == nil || !strings.Contains(err.Error(), "UNTRUSTED") {
+		t.Fatalf("missing intermediate accepted: %v", err)
+	}
+}
+
+func TestPersistRejectsIncorrectIntermediate(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore(t, now)
+	keyPEM, _, rootBundle, wrongChain, _ := makeIntermediateChainMaterial(t, "sensor-001", now.Add(-time.Minute), now.Add(time.Hour))
+	response := EnrollmentResponse{
+		SensorID:       "sensor-001",
+		CertificatePEM: wrongChain,
+		CABundlePEM:    rootBundle,
+	}
+	if _, err := store.Persist(response, keyPEM); err == nil || !strings.Contains(err.Error(), "UNTRUSTED") {
+		t.Fatalf("incorrect intermediate accepted: %v", err)
+	}
+}
+
+func TestPersistDirectLeafToRootStillPasses(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore(t, now)
+	material := makeEnrollmentMaterial(t, "sensor-001", now.Add(-time.Minute), now.Add(time.Hour))
+	if _, err := store.Persist(material.Response, material.KeyPEM); err != nil {
+		t.Fatalf("direct root chain regression: %v", err)
 	}
 }

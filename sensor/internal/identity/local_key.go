@@ -5,7 +5,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
 )
@@ -29,16 +28,13 @@ func generateLocalEnrollmentKey() (*ecdsa.PrivateKey, []byte, error) {
 }
 
 // createEnrollmentCSR builds a PKCS#10 CSR PEM signed by the local private key.
-// Subject is intentionally minimal: Core assigns authoritative Sensor identity.
+// Subject and SANs are intentionally empty: the CSR proves possession only;
+// Core assigns authoritative Sensor certificate identity after enrollment.
 func createEnrollmentCSR(key *ecdsa.PrivateKey) ([]byte, error) {
 	if key == nil {
 		return nil, fmt.Errorf("SENSOR_IDENTITY_CSR_INVALID: private key is required")
 	}
 	template := &x509.CertificateRequest{
-		Subject: pkix.Name{
-			// No authoritative Sensor ID / tenant / site claim — Core assigns identity.
-			CommonName: "platform-sensor-enrollment",
-		},
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
 	}
 	der, err := x509.CreateCertificateRequest(rand.Reader, template, key)

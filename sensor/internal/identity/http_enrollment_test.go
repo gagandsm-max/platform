@@ -165,3 +165,31 @@ func TestHTTPEnrollmentTransportRequiresCSRPem(t *testing.T) {
 		t.Fatal("missing csrPem accepted")
 	}
 }
+
+func TestHTTPEnrollmentTransportRejectsTrailingJSON(t *testing.T) {
+	now := time.Now().UTC()
+	material := makeEnrollmentMaterial(t, "sensor-http", now.Add(-time.Minute), now.Add(time.Hour))
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		first, _ := json.Marshal(enrollmentWireResponse{
+			SensorID:       material.Response.SensorID,
+			CertificatePEM: string(material.Response.CertificatePEM),
+			CABundlePEM:    string(material.Response.CABundlePEM),
+		})
+		_, _ = w.Write(first)
+		_, _ = w.Write([]byte(`{"extra":true}`))
+	}))
+	defer server.Close()
+	caFile := filepath.Join(t.TempDir(), "ca.crt")
+	_ = os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600)
+	transport, err := NewHTTPEnrollmentTransport(server.URL+"/enroll", caFile, time.Second, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = transport.Enroll(context.Background(), []byte("token"), EnrollmentRequest{
+		Role:   "NETWORK",
+		CSRPem: string(material.CSRPem),
+	})
+	if err == nil || !strings.Contains(err.Error(), "RESPONSE_INVALID") {
+		t.Fatalf("trailing JSON accepted: %v", err)
+	}
+}
