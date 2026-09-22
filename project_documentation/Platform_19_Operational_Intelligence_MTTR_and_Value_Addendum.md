@@ -70,6 +70,7 @@ The following IDs are authoritative PRD supplement requirements for v3.2.2.
 | `PRD-OIV-012` | Platform shall provide a four-layer customer-value dashboard covering operational noise reduction, diagnosis effectiveness, incident improvement and evidence-supported operational/economic benefit. |
 | `PRD-OIV-013` | Platform shall expose health, lag, completeness, capacity and failure telemetry for all OIV capabilities themselves. |
 | `PRD-OIV-014` | Platform shall provide role-aware APIs and UI for OIV capabilities with tenant scope, audit, query bounds and safe error behavior. |
+| `PRD-OIV-015` | Platform shall support policy-driven **Automated Investigation** as a bounded orchestration mode over the existing Investigation Session, Diagnostic Job, Incident Flight Recorder, Active Evidence Acquisition, Change Intelligence, Similar Incident and RCA contracts. It shall trigger only for policy-eligible qualified incidents/conditions, deduplicate correlated symptoms, enforce tenant/RBAC/maintenance/resource budgets, preserve cancellation/expiry and explicit `PARTIAL`/`INCONCLUSIVE`, prioritize live monitoring over diagnostic enrichment, and may recommend but shall not directly execute state-changing remediation outside the Controlled Remediation authority. |
 
 ### 3.1 First-class SaaS monitoring — `PRD-OIV-001`
 
@@ -153,6 +154,24 @@ Each qualifying incident shows where available: raw events, qualified alerts, co
 
 **Layer 4 — Operational/economic benefit:** evidence-supported incident minutes difference, engineer-hours from customer staffing assumptions, duplicate tickets/escalations avoided, user-hours where data exists, and SLA/outage-cost estimates only from customer-approved assumptions. Every economic panel shows calculation basis.
 
+
+### 3.13 Automated Investigation orchestration — `PRD-OIV-015`
+
+Automated Investigation is **not** a second diagnostics framework, RCA engine, workflow engine, agent platform, remediation authority, database or microservice. It is a Core-owned orchestration mode that coordinates existing tenant-scoped Investigation Session / Diagnostic Job / evidence / RCA capabilities for selected qualified incidents or policy-eligible operational conditions.
+
+The minimum P1 contract is:
+
+- triggers are policy-governed and initially limited to qualified incident/alert conditions, authorized manual request and existing RCA/investigation escalation points; do not auto-enable every possible trigger class;
+- correlated symptoms/failure domains deduplicate to a bounded investigation scope rather than creating one investigation per raw alert;
+- deterministic investigation profiles select passive evidence and permitted Diagnostic Jobs from existing Capability Pack/monitor/runbook primitives; an LLM may explain or propose permitted next evidence but is not execution authority;
+- passive evidence assembly is preferred first; active diagnostics require canonical targets, governed credentials, tenant/resource authorization, timeout/cancellation and protocol-specific safety;
+- every investigation has explicit step, duration, concurrency, evidence-volume and Sensor/Core resource budgets; live monitoring, ingestion, durability and critical alert qualification take precedence over investigation enrichment;
+- iterative evidence acquisition is bounded by deterministic stop conditions and may end as `CONCLUDED`, `PARTIAL`, `INCONCLUSIVE`, `FAILED`, `CANCELLED` or compatible existing Investigation Session outcome without inventing a competing RCA state machine;
+- evidence, contradictions, missing evidence, skipped diagnostics/reasons, budget decisions and RCA revisions remain provenance-linked and auditable;
+- investigation may produce a recommendation or Controlled Remediation candidate, but state-changing execution remains exclusively governed by the existing Controlled Remediation contract.
+
+This requirement closes an orchestration gap between already-approved OIV/MIA capabilities. It does **not** make those constituent capabilities implemented, tested, benchmarked, certified or deployed.
+
 ---
 
 ## 4. Governing architecture
@@ -178,6 +197,7 @@ No dedicated vector database is selected; use existing analytical capabilities f
 
 ## 5. HLD subsystem contracts
 
+- **Investigation Orchestrator:** policy eligibility, incident/failure-domain deduplication, Investigation Session lifecycle coordination, deterministic profile selection, budget/admission, bounded Diagnostic Job fan-out, cancellation/expiry, iterative stop conditions, RCA invocation/revision linkage and audit. This is a logical Core module and does not imply a new process/service.
 - **Evidence Window Orchestrator:** trigger eligibility, bounded window, evidence fan-out, completeness, retention/legal hold references, manifest and replay; missing sources yield `PARTIAL`.
 - **Similar Incident Service:** feature extraction, bounded search, scoring/version, quality/provenance filters, matching-factor explanation, feedback.
 - **Change Intelligence Ingestion:** connector health/auth references, polling/webhook state, normalization, idempotency, clock/provenance and entity correlation.
@@ -276,12 +296,15 @@ Versioned `saas_service_observation`, `carrier_event` and `packet_evidence_metad
 - **DF-OIV-004 Remediation:** recommendation/manual -> versioned action -> authorization -> preconditions -> blast-radius preview -> approval/policy -> idempotent execution -> trusted executor -> validation -> success or rollback/escalation -> audit/value fact.
 - **DF-OIV-005 Value:** lifecycle/RCA/remediation/ITSM evidence -> normalized timestamps -> completeness -> metric version -> cohort matching -> comparison -> dashboard. Insufficient evidence => `INSUFFICIENT EVIDENCE`.
 - **DF-OIV-006 Packet evidence:** authorized trigger -> RBAC/scope -> Sensor resource check -> bounded capture -> auto-stop -> encrypted artifact/metadata/checksum -> manifest -> TTL/legal hold.
+- **DF-OIV-007 Automated Investigation:** qualified incident/condition or authorized request -> policy eligibility/deduplication -> existing Investigation Session -> passive evidence/Flight Recorder -> budget/admission -> bounded authorized Diagnostic Jobs where needed -> evidence/RCA revision -> evidence-backed conclusion or `PARTIAL`/`INCONCLUSIVE` -> recommendation; any state-changing action crosses separately into Controlled Remediation.
 
 ---
 
 ## 8. UI/UX requirements
 
 Incident workspace adds **Evidence / Flight Recorder**, **Similar Incidents**, **Changes**, **Remediation**, and **Value / Contribution** panels/tabs.
+
+Automated Investigation is presented inside the existing Incident / Investigation experience rather than a disconnected workspace. Show trigger/reason, current stage, elapsed/budget status, diagnostics completed/skipped with reason, evidence/contradictions/missing evidence, current RCA revision and final `PARTIAL`/`INCONCLUSIVE`/concluded outcome as applicable.
 
 Provide a dedicated `Platform Value` / `Operational Value` dashboard implementing §3.12 with time, tenant, region/site, business service, severity, incident class, technology and assisted/remediation filters. Every improvement figure drills into cohort/sample/calculation basis.
 
@@ -299,6 +322,8 @@ Reuse the versioned Connector framework and Credential Profiles. Webhooks requir
 
 Threat-model/test unauthorized packet capture/access, payload leakage, cross-tenant evidence leakage, forged/replayed changes, malicious provider responses, connector credential theft, poisoned similarity, similarity tenant leakage, remediation injection/approval bypass/replay/excessive blast radius/stale topology, rollback tampering, false value attribution, manipulated timestamps/cohorts and untrusted financial assumptions represented as audited savings.
 
+Automated Investigation additionally threat-models trigger amplification/DoS, investigation storms, arbitrary-target/SSRF-like diagnostics, credential misuse, malicious diagnostic profile/Capability Pack content, cross-tenant evidence references, stale/replayed authority, unbounded iterative loops, resource starvation and any path that could bypass the Investigation→Recommendation→Controlled Remediation boundary.
+
 Mitigate with tenant-scoped authorization, immutable audit, idempotency, versioned actions, bounded inputs, schema validation, redaction, artifact encryption/TTL/checksums, approval policy, blast-radius limits and data-quality labels.
 
 ---
@@ -307,11 +332,15 @@ Mitigate with tenant-scoped authorization, immutable audit, idempotency, version
 
 Bound Flight Recorder work, packet resources, similarity searches and connector queues. Packet evidence has lower priority than live monitoring. External connectors expose lag/rate-limit/drop health. Packet payload retention is short by default. Value analytics uses rollups/aggregates. OIV workload participates in applicable performance certification and may not silently invalidate the Core footprint.
 
+Automated Investigation uses explicit per-investigation/per-tenant/per-Sensor budgets for steps, duration, concurrency, active targets, diagnostic rate and evidence volume. Incident storms must deduplicate/suppress investigation fan-out. Under pressure, investigation enrichment queues/suppresses/cancels before routine monitoring, critical qualification, telemetry durability or Core safety is degraded.
+
 ---
 
 ## 12. Test and release gates
 
 Applicable tests cover tenant isolation, stale/partial topology, missing evidence, clock skew/out-of-order events, duplicate/replayed changes, provider timeout/throttling/malformed response, Flight Recorder partial/failure/replay, packet permission/bounds/auto-stop/encryption/TTL/resources, similarity false positives/poisoning, remediation deny/precondition/approval/timeout/cancel/partial/validation/rollback/idempotency/blast-radius, value ambiguity/insufficient or mismatched cohorts/unsupported savings prevention, formula migration, performance regression, upgrade/rollback and audit completeness.
+
+Automated Investigation certification additionally covers correct trigger/non-trigger, incident/failure-domain deduplication, cancellation/expiry, bounded iterative steps, Sensor/Core pressure suppression, diagnostic timeout/credential failure, stale or missing evidence, unauthorized/cross-tenant diagnostics, investigation-trigger storms, explicit skipped-test reasons, `PARTIAL`/`INCONCLUSIVE`, and proof that investigation load does not violate protected monitoring/ingestion/durability objectives.
 
 Platform may not externally claim a generic MTTR-reduction percentage without reproducible customer/pilot evidence for a disclosed population/methodology. A customer's own measured/matched dashboard comparison is allowed when data quality is sufficient.
 
@@ -341,6 +370,7 @@ Add runbooks for Flight Recorder partial/failure, stale similarity, connector la
 | `REQ-OIV-012` | `PRD-OIV-012` | Four-layer value dashboard | §3.12 | §4 | §5 | §6 | DF-OIV-005 | §8 | §10 | §12 |
 | `REQ-OIV-013` | `PRD-OIV-013` | OIV self-observability | §3 | §4 | §5 | §6 | all | §8 | §10 | §12 |
 | `REQ-OIV-014` | `PRD-OIV-014` | Role-aware APIs/UI/audit | §3 | §4 | §5 | §6 | all | §8 | §10 | §12 |
+| `REQ-OIV-015` | `PRD-OIV-015` | Automated Investigation orchestration | §3.13 | §4 | §5 | existing Investigation Session / Diagnostic Job contracts | DF-OIV-007 | §8 | §10 | §12 |
 
 This master supplements legacy `Platform_01`, `02`, `03`, `04`, `05`, `06`, `08`, `09`, `10`, `11`, `14`, `16`, `17` and `18` for this additive capability family. Those files remain authoritative for existing scope.
 
@@ -350,12 +380,13 @@ This master supplements legacy `Platform_01`, `02`, `03`, `04`, `05`, `06`, `08`
 
 1. external change/carrier/SaaS normalization;
 2. Flight Recorder;
-3. Value Engine foundation;
-4. Similar Incident Memory;
-5. cloud-native graph enrichment;
-6. bounded controlled remediation;
-7. triggered packet evidence after security/resource gates;
-8. expand certified SaaS/carrier packs based on demand/API viability.
+3. Automated Investigation orchestration foundation (policy/deduplication/budget/passive evidence/RCA coordination only; no new privileged diagnostic scope);
+4. Value Engine foundation;
+5. Similar Incident Memory;
+6. cloud-native graph enrichment;
+7. bounded controlled remediation;
+8. triggered packet evidence after security/resource gates;
+9. expand certified SaaS/carrier packs based on demand/API viability.
 
 ---
 
