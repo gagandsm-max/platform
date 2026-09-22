@@ -70,7 +70,7 @@ class EntityManagementEndpointServiceTest {
                 TENANT, ENTITY, ManagementEndpointAddressType.IPV4, "10.0.0.1", true);
         assertEquals("10.0.0.1", created.address());
         assertTrue(created.primary());
-        verify(endpoints).clearPrimaryFlags(TENANT, ENTITY, null);
+        verify(endpoints).clearPrimaryFlags(eq(TENANT), eq(ENTITY), isNull(), eq("admin-user"), any(Instant.class));
         verify(endpoints).insert(any());
     }
 
@@ -124,7 +124,7 @@ class EntityManagementEndpointServiceTest {
         EntityManagementEndpoint updated = service.updateState(
                 TENANT, ENTITY, existing.endpointId(), ManagementEndpointState.ACTIVE, true);
         assertTrue(updated.primary());
-        verify(endpoints).clearPrimaryFlags(TENANT, ENTITY, existing.endpointId());
+        verify(endpoints).clearPrimaryFlags(eq(TENANT), eq(ENTITY), eq(existing.endpointId()), eq("admin-user"), any(Instant.class));
         verify(endpoints).update(any());
     }
 
