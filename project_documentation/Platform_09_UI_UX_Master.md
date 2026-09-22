@@ -150,6 +150,59 @@ Stable customer outcomes distinguish timeout/path, unknown v3 user, auth mismatc
 
 Dashboard library scopes: My, Team, Shared, Tenant/Customer, System and folders/groups. Actions: create, clone, move, rename, share, import/export, permissions, delete, variables and reusable panels. Editor supports drag/resize/duplicate/copy panels, undo/redo and preview. Panel editor tabs: Data, Query, Transformation, Visualization, Thresholds, Links, Overrides, Permissions. Panel types: stat, gauge, time series, bar, pie, table, heatmap, histogram, status grid, Sankey, topology, geo, text, alert list, incident list, RCA and domain-specific visualizations.
 
+## 4.1 OOB workspace classification and manifest contract — v3.2.2 reconciliation
+
+The 98 mandatory UI entries are **not all grid dashboards**. Before implementation or GA classification, every UI-001..UI-098 definition shall carry an explicit workspace class selected from the smallest useful vocabulary, such as:
+
+```text
+EXECUTIVE_DASHBOARD | NOC_DASHBOARD | WALLBOARD | ANALYTICAL_DASHBOARD |
+OPERATIONAL_CONSOLE | ENTITY_DETAIL | INVENTORY_FLEET | TOPOLOGY_MAP |
+INVESTIGATION | CONFIGURATION | GOVERNANCE | PLATFORM_OPERATIONS |
+REPORT_ANALYSIS
+```
+
+The class controls the default interaction model. A console may be queue/table-first; an entity workspace may be detail/tab-first; an investigation may be evidence/timeline/graph-first. Platform shall not force decorative chart grids onto workspaces where they reduce operational usability.
+
+Each shipped System workspace requires a versioned **OOB manifest**. For every applicable tab/view the manifest records at least: stable workspace/view/panel identifiers, purpose, default order/layout, visualization/widget type, governed query/API reference, authoritative data-source/domain reference, entity/scope binding, aggregation/dimensions/unit, time/comparison behavior, visualization settings reference, presentation-threshold/value-mapping reference, null/no-data behavior, drill-down/action references, freshness/provenance expectations, permission/entitlement references, query bounds, responsive/wallboard behavior and customer editability.
+
+A candidate default panel that cannot be mapped to an authoritative requirement + governed query/API + data source + permission/entitlement + test evidence is **not production-ready**. It is removed from the shipped default or explicitly retained as deferred design metadata; it must not be implemented with fake metrics, placeholder operational truth or an invented backend contract.
+
+The 98 broad workspace specifications in §5 remain authoritative product scope. This reconciliation does **not** require all 98 panel manifests to be fabricated immediately. Manifests are progressively frozen only when their underlying metric/query/data contracts are authoritative.
+
+### 4.2 Declarative System definitions and recoverability
+
+System OOB definitions shall be schema-backed, versioned and CI-validated rather than being authoritative only as hard-coded React composition. The current presentation-schema family is the starting contract; future manifest/schema evolution remains versioned and backward-compatible according to normal Platform contract rules.
+
+System definitions are immutable product versions. Upgrade may introduce a newer System version, but shall not silently overwrite a customer clone or customer-owned dashboard. Authorized users can restore/reopen the current System definition and clone a newer System version. Team/Tenant/Shared mutable dashboards require revision history sufficient for safe rollback of accidental edits. A mandatory maker-checker workflow is **not** implied merely by this requirement.
+
+### 4.3 Visualization styling and threshold separation
+
+Dashboard Studio shall expose only visualization controls that are meaningful for the selected panel type. The governed styling vocabulary may include series/palette, theme-aware color, line/fill/opacity/marker, axes and linear/log scale, unit/precision/min/max, legend/tooltip/stacking, display name, null display, value/status mapping, threshold colors, conditional/table formatting, text/title/subtitle/alignment, field overrides and links/drill-downs.
+
+Accessibility remains mandatory: status must not depend on color alone, contrast must remain usable in supported themes, and chart/table alternatives or summaries are provided where practical.
+
+**Visualization thresholds are presentation metadata only.** They do not create, modify or override Alert/Validation Policy behavior. Alert-policy thresholds are operational control state and may influence a visualization only through an explicit governed link/reference. Changing chart colors never silently changes alerting, and changing an alert rule never silently rewrites customer styling.
+
+### 4.4 Team-scope guardrail pending Identity/Access reconciliation
+
+Existing `TEAM` dashboard scope, notification subscriptions and owner/team references do **not** by themselves define a first-class human Team authorization model. Until the Identity/Access reconciliation freezes that model:
+
+- a directory/AD/LDAP/Entra/SCIM group is not automatically a Platform Team;
+- a Team label/reference never grants resource access;
+- server-side tenant/resource authorization remains authoritative;
+- Team dashboards/work queues must not leak resources merely because a definition references them.
+
+The proposed first-class Team object, effective-access inspector, directory mapping, JIT grants and work-routing model are valid enterprise concerns but are **deferred to the Identity/Access specialized reconciliation** so Platform does not create a competing IAM model from the UI layer.
+
+### 4.5 Formal UI requirement supplement
+
+| REQ ID | Requirement |
+|---|---|
+| `REQ-UI-026` | Every mandatory OOB UI workspace has an explicit workspace class and progressively frozen versioned System manifest appropriate to its interaction model; not every UI entry is forced into a dashboard grid. |
+| `REQ-UI-027` | Every shipped OOB panel/widget maps to authoritative requirement, governed query/API, data source, permission/entitlement, state/no-data semantics, query bounds, drill-down/action and test evidence; unsupported/fake operational panels are prohibited. |
+| `REQ-UI-028` | Dashboard visualization styling is governed, accessible and panel-type appropriate; presentation thresholds/value mappings remain semantically separate from Alert/Validation Policy thresholds. |
+| `REQ-UI-029` | System dashboards/workspaces are versioned and recoverable across upgrades; customer clones are not silently overwritten; mutable Team/Tenant/Shared definitions retain rollback-capable revision history without implying mandatory maker-checker. |
+
 ## 5. Dashboard/workspace screen specifications
 
 The 98 out-of-box screens below are mandatory. Customers may clone/customize them; System versions remain recoverable as product defaults. Entity-detail pages may be contextual and need not be separate left-navigation items.
