@@ -118,7 +118,8 @@ public final class ManagementEndpointAddressValidator {
             throw new DomainException("VALIDATION_FAILED", "malformed FQDN");
         }
         String[] labels = fqdn.split("\\.");
-        if (labels.length < 1) {
+        // Canonical management authority requires a real multi-label FQDN (not search-domain dependent).
+        if (labels.length < 2) {
             throw new DomainException("VALIDATION_FAILED", "malformed FQDN");
         }
         for (String label : labels) {

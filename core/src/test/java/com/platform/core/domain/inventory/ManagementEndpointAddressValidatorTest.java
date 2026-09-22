@@ -41,17 +41,36 @@ class ManagementEndpointAddressValidatorTest {
     }
 
     @Test
-    void acceptsFqdnLowercases() {
+    void acceptsMultiLabelFqdnAndNormalizesUppercaseAndTrailingDot() {
         var n = ManagementEndpointAddressValidator.normalizeAndValidate(
                 ManagementEndpointAddressType.FQDN, "Device.Example.COM.");
         assertEquals("device.example.com", n.address());
+        assertEquals("core-sw-01.dc1.customer.local",
+                ManagementEndpointAddressValidator.normalizeAndValidate(
+                        ManagementEndpointAddressType.FQDN, "Core-SW-01.DC1.Customer.Local").address());
     }
 
     @Test
-    void rejectsMalformedFqdn() {
+    void rejectsSingleLabelFqdn() {
+        assertThrows(DomainException.class,
+                () -> ManagementEndpointAddressValidator.normalizeAndValidate(
+                        ManagementEndpointAddressType.FQDN, "router01"));
+        assertThrows(DomainException.class,
+                () -> ManagementEndpointAddressValidator.normalizeAndValidate(
+                        ManagementEndpointAddressType.FQDN, "localhost"));
+    }
+
+    @Test
+    void rejectsMalformedFqdnLabels() {
         assertThrows(DomainException.class,
                 () -> ManagementEndpointAddressValidator.normalizeAndValidate(
                         ManagementEndpointAddressType.FQDN, "-bad.example.com"));
+        assertThrows(DomainException.class,
+                () -> ManagementEndpointAddressValidator.normalizeAndValidate(
+                        ManagementEndpointAddressType.FQDN, "host-"));
+        assertThrows(DomainException.class,
+                () -> ManagementEndpointAddressValidator.normalizeAndValidate(
+                        ManagementEndpointAddressType.FQDN, "bad..example.com"));
     }
 
     @Test

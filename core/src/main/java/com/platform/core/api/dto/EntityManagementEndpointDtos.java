@@ -7,11 +7,14 @@ public final class EntityManagementEndpointDtos {
     private EntityManagementEndpointDtos() {
     }
 
+    /**
+     * Public create request. Provenance is always MANUAL for this API surface;
+     * callers cannot assert DISCOVERY/PROVISIONING provenance via REST.
+     */
     public record CreateManagementEndpointRequest(
             String addressType,
             String address,
-            Boolean primary,
-            String source
+            Boolean primary
     ) {
     }
 

@@ -6,7 +6,6 @@ import com.platform.core.api.dto.EntityManagementEndpointDtos.UpdateManagementEn
 import com.platform.core.domain.inventory.EntityManagementEndpoint;
 import com.platform.core.domain.inventory.EntityManagementEndpointService;
 import com.platform.core.domain.inventory.ManagementEndpointAddressType;
-import com.platform.core.domain.inventory.ManagementEndpointSource;
 import com.platform.core.domain.inventory.ManagementEndpointState;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -60,15 +59,10 @@ public class EntityManagementEndpointController {
         }
         ManagementEndpointAddressType type = ManagementEndpointAddressType.from(request.addressType());
         boolean primary = request.primary() != null && request.primary();
-        ManagementEndpointSource source = ManagementEndpointSource.from(request.source());
-        EntityManagementEndpoint created;
-        if (source == ManagementEndpointSource.MANUAL) {
-            created = endpoints.createManual(tenantId, entityId, type, request.address(), primary);
-        } else {
-            // Explicit approved-source path only — still requires entity.update authorization.
-            created = endpoints.createFromApprovedSource(
-                    tenantId, entityId, type, request.address(), source, primary);
-        }
+        // Public REST create is MANUAL-only. Governed DISCOVERY/PROVISIONING provenance
+        // remains an internal service boundary (createFromApprovedSource), not this API.
+        EntityManagementEndpoint created = endpoints.createManual(
+                tenantId, entityId, type, request.address(), primary);
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created));
     }
 

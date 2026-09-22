@@ -152,11 +152,23 @@ class EntityManagementEndpointServiceTest {
                 TENANT, ENTITY, ManagementEndpointAddressType.IPV4, "10.1.2.3",
                 ManagementEndpointSource.DISCOVERY, true);
         assertEquals(ManagementEndpointSource.DISCOVERY, created.source());
+        EntityManagementEndpoint provisioned = service.createFromApprovedSource(
+                TENANT, ENTITY, ManagementEndpointAddressType.FQDN, "edge.example.com",
+                ManagementEndpointSource.PROVISIONING, false);
+        assertEquals(ManagementEndpointSource.PROVISIONING, provisioned.source());
         // MANUAL is rejected for the approved-source boundary.
         assertThrows(DomainException.class,
                 () -> service.createFromApprovedSource(
                         TENANT, ENTITY, ManagementEndpointAddressType.IPV4, "10.1.2.4",
                         ManagementEndpointSource.MANUAL, false));
+    }
+
+    @Test
+    void createManualAlwaysSetsManualSource() {
+        stubEntity(TENANT, ENTITY);
+        EntityManagementEndpoint created = service.createManual(
+                TENANT, ENTITY, ManagementEndpointAddressType.FQDN, "poll.example.com", true);
+        assertEquals(ManagementEndpointSource.MANUAL, created.source());
     }
 
     @Test
