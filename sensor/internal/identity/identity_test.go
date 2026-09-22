@@ -690,3 +690,127 @@ func TestPersistDirectLeafToRootStillPasses(t *testing.T) {
 		t.Fatalf("direct root chain regression: %v", err)
 	}
 }
+
+func TestPersistRejectsClientLeafAsTrustAnchor(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore(t, now)
+	material := makeEnrollmentMaterial(t, "sensor-001", now.Add(-time.Minute), now.Add(time.Hour))
+	material.Response.CABundlePEM = material.Response.CertificatePEM
+	if _, err := store.Persist(material.Response, material.KeyPEM); err == nil || !strings.Contains(err.Error(), "CA_INVALID") {
+		t.Fatalf("client leaf accepted as trust anchor: %v", err)
+	}
+}
+
+func TestPersistRejectsNonCAInTrustBundle(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore(t, now)
+	material := makeEnrollmentMaterial(t, "sensor-001", now.Add(-time.Minute), now.Add(time.Hour))
+	other := makeEnrollmentMaterial(t, "sensor-other", now.Add(-time.Minute), now.Add(time.Hour))
+	// End-entity certificate from another enrollment used as "CA" trust material.
+	material.Response.CABundlePEM = other.Response.CertificatePEM
+	if _, err := store.Persist(material.Response, material.KeyPEM); err == nil || !strings.Contains(err.Error(), "CA_INVALID") {
+		t.Fatalf("non-CA trust bundle accepted: %v", err)
+	}
+}
+
+func TestPersistRejectsCALeafAsClientCertificate(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore(t, now)
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, keyPEM, err := generateLocalEnrollmentKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: "sensor-001"},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leaf, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := EnrollmentResponse{
+		SensorID:       "sensor-001",
+		CertificatePEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}),
+		CABundlePEM:    pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}),
+	}
+	if _, err := store.Persist(response, keyPEM); err == nil || !strings.Contains(err.Error(), "must not be a CA") {
+		t.Fatalf("CA leaf accepted as Sensor client certificate: %v", err)
+	}
+}
+
+func TestPersistRejectsClientCertWithoutDigitalSignatureKeyUsage(t *testing.T) {
+	now := time.Now().UTC()
+	store := newTestStore(t, now)
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, keyPEM, err := generateLocalEnrollmentKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "sensor-001"},
+		NotBefore:    now.Add(-time.Minute),
+		NotAfter:     now.Add(time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leaf, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := EnrollmentResponse{
+		SensorID:       "sensor-001",
+		CertificatePEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}),
+		CABundlePEM:    pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}),
+	}
+	if _, err := store.Persist(response, keyPEM); err == nil || !strings.Contains(err.Error(), "digitalSignature") {
+		t.Fatalf("client cert without digitalSignature KeyUsage accepted: %v", err)
+	}
+}

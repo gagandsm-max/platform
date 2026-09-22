@@ -245,15 +245,21 @@ func validateEnrollmentResponse(response EnrollmentResponse, localPrivateKeyPEM 
 	if now.Before(cert.NotBefore) || !now.Before(cert.NotAfter) {
 		return Identity{}, nil, fmt.Errorf("SENSOR_IDENTITY_CERTIFICATE_INVALID: client certificate is not currently valid")
 	}
+	if cert.IsCA {
+		return Identity{}, nil, fmt.Errorf("SENSOR_IDENTITY_CERTIFICATE_INVALID: Sensor client certificate must not be a CA")
+	}
 	if cert.Subject.CommonName != "" && cert.Subject.CommonName != response.SensorID {
 		return Identity{}, nil, fmt.Errorf("SENSOR_IDENTITY_CERTIFICATE_MISMATCH: certificate common name does not match Sensor ID")
 	}
 	if !hasClientAuthEKU(cert) {
 		return Identity{}, nil, fmt.Errorf("SENSOR_IDENTITY_CERTIFICATE_INVALID: certificate is not valid for TLS client authentication")
 	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(response.CABundlePEM) {
-		return Identity{}, nil, fmt.Errorf("SENSOR_IDENTITY_CA_INVALID: trust bundle contains no usable CA certificate")
+	if cert.KeyUsage != 0 && cert.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		return Identity{}, nil, fmt.Errorf("SENSOR_IDENTITY_CERTIFICATE_INVALID: certificate KeyUsage excludes digitalSignature")
+	}
+	roots, err := parseCATrustAnchors(response.CABundlePEM)
+	if err != nil {
+		return Identity{}, nil, err
 	}
 	// Intermediate certificates may accompany the leaf in certificatePem.
 	// They are presentation-path material only — never promoted into Roots.
@@ -291,6 +297,45 @@ func hasClientAuthEKU(cert *x509.Certificate) bool {
 		}
 	}
 	return false
+}
+
+// parseCATrustAnchors builds a Roots pool from caBundlePem. Every entry must be a
+// CA trust anchor; client leaves and other non-CA certificates are rejected.
+func parseCATrustAnchors(caBundlePEM []byte) (*x509.CertPool, error) {
+	rest := caBundlePEM
+	var anchors []*x509.Certificate
+	for {
+		block, next := pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		rest = next
+		if block.Type != "CERTIFICATE" {
+			return nil, fmt.Errorf("SENSOR_IDENTITY_CA_INVALID: trust bundle contains non-certificate PEM")
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("SENSOR_IDENTITY_CA_INVALID: trust bundle certificate cannot be parsed")
+		}
+		if !cert.BasicConstraintsValid || !cert.IsCA {
+			return nil, fmt.Errorf("SENSOR_IDENTITY_CA_INVALID: trust bundle entry is not a CA certificate")
+		}
+		if cert.KeyUsage != 0 && cert.KeyUsage&x509.KeyUsageCertSign == 0 {
+			return nil, fmt.Errorf("SENSOR_IDENTITY_CA_INVALID: trust bundle CA lacks certificate signing usage")
+		}
+		anchors = append(anchors, cert)
+	}
+	if strings.TrimSpace(string(rest)) != "" {
+		return nil, fmt.Errorf("SENSOR_IDENTITY_CA_INVALID: trust bundle contains malformed PEM data")
+	}
+	if len(anchors) == 0 {
+		return nil, fmt.Errorf("SENSOR_IDENTITY_CA_INVALID: trust bundle contains no usable CA certificate")
+	}
+	pool := x509.NewCertPool()
+	for _, cert := range anchors {
+		pool.AddCert(cert)
+	}
+	return pool, nil
 }
 
 func (s *Store) Load() (Identity, error) {
