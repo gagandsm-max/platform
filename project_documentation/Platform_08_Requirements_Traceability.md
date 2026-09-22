@@ -286,6 +286,9 @@ The requirements below are owned by `Platform_09_UI_UX_Master.md` and quality-ga
 | `REQ-UI-027` | OOB panel authority mapping: requirement→query/API→data source→permission/entitlement→state/query bounds→test | Platform_09 §4.1 | Platform_14 |
 | `REQ-UI-028` | Governed accessible visualization styling; presentation thresholds distinct from Alert/Validation Policy | Platform_09 §4.3 | Platform_14 |
 | `REQ-UI-029` | Recoverable/versioned System dashboards and rollback-capable mutable shared scopes | Platform_09 §4.2 | Platform_14 |
+| `REQ-UI-030` | Common workspace-manifest envelope + class-specific definition contracts; dashboard schema only for dashboard-like classes | Platform_09 §§4.6,4.11 | Platform_14 |
+| `REQ-UI-031` | Governed Presentation Query & Metric Catalogue + Presentation Capability Registry | Platform_09 §4.8; Platform_17 | Platform_14 |
+| `REQ-UI-032` | TEAM presentation scope blocked until authoritative tenant-scoped Team binding and IAM reconciliation | Platform_09 §4.7 | Platform_14 |
 
 ### Data lifecycle
 
