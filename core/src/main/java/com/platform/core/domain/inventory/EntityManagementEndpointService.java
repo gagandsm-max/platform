@@ -114,7 +114,7 @@ public class EntityManagementEndpointService {
         }
 
         if (primary) {
-            endpoints.clearPrimaryFlags(tenantId, entityId, endpointId);
+            endpoints.clearPrimaryFlags(tenantId, entityId, endpointId, actor, now);
         }
 
         EntityManagementEndpoint updated = new EntityManagementEndpoint(
@@ -175,7 +175,7 @@ public class EntityManagementEndpointService {
         UUID endpointId = UuidV7.generate();
         boolean primary = makePrimary;
         if (primary) {
-            endpoints.clearPrimaryFlags(tenantId, entityId, null);
+            endpoints.clearPrimaryFlags(tenantId, entityId, null, actor, now);
         }
 
         EntityManagementEndpoint created = new EntityManagementEndpoint(
