@@ -283,6 +283,27 @@ Minimum metadata:
 
 These are logical registries, not authorization systems and not justification for a new microservice.
 
+#### Presentation Foundation — Workspace Manifest, Query/Metric & Visualization Contract Reconciliation
+
+This is the next **presentation-specific** implementation/reconciliation tranche. It does not displace higher-priority P0 security/enrollment work in the overall Platform sequence, but Dashboard Runtime/Studio/Report work must not invent presentation contracts ahead of it.
+
+The tranche freezes only the smallest contract family that current interaction semantics require:
+
+- existing `DASHBOARD_DEFINITION` remains the composition contract for `EXECUTIVE_DASHBOARD`, `NOC_DASHBOARD`, `ANALYTICAL_DASHBOARD` and `WALLBOARD`; wallboard differences are capability/presentation constraints rather than a second dashboard schema;
+- `REPORT_ANALYSIS` may reuse dashboard composition when it is an interactive analytical workspace, while scheduled/static report artifacts continue to use the separate `REPORT_DEFINITION`;
+- one bounded **collection/operations workspace** contract may serve `INVENTORY_FLEET`, `OPERATIONAL_CONSOLE`, `GOVERNANCE` and `PLATFORM_OPERATIONS` only where they share table/list/queue/summary/action semantics; the contract must use typed view/body kinds and must not become an all-optional property bag;
+- `ENTITY_DETAIL`, `INVESTIGATION`, `TOPOLOGY_MAP` and `CONFIGURATION` retain distinct contracts because their identity/context, evidence, graph/map and mutation semantics materially differ.
+
+The tranche owns WME schema/versioning/identity/context/visibility/freshness/content-definition typing and System/customer ownership; QMC metadata and compatibility; VIS capability/settings/overrides/mappings/presentation-threshold/accessibility/drill-down rules; and reference-integrity validation.
+
+| Consumer | Presentation Foundation blocker |
+|---|---|
+| Dashboard Runtime | WME + dashboard content mapping + QMC resolution + VIS capability/reference validation + fail-safe authorization/entitlement resolution |
+| Dashboard Studio | Dashboard Runtime foundation plus typed authoring metadata, variables/transformations and reference-integrity validation |
+| Report Studio | QMC/VIS reusable primitives + `REPORT_DEFINITION` reconciliation + execution/display-timezone semantics + server authorization/reference validation; WME is not required merely to persist a report artifact |
+| R1 OOB manifests | WME + applicable class contract + QMC/VIS + authoritative DOMAIN references |
+| Remaining OOB manifests | R1 architecture proof first, then domain-by-domain manifests only when their DOMAIN/query contracts are authoritative |
+
 ### 4.9 Dashboard enhancement proposal dispositions
 
 | Proposal | Decision | Architecture disposition |
@@ -331,6 +352,11 @@ UI-092 Data Pipeline Integrity
 
 R1 proves schema/runtime fit across dashboard, wallboard, entity detail, analytics, console, investigation, governance, fleet and Platform-operations classes. Only after R1 is coherent are the remaining manifests frozen domain-by-domain.
 
+The presentation-foundation proof is intentionally broader than dashboards. It also includes two schema-level representative artifacts; these are architecture/test fixtures, not new UI IDs or runtime implementation in this reconciliation:
+
+- **REPORT_DEFINITION — SLA Scheduled Report**: proves governed QMC query bindings, filters/variables/calculations, table/visualization reuse, static rendering, explicit execution timezone distinct from display/render timezone, allowed PDF/CSV/XLSX/JSON/API formats where applicable, server authorization and scheduled execution independent of browser runtime.
+- **SAVED_VIEW — representative dashboard/workspace view**: proves target workspace/dashboard reference, filters, grouping/sort, time-context policy, URL/context compatibility, server authorization re-evaluation and fail-safe behavior for stale, deleted or unauthorized target/reference state.
+
 ### 4.11 UI-001..UI-098 authoritative classification and coverage matrix
 
 Status legend:
@@ -341,6 +367,8 @@ Status legend:
 - **QMC** — Presentation Query & Metric Catalogue.
 - **VIS** — Presentation Capability Registry.
 - **DOMAIN** — underlying authoritative domain APIs/data/authorization needed by that workspace.
+
+Semantic review of each §5 Purpose/Tabs/Actions found eight classifications where the existing class would drive the wrong interaction contract. The authoritative corrections are: UI-035/UI-036/UI-037/UI-038 → `INVENTORY_FLEET`; UI-062 → `OPERATIONAL_CONSOLE`; UI-065 → `INVESTIGATION`; UI-090/UI-091 → `ANALYTICAL_DASHBOARD`. The other 90 classifications PASS this semantic review and are not changed merely for naming/aesthetic preference.
 
 | UI ID | Workspace | Class | Manifest Status | Query/API Authority Status | Blocking Contract | Planned Phase |
 |---|---|---|---|---|---|---|
@@ -378,10 +406,10 @@ Status legend:
 | UI-032 | Process & Service | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-033 | Hardware / Out-of-Band | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-034 | Virtualization Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
-| UI-035 | VMware | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
-| UI-036 | Nutanix | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
-| UI-037 | Hyper-V | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
-| UI-038 | Proxmox | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-035 | VMware | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-036 | Nutanix | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-037 | Hyper-V | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-038 | Proxmox | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-039 | Storage Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-040 | SAN Fabric | `TOPOLOGY_MAP` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-041 | Data Center Environmental | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
@@ -405,10 +433,10 @@ Status legend:
 | UI-059 | False Alert Qualification | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-060 | Maintenance & Suppression | `CONFIGURATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-061 | Change Timeline | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
-| UI-062 | NCM Overview | `NOC_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-062 | NCM Overview | `OPERATIONAL_CONSOLE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-063 | Device Configuration | `CONFIGURATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-064 | NCM Compliance | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
-| UI-065 | Configuration Change | `CONFIGURATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-065 | Configuration Change | `INVESTIGATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-066 | IPAM Overview | `INVENTORY_FLEET` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
 | UI-067 | Subnet Detail | `ENTITY_DETAIL` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-068 | IP Conflict | `OPERATIONAL_CONSOLE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
@@ -433,8 +461,8 @@ Status legend:
 | UI-087 | Desired vs Actual / Configuration Drift | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-088 | Shift Handover | `OPERATIONAL_CONSOLE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R1 REPRESENTATIVE PROOF |
 | UI-089 | Migration Studio | `CONFIGURATION` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
-| UI-090 | Intelligence Quality | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
-| UI-091 | Alert Policy Effectiveness | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-090 | Intelligence Quality | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
+| UI-091 | Alert Policy Effectiveness | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-092 | Data Pipeline Integrity | `PLATFORM_OPERATIONS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R1 REPRESENTATIVE PROOF |
 | UI-093 | Storage & Retention | `PLATFORM_OPERATIONS` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-094 | Usage & Licensing | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |

@@ -86,24 +86,27 @@ Discovery scheduling reuses the existing Core-owned scheduling authority; it doe
 Supported customer-safe modes for the initial contract are:
 
 - **Run Now**;
-- **Run Once** at an explicit instant;
+- **Run Once** from an explicit requested local wall-clock + IANA timezone, resolved once and persisted as the authoritative UTC execution instant while retaining the original wall-clock/timezone input for audit/display;
 - **Daily** at local wall-clock time + IANA timezone;
 - **Weekly** on selected weekday(s) + local time + IANA timezone;
-- **Monthly** on an explicit supported day policy + local time + IANA timezone.
+- **Monthly** on day 1–31 + local time + IANA timezone. When the requested day does not exist in a month, Platform uses **LAST_VALID_DAY** for that month and makes that behavior explicit in schedule UI/preview; there is no hidden skip and no user-selectable missing-day policy in the initial contract.
 
 Advanced recurrence is deferred unless a real customer requirement justifies it; unrestricted raw cron is not the default ordinary-user contract.
 
-The authoritative schedule/control state includes schedule identity, tenant, discovery profile/scope/exclusions, protocol set, Credential Profile references, Sensor/Sensor-Pool placement policy, recurrence/timezone, enabled/paused state, generation/revision, next/last run, max duration, rate/concurrency limits, failure state and audit metadata. Run history is retained separately from the reusable schedule definition.
+The authoritative schedule/control state includes schedule identity, tenant, discovery profile/scope/exclusions, protocol set, Credential Profile references, Sensor/Sensor-Pool placement policy, recurrence/timezone, enabled/paused state, generation/revision, authoritative `next_run` UTC instant, last run, max duration, rate/concurrency limits, failure state and audit metadata. Run history is retained separately from the reusable schedule definition.
 
 Execution rules:
 
 - Core owns schedule desired state and generation/fencing; Sensor executes only currently authorized work;
 - recurring scans are deterministically spread and bounded so many tenants/sites do not align at the same minute boundary;
-- missed executions do not create an unbounded catch-up queue; explicit skip/coalesce policy applies;
-- pause/resume and schedule edits are versioned/audited;
+- for a nonexistent local time during a DST forward transition, that occurrence runs once at the first valid local instant after the gap and the resolved UTC instant is recorded;
+- for an ambiguous local time during a DST fall-back transition, that occurrence runs exactly once at the **earlier** of the two valid instants;
+- after Core/scheduler unavailability, missed recurring occurrences **COALESCE to at most one** recovery execution; older missed occurrences are not replayed, and recovery executions remain deterministically spread/rate bounded to prevent a restart stampede;
+- pause never accumulates catch-up work. Resume computes the next scheduled occurrence strictly after resume time; an operator who wants immediate execution uses Run Now;
+- schedule edit/cancel advances generation. Queued or not-yet-started work from an obsolete generation must fail closed before execution. Work already in flight is cancellation-best-effort; any late obsolete-generation result is fenced from current schedule state and trusted auto-approval/activation and is retained only as auditable evidence unless explicitly reviewed;
 - discovery result remains candidate evidence and does not bypass governed review/entitlement/activation;
 - trusted auto-approval, where enabled, remains separately governed by `PRD-ONB-008`;
-- display timezone never changes the schedule's operational timezone semantics.
+- display timezone never changes recurrence or the persisted Run Once UTC execution instant.
 
 ### 3.1 Supported candidate sources
 
