@@ -68,14 +68,24 @@ public class EntityManagementEndpointRepository {
                 params(endpoint));
     }
 
-    public int clearPrimaryFlags(UUID tenantId, UUID entityId, UUID exceptEndpointId) {
+    public int clearPrimaryFlags(
+            UUID tenantId,
+            UUID entityId,
+            UUID exceptEndpointId,
+            String updatedBy,
+            java.time.Instant updatedAt
+    ) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("tenantId", tenantId)
                 .addValue("entityId", entityId)
-                .addValue("exceptEndpointId", exceptEndpointId);
+                .addValue("exceptEndpointId", exceptEndpointId)
+                .addValue("updatedBy", updatedBy)
+                .addValue("updatedAt", JdbcTime.ts(updatedAt));
         String sql = """
                 UPDATE platform.entity_management_endpoint
-                   SET is_primary = FALSE
+                   SET is_primary = FALSE,
+                       updated_by = :updatedBy,
+                       updated_at = :updatedAt
                  WHERE tenant_id = :tenantId
                    AND entity_id = :entityId
                    AND is_primary = TRUE
