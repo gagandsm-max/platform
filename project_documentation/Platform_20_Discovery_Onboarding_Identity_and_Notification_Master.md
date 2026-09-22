@@ -79,7 +79,7 @@ The following IDs are authoritative PRD supplements for v3.2.2.
 | `PRD-ONB-020` | Sensor/Agent provisioning and placement shall be capacity-aware and locality-aware without making hardware increases the first response to load. Core shall prefer bounded workload placement, batching/data-path efficiency and healthy eligible pools before requiring larger resource profiles; capacity certification remains owned by Platform_11/14. |
 | `PRD-ONB-021` | Platform shall support governed recurring Network Discovery schedules in addition to Run Now/one-time execution. Customer-safe schedules include Daily, Weekly and Monthly recurrence with explicit IANA timezone, start/effective date, pause/resume, next/last run, run history/failure state, max duration/rate/concurrency bounds, Sensor/Sensor-Pool placement, Credential Profile references, protocol/scope/exclusions and review/auto-approval policy. Ordinary users are not given unrestricted cron. Missed runs follow explicit skip/coalesce policy and deterministic spreading prevents fleet scan stampedes. |
 
-### 3.1 Governed recurring Discovery scheduling — `PRD-ONB-021`
+### 3.1A Governed recurring Discovery scheduling — `PRD-ONB-021`
 
 Discovery scheduling reuses the existing Core-owned scheduling authority; it does not create a second scheduler service.
 
@@ -750,7 +750,7 @@ Operational self-monitoring includes candidate queue depth/age, review backlog, 
 | `REQ-ONB-017` | Agent bootstrap and normal Agent→Sensor→Core assignment semantics | `PRD-ONB-018` | §§4–7 | §§8.5–12 |
 | `REQ-ONB-018` | Platform-owned Sensor/Core and Agent/Sensor channels remain encrypted/authenticated; no approved plaintext production mode | `PRD-ONB-019` | §§4–7 | §§9–11 |
 | `REQ-ONB-019` | Provisioning/placement efficiency and capacity-aware pool selection without hardware-first scaling | `PRD-ONB-020` | §§4–7 | §§8.5,11,12 |
-| `REQ-ONB-020` | Governed recurring Discovery schedules with explicit timezone, bounds, placement, history, skip/coalesce and deterministic spread | `PRD-ONB-021` | §§3.1,4–7 | §§8,11,12 |
+| `REQ-ONB-020` | Governed recurring Discovery schedules with explicit timezone, bounds, placement, history, skip/coalesce and deterministic spread | `PRD-ONB-021` | §§3.1A,4–7 | §§8,11,12 |
 
 ### 13.1 Definition of done
 
