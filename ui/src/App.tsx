@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AppShell, ThemeMode } from './components/AppShell';
+import { AppShell, DensityMode, ThemeMode } from './components/AppShell';
 import { CategoryLanding } from './components/CategoryLanding';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PageState } from './components/PageState';
@@ -45,6 +45,26 @@ const persistThemePreference = (theme: ThemeMode) => {
   }
 };
 
+const readDensityPreference = (): DensityMode => {
+  try {
+    const stored = window.localStorage.getItem('platform.density');
+    if (stored === 'compact' || stored === 'comfortable' || stored === 'large') {
+      return stored;
+    }
+  } catch {
+    // Density persistence is optional local UI state; failure must not prevent the shell from loading.
+  }
+  return 'comfortable';
+};
+
+const persistDensityPreference = (density: DensityMode) => {
+  try {
+    window.localStorage.setItem('platform.density', density);
+  } catch {
+    // Do not fail navigation/rendering when browser preference storage is unavailable.
+  }
+};
+
 const applyTheme = (mode: ThemeMode): (() => void) => {
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   const update = () => {
@@ -63,6 +83,7 @@ const applyTheme = (mode: ThemeMode): (() => void) => {
 export const App: React.FC = () => {
   const [currentPath, setCurrentPath] = useState(window.location.pathname || '/');
   const [theme, setTheme] = useState<ThemeMode>(readThemePreference);
+  const [density, setDensity] = useState<DensityMode>(readDensityPreference);
 
   const routeResolution = useMemo(
     () => resolveAppRoute(currentPath, FOUNDATION_ACCESS),
@@ -105,6 +126,10 @@ export const App: React.FC = () => {
   useEffect(() => applyTheme(theme), [theme]);
 
   useEffect(() => {
+    document.documentElement.dataset.density = density;
+  }, [density]);
+
+  useEffect(() => {
     if (routeResolution.kind === 'workspace') {
       document.title = `${routeResolution.workspace.label} | Platform`;
     } else if (routeResolution.kind === 'primary') {
@@ -119,6 +144,11 @@ export const App: React.FC = () => {
   const changeTheme = (nextTheme: ThemeMode) => {
     persistThemePreference(nextTheme);
     setTheme(nextTheme);
+  };
+
+  const changeDensity = (nextDensity: DensityMode) => {
+    persistDensityPreference(nextDensity);
+    setDensity(nextDensity);
   };
 
   const navigateTo = (path: string) => {
@@ -159,6 +189,8 @@ export const App: React.FC = () => {
         onNavigateWorkspace={(workspace) => navigateTo(workspace.path)}
         theme={theme}
         onThemeChange={changeTheme}
+        density={density}
+        onDensityChange={changeDensity}
       >
         {routeResolution.kind === 'workspace' ? (
           <WorkspacePage
