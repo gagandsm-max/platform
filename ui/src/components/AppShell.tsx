@@ -11,6 +11,7 @@ import {
 } from '../platform/navigation';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
+export type DensityMode = 'compact' | 'comfortable' | 'large';
 
 interface AppShellProps {
   access: AccessContext;
@@ -20,6 +21,8 @@ interface AppShellProps {
   onNavigateWorkspace: (workspace: WorkspaceDefinition) => void;
   theme: ThemeMode;
   onThemeChange: (theme: ThemeMode) => void;
+  density: DensityMode;
+  onDensityChange: (density: DensityMode) => void;
   children: React.ReactNode;
 }
 
@@ -46,6 +49,8 @@ export const AppShell: React.FC<AppShellProps> = ({
   onNavigateWorkspace,
   theme,
   onThemeChange,
+  density,
+  onDensityChange,
   children,
 }) => {
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -167,6 +172,18 @@ export const AppShell: React.FC<AppShellProps> = ({
               <option value="system">System</option>
               <option value="light">Light</option>
               <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label className="density-control">
+            <span className="sr-only">Display density</span>
+            <select
+              value={density}
+              onChange={(event) => onDensityChange(event.target.value as DensityMode)}
+              aria-label="Display density"
+            >
+              <option value="compact">Compact</option>
+              <option value="comfortable">Comfortable</option>
+              <option value="large">Large</option>
             </select>
           </label>
           <button
