@@ -63,12 +63,11 @@ DPI and full APM are excluded for the initial product scope.
 ## 3. Product information architecture
 ### 3.1 Primary workspaces
 
-The primary navigation shall be role-aware and organized into these workspaces:
+The primary navigation shall be role-aware and organized into these **top-level primary sidebar** workspaces (14-item taxonomy; aligned with `Platform_09` / UI foundation):
 
 - Home
 - Dashboards
 - Inventory
-- Provisioning & Discovery
 - Topology & Maps
 - Alerts & Incidents
 - RCA & Investigations
@@ -80,6 +79,12 @@ The primary navigation shall be role-aware and organized into these workspaces:
 - Administration
 - Audit & Governance
 - Platform Operations
+
+**Provisioning & Discovery is not a top-level primary sidebar item.** It is a major product workspace nested under Inventory:
+
+`Inventory → Provisioning & Discovery`
+
+(with `/provisioning` as a child/compatibility destination under Inventory). Do not introduce a second navigation interpretation that places Provisioning & Discovery as a peer of Inventory in the primary sidebar.
 
 The UI shall not expose 80+ dashboard links as one flat menu. Domain dashboards are grouped; entity-level dashboards open contextually through drill-down.
 
@@ -368,6 +373,8 @@ The Sensor Placement Engine shall evaluate:
 - tenant and credential policy.
 
 The nearest geographic Sensor must not be selected blindly if it is unhealthy or overloaded.
+
+Platform may recommend Sensor placement improvements from observed locality, capacity and completion evidence (**Sensor placement learning**). Recommendations require operator/admin approval unless an explicit safe auto-rebalance policy is enabled; learning never silently overrides pinned/manual placements.
 
 ### 7.3 Sensor pools and redundancy
 
@@ -1386,7 +1393,7 @@ Telnet is legacy, disabled by default and never automatic fallback.
 ## 25. IPAM requirements
 IPAM shall support:
 
-- IPv4 and IPv6 as first-class;
+- IPv4 and IPv6 as first-class, including dual-stack estates;
 - subnet/supernet hierarchy;
 - VLAN/VRF association;
 - address state/reservation;
@@ -1803,6 +1810,8 @@ UI shall support:
 - asynchronous long-running operations with progress;
 - WebSocket/SSE updates where beneficial.
 
+UI foundations shall include internationalization readiness (locale-aware formatting where applicable) alongside accessibility requirements above. Exact translation scope remains product-configurable; accessibility and readable contrast remain mandatory.
+
 Exact numeric SLOs are benchmark-defined TBD, but common interactive actions must remain low-latency and regressions shall fail performance certification.
 
 ---
@@ -2123,6 +2132,8 @@ Support Bundle generation shall collect relevant versions, service health, logs,
 
 Every customer-facing technical error should carry a stable error code, customer explanation, technical context, suggested action and correlation/request ID.
 
+**No Silent Failure:** material collection, storage, integration, HA, provisioning, authentication or workflow failures must expose what failed, evidence, impact and remediation guidance rather than failing silently.
+
 ---
 
 
@@ -2240,33 +2251,6 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 
 | PRD-TBD-LIC-GRACE | Licence grace 7 vs 15 day Founder-reserved conflict | UNRESOLVED |
 
-## 44. Version 3.0 must-not-lose residual (compressed)
-The following cross-cutting capabilities remain mandatory and are absorbed into the sections above; this residual checklist exists only as absorption evidence, not as a competing chronological appendix:
+## 44. A2.1 migration note
 
-- asset lifecycle/reconciliation, stale/disappeared/replaced device handling and decommission workflow;
-- technology lifecycle/EOL/EOS/firmware risk visibility without pretending to be a vulnerability scanner;
-- backup, restore verification, v1.0 DR, low-downtime upgrade, rollback, canary and feature-flag controls;
-- desired-vs-actual monitoring state, drift detection, change impact preview and dry-run;
-- path analysis, device/time comparison, circuit inventory, business/service ownership and shift handover;
-- learned baselines/seasonality, alert storm protection, flapping detection, event compression and alert-policy effectiveness;
-- unified Operations Timeline combining telemetry, events, topology, NCM, audit, user action, sensor activity, ITSM and RCA;
-- data provenance/quality/confidence, topology relationship provenance/confidence and historical topology;
-- global search, command palette, contextual troubleshooting actions, support bundle and customer-visible Platform Health;
-- licensing/usage dashboard, data-growth forecast and entitlement-aware UI;
-- sensitive-field classification, masking/drop/hash/store policy, AI data boundaries and AI audit;
-- Device Pack certification/test simulator, import/export, template library, onboarding wizard and contextual help;
-- API-first implementation, webhooks/outbound events, API governance, rate limits and query protection;
-- integration test sandbox, timezone/site timezone handling, internationalization foundations and accessibility;
-- telemetry/cardinality explosion protection, tenant/noisy-neighbor quotas, ingestion dedupe, late/out-of-order/replay handling and legal hold;
-- Migration Studio and Environment Readiness Scanner;
-- change-freeze/business calendars, runbook/knowledge library and post-incident review/problem management;
-- RCA accuracy/feedback metrics, monitoring optimization recommendations and Sensor placement learning;
-- certificate/PKI lifecycle, proxy/no-proxy and data-sovereignty/regional-placement readiness;
-- IPv6/dual-stack first-class behavior;
-- scheduled housekeeping and end-to-end pipeline-integrity visibility;
-- stable customer-facing error codes/correlation IDs and **No Silent Failure**.
----
-
-## 45. A2.1 migration note
-
-A2.1 absorbed Version 3.0 PRD-* appendices, v3.1 packaging/service requirements, v3.2.2 timezone/scheduling/EDS/local-AI handoff sections and workshop §64/§65 catalogues into the numbered normative structure above. Chronological appendices are removed as competing truth. Formal `PRD-*` identifiers remain indexed in `Platform_08_Requirements_Traceability.md` without net-new or removed IDs under A2.1. Git history retains chronology.
+A2.1 absorbed Version 3.0 / v3.1 / v3.2.2 and related reconciliation content into the numbered normative sections above. Chronological appendices and residual “must-not-lose” checklists are not current normative truth. Git history preserves chronology. Formal `PRD-*` identifiers remain indexed in `Platform_08_Requirements_Traceability.md` without net-new or removed IDs under A2.1.

@@ -520,7 +520,7 @@ Agents (Windows/Linux) are distinct builds. They enroll via Core, receive Sensor
 Detailed Agent product behavior: `Platform_02_PRD.md`. EDS placement: §22.
 
 ## 11. Placement architecture (Region, Site, Sensor Pool)
-Core owns placement policy.
+Core owns placement policy. Placement may incorporate observed locality/capacity/completion evidence as **placement-learning recommendations**. Recommendations do not silently override pinned/manual placement or pool policy without authorized auto-rebalance controls.
 
 ### 11.1 Sensor suitability score
 
@@ -859,7 +859,7 @@ Browser → Core WebSocket Session Broker → assigned Network Sensor → SSH de
 
 
 ## 22. IPAM architecture
-IPAM authoritative current state lives in PostgreSQL and is enriched by discovery/graph observations. It supports IPv4/IPv6, VRF/VLAN namespaces, DHCP/DNS integration and history/forecast facts in ClickHouse where useful.
+IPAM authoritative current state lives in PostgreSQL and is enriched by discovery/graph observations. It supports IPv4/IPv6 (including dual-stack estates), VRF/VLAN namespaces, DHCP/DNS integration and history/forecast facts in ClickHouse where useful.
 
 NetBox-like external tools may integrate, but Platform IPAM remains coherent with Platform canonical inventory and authorization.
 
@@ -1052,34 +1052,9 @@ Runbooks/known issues are versioned knowledge artifacts. Incident closure can cr
 
 ### 31.5 Effectiveness/quality analytics
 
-Platform shall analyze its own monitoring intelligence: alert policy effectiveness, qualification outcomes, RCA accuracy, telemetry quality, Sensor efficiency and pipeline integrity. These analytics are essential for proving the low-noise/meaningful-AI product proposition.
-
+Platform shall analyze its own monitoring intelligence: alert policy effectiveness, qualification outcomes, RCA accuracy, telemetry quality, Sensor efficiency and pipeline integrity. These analytics are essential for proving the low-noise/meaningful-AI product proposition. UI architecture shall preserve internationalization foundations (locale-aware presentation where applicable) and accessibility constraints; detailed screen contracts remain in `Platform_09_UI_UX_Master.md`.
 
 ---
-
-### Version 3.0 must-not-lose residual (absorbed)
-- asset lifecycle/reconciliation, stale/disappeared/replaced device handling and decommission workflow;
-- technology lifecycle/EOL/EOS/firmware risk visibility without pretending to be a vulnerability scanner;
-- backup, restore verification, v1.0 DR, low-downtime upgrade, rollback, canary and feature-flag controls;
-- desired-vs-actual monitoring state, drift detection, change impact preview and dry-run;
-- path analysis, device/time comparison, circuit inventory, business/service ownership and shift handover;
-- learned baselines/seasonality, alert storm protection, flapping detection, event compression and alert-policy effectiveness;
-- unified Operations Timeline combining telemetry, events, topology, NCM, audit, user action, sensor activity, ITSM and RCA;
-- data provenance/quality/confidence, topology relationship provenance/confidence and historical topology;
-- global search, command palette, contextual troubleshooting actions, support bundle and customer-visible Platform Health;
-- licensing/usage dashboard, data-growth forecast and entitlement-aware UI;
-- sensitive-field classification, masking/drop/hash/store policy, AI data boundaries and AI audit;
-- Device Pack certification/test simulator, import/export, template library, onboarding wizard and contextual help;
-- API-first implementation, webhooks/outbound events, API governance, rate limits and query protection;
-- integration test sandbox, timezone/site timezone handling, internationalization foundations and accessibility;
-- telemetry/cardinality explosion protection, tenant/noisy-neighbor quotas, ingestion dedupe, late/out-of-order/replay handling and legal hold;
-- Migration Studio and Environment Readiness Scanner;
-- change-freeze/business calendars, runbook/knowledge library and post-incident review/problem management;
-- RCA accuracy/feedback metrics, monitoring optimization recommendations and Sensor placement learning;
-- certificate/PKI lifecycle, proxy/no-proxy and data-sovereignty/regional-placement readiness;
-- IPv6/dual-stack first-class behavior;
-- scheduled housekeeping and end-to-end pipeline-integrity visibility;
-- stable customer-facing error codes/correlation IDs and **No Silent Failure**.
 
 ## 32. Development, packaging and service-runtime architecture
 ### 32.1 Docker Compose is the normative local runtime
@@ -1474,4 +1449,4 @@ Packaging detail remains `Platform_15`/`Platform_16`. A2.1 only defines architec
 
 ## 43. A2.1 migration note
 
-A2.1 absorbed Version 3.0 ARCH-* blocks, v3.1 packaging/runtime sections, v3.2.2 timezone/scheduling/EDS/local-intelligence handoffs and corrected out-of-order headings (former 18.1 peer, 35A–D preceding 33). Chronological appendices are removed as competing normative truth. Git history retains chronology.
+A2.1 absorbed Version 3.0 ARCH-* blocks, v3.1 packaging/runtime sections and v3.2.2 timezone/scheduling/EDS/local-intelligence handoffs into the numbered normative architecture above, and corrected out-of-order headings. Chronological appendices and residual “must-not-lose” checklists are not current normative truth. Git history preserves chronology.
