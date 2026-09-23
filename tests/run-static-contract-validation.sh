@@ -91,6 +91,12 @@ done
 echo "--> Dev disk hygiene guardrails"
 bash "${ROOT_DIR}/tests/test-dev-disk-hygiene.sh"
 
+echo "--> Mother Reference validator unit tests"
+python3 -m unittest discover -s "${ROOT_DIR}/project_documentation/tools" -p 'test_validate_mother_references.py' -v
+
+echo "--> Mother Reference structural validator (repository)"
+python3 "${ROOT_DIR}/project_documentation/tools/validate_mother_references.py"
+
 echo "========================================================================"
 echo "STATIC CONTRACT VALIDATION PASSED"
 echo "========================================================================"
