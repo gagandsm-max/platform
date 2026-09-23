@@ -27,9 +27,9 @@ MINIMAL_DOCS = [
     ("Platform_01_BRD.md", "PLATFORM-BRD-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_02_PRD.md", "PLATFORM-PRD-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_03_Architecture.md", "PLATFORM-ARC-001", "NORMALIZED_V1", "mother_reference"),
-    ("Platform_04_HLD.md", "PLATFORM-HLD-001", "TRANSITIONAL_LEGACY", "mother_reference"),
-    ("Platform_05_LLD.md", "PLATFORM-LLD-001", "TRANSITIONAL_LEGACY", "mother_reference"),
-    ("Platform_06_Dataflow.md", "PLATFORM-DF-001", "TRANSITIONAL_LEGACY", "mother_reference"),
+    ("Platform_04_HLD.md", "PLATFORM-HLD-001", "NORMALIZED_V1", "mother_reference"),
+    ("Platform_05_LLD.md", "PLATFORM-LLD-001", "NORMALIZED_V1", "mother_reference"),
+    ("Platform_06_Dataflow.md", "PLATFORM-DF-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_07_OSS_Catalog.md", "PLATFORM-OSS-001", "TRANSITIONAL_LEGACY", "mother_reference"),
     ("Platform_08_Requirements_Traceability.md", "PLATFORM-RTM-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_09_UI_UX_Master.md", "PLATFORM-UIUX-001", "TRANSITIONAL_LEGACY", "mother_reference"),
@@ -512,17 +512,17 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
 
     def test_18_transitional_legacy_duplicate_sections_not_blocked(self) -> None:
-        # Platform_04 remains TRANSITIONAL_LEGACY after A2.1; duplicate ## numbers allowed.
+        # Platform_07 remains TRANSITIONAL_LEGACY after A2.2; duplicate ## numbers allowed.
         root = self._write_minimal()
-        (root / "Platform_04_HLD.md").write_text(
-            _header("PLATFORM-HLD-001")
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
             + "## 1. One\n\n## 1. Two\n\n## 18.1 Nested historical\n\n",
             encoding="utf-8",
         )
         errors = validate_docs_root(root)
         self.assertFalse(
             any(
-                "Platform_04_HLD.md: duplicate normalized" in e for e in errors
+                "Platform_07_OSS_Catalog.md: duplicate normalized" in e for e in errors
             ),
             errors,
         )
@@ -618,18 +618,33 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
-    def test_18g_transitional_platform_04_may_retain_historical_numbering(self) -> None:
+    def test_18g_transitional_platform_07_may_retain_historical_numbering(self) -> None:
         root = self._write_minimal()
-        (root / "Platform_04_HLD.md").write_text(
-            _header("PLATFORM-HLD-001")
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
             + "## 9. Placement\n\n"
-            + "### 8.1 Historical Sensor runtime numbering retained until A2.2\n\n",
+            + "### 8.1 Historical OSS numbering retained until A2.3\n\n",
             encoding="utf-8",
         )
         errors = validate_docs_root(root)
         self.assertFalse(
             any(
-                "Platform_04_HLD.md" in e and "parent mismatch" in e for e in errors
+                "Platform_07_OSS_Catalog.md" in e and "parent mismatch" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_18h_normalized_platform_04_duplicate_sections_blocked(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_04_HLD.md").write_text(
+            _header("PLATFORM-HLD-001")
+            + "## 1. One\n\n## 1. Two\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_04_HLD.md: duplicate normalized" in e for e in errors
             ),
             errors,
         )
@@ -1031,16 +1046,61 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
 
     def test_43_premature_transitional_to_normalized_fails(self) -> None:
-        # Platform_04 remains TRANSITIONAL_LEGACY after A2.1; premature upgrade must fail.
+        # Platform_07 remains TRANSITIONAL_LEGACY after A2.2; premature upgrade must fail.
         root = self._write_minimal(
-            normalize_overrides={"Platform_04_HLD.md": "NORMALIZED_V1"}
+            normalize_overrides={"Platform_07_OSS_Catalog.md": "NORMALIZED_V1"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_07_OSS_Catalog.md" in e
+                and "normalizationState" in e
+                and "TRANSITIONAL_LEGACY" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43e_platform_04_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_04_HLD.md": "TRANSITIONAL_LEGACY"}
         )
         errors = validate_docs_root(root)
         self.assertTrue(
             any(
                 "Platform_04_HLD.md" in e
                 and "normalizationState" in e
-                and "TRANSITIONAL_LEGACY" in e
+                and "NORMALIZED_V1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43f_platform_05_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_05_LLD.md": "TRANSITIONAL_LEGACY"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_05_LLD.md" in e
+                and "normalizationState" in e
+                and "NORMALIZED_V1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43g_platform_06_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_06_Dataflow.md": "TRANSITIONAL_LEGACY"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_06_Dataflow.md" in e
+                and "normalizationState" in e
+                and "NORMALIZED_V1" in e
                 for e in errors
             ),
             errors,

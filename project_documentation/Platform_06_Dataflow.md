@@ -1,13 +1,21 @@
 # Platform — End-to-End Dataflow & Sequence Documentation
 
-**Document ID:** PLATFORM-DF-001  
-**Version:** 3.2.2  
-**Status:** Authoritative Mother Reference — Engineering Source of Truth
-**Governing documents:** BRD, PRD, Architecture, HLD, LLD  
+**Document ID:** PLATFORM-DF-001
+**Version:** 3.2.2
+**Status:** Authoritative Mother Reference — End-to-End Dataflow & Sequence Documentation Authority (**A2.2 NORMALIZED_V1**)
+**Product name:** Platform
+**Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
+**Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_08_Requirements_Traceability.md`
+**Normalization state:** NORMALIZED_V1
+**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102)
+
+**Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
 ---
 
 ## 1. Purpose
+
+**Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. A documented flow is not runtime certification. Issue #92 gaps (HA, Flow/NTA receiver, Sensor production entrypoint, IAM/RBAC, CH lifecycle, etc.) remain binding where applicable.
 
 This document defines the end-to-end movement of control data, telemetry, events, configuration, identity, alerts, RCA evidence, retention actions and HA/DR state through Platform. It is intended for engineering, QA, security and operations teams validating that no hidden synchronous dependency or unowned state exists.
 
@@ -766,7 +774,7 @@ sequenceDiagram
 
 ---
 
-## 28A. Flow DF-027A — Contextual on-demand diagnostic / multi-vantage verification
+## 29. __TMP29__. Flow DF-027A — Contextual on-demand diagnostic / multi-vantage verification
 
 ```mermaid
 sequenceDiagram
@@ -805,7 +813,7 @@ Contradictory vantage evidence is shown, not averaged into a false definitive st
 
 ---
 
-## 28B. Flow DF-027B — Investigation Session evidence capture
+## 30. __TMP30__. Flow DF-027B — Investigation Session evidence capture
 
 ```mermaid
 sequenceDiagram
@@ -836,7 +844,7 @@ Investigation storage references authoritative evidence instead of copying entir
 
 ---
 
-## 29. Flow DF-028 — ITSM incident creation/update
+## 31. Flow DF-028 — ITSM incident creation/update
 
 ```mermaid
 sequenceDiagram
@@ -863,7 +871,7 @@ Connector health exposes stuck/rejected operations.
 
 ---
 
-## 30. Flow DF-029 — Incident recovery → ITSM resolution
+## 32. Flow DF-029 — Incident recovery → ITSM resolution
 
 ```mermaid
 sequenceDiagram
@@ -885,7 +893,7 @@ sequenceDiagram
 
 ---
 
-## 31. Flow DF-030 — Policy change with impact preview
+## 33. Flow DF-030 — Policy change with impact preview
 
 ```mermaid
 sequenceDiagram
@@ -909,7 +917,7 @@ sequenceDiagram
 
 ---
 
-## 32. Flow DF-031 — Adaptive polling
+## 34. Flow DF-031 — Adaptive polling
 
 ```mermaid
 flowchart LR
@@ -924,7 +932,7 @@ flowchart LR
 
 ---
 
-## 33. Flow DF-032 — Retention rollup
+## 35. Flow DF-032 — Retention rollup
 
 ```mermaid
 flowchart LR
@@ -941,7 +949,7 @@ Rollup interval and retention are customer-configurable; labels here do not impl
 
 ---
 
-## 34. Flow DF-033 — Historical dashboard query with automatic resolution
+## 36. Flow DF-033 — Historical dashboard query with automatic resolution
 
 ```mermaid
 sequenceDiagram
@@ -963,7 +971,7 @@ sequenceDiagram
 
 ---
 
-## 35. Flow DF-034 — Core 80% storage protection
+## 37. Flow DF-034 — Core 80% storage protection
 
 ```mermaid
 sequenceDiagram
@@ -990,7 +998,7 @@ Monitoring ingestion remains active throughout to the greatest technically safe 
 
 ---
 
-## 36. Flow DF-035 — Sensor 80% storage protection during WAN outage
+## 38. Flow DF-035 — Sensor 80% storage protection during WAN outage
 
 ```mermaid
 sequenceDiagram
@@ -1013,7 +1021,7 @@ sequenceDiagram
 
 ---
 
-## 37. Flow DF-036 — Legal/investigation hold
+## 39. Flow DF-036 — Legal/investigation hold
 
 ```mermaid
 sequenceDiagram
@@ -1030,7 +1038,7 @@ sequenceDiagram
 
 ---
 
-## 38. Flow DF-037 — Core Active failure and HA failover
+## 40. Flow DF-037 — Core Active failure and HA failover
 
 ```mermaid
 sequenceDiagram
@@ -1059,7 +1067,7 @@ Certified safe failure cases must restore Core service in <60 seconds.
 
 ---
 
-## 39. Flow DF-038 — Former Active returns after failover
+## 41. Flow DF-038 — Former Active returns after failover
 
 ```mermaid
 sequenceDiagram
@@ -1079,7 +1087,7 @@ Old Core may never independently resume Active because it used to be Active.
 
 ---
 
-## 40. Flow DF-039 — Sensor failure and polling reassignment
+## 42. Flow DF-039 — Sensor failure and polling reassignment
 
 ```mermaid
 sequenceDiagram
@@ -1101,7 +1109,7 @@ sequenceDiagram
 
 ---
 
-## 41. Flow DF-040 — Licence expiration lifecycle
+## 43. Flow DF-040 — Licence expiration lifecycle
 
 ```mermaid
 sequenceDiagram
@@ -1112,7 +1120,7 @@ sequenceDiagram
 
   L->>UI: 30-day warning notification
   L->>UI: 7-day global expiry banner
-  L->>L: Licence expires; enter 7-day grace
+  L->>L: Licence expires; enter FOUNDER-LIC-GRACE (duration UNRESOLVED)
   L->>S: Keep polling enabled during grace
   L->>L: Grace expires
   L->>S: Disable new polling assignments / signed polling-stop state
@@ -1122,7 +1130,7 @@ sequenceDiagram
 
 ---
 
-## 42. Flow DF-041 — Licence renewed after polling stop
+## 44. Flow DF-041 — Licence renewed after polling stop
 
 ```mermaid
 sequenceDiagram
@@ -1140,7 +1148,7 @@ sequenceDiagram
 
 ---
 
-## 43. Flow DF-042 — Dashboard query and fast UI response
+## 45. Flow DF-042 — Dashboard query and fast UI response
 
 ```mermaid
 sequenceDiagram
@@ -1170,7 +1178,7 @@ Large tables use server-side pagination; oversized exports become background job
 
 ---
 
-## 44. Flow DF-043 — Report execution
+## 46. Flow DF-043 — Report execution
 
 ```mermaid
 flowchart LR
@@ -1186,7 +1194,7 @@ flowchart LR
 
 ---
 
-## 45. Flow DF-044 — Device Pack creation from MIB
+## 47. Flow DF-044 — Device Pack creation from MIB
 
 ```mermaid
 sequenceDiagram
@@ -1211,7 +1219,7 @@ sequenceDiagram
 
 ---
 
-## 46. Flow DF-045 — API Studio connector creation
+## 48. Flow DF-045 — API Studio connector creation
 
 ```mermaid
 sequenceDiagram
@@ -1236,7 +1244,7 @@ sequenceDiagram
 
 ---
 
-## 47. Flow DF-046 — Data masking before AI
+## 49. Flow DF-046 — Data masking before AI
 
 ```mermaid
 flowchart LR
@@ -1254,7 +1262,7 @@ Credentials/private keys never enter the allowed path.
 
 ---
 
-## 48. Flow DF-047 — Backup and restore verification
+## 50. Flow DF-047 — Backup and restore verification
 
 ```mermaid
 sequenceDiagram
@@ -1278,7 +1286,7 @@ A backup failure is a Platform alert.
 
 ---
 
-## 49. Flow DF-048 — DR activation (architecture-level, exact RPO/RTO TBD)
+## 51. Flow DF-048 — DR activation (architecture-level, exact RPO/RTO TBD)
 
 ```mermaid
 sequenceDiagram
@@ -1303,7 +1311,7 @@ Exact automation, node count and RPO/RTO remain TBD.
 
 ---
 
-## 50. Flow DF-049 — Core upgrade in HA
+## 52. Flow DF-049 — Core upgrade in HA
 
 ```mermaid
 sequenceDiagram
@@ -1329,7 +1337,7 @@ Exact sequence may differ for schema-breaking releases but must remain documente
 
 ---
 
-## 51. Flow DF-050 — Sensor canary upgrade
+## 53. Flow DF-050 — Sensor canary upgrade
 
 ```mermaid
 flowchart LR
@@ -1344,7 +1352,7 @@ flowchart LR
 
 ---
 
-## 52. Flow DF-051 — Cardinality explosion protection
+## 54. Flow DF-051 — Cardinality explosion protection
 
 ```mermaid
 sequenceDiagram
@@ -1364,7 +1372,7 @@ The system reports dropped/rejected records explicitly.
 
 ---
 
-## 53. Flow DF-052 — Telemetry quality → RCA confidence
+## 55. Flow DF-052 — Telemetry quality → RCA confidence
 
 ```mermaid
 flowchart LR
@@ -1377,7 +1385,7 @@ flowchart LR
 
 ---
 
-## 54. Flow DF-053 — Historical topology during incident investigation
+## 56. Flow DF-053 — Historical topology during incident investigation
 
 ```mermaid
 sequenceDiagram
@@ -1395,7 +1403,7 @@ sequenceDiagram
 
 ---
 
-## 55. Flow DF-054 — Unified Operations Timeline
+## 57. Flow DF-054 — Unified Operations Timeline
 
 ```mermaid
 flowchart TB
@@ -1413,7 +1421,7 @@ flowchart TB
 
 ---
 
-## 56. Flow DF-055 — Query-too-large protection
+## 58. Flow DF-055 — Query-too-large protection
 
 ```mermaid
 sequenceDiagram
@@ -1431,7 +1439,7 @@ sequenceDiagram
 
 ---
 
-## 57. Flow DF-056 — Integration test sandbox
+## 59. Flow DF-056 — Integration test sandbox
 
 ```mermaid
 sequenceDiagram
@@ -1453,7 +1461,7 @@ sequenceDiagram
 
 ---
 
-## 58. Flow DF-057 — Support bundle
+## 60. Flow DF-057 — Support bundle
 
 ```mermaid
 flowchart LR
@@ -1466,7 +1474,7 @@ flowchart LR
 
 ---
 
-## 59. Flow DF-058 — Change freeze calendar
+## 61. Flow DF-058 — Change freeze calendar
 
 ```mermaid
 sequenceDiagram
@@ -1482,7 +1490,7 @@ sequenceDiagram
 
 ---
 
-## 60. Flow DF-059 — Post-incident review generation
+## 62. Flow DF-059 — Post-incident review generation
 
 ```mermaid
 flowchart LR
@@ -1498,7 +1506,7 @@ flowchart LR
 
 ---
 
-## 61. Flow DF-060 — Platform self-monitoring
+## 63. Flow DF-060 — Platform self-monitoring
 
 ```mermaid
 flowchart TB
@@ -1519,7 +1527,7 @@ Internal platform failure alerts are classified separately from customer-device 
 
 ---
 
-## 62. Flow DF-061 — User access request and authorization
+## 64. Flow DF-061 — User access request and authorization
 
 ```mermaid
 sequenceDiagram
@@ -1544,7 +1552,7 @@ sequenceDiagram
 
 ---
 
-## 63. Flow DF-062 — Credential rotation
+## 65. Flow DF-062 — Credential rotation
 
 ```mermaid
 sequenceDiagram
@@ -1569,7 +1577,7 @@ sequenceDiagram
 
 ---
 
-## 64. Flow DF-063 — Data deletion due to normal retention vs emergency
+## 66. Flow DF-063 — Data deletion due to normal retention vs emergency
 
 ```mermaid
 flowchart TB
@@ -1585,7 +1593,7 @@ flowchart TB
 
 ---
 
-## 65. Flow DF-064 — Device comparison
+## 67. Flow DF-064 — Device comparison
 
 ```mermaid
 sequenceDiagram
@@ -1607,7 +1615,7 @@ sequenceDiagram
 
 ---
 
-## 66. Flow DF-065 — Runbook recommendation
+## 68. Flow DF-065 — Runbook recommendation
 
 ```mermaid
 flowchart LR
@@ -1621,7 +1629,7 @@ Customer-approved runbook remains authoritative; AI summary cannot modify execut
 
 ---
 
-## 67. Flow DF-066 — Future controlled remediation
+## 69. Flow DF-066 — Future controlled remediation
 
 Future/Phase 2 only:
 
@@ -1641,7 +1649,7 @@ No direct LLM-to-device execution.
 
 ---
 
-## 68. Data ownership matrix
+## 70. Data ownership matrix
 
 | Data | System of record | Secondary/history |
 |---|---|---|
@@ -1664,7 +1672,7 @@ No direct LLM-to-device execution.
 
 ---
 
-## 69. Dataflow invariants
+## 71. Dataflow invariants
 
 1. Tenant context is present from ingestion through storage/query.
 2. Sensor/Agent identity is cryptographically verified.
@@ -1681,7 +1689,7 @@ No direct LLM-to-device execution.
 
 ---
 
-## 70. Dataflow acceptance tests
+## 72. Dataflow acceptance tests
 
 QA must trace correlation IDs end-to-end for at least:
 
@@ -1706,7 +1714,7 @@ Each test must prove source → normalized message → persistence → downstrea
 
 ---
 
-## 71. Explicit Dataflow TBDs
+## 73. Explicit Dataflow TBDs
 
 - Exact durable ingest acknowledgment boundary under the final two-Core Kafka/ClickHouse design.
 - Exact HA fencing mechanism.
@@ -1717,7 +1725,7 @@ Each test must prove source → normalized message → persistence → downstrea
 
 ---
 
-## 72. Flow DF-067 — Desired state reconciliation
+## 74. Flow DF-067 — Desired state reconciliation
 
 ```mermaid
 sequenceDiagram
@@ -1738,7 +1746,7 @@ sequenceDiagram
   end
 ```
 
-## 73. Flow DF-068 — Migration Studio import
+## 75. Flow DF-068 — Migration Studio import
 
 ```mermaid
 flowchart LR
@@ -1751,7 +1759,7 @@ flowchart LR
   COM --> PROV[Normal Platform provisioning/reconciliation]
 ```
 
-## 74. Flow DF-069 — Alert policy effectiveness recommendation
+## 76. Flow DF-069 — Alert policy effectiveness recommendation
 
 ```mermaid
 flowchart LR
@@ -1762,7 +1770,7 @@ flowchart LR
   USER -->|approved change| POL[Normal policy preview/version workflow]
 ```
 
-## 75. Flow DF-070 — Pipeline integrity reconciliation
+## 77. Flow DF-070 — Pipeline integrity reconciliation
 
 ```mermaid
 flowchart LR
@@ -1778,11 +1786,9 @@ flowchart LR
 
 ---
 
-# Version 3.0 Reconciliation — Requirements That Must Not Be Lost
+## 78. Cross-cutting dataflow capability completeness (absorbed)
 
-This section is part of the authoritative document. It was added after a complete reconciliation of the Platform design discussions because the earlier split-document version compressed or omitted details. The canonical requirement IDs are in `Platform_08_Requirements_Traceability.md`; OSS decisions are in `Platform_07_OSS_Catalog.md`.
-
-The following cross-cutting capabilities are mandatory where applicable and must be represented in design, UI, APIs, security, audit and QA:
+The following cross-cutting capabilities remain mandatory where applicable and must appear in relevant flows, failure behavior and acceptance tests. Canonical requirement IDs remain in `Platform_08_Requirements_Traceability.md`.
 
 - asset lifecycle/reconciliation, stale/disappeared/replaced device handling and decommission workflow;
 - technology lifecycle/EOL/EOS/firmware risk visibility without pretending to be a vulnerability scanner;
@@ -1807,8 +1813,17 @@ The following cross-cutting capabilities are mandatory where applicable and must
 - scheduled housekeeping and end-to-end pipeline-integrity visibility;
 - stable customer-facing error codes/correlation IDs and **No Silent Failure**.
 
+## 79. Supporting mother-reference ownership
 
-## DF-071 — OSS dependency admission and release
+- `Platform_03_Architecture.md` — architecture/topology/invariants.
+- `Platform_04_HLD.md` — high-level component/service design.
+- `Platform_05_LLD.md` — detailed logical design.
+- `Platform_07_OSS_Catalog.md` — OSS catalogue (TRANSITIONAL_LEGACY until A2.3).
+- `Platform_10_Protocol_Security_Connector_Master.md` — protocol/security mechanics.
+- `Platform_11_Sizing_Capacity_Storage_Master.md` — capacity/storage constants.
+- `Platform_17_API_Event_and_Data_Model_Contracts.md` — exact API/event contracts.
+
+## 80. Flow DF-071 — OSS dependency admission and release
 
 ```mermaid
 sequenceDiagram
@@ -1836,7 +1851,7 @@ sequenceDiagram
   end
 ```
 
-## DF-072 — SNMP polling through GoSNMP adapter
+## 81. Flow DF-072 — SNMP polling through GoSNMP adapter
 
 ```mermaid
 sequenceDiagram
@@ -1855,7 +1870,7 @@ sequenceDiagram
   S->>I: mTLS batch with source sequence IDs
 ```
 
-## DF-073 — MIB Studio to Device Pack
+## 82. Flow DF-073 — MIB Studio to Device Pack
 
 ```mermaid
 sequenceDiagram
@@ -1876,7 +1891,7 @@ sequenceDiagram
   UI->>Pack: Build versioned signed Device Pack
 ```
 
-## DF-074 — Flow ingestion through GoFlow2
+## 83. Flow DF-074 — Flow ingestion through GoFlow2
 
 ```mermaid
 sequenceDiagram
@@ -1898,78 +1913,64 @@ sequenceDiagram
   EN->>CH: Insert network_flow
 ```
 
-## DF-075 — gNMI/YANG subscription
+## 84. Flow DF-075 — gNMI/YANG subscription
 
 Sensor loads Device Pack/YANG mapping, validates subscription paths using goyang/ygot metadata, establishes OpenConfig gNMI subscription, applies backpressure/rate policy, converts updates/deletes to canonical telemetry, and sends batches through Core Ingestion. Subscription failure produces a structured collection-health event rather than a generic `device down` condition.
 
-## DF-076 — API Studio OpenAPI connector
+## 85. Flow DF-076 — API Studio OpenAPI connector
 
 User imports OpenAPI/Swagger or configures endpoint -> kin-openapi validates schema -> authentication/test executes through selected Sensor -> response preview/inference -> user confirms entity/metric mapping -> Device Pack/Connector version is published -> scheduler issues jobs -> Sensor executes paging/token refresh/chained calls -> canonical observations enter ingestion.
 
-## DF-077 — NCM controlled change using OSS worker
+## 86. Flow DF-077 — NCM controlled change using OSS worker
 
 Core creates approved NCM job -> NCM Worker uses Nornir/scrapli/scrapli_cfg/approved driver -> retrieves pre-change config -> computes diff -> maker/checker approval where policy requires -> executes -> validates -> captures post-change config -> rollback on policy/validation failure -> emits NCM change evidence to audit and RCA timeline.
 
-## DF-078 — Dashboard query path
+## 87. Flow DF-078 — Dashboard query path
 
 Browser React/TanStack Query -> Core Query API -> authorization/resource-scope check -> query planner selects raw or rollup resolution -> ClickHouse/PostgreSQL as appropriate -> result limits/timeout -> response -> ECharts/TanStack/Cytoscape/MapLibre render. Browser never directly queries databases.
 
-## DF-079 — 80% Core storage protection
+## 88. Flow DF-079 — 80% Core storage protection
 
 Per-volume Storage Lifecycle monitor detects managed volume >=80% -> marks emergency protection active -> calculates protected/legal-hold/nonpurgeable data -> selects oldest eligible raw partitions by configured purge priority -> preserves rollups/recent minimum where possible -> drops/TTLs efficient partitions -> continues ingestion -> records reclaimed bytes, effective retention loss and actions -> raises visible Platform event/audit until safe headroom restored.
 
-## DF-080 — Sensor 80% disk protection
+## 89. Flow DF-080 — Sensor 80% disk protection
 
 Sensor local volume reaches protection watermark -> clean disposable logs/cache/temp first -> evaluate spool age/priority -> preserve recent/critical unsent records first -> discard only oldest eligible lower-priority buffered data when unavoidable -> continue polling -> increment `sensor_data_dropped_due_to_storage` counters -> report exact loss to Core when connectivity resumes.
 
-## DF-081 — License expiry
+## 90. Flow DF-081 — License expiry
 
-T-30 warning event -> T-7 persistent dashboard banner -> expiry enters 7-day grace while Scheduler continues -> grace expiry transitions deployment to `POLLING_SUSPENDED` -> Scheduler stops new/renewed poll jobs -> Sensors receive suspension desired state -> historical query/UI/admin/license import remain available -> renewal returns state to VALID and polling resumes.
+T-30 warning event -> T-7 persistent dashboard banner -> expiry enters FOUNDER-LIC-GRACE (duration UNRESOLVED; historical/source 7-day vs 15-day only) while Scheduler continues -> grace expiry transitions deployment to `POLLING_SUSPENDED` -> Scheduler stops new/renewed poll jobs -> Sensors receive suspension desired state -> historical query/UI/admin/license import remain available -> renewal returns state to VALID and polling resumes.
 
-## DF-082 — GNN evidence scoring and RCA fusion
+## 91. Flow DF-082 — GNN evidence scoring and RCA fusion
 
 Incident candidate graph/time window -> Graph Feature Builder -> versioned graph snapshot -> GraphScoringService (candidate PyTorch/PyG) -> root/propagation/impact scores -> RCA Fusion combines protocol/topology/config/anomaly/telemetry-quality evidence -> contradiction/missing-evidence checks -> root hypothesis or INCONCLUSIVE -> evidence/causal chain/blast radius stored -> Gemini may explain/summarize through AI Gateway but cannot alter RCA truth.
 
-## DF-083 — Legal hold
+## 92. Flow DF-083 — Legal hold
 
 Authorized user selects incident/time/entities -> Legal Hold Service resolves raw/rollup/event/flow/config/audit evidence references -> marks eligible partitions/records as protected -> storage-purge planner excludes held evidence where feasible/required -> hold release requires authorized audited action.
 
-## DF-084 — Integration test sandbox
+## 93. Flow DF-084 — Integration test sandbox
 
 Admin configures ITSM/notification connector -> Test Sandbox verifies DNS/TLS/auth -> executes safe test create/update/resolve where supported -> validates field mapping and permissions -> connector cannot be marked Production Ready until required checks pass or an authorized exception is recorded.
 
-## DF-085 — Migration Studio
+## 94. Flow DF-085 — Migration Studio
 
 Import source/CSV/API -> parse source inventory/groups/tags/threshold metadata -> normalize -> map to Platform entities/sites/groups/credential/profile placeholders -> classify automatically mapped / review / unsupported -> user approves staging -> run normal Provisioning Preflight/Sensor Placement/Capacity Simulation -> activate only approved entities.
 
-## DF-086 — Support bundle
+## 95. Flow DF-086 — Support bundle
 
 Authorized admin requests support bundle -> Support Bundle Service gathers versions/health/config metadata/relevant logs/Kafka/ClickHouse/PostgreSQL/Sensor diagnostics -> Secret Redaction Engine removes credentials/tokens/keys -> manifest/checksums generated -> audit records bundle creation/download.
 
-## DF-087 — Certificate rotation
+## 96. Flow DF-087 — Certificate rotation
 
 PKI admin imports/generates new certificate/CA -> validation -> staged trust overlap -> Core/Sensor/Agent receives new trust material through secure policy -> endpoints rotate -> health validation -> old certificate removed after overlap -> audit event. Failed rotation retains old trusted path until policy-expiry/safety rule.
 
-## DF-088 — Change impact/dry-run
+## 97. Flow DF-088 — Change impact/dry-run
 
 Admin proposes broad polling/threshold/NCM/retention/Sensor policy change -> Impact Service evaluates affected entities, Sensor workload, storage, expected historical alert rate or NCM targets -> returns SAFE/WARNING/UNSAFE with evidence -> dry-run produces no production mutation -> authorized user applies only after review/approval policy.
 
 
-## Mother-reference cross-document contract (v3.1)
-
-The following supporting mother references are normative and must be read together with this document:
-
-- `Platform_07_OSS_Catalog.md` — approved/candidate OSS by module, license class, usage, rationale and restrictions.
-- `Platform_08_Requirements_Traceability.md` — completeness control; a missing mapped requirement is a documentation defect.
-- `Platform_09_UI_UX_Master.md` — detailed global shell, Studios, 98 out-of-box dashboard/workspace screen contracts, filters/actions/states/RBAC behavior.
-- `Platform_10_Protocol_Security_Connector_Master.md` — protocol/security/authentication/credential/connectivity matrix and provisioning diagnostics.
-- `Platform_11_Sizing_Capacity_Storage_Master.md` — Core/Sensor compute targets, MWU, placement, retention/storage and 80% protection.
-- `Platform_12_Decision_Source_Register.md` — USER-FIXED vs ARCH-DELEGATED vs REFERENCE-LEARNING vs TBD/P0 decisions.
-
-**OSS rule:** implementation teams may not add a runtime/build dependency merely because it is open source. It must be admitted to the Platform OSS Catalogue by exact version, transitive license/CVE scan and release policy.
-
-
-## DF-089 — Future regional data-sovereignty routing
+## 98. Flow DF-089 — Future regional data-sovereignty routing
 
 **Status:** architecture-ready/future federation, not initial multi-Core scope.
 
@@ -1982,7 +1983,7 @@ The following supporting mother references are normative and must be read togeth
 
 No production claim is made until this architecture is implemented and validated.
 
-## DF-090 — Developer laptop reboot / Docker Compose recovery — v3.1
+## 99. Flow DF-090 — Developer laptop reboot / Docker Compose recovery
 
 1. Engineer shuts down/reboots laptop normally.
 2. Docker daemon stops containers; named volumes retain durable state.
@@ -1994,7 +1995,7 @@ No production claim is made until this architecture is implemented and validated
 8. Developer can verify `docker compose ps`/Platform health and continue without host-runtime repair.
 9. If recovery fails, documented reset/rebuild path exists and failure logs are retained.
 
-## DF-091 — Linux Core/Sensor/Agent boot and recovery
+## 100. Flow DF-091 — Linux Core/Sensor/Agent boot and recovery
 
 1. Linux host boots.
 2. systemd starts enabled Platform service after required OS/network dependencies.
@@ -2005,7 +2006,7 @@ No production claim is made until this architecture is implemented and validated
 7. If process crashes, systemd performs bounded restart according to policy.
 8. Repeated failure creates a visible health condition and preserves diagnostic logs.
 
-## DF-092 — Windows Agent boot and recovery
+## 101. Flow DF-092 — Windows Agent boot and recovery
 
 1. Windows boots.
 2. SCM starts PlatformAgent service automatically.
@@ -2015,7 +2016,7 @@ No production claim is made until this architecture is implemented and validated
 6. Failure triggers configured SCM recovery action.
 7. Repeated failures are logged to Windows Event Log/Agent diagnostics and surfaced to Core when communication resumes.
 
-## DF-093 — Native package upgrade
+## 102. Flow DF-093 — Native package upgrade
 
 1. Preflight validates OS, free disk, compatibility and package signature.
 2. Current configuration/state is backed up or checkpointed.
@@ -2028,7 +2029,7 @@ No production claim is made until this architecture is implemented and validated
 
 ---
 
-## DF-094 — Capture-eligible endpoint condition to EDS Diagnostic Job evidence
+## 103. Flow DF-094 — Capture-eligible endpoint condition to EDS Diagnostic Job evidence
 
 ```text
 normal Agent sample
@@ -2051,7 +2052,7 @@ normal Agent sample
 
 Capture-eligibility states are not authoritative host-health states. Agent transport/ACK/replay semantics remain the existing authoritative Agent -> Sensor -> Core contract. EDS does not bypass durable delivery. Incomplete/suppressed/shed diagnostic evidence is explicit; routine telemetry durability is never silently sacrificed for EDS.
 
-## DF-095 — Agentless infrastructure EDS
+## 104. Flow DF-095 — Agentless infrastructure EDS
 
 ```text
 scheduled monitor or authorized investigation Diagnostic Job
@@ -2072,7 +2073,7 @@ scheduled monitor or authorized investigation Diagnostic Job
 
 A remote collection/auth/path failure is stored as monitoring-quality evidence and does not by itself become proof that the target host/service failed.
 
-## DF-096 — Local/private AI assistance isolation
+## 105. Flow DF-096 — Local/private AI assistance isolation
 
 ```text
 Core evidence/RCA context
@@ -2087,7 +2088,7 @@ Core evidence/RCA context
 **If** the dedicated inference provider is supported/enabled, it has no direct Agent/Sensor/device credential path and owns no authoritative Platform state. Its outage returns AI unavailable/degraded state while deterministic monitoring/RCA continues. The provider is not required for EDS or base monitoring.
 
 
-## 80A. Flow DF-SCHED-001 — Recurring schedule execution
+## 106. Flow DF-SCHED-001 — Recurring schedule execution
 
 ```text
 Core desired policy
@@ -2102,7 +2103,7 @@ Core desired policy
 
 Missed cycles coalesce/skip with quality evidence. No fabricated historical samples. No infinite catch-up.
 
-## 80B. Flow DF-SCHED-002 — Failure-domain recovery
+## 107. Flow DF-SCHED-002 — Failure-domain recovery
 
 ```text
 collection failure
@@ -2114,7 +2115,7 @@ collection failure
 
 `No Data != Device Down`. Broad site/controller/API outages must not stampede expensive retries.
 
-## 80C. Flow DF-TIME-001 — Display timezone rendering
+## 108. Flow DF-TIME-001 — Display timezone rendering
 
 ```text
 UTC instant (authoritative)

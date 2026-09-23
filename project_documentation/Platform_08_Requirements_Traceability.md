@@ -2,10 +2,10 @@
 
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
-**Status:** **Authoritative Mother Reference — Global Traceability Index (A1/A2.1 NORMALIZED_V1)**
+**Status:** **Authoritative Mother Reference — Global Traceability Index (A1/A2.1/A2.2 NORMALIZED_V1)**
 **Product:** Platform
-**Last reconciliation:** 2026-09-23 — A2.1 BRD/PRD/Architecture normalization (Issue #96); registries unchanged from A1 counts
-**Normalization state:** NORMALIZED_V1 (global index layer). Platform_01/02/03 are NORMALIZED_V1 after A2.1; Platform_04..07 and Platform_09..23 remain TRANSITIONAL_LEGACY until later A2–A5 tranches.
+**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102); registries unchanged from A1 counts
+**Normalization state:** NORMALIZED_V1 (global index layer). Platform_01..06 and Platform_08 are NORMALIZED_V1 after A2.2; Platform_07 and Platform_09..23 remain TRANSITIONAL_LEGACY until later A2–A5 tranches.
 
 ## 1. Purpose
 

@@ -50,7 +50,7 @@
       "kind": "mother_reference",
       "expectedDocumentId": "PLATFORM-HLD-001",
       "governingRole": "Subsystems, services, modules, interfaces, failure boundaries",
-      "normalizationState": "TRANSITIONAL_LEGACY"
+      "normalizationState": "NORMALIZED_V1"
     },
     {
       "file": "Platform_05_LLD.md",
@@ -58,7 +58,7 @@
       "kind": "mother_reference",
       "expectedDocumentId": "PLATFORM-LLD-001",
       "governingRole": "Executable low-level technical contracts",
-      "normalizationState": "TRANSITIONAL_LEGACY"
+      "normalizationState": "NORMALIZED_V1"
     },
     {
       "file": "Platform_06_Dataflow.md",
@@ -66,7 +66,7 @@
       "kind": "mother_reference",
       "expectedDocumentId": "PLATFORM-DF-001",
       "governingRole": "Success/failure/retry/failover dataflows",
-      "normalizationState": "TRANSITIONAL_LEGACY"
+      "normalizationState": "NORMALIZED_V1"
     },
     {
       "file": "Platform_07_OSS_Catalog.md",
