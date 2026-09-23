@@ -676,9 +676,14 @@ def validate_agent_pack(repo: Path) -> list[str]:
     return errors
 
 
+# Match the authoritative Mother Reference set table by semantic heading.
+# Section number and optional "<N>-file" count are intentionally not fixed so
+# normalized Platform_00 (e.g. "## 5. Exact Mother Reference set") and legacy
+# fixtures (e.g. "## 3. Exact 2-file mother-reference set") both parse.
 MOTHER_INDEX_SECTION_RE = re.compile(
-    r"^## 3\. Exact \d+-file mother-reference set\s*\n(?P<body>.*?)(?=^## |\Z)",
-    re.MULTILINE | re.DOTALL,
+    r"^##\s+\d+\.\s+Exact(?:\s+\d+-file)?\s+mother[-\s]reference\s+set\s*\n"
+    r"(?P<body>.*?)(?=^##\s|\Z)",
+    re.MULTILINE | re.DOTALL | re.IGNORECASE,
 )
 MOTHER_INDEX_ROW_RE = re.compile(r"^\|\s*\d+\s*\|\s*`([^`]+)`\s*\|", re.MULTILINE)
 
@@ -686,10 +691,10 @@ MOTHER_INDEX_ROW_RE = re.compile(r"^\|\s*\d+\s*\|\s*`([^`]+)`\s*\|", re.MULTILIN
 def parse_platform_00_mother_reference_files(index_text: str) -> list[str]:
     match = MOTHER_INDEX_SECTION_RE.search(index_text)
     if match is None:
-        raise AgentPackError("Platform_00 §3 mother-reference table was not found")
+        raise AgentPackError("Platform_00 exact Mother Reference table was not found")
     files = MOTHER_INDEX_ROW_RE.findall(match.group("body"))
     if not files:
-        raise AgentPackError("Platform_00 §3 mother-reference table has no file rows")
+        raise AgentPackError("Platform_00 exact Mother Reference table has no file rows")
     return files
 
 
@@ -772,6 +777,8 @@ def validate_mother_reference_coverage(repo: Path, pa: Path, manifest: list[dict
     if extra:
         errors.append(f"mother-reference coverage has stale files: {', '.join(extra)}")
     if len(index_files) != len(index_set):
-        errors.append("Platform_00 §3 contains duplicate mother-reference filenames")
+        errors.append(
+            "Platform_00 exact Mother Reference table contains duplicate filenames"
+        )
 
     return errors
