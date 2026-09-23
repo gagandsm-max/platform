@@ -15,6 +15,7 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 from validate_mother_references import (  # noqa: E402
+    CANONICAL_MOTHER_REFERENCE_VERSION,
     CONSTITUTIONAL_AUTHORITATIVE_COUNT,
     SCHEMA_VERSION,
     validate_docs_root,
@@ -127,7 +128,16 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md")
         ]
         prd_rows = prd_rows or [("PRD-HA-001", "HA pair", "Platform_02_PRD.md")]
-        legacy = legacy if legacy is not None else []
+        if skip_manifest_legacy:
+            legacy = []
+        elif legacy is None:
+            legacy = [
+                {
+                    "id": "OSS-008",
+                    "kind": "formal_requirement_legacy",
+                    "reason": "A1 approved legacy exception",
+                }
+            ]
 
         docs_meta = []
         ordinal = 0
@@ -434,7 +444,13 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         errors = validate_docs_root(root)
         self.assertTrue(
-            any("invalid formal ID" in e or "unregistered malformed" in e for e in errors),
+            any(
+                "invalid formal ID" in e
+                or "unregistered malformed" in e
+                or "unapproved legacy" in e
+                or "missing required legacy" in e
+                for e in errors
+            ),
             errors,
         )
 
@@ -466,7 +482,12 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         errors = validate_docs_root(root)
         self.assertTrue(
             any(
-                "OSS-008" in e and ("invalid" in e or "unregistered" in e)
+                "OSS-008" in e
+                and (
+                    "invalid" in e
+                    or "unregistered" in e
+                    or "missing required legacy" in e
+                )
                 for e in errors
             ),
             errors,
@@ -771,6 +792,238 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         errors = validate_docs_root(root)
         self.assertTrue(
             any("malformed REQ registry row column count" in e for e in errors),
+            errors,
+        )
+
+    # --- Final constitutional hardening (pinned invariants) ---
+
+    def test_36_coordinated_filename_and_manifest_rename_fails(self) -> None:
+        root = self._write_minimal()
+        old = root / "Platform_03_Architecture.md"
+        new = root / "Platform_03_Other.md"
+        old.rename(new)
+        man = json.loads((root / "mother_reference_manifest.json").read_text())
+        for doc in man["documents"]:
+            if doc["file"] == "Platform_03_Architecture.md":
+                doc["file"] = "Platform_03_Other.md"
+        (root / "mother_reference_manifest.json").write_text(
+            json.dumps(man), encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_03_Architecture.md" in e
+                or "Platform_03_Other.md" in e
+                or "canonical" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_37_coordinated_document_id_and_header_change_fails(self) -> None:
+        root = self._write_minimal()
+        man = json.loads((root / "mother_reference_manifest.json").read_text())
+        for doc in man["documents"]:
+            if doc["file"] == "Platform_03_Architecture.md":
+                doc["expectedDocumentId"] = "PLATFORM-REDEFINED-001"
+        (root / "mother_reference_manifest.json").write_text(
+            json.dumps(man), encoding="utf-8"
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-REDEFINED-001") + "## 1. Section\n\nContent.\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "PLATFORM-ARC-001" in e
+                or "pinned Document ID" in e
+                or "wrong Document ID" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_38_manifest_and_document_version_bump_still_fails(self) -> None:
+        root = self._write_minimal(version="9.9.9")
+        man = json.loads((root / "mother_reference_manifest.json").read_text())
+        man["motherReferenceVersion"] = "9.9.9"
+        (root / "mother_reference_manifest.json").write_text(
+            json.dumps(man), encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                CANONICAL_MOTHER_REFERENCE_VERSION in e
+                or "pinned constitutional version" in e
+                or "version mismatch" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_39_global_req_index_redirect_fails(self) -> None:
+        root = self._write_minimal()
+        man = json.loads((root / "mother_reference_manifest.json").read_text())
+        man["globalRequirementIndex"] = "Platform_02_PRD.md"
+        (root / "mother_reference_manifest.json").write_text(
+            json.dumps(man), encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("globalRequirementIndex redirect forbidden" in e for e in errors),
+            errors,
+        )
+
+    def test_40_global_prd_index_redirect_fails(self) -> None:
+        root = self._write_minimal()
+        man = json.loads((root / "mother_reference_manifest.json").read_text())
+        man["globalProductRequirementIndex"] = "Platform_02_PRD.md"
+        (root / "mother_reference_manifest.json").write_text(
+            json.dumps(man), encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "globalProductRequirementIndex redirect forbidden" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_41_platform_00_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_00_Document_Index.md": "TRANSITIONAL_LEGACY"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_00_Document_Index.md" in e
+                and "normalizationState" in e
+                and "NORMALIZED_V1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_42_platform_08_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={
+                "Platform_08_Requirements_Traceability.md": "TRANSITIONAL_LEGACY"
+            }
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_08_Requirements_Traceability.md" in e
+                and "normalizationState" in e
+                and "NORMALIZED_V1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43_premature_transitional_to_normalized_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_03_Architecture.md": "NORMALIZED_V1"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_03_Architecture.md" in e
+                and "normalizationState" in e
+                and "TRANSITIONAL_LEGACY" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_44_extra_legacy_exception_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                ("OSS-008", "Air-gap", "Platform_08_Requirements_Traceability.md"),
+                ("OSS-999", "Extra", "Platform_08_Requirements_Traceability.md"),
+            ],
+            legacy=[
+                {
+                    "id": "OSS-008",
+                    "kind": "formal_requirement_legacy",
+                    "reason": "approved",
+                },
+                {
+                    "id": "OSS-999",
+                    "kind": "formal_requirement_legacy",
+                    "reason": "unapproved expansion",
+                },
+            ],
+            p08_historical=(
+                "### Historical\n"
+                "| REQ-P-001 | Quality | ✓ |\n"
+                "| OSS-008 | Air-gap | ✓ |\n"
+                "| OSS-999 | Extra | ✓ |\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "OSS-999" in e
+                and (
+                    "unapproved legacy" in e
+                    or "unregistered malformed" in e
+                    or "invalid formal ID" in e
+                )
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_45_prd_in_platform_09_missing_registry_fails(self) -> None:
+        root = self._write_minimal(
+            prd_rows=[("PRD-HA-001", "HA", "Platform_02_PRD.md")]
+        )
+        p09 = root / "Platform_09_UI_UX_Master.md"
+        p09.write_text(
+            p09.read_text(encoding="utf-8") + "\n| `PRD-UI-999` | UI requirement |\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "PRD-UI-999" in e
+                and "absent from global primary PRD registry" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_46_prd_in_platform_09_with_correct_primary_row_passes(self) -> None:
+        root = self._write_minimal(
+            prd_rows=[
+                ("PRD-HA-001", "HA", "Platform_02_PRD.md"),
+                ("PRD-UI-999", "UI requirement", "Platform_09_UI_UX_Master.md"),
+            ]
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_47_fabricated_registry_only_prd_fails(self) -> None:
+        root = self._write_minimal(
+            prd_rows=[
+                ("PRD-HA-001", "HA", "Platform_02_PRD.md"),
+                ("PRD-FAKE-001", "Fabricated", "Platform_02_PRD.md"),
+            ],
+            p02_body="| `PRD-HA-001` | HA |\n",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "PRD-FAKE-001" in e
+                and (
+                    "no authoritative source" in e
+                    or "absent from declared owner" in e
+                )
+                for e in errors
+            ),
             errors,
         )
 

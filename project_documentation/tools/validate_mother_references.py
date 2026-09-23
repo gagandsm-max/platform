@@ -28,9 +28,100 @@ MATURITY_STATES = (
     "DEPLOYED",
 )
 
-# Constitutional invariant: AGENTS + Platform_00..Platform_23 (25 files).
+# --- A1 pinned constitutional invariants (deliberate change control required) ---
+CANONICAL_MOTHER_REFERENCE_VERSION = "3.2.2"
+CANONICAL_GLOBAL_REQUIREMENT_INDEX = "Platform_08_Requirements_Traceability.md"
+CANONICAL_GLOBAL_PRODUCT_REQUIREMENT_INDEX = (
+    "Platform_08_Requirements_Traceability.md"
+)
+CANONICAL_ALLOWED_LEGACY_IDS = frozenset({"OSS-008"})
+
+CANONICAL_FILES: tuple[str, ...] = (
+    "AGENTS.md",
+    "Platform_00_Document_Index.md",
+    "Platform_01_BRD.md",
+    "Platform_02_PRD.md",
+    "Platform_03_Architecture.md",
+    "Platform_04_HLD.md",
+    "Platform_05_LLD.md",
+    "Platform_06_Dataflow.md",
+    "Platform_07_OSS_Catalog.md",
+    "Platform_08_Requirements_Traceability.md",
+    "Platform_09_UI_UX_Master.md",
+    "Platform_10_Protocol_Security_Connector_Master.md",
+    "Platform_11_Sizing_Capacity_Storage_Master.md",
+    "Platform_12_Decision_Source_Register.md",
+    "Platform_13_Engineering_Development_and_Docker_Standards.md",
+    "Platform_14_Test_Performance_and_Release_Quality.md",
+    "Platform_15_CI_CD_Packaging_and_Distribution.md",
+    "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
+    "Platform_17_API_Event_and_Data_Model_Contracts.md",
+    "Platform_18_Security_Threat_Model.md",
+    "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md",
+    "Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md",
+    "Platform_21_Enterprise_Gap_Closure_Master.md",
+    "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md",
+    "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md",
+)
+CANONICAL_FILE_SET = frozenset(CANONICAL_FILES)
+CONSTITUTIONAL_AUTHORITATIVE_COUNT = len(CANONICAL_FILES)
 CONSTITUTIONAL_PLATFORM_NUMBERS = tuple(f"{n:02d}" for n in range(0, 24))
-CONSTITUTIONAL_AUTHORITATIVE_COUNT = 1 + len(CONSTITUTIONAL_PLATFORM_NUMBERS)  # 25
+
+CANONICAL_DOCUMENT_IDS: dict[str, str | None] = {
+    "AGENTS.md": None,
+    "Platform_00_Document_Index.md": "PLATFORM-INDEX-001",
+    "Platform_01_BRD.md": "PLATFORM-BRD-001",
+    "Platform_02_PRD.md": "PLATFORM-PRD-001",
+    "Platform_03_Architecture.md": "PLATFORM-ARC-001",
+    "Platform_04_HLD.md": "PLATFORM-HLD-001",
+    "Platform_05_LLD.md": "PLATFORM-LLD-001",
+    "Platform_06_Dataflow.md": "PLATFORM-DF-001",
+    "Platform_07_OSS_Catalog.md": "PLATFORM-OSS-001",
+    "Platform_08_Requirements_Traceability.md": "PLATFORM-RTM-001",
+    "Platform_09_UI_UX_Master.md": "PLATFORM-UIUX-001",
+    "Platform_10_Protocol_Security_Connector_Master.md": "PLATFORM-PROTOCOL-001",
+    "Platform_11_Sizing_Capacity_Storage_Master.md": "PLATFORM-SIZING-001",
+    "Platform_12_Decision_Source_Register.md": "PLATFORM-DECISION-001",
+    "Platform_13_Engineering_Development_and_Docker_Standards.md": "PLATFORM-ENGDEV-001",
+    "Platform_14_Test_Performance_and_Release_Quality.md": "PLATFORM-QUALITY-001",
+    "Platform_15_CI_CD_Packaging_and_Distribution.md": "PLATFORM-RELEASEENG-001",
+    "Platform_16_Installation_Upgrade_Rollback_and_Operations.md": "PLATFORM-OPSINSTALL-001",
+    "Platform_17_API_Event_and_Data_Model_Contracts.md": "PLATFORM-CONTRACTDATA-001",
+    "Platform_18_Security_Threat_Model.md": "PLATFORM-THREAT-001",
+    "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md": "PLATFORM-INTELVALUE-001",
+    "Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md": "PLATFORM-ONBOARDING-001",
+    "Platform_21_Enterprise_Gap_Closure_Master.md": "PLATFORM-EGC-001",
+    "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md": "PLATFORM-MIA-001",
+    "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md": "PLATFORM-EMC-001",
+}
+
+CANONICAL_NORMALIZATION: dict[str, str] = {
+    "AGENTS.md": "TRANSITIONAL_LEGACY",
+    "Platform_00_Document_Index.md": "NORMALIZED_V1",
+    "Platform_01_BRD.md": "TRANSITIONAL_LEGACY",
+    "Platform_02_PRD.md": "TRANSITIONAL_LEGACY",
+    "Platform_03_Architecture.md": "TRANSITIONAL_LEGACY",
+    "Platform_04_HLD.md": "TRANSITIONAL_LEGACY",
+    "Platform_05_LLD.md": "TRANSITIONAL_LEGACY",
+    "Platform_06_Dataflow.md": "TRANSITIONAL_LEGACY",
+    "Platform_07_OSS_Catalog.md": "TRANSITIONAL_LEGACY",
+    "Platform_08_Requirements_Traceability.md": "NORMALIZED_V1",
+    "Platform_09_UI_UX_Master.md": "TRANSITIONAL_LEGACY",
+    "Platform_10_Protocol_Security_Connector_Master.md": "TRANSITIONAL_LEGACY",
+    "Platform_11_Sizing_Capacity_Storage_Master.md": "TRANSITIONAL_LEGACY",
+    "Platform_12_Decision_Source_Register.md": "TRANSITIONAL_LEGACY",
+    "Platform_13_Engineering_Development_and_Docker_Standards.md": "TRANSITIONAL_LEGACY",
+    "Platform_14_Test_Performance_and_Release_Quality.md": "TRANSITIONAL_LEGACY",
+    "Platform_15_CI_CD_Packaging_and_Distribution.md": "TRANSITIONAL_LEGACY",
+    "Platform_16_Installation_Upgrade_Rollback_and_Operations.md": "TRANSITIONAL_LEGACY",
+    "Platform_17_API_Event_and_Data_Model_Contracts.md": "TRANSITIONAL_LEGACY",
+    "Platform_18_Security_Threat_Model.md": "TRANSITIONAL_LEGACY",
+    "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md": "TRANSITIONAL_LEGACY",
+    "Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md": "TRANSITIONAL_LEGACY",
+    "Platform_21_Enterprise_Gap_Closure_Master.md": "TRANSITIONAL_LEGACY",
+    "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md": "TRANSITIONAL_LEGACY",
+    "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md": "TRANSITIONAL_LEGACY",
+}
 
 REQ_ID_RE = re.compile(r"\b(REQ-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?)\b")
 PRD_ID_RE = re.compile(r"\b(PRD-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?)\b")
@@ -65,16 +156,6 @@ PRD_HEADERS = {
     "Source locator",
     "Related REQ family",
     "Maturity / implementation boundary",
-}
-
-# Product/specialized owners used for PRD discovery (authoritative prose homes).
-PRD_SOURCE_FILES = {
-    "Platform_02_PRD.md",
-    "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md",
-    "Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md",
-    "Platform_21_Enterprise_Gap_Closure_Master.md",
-    "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md",
-    "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md",
 }
 
 
@@ -127,19 +208,29 @@ class MotherReferenceValidator:
         for key in required:
             if key not in manifest:
                 self.fail(f"manifest missing required field: {key}")
-        if self.errors:
+        if any("missing required field" in e for e in self.errors):
             return
         if manifest["schemaVersion"] != SCHEMA_VERSION:
             self.fail(
                 f"wrong schemaVersion: {manifest['schemaVersion']!r} "
                 f"(expected {SCHEMA_VERSION!r})"
             )
+        if not isinstance(manifest["motherReferenceVersion"], str):
+            self.fail("manifest.motherReferenceVersion must be a string")
+        if not isinstance(manifest["globalRequirementIndex"], str):
+            self.fail("manifest.globalRequirementIndex must be a string")
+        if not isinstance(manifest["globalProductRequirementIndex"], str):
+            self.fail("manifest.globalProductRequirementIndex must be a string")
         if not isinstance(manifest["documents"], list) or not manifest["documents"]:
             self.fail("manifest.documents must be a non-empty list")
             return
         if not isinstance(manifest["legacyIdExceptions"], list):
             self.fail("manifest.legacyIdExceptions must be a list")
             return
+        if "historicalFilenameAllowlist" in manifest:
+            hfa = manifest["historicalFilenameAllowlist"]
+            if not isinstance(hfa, list) or not all(isinstance(x, str) for x in hfa):
+                self.fail("historicalFilenameAllowlist must be a list of strings")
 
         files: list[str] = []
         ordinals: list[Any] = []
@@ -159,18 +250,43 @@ class MotherReferenceValidator:
                     self.fail(f"documents[{i}] missing required field: {key}")
             if "expectedDocumentId" not in doc:
                 self.fail(f"documents[{i}] missing required field: expectedDocumentId")
-            if "file" in doc:
+            if "file" in doc and not isinstance(doc["file"], str):
+                self.fail(f"documents[{i}].file must be a string")
+            if "kind" in doc and not isinstance(doc["kind"], str):
+                self.fail(f"documents[{i}].kind must be a string")
+            if "governingRole" in doc and not isinstance(doc["governingRole"], str):
+                self.fail(f"documents[{i}].governingRole must be a string")
+            if "normalizationState" in doc and not isinstance(
+                doc["normalizationState"], str
+            ):
+                self.fail(f"documents[{i}].normalizationState must be a string")
+            if "ordinal" in doc and not isinstance(doc["ordinal"], int):
+                self.fail(f"documents[{i}].ordinal must be an integer")
+            eid = doc.get("expectedDocumentId")
+            if eid is not None and not isinstance(eid, str):
+                self.fail(f"documents[{i}].expectedDocumentId must be string or null")
+            if "file" in doc and isinstance(doc["file"], str):
                 files.append(doc["file"])
             if "ordinal" in doc:
                 ordinals.append(doc["ordinal"])
-            if "expectedDocumentId" in doc and doc["expectedDocumentId"] is not None:
-                doc_ids.append(doc["expectedDocumentId"])
+            if eid is not None:
+                doc_ids.append(eid)
             state = doc.get("normalizationState")
-            if state not in ALLOWED_NORMALIZATION:
+            if isinstance(state, str) and state not in ALLOWED_NORMALIZATION:
                 self.fail(
                     f"documents[{i}] unknown normalizationState: {state!r} "
                     f"(allowed: {sorted(ALLOWED_NORMALIZATION)})"
                 )
+
+        for j, exc in enumerate(manifest["legacyIdExceptions"]):
+            if not isinstance(exc, dict):
+                self.fail(f"legacyIdExceptions[{j}] must be an object")
+                continue
+            for key in ("id", "kind", "reason"):
+                if key not in exc or not isinstance(exc[key], str):
+                    self.fail(
+                        f"legacyIdExceptions[{j}].{key} must be a present string"
+                    )
 
         for name, count in Counter(files).items():
             if count > 1:
@@ -189,95 +305,120 @@ class MotherReferenceValidator:
             )
 
     def validate_constitutional_set(self) -> dict[str, Path]:
-        """Enforce AGENTS + exactly one Platform_00..23 independently of the manifest."""
+        """Enforce exact A1 filenames independently of the editable manifest."""
         paths: dict[str, Path] = {}
-        agents = self.docs_root / "AGENTS.md"
-        if not agents.is_file():
-            self.fail("missing authoritative file: AGENTS.md")
-        else:
-            paths["AGENTS.md"] = agents
-
-        on_disk = sorted(self.docs_root.glob("Platform_*.md"))
-        by_num: dict[str, list[str]] = {n: [] for n in CONSTITUTIONAL_PLATFORM_NUMBERS}
-        extras: list[str] = []
-        for path in on_disk:
-            name = path.name
-            m = PLATFORM_NUM_RE.match(name)
-            if not m:
-                self.fail(f"unexpected numbered document: {name}")
-                continue
-            num = m.group(1)
-            if int(num) >= 24:
-                self.fail(f"Platform_24+ without deliberate allocation: {name}")
-                continue
-            if num not in by_num:
-                extras.append(name)
-                continue
-            by_num[num].append(name)
-
-        for num in CONSTITUTIONAL_PLATFORM_NUMBERS:
-            names = by_num[num]
-            if not names:
-                self.fail(
-                    f"missing authoritative Platform_{num} Mother Reference "
-                    f"(constitutional set requires Platform_00 through Platform_23)"
-                )
-            elif len(names) > 1:
-                self.fail(
-                    f"duplicate Platform number {num}: {' and '.join(names)}"
-                )
+        for name in CANONICAL_FILES:
+            path = self.docs_root / name
+            if not path.is_file():
+                self.fail(f"missing authoritative file: {name}")
             else:
-                paths[names[0]] = self.docs_root / names[0]
+                paths[name] = path
 
-        for name in extras:
-            self.fail(f"unexpected numbered document: {name}")
+        on_disk = {p.name for p in self.docs_root.glob("Platform_*.md")}
+        on_disk |= (
+            {"AGENTS.md"} if (self.docs_root / "AGENTS.md").is_file() else set()
+        )
+        for name in sorted(on_disk - CANONICAL_FILE_SET):
+            m = PLATFORM_NUM_RE.match(name)
+            if m and int(m.group(1)) >= 24:
+                self.fail(f"Platform_24+ without deliberate allocation: {name}")
+            else:
+                self.fail(f"unexpected numbered document: {name}")
 
-        if len(paths) != CONSTITUTIONAL_AUTHORITATIVE_COUNT and "AGENTS.md" in paths:
-            # Count only when AGENTS present; missing Platform numbers already reported.
-            present_platforms = sum(
-                1 for k in paths if k.startswith("Platform_")
-            )
-            if present_platforms != len(CONSTITUTIONAL_PLATFORM_NUMBERS):
-                self.fail(
-                    f"constitutional set requires exactly "
-                    f"{len(CONSTITUTIONAL_PLATFORM_NUMBERS)} numbered Mother References "
-                    f"Platform_00..23 (found {present_platforms})"
-                )
+        # Duplicate Platform numbers among unexpected/extra files already covered;
+        # also detect two files for same number if one is canonical and one not.
+        by_num: dict[str, list[str]] = {}
+        for name in on_disk:
+            m = PLATFORM_NUM_RE.match(name)
+            if m:
+                by_num.setdefault(m.group(1), []).append(name)
+        for num, names in by_num.items():
+            if len(names) > 1:
+                self.fail(f"duplicate Platform number {num}: {' and '.join(sorted(names))}")
 
         return paths
 
     def validate_manifest_matches_constitutional(
         self, manifest: dict[str, Any], constitutional: dict[str, Path]
     ) -> None:
-        declared = [d.get("file") for d in manifest.get("documents", []) if isinstance(d, dict)]
+        declared = [
+            d.get("file")
+            for d in manifest.get("documents", [])
+            if isinstance(d, dict)
+        ]
         declared_set = {f for f in declared if isinstance(f, str)}
-        constitutional_set = set(constitutional)
+        if declared_set != CANONICAL_FILE_SET:
+            for name in sorted(CANONICAL_FILE_SET - declared_set):
+                self.fail(f"manifest missing required canonical file: {name}")
+            for name in sorted(declared_set - CANONICAL_FILE_SET):
+                self.fail(f"manifest entry not in canonical Mother Reference set: {name}")
+        if set(constitutional) != CANONICAL_FILE_SET:
+            # constitutional set already reported missing files; keep alignment check.
+            for name in sorted(CANONICAL_FILE_SET - set(constitutional)):
+                if f"missing authoritative file: {name}" not in self.errors:
+                    self.fail(f"constitutional file absent from on-disk set: {name}")
 
-        if "AGENTS.md" not in declared_set:
-            self.fail("manifest missing required authoritative entry: AGENTS.md")
-
-        for num in CONSTITUTIONAL_PLATFORM_NUMBERS:
-            matches = [f for f in declared_set if f.startswith(f"Platform_{num}_")]
-            if not matches:
-                self.fail(
-                    f"manifest missing required Platform_{num} entry "
-                    f"(constitutional set cannot be redefined by deleting manifest rows)"
-                )
-            elif len(matches) > 1:
-                self.fail(f"manifest has duplicate Platform_{num} entries: {matches}")
-
-        for name in sorted(declared_set - constitutional_set):
-            # Manifest claims a file not in the constitutional on-disk set.
-            self.fail(f"manifest entry not in constitutional set: {name}")
-
-        for name in sorted(constitutional_set - declared_set):
-            self.fail(f"constitutional file absent from manifest: {name}")
-
-        if len(declared_set) != CONSTITUTIONAL_AUTHORITATIVE_COUNT:
+    def validate_pinned_invariants(self, manifest: dict[str, Any]) -> None:
+        if manifest.get("motherReferenceVersion") != CANONICAL_MOTHER_REFERENCE_VERSION:
             self.fail(
-                f"manifest must contain exactly {CONSTITUTIONAL_AUTHORITATIVE_COUNT} "
-                f"authoritative entries matching AGENTS + Platform_00..23"
+                f"manifest motherReferenceVersion {manifest.get('motherReferenceVersion')!r} "
+                f"does not match pinned constitutional version "
+                f"{CANONICAL_MOTHER_REFERENCE_VERSION!r}"
             )
+        if (
+            manifest.get("globalRequirementIndex")
+            != CANONICAL_GLOBAL_REQUIREMENT_INDEX
+        ):
+            self.fail(
+                f"globalRequirementIndex redirect forbidden: "
+                f"{manifest.get('globalRequirementIndex')!r} "
+                f"(pinned to {CANONICAL_GLOBAL_REQUIREMENT_INDEX!r})"
+            )
+        if (
+            manifest.get("globalProductRequirementIndex")
+            != CANONICAL_GLOBAL_PRODUCT_REQUIREMENT_INDEX
+        ):
+            self.fail(
+                f"globalProductRequirementIndex redirect forbidden: "
+                f"{manifest.get('globalProductRequirementIndex')!r} "
+                f"(pinned to {CANONICAL_GLOBAL_PRODUCT_REQUIREMENT_INDEX!r})"
+            )
+
+        by_file = {
+            d["file"]: d
+            for d in manifest.get("documents", [])
+            if isinstance(d, dict) and isinstance(d.get("file"), str)
+        }
+        for fname, expected_id in CANONICAL_DOCUMENT_IDS.items():
+            doc = by_file.get(fname)
+            if doc is None:
+                continue
+            actual = doc.get("expectedDocumentId")
+            if actual != expected_id:
+                self.fail(
+                    f"{fname}: manifest expectedDocumentId {actual!r} "
+                    f"does not match pinned Document ID {expected_id!r}"
+                )
+            state = doc.get("normalizationState")
+            pinned_state = CANONICAL_NORMALIZATION[fname]
+            if state != pinned_state:
+                self.fail(
+                    f"{fname}: normalizationState {state!r} does not match "
+                    f"pinned A1 baseline {pinned_state!r}"
+                )
+
+        legacy_ids = set()
+        for exc in manifest.get("legacyIdExceptions", []):
+            if isinstance(exc, dict) and isinstance(exc.get("id"), str):
+                legacy_ids.add(exc["id"])
+        if legacy_ids != CANONICAL_ALLOWED_LEGACY_IDS:
+            for extra in sorted(legacy_ids - CANONICAL_ALLOWED_LEGACY_IDS):
+                self.fail(
+                    f"unapproved legacy formal-ID exception: {extra} "
+                    f"(only {sorted(CANONICAL_ALLOWED_LEGACY_IDS)} permitted in A1)"
+                )
+            for missing in sorted(CANONICAL_ALLOWED_LEGACY_IDS - legacy_ids):
+                self.fail(f"missing required legacy formal-ID exception: {missing}")
 
     def validate_document_set(
         self, manifest: dict[str, Any], constitutional: dict[str, Path]
@@ -300,31 +441,31 @@ class MotherReferenceValidator:
     def validate_headers(
         self, manifest: dict[str, Any], paths: dict[str, Path]
     ) -> None:
-        version = manifest["motherReferenceVersion"]
-        for doc in manifest["documents"]:
-            rel = doc["file"]
-            path = paths.get(rel)
-            if path is None:
+        for fname in CANONICAL_FILES:
+            if fname == "AGENTS.md":
+                continue
+            path = paths.get(fname)
+            if path is None or not path.is_file():
                 continue
             text = path.read_text(encoding="utf-8")
-            expected_id = doc.get("expectedDocumentId")
-            if expected_id is None:
-                continue
+            pinned_id = CANONICAL_DOCUMENT_IDS[fname]
             m = DOC_ID_RE.search(text)
             if not m:
-                self.fail(f"{rel}: missing Document ID header")
-            elif m.group(1).rstrip("*") != expected_id:
-                self.fail(
-                    f"{rel}: wrong Document ID {m.group(1)!r} "
-                    f"(expected {expected_id!r})"
-                )
+                self.fail(f"{fname}: missing Document ID header")
+            else:
+                header_id = m.group(1).rstrip("*")
+                if header_id != pinned_id:
+                    self.fail(
+                        f"{fname}: wrong Document ID {header_id!r} "
+                        f"(pinned expected {pinned_id!r})"
+                    )
             vm = VERSION_RE.search(text)
             if not vm:
-                self.fail(f"{rel}: missing Version header")
-            elif vm.group(1).rstrip("*") != version:
+                self.fail(f"{fname}: missing Version header")
+            elif vm.group(1).rstrip("*") != CANONICAL_MOTHER_REFERENCE_VERSION:
                 self.fail(
-                    f"{rel}: version mismatch {vm.group(1)!r} "
-                    f"(expected {version!r})"
+                    f"{fname}: version mismatch {vm.group(1)!r} "
+                    f"(pinned expected {CANONICAL_MOTHER_REFERENCE_VERSION!r})"
                 )
 
     def _parse_registry_rows(
@@ -418,14 +559,8 @@ class MotherReferenceValidator:
         self,
         rows: list[dict[str, str]],
         kind: str,
-        manifest: dict[str, Any],
         paths: dict[str, Path],
     ) -> None:
-        manifest_files = {
-            d["file"]
-            for d in manifest.get("documents", [])
-            if isinstance(d, dict) and "file" in d
-        }
         for row in rows:
             rid = row["id"]
             owner = row["owner"]
@@ -435,7 +570,7 @@ class MotherReferenceValidator:
             if not owner:
                 self.fail(f"{kind} {rid}: empty owner")
                 continue
-            if owner not in manifest_files:
+            if owner not in CANONICAL_FILE_SET:
                 self.fail(
                     f"{kind} {rid}: owner is not a valid Mother Reference filename: "
                     f"{owner}"
@@ -455,7 +590,7 @@ class MotherReferenceValidator:
     def validate_global_requirements(
         self, manifest: dict[str, Any], paths: dict[str, Path]
     ) -> None:
-        index_name = manifest["globalRequirementIndex"]
+        index_name = CANONICAL_GLOBAL_REQUIREMENT_INDEX
         index_path = paths.get(index_name) or (self.docs_root / index_name)
         if not index_path.is_file():
             self.fail(f"missing global RTM: {index_name}")
@@ -469,14 +604,8 @@ class MotherReferenceValidator:
             if count > 1:
                 self.fail(f"duplicate primary REQ row: {rid}")
 
-        legacy = {
-            e["id"]
-            for e in manifest.get("legacyIdExceptions", [])
-            if isinstance(e, dict) and "id" in e
-        }
+        legacy = set(CANONICAL_ALLOWED_LEGACY_IDS)
 
-        # Authoritative discovery EXCLUDES the primary REQ registry block so a
-        # fabricated registry-only row cannot self-satisfy source presence.
         authoritative: set[str] = set()
         for rel, path in paths.items():
             if not rel.startswith("Platform_"):
@@ -496,7 +625,7 @@ class MotherReferenceValidator:
                     f"REQ in source but absent from global primary registry: {rid}"
                 )
         for rid in sorted(primary_set - authoritative):
-            if rid in legacy and rid in primary_set:
+            if rid in legacy:
                 self.fail(
                     f"legacy ID {rid} has no authoritative occurrence outside "
                     f"the primary REQ registry"
@@ -513,12 +642,12 @@ class MotherReferenceValidator:
                 continue
             self.fail(f"invalid formal ID in primary REQ registry: {rid}")
 
-        self._validate_registry_owners(rows, "REQ", manifest, paths)
+        self._validate_registry_owners(rows, "REQ", paths)
 
     def validate_global_prds(
         self, manifest: dict[str, Any], paths: dict[str, Path]
     ) -> None:
-        index_name = manifest["globalProductRequirementIndex"]
+        index_name = CANONICAL_GLOBAL_PRODUCT_REQUIREMENT_INDEX
         index_path = paths.get(index_name) or (self.docs_root / index_name)
         if not index_path.is_file():
             self.fail(f"missing global PRD index: {index_name}")
@@ -532,12 +661,15 @@ class MotherReferenceValidator:
             if count > 1:
                 self.fail(f"duplicate primary PRD row: {rid}")
 
+        # Global PRD discovery across ALL numbered Mother References.
+        # Primary PRD registry block cannot self-satisfy discovery.
         discovered: set[str] = set()
-        for rel in PRD_SOURCE_FILES:
-            path = paths.get(rel) or (self.docs_root / rel)
-            if not path.is_file():
+        for rel, path in paths.items():
+            if not rel.startswith("Platform_"):
                 continue
             text = path.read_text(encoding="utf-8")
+            if rel == index_name:
+                text = strip_marker_block(text, PRD_MARKER_START, PRD_MARKER_END)
             for rid in PRD_ID_RE.findall(text):
                 discovered.add(rid)
 
@@ -547,36 +679,19 @@ class MotherReferenceValidator:
                 self.fail(
                     f"PRD in source but absent from global primary PRD registry: {rid}"
                 )
+        for rid in sorted(primary_set - discovered):
+            self.fail(
+                f"unknown primary registry PRD with no authoritative source / "
+                f"unknown owner/source file: {rid}"
+            )
 
-        # Authoritative sources exclude the primary PRD registry block.
-        authoritative: set[str] = set()
-        for rel, path in paths.items():
-            if not rel.startswith("Platform_"):
-                continue
-            text = path.read_text(encoding="utf-8")
-            if rel == index_name:
-                text = strip_marker_block(text, PRD_MARKER_START, PRD_MARKER_END)
-            for rid in PRD_ID_RE.findall(text):
-                authoritative.add(rid)
-
-        for rid in sorted(primary_set):
-            if rid not in authoritative:
-                self.fail(
-                    f"unknown primary registry PRD with no authoritative source / "
-                    f"unknown owner/source file: {rid}"
-                )
-
-        self._validate_registry_owners(rows, "PRD", manifest, paths)
+        self._validate_registry_owners(rows, "PRD", paths)
 
     def validate_legacy_and_malformed(
         self, manifest: dict[str, Any], paths: dict[str, Path]
     ) -> None:
-        legacy = {
-            e["id"]
-            for e in manifest.get("legacyIdExceptions", [])
-            if isinstance(e, dict) and "id" in e
-        }
-        index_name = manifest["globalRequirementIndex"]
+        legacy = set(CANONICAL_ALLOWED_LEGACY_IDS)
+        index_name = CANONICAL_GLOBAL_REQUIREMENT_INDEX
         index_path = paths.get(index_name)
         if index_path is None:
             return
@@ -619,24 +734,20 @@ class MotherReferenceValidator:
                 re.findall(r"\]\((Platform_\d{2}_[A-Za-z0-9_]+\.md)\)", cleaned)
             )
             for ref in sorted(refs):
-                # Exact filename must exist OR be an explicit historical allowlist entry.
-                # Same Platform number with a different name is NOT sufficient.
                 if ref in on_disk or ref in historical:
                     continue
                 self.fail(f"{rel}: broken Platform_*.md reference: {ref}")
 
     def validate_normalized_structure(
-        self, manifest: dict[str, Any], paths: dict[str, Path]
+        self, paths: dict[str, Path]
     ) -> None:
-        for doc in manifest["documents"]:
-            if doc.get("normalizationState") != "NORMALIZED_V1":
+        for rel, state in CANONICAL_NORMALIZATION.items():
+            if state != "NORMALIZED_V1":
                 continue
-            rel = doc["file"]
             path = paths.get(rel)
             if path is None:
                 continue
             text = path.read_text(encoding="utf-8")
-            # For Platform_00, ignore Appendix A transitional historical numbering.
             if rel.startswith("Platform_00"):
                 appendix = text.find("## Appendix A")
                 if appendix >= 0:
@@ -648,9 +759,7 @@ class MotherReferenceValidator:
                         f"{rel}: duplicate normalized top-level section number: {n}"
                     )
 
-    def validate_maturity_language(
-        self, manifest: dict[str, Any], paths: dict[str, Path]
-    ) -> None:
+    def validate_maturity_language(self, paths: dict[str, Path]) -> None:
         banned = [
             re.compile(r"\bSPECIFIED\s*=\s*IMPLEMENTED\b"),
             re.compile(r"\bIMPLEMENTED\s*=\s*TESTED\b"),
@@ -659,10 +768,9 @@ class MotherReferenceValidator:
             re.compile(r"\bCERTIFIED\s*=\s*DEPLOYED\b"),
             re.compile(r"\bSPECIFIED\s*=>\s*IMPLEMENTED\b"),
         ]
-        for doc in manifest["documents"]:
-            if doc.get("normalizationState") != "NORMALIZED_V1":
+        for rel, state in CANONICAL_NORMALIZATION.items():
+            if state != "NORMALIZED_V1":
                 continue
-            rel = doc["file"]
             path = paths.get(rel)
             if path is None:
                 continue
@@ -700,14 +808,15 @@ class MotherReferenceValidator:
         ):
             return self.errors
         self.validate_manifest_matches_constitutional(manifest, constitutional)
+        self.validate_pinned_invariants(manifest)
         paths = self.validate_document_set(manifest, constitutional)
         self.validate_headers(manifest, paths)
         self.validate_global_requirements(manifest, paths)
         self.validate_global_prds(manifest, paths)
         self.validate_legacy_and_malformed(manifest, paths)
         self.validate_cross_references(manifest, paths)
-        self.validate_normalized_structure(manifest, paths)
-        self.validate_maturity_language(manifest, paths)
+        self.validate_normalized_structure(paths)
+        self.validate_maturity_language(paths)
         return self.errors
 
 

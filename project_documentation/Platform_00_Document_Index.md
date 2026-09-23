@@ -80,7 +80,7 @@ Where absent, status remains `SPECIFIED` / `NOT IMPLEMENTED` (or equivalent). A1
 | 7 | `Platform_05_LLD.md` | Concrete schemas, topics, state machines, adapters, algorithms and implementation rules |
 | 8 | `Platform_06_Dataflow.md` | End-to-end telemetry/control/HA/RCA/NCM/storage/integration sequences |
 | 9 | `Platform_07_OSS_Catalog.md` | Authoritative OSS allow/candidate list, licences, custom boundaries and governance |
-| 10 | `Platform_08_Requirements_Traceability.md` | Base completeness and requirement traceability control |
+| 10 | `Platform_08_Requirements_Traceability.md` | Global requirements, product-requirement and evidence traceability index |
 | 11 | `Platform_09_UI_UX_Master.md` | UI shell, navigation, Studios, RBAC UX and out-of-box dashboards/workspaces |
 | 12 | `Platform_10_Protocol_Security_Connector_Master.md` | Protocols, authentication, credentials, ports, connector and provisioning diagnostics |
 | 13 | `Platform_11_Sizing_Capacity_Storage_Master.md` | Core/Sensor sizing, MWU, placement, retention, rollups and storage protection |
@@ -99,7 +99,7 @@ Where absent, status remains `SPECIFIED` / `NOT IMPLEMENTED` (or equivalent). A1
 
 ### 5.1 Specialized-master number allocation
 
-The canonical Mother Reference remains the actual merged set listed in §3 on current GitHub `main`. Today the numbered specialized-master sequence ends at the highest merged master (`Platform_23`). Candidate or open PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not enlarge the authoritative set.
+The canonical Mother Reference remains the actual merged set listed in §5 on current GitHub `main`. Today the numbered specialized-master sequence ends at the highest merged master (`Platform_23`). Candidate or open PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not enlarge the authoritative set.
 
 A Platform number becomes canonical only when the corresponding specialized master is finally reconciled and merged. At each final specialized-master reconciliation:
 
@@ -403,7 +403,7 @@ Current Mother References contain substantial historical reconciliation material
 
 Policy:
 
-1. Current normative constitution is this document (sections 1–14 and §16).
+1. Current normative constitution is this document, sections 1–16. Appendix A is transitional historical/reconciliation material retained for zero-loss migration and is not the destination for new normative requirements.
 2. Transitional historical/reconciliation material is retained in **Appendix A** so A1 does not recklessly delete content and risk requirement loss.
 3. No new product requirement may be appended to Appendix A or to any historical reconciliation block.
 4. Historical sections are retained temporarily for zero-loss migration.
