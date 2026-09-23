@@ -24,8 +24,32 @@
   --info: #075985;
   --info-soft: #eff8ff;
   --shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  --density-control-height: 40px;
+  --density-nav-height: 44px;
+  --density-panel-padding: 1.2rem;
+  --density-shell-gap: 1rem;
+  --density-tab-height: 36px;
+  --density-toolbar-y: 0.4rem;
   color: var(--text);
   background: var(--bg);
+}
+
+:root[data-density='compact'] {
+  --density-control-height: 36px;
+  --density-nav-height: 38px;
+  --density-panel-padding: 0.9rem;
+  --density-shell-gap: 0.75rem;
+  --density-tab-height: 32px;
+  --density-toolbar-y: 0.25rem;
+}
+
+:root[data-density='large'] {
+  --density-control-height: 46px;
+  --density-nav-height: 50px;
+  --density-panel-padding: 1.45rem;
+  --density-shell-gap: 1.25rem;
+  --density-tab-height: 44px;
+  --density-toolbar-y: 0.6rem;
 }
 
 :root[data-theme='dark'] {
@@ -180,7 +204,8 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  height: 44px;
+  height: var(--density-control-height);
+  min-height: 36px;
   padding: 0 0.85rem;
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -213,10 +238,11 @@ kbd {
 }
 
 .theme-control select,
+.density-control select,
 .icon-button,
 .user-menu,
 .context-button {
-  min-height: 40px;
+  min-height: var(--density-control-height);
   padding: 0 0.7rem;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -274,7 +300,7 @@ kbd {
   align-items: center;
   gap: 0.6rem;
   width: 100%;
-  min-height: 44px;
+  min-height: var(--density-nav-height);
   padding: 0.45rem 0.65rem;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -330,7 +356,7 @@ kbd {
   justify-content: space-between;
   gap: 1rem;
   margin: 0 -2rem;
-  padding: 0.4rem 2rem;
+  padding: var(--density-toolbar-y) 2rem;
   background: color-mix(in srgb, var(--bg) 94%, transparent);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(12px);
@@ -360,7 +386,7 @@ kbd {
 }
 
 .context-button {
-  min-height: 40px;
+  min-height: var(--density-control-height);
   font-size: 0.78rem;
 }
 
@@ -374,7 +400,7 @@ kbd {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--density-shell-gap);
   padding: 2rem 0 1.3rem;
 }
 
@@ -434,13 +460,13 @@ kbd {
 .foundation-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
+  gap: var(--density-shell-gap);
   margin-top: 1rem;
 }
 
 .surface-card {
   min-width: 0;
-  padding: 1.2rem;
+  padding: var(--density-panel-padding);
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
@@ -472,7 +498,7 @@ kbd {
 
 .page-state {
   margin-top: 2rem;
-  padding: 1.5rem;
+  padding: var(--density-panel-padding);
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
@@ -652,7 +678,7 @@ kbd {
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 0.7rem;
   width: 100%;
-  min-height: 48px;
+  min-height: var(--density-nav-height);
   padding: 0.7rem;
   border: 0;
   border-radius: 9px;
@@ -745,7 +771,7 @@ kbd {
   .nav-link {
     display: flex;
     width: auto;
-    min-height: 44px;
+    min-height: var(--density-nav-height);
     white-space: nowrap;
   }
 
@@ -789,7 +815,7 @@ kbd {
 /* Workspace host — metadata-driven chrome for Platform_09 screens */
 .workspace-host {
   display: grid;
-  gap: 1rem;
+  gap: var(--density-shell-gap);
 }
 
 .workspace-header {
@@ -879,7 +905,7 @@ kbd {
   padding: 0.35rem 0.8rem;
   cursor: pointer;
   font: inherit;
-  min-height: 36px;
+  min-height: var(--density-tab-height);
 }
 
 .workspace-tab--active,
