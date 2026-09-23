@@ -16,6 +16,7 @@ import {
   findWorkspaceByPath,
   firstAccessiblePrimaryNav,
   foundationDataStateForCapability,
+  nextWorkspaceTabIndex,
   normalizeWorkspacePath,
   primarySidebarDestinations,
   resolveAppRoute,
@@ -266,6 +267,17 @@ test('workspace navigation remount contract: tab index helper stays bound to wor
   assert.notEqual(workspaceTabDomId('ui-001', 0), workspaceTabDomId('ui-002', 0));
 });
 
+test('workspace tabs implement deterministic horizontal keyboard navigation', () => {
+  assert.equal(nextWorkspaceTabIndex(0, 4, 'ArrowRight'), 1);
+  assert.equal(nextWorkspaceTabIndex(3, 4, 'ArrowRight'), 0);
+  assert.equal(nextWorkspaceTabIndex(0, 4, 'ArrowLeft'), 3);
+  assert.equal(nextWorkspaceTabIndex(2, 4, 'Home'), 0);
+  assert.equal(nextWorkspaceTabIndex(1, 4, 'End'), 3);
+  assert.equal(nextWorkspaceTabIndex(1, 4, 'Enter'), undefined);
+  assert.equal(nextWorkspaceTabIndex(-1, 4, 'ArrowRight'), undefined);
+  assert.equal(nextWorkspaceTabIndex(0, 0, 'ArrowRight'), undefined);
+});
+
 test('every workspace belongs to a valid navigation group and primary groups are valid', () => {
   const validWorkspaceGroups = new Set(WORKSPACE_GROUPS);
   const validPrimaryGroups = new Set(PRIMARY_NAV_GROUPS);
@@ -292,6 +304,12 @@ test('global shell capability registry is complete and non-duplicated', () => {
   const ids = GLOBAL_SHELL_CAPABILITIES.map((capability) => capability.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(ids.includes('command-palette'));
+  assert.ok(ids.includes('theme'));
+  assert.ok(ids.includes('density'));
+
+  const density = GLOBAL_SHELL_CAPABILITIES.find((capability) => capability.id === 'density');
+  assert.equal(density?.readiness, 'SHELL_READY');
+  assert.equal(density?.serverContractRequired, false);
 });
 
 test('presentation permissions are explicitly UI-local identifiers', () => {
