@@ -4,6 +4,7 @@ import {
   AccessContext,
   WorkspaceDefinition,
   foundationDataStateForCapability,
+  nextWorkspaceTabIndex,
   secondaryWorkspacesInDomain,
   workspaceTabDomId,
   workspaceTabPanelDomId,
@@ -42,6 +43,17 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
     () => secondaryWorkspacesInDomain(workspace.domain, access),
     [workspace.domain, access],
   );
+
+  const moveTabFocus = (currentIndex: number, key: string) => {
+    const nextIndex = nextWorkspaceTabIndex(currentIndex, workspace.tabs.length, key);
+    if (nextIndex === currentIndex && !['Home', 'End', 'ArrowLeft', 'ArrowRight'].includes(key)) {
+      return;
+    }
+    setActiveTabIndex(nextIndex);
+    window.requestAnimationFrame(() => {
+      document.getElementById(workspaceTabDomId(workspace.id, nextIndex))?.focus();
+    });
+  };
 
   const capabilityPending = workspace.backendCapability === 'PENDING_BACKEND';
   const resolvedDataState: ScreenDataState = dataState
@@ -117,6 +129,12 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
                 tabIndex={selected ? 0 : -1}
                 className={selected ? 'workspace-tab workspace-tab--active' : 'workspace-tab'}
                 onClick={() => setActiveTabIndex(index)}
+                onKeyDown={(event) => {
+                  if (['Home', 'End', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+                    event.preventDefault();
+                    moveTabFocus(index, event.key);
+                  }
+                }}
               >
                 {tab}
               </button>
