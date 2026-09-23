@@ -36,7 +36,7 @@
 
 :root[data-density='compact'] {
   --density-control-height: 34px;
-  --density-interactive-height: 38px;
+  --density-interactive-height: 44px;
   --density-surface-padding: 0.9rem;
   --density-nav-padding-y: 0.3rem;
   --density-tab-padding-y: 0.25rem;
@@ -904,7 +904,7 @@ kbd {
   padding: var(--density-tab-padding-y) var(--density-tab-padding-x);
   cursor: pointer;
   font: inherit;
-  min-height: var(--density-control-height);
+  min-height: var(--density-interactive-height);
 }
 
 .workspace-tab--active,
