@@ -17,6 +17,7 @@ import {
   firstAccessiblePrimaryNav,
   foundationDataStateForCapability,
   normalizeWorkspacePath,
+  nextWorkspaceTabIndex,
   primarySidebarDestinations,
   resolveAppRoute,
   searchableWorkspaces,
@@ -292,6 +293,10 @@ test('global shell capability registry is complete and non-duplicated', () => {
   const ids = GLOBAL_SHELL_CAPABILITIES.map((capability) => capability.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(ids.includes('command-palette'));
+  assert.ok(ids.includes('density'));
+  const density = GLOBAL_SHELL_CAPABILITIES.find((capability) => capability.id === 'density');
+  assert.equal(density?.readiness, 'SHELL_READY');
+  assert.equal(density?.serverContractRequired, false);
 });
 
 test('presentation permissions are explicitly UI-local identifiers', () => {
@@ -300,4 +305,19 @@ test('presentation permissions are explicitly UI-local identifiers', () => {
     PRIMARY_NAV_DESTINATIONS.every((destination) =>
       destination.presentationPermission.startsWith('nav.')),
   );
+});
+
+
+test('workspace tabs support horizontal ARIA keyboard navigation with wrap-around', () => {
+  assert.equal(nextWorkspaceTabIndex(0, 4, 'ArrowRight'), 1);
+  assert.equal(nextWorkspaceTabIndex(3, 4, 'ArrowRight'), 0);
+  assert.equal(nextWorkspaceTabIndex(0, 4, 'ArrowLeft'), 3);
+  assert.equal(nextWorkspaceTabIndex(2, 4, 'Home'), 0);
+  assert.equal(nextWorkspaceTabIndex(1, 4, 'End'), 3);
+  assert.equal(nextWorkspaceTabIndex(2, 4, 'Enter'), 2);
+});
+
+test('workspace tab navigation fails safely for invalid tab counts', () => {
+  assert.equal(nextWorkspaceTabIndex(0, 0, 'ArrowRight'), 0);
+  assert.equal(nextWorkspaceTabIndex(2, -1, 'Home'), 2);
 });

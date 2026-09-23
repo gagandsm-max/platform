@@ -52,6 +52,7 @@ export {
 export {
   capabilityImpliesNormalDataState,
   foundationDataStateForCapability,
+  nextWorkspaceTabIndex,
   workspaceTabDomId,
   workspaceTabPanelDomId,
 } from './workspace-host-state.js';

@@ -34,3 +34,35 @@ export const workspaceTabDomId = (workspaceId: string, tabIndex: number): string
 
 export const workspaceTabPanelDomId = (workspaceId: string, tabIndex: number): string =>
   `workspace-tabpanel-${workspaceId}-${tabIndex}`;
+
+
+export type WorkspaceTabNavigationKey = 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End';
+
+/**
+ * WAI-ARIA horizontal tab-list navigation with wrap-around.
+ * Returns the current index for unsupported/invalid input rather than inventing state.
+ */
+export const nextWorkspaceTabIndex = (
+  currentIndex: number,
+  tabCount: number,
+  key: string,
+): number => {
+  if (!Number.isInteger(currentIndex) || !Number.isInteger(tabCount) || tabCount <= 0) {
+    return currentIndex;
+  }
+
+  const boundedCurrent = Math.min(Math.max(currentIndex, 0), tabCount - 1);
+  if (key === 'Home') {
+    return 0;
+  }
+  if (key === 'End') {
+    return tabCount - 1;
+  }
+  if (key === 'ArrowRight') {
+    return (boundedCurrent + 1) % tabCount;
+  }
+  if (key === 'ArrowLeft') {
+    return (boundedCurrent - 1 + tabCount) % tabCount;
+  }
+  return boundedCurrent;
+};
