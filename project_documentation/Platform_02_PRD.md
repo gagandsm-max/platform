@@ -1,15 +1,17 @@
 # Platform — Product Requirements Document (PRD)
 
-**Document ID:** PLATFORM-PRD-001  
-**Version:** 3.2.2  
-**Status:** Authoritative Mother Reference — Engineering Source of Truth
-**Depends on:** `Platform_01_BRD.md`  
-**Engineering companions:** Architecture, HLD, LLD and Dataflow documents in this set  
+**Document ID:** PLATFORM-PRD-001
+**Version:** 3.2.2
+**Status:** Authoritative Mother Reference — Complete Product Capability Authority (**A2.1 NORMALIZED_V1**)
+**Product name:** Platform
+**Depends on:** `Platform_01_BRD.md`
+**Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_08_Requirements_Traceability.md`, specialized masters `Platform_19`..`Platform_23`
+**Normalization state:** NORMALIZED_V1
+**Last reconciliation:** 2026-09-23 — A2.1 BRD/PRD/Architecture normalization (Issue #96)
 
 ---
 
 ## 1. Purpose and authority
-
 This PRD defines **what Platform must do**. It translates the business requirements into functional, UX, administrative, security, HA/DR, data-management, AI/RCA, integration and non-functional product requirements.
 
 Requirements use normative language:
@@ -23,8 +25,14 @@ Platform is a clean-room product. Industry products such as SolarWinds, ManageEn
 
 ---
 
-## 2. Product scope summary
 
+**Normative language:** SHALL/MUST, SHOULD, MAY, TBD. TBD must not be silently assumed.
+
+**Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. This PRD specifies product behavior; it does not certify implementation.
+
+**Cross-document contract:** `Platform_07` (OSS), `Platform_08` (global IDs), `Platform_09` (UI detail), `Platform_10` (protocols), `Platform_11` (sizing), `Platform_12` (decisions). Specialized `PRD-OIV-*`/`PRD-ONB-*`/`PRD-EGC-*`/`PRD-MIA-*`/`PRD-EMC-*` remain authoritative supplements in their masters.
+
+## 2. Product scope summary
 Platform shall provide a unified enterprise operations experience covering:
 
 1. Network monitoring and traffic analytics.
@@ -51,16 +59,15 @@ DPI and full APM are excluded for the initial product scope.
 
 ---
 
-## 3. Product information architecture
 
+## 3. Product information architecture
 ### 3.1 Primary workspaces
 
-The primary navigation shall be role-aware and organized into these workspaces:
+The primary navigation shall be role-aware and organized into these **top-level primary sidebar** workspaces (14-item taxonomy; aligned with `Platform_09` / UI foundation):
 
 - Home
 - Dashboards
 - Inventory
-- Provisioning & Discovery
 - Topology & Maps
 - Alerts & Incidents
 - RCA & Investigations
@@ -72,6 +79,12 @@ The primary navigation shall be role-aware and organized into these workspaces:
 - Administration
 - Audit & Governance
 - Platform Operations
+
+**Provisioning & Discovery is not a top-level primary sidebar item.** It is a major product workspace nested under Inventory:
+
+`Inventory → Provisioning & Discovery`
+
+(with `/provisioning` as a child/compatibility destination under Inventory). Do not introduce a second navigation interpretation that places Provisioning & Discovery as a peer of Inventory in the primary sidebar.
 
 The UI shall not expose 80+ dashboard links as one flat menu. Domain dashboards are grouped; entity-level dashboards open contextually through drill-down.
 
@@ -97,7 +110,26 @@ The application UI shall be reachable only over HTTPS/TLS. There shall be no Pla
 
 ---
 
+
+### Additional must-have workspaces (absorbed from PRD-CROSS)
+The product shall include the following even where they are implemented as contextual workspaces rather than top-level navigation items:
+
+Asset Reconciliation; Technology Lifecycle Risk; Backup & Restore; DR; Upgrade & Rollback; Desired vs Actual State; Change Impact/Dry Run; Path Analysis; Device/Time Compare; Baseline & Seasonality; Alert Storm/Flapping; Shift Handover; Circuit Inventory; Operational Timeline; Support Bundle; Platform Health; Licensing/Usage; Storage Forecast; AI Boundary/Feedback; Device Pack Certification/Test Lab; Migration Studio; Environment Readiness; Change Freeze/Calendars; Runbook Knowledge Base; Post-Incident Review; Intelligence Quality; Alert Policy Effectiveness; Monitoring Optimization; Sensor Placement Optimization; Certificate/PKI; Proxy; Data Sovereignty; API Governance; Query Protection; Housekeeping; Data Pipeline Integrity.
+
+
 ## 4. Tenant and tenancy requirements
+
+**Feature contract (summary):**
+- **Purpose/outcome:** Hard multi-tenant / MSP isolation without separate products
+- **Subfeatures:** single-customer mode; MSP mode; overlapping IP handling; noisy-neighbor quotas
+- **Primary persona:** MSP Super Admin / Tenant Admin
+- **Dependencies:** IAM, RBAC, query layer, persistence tenancy
+- **Preconditions:** tenant identity provisioned
+- **Primary workflow:** create/select tenant → scoped operations
+- **Product behavior:** isolation enforced server-side at API/authz/query/persistence
+- **Failure/degraded behavior:** cross-tenant access denied; noisy neighbor throttled
+- **Acceptance outcome:** negative cross-tenant tests pass
+- **Maturity boundary:** SPECIFIED (target); do not infer IMPLEMENTED from this PRD alone
 
 | ID | Requirement |
 |---|---|
@@ -110,7 +142,20 @@ The application UI shall be reachable only over HTTPS/TLS. There shall be no Pla
 
 ---
 
-## 5. Core installation and deployment requirements
+
+## 5. Core installation, packaging, HA and DR
+
+**Feature contract (summary):**
+- **Purpose/outcome:** Installable Core with Standalone or exactly-two-Core HA and v1.0 DR capability
+- **Subfeatures:** build separation; installer; HA Active/Standby; DR backup/replication readiness; native packages; auto-start
+- **Primary persona:** Platform Super Admin / implementer
+- **Dependencies:** PKI, networking, storage, peer Core for HA
+- **Preconditions:** OS certification matrix met
+- **Primary workflow:** install → configure topology → validate readiness
+- **Product behavior:** HA failover target <60s; Sensors continue buffering
+- **Failure/degraded behavior:** fail-safe prefer no dual-active; Sensors buffer
+- **Acceptance outcome:** installer/HA/DR acceptance gates demonstrated
+- **Maturity boundary:** SPECIFIED; HA stateful mechanisms remain open P0 until certified (Architecture/#92)
 
 ### 5.1 Build separation
 
@@ -161,7 +206,64 @@ Exact contractual RPO, RTO and automated/manual DR activation remain TBD and mus
 
 ---
 
-## 6. Sensor architecture product requirements
+
+### Native production packages and service continuity
+### PRD-DEV-001 — Container-isolated engineering environment
+
+All normal development and automated test stacks shall run under Docker Compose. The repository shall provide a one-command startup path, health-aware startup, deterministic teardown and documented reset/recovery. Project services and databases shall not depend on host-native project runtimes.
+
+### PRD-DEV-002 — Reboot-safe developer state
+
+The development environment shall distinguish durable named volumes from disposable test volumes. Normal laptop shutdown/reboot must not corrupt Platform state. After Docker daemon restart, services configured for development auto-resume must restart according to Compose policy and re-establish health without manual database repair.
+
+### PRD-PKG-001 — Native production packages
+
+Core, Sensor and Linux Agent shall ship as both `.deb` and `.rpm` packages for certified Ubuntu/RHEL versions. Windows Agent shall ship as a code-signed service executable and GA MSI, with install/uninstall BAT wrappers. Docker images are engineering/test artifacts and optional future deployment artifacts; Docker is not a mandatory customer runtime for the initial native installation model.
+
+### PRD-SVC-001 — Auto-start and recovery
+
+- Linux Core, Sensor and Agent services shall be enabled at install time for automatic boot startup.
+- Windows Agent shall be installed as an automatically starting Windows Service.
+- Services shall expose explicit states: STARTING, HEALTHY, DEGRADED, STOPPING, STOPPED, FAILED, RECOVERING.
+- Repeated crash loops shall be surfaced as Platform/system alerts rather than being hidden by infinite restart.
+
+### PRD-LOG-001 — Structured system/application diagnostics
+
+Each component shall emit structured logs containing at minimum timestamp, severity, component, version, node/sensor/agent identity, tenant where relevant, event/error code, correlation/request ID where relevant and safe contextual attributes. Passwords, communities, private keys, tokens and authorization headers shall never be written in clear text.
+
+Required log classes include startup, configuration load, registration/enrollment, connectivity, storage, database/message-bus interaction, polling/collection, provisioning, protocol errors, security events, HA/failover, upgrade/rollback, shutdown, crash/restart and recovery.
+
+### PRD-LOG-002 — Supportability
+
+The Administration and Platform Health workspaces shall expose service health, recent failures, restart count, last successful recovery and links to sanitized diagnostics/support-bundle generation according to RBAC.
+
+---
+
+
+## 6. Sensor runtime, roles and local continuity
+
+**Feature contract (summary):**
+- **Purpose/outcome:** One Universal Sensor runtime with role-based collection near the estate
+- **Subfeatures:** NETWORK/INFRASTRUCTURE/FLOW/LOG; conditional SYNTHETIC/CLOUD_API; COMBINED lab; local spool; 80% protection
+- **Primary persona:** Platform / Tenant Admin; NOC
+- **Dependencies:** Core desired-state, credentials, capacity, mTLS
+- **Preconditions:** Sensor enrolled and healthy
+- **Primary workflow:** deploy Sensor → assign role → receive work → spool → upload
+- **Product behavior:** headless; continues during Core/WAN loss while capacity remains
+- **Failure/degraded behavior:** backpressure/reclaim under 80%; role isolation so Flow does not starve SNMP
+- **Acceptance outcome:** Sensor continues through Core failover; durable replay idempotent
+- **Maturity boundary:** SPECIFIED; production entrypoint may not yet wire full governed scheduler — Architecture states target vs gap
+
+
+### Canonical Sensor role taxonomy (normative product)
+
+| Role class | Roles | Notes |
+|---|---|---|
+| Standard production | `NETWORK`, `INFRASTRUCTURE`, `FLOW`, `LOG` | Customer-facing production roles |
+| Conditional | `SYNTHETIC`, `CLOUD_API` | Where product requirements justify dedicated Sensors |
+| Lab/dev/small | `COMBINED` | Only for explicitly governed lab/dev/small profiles unless separately certified |
+
+**Implementation mismatch:** current runtime also exposes `STREAMING_EVENT` as a general streaming/event role. That implementation role must **not** remain the final product-facing substitute for explicit `FLOW` and `LOG` production roles. Status: **IMPLEMENTATION RECONCILIATION REQUIRED / migration gap**. Do not create multiple Sensor products/codebases. Do not change runtime code in A2.1 documentation work.
 
 ### 6.1 Universal runtime and roles
 
@@ -241,8 +343,8 @@ Sensors shall:
 
 ---
 
-## 7. Sensor placement and capacity
 
+## 7. Sensor placement, pools and capacity
 ### 7.1 Placement modes
 
 During provisioning customers shall be able to select:
@@ -272,6 +374,8 @@ The Sensor Placement Engine shall evaluate:
 
 The nearest geographic Sensor must not be selected blindly if it is unhealthy or overloaded.
 
+Platform may recommend Sensor placement improvements from observed locality, capacity and completion evidence (**Sensor placement learning**). Recommendations require operator/admin approval unless an explicit safe auto-rebalance policy is enabled; learning never silently overrides pinned/manual placements.
+
 ### 7.3 Sensor pools and redundancy
 
 Sensor Pools shall support:
@@ -300,8 +404,10 @@ Device count alone shall not be the sole enforcement model.
 
 ---
 
-## 8. Agent requirements
 
+**Maturity note:** logical Region/Site/Sensor Pool product model is required; physical persistence of pools/regions may be incomplete on current main (Architecture/#92). Do not treat UI/logical design as certified physical schema.
+
+## 8. Agent requirements
 - Separate Windows and Linux Agent builds.
 - Initial Agent enrollment takes a stable Core endpoint.
 - Core authenticates/enrolls Agent and shall select an appropriate eligible Sensor during enrollment for a provisional authenticated Agent→Sensor control/transport association used for certificate/identity authority, onboarding/bootstrap validation, bounded health/bootstrap evidence and candidate reconciliation.
@@ -316,7 +422,20 @@ Device count alone shall not be the sole enforcement model.
 
 ---
 
-## 9. Provisioning & Discovery workspace
+
+## 9. Provisioning, discovery and identity
+
+**Feature contract (summary):**
+- **Purpose/outcome:** UI-driven onboarding without silent licence activation
+- **Subfeatures:** individual; bulk; auto-discovery; preflight; firewall matrix; identity/dedup; review queue
+- **Primary persona:** Tenant Admin / Network Engineer
+- **Dependencies:** credentials, Sensors, packs, capacity
+- **Preconditions:** eligible Sensor and Credential Profile
+- **Primary workflow:** wizard/import/discovery → preflight → review → activate
+- **Product behavior:** actionable failures with evidence; Display Name rules
+- **Failure/degraded behavior:** block on capacity/auth/firewall with Fix & Retry
+- **Acceptance outcome:** no silent licensed monitoring without policy
+- **Maturity boundary:** SPECIFIED; customer Discovery authorization may be fail-closed while IAM integration incomplete (#92)
 
 Navigation: **Inventory → Provisioning & Discovery**.
 
@@ -438,8 +557,20 @@ Canonical entity identity shall use tenant-aware combinations of stable signals 
 
 ---
 
-## 10. Credential and security protocol requirements
 
+### Provisioning completeness (absorbed from PRD-PRV-PLUS)
+1. Manual, bulk and discovery provisioning use one common validation pipeline; none may bypass preflight checks.
+2. User may enter `Display Name` and `Description` for network, infrastructure, API or any other entity. If Display Name is blank, resolution order is customer alias/device alias → discovered hostname/sysName/API name → DNS/FQDN → IP/address fallback. Customer-entered name is never silently overwritten by later discovery.
+3. Sensitive values are never silently trimmed; non-secret textual fields may be normalized with a visible correction record.
+4. The diagnostic result differentiates unreachable path, protocol timeout, authentication failure, authorization failure, likely ACL/firewall blockage, protocol-not-enabled suspicion, TLS failure, unsupported profile, duplicate identity, no eligible Sensor and capacity exceeded.
+5. Every diagnostic result contains evidence and recommended next action. AI may explain evidence but may not invent certainty.
+6. Sensor selection is tested from the Sensor that will actually perform monitoring.
+7. Bulk import provides interactive staging and `Fix & Retry`, not repeated spreadsheet rework.
+8. Device discovery never immediately consumes licensing/starts polling without the customer's configured auto-approval policy or review queue.
+9. Capacity simulation runs before bulk activation and can block unsafe provisioning.
+
+
+## 10. Credential and security protocol requirements
 Credential Profiles shall be centrally managed, encrypted and scoped by tenant/site/group/Sensor policy.
 
 Network/device provisioning must support the following protocol/security categories as certified by device/library compatibility:
@@ -465,8 +596,8 @@ Credential permissions shall distinguish **USE** from **REVEAL**.
 
 ---
 
-## 11. Network monitoring requirements
 
+## 11. Network monitoring requirements
 ### 11.1 SNMP
 
 Platform shall support:
@@ -554,8 +685,8 @@ Enrichment may include entity/device/interface, site/region, IPAM/subnet, VLAN/V
 
 ---
 
-## 12. Infrastructure, hardware, virtualization and storage requirements
 
+## 12. Infrastructure, hardware, virtualization and storage
 ### 12.1 Server/OS
 
 Support agentless and optional Agent-based monitoring for:
@@ -595,8 +726,28 @@ Support storage systems and SAN fabric monitoring for capacity, IOPS, throughput
 
 ---
 
-## 13. Database monitoring requirements
 
+### Windows/Linux infrastructure monitoring modes
+
+Platform shall support both **Agent-based** and **agentless/remote** Windows/Linux infrastructure monitoring as separately certifiable modes.
+
+Customer-visible server monitoring shall include, where the OS/version/privilege supports it:
+
+- CPU utilization and useful scheduler/resource-pressure evidence;
+- memory, swap/page/commit and resource-exhaustion evidence;
+- filesystem capacity/inodes and block-I/O throughput/IOPS/queue/latency/error evidence;
+- network-interface state/throughput/errors/drops and bounded transport-quality counters;
+- bounded process resource/state/restart information;
+- Linux systemd and Windows service state/restart/failure information;
+- OS/boot/uptime/time-quality facts and selected bounded operational/kernel/Event Log evidence;
+- applicable hardware/thermal/power evidence through approved native or out-of-band sources.
+
+Linux Agent and Windows Agent are the richer local collection modes. Linux agentless monitoring uses governed SSH query packs; Windows agentless monitoring uses governed WinRM/WMI/CIM query packs. Product/UI/API shall disclose capability differences rather than imply identical raw coverage.
+
+Collection, credential, privilege or path failure is **monitoring-health evidence**. It shall not automatically become host/service DOWN when the monitored state cannot be established.
+
+
+## 13. Database monitoring requirements
 Platform shall provide database packs/connectors for major databases including PostgreSQL, MySQL/MariaDB, Microsoft SQL Server, Oracle, SAP HANA, MongoDB, ClickHouse and Elasticsearch/OpenSearch where interfaces/licensing permit.
 
 Normalized capabilities include:
@@ -616,8 +767,8 @@ Database credentials shall be scoped and protected. Arbitrary dangerous SQL shal
 
 ---
 
-## 14. Cloud, Kubernetes and OpenTelemetry requirements
 
+## 14. Cloud, Kubernetes and OpenTelemetry
 ### 14.1 Cloud
 
 Cloud provider roots include AWS, Azure, GCP and OCI. Vendor identifiers never override Platform tenant/entity authority. Required concepts: cloud hierarchy discovery; ephemeral-child lifecycle/reconciliation; provider API quota/rate-budget governance; throttling; freshness/staleness; provider service-health; audit/change evidence; cloud-network evidence; quota/autoscaling evidence; canonical normalized entity/state; connector self-health. New cloud SDK dependencies remain Platform_07 governed and are not auto-approved.
@@ -640,8 +791,8 @@ Platform shall accept OTLP metrics and logs initially. Architecture shall be tra
 
 ---
 
-## 15. Synthetics and service assurance
 
+## 15. Synthetics and service assurance
 Synthetic Monitor Studio shall support structured, safe tests for:
 
 - ICMP;
@@ -656,8 +807,8 @@ HTTP/API tests shall support method, headers, authentication, body, expected sta
 
 ---
 
-## 16. MIB Studio
 
+## 16. Extensibility studios (MIB, API, Device Pack)
 MIB Studio remains part of the single Capability Pack extension architecture (not a second pack registry/SDK). Required contracts include import, revision/version, provenance/licensing, dependencies, compile/test, OID/table/notification mapping and firmware/model compatibility.
 
 
@@ -683,7 +834,6 @@ MIB provenance shall classify Platform Supplied, Customer Supplied, Partner Supp
 
 ---
 
-## 17. API Studio
 
 API Studio collection runtime is **monitoring source collection**, distinct from external integration delivery queues. Required contracts include REST/API schema, authentication reference, pagination, extraction/mapping, rate-limit behavior, collection cadence/freshness, schema-drift handling and source provenance. Do not treat an outbound ITSM/webhook connector queue as the API monitoring scheduler.
 
@@ -723,7 +873,6 @@ AI may suggest schema interpretation but an administrator confirms mappings befo
 
 ---
 
-## 18. Device Pack Studio
 
 A Device Pack may contain:
 
@@ -755,8 +904,11 @@ A Device Pack Test Lab shall accept sample SNMP walks, REST responses, CLI outpu
 
 ---
 
-## 19. Canonical entity and graph product requirements
 
+### OSS implementation basis (product constraint)
+Module SHALL use catalogue-approved OSS for commodity primitives and retain Platform-owned product layers (identity, policy, placement, qualification, RCA guardrails, UX). Exact component versions and licence class live in `Platform_07_OSS_Catalog.md`; runtime authority in `Platform_03_Architecture.md`. The historical PRD-OSS tables are absorbed as this constraint — not as a competing catalogue.
+
+## 17. Canonical entity and operational graph
 The same physical/logical resource shall not become duplicate entities merely because it is observed through SNMP, flow, syslog, NCM, API or Agent.
 
 Entity families include tenant, region, site, network device, chassis/module/interface, VRF/VLAN, route/peer, server/OS/NIC/disk/process/service, hypervisor/VM, storage, DB, Kubernetes, cloud and business service entities.
@@ -771,8 +923,8 @@ Historical topology shall support viewing the network/service graph as it existe
 
 ---
 
-## 20. Grouping, hierarchy and ownership
 
+## 18. Grouping, hierarchy, ownership and circuits
 Platform shall support concurrently:
 
 - tags/attributes;
@@ -788,7 +940,6 @@ Entities may store business owner, technical owner, support team, escalation gro
 
 ---
 
-## 21. Circuit inventory
 
 Circuit records shall support:
 
@@ -807,8 +958,8 @@ This context shall enrich Link, SLA, path and incident workflows.
 
 ---
 
-## 22. Monitoring and policy hierarchy
 
+## 19. Monitoring policy, thresholds and adaptive polling
 No customer-specific operational behavior should require source-code modification.
 
 Policy inheritance shall support:
@@ -842,7 +993,6 @@ Changes shall be versioned, auditable and rollback-capable at configuration leve
 
 ---
 
-## 23. Threshold and baseline engine
 
 Supported conditions shall include:
 
@@ -864,7 +1014,6 @@ Learned baselines shall support configurable training window, sensitivity, seaso
 
 ---
 
-## 24. Adaptive polling
 
 Adaptive polling may be triggered by:
 
@@ -884,7 +1033,20 @@ Safety limits shall protect Sensor CPU, polling operations/sec, maximum adaptive
 
 ---
 
-## 25. Event, alert and incident model
+
+## 20. Events, alerts, incidents, Alert Qualification Engine, storm and maintenance
+
+**Feature contract (summary):**
+- **Purpose/outcome:** Low-noise, evidence-qualified operational alerting
+- **Subfeatures:** event/alert/incident model; qualification; storm/dedup/flapping; maintenance/suppression
+- **Primary persona:** NOC Operator / Manager
+- **Dependencies:** freshness, identity, topology, maintenance calendars, multi-evidence
+- **Preconditions:** monitors assigned and telemetry flowing or path-health known
+- **Primary workflow:** observe → qualify → correlate → incident → recover
+- **Product behavior:** SNMP/path failure alone must not auto-assert DEVICE DOWN when contradictory evidence remains credible
+- **Failure/degraded behavior:** UNKNOWN / MONITORING_DEGRADED / path-unavailable semantics preserved
+- **Acceptance outcome:** false-alert reduction measurable; severity ≠ confidence
+- **Maturity boundary:** SPECIFIED
 
 Platform shall distinguish:
 
@@ -900,7 +1062,6 @@ Ownership, team assignment, notes, escalation, SLA timer and handoff shall be av
 
 ---
 
-## 26. Alert Qualification Engine
 
 A failed SNMP poll shall **not** automatically mean `DEVICE DOWN`.
 
@@ -937,7 +1098,6 @@ Recovery shall also be qualified using configurable stability windows, not one s
 
 ---
 
-## 27. Alert storm, deduplication and flapping protection
 
 Platform shall support:
 
@@ -955,7 +1115,6 @@ Product shall expose metrics for raw events vs qualified alerts vs correlated in
 
 ---
 
-## 28. Maintenance and suppression
 
 Platform shall distinguish:
 
@@ -969,13 +1128,13 @@ ITSM change/maintenance windows may synchronize into Platform when configured.
 
 ---
 
-## 29. Graph intelligence, GNN and RCA requirements
 
-### 29.1 Architecture principle
+## 21. Graph intelligence, GNN and RCA
+### 21.1 Architecture principle
 
 Platform RCA is a **hybrid evidence-based graph reasoning system**. It shall not be an LLM-only system and shall not treat GNN output as proof of causality.
 
-### 29.2 Evidence inputs
+### 21.2 Evidence inputs
 
 RCA shall combine, when available:
 
@@ -993,7 +1152,7 @@ RCA shall combine, when available:
 - prior incident patterns;
 - learned graph/GNN scores.
 
-### 29.3 GNN learning incorporated from graph-first products
+### 21.3 GNN learning incorporated from graph-first products
 
 Platform shall maintain a temporal multi-layer operational graph suitable for learned graph features. A GNN/graph-learning component may:
 
@@ -1007,7 +1166,7 @@ Platform shall maintain a temporal multi-layer operational graph suitable for le
 
 GNN results must remain subordinate to evidence/protocol constraints. Model output must include version, score/confidence and traceability to the graph snapshot/evidence window used.
 
-### 29.4 RCA output
+### 21.4 RCA output
 
 Every RCA shall expose:
 
@@ -1025,11 +1184,11 @@ Every RCA shall expose:
 - recommended next action/runbook;
 - correlated child alerts in chronological order.
 
-### 29.5 Deterministic/learned separation
+### 21.5 Deterministic/learned separation
 
 Protocol-aware rules and canonical relationships provide deterministic constraints. Statistical/ML/GNN components provide learned scoring or anomaly evidence. The system shall never market “GNN = deterministic truth.”
 
-### 29.6 RCA quality benchmark
+### 21.6 RCA quality benchmark
 
 Engineering/QA shall maintain a labeled incident benchmark including at minimum representative cases such as physical link failure, interface shutdown, BGP/OSPF cascades, MPLS path failure, configuration blackhole, congestion, hardware/power fault, maintenance storm and multi-site dependency failure.
 
@@ -1048,8 +1207,23 @@ No unsupported answer is preferable to a confident wrong answer.
 
 ---
 
-## 30. AI Gateway and conversational operations
 
+### Graph/GNN/AI product constraints (absorbed from PRD-RCA-GNN)
+Platform shall incorporate graph-first learning without copying NetAI proprietary implementation:
+
+- topology is a reasoning substrate, not merely a visual map;
+- graph is temporal and multi-layer: physical/L2/L3/routing/MPLS/VXLAN/SD-WAN/traffic/infra/service/geo/causal;
+- deterministic/protocol evidence and observed configuration change retain explicit provenance;
+- ML/GNN can score anomaly, propagation likelihood, likely root candidate and blast radius;
+- GNN output is **supporting evidence**, never sufficient by itself to declare causality;
+- the RCA result exposes root candidate, confidence, causal chain, supporting evidence, contradictory evidence, affected scope, change context, recommendation and missing evidence;
+- `INCONCLUSIVE` is a first-class result;
+- raw/child alarms are not destroyed when incident compression occurs;
+- training/validation uses labeled incidents and measures root-cause precision, false-root-cause rate, no-answer rate, time-to-root-cause, blast-radius accuracy, alarm-compression ratio and explanation completeness;
+- Gemini/LLM operates through AI Gateway for natural-language search, summarization, explanation and recommendation. It does not replace the causal engine and never receives secrets by default.
+
+
+## 22. AI Gateway and local intelligence placement
 Gemini shall be integrated through a provider-independent AI Gateway.
 
 Permitted uses include:
@@ -1073,8 +1247,21 @@ AI feedback shall support Correct / Partially Correct / Incorrect plus optional 
 
 ---
 
-## 31. Unified Operations Timeline
 
+### Lightweight/local AI placement
+
+Local intelligence uses three deployment tiers:
+
+1. **Tier 0 — endpoint deterministic intelligence:** capture-eligibility evaluation, hysteresis, bounded rolling/statistical checks and EDS evidence logic. No LLM/GNN/foundation-model runtime is required or permitted on normal monitored Agents/Sensors for EDS.
+2. **Tier 1 — Core bounded analytics:** statistical/ML, anomaly, forecast, similarity and optional GNN work executes only within certified cold/bounded resource controls and yields to protected monitoring.
+3. **Tier 2 — language/embedding assistance:** LLM/embedding functions run behind AI Gateway either in a certified on-Core profile or through an optional dedicated local/private inference provider.
+
+**If** a dedicated local/private inference provider is supported/enabled, it is optional and must remain stateless with respect to authoritative Platform state. It is not required for Linux/Windows monitoring, EDS, deterministic RCA or base Platform operation; it is not a third Core/HA node; and it may be unavailable without impairing deterministic collection, alerting, incident handling or RCA. Core-resident LLM remains optional. All-AI-disabled remains supported.
+
+Detailed evidence, security, resource and release contracts are authoritative in `Platform_22`, `Platform_23`, `Platform_10`, `Platform_11`, `Platform_14`, `Platform_17` and `Platform_18`.
+
+
+## 23. Operations timeline, troubleshooting, path analysis and EDS
 For device, site, service and incident contexts, Platform shall provide one time-ordered view combining, as available:
 
 - telemetry state changes;
@@ -1094,7 +1281,6 @@ Timeline data shall be queryable around incident windows and support historical 
 
 ---
 
-## 32. Investigation and troubleshooting workspace
 
 Platform shall implement a **no-context-switch operational troubleshooting experience**. An authorized NOC/operator shall be able to move from observation to verification, diagnosis and evidence capture without leaving the current device/interface/alert/incident context for routine troubleshooting. Flexible composable dashboard interaction patterns may take inspiration from mature dashboard products such as Grafana, but Platform shall not copy Grafana literally; Platform troubleshooting remains domain-aware and action-oriented rather than a generic visualization-only experience.
 
@@ -1121,7 +1307,6 @@ Temporary **Investigation Mode** may increase polling, run deeper checks and gat
 
 ---
 
-## 33. Path Analysis
 
 User selects a source and destination/vantage. Platform correlates forward/reverse evidence where available, traceroute, latency/loss, interfaces, routing, VRF, SD-WAN/MPLS, Flow, topology and recent changes.
 
@@ -1129,8 +1314,28 @@ Path view shall identify uncertain/unobserved hops rather than inventing links.
 
 ---
 
-## 34. NCM requirements
 
+### Endpoint Diagnostic Snapshot
+
+Platform shall provide a bounded **Endpoint Diagnostic Snapshot (EDS)** for Windows/Linux infrastructure as a specialized profile of the existing Diagnostic Job / Live Evidence / Investigation architecture (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`). EDS may start automatically after a centrally governed threshold/state condition becomes **capture-eligible**, or from an authorized investigation request. Capture-eligibility is not authoritative host-health state.
+
+EDS shall:
+
+- reuse existing normal observations for capture-eligibility evaluation wherever possible;
+- use policy-defined duration, hysteresis, recovery and cooldown rather than one-sample triggering;
+- execute only under currently valid Core-issued assignment/policy/control generation (policy ID/version alone is insufficient);
+- collect a short-lived typed diagnostic evidence bundle appropriate to the capture-eligible resource class;
+- report Diagnostic Job state plus capture completeness `COMPLETE`, `PARTIAL`, `FAILED` or `SUPPRESSED` rather than inventing missing evidence;
+- preserve policy/version, authority generation, trigger, entity, source/vantage, time and evidence provenance;
+- feed the authoritative Core incident/RCA workflow through the existing Agent/Sensor durability paths (no second EDS transport);
+- stop, suppress or degrade with explicit observable reason before creating material additional pressure on an already stressed endpoint or silently destroying routine telemetry durability.
+
+EDS is evidence acquisition, **not endpoint-authoritative RCA** and not a second diagnostics framework. Core remains responsible for cross-domain causal analysis because endpoint-local evidence cannot by itself observe all network, hypervisor, storage, database, cloud, shared-service or change dependencies.
+
+No universal customer CPU/memory/disk threshold is fixed here. Effective values remain governed policy. This section is target architecture/requirements; specified ≠ implemented ≠ tested ≠ certified ≠ deployed.
+
+
+## 24. NCM and Privileged CLI Session Broker
 NCM is Day-1 important and shall support:
 
 - credentialed SSH/NETCONF/API connections;
@@ -1159,7 +1364,6 @@ Bulk operations shall support dry-run/impact preview and canary/staged execution
 
 ---
 
-## 35. Privileged CLI Session Broker
 
 The browser shall never directly receive reusable device credentials.
 
@@ -1185,11 +1389,11 @@ Telnet is legacy, disabled by default and never automatic fallback.
 
 ---
 
-## 36. IPAM requirements
 
+## 25. IPAM requirements
 IPAM shall support:
 
-- IPv4 and IPv6 as first-class;
+- IPv4 and IPv6 as first-class, including dual-stack estates;
 - subnet/supernet hierarchy;
 - VLAN/VRF association;
 - address state/reservation;
@@ -1209,9 +1413,7 @@ IPAM is integrated into the canonical graph and shall not be a separate competin
 ---
 
 
-
-## 37A. Display timezone requirements — v3.2.2 handoff
-
+## 26. Display timezone, scheduling and freshness
 | ID | Requirement |
 |---|---|
 | `PRD-TIME-001` | All authoritative system/event/telemetry timestamps shall remain absolute UTC instants in storage and machine-to-machine contracts (RFC3339/ISO-8601 capable). Rendered wall-clock strings are never source truth. |
@@ -1220,7 +1422,6 @@ IPAM is integrated into the canonical graph and shall not be a separate competin
 | `PRD-TIME-004` | Changing display timezone shall update labels/calendar grouping only. It must not change telemetry timestamps, alert evaluation, thresholds, incident sequencing, RCA/correlation, polling/retry/freshness, SLA semantics, maintenance-window execution, business calendars, scheduled jobs, report execution schedules or automation schedules. Operational policies requiring wall-clock interpretation carry their own explicit IANA timezone. Host OS timezone is non-authoritative. |
 | `PRD-TIME-005` | Reports/exports that render local timestamps must disclose the timezone used. Scheduled reports separate execution/schedule timezone from render/display timezone. Calendar-bucket queries may accept an explicit IANA zone and must return unambiguous absolute bucket boundaries plus timezone metadata. DST and half/quarter-hour correctness are mandatory certification subjects. |
 
-## 37B. Generic scheduling and freshness requirements — v3.2.2 handoff
 
 | ID | Requirement |
 |---|---|
@@ -1234,7 +1435,8 @@ IPAM is integrated into the canonical graph and shall not be a separate competin
 | `PRD-SCHED-008` | Scheduler admission shall observe CPU/RAM/spool/queue/latency/error/upload-backlog/freshness-debt pressure. Recovery ramp order is liveness → recovering critical → normal operational → detail → topology/state → inventory/background. Adaptive and event-triggered refresh are capacity/authorization/cooldown/dedup bounded with automatic reversion. |
 | `PRD-SCHED-009` | Capability Pack contracts carry applicable cadence/freshness/cost semantics. Where valuable, Agents may sample gauges approximately every 30–60 seconds locally and forward governed lower-rate min/max/average/last/count summaries; raw monotonic counters must not be averaged; tiny-sample P95/P99 must not be represented as statistically meaningful. |
 
-## 37. Reporting and SLA
+
+## 27. Reporting and SLA
 
 Report Studio shall support:
 
@@ -1254,8 +1456,8 @@ Long-term SLA/report retention may differ from raw telemetry retention.
 
 ---
 
-## 38. ITSM and notification integrations
 
+## 28. ITSM and notification integrations
 Supported adapters shall include architecture for:
 
 - ServiceNow;
@@ -1290,8 +1492,8 @@ An Integration Test Sandbox shall validate authentication, connection, field map
 
 ---
 
-## 39. RBAC and authorization
 
+## 29. RBAC, audit, API-first and query protection
 Authorization model: **Who × Resource × Action × Where × Conditions**.
 
 Dimensions:
@@ -1314,7 +1516,6 @@ All authorization is enforced server-side.
 
 ---
 
-## 40. Audit and governance
 
 Audit shall cover authentication, users/RBAC, provisioning, credentials, monitoring policies, alerts/incidents, maintenance, NCM/CLI, IPAM, dashboards/maps/reports, integrations, AI/remediation, Sensors/HA, licensing, retention, backup/restore and upgrades.
 
@@ -1335,8 +1536,32 @@ Audit storage should support append-only/tamper-evident controls, configurable r
 
 ---
 
-## 41. Data retention, rollup and archive
 
+All normal customer operations remain UI-first, but the UI shall consume supported control-plane APIs rather than bypassing them with database access.
+
+API Management shall support service accounts, clients/tokens, scopes, rate limits, usage, failures, expiry/rotation and audit.
+
+Outbound event/webhook subscriptions shall include relevant alert, incident, device, NCM, SLA and state-change events.
+
+---
+
+
+Platform shall protect itself from:
+
+- unbounded dashboard/raw queries;
+- high-cardinality custom metrics/labels;
+- API connector explosions;
+- excessive Flow/log rate;
+- excessive report concurrency.
+
+Controls include timeouts, maximum scan/rows, asynchronous large exports, cancellation, per-tenant/user concurrency, cardinality detection and recommendations to drop/normalize unstable labels.
+
+---
+
+
+**Maturity note:** persistent production IdentityDirectory / PermissionGrantDirectory authority may be absent on current main; Discovery authorization may be intentionally fail-closed until permission integration is complete (#92). Target product requirements remain as specified above.
+
+## 30. Retention, Storage Protection Engine and Legal/investigation hold
 Administration → Data & Retention shall allow configuration by data class/scope for:
 
 - raw retention;
@@ -1354,7 +1579,6 @@ Normal deletion should verify required rollups exist before raw data expires; em
 
 ---
 
-## 42. Storage Protection Engine
 
 Mandatory for Core and Sensor managed volumes.
 
@@ -1379,22 +1603,149 @@ Data-growth forecasting shall estimate time to watermark by volume/data class.
 
 ---
 
-## 43. Legal/investigation hold
 
 Authorized users shall be able to protect incident evidence for a defined scope/time range from normal retention/purge, including selected telemetry, Flow, logs, events, configuration, audit and RCA artifacts. Emergency capacity conflicts shall be surfaced explicitly; Platform must not silently violate protected retention policy.
 
 ---
 
-## 44. Asset lifecycle/reconciliation
 
+### Retention/protection constraints (absorbed from PRD-STORAGE)
+Administrators configure per tenant/data type/scope:
+
+- raw retention;
+- each rollup resolution and rollup retention;
+- archive action/destination/retention;
+- legal-hold behavior;
+- emergency purge priority within protected-data constraints.
+
+Rollup semantics must match metric type: gauges preserve min/max/avg/count/percentiles as configured; counters use delta/rate/total as appropriate; states preserve availability, duration, transitions and last state. Historical queries automatically select the appropriate resolution and disclose the resolution used.
+
+Core and Sensors implement non-disableable 80% managed-storage safety protection. Cleanup targets safe headroom rather than merely 79.9%. Purge actions are audited and visible. Monitoring/collection remains the priority.
+
+
+## 31. Asset lifecycle, technology lifecycle and desired-vs-actual
 Lifecycle states shall include Discovered, Pending Approval, Provisioning, Active/Monitored, Monitoring Degraded, Unmanaged, Disabled, Maintenance, Failed Provisioning, Decommission Requested, Decommissioned and Archived as applicable.
 
 Reconciliation detects disappeared devices, identity changes, IP/hostname moves, replacement/serial changes and stale licensed inventory. It shall never silently delete stale devices; they enter a review/decommission workflow.
 
 ---
 
-## 45. Upgrade, canary and rollback
 
+The following capabilities are part of the agreed Platform scope and must not be lost simply because they were identified after the first dashboard catalogue was drafted.
+
+### 31.1 Technology Lifecycle / EOS-EOL visibility
+
+Where authoritative vendor/customer data is legally available, Platform shall track model, firmware/software version, support lifecycle metadata, EOS/EOL dates, support/warranty metadata and lifecycle risk. Lifecycle data must preserve source/provenance and must not fabricate unsupported vendor dates.
+
+The product shall surface:
+
+- unsupported firmware/software;
+- hardware approaching EOL/EOS;
+- models already out of support;
+- inventory affected by lifecycle risk;
+- recommended review/upgrade candidates.
+
+This is operational asset intelligence, not a substitute for vulnerability management.
+
+### 31.2 Desired State vs Actual State
+
+For monitoring configuration, Platform shall continuously compare desired policy/assignment state with actual applied Sensor/entity state.
+
+Examples:
+
+- expected Sensor assignment vs actual;
+- expected monitoring profile vs actual;
+- desired protocol enabled vs observed protocol failure;
+- desired credential version vs applied/validated version;
+- desired Device Pack version vs actual;
+- desired Agent/Sensor version vs actual;
+- desired retention/alert policy vs effective configuration.
+
+Drift is visible, explainable and auditable.
+
+### 31.3 Shift Handover
+
+NOC operations shall have a Shift Handover workspace/report covering:
+
+- open critical/major incidents;
+- incidents under investigation/recovery;
+- unstable/flapping entities;
+- active/scheduled maintenance;
+- pending NCM/privileged approvals;
+- significant configuration changes;
+- Sensor/Core/integration degradation;
+- ticket synchronization failures;
+- capacity/storage/license warnings;
+- operator notes and ownership handoff.
+
+### 31.4 Migration Studio
+
+To reduce adoption friction, Platform shall provide a Migration Studio capable of importing and reconciling inventory/configuration data from customer exports/APIs. Initial generic import must support CSV/XLSX/CMDB-style data; vendor-specific migration adapters may be added for SolarWinds, ManageEngine, Zabbix, PRTG, Nagios, LogicMonitor, NetBox and others where legal/API/export mechanisms permit.
+
+Migration outcomes shall classify Imported, Automatically Mapped, Needs Review and Unsupported. Platform must not claim full translation of proprietary policies when semantic equivalence does not exist.
+
+### 31.5 Knowledge Base / Runbook Library
+
+Customers shall maintain approved runbooks, known issues, escalation procedures and troubleshooting guides, scoped by tenant/site/device type/service/incident class.
+
+RCA and AI may recommend or summarize approved runbooks. Customer-approved source content remains authoritative. Runbooks must be versioned/audited and executable steps must not become autonomous actions unless future remediation policy explicitly allows it.
+
+### 31.6 Post-Incident Review / Problem Management
+
+Platform shall generate a draft PIR from incident timeline, RCA, impact, evidence, ITSM ticket, configuration changes, actions and recovery. Human operators add/approve final root cause, corrective action, preventive action and lessons learned. Output can be reported/exported.
+
+### 31.7 Intelligence Quality / RCA Accuracy
+
+Platform shall measure and display, subject to available feedback/ground truth:
+
+- RCA runs;
+- confirmed correct/partially correct/incorrect;
+- inconclusive rate;
+- root-cause precision;
+- false-root-cause rate;
+- time-to-root-cause;
+- explanation completeness;
+- blast-radius accuracy;
+- recommendation correctness.
+
+Metrics must distinguish actual validated outcomes from unverified confidence scores.
+
+### 31.8 Alert Policy Effectiveness
+
+Platform shall identify noisy/low-value rules using evidence such as alert volume, incident conversion, acknowledgement/closure patterns, repeat rates and suppression. It may recommend review of a policy but does not silently change thresholds.
+
+### 31.9 Monitoring Optimization Recommendations
+
+Platform may recommend reducing unnecessary metric collection/polling when metrics are high-cost but unused by dashboards, alerts, reports or RCA over a configurable analysis period. It may also recommend Sensor redistribution. Recommendations require review/approval unless a safe automatic policy is explicitly enabled.
+
+### 31.10 Change Freeze and Operational Calendars
+
+Platform shall support business calendars, working hours, regional holidays, change freezes and blackout windows. NCM pushes, Platform/Sensor/Agent/Device Pack upgrades and other governed changes can be blocked or require emergency override/approval during freeze windows.
+
+### 31.11 Device / Time Comparison
+
+Operators shall be able to compare device A vs device B, or one entity/time window vs another, aligning normalized metrics, configuration, firmware, monitoring profile, topology, routing, errors and alerts where compatible. Missing/incompatible fields are marked rather than fabricated.
+
+### 31.12 Data Pipeline Integrity
+
+Platform Operations shall expose produced, accepted, consumed, inserted, rejected, duplicate, late, schema-error and dropped telemetry counts. The purpose is to detect silent data loss between Sensor, ingestion, Kafka, processing and ClickHouse.
+
+### 31.13 Scheduled Housekeeping
+
+A Housekeeping workspace shall show status/history/failures for rollups, TTL deletion, emergency purge, database compaction/maintenance, backups, archives, NCM backups, discovery jobs, report jobs and Sensor redistribution. Internal lifecycle work must not be invisible.
+
+### 31.14 Usage and Licensing Forecast
+
+Authorized administrators shall see licensed vs used entities/elements/modules and forecast approaching entitlement thresholds/expiry. This does not replace the agreed expiry/grace behavior.
+
+### 31.15 Contextual Help
+
+Complex settings and diagnostics shall expose `What is this?`, contextual documentation and, where allowed, AI explanation grounded in current Platform documentation/configuration. Help must never modify configuration without a separate explicit action.
+
+---
+
+
+## 32. Upgrade, canary, rollback and PKI
 Platform upgrade workflow shall include:
 
 - preflight;
@@ -1411,7 +1762,6 @@ Feature flags may restrict new features to selected tenants/groups during contro
 
 ---
 
-## 46. Certificate/PKI lifecycle
 
 Administration shall show UI, Sensor, Agent, internal-service and integration certificates, issuer, expiry, days remaining, usage and status.
 
@@ -1419,44 +1769,43 @@ Support customer CA, CSR/import/renewal, trust stores and certificate rotation. 
 
 ---
 
-## 47. API-first requirement
 
-All normal customer operations remain UI-first, but the UI shall consume supported control-plane APIs rather than bypassing them with database access.
+## 33. Licensing and usage forecast
 
-API Management shall support service accounts, clients/tokens, scopes, rate limits, usage, failures, expiry/rotation and audit.
+### Licensing grace — Founder-reserved conflict (UNRESOLVED)
 
-Outbound event/webhook subscriptions shall include relevant alert, incident, device, NCM, SLA and state-change events.
+**Founder-reserved conflict — neither 7-day nor 15-day post-expiry grace is current final normative commercial truth.**
 
----
+Conflicting historical/source values (record only; do not select):
 
-## 48. Query/cardinality protection
+- Current Mother Reference material: **7-day** post-expiry grace.
+- Prior Founder-approved material: **15-day** post-expiry grace.
 
-Platform shall protect itself from:
+Until Founder change control resolves **FOUNDER-LIC-GRACE**:
 
-- unbounded dashboard/raw queries;
-- high-cardinality custom metrics/labels;
-- API connector explosions;
-- excessive Flow/log rate;
-- excessive report concurrency.
+- post-expiry grace is a Founder-reserved, decision-required / configurable duration;
+- polling continues during whichever post-expiry grace duration is formally approved;
+- after the approved grace duration ends, polling stops unless the licence is manually extended/renewed;
+- historical data remains accessible; no licence-expiry data deletion;
+- engineering must not invent a compromise day-count and must not treat either historical value as settled commercial truth.
 
-Controls include timeouts, maximum scan/rows, asynchronous large exports, cancellation, per-tenant/user concurrency, cardinality detection and recommendations to drop/normalize unstable labels.
+Normative non-grace continuity (unchanged):
 
----
-
-## 49. Licensing behavior
-
-- Warn 30 days before expiry.
-- From 7 days before expiry, every dashboard shows a top banner: `Licence expires in X days`.
-- Default grace: 7 days after expiry; polling continues.
-- After grace, polling stops unless manually extended/renewed.
-- Historical data remains accessible; no licence-expiry data deletion.
+- Warn 30 days before expiry (T-30).
+- From 7 days before expiry (T-7), every dashboard shows a top banner: `Licence expires in X days`.
 - Licence settings/import remain accessible to authorized admins.
-- All state changes audited.
+- All licence/entitlement state changes are audited and visible in Usage & Licensing.
 
----
+### Licence expiry behavior
 
-## 50. UX performance and accessibility
+- T-30 days: warning begins.
+- T-7 days: persistent dashboard banner with exact days remaining.
+- Post-expiry: grace of Founder-approved duration (**FOUNDER-LIC-GRACE** unresolved; historical/source values 7-day vs 15-day only); polling continues during that approved grace.
+- After the approved grace ends: polling stops unless manually extended/renewed; historical data remains available.
+- License/entitlement events are audited and visible in Usage & Licensing dashboard.
 
+
+## 34. UX performance, accessibility and Dashboard Studio
 UI shall support:
 
 - light/dark/system theme;
@@ -1471,11 +1820,12 @@ UI shall support:
 - asynchronous long-running operations with progress;
 - WebSocket/SSE updates where beneficial.
 
+UI foundations shall include internationalization readiness (locale-aware formatting where applicable) alongside accessibility requirements above. Exact translation scope remains product-configurable; accessibility and readable contrast remain mandatory.
+
 Exact numeric SLOs are benchmark-defined TBD, but common interactive actions must remain low-latency and regressions shall fail performance certification.
 
 ---
 
-## 51. Dashboard Studio requirements
 
 Library scopes:
 
@@ -1494,7 +1844,6 @@ Panels are draggable, resizable, duplicable and linkable. Users can add/remove/r
 
 ---
 
-## 52. Universal dashboard controls
 
 Where meaningful, dashboards shall support:
 
@@ -1509,8 +1858,8 @@ Where meaningful, dashboards shall support:
 
 ---
 
-## 53. Out-of-box dashboard/workspace catalogue
 
+## 35. Out-of-box dashboard and workspace catalogue
 The following catalogue is required out of box. Entity-detail dashboards may be contextual rather than separate left-nav items.
 
 | # | Dashboard / Workspace | Primary users | Out-of-box purpose/panels | Default tabs/views |
@@ -1601,11 +1950,11 @@ The following catalogue is required out of box. Entity-detail dashboards may be 
 | 84 | **Access Governance** | Security/admin | Users, privileged users, dormant/service accounts, MFA, temporary access and denied attempts. | Overview; Users; Privileged; Temporary Access; Failures |
 | 85 | **CLI Session History** | Security/network | User/device/start/end/commands/privilege/result/config-change/ticket and optional playback. | Sessions; Commands; Changes; Playback |
 
-### 53.1 Common dashboard behavior
+### 35.1 Common dashboard behavior
 
 All applicable dashboards shall inherit the Universal Dashboard Controls defined above. Drill-down must preserve tenant/site/device/time context. A row/entity click should support a quick side panel and full contextual page. Saved views may be Private, Team or Tenant-wide according to authorization.
 
-### 53.2 Role landing pages
+### 35.2 Role landing pages
 
 Default role mappings:
 
@@ -1621,8 +1970,32 @@ Customers may override landing page policy.
 
 ---
 
-## 54. Topology & Map Studio
 
+### Additional OOB workspaces #86–98
+These extend the earlier catalogue and are also required out of box:
+
+| # | Dashboard / Workspace | Purpose | Key views/actions |
+|---:|---|---|---|
+| 86 | **Technology Lifecycle Risk** | EOS/EOL/unsupported firmware/model risk by vendor/site/criticality | Lifecycle risk; Firmware; Models; Sites; Export; Create remediation plan |
+| 87 | **Desired vs Actual / Configuration Drift** | Monitoring/assignment/profile/version drift | Drift by Sensor/entity/policy; Explain source; Reconcile; Audit |
+| 88 | **Shift Handover** | NOC handover of unresolved operational state | Critical incidents; maintenance; changes; pending approvals; platform issues; notes; handover report |
+| 89 | **Migration Studio** | Import/reconcile from existing monitoring/CMDB tools | Sources; Imports; Mapping; Review; Unsupported; Job history |
+| 90 | **Intelligence Quality** | RCA/anomaly/qualification quality and feedback metrics | RCA accuracy; Inconclusive; false-root; time-to-RCA; feedback |
+| 91 | **Alert Policy Effectiveness** | Identify noisy/ineffective rules | Alert volume; incident conversion; repeats; suppressions; recommendations |
+| 92 | **Data Pipeline Integrity** | Prove telemetry continuity across ingestion pipeline | Produced; accepted; Kafka; processed; inserted; rejected; duplicates; late; dropped |
+| 93 | **Storage & Retention** | Capacity, growth, retention, rollups, archive and 80% protection | Breakdown by data class/volume; forecast; purge history; policy simulation |
+| 94 | **Usage & Licensing** | Entitlement/consumption/expiry forecasting | Licensed vs used; module usage; growth; expiry/grace state |
+| 95 | **Housekeeping & Lifecycle Jobs** | Background maintenance/rollup/backup/archive/job status | Running; completed; failed; duration; next run; details |
+| 96 | **Post-Incident Review** | Generate/review PIR and problem-management actions | Timeline; root cause; impact; CAPA; lessons; approvals; export |
+| 97 | **Runbook Library** | Approved troubleshooting/operations procedures | Search; by incident/device/service; version; owner; recommendation usage |
+| 98 | **Device / Time Comparison** | Side-by-side operational comparison | Metrics; config; topology; firmware; alerts; profile; time comparison |
+
+All additional workspaces inherit the same global filters, RBAC, saved views, export and audit principles where applicable.
+
+
+---
+
+## 36. Topology & Map Studio
 Topology navigation shall include Topology Explorer, Physical, L2, L3, Routing, MPLS, VXLAN/EVPN, SD-WAN, Infrastructure, Service Dependency, Traffic, Geo and Custom Maps.
 
 Map Studio shall provide a palette of entities/sites/groups/services/cloud/links/shapes/labels/icons, canvas manipulation, relationship type, health rollup, visibility, layout and style controls.
@@ -1631,17 +2004,17 @@ Automatic layout options may include hierarchical, radial, force, tree, site and
 
 ---
 
-## 55. Administration information architecture
 
-### 55.1 Customers / Tenants
+## 37. Administration information architecture
+### 37.1 Customers / Tenants
 
 Customer list/create/profile, modules/licensing, deployment, users, Sensors, integrations, usage and audit. Customer users cannot browse other tenants.
 
-### 55.2 Sites, groups and hierarchy
+### 37.2 Sites, groups and hierarchy
 
 Sites, hierarchical groups, dynamic groups, hierarchies, tags and attributes. Sites may define preferred Network/Infrastructure/Synthetic Sensor pools and fallback pools.
 
-### 55.3 Users & Access
+### 37.3 Users & Access
 
 Users, Roles, Groups, Permissions, Service Accounts, API Clients, Temporary Access, Approvals and Sessions.
 
@@ -1649,80 +2022,80 @@ User detail tabs: Profile, Roles, Scope, Groups, Authentication, Sessions, CLI A
 
 Role Designer shall expose module/action/resource-scope/condition matrix and Access Simulator.
 
-### 55.4 Authentication
+### 37.4 Authentication
 
 Local Authentication, AD, LDAP, SAML, OIDC, Entra ID, MFA, Password Policy and Session Policy. Connections must be testable before enablement.
 
-### 55.5 Credentials & Secrets
+### 37.5 Credentials & Secrets
 
 SNMP, SSH, WinRM, API, cloud, DB, virtualization, Redfish and generic credential types. Credential metadata includes name/type/scope/allowed Sensors/rotation/last verified/usage/audit.
 
-### 55.6 Discovery
+### 37.6 Discovery
 
 Jobs, ranges/seeds, credentials, schedule, exclusions, results and approval.
 
-### 55.7 Monitoring Profiles
+### 37.7 Monitoring Profiles
 
 Profiles, Metrics, Polling, Adaptive Polling, Assignments, Inheritance, Thresholds, Validation, Alerts and Topology.
 
-### 55.8 Alert policies
+### 37.8 Alert policies
 
 Policies, thresholds, baselines, composite rules, validation, escalation, suppression and dependencies.
 
-### 55.9 Device Down Validation
+### 37.9 Device Down Validation
 
 Dedicated editor for retry counts, ICMP attempts, TCP ports, secondary Sensor, REST check, traceroute and decision expression/consensus.
 
-### 55.10 Maintenance & Suppression
+### 37.10 Maintenance & Suppression
 
 Active, Scheduled, Recurring, History plus create wizard for scope, type, schedule, alert/notification/ITSM effect, reason, ticket and approval.
 
-### 55.11 Notifications
+### 37.11 Notifications
 
 Email, Teams, Slack, approved WhatsApp, webhook, SMS/PagerDuty and custom adapters with routing policies.
 
-### 55.12 ITSM
+### 37.12 ITSM
 
 Connection, Authentication, Field Mapping, Ticket Policy, Recovery, Reopen, Synchronization, Queue, Health and Audit.
 
-### 55.13 Sensors
+### 37.13 Sensors
 
 Sensors, Pools, Assignments, HA, Capacity, Deployment, Versions and Updates.
 
 Sensor Pool settings include role, region/site, capacity, HA mode, affinity and allowed device groups.
 
-### 55.14 Agents
+### 37.14 Agents
 
 Agents, Policies, Versions, Updates, Edge Tests and Deployment Packages.
 
-### 55.15 Data & Retention
+### 37.15 Data & Retention
 
 Overview, Retention Policies, Rollups, Archive, Storage Forecast, Emergency Protection, Data Classes and Audit.
 
-### 55.16 HA
+### 37.16 HA
 
 Core pair, Sensor pools, state synchronization, failover history and health. Normal customers may have read-only visibility while Platform admins control changes.
 
-### 55.17 AI
+### 37.17 AI
 
 Provider, Gemini configuration, Data Policy, Tool Controls, Usage, Audit and Future Offline Provider configuration.
 
-### 55.18 Licensing
+### 37.18 Licensing
 
 Customer, licence type, modules, device/element consumption, expiry, support, HA entitlement and offline licence import/extension.
 
-### 55.19 Security
+### 37.19 Security
 
 Security Overview, MFA, Sessions, Certificates, API Tokens, Credential Policies, Encryption, Access Restrictions, Audit Retention, CLI Policies and Break Glass.
 
-### 55.20 System / Platform Operations
+### 37.20 System / Platform Operations
 
 Platform, Core Pair, Data Services, Kafka, Logs, Backup, Restore, Upgrade, Support Bundle, Time/NTP, SMTP, Proxy and Certificates.
 
 ---
 
-## 56. Onboarding wizard
 
+## 38. Onboarding wizard, environment readiness and Migration Studio
 A new installation shall not land on an unexplained empty dashboard. Wizard stages:
 
 1. Organization/tenant.
@@ -1741,7 +2114,6 @@ Show setup completion state and blocking issues.
 
 ---
 
-## 57. Deployment / environment readiness
 
 Readiness scanner checks, where applicable:
 
@@ -1762,57 +2134,58 @@ Generate an Implementation Readiness Report suitable for customer network/securi
 
 ---
 
-## 58. Backup, restore and supportability
 
+## 39. Backup, restore and supportability
 Platform shall expose backup schedules/status/restore points and restore validation.
 
 Support Bundle generation shall collect relevant versions, service health, logs, Sensor/data diagnostics and configuration metadata while automatically masking credentials, tokens, private keys and defined sensitive data.
 
 Every customer-facing technical error should carry a stable error code, customer explanation, technical context, suggested action and correlation/request ID.
 
+**No Silent Failure:** material collection, storage, integration, HA, provisioning, authentication or workflow failures must expose what failed, evidence, impact and remediation guidance rather than failing silently.
+
 ---
 
-## 59. Data sovereignty and future regional architecture
 
+## 40. Data sovereignty and future regional architecture
 Data placement policies shall be architecturally possible so future regional Cores can retain raw telemetry in region and federate summaries upward. This is a future scalability extension and not an initial Master Core implementation requirement.
 
 ---
 
-## 60. Non-functional requirements
 
-### 60.1 Resource efficiency
+## 41. Non-functional requirements and SNWP
+### 41.1 Resource efficiency
 
 - Core target up to 2,500 devices: 8 vCPU / 16 GB under certified Standard Network Workload Profile.
 - Sensor current planning baseline: 4 vCPU / 16 GB / 150 GB for ~800 normal network devices.
 - Sensor engineering benchmark target: 8 vCPU / 16 GB for ~2,000–2,500 normal devices where workload permits.
 - Agent footprint target: TBD by OS/workload benchmark; must be explicitly measured and kept low.
 
-### 60.2 UI/API performance
+### 41.2 UI/API performance
 
 Exact SLOs TBD after baseline benchmark, but release testing must cover dashboard initial load, cached load, search suggestions, table filtering, alert acknowledgement, API latency and large-environment pagination.
 
-### 60.3 Availability
+### 41.3 Availability
 
 - Non-HA installations have no HA availability claim.
 - HA target: 99.95% service design objective subject to deployment assumptions and final SLA definition.
 - Core failover certified target <60s.
 - Sensor monitoring continuity through Core failover.
 
-### 60.4 Scale
+### 41.4 Scale
 
 Architecture target range is 2,000–200,000 devices globally through horizontal Sensors and future multiple regional Cores. Exact certified scale per release must be benchmarked; architecture target is not a release claim.
 
-### 60.5 Security
+### 41.5 Security
 
 TLS 1.2 minimum, TLS 1.3 preferred/supported, TLS 1.0/1.1 disabled, secure cookies/HSTS, least privilege, mTLS internal trust boundaries where specified, secret encryption and audit.
 
-### 60.6 Maintainability
+### 41.6 Maintainability
 
 Use modular Core architecture rather than excessive microservices to fit resource targets. All configuration changes versioned/auditable; no normal customer change requires source-code modification.
 
 ---
 
-## 61. Reference Standard Network Workload Profile (SNWP-2500-v1)
 
 This profile exists to make the 8 vCPU / 16 GB Core target objectively testable. It is a **benchmark profile**, not a restriction on customer configuration.
 
@@ -1837,8 +2210,10 @@ A separate Heavy Network Workload profile shall benchmark high-interface/high-fr
 
 ---
 
-## 62. Product acceptance criteria summary
 
+**SNWP status:** SNWP-2500-v1 is a **TARGET/PROFILE** for capacity engineering. Documentation of SNWP does not constitute BENCHMARKED or CERTIFIED capacity claims.
+
+## 42. Product acceptance criteria
 Before an initial enterprise release can be signed off, engineering/QA shall prove at minimum:
 
 - installation/upgrade/rollback and separate Core/Sensor/Agent builds;
@@ -1865,8 +2240,8 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 
 ---
 
-## 63. Explicit PRD TBD register
 
+## 43. Explicit PRD TBD register
 | ID | Open item |
 |---|---|
 | PRD-TBD-01 | Exact final brand/product name beyond working name Platform |
@@ -1883,392 +2258,9 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 
 ---
 
-## 64. Additional mandatory operational capabilities captured from architecture workshops
 
-The following capabilities are part of the agreed Platform scope and must not be lost simply because they were identified after the first dashboard catalogue was drafted.
+| FOUNDER-LIC-GRACE | Post-expiry licence grace: conflicting historical/source values 7-day vs 15-day; neither is final normative commercial truth until Founder decision | UNRESOLVED |
 
-### 64.1 Technology Lifecycle / EOS-EOL visibility
+## 44. A2.1 migration note
 
-Where authoritative vendor/customer data is legally available, Platform shall track model, firmware/software version, support lifecycle metadata, EOS/EOL dates, support/warranty metadata and lifecycle risk. Lifecycle data must preserve source/provenance and must not fabricate unsupported vendor dates.
-
-The product shall surface:
-
-- unsupported firmware/software;
-- hardware approaching EOL/EOS;
-- models already out of support;
-- inventory affected by lifecycle risk;
-- recommended review/upgrade candidates.
-
-This is operational asset intelligence, not a substitute for vulnerability management.
-
-### 64.2 Desired State vs Actual State
-
-For monitoring configuration, Platform shall continuously compare desired policy/assignment state with actual applied Sensor/entity state.
-
-Examples:
-
-- expected Sensor assignment vs actual;
-- expected monitoring profile vs actual;
-- desired protocol enabled vs observed protocol failure;
-- desired credential version vs applied/validated version;
-- desired Device Pack version vs actual;
-- desired Agent/Sensor version vs actual;
-- desired retention/alert policy vs effective configuration.
-
-Drift is visible, explainable and auditable.
-
-### 64.3 Shift Handover
-
-NOC operations shall have a Shift Handover workspace/report covering:
-
-- open critical/major incidents;
-- incidents under investigation/recovery;
-- unstable/flapping entities;
-- active/scheduled maintenance;
-- pending NCM/privileged approvals;
-- significant configuration changes;
-- Sensor/Core/integration degradation;
-- ticket synchronization failures;
-- capacity/storage/license warnings;
-- operator notes and ownership handoff.
-
-### 64.4 Migration Studio
-
-To reduce adoption friction, Platform shall provide a Migration Studio capable of importing and reconciling inventory/configuration data from customer exports/APIs. Initial generic import must support CSV/XLSX/CMDB-style data; vendor-specific migration adapters may be added for SolarWinds, ManageEngine, Zabbix, PRTG, Nagios, LogicMonitor, NetBox and others where legal/API/export mechanisms permit.
-
-Migration outcomes shall classify Imported, Automatically Mapped, Needs Review and Unsupported. Platform must not claim full translation of proprietary policies when semantic equivalence does not exist.
-
-### 64.5 Knowledge Base / Runbook Library
-
-Customers shall maintain approved runbooks, known issues, escalation procedures and troubleshooting guides, scoped by tenant/site/device type/service/incident class.
-
-RCA and AI may recommend or summarize approved runbooks. Customer-approved source content remains authoritative. Runbooks must be versioned/audited and executable steps must not become autonomous actions unless future remediation policy explicitly allows it.
-
-### 64.6 Post-Incident Review / Problem Management
-
-Platform shall generate a draft PIR from incident timeline, RCA, impact, evidence, ITSM ticket, configuration changes, actions and recovery. Human operators add/approve final root cause, corrective action, preventive action and lessons learned. Output can be reported/exported.
-
-### 64.7 Intelligence Quality / RCA Accuracy
-
-Platform shall measure and display, subject to available feedback/ground truth:
-
-- RCA runs;
-- confirmed correct/partially correct/incorrect;
-- inconclusive rate;
-- root-cause precision;
-- false-root-cause rate;
-- time-to-root-cause;
-- explanation completeness;
-- blast-radius accuracy;
-- recommendation correctness.
-
-Metrics must distinguish actual validated outcomes from unverified confidence scores.
-
-### 64.8 Alert Policy Effectiveness
-
-Platform shall identify noisy/low-value rules using evidence such as alert volume, incident conversion, acknowledgement/closure patterns, repeat rates and suppression. It may recommend review of a policy but does not silently change thresholds.
-
-### 64.9 Monitoring Optimization Recommendations
-
-Platform may recommend reducing unnecessary metric collection/polling when metrics are high-cost but unused by dashboards, alerts, reports or RCA over a configurable analysis period. It may also recommend Sensor redistribution. Recommendations require review/approval unless a safe automatic policy is explicitly enabled.
-
-### 64.10 Change Freeze and Operational Calendars
-
-Platform shall support business calendars, working hours, regional holidays, change freezes and blackout windows. NCM pushes, Platform/Sensor/Agent/Device Pack upgrades and other governed changes can be blocked or require emergency override/approval during freeze windows.
-
-### 64.11 Device / Time Comparison
-
-Operators shall be able to compare device A vs device B, or one entity/time window vs another, aligning normalized metrics, configuration, firmware, monitoring profile, topology, routing, errors and alerts where compatible. Missing/incompatible fields are marked rather than fabricated.
-
-### 64.12 Data Pipeline Integrity
-
-Platform Operations shall expose produced, accepted, consumed, inserted, rejected, duplicate, late, schema-error and dropped telemetry counts. The purpose is to detect silent data loss between Sensor, ingestion, Kafka, processing and ClickHouse.
-
-### 64.13 Scheduled Housekeeping
-
-A Housekeeping workspace shall show status/history/failures for rollups, TTL deletion, emergency purge, database compaction/maintenance, backups, archives, NCM backups, discovery jobs, report jobs and Sensor redistribution. Internal lifecycle work must not be invisible.
-
-### 64.14 Usage and Licensing Forecast
-
-Authorized administrators shall see licensed vs used entities/elements/modules and forecast approaching entitlement thresholds/expiry. This does not replace the agreed expiry/grace behavior.
-
-### 64.15 Contextual Help
-
-Complex settings and diagnostics shall expose `What is this?`, contextual documentation and, where allowed, AI explanation grounded in current Platform documentation/configuration. Help must never modify configuration without a separate explicit action.
-
----
-
-## 65. Additional out-of-box dashboards/workspaces
-
-These extend the earlier catalogue and are also required out of box:
-
-| # | Dashboard / Workspace | Purpose | Key views/actions |
-|---:|---|---|---|
-| 86 | **Technology Lifecycle Risk** | EOS/EOL/unsupported firmware/model risk by vendor/site/criticality | Lifecycle risk; Firmware; Models; Sites; Export; Create remediation plan |
-| 87 | **Desired vs Actual / Configuration Drift** | Monitoring/assignment/profile/version drift | Drift by Sensor/entity/policy; Explain source; Reconcile; Audit |
-| 88 | **Shift Handover** | NOC handover of unresolved operational state | Critical incidents; maintenance; changes; pending approvals; platform issues; notes; handover report |
-| 89 | **Migration Studio** | Import/reconcile from existing monitoring/CMDB tools | Sources; Imports; Mapping; Review; Unsupported; Job history |
-| 90 | **Intelligence Quality** | RCA/anomaly/qualification quality and feedback metrics | RCA accuracy; Inconclusive; false-root; time-to-RCA; feedback |
-| 91 | **Alert Policy Effectiveness** | Identify noisy/ineffective rules | Alert volume; incident conversion; repeats; suppressions; recommendations |
-| 92 | **Data Pipeline Integrity** | Prove telemetry continuity across ingestion pipeline | Produced; accepted; Kafka; processed; inserted; rejected; duplicates; late; dropped |
-| 93 | **Storage & Retention** | Capacity, growth, retention, rollups, archive and 80% protection | Breakdown by data class/volume; forecast; purge history; policy simulation |
-| 94 | **Usage & Licensing** | Entitlement/consumption/expiry forecasting | Licensed vs used; module usage; growth; expiry/grace state |
-| 95 | **Housekeeping & Lifecycle Jobs** | Background maintenance/rollup/backup/archive/job status | Running; completed; failed; duration; next run; details |
-| 96 | **Post-Incident Review** | Generate/review PIR and problem-management actions | Timeline; root cause; impact; CAPA; lessons; approvals; export |
-| 97 | **Runbook Library** | Approved troubleshooting/operations procedures | Search; by incident/device/service; version; owner; recommendation usage |
-| 98 | **Device / Time Comparison** | Side-by-side operational comparison | Metrics; config; topology; firmware; alerts; profile; time comparison |
-
-All additional workspaces inherit the same global filters, RBAC, saved views, export and audit principles where applicable.
-
-
----
-
-# Version 3.0 Reconciliation — Requirements That Must Not Be Lost
-
-This section is part of the authoritative document. It was added after a complete reconciliation of the Platform design discussions because the earlier split-document version compressed or omitted details. The canonical requirement IDs are in `Platform_08_Requirements_Traceability.md`; OSS decisions are in `Platform_07_OSS_Catalog.md`.
-
-The following cross-cutting capabilities are mandatory where applicable and must be represented in design, UI, APIs, security, audit and QA:
-
-- asset lifecycle/reconciliation, stale/disappeared/replaced device handling and decommission workflow;
-- technology lifecycle/EOL/EOS/firmware risk visibility without pretending to be a vulnerability scanner;
-- backup, restore verification, v1.0 DR, low-downtime upgrade, rollback, canary and feature-flag controls;
-- desired-vs-actual monitoring state, drift detection, change impact preview and dry-run;
-- path analysis, device/time comparison, circuit inventory, business/service ownership and shift handover;
-- learned baselines/seasonality, alert storm protection, flapping detection, event compression and alert-policy effectiveness;
-- unified Operations Timeline combining telemetry, events, topology, NCM, audit, user action, sensor activity, ITSM and RCA;
-- data provenance/quality/confidence, topology relationship provenance/confidence and historical topology;
-- global search, command palette, contextual troubleshooting actions, support bundle and customer-visible Platform Health;
-- licensing/usage dashboard, data-growth forecast and entitlement-aware UI;
-- sensitive-field classification, masking/drop/hash/store policy, AI data boundaries and AI audit;
-- Device Pack certification/test simulator, import/export, template library, onboarding wizard and contextual help;
-- API-first implementation, webhooks/outbound events, API governance, rate limits and query protection;
-- integration test sandbox, timezone/site timezone handling, internationalization foundations and accessibility;
-- telemetry/cardinality explosion protection, tenant/noisy-neighbor quotas, ingestion dedupe, late/out-of-order/replay handling and legal hold;
-- Migration Studio and Environment Readiness Scanner;
-- change-freeze/business calendars, runbook/knowledge library and post-incident review/problem management;
-- RCA accuracy/feedback metrics, monitoring optimization recommendations and Sensor placement learning;
-- certificate/PKI lifecycle, proxy/no-proxy and data-sovereignty/regional-placement readiness;
-- IPv6/dual-stack first-class behavior;
-- scheduled housekeeping and end-to-end pipeline-integrity visibility;
-- stable customer-facing error codes/correlation IDs and **No Silent Failure**.
-
-
-## PRD-OSS — Mandatory implementation basis by product module
-
-The following tables are product requirements because they prevent engineering teams from re-inventing commodity protocols or accidentally embedding unsuitable third-party products. Exact versions are controlled by `Platform_07_OSS_Catalog.md`.
-
-### Network and Sensor module implementation basis
-
-| Feature | Required OSS basis | Product requirement / custom layer |
-|---|---|---|
-| SNMP polling/traps | GoSNMP | customer credential profiles, scheduling, retries, normalization, qualification, MIB/Device Pack semantics |
-| MIB parsing | gosmi | MIB Studio, import/dependency validation, OID tree, test-device workflow, provenance, reusable Device Pack generation |
-| NetFlow/IPFIX/sFlow | GoFlow2 | enrichment with site/device/interface/IPAM/ASN/VRF/QoS, cardinality controls, ClickHouse analytics and RCA correlation |
-| ICMP/traceroute | x/net/icmp + Platform path engine | RTT/loss/jitter, hop/path changes, multi-vantage comparison and Path Analysis |
-| DNS | miekg/dns where advanced protocol control required | DNS tests, validation, SLA and failure classification |
-| SSH | x/crypto/ssh; scrapligo where suitable | CLI Session Broker, Device Pack prompt/mode behavior, command policy and audit |
-| NETCONF | scrapligo/approved NETCONF library | normalized configuration/state collection and Device Pack adapters |
-| gNMI | OpenConfig gNMI | subscription profiles, capacity control and normalized metrics |
-| YANG | goyang/ygot | model parsing/validation and Device Pack mappings |
-| REST/OpenAPI | Go HTTP + kin-openapi | API Studio authentication, endpoint/schema discovery, mappings, chained calls and generated monitors |
-| Syslog/log ingestion | Platform receiver + optional Fluent Bit integration | tenant/entity normalization, cardinality, retention and alert/RCA semantics |
-| WinRM | masterzen/winrm | Windows agentless monitoring policy and diagnostics |
-| Redfish/Swordfish | Gofish | unified hardware lifecycle entities/alerts |
-| VMware | govmomi | vCenter/cluster/host/VM/datastore/network graph and monitoring |
-| Kubernetes | client-go | cluster/node/namespace/workload/pod/container/service graph |
-| OpenTelemetry | OTel Collector/libraries | OTLP metrics/logs ingest; no full APM claim initially |
-
-### NCM implementation basis
-
-| Capability | OSS basis | Product-owned requirement |
-|---|---|---|
-| Connection/execution | scrapli / scrapligo | tenant/RBAC/credential/Device Pack safety |
-| Parallel tasks | Nornir | Platform job orchestration, rate/concurrency/change windows |
-| Load/diff/commit | scrapli_cfg | approval, rollback, audit and RCA evidence |
-| Vendor abstraction | NAPALM only when approved by transitive license scan | Platform remains independent of NAPALM driver coverage |
-| Parsing | NTC Templates/TextFSM + Platform certified parsers | compatibility/provenance and Device Pack certification |
-| Templates | Jinja2 | maker-checker, variable validation, secret controls and job history |
-
-### UI implementation basis
-
-| Capability | OSS basis | Product-owned requirement |
-|---|---|---|
-| Application | React/TypeScript | complete Platform navigation, UX and RBAC behavior |
-| Charts | Apache ECharts | native Platform panel library and dashboard schema |
-| Tables | TanStack Table + virtualization | server-side query/filter/page semantics at 200K-device scale |
-| Dashboard layout | react-grid-layout | folders/groups/permissions/variables/versioning |
-| Topology/causal graph | Cytoscape.js | canonical relationship model, provenance/confidence and temporal views |
-| Geo maps | MapLibre GL JS | site/region health views; tile/data licensing handled separately |
-| CLI terminal | xterm.js | privileged broker, command controls and audit |
-| Query state | TanStack Query | client caching only; Core remains authority |
-
-### Core/data/AI implementation basis
-
-| Capability | OSS basis | Product-owned requirement |
-|---|---|---|
-| Core | Java 21 + Spring Boot | modular product domain/control plane |
-| AuthN | Keycloak | resource-scoped authorization and tenant isolation remain Platform-owned |
-| Expressions | CEL | safe variables/functions/cost limits, inheritance and simulation |
-| Messaging | Kafka + Apicurio + Avro/Protobuf | topic/schema governance, replay/idempotency and processing semantics |
-| Control state | PostgreSQL | authoritative schemas and migrations |
-| Telemetry | ClickHouse | table design, TTL, rollup, query planner, 80% storage protection |
-| Cache | Valkey | only reconstructable/ephemeral state |
-| Reports | PDFBox/POI/Commons CSV | Report Studio/SLA semantics |
-| Analytics | Polars/NumPy/scikit-learn | baseline/anomaly/forecast workflows |
-| GNN | PyTorch + PyG candidate after P0 benchmark | graph feature engineering, labeled incidents, scoring and causal guardrails |
-
-## PRD-PRV-PLUS — Provisioning completeness requirements
-
-1. Manual, bulk and discovery provisioning use one common validation pipeline; none may bypass preflight checks.
-2. User may enter `Display Name` and `Description` for network, infrastructure, API or any other entity. If Display Name is blank, resolution order is customer alias/device alias → discovered hostname/sysName/API name → DNS/FQDN → IP/address fallback. Customer-entered name is never silently overwritten by later discovery.
-3. Sensitive values are never silently trimmed; non-secret textual fields may be normalized with a visible correction record.
-4. The diagnostic result differentiates unreachable path, protocol timeout, authentication failure, authorization failure, likely ACL/firewall blockage, protocol-not-enabled suspicion, TLS failure, unsupported profile, duplicate identity, no eligible Sensor and capacity exceeded.
-5. Every diagnostic result contains evidence and recommended next action. AI may explain evidence but may not invent certainty.
-6. Sensor selection is tested from the Sensor that will actually perform monitoring.
-7. Bulk import provides interactive staging and `Fix & Retry`, not repeated spreadsheet rework.
-8. Device discovery never immediately consumes licensing/starts polling without the customer's configured auto-approval policy or review queue.
-9. Capacity simulation runs before bulk activation and can block unsafe provisioning.
-
-## PRD-RCA-GNN — Graph/GNN/AI requirements
-
-Platform shall incorporate graph-first learning without copying NetAI proprietary implementation:
-
-- topology is a reasoning substrate, not merely a visual map;
-- graph is temporal and multi-layer: physical/L2/L3/routing/MPLS/VXLAN/SD-WAN/traffic/infra/service/geo/causal;
-- deterministic/protocol evidence and observed configuration change retain explicit provenance;
-- ML/GNN can score anomaly, propagation likelihood, likely root candidate and blast radius;
-- GNN output is **supporting evidence**, never sufficient by itself to declare causality;
-- the RCA result exposes root candidate, confidence, causal chain, supporting evidence, contradictory evidence, affected scope, change context, recommendation and missing evidence;
-- `INCONCLUSIVE` is a first-class result;
-- raw/child alarms are not destroyed when incident compression occurs;
-- training/validation uses labeled incidents and measures root-cause precision, false-root-cause rate, no-answer rate, time-to-root-cause, blast-radius accuracy, alarm-compression ratio and explanation completeness;
-- Gemini/LLM operates through AI Gateway for natural-language search, summarization, explanation and recommendation. It does not replace the causal engine and never receives secrets by default.
-
-## PRD-STORAGE — Retention, rollup and protection requirements
-
-Administrators configure per tenant/data type/scope:
-
-- raw retention;
-- each rollup resolution and rollup retention;
-- archive action/destination/retention;
-- legal-hold behavior;
-- emergency purge priority within protected-data constraints.
-
-Rollup semantics must match metric type: gauges preserve min/max/avg/count/percentiles as configured; counters use delta/rate/total as appropriate; states preserve availability, duration, transitions and last state. Historical queries automatically select the appropriate resolution and disclose the resolution used.
-
-Core and Sensors implement non-disableable 80% managed-storage safety protection. Cleanup targets safe headroom rather than merely 79.9%. Purge actions are audited and visible. Monitoring/collection remains the priority.
-
-## PRD-LICENSE — Expiry behavior
-
-- T-30 days: warning begins.
-- T-7 days: persistent dashboard banner with exact days remaining.
-- Expiry through +7 days: grace; polling continues.
-- End of +7-day grace: polling stops unless manually extended/renewed; historical data remains available.
-- License/entitlement events are audited and visible in Usage & Licensing dashboard.
-
-## PRD-CROSS — Additional must-have product workspaces/capabilities
-
-The product shall include the following even where they are implemented as contextual workspaces rather than top-level navigation items:
-
-Asset Reconciliation; Technology Lifecycle Risk; Backup & Restore; DR; Upgrade & Rollback; Desired vs Actual State; Change Impact/Dry Run; Path Analysis; Device/Time Compare; Baseline & Seasonality; Alert Storm/Flapping; Shift Handover; Circuit Inventory; Operational Timeline; Support Bundle; Platform Health; Licensing/Usage; Storage Forecast; AI Boundary/Feedback; Device Pack Certification/Test Lab; Migration Studio; Environment Readiness; Change Freeze/Calendars; Runbook Knowledge Base; Post-Incident Review; Intelligence Quality; Alert Policy Effectiveness; Monitoring Optimization; Sensor Placement Optimization; Certificate/PKI; Proxy; Data Sovereignty; API Governance; Query Protection; Housekeeping; Data Pipeline Integrity.
-
-
-## Mother-reference cross-document contract (v3.1)
-
-The following supporting mother references are normative and must be read together with this document:
-
-- `Platform_07_OSS_Catalog.md` — approved/candidate OSS by module, license class, usage, rationale and restrictions.
-- `Platform_08_Requirements_Traceability.md` — completeness control; a missing mapped requirement is a documentation defect.
-- `Platform_09_UI_UX_Master.md` — detailed global shell, Studios, 98 out-of-box dashboard/workspace screen contracts, filters/actions/states/RBAC behavior.
-- `Platform_10_Protocol_Security_Connector_Master.md` — protocol/security/authentication/credential/connectivity matrix and provisioning diagnostics.
-- `Platform_11_Sizing_Capacity_Storage_Master.md` — Core/Sensor compute targets, MWU, placement, retention/storage and 80% protection.
-- `Platform_12_Decision_Source_Register.md` — USER-FIXED vs ARCH-DELEGATED vs REFERENCE-LEARNING vs TBD/P0 decisions.
-
-**OSS rule:** implementation teams may not add a runtime/build dependency merely because it is open source. It must be admitted to the Platform OSS Catalogue by exact version, transitive license/CVE scan and release policy.
-
-## 66. Development/runtime packaging and service-management product requirements — v3.1
-
-### PRD-DEV-001 — Container-isolated engineering environment
-
-All normal development and automated test stacks shall run under Docker Compose. The repository shall provide a one-command startup path, health-aware startup, deterministic teardown and documented reset/recovery. Project services and databases shall not depend on host-native project runtimes.
-
-### PRD-DEV-002 — Reboot-safe developer state
-
-The development environment shall distinguish durable named volumes from disposable test volumes. Normal laptop shutdown/reboot must not corrupt Platform state. After Docker daemon restart, services configured for development auto-resume must restart according to Compose policy and re-establish health without manual database repair.
-
-### PRD-PKG-001 — Native production packages
-
-Core, Sensor and Linux Agent shall ship as both `.deb` and `.rpm` packages for certified Ubuntu/RHEL versions. Windows Agent shall ship as a code-signed service executable and GA MSI, with install/uninstall BAT wrappers. Docker images are engineering/test artifacts and optional future deployment artifacts; Docker is not a mandatory customer runtime for the initial native installation model.
-
-### PRD-SVC-001 — Auto-start and recovery
-
-- Linux Core, Sensor and Agent services shall be enabled at install time for automatic boot startup.
-- Windows Agent shall be installed as an automatically starting Windows Service.
-- Services shall expose explicit states: STARTING, HEALTHY, DEGRADED, STOPPING, STOPPED, FAILED, RECOVERING.
-- Repeated crash loops shall be surfaced as Platform/system alerts rather than being hidden by infinite restart.
-
-### PRD-LOG-001 — Structured system/application diagnostics
-
-Each component shall emit structured logs containing at minimum timestamp, severity, component, version, node/sensor/agent identity, tenant where relevant, event/error code, correlation/request ID where relevant and safe contextual attributes. Passwords, communities, private keys, tokens and authorization headers shall never be written in clear text.
-
-Required log classes include startup, configuration load, registration/enrollment, connectivity, storage, database/message-bus interaction, polling/collection, provisioning, protocol errors, security events, HA/failover, upgrade/rollback, shutdown, crash/restart and recovery.
-
-### PRD-LOG-002 — Supportability
-
-The Administration and Platform Health workspaces shall expose service health, recent failures, restart count, last successful recovery and links to sanitized diagnostics/support-bundle generation according to RBAC.
-
----
-
-## 67. Endpoint diagnostic evidence and lightweight local intelligence — v3.2.2 reconciliation
-
-This section anchors the detailed `PRD-MIA-043..050` requirements in `Platform_22` and the infrastructure-coverage requirements `PRD-EMC-019..022` in `Platform_23`.
-
-### 67.1 Windows/Linux infrastructure monitoring
-
-Platform shall support both **Agent-based** and **agentless/remote** Windows/Linux infrastructure monitoring as separately certifiable modes.
-
-Customer-visible server monitoring shall include, where the OS/version/privilege supports it:
-
-- CPU utilization and useful scheduler/resource-pressure evidence;
-- memory, swap/page/commit and resource-exhaustion evidence;
-- filesystem capacity/inodes and block-I/O throughput/IOPS/queue/latency/error evidence;
-- network-interface state/throughput/errors/drops and bounded transport-quality counters;
-- bounded process resource/state/restart information;
-- Linux systemd and Windows service state/restart/failure information;
-- OS/boot/uptime/time-quality facts and selected bounded operational/kernel/Event Log evidence;
-- applicable hardware/thermal/power evidence through approved native or out-of-band sources.
-
-Linux Agent and Windows Agent are the richer local collection modes. Linux agentless monitoring uses governed SSH query packs; Windows agentless monitoring uses governed WinRM/WMI/CIM query packs. Product/UI/API shall disclose capability differences rather than imply identical raw coverage.
-
-Collection, credential, privilege or path failure is **monitoring-health evidence**. It shall not automatically become host/service DOWN when the monitored state cannot be established.
-
-### 67.2 Endpoint Diagnostic Snapshot
-
-Platform shall provide a bounded **Endpoint Diagnostic Snapshot (EDS)** for Windows/Linux infrastructure as a specialized profile of the existing Diagnostic Job / Live Evidence / Investigation architecture (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`). EDS may start automatically after a centrally governed threshold/state condition becomes **capture-eligible**, or from an authorized investigation request. Capture-eligibility is not authoritative host-health state.
-
-EDS shall:
-
-- reuse existing normal observations for capture-eligibility evaluation wherever possible;
-- use policy-defined duration, hysteresis, recovery and cooldown rather than one-sample triggering;
-- execute only under currently valid Core-issued assignment/policy/control generation (policy ID/version alone is insufficient);
-- collect a short-lived typed diagnostic evidence bundle appropriate to the capture-eligible resource class;
-- report Diagnostic Job state plus capture completeness `COMPLETE`, `PARTIAL`, `FAILED` or `SUPPRESSED` rather than inventing missing evidence;
-- preserve policy/version, authority generation, trigger, entity, source/vantage, time and evidence provenance;
-- feed the authoritative Core incident/RCA workflow through the existing Agent/Sensor durability paths (no second EDS transport);
-- stop, suppress or degrade with explicit observable reason before creating material additional pressure on an already stressed endpoint or silently destroying routine telemetry durability.
-
-EDS is evidence acquisition, **not endpoint-authoritative RCA** and not a second diagnostics framework. Core remains responsible for cross-domain causal analysis because endpoint-local evidence cannot by itself observe all network, hypervisor, storage, database, cloud, shared-service or change dependencies.
-
-No universal customer CPU/memory/disk threshold is fixed here. Effective values remain governed policy. This section is target architecture/requirements; specified ≠ implemented ≠ tested ≠ certified ≠ deployed.
-
-### 67.3 Lightweight/local AI placement
-
-Local intelligence uses three deployment tiers:
-
-1. **Tier 0 — endpoint deterministic intelligence:** capture-eligibility evaluation, hysteresis, bounded rolling/statistical checks and EDS evidence logic. No LLM/GNN/foundation-model runtime is required or permitted on normal monitored Agents/Sensors for EDS.
-2. **Tier 1 — Core bounded analytics:** statistical/ML, anomaly, forecast, similarity and optional GNN work executes only within certified cold/bounded resource controls and yields to protected monitoring.
-3. **Tier 2 — language/embedding assistance:** LLM/embedding functions run behind AI Gateway either in a certified on-Core profile or through an optional dedicated local/private inference provider.
-
-**If** a dedicated local/private inference provider is supported/enabled, it is optional and must remain stateless with respect to authoritative Platform state. It is not required for Linux/Windows monitoring, EDS, deterministic RCA or base Platform operation; it is not a third Core/HA node; and it may be unavailable without impairing deterministic collection, alerting, incident handling or RCA. Core-resident LLM remains optional. All-AI-disabled remains supported.
-
-Detailed evidence, security, resource and release contracts are authoritative in `Platform_22`, `Platform_23`, `Platform_10`, `Platform_11`, `Platform_14`, `Platform_17` and `Platform_18`.
+A2.1 absorbed Version 3.0 / v3.1 / v3.2.2 and related reconciliation content into the numbered normative sections above. Chronological appendices and residual “must-not-lose” checklists are not current normative truth. Git history preserves chronology. Formal `PRD-*` identifiers remain indexed in `Platform_08_Requirements_Traceability.md` without net-new or removed IDs under A2.1.

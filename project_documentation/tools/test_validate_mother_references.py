@@ -24,9 +24,9 @@ from validate_mother_references import (  # noqa: E402
 MINIMAL_DOCS = [
     ("AGENTS.md", None, "TRANSITIONAL_LEGACY", "navigation_engineering_governance"),
     ("Platform_00_Document_Index.md", "PLATFORM-INDEX-001", "NORMALIZED_V1", "mother_reference"),
-    ("Platform_01_BRD.md", "PLATFORM-BRD-001", "TRANSITIONAL_LEGACY", "mother_reference"),
-    ("Platform_02_PRD.md", "PLATFORM-PRD-001", "TRANSITIONAL_LEGACY", "mother_reference"),
-    ("Platform_03_Architecture.md", "PLATFORM-ARC-001", "TRANSITIONAL_LEGACY", "mother_reference"),
+    ("Platform_01_BRD.md", "PLATFORM-BRD-001", "NORMALIZED_V1", "mother_reference"),
+    ("Platform_02_PRD.md", "PLATFORM-PRD-001", "NORMALIZED_V1", "mother_reference"),
+    ("Platform_03_Architecture.md", "PLATFORM-ARC-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_04_HLD.md", "PLATFORM-HLD-001", "TRANSITIONAL_LEGACY", "mother_reference"),
     ("Platform_05_LLD.md", "PLATFORM-LLD-001", "TRANSITIONAL_LEGACY", "mother_reference"),
     ("Platform_06_Dataflow.md", "PLATFORM-DF-001", "TRANSITIONAL_LEGACY", "mother_reference"),
@@ -512,16 +512,124 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
 
     def test_18_transitional_legacy_duplicate_sections_not_blocked(self) -> None:
+        # Platform_04 remains TRANSITIONAL_LEGACY after A2.1; duplicate ## numbers allowed.
         root = self._write_minimal()
-        (root / "Platform_03_Architecture.md").write_text(
-            _header("PLATFORM-ARC-001")
+        (root / "Platform_04_HLD.md").write_text(
+            _header("PLATFORM-HLD-001")
             + "## 1. One\n\n## 1. Two\n\n## 18.1 Nested historical\n\n",
             encoding="utf-8",
         )
         errors = validate_docs_root(root)
         self.assertFalse(
             any(
+                "Platform_04_HLD.md: duplicate normalized" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_18b_normalized_platform_03_duplicate_sections_blocked(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 1. One\n\n## 1. Two\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
                 "Platform_03_Architecture.md: duplicate normalized" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_18c_normalized_platform_02_stale_subsection_parent_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 12. Infrastructure\n\n"
+            + "### 67.1 Windows/Linux infrastructure monitoring\n\n"
+            + "| `PRD-HA-001` | HA |\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_02_PRD.md" in e
+                and "parent mismatch" in e
+                and "67.1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18d_normalized_platform_03_stale_subsection_parent_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 9. Sensor architecture\n\n"
+            + "### 8.1 Sensor runtime\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_03_Architecture.md" in e
+                and "parent mismatch" in e
+                and "8.1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18e_normalized_matching_subsection_parent_passes(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 12. Infrastructure\n\n"
+            + "### 12.1 Server/OS\n\n"
+            + "| `PRD-HA-001` | HA |\n",
+            encoding="utf-8",
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 9. Sensor architecture\n\n"
+            + "### 9.1 Sensor runtime\n\n"
+            + "#### 9.1.1 Nested detail\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("parent mismatch" in e for e in errors),
+            errors,
+        )
+
+    def test_18f_normalized_descriptive_unnumbered_subsection_passes(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 12. Infrastructure\n\n"
+            + "### Windows/Linux infrastructure monitoring modes\n\n"
+            + "| `PRD-HA-001` | HA |\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("parent mismatch" in e for e in errors),
+            errors,
+        )
+
+    def test_18g_transitional_platform_04_may_retain_historical_numbering(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_04_HLD.md").write_text(
+            _header("PLATFORM-HLD-001")
+            + "## 9. Placement\n\n"
+            + "### 8.1 Historical Sensor runtime numbering retained until A2.2\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any(
+                "Platform_04_HLD.md" in e and "parent mismatch" in e for e in errors
             ),
             errors,
         )
@@ -923,15 +1031,61 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
 
     def test_43_premature_transitional_to_normalized_fails(self) -> None:
+        # Platform_04 remains TRANSITIONAL_LEGACY after A2.1; premature upgrade must fail.
         root = self._write_minimal(
-            normalize_overrides={"Platform_03_Architecture.md": "NORMALIZED_V1"}
+            normalize_overrides={"Platform_04_HLD.md": "NORMALIZED_V1"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_04_HLD.md" in e
+                and "normalizationState" in e
+                and "TRANSITIONAL_LEGACY" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43b_platform_01_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_01_BRD.md": "TRANSITIONAL_LEGACY"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_01_BRD.md" in e
+                and "normalizationState" in e
+                and "NORMALIZED_V1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43c_platform_02_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_02_PRD.md": "TRANSITIONAL_LEGACY"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_02_PRD.md" in e
+                and "normalizationState" in e
+                and "NORMALIZED_V1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43d_platform_03_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_03_Architecture.md": "TRANSITIONAL_LEGACY"}
         )
         errors = validate_docs_root(root)
         self.assertTrue(
             any(
                 "Platform_03_Architecture.md" in e
                 and "normalizationState" in e
-                and "TRANSITIONAL_LEGACY" in e
+                and "NORMALIZED_V1" in e
                 for e in errors
             ),
             errors,
