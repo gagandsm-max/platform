@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { PageState } from './PageState';
 import {
   AccessContext,
   WorkspaceDefinition,
   foundationDataStateForCapability,
+  nextWorkspaceTabIndex,
   secondaryWorkspacesInDomain,
   workspaceTabDomId,
   workspaceTabPanelDomId,
@@ -33,6 +34,7 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
 }) => {
   // Tab selection is indexed (not label-keyed) and remounted via key={workspace.id} from the parent.
   const [activeTabIndex, setActiveTabIndex] = useState(0);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const safeTabIndex = workspace.tabs.length === 0
     ? 0
     : Math.min(activeTabIndex, workspace.tabs.length - 1);
@@ -46,6 +48,19 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
   const capabilityPending = workspace.backendCapability === 'PENDING_BACKEND';
   const resolvedDataState: ScreenDataState = dataState
     ?? foundationDataStateForCapability(workspace.backendCapability);
+
+  const handleTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number,
+  ) => {
+    const nextIndex = nextWorkspaceTabIndex(currentIndex, workspace.tabs.length, event.key);
+    if (nextIndex === undefined) {
+      return;
+    }
+    event.preventDefault();
+    setActiveTabIndex(nextIndex);
+    tabRefs.current[nextIndex]?.focus();
+  };
 
   return (
     <div className="workspace-host" data-workspace-id={workspace.id} data-ui-code={workspace.uiCode}>
@@ -101,7 +116,12 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
       ) : null}
 
       {workspace.tabs.length > 0 ? (
-        <div className="workspace-tabs" role="tablist" aria-label={`${workspace.label} views`}>
+        <div
+          className="workspace-tabs"
+          role="tablist"
+          aria-label={`${workspace.label} views`}
+          aria-orientation="horizontal"
+        >
           {workspace.tabs.map((tab, index) => {
             const tabId = workspaceTabDomId(workspace.id, index);
             const panelId = workspaceTabPanelDomId(workspace.id, index);
@@ -109,6 +129,9 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
             return (
               <button
                 key={tabId}
+                ref={(element) => {
+                  tabRefs.current[index] = element;
+                }}
                 type="button"
                 role="tab"
                 id={tabId}
@@ -117,6 +140,7 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
                 tabIndex={selected ? 0 : -1}
                 className={selected ? 'workspace-tab workspace-tab--active' : 'workspace-tab'}
                 onClick={() => setActiveTabIndex(index)}
+                onKeyDown={(event) => handleTabKeyDown(event, index)}
               >
                 {tab}
               </button>
