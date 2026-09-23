@@ -208,6 +208,111 @@ class CapabilityPackInventoryTests(unittest.TestCase):
         )
         self.assertEqual(errors, [], errors)
 
+    def test_parse_platform_00_accepts_normalized_and_legacy_headings(self) -> None:
+        def _doc(heading: str, names: list[str]) -> str:
+            rows = "\n".join(
+                f"| {i} | `{name}` | purpose |" for i, name in enumerate(names, 1)
+            )
+            return (
+                f"# Platform_00 fixture\n\n"
+                f"{heading}\n\n"
+                "| # | File | Governing scope |\n|---:|---|---|\n"
+                f"{rows}\n\n"
+                "## Later section\n"
+            )
+
+        names = ["AGENTS.md", "Platform_00_Document_Index.md"]
+
+        current = agent_pack.parse_platform_00_mother_reference_files(
+            _doc("## 5. Exact Mother Reference set", names)
+        )
+        self.assertEqual(current, names)
+
+        legacy = agent_pack.parse_platform_00_mother_reference_files(
+            _doc("## 3. Exact 2-file mother-reference set", names)
+        )
+        self.assertEqual(legacy, names)
+
+        other_number = agent_pack.parse_platform_00_mother_reference_files(
+            _doc("## 7. Exact Mother Reference set", names)
+        )
+        self.assertEqual(other_number, names)
+
+        count_free = agent_pack.parse_platform_00_mother_reference_files(
+            _doc("## 5. Exact Mother Reference set", names)
+        )
+        self.assertEqual(count_free, names)
+
+        counted = agent_pack.parse_platform_00_mother_reference_files(
+            _doc("## 4. Exact 25-file mother-reference set", names)
+        )
+        self.assertEqual(counted, names)
+
+        with self.assertRaises(agent_pack.AgentPackError) as missing:
+            agent_pack.parse_platform_00_mother_reference_files(
+                "# Platform_00\n\n## 5. Precedence\n\nNo mother table.\n"
+            )
+        self.assertIn(
+            "Platform_00 exact Mother Reference table was not found",
+            str(missing.exception),
+        )
+
+        unrelated = (
+            "# Platform_00\n\n"
+            "## 5. Precedence\n\n"
+            "| # | File | Governing scope |\n|---:|---|---|\n"
+            "| 1 | `AGENTS.md` | navigation |\n\n"
+            "## 6. After\n"
+        )
+        with self.assertRaises(agent_pack.AgentPackError) as unrelated_exc:
+            agent_pack.parse_platform_00_mother_reference_files(unrelated)
+        self.assertIn(
+            "Platform_00 exact Mother Reference table was not found",
+            str(unrelated_exc.exception),
+        )
+
+        # Canonical repository Platform_00 must parse to the coverage file set.
+        index = (REPO_ROOT / "project_documentation" / "Platform_00_Document_Index.md").read_text(
+            encoding="utf-8"
+        )
+        repo_files = agent_pack.parse_platform_00_mother_reference_files(index)
+        coverage = json.loads(
+            (REPO_ROOT / "project_agents" / "mother_reference_coverage.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            set(repo_files),
+            {row["file"] for row in coverage["mappings"]},
+        )
+        self.assertIn("## 5. Exact Mother Reference set", index)
+
+        # Duplicate filenames in the parsed table still surface as coverage errors.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pa = _write_mother_reference_fixture(
+                root,
+                index_files=["AGENTS.md", "AGENTS.md"],
+                disk_files=["AGENTS.md"],
+                mapped_files=["AGENTS.md"],
+            )
+            errors = agent_pack.validate_mother_reference_coverage(
+                root, pa, [{"name": "demo-agent"}]
+            )
+            self.assertTrue(
+                any(
+                    "exact Mother Reference table contains duplicate filenames" in e
+                    for e in errors
+                ),
+                errors,
+            )
+
+        # Current repository pack validation remains clean for mother-reference coverage.
+        pack_errors = agent_pack.validate_mother_reference_coverage(
+            REPO_ROOT, REPO_ROOT / "project_agents", _manifest()
+        )
+        self.assertEqual(pack_errors, [], pack_errors)
+
     def test_every_agent_has_bounded_required_skills(self) -> None:
         manifest_names = {entry["name"] for entry in _manifest()}
         skill_names = {entry["name"] for entry in _skill_manifest()}

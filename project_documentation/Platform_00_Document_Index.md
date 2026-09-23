@@ -1,33 +1,73 @@
-# Platform — Mother Reference Documentation Set
+# Platform — Mother Reference Documentation Constitution
 
-**Document ID:** PLATFORM-INDEX-001  
-**Version:** 3.2.2  
-**Status:** **Authoritative Mother Reference — 25-File Consolidated Engineering Source of Truth**
-**Product:** Platform  
-**Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI  
-**Last reconciliation:** 2026-09-21 — v3.2.2 final handoff + unified RCA / regional Sensor-provisioning reconciliation, including verified PR #84 Counter64 implementation truth; no new specialized master
+**Document ID:** PLATFORM-INDEX-001
+**Version:** 3.2.2
+**Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
+**Product:** Platform
+**Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
+**Last reconciliation:** 2026-09-23 — A1 Mother Reference constitution, maturity model, capability contract and global-traceability foundation (Issue #94)
+**Normalization state:** NORMALIZED_V1 for this constitution document only. Platform_01..07 and Platform_09..23 remain TRANSITIONAL_LEGACY until A2–A5.
 
 ## 1. Authority
 
-**v3.2.2 supersedes v3.2.1 as the authoritative Platform mother-reference set after merge to the canonical GitHub `main`.**
-
-v3.2.2 is an additive product/engineering scope revision. It includes five specialized Mother Reference masters: `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` for operational intelligence/MTTR/customer value; `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` for governed discovery/onboarding, Agent identity continuity and the global Notification Center; `Platform_21_Enterprise_Gap_Closure_Master.md` for enterprise adoption gaps such as normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, tamper-evident audit, governed offboarding/data portability and connector families; `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` for evidence-qualified alerting, monitoring-state semantics, RCA/AI assurance, bounded AI assistance and related shared-service evidence; and `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` for enterprise monitoring-domain coverage, the single Capability Pack architecture, dimensional certification and Real Customer Requirements normalization. These specialized masters carry formal logical-layer supplements without weakening any v3.2.1 requirement. Existence of `Platform_23` is EMC-0 specification only and does not imply pack runtime, vendor certification or contractual coverage.
-
-v3.2.1 superseded v3.2 as a corrective/governance patch. v3.2 superseded v3.1 as a documentation-packaging revision. Earlier v1/v2/v3.0/v3.1 generated master packages and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as Platform engineering sources of truth.
-
-Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other supplied reference material remains reference/evidence only and never overrides this set.
+1. The canonical GitHub repository `https://github.com/gagandsm-max/platform` (`main` after merge) is the authoritative system of record for Platform Mother References and implementation.
+2. Current Mother Reference version is **3.2.2**.
+3. The exact authoritative Mother Reference set is the **25-file set** listed in §5 (`project_documentation/AGENTS.md` plus `Platform_00` through `Platform_23`). Supporting artifacts such as `mother_reference_manifest.json` and `project_documentation/tools/validate_mother_references.py` are governance tooling, **not** additional Mother References and must not be numbered as `Platform_24+`.
+4. Source precedence is defined in §6. Conflicts require documented change control; implementation must not silently choose a convenient interpretation.
+5. Mother documents are READ-MOSTLY. Deliberate change control is mandatory (see §12).
+6. Repository implementation does **not** silently override an explicit approved product decision recorded in the Mother References or Decision Register.
+7. If implementation discovers false, stale or contradictory documentation, engineering must correct the Mother References through change control rather than knowingly preserve a false specification.
+8. v3.2.2 supersedes v3.2.1 as the authoritative Platform mother-reference set after merge to canonical GitHub `main`. Earlier v1/v2/v3.0/v3.1 generated master packages and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as Platform engineering sources of truth. Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other supplied reference material remains reference/evidence only and never overrides this set.
+9. Open/draft PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not change the authoritative Mother Reference set or version.
 
 ## 2. No-assumption rule
 
-- Explicit product-owner decisions remain fixed until change control changes them.
-- Delegated engineering choices are architecture decisions and must be recorded.
-- Unknown values remain `TBD — Decision Required` or `P0 ENGINEERING SPIKE`; they are not guessed.
-- Capacity statements remain engineering targets until benchmark-certified.
-- Security/compliance readiness must never be represented as achieved certification until independently achieved.
+- Founder-fixed / explicit product-owner decisions remain fixed until deliberate change control changes them.
+- Architecture-delegated decisions require recorded evidence and Decision Register updates; they are not free-form invention.
+- Unresolved values remain explicit `TBD — Decision Required` or `P0 ENGINEERING SPIKE`. No inference may convert TBD into implementation truth.
+- Capacity statements remain engineering targets until benchmark-certified. A capacity target is not benchmark certification.
+- Security/compliance readiness must never be represented as achieved certification until independently achieved. Security readiness is not compliance certification.
 - Customer-value/MTTR percentages are not product claims until supported by disclosed reproducible customer/pilot evidence.
-- Open/draft PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not change the authoritative Mother Reference set or version.
+- A1 does not resolve Founder/commercial/legal-reserved conflicts (including any licence-grace day-count conflict between Mother References and external handover notes). Encountered conflicts remain unresolved until Founder change control.
 
-## 3. Exact 25-file mother-reference set
+## 3. Maturity model
+
+The following maturity vocabulary is normative. A lower state never implies a higher state. AI agents and humans must not casually upgrade maturity without physical evidence.
+
+| State | Meaning |
+|---|---|
+| **SPECIFIED** | An approved normative design exists in the Mother References (or an approved Decision Register entry). |
+| **IMPLEMENTED** | Physical production-path source exists and is source-verified (migration, package, service, API implementation, or equivalent). |
+| **TESTED** | Required automated and/or runtime tests for the implemented boundary pass with reproducible evidence. |
+| **BENCHMARKED** | Applicable workload/resource/performance evidence exists for the declared profile/envelope. |
+| **CERTIFIED** | All applicable architecture, security, tenancy, failure, scale, lifecycle, upgrade/recovery and operability gates are proven for the declared certification profile. |
+| **DEPLOYED** | The certified artifact/version is actually installed in the stated environment. |
+
+Canonical inequality:
+
+`SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`
+
+Unsupported combined spellings that accidentally imply a higher maturity without evidence are prohibited as certification claims. Phrases such as `IMPLEMENTED+TESTED` may describe concurrent evidenced states only when each component is independently true; they do not imply `BENCHMARKED`, `CERTIFIED` or `DEPLOYED`.
+
+## 4. Logical design versus physical implementation
+
+A logical table, API, topic, service or interface described in a Mother Reference does **not** prove it physically exists.
+
+Where implementation exists, documentation should eventually point to physical source evidence such as:
+
+- migration;
+- schema;
+- package;
+- service;
+- source path;
+- API implementation;
+- test;
+- benchmark;
+- CI evidence.
+
+Where absent, status remains `SPECIFIED` / `NOT IMPLEMENTED` (or equivalent). A1 establishes this rule; A2–A5 progressively attach evidence pointers without inventing architecture.
+
+## 5. Exact Mother Reference set
 
 | # | File | Governing scope |
 |---:|---|---|
@@ -40,7 +80,7 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 | 7 | `Platform_05_LLD.md` | Concrete schemas, topics, state machines, adapters, algorithms and implementation rules |
 | 8 | `Platform_06_Dataflow.md` | End-to-end telemetry/control/HA/RCA/NCM/storage/integration sequences |
 | 9 | `Platform_07_OSS_Catalog.md` | Authoritative OSS allow/candidate list, licences, custom boundaries and governance |
-| 10 | `Platform_08_Requirements_Traceability.md` | Base completeness and requirement traceability control |
+| 10 | `Platform_08_Requirements_Traceability.md` | Global requirements, product-requirement and evidence traceability index |
 | 11 | `Platform_09_UI_UX_Master.md` | UI shell, navigation, Studios, RBAC UX and out-of-box dashboards/workspaces |
 | 12 | `Platform_10_Protocol_Security_Connector_Master.md` | Protocols, authentication, credentials, ports, connector and provisioning diagnostics |
 | 13 | `Platform_11_Sizing_Capacity_Storage_Master.md` | Core/Sensor sizing, MWU, placement, retention, rollups and storage protection |
@@ -57,9 +97,9 @@ Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other su
 | 24 | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Authoritative monitoring-intelligence specialized master: class-specific Alert Evidence Contracts, telemetry trust, semantic monitoring states, Endpoint Diagnostic Snapshot (EDS), tiered local intelligence, RCA/AI assurance, Incident Copilot, AI safety/provenance, formal `PRD-MIA-*` + `REQ-MIA-*` supplement |
 | 25 | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | Authoritative enterprise-monitoring-coverage specialized master: Capability Pack product contract, L1/L2/L3 dimensional certification, Linux/Windows Agent and agentless infrastructure coverage, technology-family catalogue, Customer Acceptance Profiles, Real Customer Requirements normalization, formal `PRD-EMC-*` + `REQ-EMC-*` supplement |
 
-### 3.1 Specialized-master number allocation
+### 5.1 Specialized-master number allocation
 
-The canonical Mother Reference remains the actual merged set listed in §3 on current GitHub `main`. Today the numbered specialized-master sequence ends at the highest merged master (`Platform_23`). Candidate or open PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not enlarge the authoritative set.
+The canonical Mother Reference remains the actual merged set listed in §5 on current GitHub `main`. Today the numbered specialized-master sequence ends at the highest merged master (`Platform_23`). Candidate or open PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not enlarge the authoritative set.
 
 A Platform number becomes canonical only when the corresponding specialized master is finally reconciled and merged. At each final specialized-master reconciliation:
 
@@ -76,7 +116,325 @@ A Platform number becomes canonical only when the corresponding specialized mast
 
 Multiple parallel candidate PRs must not each claim the same next number. Merge order against then-current `main` determines allocation. Candidate documents remain **unnumbered/unallocated until final reconciliation**; temporary internal names are allowed, but they confer no reservation authority. Number assignment, rename and cross-reference updates must occur atomically before merge. A candidate specialized master must not silently advance the set-wide Mother Reference version (currently **v3.2.2**); version changes require separate set-wide change control.
 
-## 4. Consolidation and version map
+## 6. Source precedence
+
+When requirements appear to conflict:
+
+1. BRD (`Platform_01`) — business intent/non-negotiable outcomes.
+2. PRD (`Platform_02` and authoritative specialized `PRD-*` supplements) — customer-visible behavior.
+3. Architecture (`Platform_03`) — technology/deployment/security constraints.
+4. HLD (`Platform_04`) — subsystem boundaries.
+5. LLD (`Platform_05`) — implementation contracts.
+6. Dataflow (`Platform_06`) — end-to-end sequencing consistent with the above.
+7. Specialized masters (`Platform_19`..`Platform_23`) — detailed normative contracts in their assigned domain.
+8. Decision Register (`Platform_12`) — provenance/TBD control.
+
+**Specialized-master special cases (unchanged):**
+
+- **OIV:** `Platform_19` may add behavior where existing files are silent, but may not silently override an explicit higher-precedence requirement. Formal `PRD-OIV-*` / `REQ-OIV-*` are authoritative supplements.
+- **Onboarding:** `Platform_20` `PRD-ONB-*` / `REQ-ONB-*` are authoritative supplements for discovery/onboarding/identity/notification.
+- **Enterprise gap-closure:** `Platform_21` `PRD-EGC-*` / `REQ-EGC-*` govern that enterprise capability family.
+- **Monitoring-intelligence:** `Platform_22` `PRD-MIA-*` / `REQ-MIA-*` govern alert quality, evidence qualification and AI/RCA assurance without silently overriding Platform_19/21 outside assigned scope.
+- **Enterprise monitoring coverage:** `Platform_23` `PRD-EMC-*` / `REQ-EMC-*` govern Capability Pack / dimensional certification without silently overriding Platform_10/19/20/21/22 outside assigned scope.
+
+Conflicts require documented change control.
+
+## 7. Normalized document ownership
+
+| Document | Owns |
+|---|---|
+| `Platform_01` | Business intent/outcomes/scope. |
+| `Platform_02` | Product capability and customer-visible behavior. |
+| `Platform_03` | System architecture/deployment/trust/data/control planes/HA. |
+| `Platform_04` | Subsystems/services/modules/interfaces/failure boundaries. |
+| `Platform_05` | Executable low-level technical contracts including data/index/cache/concurrency algorithms. |
+| `Platform_06` | Success/failure/retry/failover dataflows. |
+| `Platform_07` | Dependency/provenance/licensing authority. |
+| `Platform_08` | **Global** requirements/product-requirement/evidence traceability index. |
+| `Platform_09` | UI/UX/workspace/workflow contract. |
+| `Platform_10` | Protocol/transport/credential/connector mechanics. |
+| `Platform_11` | Capacity/cardinality/retention/storage/resource budgets. |
+| `Platform_12` | Decisions/TBD/provenance/implementation-truth deltas. |
+| `Platform_13` | Engineering/repository/development standards. |
+| `Platform_14` | Test/benchmark/certification/release quality gates. |
+| `Platform_15` | CI/CD/artifacts/signing/SBOM/packaging/distribution. |
+| `Platform_16` | Install/upgrade/rollback/backup/restore/operations/runbooks. |
+| `Platform_17` | API/event/data/schema/compatibility authority. |
+| `Platform_18` | Security threat/risk/control/verification authority. |
+| `Platform_19`..`Platform_23` | Specialized product domains using the **same** capability-contract discipline and cross-referencing base mechanics rather than inventing duplicates. |
+| `AGENTS.md` | Coding-agent/engineer navigation and non-negotiable repository rules (not a numbered Platform Document ID). |
+
+## 8. Mandatory capability specification contract
+
+Every significant capability/sub-capability must eventually be specified against the following contract fields where applicable. Fields that are genuinely irrelevant may state **N/A with reason**. The contract must not encourage meaningless boilerplate.
+
+1. capability ID/name
+2. customer/operational outcome
+3. scope
+4. explicit exclusions
+5. subfeatures
+6. owning subsystem/module/service
+7. owning engineering agent/domain
+8. upstream dependencies
+9. downstream dependencies
+10. deployment/execution location
+11. control-plane boundary
+12. data-plane boundary
+13. public/internal interfaces
+14. APIs/actions
+15. transport
+16. protocol
+17. source→destination direction
+18. ports/defaults/override rules
+19. authentication
+20. authorization
+21. PostgreSQL ownership
+22. ClickHouse ownership
+23. Kafka ownership
+24. Valkey/cache ownership
+25. object/table/entity model
+26. primary/natural keys
+27. same-tenant relationships/FKs
+28. indexes
+29. primary query/access patterns
+30. pagination model
+31. cache rules/invalidation/degradation
+32. state machine/lifecycle
+33. transactional boundaries
+34. idempotency
+35. replay/deduplication
+36. ordering
+37. concurrency/race behavior
+38. tenant isolation
+39. RBAC/resource scope
+40. credential handling
+41. secret handling
+42. PKI/certificate behavior
+43. normal success flow
+44. failure states
+45. degraded states
+46. retry/backoff
+47. recovery semantics
+48. HA/fencing/ownership
+49. capacity limits
+50. cardinality limits
+51. concurrency/rate limits
+52. backpressure
+53. storage budget/horizon
+54. logs
+55. metrics
+56. health/self-monitoring
+57. audit
+58. customer-visible diagnostics
+59. retention
+60. purge
+61. legal hold/protected evidence
+62. backup
+63. restore
+64. DR implications
+65. install/package implications
+66. migration
+67. upgrade
+68. backward compatibility
+69. rollback
+70. UI/workflow behavior
+71. stable customer errors/remediation
+72. security threats/abuse cases
+73. negative/failure tests
+74. integration tests
+75. performance/scale tests
+76. certification profile/evidence
+77. current maturity
+78. physical implementation/evidence pointers
+79. requirement IDs
+80. decision/source references
+81. open decisions/TBD
+82. owner of each unresolved decision
+83. blocking impact
+
+A1 makes this contract normative. Completing the field set for every capability across Platform_01..23 is A2–A5 work, not an A1 claim.
+
+## 9. Fixed product/architecture decisions
+
+- Product name: **Platform**.
+- Clean-room implementation; no ThoughtData/NetAI proprietary implementation reuse.
+- Core/Sensor: **Ubuntu 24.x LTS family** and **RHEL 9.x family** first (subject to certification matrix); Windows Core/Sensor not initial scope.
+- Standalone: one Core. HA: exactly two full Core nodes, Active/Standby, target <60s Core-service restoration.
+- Sensors continue polling and locally buffer through Core failure/WAN loss while capacity permits; 80% storage protection may reclaim/shed eligible oldest lower-priority data and must expose data-loss risk. Absolute zero-loss is not promised.
+- Sensor/Agent external channel: HTTPS/gRPC over mTLS; Kafka stays internal.
+- Data stack: PostgreSQL authoritative control state, ClickHouse high-volume telemetry analytics, Kafka streaming backbone, Valkey cache/ephemeral state.
+- Go Sensors/Agents; Java 21 Core; React/TypeScript UI; Python for selected NCM/AI/analytics workers.
+- Core ≤2,500 reference devices: 8 vCPU/16 GB mandatory engineering target under SNWP-2500-v1.
+- UI-driven provisioning: individual, CSV/XLSX bulk and network auto-discovery.
+- Placement is locality + reachability + capacity + HA + security aware.
+- Full always-on DPI/full APM remain excluded initially; **bounded triggered packet evidence** is an approved diagnostic capability and does not reopen the full-DPI decision.
+- Graph-grounded hybrid RCA; GNN is an augmenting scorer, not causal proof; `INCONCLUSIVE` is required.
+- Native Platform dashboard/UI; no embedded Grafana.
+- Core and Sensor managed-storage 80% protection watermark is mandatory.
+- SNMP is a typed evidence source rather than a numeric-only transport. Exact raw counters, state/inventory/topology facts and collection-quality outcomes remain semantically distinct; a failed SNMP poll alone does not prove device failure.
+- Routine SNMP monitoring is read-only. SNMP SET, when implemented, is a privileged NCM/remediation action subject to authorization, policy/approval, pre/post verification and audit rather than an ordinary polling operation.
+- Customer controls raw retention, rollups, archive and allowed purge priority.
+- DR capability required in v1.0; contractual RPO/RTO remain TBD until frozen.
+- Gemini through AI Gateway initially; deterministic/causal RCA remains independent.
+- HTTPS-only Platform UI; no application listener on TCP/80.
+- Development/test: Docker Compose standard; host laptop kept free of project-specific runtimes.
+- Production packaging: Core/Sensor/Linux Agent `.deb` + `.rpm`; Windows Agent signed service EXE + MSI + BAT wrappers.
+- Core, Sensors and Agents auto-start after reboot and emit structured diagnostics/logs.
+- Canonical source repository: `https://github.com/gagandsm-max/platform`.
+- First-class SaaS monitoring, cloud-native runtime dependency discovery, external deployment/change telemetry and carrier/ISP operational integration are approved product scope.
+- Incident Flight Recorder, Similar Incident Memory and cross-domain Change Intelligence are approved MTTR-reduction capabilities.
+- Controlled remediation is approved only with deterministic action definitions, authorization, preconditions, blast-radius controls, approval/policy, audit, post-action validation and rollback/fail-safe handling; no direct LLM privileged execution.
+- Platform Value / MTTR Improvement measurement and the four-layer customer-value dashboard are approved product scope; unsupported causal or financial claims are prohibited.
+- Network auto-discovery and Windows/Linux Agent enrollment use a governed review lifecycle; full monitoring/licence activation requires review by default unless authorized trusted auto-approval policy applies.
+- Approve/reject/unmanaged/exclude onboarding decisions require operator comment/reason and audit; pre-activation review supports metadata, group/sub-group and monitoring/alert-policy preview.
+- Agent-backed endpoint identity is anchored to canonical `entity_id` plus unique `agent_id`/mTLS identity; system/host name is human-readable technical identity and dynamic IP/MAC values are mutable observations.
+- Platform exposes one global per-user Notification Center/bell with server-side tenant/RBAC/resource scoping; operational Alerts/Incidents remain distinct from platform/workflow notifications.
+- Enterprise integrations normalize vendor-specific evidence into Platform-owned canonical contracts; vendor identifiers do not override tenant/entity authority.
+- Existing seven-day licence grace remains governed behavior. Commercial quantities, packaging and pricing remain Founder-reserved.
+- Declarative policy/configuration inputs cannot bypass Platform RBAC, validation, approvals, audit or runtime safety.
+- Endpoint DEX is bounded operational-experience monitoring, not employee surveillance.
+- Future regional federation does not reopen the v1 exactly-two-Core Active/Standby topology by implication.
+- Material alert classes use class-specific evidence contracts and telemetry-quality trust checks before authoritative operational-failure assertions.
+- Alert severity and evidentiary confidence are independent; semantic states such as `MONITORING_DEGRADED`, `REDUNDANCY_LOST`, `SLA_DEGRADED`, `EXPECTED_STATE`, `UNKNOWN` and `STALE` are preserved where applicable rather than collapsed into generic DOWN.
+- GNN/LLM outputs are evidence/hypothesis assistance, never causal authority; `INCONCLUSIVE` remains valid and prompt/model text cannot grant privileged execution authority.
+- Core monitoring and deterministic RCA/alerting continue without Internet/hosted AI availability; hosted/private/local/no-LLM operation is governed by explicit data-egress and fallback controls.
+- Capability Pack is the canonical enterprise extension architecture. Technology Monitoring Pack, Device / Network Pack, SaaS Monitoring Pack, Integration Pack and optional Customer Extension Pack are classifications/profiles of that architecture, not independent frameworks. Existing Device Pack contracts remain valid under this model.
+- Monitoring-technology certification is dimensional (Discovery/L1/L2/L3/Topology/NCM/Security/version). A family listed in `Platform_23` is a coverage target, not an implemented or certified pack.
+- Windows/Linux server monitoring certifies Agent-based and agentless/remote modes separately; collection/credential/path failure is monitoring-health evidence and does not automatically assert host/service failure.
+- Endpoint Diagnostic Snapshot is a bounded typed evidence-acquisition capability triggered by qualified policy state or authorized investigation; endpoint evidence informs but does not replace Core-authoritative cross-domain RCA.
+- Normal monitored Agents and Sensors do not host an LLM/GNN/foundation-model runtime for EDS; endpoint-local intelligence is deterministic/bounded statistical logic only.
+- Optional dedicated local/private inference is an AI-Gateway provider, not a third Core/HA authority or authoritative data store; deterministic Platform operation does not depend on it.
+- Authoritative system/event/telemetry instants are absolute UTC; interactive display uses IANA zones with precedence override → user preference → browser local → tenant.timezone → UTC; display preference never rewrites operational policy timezones; host OS timezone is non-authoritative.
+- Recurring monitoring uses Core schedule/placement authority plus Sensor durable local desired-state execution; Monitor Group, Scheduling Class and Execution Class remain distinct; cadence and freshness are both required; deterministic phase spreading and failure-domain backoff are mandatory architecture.
+- Exact raw Counter64 Sensor→Core→Kafka→ClickHouse transport/persistence is **IMPLEMENTED+TESTED** on current main after PR #84, including full unsigned-64 boundary coverage and replay-safe `UInt64` persistence; benchmarking/certification/deployment remain open, and derived delta/rate/reset/wrap/discontinuity semantics remain a P0 implementation gap.
+- Exactly-two-Core Active/Standby HA remains P0 and not production-certified; no Patroni/repmgr/ClickHouse Keeper/Raft/Consul/etcd third-coordination selection is made by this baseline.
+- Standard production Sensor roles are NETWORK, INFRASTRUCTURE, FLOW and LOG; SYNTHETIC and CLOUD_API are conditional dedicated roles; COMBINED is lab/dev/small-deployment unless separately certified; runtime STREAMING_EVENT requires product/runtime reconciliation toward FLOW/LOG.
+- PR #81 Sensor telemetry durability is canonical at-least-once; concurrent pending-reservation republish amplification is P1 hardening, not a new datastore.
+
+## 10. Completeness and global traceability
+
+`Platform_08_Requirements_Traceability.md` is the **single global index** for formal `REQ-*` and `PRD-*` identifiers.
+
+- Detailed normative requirements remain in their owning documents.
+- Specialized-master `REQ-*` / `PRD-*` supplements remain authoritative in their owners and are indexed globally by Platform_08.
+- A new requirement is incorporated only when it has an ID, affected-layer mapping and sufficient normative behavior for implementation without inventing a load-bearing decision.
+- Documentation mapping is not implementation evidence.
+
+Machine-enforced structural protection is provided by:
+
+- `project_documentation/mother_reference_manifest.json`
+- `project_documentation/tools/validate_mother_references.py`
+
+These are supporting governance artifacts, not Mother References.
+
+## 11. Explicit unresolved/P0 items
+
+Authoritative list is `Platform_12_Decision_Source_Register.md` §5 and the 2026-09-21 handoff priority freeze. Restated here for navigation:
+
+- exact Counter64 typed pipeline (Sensor→Core→Kafka→ClickHouse) preserving full unsigned 64-bit source truth;
+- display timezone persistence/API/UI behavior (`display_timezone` preference, precedence, DST/report correctness);
+- generic recurring scheduling/freshness/deterministic spreading and production scheduler wiring (including SNMP);
+- failure-domain backoff, recovery ramp and resource-pressure deferral behavior;
+- exact two-Core Kafka implementation/failover while honoring no third full Core;
+- exact two-Core ClickHouse replication/promotion/fencing design;
+- exact PostgreSQL two-Core failover/fencing/rewind mechanics;
+- exact Core service fencing/VIP implementation and failure matrix;
+- Sensor ownership/lease/fencing and push-protocol HA continuity;
+- Flow/NTA production runtime and FLOW-role certification; LOG production role/runtime reconciliation;
+- final contractual DR RPO/RTO and data-loss objectives;
+- final SNWP-2500-v1 metric/interface/event mix and certified performance results;
+- Streaming/Flow Sensor certified Flow records/sec and Syslog EPS;
+- exact GNN model architecture, training labels, inference latency, CPU/GPU footprint and production enablement threshold;
+- final compliance certification program/scope and achieved certifications;
+- exact product SKUs/licensing quantities beyond the agreed behavioral rules.
+
+These remain unresolved until formally approved; no coding tool may invent them. Specialized-master additions do not resolve these P0/TBD items by declaration.
+
+## 12. Deliberate change control (READ-MOSTLY)
+
+Mother documents are **READ-MOSTLY** and authoritative.
+Coding agents must **not casually** modify them while implementing features.
+
+A mother document **MUST** be updated when:
+
+1. a factual/documentation error is identified;
+2. two mother documents contradict one another;
+3. an approved product decision changes;
+4. an approved architecture decision changes;
+5. an implementation dependency becomes formally selected;
+6. a P0/TBD item is resolved;
+7. a requirement was accidentally omitted;
+8. an implemented behavior would otherwise conflict with documented truth.
+
+Such changes require deliberate change control, cross-document reconciliation, Decision Register update where a decision changes, and review through the canonical GitHub repository. No implementation is allowed to permanently diverge from the mother-reference truth. If implementation discovers an error in the mother documents, engineering must correct the mother documents rather than knowingly preserve a false specification.
+
+## 13. Canonical repository and working clone
+
+**USER-FIXED:** Canonical Platform source repository is `https://github.com/gagandsm-max/platform`.
+
+- GitHub is the authoritative repository/system of record.
+- Local `~/nms` (or any other clone path) is a **working clone**, not an independent source of truth.
+- Code, build, test and mother-document changes become authoritative only after being pushed and merged into the canonical GitHub repository.
+- Normal development uses short-lived branches.
+- Material changes use pull requests.
+- Do not directly push normal development changes to the protected/default branch.
+- Commits must be traceable to the implementation/change being made.
+- Do not force-push shared/default branches.
+- GitHub history must preserve architecture/document decision provenance.
+- Selecting GitHub as source of record does **not** by itself freeze a CI provider. GitHub Actions may be evaluated later; it is not a fixed architecture decision unless separately approved.
+
+## 14. Development-stage readiness
+
+Before coding a module, an engineer or coding agent reads `AGENTS.md`, this Index, the relevant BRD/PRD requirement, Architecture/HLD/LLD/Dataflow sections, OSS Catalogue, **all task-relevant specialized masters discovered from this Index**, and the Decision Register. Do not hard-code an upper specialized-master document number in agent/tooling logic.
+
+For any OIV task, `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` is mandatory preflight reading.
+For discovery review, Agent onboarding/enrollment identity, dynamic endpoint identity/reconciliation or in-product Notification Center work, `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` is mandatory preflight reading.
+For normalized SD-WAN, SCIM lifecycle, SLI/SLO/error budgets, audit tamper evidence, middleware/backup/SASE connectors, tenant offboarding/data portability, licensing safety, declarative configuration/policy-as-code, Incident Command Workspace, privacy-bounded endpoint DEX, browser synthetics, customer-operated probes or future regional federation, `Platform_21_Enterprise_Gap_Closure_Master.md` is mandatory preflight reading.
+For alert evidence/qualification, semantic monitoring states, alert-policy lifecycle/quality, active evidence acquisition, RCA confidence/contradictions, AI evaluation/safety, Incident Copilot, AI provider/egress controls, prompt-injection/tool-use protection, tenant-scoped learning, shared-service dependency evidence, PKI assurance or AI observability, `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` is mandatory preflight reading.
+For enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph vs governed-CMDB semantics, or coverage-measurement work, `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading.
+
+A feature is not complete when it only compiles: tests, observability, error/failure behavior, upgrade/migration impact, security/OSS implications, traceability and acceptance evidence are part of Definition of Done.
+
+## 15. Historical reconciliation policy
+
+A1 does **not** claim to have normalized all of Platform_01..23.
+
+Current Mother References contain substantial historical reconciliation material (chronological amendment blocks, handoff appendices and duplicated/out-of-order structure in transitional documents).
+
+Policy:
+
+1. Current normative constitution is this document, sections 1–16. Appendix A is transitional historical/reconciliation material retained for zero-loss migration and is not the destination for new normative requirements.
+2. Transitional historical/reconciliation material is retained in **Appendix A** so A1 does not recklessly delete content and risk requirement loss.
+3. No new product requirement may be appended to Appendix A or to any historical reconciliation block.
+4. Historical sections are retained temporarily for zero-loss migration.
+5. A2–A5 will absorb valid current requirements into proper owning documents before historical blocks are removed.
+6. Git history, PRs and the Decision Register are ultimately the history source.
+
+## 16. Repository placement and agent navigation
+
+For ChatGPT Project use, these **25 Markdown mother-reference files** are sufficient as the authoritative source set.
+For code-agent enforcement, `AGENTS.md` should also be available at repository root (`~/nms/AGENTS.md` in a working clone), preferably as the existing symlink to `project_documentation/AGENTS.md`, so tools that auto-discover root instructions see the same content.
+Authority of the clone follows §12 after merge to the canonical GitHub repository.
+
+OSS governance remains governed by `Platform_07_OSS_Catalog.md`:
+
+Only components admitted by `Platform_07_OSS_Catalog.md` at an approved pinned version may ship.
+Top-level licence alone is insufficient; transitive/bundled licences, notices, vulnerabilities and exact artifacts must be scanned.
+Every release produces SPDX and CycloneDX SBOMs, third-party notices/licence texts, version locks, checksums and provenance.
+Implementation dependencies must match the catalogue; catalogue omissions discovered in implementation require catalogue/change-control updates before milestone/release.
+
+`Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` do not by themselves select new runtime dependencies. Any new vector database, packet-analysis product, SaaS SDK, browser automation engine, probe runtime, AI/model runtime, vendor SDK, pack runtime or other dependency requires normal OSS catalogue/security/performance approval.
+
+---
+
+## Appendix A — Transitional historical / reconciliation material (zero-loss retention)
+
+> **TRANSITIONAL.** Retained for zero-loss migration under Issue #94 / programme #93.
+> **Forbidden destination for new product requirements.**
+> A2–A5 must absorb valid current requirements into proper owners before removal.
+> Git history / PR / Decision Register remains the long-term history source.
+
+### A.1 Consolidation and version map (historical)
 
 ### 4.1 v3.1 → v3.2 consolidation
 
@@ -170,180 +528,3 @@ The resource-efficiency principle is accepted as an engineering constraint: opti
 Implementation truth is also reconciled to verified current `main`: PR #84 established the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path as **IMPLEMENTED+TESTED**. Derived counter delta/rate/reset/wrap/discontinuity behavior remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**.
 
 This reconciliation updates existing Mother References and keeps the authoritative set at **25 files**, version **v3.2.2**, highest specialized master **Platform_23**. No `Platform_24` is introduced.
-
-## 5. Precedence
-
-When requirements appear to conflict:
-
-1. BRD — business intent/non-negotiable outcomes.
-2. PRD — customer-visible behavior.
-3. Architecture — technology/deployment/security constraints.
-4. HLD — subsystem boundaries.
-5. LLD — implementation contracts.
-6. Dataflow — end-to-end sequencing consistent with the above.
-7. Specialized masters — detailed normative contracts in their assigned domain.
-8. Decision Register — provenance/TBD control.
-
-**OIV special case:** `Platform_19` is a consolidated specialized amendment whose product requirements act as authoritative PRD supplements and whose remaining sections carry corresponding architecture/HLD/LLD/dataflow/UI/security/quality/operations authority for that additive capability family. It may add behavior where existing files are silent, but may not silently override an explicit higher-precedence requirement.
-
-**Onboarding special case:** `Platform_20` is a consolidated specialized amendment. Its `PRD-ONB-*` requirements act as authoritative BRD/PRD supplements; its logical-layer sections carry the corresponding architecture/HLD/LLD/dataflow/UI/security/quality/operations authority; its `REQ-ONB-*` catalogue is the formal RTM supplement.
-
-**Enterprise gap-closure special case:** `Platform_21` is a consolidated specialized amendment. Its `PRD-EGC-*` requirements act as authoritative product supplements for its assigned enterprise capability family; its architecture/security/operability sections govern that scope and its `REQ-EGC-*` catalogue is the formal RTM supplement.
-
-**Monitoring-intelligence special case:** `Platform_22` is a consolidated specialized amendment. Its `PRD-MIA-*` requirements act as authoritative product supplements for alert quality, evidence qualification and AI/RCA assurance; its architecture/security/operability sections govern that capability family and its `REQ-MIA-*` catalogue is the formal RTM supplement. It does not silently override Platform_19 OIV or Platform_21 enterprise-gap authority outside its assigned scope.
-
-**Enterprise-monitoring-coverage special case:** `Platform_23` is a consolidated specialized amendment. Its `PRD-EMC-*` requirements act as authoritative product supplements for enterprise monitoring coverage, Capability Pack contract, dimensional certification and Customer Acceptance Profiles; its `REQ-EMC-*` catalogue is the formal RTM supplement. It does not silently override Platform_10 connector/security, Platform_19 OIV, Platform_20 onboarding, Platform_21 enterprise-gap or Platform_22 alert/AI-assurance authority outside its assigned scope.
-
-Conflicts require documented change control; implementation must not silently choose a convenient interpretation.
-
-## 6. Fixed product/architecture decisions
-
-- Product name: **Platform**.
-- Clean-room implementation; no ThoughtData/NetAI proprietary implementation reuse.
-- Core/Sensor: **Ubuntu 24.x LTS family** and **RHEL 9.x family** first (subject to certification matrix); Windows Core/Sensor not initial scope.
-- Standalone: one Core. HA: exactly two full Core nodes, Active/Standby, target <60s Core-service restoration.
-- Sensors continue polling and locally buffer through Core failure/WAN loss while capacity permits; 80% storage protection may reclaim/shed eligible oldest lower-priority data and must expose data-loss risk. Absolute zero-loss is not promised.
-- Sensor/Agent external channel: HTTPS/gRPC over mTLS; Kafka stays internal.
-- Data stack: PostgreSQL authoritative control state, ClickHouse high-volume telemetry analytics, Kafka streaming backbone, Valkey cache/ephemeral state.
-- Go Sensors/Agents; Java 21 Core; React/TypeScript UI; Python for selected NCM/AI/analytics workers.
-- Core ≤2,500 reference devices: 8 vCPU/16 GB mandatory engineering target under SNWP-2500-v1.
-- UI-driven provisioning: individual, CSV/XLSX bulk and network auto-discovery.
-- Placement is locality + reachability + capacity + HA + security aware.
-- Full always-on DPI/full APM remain excluded initially; **bounded triggered packet evidence** is an approved diagnostic capability and does not reopen the full-DPI decision.
-- Graph-grounded hybrid RCA; GNN is an augmenting scorer, not causal proof; `INCONCLUSIVE` is required.
-- Native Platform dashboard/UI; no embedded Grafana.
-- Core and Sensor managed-storage 80% protection watermark is mandatory.
-- SNMP is a typed evidence source rather than a numeric-only transport. Exact raw counters, state/inventory/topology facts and collection-quality outcomes remain semantically distinct; a failed SNMP poll alone does not prove device failure.
-- Routine SNMP monitoring is read-only. SNMP SET, when implemented, is a privileged NCM/remediation action subject to authorization, policy/approval, pre/post verification and audit rather than an ordinary polling operation.
-- Customer controls raw retention, rollups, archive and allowed purge priority.
-- DR capability required in v1.0; contractual RPO/RTO remain TBD until frozen.
-- Gemini through AI Gateway initially; deterministic/causal RCA remains independent.
-- HTTPS-only Platform UI; no application listener on TCP/80.
-- Development/test: Docker Compose standard; host laptop kept free of project-specific runtimes.
-- Production packaging: Core/Sensor/Linux Agent `.deb` + `.rpm`; Windows Agent signed service EXE + MSI + BAT wrappers.
-- Core, Sensors and Agents auto-start after reboot and emit structured diagnostics/logs.
-- Canonical source repository: `https://github.com/gagandsm-max/platform`.
-- First-class SaaS monitoring, cloud-native runtime dependency discovery, external deployment/change telemetry and carrier/ISP operational integration are approved product scope.
-- Incident Flight Recorder, Similar Incident Memory and cross-domain Change Intelligence are approved MTTR-reduction capabilities.
-- Controlled remediation is approved only with deterministic action definitions, authorization, preconditions, blast-radius controls, approval/policy, audit, post-action validation and rollback/fail-safe handling; no direct LLM privileged execution.
-- Platform Value / MTTR Improvement measurement and the four-layer customer-value dashboard are approved product scope; unsupported causal or financial claims are prohibited.
-- Network auto-discovery and Windows/Linux Agent enrollment use a governed review lifecycle; full monitoring/licence activation requires review by default unless authorized trusted auto-approval policy applies.
-- Approve/reject/unmanaged/exclude onboarding decisions require operator comment/reason and audit; pre-activation review supports metadata, group/sub-group and monitoring/alert-policy preview.
-- Agent-backed endpoint identity is anchored to canonical `entity_id` plus unique `agent_id`/mTLS identity; system/host name is human-readable technical identity and dynamic IP/MAC values are mutable observations.
-- Platform exposes one global per-user Notification Center/bell with server-side tenant/RBAC/resource scoping; operational Alerts/Incidents remain distinct from platform/workflow notifications.
-- Enterprise integrations normalize vendor-specific evidence into Platform-owned canonical contracts; vendor identifiers do not override tenant/entity authority.
-- Existing seven-day licence grace remains governed behavior. Commercial quantities, packaging and pricing remain Founder-reserved.
-- Declarative policy/configuration inputs cannot bypass Platform RBAC, validation, approvals, audit or runtime safety.
-- Endpoint DEX is bounded operational-experience monitoring, not employee surveillance.
-- Future regional federation does not reopen the v1 exactly-two-Core Active/Standby topology by implication.
-- Material alert classes use class-specific evidence contracts and telemetry-quality trust checks before authoritative operational-failure assertions.
-- Alert severity and evidentiary confidence are independent; semantic states such as `MONITORING_DEGRADED`, `REDUNDANCY_LOST`, `SLA_DEGRADED`, `EXPECTED_STATE`, `UNKNOWN` and `STALE` are preserved where applicable rather than collapsed into generic DOWN.
-- GNN/LLM outputs are evidence/hypothesis assistance, never causal authority; `INCONCLUSIVE` remains valid and prompt/model text cannot grant privileged execution authority.
-- Core monitoring and deterministic RCA/alerting continue without Internet/hosted AI availability; hosted/private/local/no-LLM operation is governed by explicit data-egress and fallback controls.
-- Capability Pack is the canonical enterprise extension architecture. Technology Monitoring Pack, Device / Network Pack, SaaS Monitoring Pack, Integration Pack and optional Customer Extension Pack are classifications/profiles of that architecture, not independent frameworks. Existing Device Pack contracts remain valid under this model.
-- Monitoring-technology certification is dimensional (Discovery/L1/L2/L3/Topology/NCM/Security/version). A family listed in `Platform_23` is a coverage target, not an implemented or certified pack.
-- Windows/Linux server monitoring certifies Agent-based and agentless/remote modes separately; collection/credential/path failure is monitoring-health evidence and does not automatically assert host/service failure.
-- Endpoint Diagnostic Snapshot is a bounded typed evidence-acquisition capability triggered by qualified policy state or authorized investigation; endpoint evidence informs but does not replace Core-authoritative cross-domain RCA.
-- Normal monitored Agents and Sensors do not host an LLM/GNN/foundation-model runtime for EDS; endpoint-local intelligence is deterministic/bounded statistical logic only.
-- Optional dedicated local/private inference is an AI-Gateway provider, not a third Core/HA authority or authoritative data store; deterministic Platform operation does not depend on it.
-- Authoritative system/event/telemetry instants are absolute UTC; interactive display uses IANA zones with precedence override → user preference → browser local → tenant.timezone → UTC; display preference never rewrites operational policy timezones; host OS timezone is non-authoritative.
-- Recurring monitoring uses Core schedule/placement authority plus Sensor durable local desired-state execution; Monitor Group, Scheduling Class and Execution Class remain distinct; cadence and freshness are both required; deterministic phase spreading and failure-domain backoff are mandatory architecture.
-- Exact raw Counter64 Sensor→Core→Kafka→ClickHouse transport/persistence is **IMPLEMENTED+TESTED** on current main after PR #84, including full unsigned-64 boundary coverage and replay-safe `UInt64` persistence; benchmarking/certification/deployment remain open, and derived delta/rate/reset/wrap/discontinuity semantics remain a P0 implementation gap.
-- Exactly-two-Core Active/Standby HA remains P0 and not production-certified; no Patroni/repmgr/ClickHouse Keeper/Raft/Consul/etcd third-coordination selection is made by this baseline.
-- Standard production Sensor roles are NETWORK, INFRASTRUCTURE, FLOW and LOG; SYNTHETIC and CLOUD_API are conditional dedicated roles; COMBINED is lab/dev/small-deployment unless separately certified; runtime STREAMING_EVENT requires product/runtime reconciliation toward FLOW/LOG.
-- PR #81 Sensor telemetry durability is canonical at-least-once; concurrent pending-reservation republish amplification is P1 hardening, not a new datastore.
-
-## 7. OSS governance
-
-Only components admitted by `Platform_07_OSS_Catalog.md` at an approved pinned version may ship.
-Top-level licence alone is insufficient; transitive/bundled licences, notices, vulnerabilities and exact artifacts must be scanned.
-Every release produces SPDX and CycloneDX SBOMs, third-party notices/licence texts, version locks, checksums and provenance.
-Implementation dependencies must match the catalogue; catalogue omissions discovered in implementation require catalogue/change-control updates before milestone/release.
-
-`Platform_19`, `Platform_20`, `Platform_21`, `Platform_22` and `Platform_23` do not by themselves select new runtime dependencies. Any new vector database, packet-analysis product, SaaS SDK, browser automation engine, probe runtime, AI/model runtime, vendor SDK, pack runtime or other dependency requires normal OSS catalogue/security/performance approval.
-
-## 8. Completeness control
-
-`Platform_08_Requirements_Traceability.md` remains the base formal guard against lost requirements.
-
-For v3.2.2 OIV scope, `Platform_19` contains the authoritative `REQ-OIV-*` traceability supplement.
-For v3.2.2 onboarding scope, `Platform_20` contains the authoritative `REQ-ONB-*` traceability supplement.
-For v3.2.2 enterprise gap-closure scope, `Platform_21` contains the authoritative `REQ-EGC-*` traceability supplement mapped to `PRD-EGC-*` requirements and their governing architecture/security/operability clauses.
-For v3.2.2 monitoring-intelligence/alert-quality/AI-assurance scope, `Platform_22` contains the authoritative `REQ-MIA-*` traceability supplement mapped to `PRD-MIA-*` requirements and their governing evidence/security/operability clauses.
-For v3.2.2 enterprise-monitoring-coverage / Capability Pack certification scope, `Platform_23` contains the authoritative `REQ-EMC-*` traceability supplement mapped to `PRD-EMC-*` requirements. Documentation mapping is not implementation evidence.
-
-A new requirement is considered incorporated only when it has an ID, affected-layer mapping and sufficient normative behavior for implementation without inventing a load-bearing decision. Specialized masters satisfy this requirement only within their explicitly assigned capability family.
-
-## 9. Explicit unresolved/P0 items
-
-Authoritative list is `Platform_12_Decision_Source_Register.md` §5 and the 2026-09-21 handoff priority freeze. Restated here for navigation:
-
-- exact Counter64 typed pipeline (Sensor→Core→Kafka→ClickHouse) preserving full unsigned 64-bit source truth;
-- display timezone persistence/API/UI behavior (`display_timezone` preference, precedence, DST/report correctness);
-- generic recurring scheduling/freshness/deterministic spreading and production scheduler wiring (including SNMP);
-- failure-domain backoff, recovery ramp and resource-pressure deferral behavior;
-- exact two-Core Kafka implementation/failover while honoring no third full Core;
-- exact two-Core ClickHouse replication/promotion/fencing design;
-- exact PostgreSQL two-Core failover/fencing/rewind mechanics;
-- exact Core service fencing/VIP implementation and failure matrix;
-- Sensor ownership/lease/fencing and push-protocol HA continuity;
-- Flow/NTA production runtime and FLOW-role certification; LOG production role/runtime reconciliation;
-- final contractual DR RPO/RTO and data-loss objectives;
-- final SNWP-2500-v1 metric/interface/event mix and certified performance results;
-- Streaming/Flow Sensor certified Flow records/sec and Syslog EPS;
-- exact GNN model architecture, training labels, inference latency, CPU/GPU footprint and production enablement threshold;
-- final compliance certification program/scope and achieved certifications;
-- exact product SKUs/licensing quantities beyond the agreed behavioral rules.
-
-These remain unresolved until formally approved; no coding tool may invent them. Specialized-master additions do not resolve these P0/TBD items by declaration.
-
-## 10. Development-stage readiness
-
-Before coding a module, an engineer or coding agent reads `AGENTS.md`, this Index, the relevant BRD/PRD requirement, Architecture/HLD/LLD/Dataflow sections, OSS Catalogue, **all task-relevant specialized masters discovered from this Index**, and the Decision Register. Do not hard-code an upper specialized-master document number in agent/tooling logic.
-
-For any OIV task, `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` is mandatory preflight reading.
-For discovery review, Agent onboarding/enrollment identity, dynamic endpoint identity/reconciliation or in-product Notification Center work, `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` is mandatory preflight reading.
-For normalized SD-WAN, SCIM lifecycle, SLI/SLO/error budgets, audit tamper evidence, middleware/backup/SASE connectors, tenant offboarding/data portability, licensing safety, declarative configuration/policy-as-code, Incident Command Workspace, privacy-bounded endpoint DEX, browser synthetics, customer-operated probes or future regional federation, `Platform_21_Enterprise_Gap_Closure_Master.md` is mandatory preflight reading.
-For alert evidence/qualification, semantic monitoring states, alert-policy lifecycle/quality, active evidence acquisition, RCA confidence/contradictions, AI evaluation/safety, Incident Copilot, AI provider/egress controls, prompt-injection/tool-use protection, tenant-scoped learning, shared-service dependency evidence, PKI assurance or AI observability, `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` is mandatory preflight reading.
-For enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph vs governed-CMDB semantics, or coverage-measurement work, `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading.
-
-A feature is not complete when it only compiles: tests, observability, error/failure behavior, upgrade/migration impact, security/OSS implications, traceability and acceptance evidence are part of Definition of Done.
-
-## 11. Mother-document change control (READ-MOSTLY)
-
-Mother documents are **READ-MOSTLY** and authoritative.
-Coding agents must **not casually** modify them while implementing features.
-
-A mother document **MUST** be updated when:
-
-1. a factual/documentation error is identified;
-2. two mother documents contradict one another;
-3. an approved product decision changes;
-4. an approved architecture decision changes;
-5. an implementation dependency becomes formally selected;
-6. a P0/TBD item is resolved;
-7. a requirement was accidentally omitted;
-8. an implemented behavior would otherwise conflict with documented truth.
-
-Such changes require deliberate change control, cross-document reconciliation, Decision Register update where a decision changes, and review through the canonical GitHub repository. No implementation is allowed to permanently diverge from the mother-reference truth. If implementation discovers an error in the mother documents, engineering must correct the mother documents rather than knowingly preserve a false specification.
-
-## 12. Canonical repository and working clone
-
-**USER-FIXED:** Canonical Platform source repository is `https://github.com/gagandsm-max/platform`.
-
-- GitHub is the authoritative repository/system of record.
-- Local `~/nms` (or any other clone path) is a **working clone**, not an independent source of truth.
-- Code, build, test and mother-document changes become authoritative only after being pushed and merged into the canonical GitHub repository.
-- Normal development uses short-lived branches.
-- Material changes use pull requests.
-- Do not directly push normal development changes to the protected/default branch.
-- Commits must be traceable to the implementation/change being made.
-- Do not force-push shared/default branches.
-- GitHub history must preserve architecture/document decision provenance.
-- Selecting GitHub as source of record does **not** by itself freeze a CI provider. GitHub Actions may be evaluated later; it is not a fixed architecture decision unless separately approved.
-
-## 13. Repository placement
-
-For ChatGPT Project use, these **25 Markdown mother-reference files** are sufficient as the authoritative source set.
-For code-agent enforcement, `AGENTS.md` should also be available at repository root (`~/nms/AGENTS.md` in a working clone), preferably as the existing symlink to `project_documentation/AGENTS.md`, so tools that auto-discover root instructions see the same content.
-Authority of the clone follows §12 after merge to the canonical GitHub repository.

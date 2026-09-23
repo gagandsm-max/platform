@@ -1,0 +1,230 @@
+{
+  "schemaVersion": "1.0.0",
+  "motherReferenceVersion": "3.2.2",
+  "globalRequirementIndex": "Platform_08_Requirements_Traceability.md",
+  "globalProductRequirementIndex": "Platform_08_Requirements_Traceability.md",
+  "documents": [
+    {
+      "file": "AGENTS.md",
+      "ordinal": 1,
+      "kind": "navigation_engineering_governance",
+      "expectedDocumentId": null,
+      "governingRole": "Coding-agent/engineer navigation and non-negotiable repository rules",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_00_Document_Index.md",
+      "ordinal": 2,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-INDEX-001",
+      "governingRole": "Mother Reference documentation constitution, authority, maturity and capability contract",
+      "normalizationState": "NORMALIZED_V1"
+    },
+    {
+      "file": "Platform_01_BRD.md",
+      "ordinal": 3,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-BRD-001",
+      "governingRole": "Business intent, outcomes, scope",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_02_PRD.md",
+      "ordinal": 4,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-PRD-001",
+      "governingRole": "Product capability and customer-visible behavior",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_03_Architecture.md",
+      "ordinal": 5,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-ARC-001",
+      "governingRole": "System architecture, deployment, trust, data/control planes, HA",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_04_HLD.md",
+      "ordinal": 6,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-HLD-001",
+      "governingRole": "Subsystems, services, modules, interfaces, failure boundaries",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_05_LLD.md",
+      "ordinal": 7,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-LLD-001",
+      "governingRole": "Executable low-level technical contracts",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_06_Dataflow.md",
+      "ordinal": 8,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-DF-001",
+      "governingRole": "Success/failure/retry/failover dataflows",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_07_OSS_Catalog.md",
+      "ordinal": 9,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-OSS-001",
+      "governingRole": "Dependency, provenance and licensing authority",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_08_Requirements_Traceability.md",
+      "ordinal": 10,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-RTM-001",
+      "governingRole": "Global requirements and product-requirement traceability index",
+      "normalizationState": "NORMALIZED_V1"
+    },
+    {
+      "file": "Platform_09_UI_UX_Master.md",
+      "ordinal": 11,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-UIUX-001",
+      "governingRole": "UI/UX/workspace/workflow contract",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_10_Protocol_Security_Connector_Master.md",
+      "ordinal": 12,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-PROTOCOL-001",
+      "governingRole": "Protocol, transport, credential and connector mechanics",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_11_Sizing_Capacity_Storage_Master.md",
+      "ordinal": 13,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-SIZING-001",
+      "governingRole": "Capacity, cardinality, retention, storage and resource budgets",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_12_Decision_Source_Register.md",
+      "ordinal": 14,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-DECISION-001",
+      "governingRole": "Decisions, TBD, provenance and implementation-truth deltas",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_13_Engineering_Development_and_Docker_Standards.md",
+      "ordinal": 15,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-ENGDEV-001",
+      "governingRole": "Engineering, repository and development standards",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_14_Test_Performance_and_Release_Quality.md",
+      "ordinal": 16,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-QUALITY-001",
+      "governingRole": "Test, benchmark, certification and release quality gates",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_15_CI_CD_Packaging_and_Distribution.md",
+      "ordinal": 17,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-RELEASEENG-001",
+      "governingRole": "CI/CD, artifacts, signing, SBOM, packaging and distribution",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
+      "ordinal": 18,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-OPSINSTALL-001",
+      "governingRole": "Install, upgrade, rollback, backup, restore, operations and runbooks",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_17_API_Event_and_Data_Model_Contracts.md",
+      "ordinal": 19,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-CONTRACTDATA-001",
+      "governingRole": "API, event, data and schema compatibility authority",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_18_Security_Threat_Model.md",
+      "ordinal": 20,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-THREAT-001",
+      "governingRole": "Security threat, risk, control and verification authority",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md",
+      "ordinal": 21,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-INTELVALUE-001",
+      "governingRole": "Operational intelligence, MTTR and customer-value specialized master",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md",
+      "ordinal": 22,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-ONBOARDING-001",
+      "governingRole": "Discovery, onboarding, identity and notification specialized master",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_21_Enterprise_Gap_Closure_Master.md",
+      "ordinal": 23,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-EGC-001",
+      "governingRole": "Enterprise gap-closure specialized master",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md",
+      "ordinal": 24,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-MIA-001",
+      "governingRole": "Monitoring intelligence, alert quality and AI assurance specialized master",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    },
+    {
+      "file": "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md",
+      "ordinal": 25,
+      "kind": "mother_reference",
+      "expectedDocumentId": "PLATFORM-EMC-001",
+      "governingRole": "Enterprise monitoring coverage and Capability Pack specialized master",
+      "normalizationState": "TRANSITIONAL_LEGACY"
+    }
+  ],
+  "legacyIdExceptions": [
+    {
+      "id": "OSS-008",
+      "kind": "formal_requirement_legacy",
+      "reason": "Preserved beside REQ-OSS-001..007; pending controlled reconciliation under Issue #93",
+      "primaryRegistry": "Platform_08_Requirements_Traceability.md"
+    }
+  ],
+  "historicalFilenameAllowlist": [
+    "Platform_13_Engineering_Execution_Standards.md",
+    "Platform_14_Docker_Development_Environment.md",
+    "Platform_15_Test_Strategy_and_Quality_Gates.md",
+    "Platform_16_CI_CD_and_Release_Engineering.md",
+    "Platform_17_Installation_Upgrade_Rollback_Runbook.md",
+    "Platform_18_Packaging_and_Distribution.md",
+    "Platform_19_API_and_Event_Contract_Master.md",
+    "Platform_20_Data_Model_and_Schema_Master.md",
+    "Platform_21_Security_Threat_Model.md",
+    "Platform_22_Performance_and_Benchmark_Plan.md",
+    "Platform_23_Operational_Runbooks.md",
+    "Platform_24_Release_Acceptance_Criteria.md"
+  ]
+}
