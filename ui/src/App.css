@@ -734,6 +734,7 @@ kbd {
   }
 
   .brand-name,
+  .density-control,
   .topbar-actions .user-menu,
   .global-search kbd {
     display: none;
@@ -821,7 +822,7 @@ kbd {
 .workspace-header {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--density-shell-gap);
   align-items: flex-start;
 }
 
@@ -966,7 +967,7 @@ kbd {
 
 .category-landing {
   display: grid;
-  gap: 1rem;
+  gap: var(--density-shell-gap);
 }
 
 .category-landing__section-title {
