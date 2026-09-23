@@ -99,8 +99,17 @@ public class SecurityAuditEmitter {
                     reasonCode == null ? null : new AuditReasonCode(reasonCode),
                     metadata
             );
-            log.info("security_audit event_id={} category={} action={} outcome={} reason={}",
-                    event.eventId(), category, action.value(), outcome, reasonCode == null ? "" : reasonCode);
+            log.info(
+                    "security_audit event_id={} correlation_id={} tenant_id={} category={} action={} outcome={} reason={} metadata={}",
+                    event.eventId(),
+                    event.correlationId().value(),
+                    event.tenantId() == null ? "" : event.tenantId(),
+                    event.category(),
+                    event.action().value(),
+                    event.outcome(),
+                    event.reasonCode() == null ? "" : event.reasonCode().value(),
+                    event.metadata().values()
+            );
         } catch (RuntimeException ex) {
             log.warn("security_audit_emit_failed");
         }
