@@ -207,7 +207,7 @@ Exact contractual RPO, RTO and automated/manual DR activation remain TBD and mus
 ---
 
 
-### Native production packages and service continuity (absorbed from §66 / PRD-PKG/SVC/LOG)
+### Native production packages and service continuity
 ### PRD-DEV-001 — Container-isolated engineering environment
 
 All normal development and automated test stacks shall run under Docker Compose. The repository shall provide a one-command startup path, health-aware startup, deterministic teardown and documented reset/recovery. Project services and databases shall not depend on host-native project runtimes.
@@ -727,7 +727,7 @@ Support storage systems and SAN fabric monitoring for capacity, IOPS, throughput
 ---
 
 
-### Windows/Linux infrastructure monitoring modes (absorbed from §67.1)
+### Windows/Linux infrastructure monitoring modes
 
 Platform shall support both **Agent-based** and **agentless/remote** Windows/Linux infrastructure monitoring as separately certifiable modes.
 
@@ -1248,7 +1248,7 @@ AI feedback shall support Correct / Partially Correct / Incorrect plus optional 
 ---
 
 
-### Lightweight/local AI placement (absorbed from §67.3)
+### Lightweight/local AI placement
 
 Local intelligence uses three deployment tiers:
 
@@ -1315,7 +1315,7 @@ Path view shall identify uncertain/unobserved hops rather than inventing links.
 ---
 
 
-### Endpoint Diagnostic Snapshot (absorbed from §67.2)
+### Endpoint Diagnostic Snapshot
 
 Platform shall provide a bounded **Endpoint Diagnostic Snapshot (EDS)** for Windows/Linux infrastructure as a specialized profile of the existing Diagnostic Job / Live Evidence / Investigation architecture (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`). EDS may start automatically after a centrally governed threshold/state condition becomes **capture-eligible**, or from an authorized investigation request. Capture-eligibility is not authoritative host-health state.
 
@@ -1774,24 +1774,34 @@ Support customer CA, CSR/import/renewal, trust stores and certificate rotation. 
 
 ### Licensing grace — Founder-reserved conflict (UNRESOLVED)
 
-Current Mother Reference text records a **7-day** post-expiry grace during which polling continues. Prior Founder-approved material may record a **15-day** grace. **This conflict is Founder-reserved and unresolved.** A2.1 does not choose either value, does not invent a compromise, and does not change commercial terms. Product behavior implementations must treat the grace day-count as Founder-reserved until change control resolves it. Related IDs and Usage & Licensing foresight remain in force for non-conflicting behavior (warnings, banners, history retention, admin licence import).
+**Founder-reserved conflict — neither 7-day nor 15-day post-expiry grace is current final normative commercial truth.**
 
-- Warn 30 days before expiry.
-- From 7 days before expiry, every dashboard shows a top banner: `Licence expires in X days`.
-- Default grace: 7 days after expiry; polling continues.
-- After grace, polling stops unless manually extended/renewed.
-- Historical data remains accessible; no licence-expiry data deletion.
+Conflicting historical/source values (record only; do not select):
+
+- Current Mother Reference material: **7-day** post-expiry grace.
+- Prior Founder-approved material: **15-day** post-expiry grace.
+
+Until Founder change control resolves **FOUNDER-LIC-GRACE**:
+
+- post-expiry grace is a Founder-reserved, decision-required / configurable duration;
+- polling continues during whichever post-expiry grace duration is formally approved;
+- after the approved grace duration ends, polling stops unless the licence is manually extended/renewed;
+- historical data remains accessible; no licence-expiry data deletion;
+- engineering must not invent a compromise day-count and must not treat either historical value as settled commercial truth.
+
+Normative non-grace continuity (unchanged):
+
+- Warn 30 days before expiry (T-30).
+- From 7 days before expiry (T-7), every dashboard shows a top banner: `Licence expires in X days`.
 - Licence settings/import remain accessible to authorized admins.
-- All state changes audited.
+- All licence/entitlement state changes are audited and visible in Usage & Licensing.
 
----
+### Licence expiry behavior
 
-
-### Licence expiry behavior (absorbed from PRD-LICENSE)
 - T-30 days: warning begins.
 - T-7 days: persistent dashboard banner with exact days remaining.
-- Expiry through +7 days: grace; polling continues.
-- End of +7-day grace: polling stops unless manually extended/renewed; historical data remains available.
+- Post-expiry: grace of Founder-approved duration (**FOUNDER-LIC-GRACE** unresolved; historical/source values 7-day vs 15-day only); polling continues during that approved grace.
+- After the approved grace ends: polling stops unless manually extended/renewed; historical data remains available.
 - License/entitlement events are audited and visible in Usage & Licensing dashboard.
 
 
@@ -1961,7 +1971,7 @@ Customers may override landing page policy.
 ---
 
 
-### Additional OOB workspaces #86–98 (absorbed from §65)
+### Additional OOB workspaces #86–98
 These extend the earlier catalogue and are also required out of box:
 
 | # | Dashboard / Workspace | Purpose | Key views/actions |
@@ -2249,7 +2259,7 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 ---
 
 
-| PRD-TBD-LIC-GRACE | Licence grace 7 vs 15 day Founder-reserved conflict | UNRESOLVED |
+| FOUNDER-LIC-GRACE | Post-expiry licence grace: conflicting historical/source values 7-day vs 15-day; neither is final normative commercial truth until Founder decision | UNRESOLVED |
 
 ## 44. A2.1 migration note
 
