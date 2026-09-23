@@ -1249,7 +1249,7 @@ Tenant, site, entity, data class and archive policies carry data-placement metad
 **Maturity / Issue #92:** Native production packaging remains incomplete; Docker Compose development profiles are not production packaging certification.
 
 
-### 44 Development deployment units
+### 44.1 Development deployment units
 
 The repository shall provide Docker Compose profiles for at minimum:
 
@@ -1260,19 +1260,19 @@ The repository shall provide Docker Compose profiles for at minimum:
 - `security`: security scanning and negative protocol/authentication tests;
 - `dr`: backup/restore and disaster-recovery exercises.
 
-### 44 Compose service groups
+### 44.2 Compose service groups
 
 A complete local stack shall be decomposable into logical groups: Core application, UI, ingestion, data services, Sensors, mock devices/exporters, integration mocks and test runners. Developers should be able to start a minimal profile rather than always consuming resources for the full scale stack.
 
-### 44 Linux package service layout
+### 44.3 Linux package service layout
 
 Each installable component has a dedicated package, OS service and data boundary. Standard paths shall follow Linux conventions, with exact final paths governed by `Platform_15_CI_CD_Packaging_and_Distribution.md`.
 
-### 44 Runtime health/logging subsystem
+### 44.4 Runtime health/logging subsystem
 
 Each deployment unit shall implement a common health/logging contract. Logs flow to journald/stdout plus bounded application log files where required by support policy. Platform Health ingests service status and relevant metrics without creating a monitoring dependency loop that can destabilize the monitored service.
 
-### 44 Windows Agent deployment unit
+### 44.5 Windows Agent deployment unit
 
 The Windows Agent is one compiled service executable plus configuration/certificate state and an installer. BAT wrappers are convenience automation; they are not the Agent runtime itself. GA packaging uses MSI and code signing.
 
@@ -1282,7 +1282,7 @@ The Windows Agent is one compiled service executable plus configuration/certific
 
 EDS is a specialized Diagnostic Job profile (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`) within the existing Troubleshoot / Live Evidence / Investigation architecture. It does not create a second diagnostic registry, scheduler, investigation state machine or evidence store.
 
-### 45 Agent responsibilities
+### 45.1 Agent responsibilities
 
 Windows/Linux Agent adds logical responsibilities within the existing Agent runtime:
 
@@ -1295,7 +1295,7 @@ Windows/Linux Agent adds logical responsibilities within the existing Agent runt
 
 These responsibilities do not require a second endpoint daemon, Python runtime or model service.
 
-### 45 Infrastructure Sensor responsibilities
+### 45.2 Infrastructure Sensor responsibilities
 
 Infrastructure Sensor owns:
 
@@ -1309,7 +1309,7 @@ Infrastructure Sensor owns:
 
 Sensor does not perform authoritative cross-domain RCA and does not host the local LLM for this capability.
 
-### 45 Core responsibilities
+### 45.3 Core responsibilities
 
 Core owns:
 
@@ -1323,7 +1323,7 @@ Core owns:
 - optional ML/GNN/LLM assistance under `Platform_22`;
 - UI/API exposure of eligibility, evidence, gaps and diagnostic status, visually distinct from Core RCA conclusions.
 
-### 45 Local/private inference provider boundary
+### 45.4 Local/private inference provider boundary
 
 **If** AI Gateway targets a separate local/private inference provider, that mode is an optional/conditional inference boundary only: no scheduling authority, no HA quorum role, no direct telemetry ingestion authority and no durable control-plane ownership. It is not required for EDS or base monitoring. All-AI-disabled remains supported.
 

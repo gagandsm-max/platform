@@ -774,7 +774,7 @@ sequenceDiagram
 
 ---
 
-## 29. __TMP29__. Flow DF-027A — Contextual on-demand diagnostic / multi-vantage verification
+## 29. Flow DF-027A — Contextual on-demand diagnostic / multi-vantage verification
 
 ```mermaid
 sequenceDiagram
@@ -813,7 +813,7 @@ Contradictory vantage evidence is shown, not averaged into a false definitive st
 
 ---
 
-## 30. __TMP30__. Flow DF-027B — Investigation Session evidence capture
+## 30. Flow DF-027B — Investigation Session evidence capture
 
 ```mermaid
 sequenceDiagram

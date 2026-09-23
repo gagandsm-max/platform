@@ -2567,7 +2567,7 @@ Interactive queries enforce tenant scope, maximum scan/time/rows/concurrency and
 
 ## 85. Docker, service supervision, logging and packaging LLD
 
-### 85 Compose contract
+### 85.1 Compose contract
 
 Every Compose service shall declare where applicable:
 
@@ -2583,11 +2583,11 @@ Every Compose service shall declare where applicable:
 
 `depends_on` shall not be treated as readiness. Services requiring another service must wait on health/readiness or implement retry/backoff.
 
-### 85 Docker reboot behavior
+### 85.2 Docker reboot behavior
 
 For the interactive development profile, long-lived stateful and Platform services shall use `restart: unless-stopped` unless a service has a documented reason not to. Docker daemon auto-start at host boot is required. Named volumes preserve state. Engineers must have explicit documented commands for clean stop, clean restart and destructive reset.
 
-### 85 Linux systemd unit contract
+### 85.3 Linux systemd unit contract
 
 Core, Sensor and Linux Agent packages shall install systemd units with at least:
 
@@ -2604,7 +2604,7 @@ NoNewPrivileges=true
 
 Units shall be enabled at package installation unless an explicit package option requests staging without startup. Exact hardening directives are component-specific and must be validated against required network/file capabilities.
 
-### 85 Windows Service contract
+### 85.4 Windows Service contract
 
 Windows Agent shall:
 
@@ -2616,7 +2616,7 @@ Windows Agent shall:
 - preserve enrollment identity/configuration across reboot and upgrade;
 - support silent install/uninstall for enterprise software distribution.
 
-### 85 Structured log schema
+### 85.5 Structured log schema
 
 Mandatory fields where applicable:
 
@@ -2642,11 +2642,11 @@ safe_context
 
 Forbidden fields include clear-text password/community/private key/API token/bearer token/session cookie and unredacted authorization headers.
 
-### 85 Log retention/rotation
+### 85.6 Log retention/rotation
 
 Logs shall be bounded. Linux packages integrate with journald/logrotate policy; Windows integrates with Windows Event Log and bounded Agent log files as specified. Local logs participate in storage forecasting and 80% disk protection. Debug logging is time-bound and must not remain enabled indefinitely without explicit operator choice.
 
-### 85 Package scripts
+### 85.7 Package scripts
 
 `.deb`/`.rpm` install/upgrade/uninstall scripts must be idempotent, must not destroy customer data on package removal unless an explicit purge operation is requested, and must preserve configuration/state across in-place upgrade. Package scripts must record failures with actionable error codes.
 
@@ -2656,7 +2656,7 @@ Logs shall be bounded. Linux packages integrate with journald/logrotate policy; 
 
 EDS is implemented as Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` on the existing diagnostic/Live Evidence architecture. It does not add a second scheduler, registry, evidence database or transport.
 
-### 86 Capture-eligibility state
+### 86.1 Capture-eligibility state
 
 For each effective diagnostic trigger, the Agent or agentless monitoring authority retains bounded **capture-eligibility** state sufficient to evaluate whether an automatic EDS Diagnostic Job may be created. This state is **not** authoritative host/operational health:
 
@@ -2678,7 +2678,7 @@ Evaluation uses the same normalized monitoring observations already collected wh
 
 Automatic capture executes only under currently valid Core-issued authority/generation. Stale, revoked, expired, reassigned or replayed authority fails closed.
 
-### 86 Linux Agent evidence collectors
+### 86.2 Linux Agent evidence collectors
 
 Linux EDS shall prefer bounded native reads/APIs such as `/proc`, `/sys`, stat/statfs and narrowly filtered journal/kernel evidence. Collector implementation shall be dependency-minimal and must not require spawning an unrestricted shell, `sh -c`, `bash -c` or arbitrary command strings from users/API/model output.
 
@@ -2693,13 +2693,13 @@ Supported evidence families should include where available:
 - systemd service state/restart/failure information;
 - bounded kernel/filesystem/MCE/AER/thermal/fan evidence where exposed safely.
 
-### 86 Windows Agent evidence collectors
+### 86.3 Windows Agent evidence collectors
 
 Windows EDS shall use supported native Windows interfaces/APIs appropriate to the metric, including performance-counter/PDH, Service Control Manager, Event Log, IP Helper/network, storage and WHEA/system evidence where required. Recurring collection shall not depend on continuously spawning PowerShell or on arbitrary PowerShell from users/API/model output.
 
 Evidence families normalize to the same Platform concepts as Linux while preserving Windows-specific provenance.
 
-### 86 Agentless query packs
+### 86.4 Agentless query packs
 
 Agentless EDS executes only versioned Platform-controlled diagnostic query definitions as Diagnostic Job parameters.
 
@@ -2718,7 +2718,7 @@ Each query definition declares:
 
 Linux query packs execute through the approved SSH transport as fixed operations with structured parameters. Windows query packs execute through approved WinRM HTTPS/WMI/CIM structured operations. Where a certified PowerShell fallback is unavoidable, the exact Platform-owned versioned template is read-only, typed-parameter constrained, output/timeout bounded, audited and separately security-certified. Neither path provides unrestricted generic remote command execution to normal monitoring/EDS workflows. Controlled sudo may exist only for explicitly certified read-only operations.
 
-### 86 Resource guard
+### 86.5 Resource guard
 
 EDS runtime enforces:
 
@@ -2733,13 +2733,13 @@ EDS runtime enforces:
 
 If collection would materially worsen endpoint or monitoring-path pressure, the capture is shortened, suppressed or returned `PARTIAL`/`SUPPRESSED` with an explicit reason. Incomplete diagnostic evidence must be observable; routine telemetry durability must not be silently destroyed to protect EDS.
 
-### 86 Endpoint classification boundary
+### 86.6 Endpoint classification boundary
 
 Endpoint code may emit deterministic observations/indicators such as `CPU_PRESSURE`, `MEMORY_PRESSURE`, `OOM_EVENT`, `FILESYSTEM_READ_ONLY`, `BLOCK_IO_PRESSURE`, `SERVICE_FAILED`, `PCIE_AER_EVENT` or `WHEA_HARDWARE_ERROR` only when directly supported by evidence.
 
 It must not convert an indicator into unsupported causal prose such as declaring hardware damage, thermal-paste failure, radio interference or a guaranteed repair. Causal fusion belongs to Core and may result in `INCONCLUSIVE`.
 
-### 86 Local intelligence runtime boundary
+### 86.7 Local intelligence runtime boundary
 
 No LLM/GNN/foundation-model runtime is packaged into normal Agent or Sensor EDS. Tier-0 endpoint intelligence is deterministic/bounded statistical capture-eligibility and evidence logic in the existing runtime. Tier-1/2 intelligence follows `Platform_22` and `Platform_11` resource governance and remains optional; a dedicated inference provider is not an EDS release prerequisite.
 

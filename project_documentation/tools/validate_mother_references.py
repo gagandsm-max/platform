@@ -770,12 +770,34 @@ class MotherReferenceValidator:
         """For NORMALIZED_V1 docs, numeric ###/#### headings must belong to
         the current ## N parent. Descriptive unnumbered ### headings are OK.
         TRANSITIONAL_LEGACY documents are not checked here.
+
+        Also rejects bare numeric-looking subsection tokens that lack a
+        hierarchical suffix (e.g. ``### 44 Description``), and rejects
+        temporary migration markers inside headings (e.g. ``__TMP29__``).
         """
         current_top: int | None = None
         for line in text.splitlines():
+            # Any markdown heading (## through ######) for TMP-marker guard.
+            heading = re.match(r"^(#{2,6})\s+(.+)$", line)
+            if heading:
+                title = heading.group(2)
+                if re.search(r"(?:__TMP\d+__|\*\*TMP\d+\*\*)", title):
+                    self.fail(
+                        f"{rel}: temporary migration marker in heading: "
+                        f"{line.strip()[:80]}"
+                    )
             top_match = re.match(r"^##\s+(\d+)\.", line)
             if top_match:
                 current_top = int(top_match.group(1))
+                continue
+            # Bare numeric parent token without hierarchical suffix:
+            # ### 44 Description  /  #### 44 Nested detail
+            bare = re.match(r"^(#{3,6})\s+(\d+)\s+\S", line)
+            if bare and not re.match(r"^(#{3,6})\s+\d+(?:\.\d+)+\s+\S", line):
+                self.fail(
+                    f"{rel}: malformed bare-numeric subsection heading "
+                    f"(missing hierarchical suffix): {line.strip()[:80]}"
+                )
                 continue
             sub = re.match(r"^(#{3,6})\s+(\d+)((?:\.\d+)+)\s+\S", line)
             if not sub:

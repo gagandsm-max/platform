@@ -618,6 +618,100 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
+    def test_18f2_normalized_proper_dotted_subsection_passes(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_04_HLD.md").write_text(
+            _header("PLATFORM-HLD-001")
+            + "## 44. Engineering-runtime\n\n"
+            + "### 44.1 Development deployment units\n\n"
+            + "### Core node\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("malformed bare-numeric" in e for e in errors),
+            errors,
+        )
+        self.assertFalse(
+            any("parent mismatch" in e for e in errors),
+            errors,
+        )
+
+    def test_18f3_normalized_bare_numeric_subsection_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_04_HLD.md").write_text(
+            _header("PLATFORM-HLD-001")
+            + "## 44. Engineering-runtime\n\n"
+            + "### 44 Development deployment units\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_04_HLD.md" in e and "malformed bare-numeric" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18f4_normalized_bare_numeric_deep_heading_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_04_HLD.md").write_text(
+            _header("PLATFORM-HLD-001")
+            + "## 44. Engineering-runtime\n\n"
+            + "#### 44 Nested detail\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_04_HLD.md" in e and "malformed bare-numeric" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18f5_normalized_tmp_marker_in_heading_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_06_Dataflow.md").write_text(
+            _header("PLATFORM-DF-001")
+            + "## 29. __TMP29__. Flow DF-027A — Example\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_06_Dataflow.md" in e
+                and "temporary migration marker" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18f6_transitional_platform_07_bare_numeric_not_blocked(self) -> None:
+        # Platform_07 remains TRANSITIONAL_LEGACY; bare-numeric / TMP guards
+        # apply only to NORMALIZED_V1 documents.
+        root = self._write_minimal()
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
+            + "## 9. Placement\n\n"
+            + "### 9 Historical OSS bare token retained until A2.3\n\n"
+            + "## 10. __TMP10__. Historical marker\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("Platform_07_OSS_Catalog.md" in e and "malformed bare-numeric" in e for e in errors),
+            errors,
+        )
+        self.assertFalse(
+            any(
+                "Platform_07_OSS_Catalog.md" in e and "temporary migration marker" in e
+                for e in errors
+            ),
+            errors,
+        )
+
     def test_18g_transitional_platform_07_may_retain_historical_numbering(self) -> None:
         root = self._write_minimal()
         (root / "Platform_07_OSS_Catalog.md").write_text(
