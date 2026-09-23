@@ -728,13 +728,31 @@ kbd {
   .topbar {
     position: sticky;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'brand search'
+      'actions actions';
     min-height: 58px;
-    gap: 0.65rem;
+    gap: 0.55rem 0.65rem;
+    padding-block: 0.5rem;
+  }
+
+  .brand-block {
+    grid-area: brand;
+  }
+
+  .global-search {
+    grid-area: search;
+  }
+
+  .topbar-actions {
+    grid-area: actions;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 0.1rem;
   }
 
   .brand-name,
-  .density-control,
   .topbar-actions .user-menu,
   .global-search kbd {
     display: none;
