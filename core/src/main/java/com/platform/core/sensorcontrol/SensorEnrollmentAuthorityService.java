@@ -5,6 +5,7 @@ import com.platform.core.security.audit.AuditActions;
 import com.platform.core.security.audit.AuditCategory;
 import com.platform.core.security.audit.AuditOutcome;
 import com.platform.core.security.http.SecurityAuditEmitter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +42,7 @@ public class SensorEnrollmentAuthorityService {
     private final SecurityAuditEmitter auditEmitter;
     private final SecureRandom secureRandom;
 
+    @Autowired
     public SensorEnrollmentAuthorityService(
             SensorEnrollmentAuthorityRepository authorities,
             SensorControlRepository sensors,
