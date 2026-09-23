@@ -18,6 +18,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -153,6 +154,49 @@ class SensorEnrollmentAuthorityIntegrationTest {
         assertEquals(SensorControlException.ERR_SENSOR_ENROLLMENT_AUTHORITY_INVALID,
                 assertThrows(SensorControlException.class,
                         () -> service.consume(issued.plaintextToken(), SensorRole.NETWORK, null)).getCode());
+    }
+
+    @Test
+    void tryInsertDuplicateReturnsFalseWithoutPoisoningTransaction() {
+        Tenant tenant = tenants.create("Conflict Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        Instant now = Instant.now();
+        String digest = "a".repeat(64);
+        SensorEnrollmentAuthority first = new SensorEnrollmentAuthority(
+                UUID.fromString("018f0e0a-0000-7000-8000-0000000000c1"),
+                digest, tenant.tenantId(), "deploy-conflict", null, SensorRole.NETWORK,
+                now, now.plusSeconds(3600), null, null, now, now);
+        assertTrue(authorityRepo.tryInsert(first));
+
+        SensorEnrollmentAuthority duplicateDigest = new SensorEnrollmentAuthority(
+                UUID.fromString("018f0e0a-0000-7000-8000-0000000000c2"),
+                digest, tenant.tenantId(), "deploy-conflict", null, SensorRole.NETWORK,
+                now, now.plusSeconds(3600), null, null, now, now);
+        assertFalse(authorityRepo.tryInsert(duplicateDigest));
+
+        // Same connection/transaction remains usable after conflict — subsequent insert succeeds.
+        SensorEnrollmentAuthority next = new SensorEnrollmentAuthority(
+                UUID.fromString("018f0e0a-0000-7000-8000-0000000000c3"),
+                "b".repeat(64), tenant.tenantId(), "deploy-conflict", null, SensorRole.NETWORK,
+                now, now.plusSeconds(3600), null, null, now, now);
+        assertTrue(authorityRepo.tryInsert(next));
+        assertEquals(2, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_enrollment_authority WHERE tenant_id = ?",
+                Integer.class, tenant.tenantId()));
+    }
+
+    @Test
+    void nullRequestedRoleFailsSafelyAgainstPersistedAuthority() {
+        Tenant tenant = tenants.create("Null Role Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        IssuedSensorEnrollmentAuthority issued = service.issue(
+                tenant.tenantId(), "deploy-null-role", null, SensorRole.NETWORK, Duration.ofMinutes(20));
+        SensorControlException ex = assertThrows(SensorControlException.class,
+                () -> service.consume(issued.plaintextToken(), null, null));
+        assertEquals(SensorControlException.ERR_SENSOR_ENROLLMENT_AUTHORITY_INVALID, ex.getCode());
+        assertFalse(ex.getMessage().contains(issued.plaintextToken()));
+        // Token must remain consumable after null-role rejection.
+        ConsumedSensorEnrollmentAuthority consumed = service.consume(
+                issued.plaintextToken(), SensorRole.NETWORK, null);
+        assertEquals(issued.authorityId(), consumed.authorityId());
     }
 
     private int raceConsume(String token, SensorRole role) throws Exception {

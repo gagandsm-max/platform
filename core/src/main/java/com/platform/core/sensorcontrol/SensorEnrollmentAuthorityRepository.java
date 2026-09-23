@@ -1,6 +1,5 @@
 package com.platform.core.sensorcontrol;
 
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -40,19 +39,22 @@ public class SensorEnrollmentAuthorityRepository {
         this.jdbc = jdbc;
     }
 
-    public void insert(SensorEnrollmentAuthority authority) {
-        try {
-            jdbc.update("""
-                    INSERT INTO platform.sensor_enrollment_authority
-                        (authority_id, token_hash_sha256, tenant_id, deployment_id, site_id, role,
-                         issued_at, expires_at, consumed_at, revoked_at, created_at, updated_at)
-                    VALUES
-                        (:authorityId, :tokenHash, :tenantId, :deploymentId, :siteId, :role,
-                         :issuedAt, :expiresAt, NULL, NULL, :createdAt, :updatedAt)
-                    """, params(authority));
-        } catch (DuplicateKeyException ex) {
-            throw ex;
-        }
+    /**
+     * Insert-if-absent. Returns {@code true} when exactly one row was inserted.
+     * Unique conflicts return {@code false} without aborting the transaction.
+     * FK/check/data-integrity failures still throw.
+     */
+    public boolean tryInsert(SensorEnrollmentAuthority authority) {
+        int inserted = jdbc.update("""
+                INSERT INTO platform.sensor_enrollment_authority
+                    (authority_id, token_hash_sha256, tenant_id, deployment_id, site_id, role,
+                     issued_at, expires_at, consumed_at, revoked_at, created_at, updated_at)
+                VALUES
+                    (:authorityId, :tokenHash, :tenantId, :deploymentId, :siteId, :role,
+                     :issuedAt, :expiresAt, NULL, NULL, :createdAt, :updatedAt)
+                ON CONFLICT DO NOTHING
+                """, params(authority));
+        return inserted == 1;
     }
 
     public Optional<SensorEnrollmentAuthority> findById(UUID authorityId) {
@@ -107,14 +109,6 @@ public class SensorEnrollmentAuthorityRepository {
                         .addValue("authorityId", authorityId)
                         .addValue("now", Timestamp.from(now)));
         return updated == 1;
-    }
-
-    public boolean tokenHashExists(String tokenHashSha256) {
-        Long count = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM platform.sensor_enrollment_authority WHERE token_hash_sha256 = :tokenHash",
-                Map.of("tokenHash", tokenHashSha256),
-                Long.class);
-        return count != null && count > 0;
     }
 
     private static MapSqlParameterSource params(SensorEnrollmentAuthority authority) {

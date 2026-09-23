@@ -7,12 +7,14 @@ import com.platform.core.security.http.SecurityAuditEmitter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,10 +24,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -49,16 +51,16 @@ class SensorEnrollmentAuthorityServiceTest {
         when(sensors.tenantExists(TENANT)).thenReturn(true);
         when(sensors.siteExists(TENANT, SITE)).thenReturn(true);
         when(sensors.siteExists(TENANT, OTHER_SITE)).thenReturn(false);
-        doNothing().when(authorities).insert(any());
+        when(authorities.tryInsert(any())).thenReturn(true);
     }
 
     @Test
     void issueReturnsPlaintextAndPersistsDigestOnly() {
         AtomicReference<SensorEnrollmentAuthority> inserted = new AtomicReference<>();
-        doAnswer(inv -> {
+        when(authorities.tryInsert(any())).thenAnswer(inv -> {
             inserted.set(inv.getArgument(0));
-            return null;
-        }).when(authorities).insert(any());
+            return true;
+        });
 
         IssuedSensorEnrollmentAuthority issued = service.issue(
                 TENANT, "deploy-a", SITE, SensorRole.NETWORK, Duration.ofHours(1));
@@ -85,6 +87,57 @@ class SensorEnrollmentAuthorityServiceTest {
         String joined = String.join(",", meta.getValue().values());
         assertFalse(joined.contains(issued.plaintextToken()));
         assertFalse(joined.contains(row.tokenHashSha256()));
+    }
+
+    @Test
+    void issueRetriesOnNonExceptionalConflictThenSucceedsOnce() {
+        AtomicInteger attempts = new AtomicInteger();
+        AtomicReference<SensorEnrollmentAuthority> accepted = new AtomicReference<>();
+        when(authorities.tryInsert(any())).thenAnswer(inv -> {
+            SensorEnrollmentAuthority row = inv.getArgument(0);
+            int n = attempts.incrementAndGet();
+            if (n == 1) {
+                return false; // uniqueness conflict — no exception, transaction remains usable
+            }
+            accepted.set(row);
+            return true;
+        });
+
+        IssuedSensorEnrollmentAuthority issued = service.issue(
+                TENANT, "deploy-retry", null, SensorRole.NETWORK, Duration.ofMinutes(15));
+
+        assertEquals(2, attempts.get());
+        assertEquals(accepted.get().authorityId(), issued.authorityId());
+        assertEquals(SensorEnrollmentAuthorityService.sha256Hex(issued.plaintextToken()),
+                accepted.get().tokenHashSha256());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> meta = ArgumentCaptor.forClass(Map.class);
+        verify(audit, times(1)).emitControlEvent(
+                eq(AuditCategory.SECURITY_ADMINISTRATION),
+                eq(AuditActions.SENSOR_ENROLLMENT_AUTHORITY_ISSUE),
+                eq(AuditOutcome.SUCCESS),
+                eq(TENANT),
+                eq("SENSOR_ENROLLMENT_AUTHORITY_ISSUED"),
+                meta.capture());
+        String joined = String.join(",", meta.getValue().values());
+        assertFalse(joined.contains(issued.plaintextToken()));
+        assertFalse(joined.contains(accepted.get().tokenHashSha256()));
+
+        InOrder order = inOrder(authorities, audit);
+        order.verify(authorities, times(2)).tryInsert(any());
+        order.verify(audit).emitControlEvent(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void issueExhaustsBoundedRetriesWithoutAuditing() {
+        when(authorities.tryInsert(any())).thenReturn(false);
+
+        SensorControlException ex = assertThrows(SensorControlException.class,
+                () -> service.issue(TENANT, "deploy-exhaust", null, null, Duration.ofMinutes(5)));
+        assertEquals(SensorControlException.ERR_SENSOR_ENROLLMENT_AUTHORITY_INVALID, ex.getCode());
+        verify(authorities, times(3)).tryInsert(any());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -141,6 +194,17 @@ class SensorEnrollmentAuthorityServiceTest {
                 () -> service.consume(token, SensorRole.NETWORK, SITE));
         assertEquals(SensorControlException.ERR_SENSOR_ENROLLMENT_AUTHORITY_INVALID, replay.getCode());
         assertFalse(replay.getMessage().contains(token));
+    }
+
+    @Test
+    void nullRequestedRoleFailsWithSafeInvalidFamily() {
+        String token = "null-role-token-abcdefghijklmnopqrstuvwxyz0123";
+        SensorControlException ex = assertThrows(SensorControlException.class,
+                () -> service.consume(token, null, SITE));
+        assertEquals(SensorControlException.ERR_SENSOR_ENROLLMENT_AUTHORITY_INVALID, ex.getCode());
+        assertFalse(ex.getMessage().contains(token));
+        verify(authorities, never()).findByTokenHash(any());
+        verify(authorities, never()).tryConsume(any(), any());
     }
 
     @Test
