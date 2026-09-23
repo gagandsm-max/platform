@@ -14,7 +14,11 @@ _TOOLS_DIR = Path(__file__).resolve().parent
 if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
-from validate_mother_references import SCHEMA_VERSION, validate_docs_root  # noqa: E402
+from validate_mother_references import (  # noqa: E402
+    CONSTITUTIONAL_AUTHORITATIVE_COUNT,
+    SCHEMA_VERSION,
+    validate_docs_root,
+)
 
 MINIMAL_DOCS = [
     ("AGENTS.md", None, "TRANSITIONAL_LEGACY", "navigation_engineering_governance"),
@@ -55,7 +59,8 @@ def _header(doc_id: str | None, version: str = "3.2.2") -> str:
     )
 
 
-def _req_registry(rows: list[tuple[str, str]]) -> str:
+def _req_registry(rows: list[tuple[str, str, str]]) -> str:
+    """rows: (id, summary, owner)."""
     lines = [
         "<!-- GLOBAL PRIMARY REQ REGISTRY -->",
         "### GLOBAL PRIMARY REQ REGISTRY",
@@ -63,15 +68,16 @@ def _req_registry(rows: list[tuple[str, str]]) -> str:
         "| Requirement ID | Summary | Primary owner | Source locator | Traceability state | Maturity | Evidence / blocker pointer |",
         "|---|---|---|---|---|---|---|",
     ]
-    for rid, summary in rows:
+    for rid, summary, owner in rows:
         lines.append(
-            f"| {rid} | {summary} | `Platform_08_Requirements_Traceability.md` | §2 | BASE_RTM_INDEXED | SPECIFIED | n/a |"
+            f"| {rid} | {summary} | `{owner}` | §2 | BASE_RTM_INDEXED | SPECIFIED | n/a |"
         )
     lines.append("<!-- END GLOBAL PRIMARY REQ REGISTRY -->")
     return "\n".join(lines)
 
 
-def _prd_registry(rows: list[tuple[str, str]]) -> str:
+def _prd_registry(rows: list[tuple[str, str, str]]) -> str:
+    """rows: (id, summary, owner)."""
     lines = [
         "<!-- GLOBAL PRIMARY PRD REGISTRY -->",
         "### GLOBAL PRIMARY PRD REGISTRY",
@@ -79,9 +85,9 @@ def _prd_registry(rows: list[tuple[str, str]]) -> str:
         "| PRD ID | Product requirement summary | Owner document | Source locator | Related REQ family | Maturity / implementation boundary |",
         "|---|---|---|---|---|---|",
     ]
-    for rid, summary in rows:
+    for rid, summary, owner in rows:
         lines.append(
-            f"| {rid} | {summary} | `Platform_02_PRD.md` | §1 | — | SPECIFIED |"
+            f"| {rid} | {summary} | `{owner}` | §1 | — | SPECIFIED |"
         )
     lines.append("<!-- END GLOBAL PRIMARY PRD REGISTRY -->")
     return "\n".join(lines)
@@ -95,14 +101,15 @@ class MotherReferenceValidatorTests(unittest.TestCase):
     def _write_minimal(
         self,
         *,
-        req_rows: list[tuple[str, str]] | None = None,
-        prd_rows: list[tuple[str, str]] | None = None,
+        req_rows: list[tuple[str, str, str]] | None = None,
+        prd_rows: list[tuple[str, str, str]] | None = None,
         legacy: list[dict] | None = None,
         extra_files: dict[str, str] | None = None,
         omit_files: set[str] | None = None,
         version: str = "3.2.2",
         p00_sections: str | None = None,
         p08_extra: str = "",
+        p08_historical: str | None = None,
         p02_body: str | None = None,
         normalize_overrides: dict[str, str] | None = None,
         doc_id_overrides: dict[str, str] | None = None,
@@ -110,21 +117,29 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         duplicate_platform_file: str | None = None,
         broken_ref: str | None = None,
         skip_manifest_legacy: bool = False,
+        historical_allowlist: list[str] | None = None,
+        drop_manifest_files: set[str] | None = None,
+        req_row_overrides: dict[str, str] | None = None,
     ) -> Path:
         omit_files = omit_files or set()
-        req_rows = req_rows or [("REQ-P-001", "Quality")]
-        prd_rows = prd_rows or [("PRD-HA-001", "HA pair")]
+        drop_manifest_files = drop_manifest_files or set()
+        req_rows = req_rows or [
+            ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md")
+        ]
+        prd_rows = prd_rows or [("PRD-HA-001", "HA pair", "Platform_02_PRD.md")]
         legacy = legacy if legacy is not None else []
 
         docs_meta = []
-        for i, (fname, doc_id, state, kind) in enumerate(MINIMAL_DOCS, start=1):
-            if fname in omit_files:
+        ordinal = 0
+        for fname, doc_id, state, kind in MINIMAL_DOCS:
+            if fname in omit_files or fname in drop_manifest_files:
                 continue
+            ordinal += 1
             state = (normalize_overrides or {}).get(fname, state)
             docs_meta.append(
                 {
                     "file": fname,
-                    "ordinal": i,
+                    "ordinal": ordinal,
                     "kind": kind,
                     "expectedDocumentId": doc_id,
                     "governingRole": f"role for {fname}",
@@ -151,6 +166,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "globalProductRequirementIndex": "Platform_08_Requirements_Traceability.md",
             "documents": docs_meta,
             "legacyIdExceptions": [] if skip_manifest_legacy else legacy,
+            "historicalFilenameAllowlist": historical_allowlist or [],
         }
         (self.tmp / "mother_reference_manifest.json").write_text(
             json.dumps(manifest, indent=2), encoding="utf-8"
@@ -167,8 +183,16 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             f"{maturity}\n"
             "## 4. Logical\n\n"
             "## 5. Set\n\n"
+            "### 5.1 Allocation\n\n"
             "## 6. Precedence\n\n"
         )
+
+        # Historical base RTM outside primary registry for Platform_08-owned REQs.
+        hist_lines = ["### Historical requirement catalogue (pre-A1 detail)", ""]
+        for rid, summary, owner in req_rows:
+            if owner.endswith("Platform_08_Requirements_Traceability.md") or owner == "Platform_08_Requirements_Traceability.md":
+                hist_lines.append(f"| {rid} | {summary} | ✓ |")
+        hist_default = "\n".join(hist_lines) + "\n"
 
         for fname, doc_id, state, kind in MINIMAL_DOCS:
             if fname in omit_files:
@@ -186,33 +210,53 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                     + "\n\n## 3. Global primary product-requirement registry\n\n"
                     + _prd_registry(prd_rows)
                     + "\n\n## 4. Completeness gate\n\n"
+                    + "## 5. Supporting master coverage\n\n"
+                    + "## 6. Historical base RTM detail\n\n"
+                    + (p08_historical if p08_historical is not None else hist_default)
                     + p08_extra
                     + "\n"
                 )
                 if broken_ref:
                     body += f"\nSee `{broken_ref}` for details.\n"
+                if req_row_overrides:
+                    for old, new in req_row_overrides.items():
+                        body = body.replace(old, new, 1)
             elif fname == "Platform_02_PRD.md":
                 body = _header(doc_id, version) + (
                     p02_body
-                    or ("\n".join(f"| `{rid}` | {summary} |" for rid, summary in prd_rows) + "\n")
+                    or (
+                        "\n".join(
+                            f"| `{rid}` | {summary} |" for rid, summary, _owner in prd_rows
+                        )
+                        + "\n"
+                    )
                 )
             else:
-                # Ensure REQ/PRD discovery has at least the fixture IDs somewhere
-                # for non-index docs only when needed; put REQ-P-001 only in P08/P01
                 body = _header(
                     (doc_id_overrides or {}).get(fname, doc_id), version
                 ) + "## 1. Section\n\nContent.\n"
-                if fname == "Platform_01_BRD.md":
-                    body += "\n".join(f"Mentions {rid}." for rid, _ in req_rows if rid.startswith("REQ-"))
-                    body += "\n"
-            # Apply doc id override already handled
-            if doc_id_overrides and fname in doc_id_overrides and fname not in {
-                "Platform_00_Document_Index.md",
-                "Platform_08_Requirements_Traceability.md",
-                "Platform_02_PRD.md",
-                "AGENTS.md",
-            }:
+                # Place specialized REQs in their owner files when declared.
+                for rid, summary, owner in req_rows:
+                    if owner == fname:
+                        body += f"\n| `{rid}` | {summary} |\n"
+                for rid, summary, owner in prd_rows:
+                    if owner == fname and fname != "Platform_02_PRD.md":
+                        body += f"\n| `{rid}` | {summary} |\n"
+            if (
+                doc_id_overrides
+                and fname in doc_id_overrides
+                and fname
+                not in {
+                    "Platform_00_Document_Index.md",
+                    "Platform_08_Requirements_Traceability.md",
+                    "Platform_02_PRD.md",
+                    "AGENTS.md",
+                }
+            ):
                 body = _header(doc_id_overrides[fname], version) + "## 1. Section\n\nContent.\n"
+                for rid, summary, owner in req_rows:
+                    if owner == fname:
+                        body += f"\n| `{rid}` | {summary} |\n"
             (self.tmp / fname).write_text(body, encoding="utf-8")
 
         if include_platform_24:
@@ -231,19 +275,22 @@ class MotherReferenceValidatorTests(unittest.TestCase):
     def test_01_valid_minimal_fixture_passes(self) -> None:
         root = self._write_minimal(
             legacy=[{"id": "OSS-008", "kind": "formal_requirement_legacy", "reason": "test"}],
-            req_rows=[("REQ-P-001", "Quality"), ("OSS-008", "Air-gap")],
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                ("OSS-008", "Air-gap", "Platform_08_Requirements_Traceability.md"),
+            ],
         )
-        # Put OSS-008 only in registry; also need Platform_08 table form for discovery
         errors = validate_docs_root(root)
         self.assertEqual(errors, [], errors)
 
     def test_02_missing_mother_reference_fails(self) -> None:
-        root = self._write_minimal(omit_files={"Platform_03_Architecture.md"})
-        # still declare in manifest — recreate manifest with full list but delete file
         root = self._write_minimal()
         (root / "Platform_03_Architecture.md").unlink()
         errors = validate_docs_root(root)
-        self.assertTrue(any("missing authoritative file: Platform_03_Architecture.md" in e for e in errors), errors)
+        self.assertTrue(
+            any("missing authoritative" in e and "Platform_03" in e for e in errors),
+            errors,
+        )
 
     def test_03_unexpected_numbered_document_fails(self) -> None:
         root = self._write_minimal(
@@ -252,7 +299,13 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             }
         )
         errors = validate_docs_root(root)
-        self.assertTrue(any("unexpected numbered document" in e for e in errors), errors)
+        self.assertTrue(
+            any(
+                "unexpected numbered document" in e or "Platform_24+" in e
+                for e in errors
+            ),
+            errors,
+        )
 
     def test_04_platform_24_fails(self) -> None:
         root = self._write_minimal(include_platform_24=True)
@@ -263,7 +316,10 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         root = self._write_minimal(duplicate_platform_file="Platform_03_Duplicate.md")
         errors = validate_docs_root(root)
         self.assertTrue(
-            any("unexpected numbered document" in e or "duplicate Platform number" in e for e in errors),
+            any(
+                "unexpected numbered document" in e or "duplicate Platform number" in e
+                for e in errors
+            ),
             errors,
         )
 
@@ -276,69 +332,105 @@ class MotherReferenceValidatorTests(unittest.TestCase):
 
     def test_07_version_mismatch_fails(self) -> None:
         root = self._write_minimal(version="9.9.9")
-        # Manifest still says 3.2.2 by rewriting
         man = json.loads((root / "mother_reference_manifest.json").read_text())
         man["motherReferenceVersion"] = "3.2.2"
-        (root / "mother_reference_manifest.json").write_text(json.dumps(man), encoding="utf-8")
+        (root / "mother_reference_manifest.json").write_text(
+            json.dumps(man), encoding="utf-8"
+        )
         errors = validate_docs_root(root)
         self.assertTrue(any("version mismatch" in e for e in errors), errors)
 
     def test_08_req_absent_from_global_registry_fails(self) -> None:
-        root = self._write_minimal(req_rows=[("REQ-P-001", "Quality")])
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md")
+            ]
+        )
         p01 = (root / "Platform_01_BRD.md").read_text(encoding="utf-8")
-        (root / "Platform_01_BRD.md").write_text(p01 + "\nREQ-NET-001 must be indexed.\n", encoding="utf-8")
+        (root / "Platform_01_BRD.md").write_text(
+            p01 + "\nREQ-NET-001 must be indexed.\n", encoding="utf-8"
+        )
         errors = validate_docs_root(root)
         self.assertTrue(
-            any("REQ in source but absent from global primary registry: REQ-NET-001" in e for e in errors),
+            any(
+                "REQ in source but absent from global primary registry: REQ-NET-001" in e
+                for e in errors
+            ),
             errors,
         )
 
     def test_09_duplicate_primary_req_row_fails(self) -> None:
         root = self._write_minimal(
-            req_rows=[("REQ-P-001", "Quality"), ("REQ-P-001", "Dup")]
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                ("REQ-P-001", "Dup", "Platform_08_Requirements_Traceability.md"),
+            ]
         )
         errors = validate_docs_root(root)
-        self.assertTrue(any("duplicate primary REQ row: REQ-P-001" in e for e in errors), errors)
+        self.assertTrue(
+            any("duplicate primary REQ row: REQ-P-001" in e for e in errors), errors
+        )
 
     def test_10_prd_absent_from_global_registry_fails(self) -> None:
-        root = self._write_minimal(prd_rows=[("PRD-HA-001", "HA")])
+        root = self._write_minimal(
+            prd_rows=[("PRD-HA-001", "HA", "Platform_02_PRD.md")]
+        )
         p02 = (root / "Platform_02_PRD.md").read_text(encoding="utf-8")
-        (root / "Platform_02_PRD.md").write_text(p02 + "\nPRD-SNMP-001 appears here.\n", encoding="utf-8")
+        (root / "Platform_02_PRD.md").write_text(
+            p02 + "\nPRD-SNMP-001 appears here.\n", encoding="utf-8"
+        )
         errors = validate_docs_root(root)
         self.assertTrue(
-            any("PRD in source but absent from global primary PRD registry: PRD-SNMP-001" in e for e in errors),
+            any(
+                "PRD in source but absent from global primary PRD registry: PRD-SNMP-001"
+                in e
+                for e in errors
+            ),
             errors,
         )
 
     def test_11_duplicate_primary_prd_row_fails(self) -> None:
         root = self._write_minimal(
-            prd_rows=[("PRD-HA-001", "HA"), ("PRD-HA-001", "Dup")]
+            prd_rows=[
+                ("PRD-HA-001", "HA", "Platform_02_PRD.md"),
+                ("PRD-HA-001", "Dup", "Platform_02_PRD.md"),
+            ]
         )
         errors = validate_docs_root(root)
-        self.assertTrue(any("duplicate primary PRD row: PRD-HA-001" in e for e in errors), errors)
+        self.assertTrue(
+            any("duplicate primary PRD row: PRD-HA-001" in e for e in errors), errors
+        )
 
     def test_12_unknown_owner_source_file_fails(self) -> None:
-        # Primary PRD with no source occurrence anywhere
-        root = self._write_minimal(prd_rows=[("PRD-HA-001", "HA")])
+        root = self._write_minimal(
+            prd_rows=[("PRD-HA-001", "HA", "Platform_02_PRD.md")]
+        )
         (root / "Platform_02_PRD.md").write_text(
             _header("PLATFORM-PRD-001") + "## 1. Empty of this PRD\n", encoding="utf-8"
         )
-        # Keep PRD only in primary registry
         errors = validate_docs_root(root)
         self.assertTrue(
-            any("no authoritative source" in e or "unknown owner" in e for e in errors),
+            any("no authoritative source" in e or "absent from declared owner" in e for e in errors),
             errors,
         )
 
     def test_13_broken_platform_md_reference_fails(self) -> None:
         root = self._write_minimal(broken_ref="Platform_99_Does_Not_Exist.md")
         errors = validate_docs_root(root)
-        self.assertTrue(any("broken Platform_*.md reference" in e for e in errors), errors)
+        self.assertTrue(
+            any("broken Platform_*.md reference" in e for e in errors), errors
+        )
 
     def test_14_invalid_formal_id_fails(self) -> None:
         root = self._write_minimal(
-            req_rows=[("REQ-P-001", "Quality"), ("OSS-999", "Bad legacy")],
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                ("OSS-999", "Bad legacy", "Platform_08_Requirements_Traceability.md"),
+            ],
             skip_manifest_legacy=True,
+            p08_historical=(
+                "### Historical\n| REQ-P-001 | Quality | ✓ |\n| OSS-999 | Bad | ✓ |\n"
+            ),
         )
         errors = validate_docs_root(root)
         self.assertTrue(
@@ -348,20 +440,35 @@ class MotherReferenceValidatorTests(unittest.TestCase):
 
     def test_15_registered_oss008_legacy_passes(self) -> None:
         root = self._write_minimal(
-            req_rows=[("REQ-P-001", "Quality"), ("OSS-008", "Air-gap")],
-            legacy=[{"id": "OSS-008", "kind": "formal_requirement_legacy", "reason": "Issue #93"}],
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                ("OSS-008", "Air-gap", "Platform_08_Requirements_Traceability.md"),
+            ],
+            legacy=[
+                {
+                    "id": "OSS-008",
+                    "kind": "formal_requirement_legacy",
+                    "reason": "Issue #93",
+                }
+            ],
         )
         errors = validate_docs_root(root)
         self.assertEqual(errors, [], errors)
 
     def test_16_unregistered_malformed_legacy_fails(self) -> None:
         root = self._write_minimal(
-            req_rows=[("REQ-P-001", "Quality"), ("OSS-008", "Air-gap")],
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                ("OSS-008", "Air-gap", "Platform_08_Requirements_Traceability.md"),
+            ],
             skip_manifest_legacy=True,
         )
         errors = validate_docs_root(root)
         self.assertTrue(
-            any("OSS-008" in e and ("invalid" in e or "unregistered" in e) for e in errors),
+            any(
+                "OSS-008" in e and ("invalid" in e or "unregistered" in e)
+                for e in errors
+            ),
             errors,
         )
 
@@ -377,12 +484,13 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         errors = validate_docs_root(root)
         self.assertTrue(
-            any("duplicate normalized top-level section number: 1" in e for e in errors),
+            any(
+                "duplicate normalized top-level section number: 1" in e for e in errors
+            ),
             errors,
         )
 
     def test_18_transitional_legacy_duplicate_sections_not_blocked(self) -> None:
-        # Platform_03 is TRANSITIONAL_LEGACY; duplicate ## 1 should not fail normalized checks
         root = self._write_minimal()
         (root / "Platform_03_Architecture.md").write_text(
             _header("PLATFORM-ARC-001")
@@ -391,7 +499,278 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         errors = validate_docs_root(root)
         self.assertFalse(
-            any("Platform_03_Architecture.md: duplicate normalized" in e for e in errors),
+            any(
+                "Platform_03_Architecture.md: duplicate normalized" in e for e in errors
+            ),
+            errors,
+        )
+
+    # --- Bypass-closure tests (control-plane corrective patch) ---
+
+    def test_19_physical_file_only_deletion_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_12_Decision_Source_Register.md").unlink()
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("Platform_12" in e and "missing" in e for e in errors), errors
+        )
+
+    def test_20_physical_and_manifest_deletion_still_fails(self) -> None:
+        root = self._write_minimal(
+            drop_manifest_files={"Platform_12_Decision_Source_Register.md"}
+        )
+        (root / "Platform_12_Decision_Source_Register.md").unlink()
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("Platform_12" in e for e in errors),
+            errors,
+        )
+        self.assertTrue(
+            any(
+                "manifest missing required Platform_12" in e
+                or "constitutional set requires" in e
+                or "missing authoritative" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_21_agents_and_manifest_deletion_still_fails(self) -> None:
+        root = self._write_minimal(drop_manifest_files={"AGENTS.md"})
+        (root / "AGENTS.md").unlink()
+        errors = validate_docs_root(root)
+        self.assertTrue(any("AGENTS.md" in e for e in errors), errors)
+
+    def test_22_missing_platform_23_and_manifest_entry_fails(self) -> None:
+        root = self._write_minimal(
+            drop_manifest_files={
+                "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md"
+            }
+        )
+        (
+            root
+            / "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md"
+        ).unlink()
+        errors = validate_docs_root(root)
+        self.assertTrue(any("Platform_23" in e for e in errors), errors)
+
+    def test_23_exactly_25_authoritative_entries_required(self) -> None:
+        root = self._write_minimal()
+        man = json.loads((root / "mother_reference_manifest.json").read_text())
+        self.assertEqual(len(man["documents"]), CONSTITUTIONAL_AUTHORITATIVE_COUNT)
+        # Drop one manifest entry without deleting file → still fail (count + mismatch)
+        man["documents"] = [d for d in man["documents"] if d["file"] != "AGENTS.md"]
+        (root / "mother_reference_manifest.json").write_text(
+            json.dumps(man), encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "exactly 25" in e or "AGENTS.md" in e or "authoritative entries" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_24_same_number_bogus_filename_reference_fails(self) -> None:
+        root = self._write_minimal(broken_ref="Platform_17_Bogus.md")
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("Platform_17_Bogus.md" in e and "broken" in e for e in errors),
+            errors,
+        )
+
+    def test_25_same_number_platform_03_bogus_fails(self) -> None:
+        root = self._write_minimal(broken_ref="Platform_03_Bogus.md")
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("Platform_03_Bogus.md" in e and "broken" in e for e in errors),
+            errors,
+        )
+
+    def test_26_exact_live_filename_reference_passes(self) -> None:
+        root = self._write_minimal(
+            broken_ref="Platform_17_API_Event_and_Data_Model_Contracts.md"
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("Platform_17_API_Event_and_Data_Model_Contracts.md" in e and "broken" in e for e in errors),
+            errors,
+        )
+
+    def test_27_allowlisted_historical_filename_passes(self) -> None:
+        hist = "Platform_24_Release_Acceptance_Criteria.md"
+        root = self._write_minimal(
+            broken_ref=hist,
+            historical_allowlist=[hist],
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any(hist in e and "broken" in e for e in errors),
+            errors,
+        )
+
+    def test_28_fabricated_registry_only_req_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                ("REQ-FAKE-001", "Fabricated", "Platform_08_Requirements_Traceability.md"),
+            ],
+            # Historical only keeps REQ-P-001
+            p08_historical="### Historical\n| REQ-P-001 | Quality | ✓ |\n",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-FAKE-001" in e
+                and (
+                    "no authoritative source" in e
+                    or "absent from declared owner" in e
+                )
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_29_platform_08_historical_base_req_passes(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md")
+            ]
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_30_specialized_req_correct_owner_passes(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-OIV-001",
+                    "SaaS monitoring",
+                    "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md",
+                )
+            ]
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_31_specialized_req_wrong_owner_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-OIV-001",
+                    "SaaS monitoring",
+                    "Platform_08_Requirements_Traceability.md",
+                )
+            ],
+            # Put ID only in Platform_19, not in Platform_08 historical
+            p08_historical="### Historical\n(no OIV rows)\n",
+            extra_files={},
+        )
+        # Ensure specialized master has the ID (fixture writer places by owner;
+        # wrong owner means P19 won't get it from req_rows owner match — add manually)
+        p19 = root / "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md"
+        p19.write_text(
+            p19.read_text(encoding="utf-8") + "\n| `REQ-OIV-001` | SaaS monitoring |\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-OIV-001" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_32_nonexistent_req_owner_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md")
+            ],
+            req_row_overrides={
+                "`Platform_08_Requirements_Traceability.md`": "`Platform_99_Does_Not_Exist.md`",
+            },
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-P-001" in e
+                and (
+                    "not a valid Mother Reference filename" in e
+                    or "does not exist" in e
+                )
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_33_prd_wrong_owner_fails(self) -> None:
+        root = self._write_minimal(
+            prd_rows=[
+                (
+                    "PRD-HA-001",
+                    "HA pair",
+                    "Platform_03_Architecture.md",
+                )
+            ],
+            p02_body="| `PRD-HA-001` | HA pair |\n",
+        )
+        # Ensure declared owner Platform_03 does NOT contain the PRD (only Platform_02 does).
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001") + "## 1. Section\n\nNo PRD here.\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "PRD-HA-001" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_34_empty_source_locator_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md")
+            ]
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §2 |",
+            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` |  |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("empty source locator" in e for e in errors),
+            errors,
+        )
+
+    def test_35_malformed_registry_column_count_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md")
+            ]
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §2 | BASE_RTM_INDEXED | SPECIFIED | n/a |",
+            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §2 |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("malformed REQ registry row column count" in e for e in errors),
             errors,
         )
 

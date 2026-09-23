@@ -2,7 +2,7 @@
 """Mother Reference structural validator (A1).
 
 Python standard library only. Validates the repository Mother Reference set
-against project_documentation/mother_reference_manifest.json.
+against constitutional invariants plus project_documentation/mother_reference_manifest.json.
 
 This is structural protection, not semantic certification.
 """
@@ -28,12 +28,15 @@ MATURITY_STATES = (
     "DEPLOYED",
 )
 
+# Constitutional invariant: AGENTS + Platform_00..Platform_23 (25 files).
+CONSTITUTIONAL_PLATFORM_NUMBERS = tuple(f"{n:02d}" for n in range(0, 24))
+CONSTITUTIONAL_AUTHORITATIVE_COUNT = 1 + len(CONSTITUTIONAL_PLATFORM_NUMBERS)  # 25
+
 REQ_ID_RE = re.compile(r"\b(REQ-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?)\b")
 PRD_ID_RE = re.compile(r"\b(PRD-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?)\b")
 FORMAL_ID_RE = re.compile(
     r"\b((?:REQ|PRD)-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?|OSS-\d{3,})\b"
 )
-PLATFORM_FILE_RE = re.compile(r"\b(Platform_\d{2}_[A-Za-z0-9_]+\.md)\b")
 PLATFORM_NUM_RE = re.compile(r"^Platform_(\d{2})_")
 DOC_ID_RE = re.compile(r"^\*\*Document ID:\*\*\s*(\S+)", re.M)
 VERSION_RE = re.compile(r"^\*\*Version:\*\*\s*(\S+)", re.M)
@@ -43,6 +46,26 @@ REQ_MARKER_START = "<!-- GLOBAL PRIMARY REQ REGISTRY -->"
 REQ_MARKER_END = "<!-- END GLOBAL PRIMARY REQ REGISTRY -->"
 PRD_MARKER_START = "<!-- GLOBAL PRIMARY PRD REGISTRY -->"
 PRD_MARKER_END = "<!-- END GLOBAL PRIMARY PRD REGISTRY -->"
+
+REQ_COLUMNS = 7
+PRD_COLUMNS = 6
+REQ_HEADERS = {
+    "Requirement ID",
+    "Summary",
+    "Primary owner",
+    "Source locator",
+    "Traceability state",
+    "Maturity",
+    "Evidence / blocker pointer",
+}
+PRD_HEADERS = {
+    "PRD ID",
+    "Product requirement summary",
+    "Owner document",
+    "Source locator",
+    "Related REQ family",
+    "Maturity / implementation boundary",
+}
 
 # Product/specialized owners used for PRD discovery (authoritative prose homes).
 PRD_SOURCE_FILES = {
@@ -57,6 +80,18 @@ PRD_SOURCE_FILES = {
 
 class ValidationError(Exception):
     pass
+
+
+def strip_marker_block(text: str, start: str, end: str) -> str:
+    if start not in text or end not in text:
+        return text
+    before, rest = text.split(start, 1)
+    _, after = rest.split(end, 1)
+    return before + after
+
+
+def clean_cell(value: str) -> str:
+    return value.strip().strip("`").strip()
 
 
 class MotherReferenceValidator:
@@ -147,10 +182,110 @@ class MotherReferenceValidator:
             if count > 1:
                 self.fail(f"duplicate expected Document ID: {did}")
 
-    def validate_document_set(self, manifest: dict[str, Any]) -> dict[str, Path]:
+        if len(files) != CONSTITUTIONAL_AUTHORITATIVE_COUNT:
+            self.fail(
+                f"manifest must contain exactly {CONSTITUTIONAL_AUTHORITATIVE_COUNT} "
+                f"authoritative entries (got {len(files)})"
+            )
+
+    def validate_constitutional_set(self) -> dict[str, Path]:
+        """Enforce AGENTS + exactly one Platform_00..23 independently of the manifest."""
         paths: dict[str, Path] = {}
-        numbered_seen: dict[str, str] = {}
-        for doc in manifest["documents"]:
+        agents = self.docs_root / "AGENTS.md"
+        if not agents.is_file():
+            self.fail("missing authoritative file: AGENTS.md")
+        else:
+            paths["AGENTS.md"] = agents
+
+        on_disk = sorted(self.docs_root.glob("Platform_*.md"))
+        by_num: dict[str, list[str]] = {n: [] for n in CONSTITUTIONAL_PLATFORM_NUMBERS}
+        extras: list[str] = []
+        for path in on_disk:
+            name = path.name
+            m = PLATFORM_NUM_RE.match(name)
+            if not m:
+                self.fail(f"unexpected numbered document: {name}")
+                continue
+            num = m.group(1)
+            if int(num) >= 24:
+                self.fail(f"Platform_24+ without deliberate allocation: {name}")
+                continue
+            if num not in by_num:
+                extras.append(name)
+                continue
+            by_num[num].append(name)
+
+        for num in CONSTITUTIONAL_PLATFORM_NUMBERS:
+            names = by_num[num]
+            if not names:
+                self.fail(
+                    f"missing authoritative Platform_{num} Mother Reference "
+                    f"(constitutional set requires Platform_00 through Platform_23)"
+                )
+            elif len(names) > 1:
+                self.fail(
+                    f"duplicate Platform number {num}: {' and '.join(names)}"
+                )
+            else:
+                paths[names[0]] = self.docs_root / names[0]
+
+        for name in extras:
+            self.fail(f"unexpected numbered document: {name}")
+
+        if len(paths) != CONSTITUTIONAL_AUTHORITATIVE_COUNT and "AGENTS.md" in paths:
+            # Count only when AGENTS present; missing Platform numbers already reported.
+            present_platforms = sum(
+                1 for k in paths if k.startswith("Platform_")
+            )
+            if present_platforms != len(CONSTITUTIONAL_PLATFORM_NUMBERS):
+                self.fail(
+                    f"constitutional set requires exactly "
+                    f"{len(CONSTITUTIONAL_PLATFORM_NUMBERS)} numbered Mother References "
+                    f"Platform_00..23 (found {present_platforms})"
+                )
+
+        return paths
+
+    def validate_manifest_matches_constitutional(
+        self, manifest: dict[str, Any], constitutional: dict[str, Path]
+    ) -> None:
+        declared = [d.get("file") for d in manifest.get("documents", []) if isinstance(d, dict)]
+        declared_set = {f for f in declared if isinstance(f, str)}
+        constitutional_set = set(constitutional)
+
+        if "AGENTS.md" not in declared_set:
+            self.fail("manifest missing required authoritative entry: AGENTS.md")
+
+        for num in CONSTITUTIONAL_PLATFORM_NUMBERS:
+            matches = [f for f in declared_set if f.startswith(f"Platform_{num}_")]
+            if not matches:
+                self.fail(
+                    f"manifest missing required Platform_{num} entry "
+                    f"(constitutional set cannot be redefined by deleting manifest rows)"
+                )
+            elif len(matches) > 1:
+                self.fail(f"manifest has duplicate Platform_{num} entries: {matches}")
+
+        for name in sorted(declared_set - constitutional_set):
+            # Manifest claims a file not in the constitutional on-disk set.
+            self.fail(f"manifest entry not in constitutional set: {name}")
+
+        for name in sorted(constitutional_set - declared_set):
+            self.fail(f"constitutional file absent from manifest: {name}")
+
+        if len(declared_set) != CONSTITUTIONAL_AUTHORITATIVE_COUNT:
+            self.fail(
+                f"manifest must contain exactly {CONSTITUTIONAL_AUTHORITATIVE_COUNT} "
+                f"authoritative entries matching AGENTS + Platform_00..23"
+            )
+
+    def validate_document_set(
+        self, manifest: dict[str, Any], constitutional: dict[str, Path]
+    ) -> dict[str, Path]:
+        paths = dict(constitutional)
+        for doc in manifest.get("documents", []):
+            if not isinstance(doc, dict) or "file" not in doc:
+                continue
             rel = doc["file"]
             path = self.docs_root / rel
             if not path.is_file():
@@ -158,37 +293,8 @@ class MotherReferenceValidator:
                 continue
             paths[rel] = path
             m = PLATFORM_NUM_RE.match(rel)
-            if m:
-                num = m.group(1)
-                if num in numbered_seen:
-                    self.fail(
-                        f"duplicate Platform number {num}: "
-                        f"{numbered_seen[num]} and {rel}"
-                    )
-                numbered_seen[num] = rel
-                if int(num) >= 24:
-                    self.fail(
-                        f"Platform_24+ without deliberate allocation: {rel}"
-                    )
-                expected_prefix = f"Platform_{num}_"
-                if not rel.startswith(expected_prefix):
-                    self.fail(f"incorrect filename relative to manifest: {rel}")
-
-        # Unexpected numbered Platform_NN files on disk
-        on_disk = sorted(self.docs_root.glob("Platform_*.md"))
-        declared = {d["file"] for d in manifest["documents"]}
-        for path in on_disk:
-            name = path.name
-            if name not in declared:
-                self.fail(f"unexpected numbered document: {name}")
-            m = PLATFORM_NUM_RE.match(name)
             if m and int(m.group(1)) >= 24:
-                self.fail(f"Platform_24+ without deliberate allocation: {name}")
-
-        # AGENTS.md must exist when declared
-        if "AGENTS.md" in declared and not (self.docs_root / "AGENTS.md").is_file():
-            self.fail("missing authoritative file: AGENTS.md")
-
+                self.fail(f"Platform_24+ without deliberate allocation: {rel}")
         return paths
 
     def validate_headers(
@@ -203,10 +309,6 @@ class MotherReferenceValidator:
             text = path.read_text(encoding="utf-8")
             expected_id = doc.get("expectedDocumentId")
             if expected_id is None:
-                # AGENTS.md: do not impose a fake Document ID
-                if DOC_ID_RE.search(text):
-                    # Optional: allow absence only; presence is not required to match
-                    pass
                 continue
             m = DOC_ID_RE.search(text)
             if not m:
@@ -225,32 +327,130 @@ class MotherReferenceValidator:
                     f"(expected {version!r})"
                 )
 
-    def _extract_primary_registry(
+    def _parse_registry_rows(
         self, text: str, start: str, end: str, kind: str
-    ) -> list[str]:
+    ) -> list[dict[str, str]]:
         if start not in text or end not in text:
             self.fail(f"Platform_08 missing {kind} registry markers")
             return []
         block = text.split(start, 1)[1].split(end, 1)[0]
-        ids: list[str] = []
+        expected_cols = REQ_COLUMNS if kind == "REQ" else PRD_COLUMNS
+        header_names = REQ_HEADERS if kind == "REQ" else PRD_HEADERS
+        rows: list[dict[str, str]] = []
         for line in block.splitlines():
             if not line.strip().startswith("|"):
                 continue
-            # First column of table rows
-            cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
             if not cells:
                 continue
-            cell = cells[0]
-            if cell in {"Requirement ID", "PRD ID", "ID"} or set(cell) <= {"-", ":"}:
+            first = clean_cell(cells[0])
+            if first in header_names or first in {
+                "Requirement ID",
+                "PRD ID",
+                "ID",
+            }:
                 continue
+            if set(first) <= {"-", ":"}:
+                continue
+            if len(cells) != expected_cols:
+                self.fail(
+                    f"malformed {kind} registry row column count: "
+                    f"expected {expected_cols}, got {len(cells)} ({first})"
+                )
+                continue
+            cleaned = [clean_cell(c) for c in cells]
             if kind == "REQ":
-                # Accept formal REQ-* and OSS-* cells so unregistered legacy IDs fail later
-                if REQ_ID_RE.fullmatch(cell) or re.fullmatch(r"OSS-\d{3,}", cell):
-                    ids.append(cell)
+                rid = cleaned[0]
+                if not (REQ_ID_RE.fullmatch(rid) or re.fullmatch(r"OSS-\d{3,}", rid)):
+                    continue
+                rows.append(
+                    {
+                        "id": rid,
+                        "summary": cleaned[1],
+                        "owner": cleaned[2],
+                        "locator": cleaned[3],
+                        "trace": cleaned[4],
+                        "maturity": cleaned[5],
+                        "evidence": cleaned[6],
+                    }
+                )
             else:
-                if PRD_ID_RE.fullmatch(cell):
-                    ids.append(cell)
-        return ids
+                rid = cleaned[0]
+                if not PRD_ID_RE.fullmatch(rid):
+                    continue
+                rows.append(
+                    {
+                        "id": rid,
+                        "summary": cleaned[1],
+                        "owner": cleaned[2],
+                        "locator": cleaned[3],
+                        "related": cleaned[4],
+                        "maturity": cleaned[5],
+                    }
+                )
+        return rows
+
+    def _id_occurs_in_text(self, rid: str, text: str) -> bool:
+        if rid == "OSS-008":
+            return bool(re.search(r"\|\s*OSS-008\s*\|", text)) or bool(
+                re.search(r"\bOSS-008\b", text)
+            )
+        if rid.startswith("REQ-"):
+            return rid in REQ_ID_RE.findall(text)
+        if rid.startswith("PRD-"):
+            return rid in PRD_ID_RE.findall(text)
+        return rid in text
+
+    def _owner_text_without_primary_registry(
+        self, owner: str, paths: dict[str, Path], kind: str
+    ) -> str | None:
+        path = paths.get(owner) or (self.docs_root / owner)
+        if not path.is_file():
+            return None
+        text = path.read_text(encoding="utf-8")
+        if kind == "REQ":
+            text = strip_marker_block(text, REQ_MARKER_START, REQ_MARKER_END)
+        else:
+            text = strip_marker_block(text, PRD_MARKER_START, PRD_MARKER_END)
+        return text
+
+    def _validate_registry_owners(
+        self,
+        rows: list[dict[str, str]],
+        kind: str,
+        manifest: dict[str, Any],
+        paths: dict[str, Path],
+    ) -> None:
+        manifest_files = {
+            d["file"]
+            for d in manifest.get("documents", [])
+            if isinstance(d, dict) and "file" in d
+        }
+        for row in rows:
+            rid = row["id"]
+            owner = row["owner"]
+            locator = row["locator"]
+            if not locator:
+                self.fail(f"{kind} {rid}: empty source locator")
+            if not owner:
+                self.fail(f"{kind} {rid}: empty owner")
+                continue
+            if owner not in manifest_files:
+                self.fail(
+                    f"{kind} {rid}: owner is not a valid Mother Reference filename: "
+                    f"{owner}"
+                )
+                continue
+            owner_path = paths.get(owner) or (self.docs_root / owner)
+            if not owner_path.is_file():
+                self.fail(f"{kind} {rid}: owner file does not exist: {owner}")
+                continue
+            owner_text = self._owner_text_without_primary_registry(owner, paths, kind)
+            if owner_text is None or not self._id_occurs_in_text(rid, owner_text):
+                self.fail(
+                    f"{kind} {rid}: formal ID absent from declared owner "
+                    f"outside primary registry: {owner}"
+                )
 
     def validate_global_requirements(
         self, manifest: dict[str, Any], paths: dict[str, Path]
@@ -261,11 +461,11 @@ class MotherReferenceValidator:
             self.fail(f"missing global RTM: {index_name}")
             return
         index_text = index_path.read_text(encoding="utf-8")
-        primary = self._extract_primary_registry(
+        rows = self._parse_registry_rows(
             index_text, REQ_MARKER_START, REQ_MARKER_END, "REQ"
         )
-        primary_counts = Counter(primary)
-        for rid, count in primary_counts.items():
+        primary = [r["id"] for r in rows]
+        for rid, count in Counter(primary).items():
             if count > 1:
                 self.fail(f"duplicate primary REQ row: {rid}")
 
@@ -275,43 +475,45 @@ class MotherReferenceValidator:
             if isinstance(e, dict) and "id" in e
         }
 
-        discovered: set[str] = set()
+        # Authoritative discovery EXCLUDES the primary REQ registry block so a
+        # fabricated registry-only row cannot self-satisfy source presence.
+        authoritative: set[str] = set()
         for rel, path in paths.items():
-            if not PLATFORM_NUM_RE.match(rel) and rel != "AGENTS.md":
-                continue
             if not rel.startswith("Platform_"):
                 continue
             text = path.read_text(encoding="utf-8")
+            if rel == index_name:
+                text = strip_marker_block(text, REQ_MARKER_START, REQ_MARKER_END)
             for rid in REQ_ID_RE.findall(text):
-                discovered.add(rid)
-            # Only count OSS-008 as formal when it appears as an RTM table ID
+                authoritative.add(rid)
             if rel == index_name and re.search(r"\|\s*OSS-008\s*\|", text):
-                discovered.add("OSS-008")
+                authoritative.add("OSS-008")
 
         primary_set = set(primary)
-        for rid in sorted(discovered):
+        for rid in sorted(authoritative):
             if rid not in primary_set:
                 self.fail(
                     f"REQ in source but absent from global primary registry: {rid}"
                 )
-        for rid in sorted(primary_set - discovered):
-            if rid in legacy:
-                # Legacy may be registered even if only present in the registry
-                # itself; still require presence somewhere in Platform_00..23.
-                if rid not in discovered and rid not in primary_set:
-                    self.fail(f"legacy ID not found in Mother References: {rid}")
+        for rid in sorted(primary_set - authoritative):
+            if rid in legacy and rid in primary_set:
+                self.fail(
+                    f"legacy ID {rid} has no authoritative occurrence outside "
+                    f"the primary REQ registry"
+                )
                 continue
             self.fail(
                 f"unknown primary registry REQ with no authoritative source: {rid}"
             )
 
-        # Malformed / unregistered formal-looking IDs in primary registry
         for rid in primary:
             if REQ_ID_RE.fullmatch(rid):
                 continue
             if rid in legacy:
                 continue
             self.fail(f"invalid formal ID in primary REQ registry: {rid}")
+
+        self._validate_registry_owners(rows, "REQ", manifest, paths)
 
     def validate_global_prds(
         self, manifest: dict[str, Any], paths: dict[str, Path]
@@ -322,15 +524,15 @@ class MotherReferenceValidator:
             self.fail(f"missing global PRD index: {index_name}")
             return
         index_text = index_path.read_text(encoding="utf-8")
-        primary = self._extract_primary_registry(
+        rows = self._parse_registry_rows(
             index_text, PRD_MARKER_START, PRD_MARKER_END, "PRD"
         )
+        primary = [r["id"] for r in rows]
         for rid, count in Counter(primary).items():
             if count > 1:
                 self.fail(f"duplicate primary PRD row: {rid}")
 
         discovered: set[str] = set()
-        owner_by_id: dict[str, set[str]] = {}
         for rel in PRD_SOURCE_FILES:
             path = paths.get(rel) or (self.docs_root / rel)
             if not path.is_file():
@@ -338,16 +540,6 @@ class MotherReferenceValidator:
             text = path.read_text(encoding="utf-8")
             for rid in PRD_ID_RE.findall(text):
                 discovered.add(rid)
-                owner_by_id.setdefault(rid, set()).add(rel)
-
-        # Also accept PRDs that only appear in other Platform docs if indexed,
-        # but discovery for "missing from primary" uses authoritative owners.
-        all_platform_prds: set[str] = set()
-        for rel, path in paths.items():
-            if not rel.startswith("Platform_"):
-                continue
-            for rid in PRD_ID_RE.findall(path.read_text(encoding="utf-8")):
-                all_platform_prds.add(rid)
 
         primary_set = set(primary)
         for rid in sorted(discovered):
@@ -356,17 +548,14 @@ class MotherReferenceValidator:
                     f"PRD in source but absent from global primary PRD registry: {rid}"
                 )
 
-        # Authoritative PRD sources exclude the primary registry block itself so a
-        # registry-only row cannot self-satisfy ownership.
+        # Authoritative sources exclude the primary PRD registry block.
         authoritative: set[str] = set()
         for rel, path in paths.items():
             if not rel.startswith("Platform_"):
                 continue
             text = path.read_text(encoding="utf-8")
-            if rel == index_name and PRD_MARKER_START in text and PRD_MARKER_END in text:
-                before, rest = text.split(PRD_MARKER_START, 1)
-                _, after = rest.split(PRD_MARKER_END, 1)
-                text = before + after
+            if rel == index_name:
+                text = strip_marker_block(text, PRD_MARKER_START, PRD_MARKER_END)
             for rid in PRD_ID_RE.findall(text):
                 authoritative.add(rid)
 
@@ -377,6 +566,8 @@ class MotherReferenceValidator:
                     f"unknown owner/source file: {rid}"
                 )
 
+        self._validate_registry_owners(rows, "PRD", manifest, paths)
+
     def validate_legacy_and_malformed(
         self, manifest: dict[str, Any], paths: dict[str, Path]
     ) -> None:
@@ -385,22 +576,21 @@ class MotherReferenceValidator:
             for e in manifest.get("legacyIdExceptions", [])
             if isinstance(e, dict) and "id" in e
         }
-        # Scan Platform_08 primary REQ registry only for formal-looking cells
         index_name = manifest["globalRequirementIndex"]
         index_path = paths.get(index_name)
         if index_path is None:
             return
         text = index_path.read_text(encoding="utf-8")
-        primary = self._extract_primary_registry(
+        rows = self._parse_registry_rows(
             text, REQ_MARKER_START, REQ_MARKER_END, "REQ"
         )
-        for rid in primary:
+        for row in rows:
+            rid = row["id"]
             if REQ_ID_RE.fullmatch(rid):
                 continue
             if rid in legacy:
                 continue
-            # Unregistered OSS-style or other malformed formal IDs fail
-            if FORMAL_ID_RE.fullmatch(rid):
+            if FORMAL_ID_RE.fullmatch(rid) or re.fullmatch(r"OSS-\d{3,}", rid):
                 self.fail(
                     f"unregistered malformed/legacy formal ID in primary registry: {rid}"
                 )
@@ -409,11 +599,6 @@ class MotherReferenceValidator:
         self, manifest: dict[str, Any], paths: dict[str, Path]
     ) -> None:
         on_disk = {p.name for p in self.docs_root.glob("Platform_*.md")}
-        current_by_num: dict[str, str] = {}
-        for name in on_disk:
-            m = PLATFORM_NUM_RE.match(name)
-            if m:
-                current_by_num[m.group(1)] = name
         historical = set(manifest.get("historicalFilenameAllowlist") or [])
 
         for rel, path in paths.items():
@@ -434,11 +619,9 @@ class MotherReferenceValidator:
                 re.findall(r"\]\((Platform_\d{2}_[A-Za-z0-9_]+\.md)\)", cleaned)
             )
             for ref in sorted(refs):
+                # Exact filename must exist OR be an explicit historical allowlist entry.
+                # Same Platform number with a different name is NOT sufficient.
                 if ref in on_disk or ref in historical:
-                    continue
-                m = PLATFORM_NUM_RE.match(ref)
-                if m and m.group(1) in current_by_num and current_by_num[m.group(1)] != ref:
-                    # Same-number consolidated rename without explicit allowlist entry
                     continue
                 self.fail(f"{rel}: broken Platform_*.md reference: {ref}")
 
@@ -453,6 +636,11 @@ class MotherReferenceValidator:
             if path is None:
                 continue
             text = path.read_text(encoding="utf-8")
+            # For Platform_00, ignore Appendix A transitional historical numbering.
+            if rel.startswith("Platform_00"):
+                appendix = text.find("## Appendix A")
+                if appendix >= 0:
+                    text = text[:appendix]
             nums = [int(m.group(1)) for m in TOP_SECTION_RE.finditer(text)]
             for n, count in Counter(nums).items():
                 if count > 1:
@@ -463,9 +651,6 @@ class MotherReferenceValidator:
     def validate_maturity_language(
         self, manifest: dict[str, Any], paths: dict[str, Path]
     ) -> None:
-        # Structural vocabulary presence in constitution; prevent unsupported
-        # combined status spellings that imply higher maturity without evidence.
-        # Do NOT attempt natural-language semantic certification.
         banned = [
             re.compile(r"\bSPECIFIED\s*=\s*IMPLEMENTED\b"),
             re.compile(r"\bIMPLEMENTED\s*=\s*TESTED\b"),
@@ -488,18 +673,14 @@ class MotherReferenceValidator:
                     self.fail(
                         f"{rel}: missing canonical maturity vocabulary: {missing}"
                     )
-                if "SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED" not in text.replace(
-                    " ", " "
+                if not re.search(
+                    r"SPECIFIED\s*!=\s*IMPLEMENTED\s*!=\s*TESTED\s*!=\s*"
+                    r"BENCHMARKED\s*!=\s*CERTIFIED\s*!=\s*DEPLOYED",
+                    text,
                 ):
-                    # allow spaced variants already exact in constitution
-                    if not re.search(
-                        r"SPECIFIED\s*!=\s*IMPLEMENTED\s*!=\s*TESTED\s*!=\s*"
-                        r"BENCHMARKED\s*!=\s*CERTIFIED\s*!=\s*DEPLOYED",
-                        text,
-                    ):
-                        self.fail(
-                            f"{rel}: missing canonical maturity inequality statement"
-                        )
+                    self.fail(
+                        f"{rel}: missing canonical maturity inequality statement"
+                    )
             for pat in banned:
                 if pat.search(text):
                     self.fail(
@@ -508,18 +689,18 @@ class MotherReferenceValidator:
 
     def validate(self) -> list[str]:
         self.errors = []
+        constitutional = self.validate_constitutional_set()
         try:
             manifest = self.load_manifest()
         except ValidationError as exc:
-            return [str(exc)]
+            return self.errors + [str(exc)]
         self.validate_manifest_shape(manifest)
-        if any(e.startswith("manifest") or "schemaVersion" in e for e in self.errors):
-            # Continue where possible, but missing documents list blocks further work
-            if "documents" not in manifest or not isinstance(
-                manifest.get("documents"), list
-            ):
-                return self.errors
-        paths = self.validate_document_set(manifest)
+        if "documents" not in manifest or not isinstance(
+            manifest.get("documents"), list
+        ):
+            return self.errors
+        self.validate_manifest_matches_constitutional(manifest, constitutional)
+        paths = self.validate_document_set(manifest, constitutional)
         self.validate_headers(manifest, paths)
         self.validate_global_requirements(manifest, paths)
         self.validate_global_prds(manifest, paths)
@@ -546,7 +727,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.docs_root is None:
-        # tools/ -> project_documentation/
         docs_root = Path(__file__).resolve().parent.parent
     else:
         docs_root = args.docs_root

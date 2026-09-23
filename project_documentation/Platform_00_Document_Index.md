@@ -97,7 +97,7 @@ Where absent, status remains `SPECIFIED` / `NOT IMPLEMENTED` (or equivalent). A1
 | 24 | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Authoritative monitoring-intelligence specialized master: class-specific Alert Evidence Contracts, telemetry trust, semantic monitoring states, Endpoint Diagnostic Snapshot (EDS), tiered local intelligence, RCA/AI assurance, Incident Copilot, AI safety/provenance, formal `PRD-MIA-*` + `REQ-MIA-*` supplement |
 | 25 | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | Authoritative enterprise-monitoring-coverage specialized master: Capability Pack product contract, L1/L2/L3 dimensional certification, Linux/Windows Agent and agentless infrastructure coverage, technology-family catalogue, Customer Acceptance Profiles, Real Customer Requirements normalization, formal `PRD-EMC-*` + `REQ-EMC-*` supplement |
 
-### 3.1 Specialized-master number allocation
+### 5.1 Specialized-master number allocation
 
 The canonical Mother Reference remains the actual merged set listed in §3 on current GitHub `main`. Today the numbered specialized-master sequence ends at the highest merged master (`Platform_23`). Candidate or open PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not enlarge the authoritative set.
 
