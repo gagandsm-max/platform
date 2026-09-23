@@ -211,7 +211,7 @@ Data plane owns: Sensor/Agent collection, local durable spool, mTLS upload to Co
 - Kafka/ClickHouse/PostgreSQL/Valkey: inside Core trust boundary
 - Monitored devices: protocol-specific credentials via Credential Profiles; no browser reusable secrets
 
-### 5.1 Modular Core
+### 5.4 Modular Core
 
 To satisfy the 8 vCPU / 16 GB target for the reference ≤2,500-device workload, the Java control plane should be modular rather than split into dozens of always-running JVM microservices.
 
@@ -399,7 +399,7 @@ Standard production: `NETWORK`, `INFRASTRUCTURE`, `FLOW`, `LOG`. Conditional: `S
 
 Current production Sensor entrypoint does **NOT** yet use the entire governed runtime/scheduler architecture. Target architecture below remains normative; implementation remains incomplete until evidence closes the gap.
 
-### 8.1 Sensor runtime
+### 9.1 Sensor runtime
 
 Production Sensor deployment-role direction: standard `NETWORK`, `INFRASTRUCTURE`, `FLOW`, `LOG`; conditional dedicated `SYNTHETIC` / `CLOUD_API`; `COMBINED` for lab/dev/small deployments unless separately certified. Current runtime `STREAMING_EVENT` is an implementation/general streaming role requiring **IMPLEMENTATION RECONCILIATION** toward explicit FLOW/LOG product roles. One Universal Sensor codebase.
 
@@ -416,7 +416,7 @@ Reasons:
 
 Rust may be introduced only for benchmark-proven hotspots, not as a blanket requirement.
 
-### 8.2 Internal Sensor worker pools
+### 9.2 Internal Sensor worker pools
 
 Sensor isolates workloads into bounded worker pools:
 
@@ -434,7 +434,7 @@ Sensor isolates workloads into bounded worker pools:
 
 A high-rate Flow workload must not starve SNMP polling or NCM safety tasks.
 
-### 8.2.1 SNMP execution architecture
+### 9.2.1 SNMP execution architecture
 
 SNMP scheduled polling is a **Network Sensor data-plane capability** coordinated by Core control state. The production path is:
 
@@ -469,7 +469,7 @@ Adaptive SNMP polling may temporarily accelerate cadence under explicit reason/a
 SNMP trap/inform reception is a Streaming/Event Sensor capability when event volume warrants separation. It is independently budgeted from routine polling.
 
 
-### 8.3 Sensor local storage
+### 9.3 Sensor local storage
 
 The Sensor stores only operational state required for continuity:
 
@@ -482,7 +482,7 @@ The Sensor stores only operational state required for continuity:
 
 It is not a full independent historical NMS database.
 
-### 8.4 Sensor communication
+### 9.4 Sensor communication
 
 ```mermaid
 sequenceDiagram
@@ -522,7 +522,7 @@ Detailed Agent product behavior: `Platform_02_PRD.md`. EDS placement: §22.
 ## 11. Placement architecture (Region, Site, Sensor Pool)
 Core owns placement policy.
 
-### 9.1 Sensor suitability score
+### 11.1 Sensor suitability score
 
 Inputs include:
 
@@ -539,14 +539,14 @@ Inputs include:
 
 The engine chooses the best **eligible** Sensor, not necessarily the lowest RTT.
 
-### 9.2 Placement modes
+### 11.2 Placement modes
 
 - Automatic.
 - Recommendation requiring approval.
 - Manual pin.
 - Sensor Pool assignment.
 
-### 9.3 Rebalancing
+### 11.3 Rebalancing
 
 A controller detects sustained imbalance and proposes/makes movement according to policy. Hysteresis and minimum-improvement thresholds prevent oscillation.
 
@@ -556,7 +556,7 @@ A controller detects sustained imbalance and proposes/makes movement according t
 **Physical persistence note:** logical Region/Site/Sensor Pool architecture is required. Do not imply physical Region/Sensor Pool schema currently exists merely because logical design exists (#92).
 
 ## 12. Canonical entity model and temporal operational graph
-### 10.1 Entity identity
+### 12.1 Entity identity
 
 Every observed object receives a stable internal `entity_id` independent of transient IP/hostname.
 
@@ -572,7 +572,7 @@ Canonical identity is tenant-aware and may use:
 - hostname + namespace/context;
 - administrator reconciliation.
 
-### 10.2 Monitor Definition
+### 12.2 Monitor Definition
 
 Every normalized metric should derive from a Monitor Definition containing at least:
 
@@ -589,7 +589,7 @@ Every normalized metric should derive from a Monitor Definition containing at le
 
 Protocol source does not dictate dashboard semantics. SNMP/REST/WMI/gNMI can normalize to the same semantic metric.
 
-### 10.3 SNMP typed evidence and identity
+### 12.3 SNMP typed evidence and identity
 
 SNMP does not normalize into a numeric-only pipe. Varbinds and notifications may become:
 
@@ -610,7 +610,7 @@ Interface identity is canonical and temporal. `ifIndex` is an observation/index,
 ---
 
 
-### 11.1 Graph layers
+### 12.4 Graph layers
 
 The graph includes:
 
@@ -627,7 +627,7 @@ The graph includes:
 - Sensor assignment/monitoring dependencies;
 - incident causal edges.
 
-### 11.2 Relationship provenance
+### 12.5 Relationship provenance
 
 Every edge stores:
 
@@ -638,7 +638,7 @@ Every edge stores:
 - confidence/quality;
 - evidence reference.
 
-### 11.3 Temporal snapshots
+### 12.6 Temporal snapshots
 
 The system must reconstruct graph state around an incident time window using relationship history rather than assuming current topology always represents past topology.
 
@@ -646,7 +646,7 @@ The system must reconstruct graph state around an incident time window using rel
 
 
 ## 13. Graph intelligence / GNN architecture
-### 12.1 Learning incorporated
+### 13.1 Learning incorporated
 
 The graph-intelligence architecture explicitly incorporates lessons from graph-first network RCA products, including NetAI GraphIQ concepts observed in public/supplied material:
 
@@ -657,7 +657,7 @@ The graph-intelligence architecture explicitly incorporates lessons from graph-f
 - child alarm evidence remains visible;
 - conversational AI should sit on top of graph/evidence, not replace it.
 
-### 12.2 Hybrid pipeline
+### 13.2 Hybrid pipeline
 
 ```mermaid
 flowchart LR
@@ -674,11 +674,11 @@ flowchart LR
     O --> LLM[AI Gateway / LLM Explanation]
 ```
 
-### 12.3 GNN role
+### 13.3 GNN role
 
 GNN is not permitted to declare an unsupported cause solely because a learned score is high. Its role is to rank/score graph hypotheses, detect propagation/structural patterns and assist evidence collection.
 
-### 12.4 Model governance
+### 13.4 Model governance
 
 Model artifacts must record:
 
@@ -693,7 +693,7 @@ Model artifacts must record:
 
 Production rollout follows canary/model-quality gates. A bad model can be disabled without disabling deterministic RCA.
 
-### 12.5 GNN framework
+### 13.5 GNN framework
 
 **TBD after OSS/licence/performance evaluation.** PyTorch/PyTorch Geometric or another framework may be evaluated, but no framework is frozen by this architecture document.
 
@@ -780,15 +780,15 @@ Policy evaluation uses constrained expression logic such as CEL where appropriat
 
 
 ## 17. Provisioning architecture
-### 16.1 Stages
+### 17.1 Stages
 
 Input → Normalize → Validate → Identity/Duplicate Check → Sensor Candidate Test → Protocol/Auth Test → Device Identification → Monitoring/Profile Fit → Capacity Preview → Approval → Provision → Verify.
 
-### 16.2 Preflight execution location
+### 17.2 Preflight execution location
 
 Protocol tests must execute from the actual candidate Sensor(s), not from Core, so firewall/ACL/path results represent production monitoring conditions.
 
-### 16.3 Error model
+### 17.3 Error model
 
 Provisioning failures are structured error codes with evidence and remediation, not raw stack traces.
 
@@ -798,15 +798,15 @@ Provisioning failures are structured error codes with evidence and remediation, 
 **Discovery authorization gap:** customer Discovery routes may be intentionally fail-closed while persistent IAM/RBAC permission integration is incomplete (#92). Target architecture remains as specified.
 
 ## 18. Extensibility architecture (Device / Technology / Capability Pack)
-### 17.1 Device Pack
+### 18.1 Device Pack
 
 Device Pack is the primary extension unit joining collection, identity, topology, dashboards, alerts, NCM and RCA semantics.
 
-### 17.2 MIB/API/YANG provenance
+### 18.2 MIB/API/YANG provenance
 
 Every imported external artifact records provenance, version, copyright/licence/redistribution status and owner. Customer-supplied files remain customer-scoped unless redistribution rights exist.
 
-### 17.3 Signed packages
+### 18.3 Signed packages
 
 Device Packs are versioned and signed; import/update supports compatibility checks and rollback.
 
@@ -943,7 +943,7 @@ The ingestion architecture must prove continuity across Sensor produced → inge
 **PR #81 durability semantics are retained:** durable spool stream identity → PostgreSQL pending reservation → Kafka transactional publish → PostgreSQL finalize → Sensor ACK (at-least-once). Concurrent pending-reservation HTTP retries may amplify Kafka republish (P1 hardening). Exact LLD contracts remain in Platform_05/17.
 
 ## 27. Data lifecycle architecture
-### 21.1 Data classes
+### 27.1 Data classes
 
 - numeric telemetry;
 - state telemetry;
@@ -957,7 +957,7 @@ The ingestion architecture must prove continuity across Sensor produced → inge
 - SLA/report aggregates;
 - configuration/identity.
 
-### 21.2 Rollups
+### 27.2 Rollups
 
 Raw → configurable rollup resolutions → longer-term aggregates → optional archive.
 
@@ -965,7 +965,7 @@ For numeric values store relevant min/max/avg/count/first/last/percentile. Count
 
 Raw SNMP counters that can exceed IEEE-754 exact-integer range require exact unsigned storage semantics (for example ClickHouse `UInt64`) or an equivalently exact representation. They must not be coerced into `Float64` before delta/reset logic. State, inventory and topology facts remain separate from numeric metric storage even when collected in the same SNMP transaction. A logical exact-counter family is required; a dedicated Kafka topic name is an implementation option when an equivalently typed contract is proven.
 
-### 21.3 Query resolution selection
+### 27.3 Query resolution selection
 
 Query service chooses suitable table/resolution based on requested range and availability; UI indicates historical resolution.
 
@@ -993,7 +993,7 @@ Emergency deletion must use efficient partition/TTL operations rather than billi
 
 
 ## 29. Security, IAM and audit architecture
-### 23.1 Trust boundaries
+### 29.1 Trust boundaries
 
 - Browser/user ↔ Core: HTTPS/OIDC/SAML/local auth.
 - Sensor ↔ Core: mTLS.
@@ -1002,19 +1002,19 @@ Emergency deletion must use efficient partition/TTL operations rather than billi
 - Device connections: protocol-specific secure method and credential policy.
 - External integrations: HTTPS/TLS/mTLS/OAuth etc.
 
-### 23.2 Secrets
+### 29.2 Secrets
 
 Secrets are encrypted at rest, accessed by reference, masked in UI/logs, never included in exports/AI by default and separated from ordinary inventory.
 
-### 23.3 Authorization
+### 29.3 Authorization
 
 Server-side resource authorization with tenant, scope, action and condition. UI hiding is only presentation.
 
-### 23.4 Audit
+### 29.4 Audit
 
 All state-changing/security-sensitive operations produce structured audit events. Audit export to SIEM supported.
 
-### 23.5 Supply chain
+### 29.5 Supply chain
 
 Release produces SBOM, checksums, provenance and third-party notices. Dependency additions pass OSS licence/security policy.
 
@@ -1034,23 +1034,23 @@ Platform's canonical tenant/entity/data-class model must carry a placement/juris
 
 
 ## 31. Cross-cutting architecture capabilities
-### 33.1 Desired-state reconciliation
+### 31.1 Desired-state reconciliation
 
 Core Policy/Sensor Control shall maintain a distinction between **desired state** and **observed/applied state** for Sensor assignments, policy versions, Device Pack versions, credential versions, Agent/Sensor versions and monitoring enablement. Drift is a first-class state and feeds Platform Operations, audit and remediation workflows.
 
-### 33.2 Migration architecture
+### 31.2 Migration architecture
 
 Migration Studio shall be adapter-based. External exports/APIs are parsed into a **staging canonical model**, mapped to Platform entities/sites/groups/tags/credentials-by-reference/policies where semantics are safely translatable, then reviewed before commit. External source products never become runtime authorities inside Platform.
 
-### 33.3 Technology lifecycle intelligence
+### 31.3 Technology lifecycle intelligence
 
 Lifecycle metadata is an enrichment domain joined to canonical inventory. Source/provenance and retrieval date are mandatory because vendor support dates change and may have licensing restrictions. Lifecycle intelligence must not contaminate core identity if the metadata is stale/unavailable.
 
-### 33.4 Operational knowledge and PIR
+### 31.4 Operational knowledge and PIR
 
 Runbooks/known issues are versioned knowledge artifacts. Incident closure can create a PIR artifact assembled from immutable timeline/evidence with human-approved CAPA. AI may summarize but not silently rewrite authoritative operator conclusions.
 
-### 33.5 Effectiveness/quality analytics
+### 31.5 Effectiveness/quality analytics
 
 Platform shall analyze its own monitoring intelligence: alert policy effectiveness, qualification outcomes, RCA accuracy, telemetry quality, Sensor efficiency and pipeline integrity. These analytics are essential for proving the low-noise/meaningful-AI product proposition.
 
@@ -1082,7 +1082,7 @@ Platform shall analyze its own monitoring intelligence: alert policy effectivene
 - stable customer-facing error codes/correlation IDs and **No Silent Failure**.
 
 ## 32. Development, packaging and service-runtime architecture
-### 34.1 Docker Compose is the normative local runtime
+### 32.1 Docker Compose is the normative local runtime
 
 Platform standardizes local engineering on **Docker Compose**. Podman compatibility is not a required architecture target. This deliberately reduces variation in networking, volume behavior, health checks and tooling across coding agents and engineers.
 
@@ -1108,23 +1108,23 @@ Docker networks/containers/volumes
 
 No architectural test may depend on a manually installed host PostgreSQL/Kafka/Java/Node runtime.
 
-### 34.2 Reboot-safe local architecture
+### 32.2 Reboot-safe local architecture
 
 Stateful development services use Docker named volumes with explicit ownership. Compose files must use health checks and service dependencies based on health rather than arbitrary sleeps. Images and configuration are pinned/versioned. The stack must recover after normal Docker daemon/laptop restart without silent data loss.
 
 Recommended development restart policy is `unless-stopped` for long-lived local services; disposable test profiles should use explicit lifecycle control and be recreated cleanly.
 
-### 34.3 Production is native-service first
+### 32.3 Production is native-service first
 
 Production Core/Sensor/Linux Agent are installed as native Linux packages and managed by `systemd`; Windows Agent is managed by Windows Service Control Manager. Container runtime is not a production prerequisite for the initial customer installation model.
 
-### 34.4 Service supervision architecture
+### 32.4 Service supervision architecture
 
 Linux services use dedicated non-login service identities, least privilege, explicit filesystem ownership and `systemd` units with boot enablement, health-aware startup and bounded restart behavior. Windows Agent runs as a dedicated Windows Service with automatic start and recovery actions.
 
 A restart mechanism is not allowed to hide a persistent fault. After configured repeated failures, the component must remain diagnosable and the Platform must raise a visible health condition.
 
-### 34.5 Observability of Platform itself
+### 32.5 Observability of Platform itself
 
 Platform self-observability is mandatory. Every deployment unit emits structured logs and health metrics. The operational model must support:
 
@@ -1137,7 +1137,7 @@ Platform self-observability is mandatory. Every deployment unit emits structured
 - error-code and correlation-ID search;
 - support-bundle generation with secret redaction.
 
-### 34.6 Windows certification exception
+### 32.6 Windows certification exception
 
 Windows Agent source can be cross-compiled and most functional tests can run in containerized CI, but GA certification of Windows Service installation, reboot auto-start, SCM recovery, MSI behavior and Windows-specific permissions requires an isolated Windows runner/VM. This is an OS-compatibility test environment, not permission to install Platform development dependencies directly on the primary developer laptop.
 
@@ -1145,20 +1145,20 @@ Windows Agent source can be cross-compiled and most functional tests can run in 
 
 
 ## 33. Scalability and performance architecture
-### 26.1 Core reference target
+### 33.1 Core reference target
 
 Up to 2,500 devices under SNWP-2500-v1: 8 vCPU / 16 GB RAM mandatory optimization target.
 
-### 26.2 Sensor planning baseline
+### 33.2 Sensor planning baseline
 
 - 4 vCPU / 16 GB / 150 GB local SSD: ~800 normal network devices planning baseline.
 - 8 vCPU / 16 GB: engineering benchmark objective ~2,000–2,500 normal network devices where workload permits.
 
-### 26.3 Horizontal scaling
+### 33.3 Horizontal scaling
 
 Scale collection by adding Sensors/Sensor Pools first. Core grows when ingestion/query/concurrency/RCA/report workload requires it, not linearly with device count alone.
 
-### 26.4 Future multiple Cores
+### 33.4 Future multiple Cores
 
 Large/global environments may later use autonomous regional Cores with a Master Core/federation layer. Not initial scope.
 
@@ -1196,23 +1196,23 @@ Upgrade architecture uses preflight, backup, compatibility checks, Sensor drains
 
 
 ## 35. Architecture lessons and incumbent learnings
-### 25.1 Do not turn every Sensor into a full independent NMS database
+### 35.1 Do not turn every Sensor into a full independent NMS database
 
 This creates sync/reconciliation complexity. Sensors stay lightweight with durable spool and bounded operational state.
 
-### 25.2 Do not make Core poll everything
+### 35.2 Do not make Core poll everything
 
 Collection belongs near devices. Core focuses on control, visualization, correlation, policy, RCA and reporting.
 
-### 25.3 Do not expose Kafka to WAN/Sensors
+### 35.3 Do not expose Kafka to WAN/Sensors
 
 Keep Kafka internal. mTLS HTTPS/gRPC ingress is easier to secure, firewall and evolve.
 
-### 25.4 Do not equate AI confidence with truth
+### 35.4 Do not equate AI confidence with truth
 
 Every RCA hypothesis must show evidence and support `INCONCLUSIVE`.
 
-### 25.5 Do not hard-code enterprise thresholds
+### 35.5 Do not hard-code enterprise thresholds
 
 Operational policies must be editable with inheritance and impact preview.
 

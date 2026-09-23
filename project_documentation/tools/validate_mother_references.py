@@ -132,6 +132,10 @@ PLATFORM_NUM_RE = re.compile(r"^Platform_(\d{2})_")
 DOC_ID_RE = re.compile(r"^\*\*Document ID:\*\*\s*(\S+)", re.M)
 VERSION_RE = re.compile(r"^\*\*Version:\*\*\s*(\S+)", re.M)
 TOP_SECTION_RE = re.compile(r"^##\s+(\d+)\.", re.M)
+# Numeric ### / #### headings that claim hierarchy, e.g. ### 12.1 or #### 11.1.1
+NUMERIC_SUBSECTION_RE = re.compile(
+    r"^(#{3,6})\s+(\d+)((?:\.\d+)+)\s+\S", re.M
+)
 
 REQ_MARKER_START = "<!-- GLOBAL PRIMARY REQ REGISTRY -->"
 REQ_MARKER_END = "<!-- END GLOBAL PRIMARY REQ REGISTRY -->"
@@ -758,6 +762,37 @@ class MotherReferenceValidator:
                     self.fail(
                         f"{rel}: duplicate normalized top-level section number: {n}"
                     )
+            self._validate_numeric_subsection_hierarchy(rel, text)
+
+    def _validate_numeric_subsection_hierarchy(
+        self, rel: str, text: str
+    ) -> None:
+        """For NORMALIZED_V1 docs, numeric ###/#### headings must belong to
+        the current ## N parent. Descriptive unnumbered ### headings are OK.
+        TRANSITIONAL_LEGACY documents are not checked here.
+        """
+        current_top: int | None = None
+        for line in text.splitlines():
+            top_match = re.match(r"^##\s+(\d+)\.", line)
+            if top_match:
+                current_top = int(top_match.group(1))
+                continue
+            sub = re.match(r"^(#{3,6})\s+(\d+)((?:\.\d+)+)\s+\S", line)
+            if not sub:
+                continue
+            if current_top is None:
+                self.fail(
+                    f"{rel}: numeric subsection before any top-level section: "
+                    f"{line.strip()[:80]}"
+                )
+                continue
+            claimed_top = int(sub.group(2))
+            if claimed_top != current_top:
+                self.fail(
+                    f"{rel}: numeric subsection {sub.group(2)}{sub.group(3)} "
+                    f"under ## {current_top} (parent mismatch): "
+                    f"{line.strip()[:80]}"
+                )
 
     def validate_maturity_language(self, paths: dict[str, Path]) -> None:
         banned = [

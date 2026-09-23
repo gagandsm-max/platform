@@ -542,6 +542,98 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
+    def test_18c_normalized_platform_02_stale_subsection_parent_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 12. Infrastructure\n\n"
+            + "### 67.1 Windows/Linux infrastructure monitoring\n\n"
+            + "| `PRD-HA-001` | HA |\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_02_PRD.md" in e
+                and "parent mismatch" in e
+                and "67.1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18d_normalized_platform_03_stale_subsection_parent_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 9. Sensor architecture\n\n"
+            + "### 8.1 Sensor runtime\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_03_Architecture.md" in e
+                and "parent mismatch" in e
+                and "8.1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18e_normalized_matching_subsection_parent_passes(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 12. Infrastructure\n\n"
+            + "### 12.1 Server/OS\n\n"
+            + "| `PRD-HA-001` | HA |\n",
+            encoding="utf-8",
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 9. Sensor architecture\n\n"
+            + "### 9.1 Sensor runtime\n\n"
+            + "#### 9.1.1 Nested detail\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("parent mismatch" in e for e in errors),
+            errors,
+        )
+
+    def test_18f_normalized_descriptive_unnumbered_subsection_passes(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 12. Infrastructure\n\n"
+            + "### Windows/Linux infrastructure monitoring modes\n\n"
+            + "| `PRD-HA-001` | HA |\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("parent mismatch" in e for e in errors),
+            errors,
+        )
+
+    def test_18g_transitional_platform_04_may_retain_historical_numbering(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_04_HLD.md").write_text(
+            _header("PLATFORM-HLD-001")
+            + "## 9. Placement\n\n"
+            + "### 8.1 Historical Sensor runtime numbering retained until A2.2\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any(
+                "Platform_04_HLD.md" in e and "parent mismatch" in e for e in errors
+            ),
+            errors,
+        )
+
     # --- Bypass-closure tests (control-plane corrective patch) ---
 
     def test_19_physical_file_only_deletion_fails(self) -> None:
