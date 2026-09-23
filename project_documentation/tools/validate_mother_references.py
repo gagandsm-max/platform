@@ -98,9 +98,9 @@ CANONICAL_DOCUMENT_IDS: dict[str, str | None] = {
 CANONICAL_NORMALIZATION: dict[str, str] = {
     "AGENTS.md": "TRANSITIONAL_LEGACY",
     "Platform_00_Document_Index.md": "NORMALIZED_V1",
-    "Platform_01_BRD.md": "TRANSITIONAL_LEGACY",
-    "Platform_02_PRD.md": "TRANSITIONAL_LEGACY",
-    "Platform_03_Architecture.md": "TRANSITIONAL_LEGACY",
+    "Platform_01_BRD.md": "NORMALIZED_V1",
+    "Platform_02_PRD.md": "NORMALIZED_V1",
+    "Platform_03_Architecture.md": "NORMALIZED_V1",
     "Platform_04_HLD.md": "TRANSITIONAL_LEGACY",
     "Platform_05_LLD.md": "TRANSITIONAL_LEGACY",
     "Platform_06_Dataflow.md": "TRANSITIONAL_LEGACY",

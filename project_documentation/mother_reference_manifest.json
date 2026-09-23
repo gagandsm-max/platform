@@ -26,7 +26,7 @@
       "kind": "mother_reference",
       "expectedDocumentId": "PLATFORM-BRD-001",
       "governingRole": "Business intent, outcomes, scope",
-      "normalizationState": "TRANSITIONAL_LEGACY"
+      "normalizationState": "NORMALIZED_V1"
     },
     {
       "file": "Platform_02_PRD.md",
@@ -34,7 +34,7 @@
       "kind": "mother_reference",
       "expectedDocumentId": "PLATFORM-PRD-001",
       "governingRole": "Product capability and customer-visible behavior",
-      "normalizationState": "TRANSITIONAL_LEGACY"
+      "normalizationState": "NORMALIZED_V1"
     },
     {
       "file": "Platform_03_Architecture.md",
@@ -42,7 +42,7 @@
       "kind": "mother_reference",
       "expectedDocumentId": "PLATFORM-ARC-001",
       "governingRole": "System architecture, deployment, trust, data/control planes, HA",
-      "normalizationState": "TRANSITIONAL_LEGACY"
+      "normalizationState": "NORMALIZED_V1"
     },
     {
       "file": "Platform_04_HLD.md",
