@@ -50,5 +50,11 @@ public final class AuditActions {
     public static final AuditAction ENTITY_MANAGEMENT_ENDPOINT_PRIMARY_CHANGE =
             new AuditAction("entity.management_endpoint.primary_change");
 
+    /** Sensor enrollment bootstrap authority (token issue/revoke; no secrets). */
+    public static final AuditAction SENSOR_ENROLLMENT_AUTHORITY_ISSUE =
+            new AuditAction("sensor.enrollment_authority.issue");
+    public static final AuditAction SENSOR_ENROLLMENT_AUTHORITY_REVOKE =
+            new AuditAction("sensor.enrollment_authority.revoke");
+
     private AuditActions() {}
 }

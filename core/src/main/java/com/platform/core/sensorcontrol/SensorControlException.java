@@ -22,6 +22,18 @@ public class SensorControlException extends DomainException {
     public static final String ERR_DISCOVERY_REQUEST_NOT_PLACEABLE = "ERR_DISCOVERY_REQUEST_NOT_PLACEABLE";
     public static final String ERR_DISCOVERY_PLACEMENT_CONFLICT = "ERR_DISCOVERY_PLACEMENT_CONFLICT";
 
+    /** Enrollment bootstrap authority (B1) — issue-time validation. */
+    public static final String ERR_SENSOR_ENROLLMENT_AUTHORITY_TTL_INVALID =
+            "ERR_SENSOR_ENROLLMENT_AUTHORITY_TTL_INVALID";
+    public static final String ERR_SENSOR_ENROLLMENT_AUTHORITY_SCOPE_INVALID =
+            "ERR_SENSOR_ENROLLMENT_AUTHORITY_SCOPE_INVALID";
+    /**
+     * Safe external-facing family for consume failures (unknown/expired/revoked/replay/scope).
+     * Do not differentiate these for unauthenticated enrollment callers.
+     */
+    public static final String ERR_SENSOR_ENROLLMENT_AUTHORITY_INVALID =
+            "ERR_SENSOR_ENROLLMENT_AUTHORITY_INVALID";
+
     public SensorControlException(String code, String message) {
         super(code, message);
     }
