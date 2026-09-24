@@ -1,5 +1,22 @@
 # Agent runtime E2E (test-only)
 
+## BUILD-001 classification — OPTIONAL NON-CI / ISOLATION-PENDING
+
+This harness is **not** part of BUILD-001 certification.
+
+- It uses the shared Compose project/resource namespace `platform`.
+- It uses fixed host/resource assumptions (default receiver host port `28444`, named volumes/containers).
+- It can `docker pause` / restart `platform-core` and mutate Sensor Agent spool state.
+- It **MUST NOT** be run concurrently with a developer Platform stack or normal Platform CI.
+- Isolation/hardening is deferred; do not treat green local runs as a canonical CI gate.
+- Shared-host CI/container contention remains Issue **#107** (do not duplicate here).
+
+BUILD-001 certifies source-only transport harness capability (including the production
+`SpoolAcceptanceSink` → `agentdrain` → mTLS Mock Core pipeline slice under `-tags=pipeline`).
+This Compose overlay remains an optional, isolation-pending real-path tool only.
+
+---
+
 Bounded overlay for Issue #46 / PR #47. It does **not** change the production
 `compose.yaml` default `SENSOR_AGENT_RECEIVER_ENABLED=false`.
 

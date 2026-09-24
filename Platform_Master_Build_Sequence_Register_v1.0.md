@@ -4,22 +4,24 @@
 **Execution model:** Contract-first, bottom-up implementation, end-to-end certification per slice.
 **Purpose:** Stable module-by-module build sequence that survives future chat handoffs.
 
-## BUILD-000 execution status
+## Current execution status
 
 | Field | Value |
 |---|---|
 | Register version | 1.0 |
-| Canonical BUILD-000 base SHA | `315a20980e89683666a64362f0ed3827bf613d4a` |
-| Last certified BUILD | NONE |
-| Active BUILD | BUILD-000 |
-| Status | IMPLEMENTING |
-| GitHub issue | #110 |
-| PR | #111 |
-| Evidence | corrective schema/runtime-alignment pass; local static validation passed; exact-head CI pending after push |
+| BUILD-001 activation base SHA | `b5ce7da76def70dc2110aafe5fd89810f7a93c10` |
+| Last certified BUILD | BUILD-000 |
+| BUILD-000 certification | CERTIFIED — PR #111 merged; post-merge Platform CI #517 / run DB `36001833784` SUCCESS |
+| Active BUILD | BUILD-001 |
+| Active status | IMPLEMENTING |
+| Active GitHub issue | #112 |
+| Active PR | #113 |
+| Evidence | production SpoolAcceptanceSink→agentdrain→mTLS mock-Core slice implemented and locally validated; exact-head CI pending |
 | Last updated | 2026-09-24 |
 | Sequencing authority | Master Chat only |
 
-BUILD-000 decision authority and evidence trail: GitHub Issue #110. Technical decision detail remains in Issue #110 / PR description / `schemas/edge/README.md` — not duplicated as a second full decision register here.
+BUILD-000 decision/certification trail: GitHub Issue #110, PR #111, exact audited head `0b25046c3c418ea5d30d565bd5d5ed7f55138f9c`, merge/main `b5ce7da76def70dc2110aafe5fd89810f7a93c10`, post-merge CI #517.
+BUILD-001 authority and evidence trail: GitHub Issue #112.
 
 ## Core rule
 
@@ -153,7 +155,7 @@ ARCHITECTURE/CAPABILITY CONTRACT CLOSED → IMPLEMENTED → UNIT TESTED → INTE
 
 ## Immediate sequence after A2.3
 
-BUILD-000 → 002 → 003 → 004 → 005 → 010 → 011 → 016 → 017 → 013 → 014 → 019 → 020 → 021 → 022 → 023 → 024 → 025 → 026 → 030/031 → 037 → 040/041/042/043/044 → 048 → 050/051/052/053 → 054 → 060 onward.
+BUILD-000 → 001 → 002 → 003 → 004 → 005 → 010 → 011 → 016 → 017 → 013 → 014 → 019 → 020 → 021 → 022 → 023 → 024 → 025 → 026 → 030/031 → 037 → 040/041/042/043/044 → 048 → 050/051/052/053 → 054 → 060 onward.
 
 ## Handoff rule
 
