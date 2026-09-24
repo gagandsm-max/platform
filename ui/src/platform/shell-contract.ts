@@ -12,7 +12,8 @@ export type GlobalShellCapabilityId =
   | 'account-menu'
   | 'favorites-recent'
   | 'command-palette'
-  | 'theme';
+  | 'theme'
+  | 'density';
 
 export type GlobalShellReadiness = 'SHELL_READY' | 'BACKEND_PENDING';
 
@@ -111,5 +112,11 @@ export const GLOBAL_SHELL_CAPABILITIES: readonly GlobalShellCapability[] = [
     readiness: 'SHELL_READY',
     serverContractRequired: false,
     note: 'Light, dark and system theme selection is local shell behavior.',
+  },
+  {
+    id: 'density',
+    readiness: 'SHELL_READY',
+    serverContractRequired: false,
+    note: 'Compact, comfortable and large density selection is local shell behavior.',
   },
 ] as const;

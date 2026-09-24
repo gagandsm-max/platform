@@ -24,8 +24,32 @@
   --info: #075985;
   --info-soft: #eff8ff;
   --shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  --density-control-height: 40px;
+  --density-interactive-height: 44px;
+  --density-surface-padding: 1.2rem;
+  --density-nav-padding-y: 0.45rem;
+  --density-tab-padding-y: 0.35rem;
+  --density-tab-padding-x: 0.8rem;
   color: var(--text);
   background: var(--bg);
+}
+
+:root[data-density='compact'] {
+  --density-control-height: 34px;
+  --density-interactive-height: 44px;
+  --density-surface-padding: 0.9rem;
+  --density-nav-padding-y: 0.3rem;
+  --density-tab-padding-y: 0.25rem;
+  --density-tab-padding-x: 0.65rem;
+}
+
+:root[data-density='large'] {
+  --density-control-height: 46px;
+  --density-interactive-height: 50px;
+  --density-surface-padding: 1.45rem;
+  --density-nav-padding-y: 0.6rem;
+  --density-tab-padding-y: 0.5rem;
+  --density-tab-padding-x: 1rem;
 }
 
 :root[data-theme='dark'] {
@@ -140,7 +164,7 @@ button:disabled {
   top: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: 260px minmax(260px, 680px) 1fr;
+  grid-template-columns: 260px minmax(260px, 1fr) auto;
   align-items: center;
   gap: 1.25rem;
   min-height: 64px;
@@ -180,7 +204,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  height: 44px;
+  height: var(--density-interactive-height);
   padding: 0 0.85rem;
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -213,10 +237,11 @@ kbd {
 }
 
 .theme-control select,
+.density-control select,
 .icon-button,
 .user-menu,
 .context-button {
-  min-height: 40px;
+  min-height: var(--density-control-height);
   padding: 0 0.7rem;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -274,8 +299,8 @@ kbd {
   align-items: center;
   gap: 0.6rem;
   width: 100%;
-  min-height: 44px;
-  padding: 0.45rem 0.65rem;
+  min-height: var(--density-interactive-height);
+  padding: var(--density-nav-padding-y) 0.65rem;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
@@ -360,7 +385,7 @@ kbd {
 }
 
 .context-button {
-  min-height: 40px;
+  min-height: var(--density-control-height);
   font-size: 0.78rem;
 }
 
@@ -440,7 +465,7 @@ kbd {
 
 .surface-card {
   min-width: 0;
-  padding: 1.2rem;
+  padding: var(--density-surface-padding);
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
@@ -574,7 +599,7 @@ kbd {
 
 .button,
 .palette-close {
-  min-height: 44px;
+  min-height: var(--density-interactive-height);
   padding: 0 0.85rem;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -702,9 +727,29 @@ kbd {
   .topbar {
     position: sticky;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    min-height: 58px;
-    gap: 0.65rem;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "brand search"
+      "actions actions";
+    min-height: auto;
+    padding: 0.55rem 1rem;
+    gap: 0.5rem 0.65rem;
+  }
+
+  .brand-block {
+    grid-area: brand;
+  }
+
+  .global-search {
+    grid-area: search;
+    width: 100%;
+  }
+
+  .topbar-actions {
+    grid-area: actions;
+    justify-content: flex-start;
+    width: 100%;
+    gap: 0.55rem;
   }
 
   .brand-name,
@@ -876,10 +921,10 @@ kbd {
   border: 1px solid var(--border, #d7dde7);
   background: var(--surface, #fff);
   border-radius: 999px;
-  padding: 0.35rem 0.8rem;
+  padding: var(--density-tab-padding-y) var(--density-tab-padding-x);
   cursor: pointer;
   font: inherit;
-  min-height: 36px;
+  min-height: var(--density-interactive-height);
 }
 
 .workspace-tab--active,
