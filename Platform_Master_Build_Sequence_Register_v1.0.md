@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | Register version | 1.0 |
-| Canonical current main SHA | `b5ce7da76def70dc2110aafe5fd89810f7a93c10` |
+| BUILD-001 activation base SHA | `b5ce7da76def70dc2110aafe5fd89810f7a93c10` |
 | Last certified BUILD | BUILD-000 |
 | BUILD-000 certification | CERTIFIED — PR #111 merged; post-merge Platform CI #517 / run DB `36001833784` SUCCESS |
 | Active BUILD | BUILD-001 |

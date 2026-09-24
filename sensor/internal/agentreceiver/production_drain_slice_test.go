@@ -3,6 +3,7 @@
 package agentreceiver_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -259,11 +260,23 @@ func assertPendingCount(t *testing.T, sp *spool.DiskSpool, want int) {
 	}
 }
 
-func assertClientCertRequired(t *testing.T, r *http.Request) {
+// assertSliceClientCert is safe to call from httptest handler goroutines.
+// It must not use t.Fatal / t.Fatalf / t.FailNow.
+func assertSliceClientCert(t *testing.T, r *http.Request) bool {
 	t.Helper()
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		t.Fatal("Mock Core must require a verified Sensor client certificate")
+	if r.TLS == nil {
+		t.Errorf("Mock Core TLS state missing; RequireAndVerifyClientCert expected")
+		return false
 	}
+	if len(r.TLS.PeerCertificates) == 0 {
+		t.Errorf("Mock Core peer certificate missing")
+		return false
+	}
+	if len(r.TLS.VerifiedChains) == 0 {
+		t.Errorf("Mock Core VerifiedChains empty; client certificate was not verified")
+		return false
+	}
+	return true
 }
 
 func TestProductionDrainSliceHappyPath(t *testing.T) {
@@ -288,7 +301,10 @@ func TestProductionDrainSliceHappyPath(t *testing.T) {
 	var gotOnce atomic.Bool
 	pki := makeSlicePKI(t)
 	server := startSliceMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assertClientCertRequired(t, r)
+		if !assertSliceClientCert(t, r) {
+			http.Error(w, "client certificate verification missing", http.StatusInternalServerError)
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/sensor/agent-telemetry" {
 			http.NotFound(w, r)
 			return
@@ -357,11 +373,20 @@ func TestProductionDrainSliceHappyPath(t *testing.T) {
 		t.Fatalf("nested len=%d", len(nested))
 	}
 	for i, want := range env.Records {
-		if nested[i].Sequence != want.Sequence || nested[i].ID != want.ID || nested[i].Checksum != want.Checksum {
-			t.Fatalf("nested[%d]=%+v want seq/id/checksum from %+v", i, nested[i], want)
+		if nested[i].Sequence != want.Sequence {
+			t.Fatalf("nested[%d].Sequence=%d want %d", i, nested[i].Sequence, want.Sequence)
 		}
-		if len(nested[i].Payload) == 0 {
-			t.Fatalf("nested[%d] payload empty", i)
+		if nested[i].ID != want.ID {
+			t.Fatalf("nested[%d].ID=%q want %q", i, nested[i].ID, want.ID)
+		}
+		if !nested[i].CreatedAt.UTC().Equal(want.CreatedAt.UTC()) {
+			t.Fatalf("nested[%d].CreatedAt=%s want %s", i, nested[i].CreatedAt.UTC().Format(time.RFC3339Nano), want.CreatedAt.UTC().Format(time.RFC3339Nano))
+		}
+		if nested[i].Checksum != want.Checksum {
+			t.Fatalf("nested[%d].Checksum=%q want %q", i, nested[i].Checksum, want.Checksum)
+		}
+		if !bytes.Equal(nested[i].Payload, want.Payload) {
+			t.Fatalf("nested[%d].Payload bytes differ:\n got=%s\nwant=%s", i, nested[i].Payload, want.Payload)
 		}
 	}
 
@@ -388,7 +413,10 @@ func TestProductionDrainSliceInvalidACKRetainsSpool(t *testing.T) {
 
 	pki := makeSlicePKI(t)
 	server := startSliceMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assertClientCertRequired(t, r)
+		if !assertSliceClientCert(t, r) {
+			http.Error(w, "client certificate verification missing", http.StatusInternalServerError)
+			return
+		}
 		var batch coreclient.AgentTelemetryBatch
 		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
 			http.Error(w, "json", 400)
@@ -426,7 +454,10 @@ func TestProductionDrainSliceTransientCoreFailureRetainsSpool(t *testing.T) {
 
 	pki := makeSlicePKI(t)
 	server := startSliceMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assertClientCertRequired(t, r)
+		if !assertSliceClientCert(t, r) {
+			http.Error(w, "client certificate verification missing", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"status":"ERROR","code":"ERR_CORE_UNAVAILABLE","message":"temporary"}`))
@@ -467,7 +498,10 @@ func TestProductionDrainSliceAmbiguousResponseRetainsThenRetryDrains(t *testing.
 	var lastBatch coreclient.AgentTelemetryBatch
 	pki := makeSlicePKI(t)
 	server := startSliceMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assertClientCertRequired(t, r)
+		if !assertSliceClientCert(t, r) {
+			http.Error(w, "client certificate verification missing", http.StatusInternalServerError)
+			return
+		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("read: %v", err)
@@ -559,7 +593,10 @@ func TestProductionDrainSliceReopenPreservesAcceptedBatch(t *testing.T) {
 
 	pki := makeSlicePKI(t)
 	server := startSliceMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assertClientCertRequired(t, r)
+		if !assertSliceClientCert(t, r) {
+			http.Error(w, "client certificate verification missing", http.StatusInternalServerError)
+			return
+		}
 		var batch coreclient.AgentTelemetryBatch
 		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
 			http.Error(w, "json", 400)
