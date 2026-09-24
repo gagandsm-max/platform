@@ -515,8 +515,25 @@ Exact topic/partition counts are deployment-sized.
 
 **Maturity / Issue #92:** Replay relational-integrity gap remains an implementation defect class; durable ACK is required design.
 
+**BUILD-000 freeze (Issue #110):** machine-readable edge contracts live under `schemas/edge/`. `SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED`.
 
 This contract is critical.
+
+### 7.0 BUILD-000 frozen edge invariants
+
+| Decision | Frozen rule |
+|---|---|
+| Sequence domain (B000-D001) | JSON-carried delivery/replay sequences are integers in `[1, 9007199254740991]` (`2^53-1` / `MAX_SAFE_SEQUENCE`). Zero is prohibited on wire. Sequences MUST NOT wrap; exhaustion fails closed; fresh lineage requires explicit new stream/generation. |
+| Counter64 (B000-D002) | SNMP Counter64 metric values are **not** delivery sequences and retain the full unsigned 64-bit exact-counter / decimal-string model. |
+| Start at 1 (B000-D006) | Every new durable delivery lineage begins at sequence 1 (Agent queue, Agent→Sensor, Sensor spool, Sensor→Core telemetry, Agent-ingress spool/path). Core Agent-ingress first-batch=1 enforcement is a **BUILD-003** conformance item. |
+| Field names (B000-D003) | Exact current v1 JSON names are frozen; dual camelCase/snake_case ACK conventions are intentional compatibility. |
+| bootEpoch (B000-D005) | Wire field `bootEpoch` remains; canonical meaning is durable Sensor spool stream/generation id matching `^stream-[0-9a-f]{32}$` (not OS boot time). |
+| ACK durability (B000-D004/D007) | Application ACK only after durable accept boundaries below; HTTP 2xx alone is insufficient; ClickHouse is not the Sensor ACK gate. |
+| Entity authority (B000-D009) | Agent `hostId` is evidence; Agent-supplied `entityId` is not authoritative; Core owns canonical entity mapping. |
+| Monitoring correctness (B000-D012) | Collection/transport/credential/Agent/Sensor/Core/queue/ingestion failure, no telemetry, or stale telemetry MUST NOT automatically assert monitored target DOWN. `No Data != Device Down`. |
+| Agent stream generation (B000-D015) | **BUILD-002 target:** durable `agentStreamId` (working name) on versioned Agent→Sensor contract; v1 is keyed by `tenantId+agentId` and fails closed on lineage restart. |
+| Control counters (B000-D016) | JSON-carried assignment/config/policy/generation counters MUST NOT exceed `MAX_SAFE_SEQUENCE`. |
+| Time (B000-D017) | Cross-boundary evidence timestamps are UTC RFC3339/ISO-8601 with `Z`; monotonic time is internal-only. |
 
 ### 7.1 Sensor spool segment
 
@@ -524,32 +541,38 @@ Each local batch contains:
 
 ```text
 sensor_id
-boot_epoch
-batch_sequence
-first_observation_id
-last_observation_id
-created_at
+bootEpoch   # durable stream/generation id (historical name; not OS boot time)
+batch_sequence / firstSequence..lastSequence
+observation/record identities
+created_at (UTC Z)
 payload_checksum
 compression
 priority
 ```
 
+Illustrative historical `boot_epoch` prose aliases the v1 wire field `bootEpoch`.
+
 ### 7.2 Ack semantics
 
 A Sensor deletes a local segment only after Core returns a durable acceptance acknowledgment consistent with the certified HA design.
 
-Because Kafka is internal and the two-Core Kafka mechanism is still a P0 spike, `ACK_DURABLE` must be defined only after failure testing proves where the durable boundary is.
-
-Until then, design target:
+**CURRENT_IMPLEMENTED_V1 Sensor→Core telemetry ACK boundary:**
 
 1. Sensor writes batch durably to local spool.
 2. Core validates identity/schema.
-3. Core writes to durable Core ingestion path.
-4. Core returns `accepted_through_sequence`.
-5. Sensor marks/deletes acknowledged segments.
-6. Duplicate replay is tolerated using observation/batch IDs.
+3. Core reserves exact range/checksum in PostgreSQL (`pending` reservation).
+4. Core commits Kafka transaction.
+5. Core finalizes PostgreSQL watermark.
+6. Core returns `accepted_through_sequence` (+ `sensor_identity`).
+7. Sensor marks/deletes acknowledged segments only after validating that ACK.
 
-No component may acknowledge and then silently lose data without a documented replay source.
+ClickHouse insertion is asynchronous and **must not** gate the Sensor ACK.
+
+**CURRENT_IMPLEMENTED_V1 Sensor→Core agent-ingress** remains **at-least-once** (Kafka publish + PostgreSQL ingress watermark; no V009-equivalent pending reservation yet). **BUILD-003** owns reservation/conflict/first-batch hardening.
+
+**CURRENT_IMPLEMENTED_V1 Agent→Sensor:** ACK means authz + contract validation + durable Sensor Agent spool accept + durable replay accounting. Agent advances/deletes only after batch-bound application ACK.
+
+Duplicate replay is tolerated using exact range+checksum identity. No component may acknowledge and then silently lose data without a documented replay source.
 
 ### 7.3 Duplicate handling
 
@@ -568,7 +591,9 @@ Late observations retain original `eventTime`. Query/RCA pipelines distinguish e
 
 ### 8.1 Heartbeat
 
-Sensor sends at configured interval:
+**BUILD-000 heartbeat v1 (B000-D008):** authenticated Sensor liveness/connectivity only.
+
+Sensor may send informational fields (examples):
 
 ```json
 {
@@ -576,28 +601,41 @@ Sensor sends at configured interval:
   "version": "...",
   "role": "NETWORK",
   "state": "HEALTHY",
-  "cpuPct": 43.1,
-  "memoryPct": 51.0,
-  "diskPct": 62.4,
+  "capabilities": ["SNMP"],
   "queueBytes": 1234567,
   "oldestQueuedAgeSec": 12,
-  "pollOpsPerSec": 380,
-  "metricsPerSec": 8400,
-  "failedPollPct": 1.2,
   "assignmentVersion": 99,
   "policyVersionWatermark": 212
 }
 ```
 
+`assignmentVersion` / `policyVersionWatermark` on the request are **non-authoritative compatibility fields** today; Core heartbeat ignores the body for desired/applied-state authority.
+
+**CURRENT_IMPLEMENTED_V1 Core heartbeat response authority:**
+
+```json
+{
+  "status": "ACCEPTED",
+  "authenticated": true,
+  "sensor_identity": "...",
+  "tenant_id": "...",
+  "received_at": "2026-09-24T10:00:00.000Z"
+}
+```
+
+Do **not** treat `desiredConfigVersion`, `assignmentVersion`, or `policyVersionWatermark` as authoritative Core desired/applied-state values on heartbeat v1. **BUILD-004** owns desired/received/applied/rejected/stale/fenced reconciliation.
+
 ### 8.2 Desired state response
 
-Core returns:
+**BUILD-004 target:** Core returns desired/received/applied control:
 
 - config/policy versions available;
 - job/assignment lease changes;
 - drain/maintenance instruction;
 - update instruction;
 - Core active endpoint/session state.
+
+These are **not** authoritative on heartbeat v1 response (B000-D008).
 
 ### 8.3 Fencing tokens for jobs
 

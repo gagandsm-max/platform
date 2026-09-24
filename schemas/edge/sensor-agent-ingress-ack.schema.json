@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/edge/sensor-agent-ingress-ack.schema.json",
+  "title": "Sensor→Core Agent-Ingress ACK v1",
+  "description": "CURRENT_IMPLEMENTED_V1 AgentTelemetryAckResponse. Exact camelCase ACK fields (B000-D003). Sequence ceiling FROZEN_BUILD_000_INVARIANT; runtime ceiling enforcement BUILD_003_TARGET.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "sensorId", "batchId", "acceptedThroughIngressSequence", "correlationId"],
+  "properties": {
+    "status": {"type": "string", "minLength": 1, "maxLength": 64},
+    "sensorId": {"$ref": "common-definitions.schema.json#/$defs/sensorId"},
+    "batchId": {"$ref": "common-definitions.schema.json#/$defs/coreBatchId"},
+    "acceptedThroughIngressSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
+    "correlationId": {"$ref": "common-definitions.schema.json#/$defs/correlationId"}
+  }
+}

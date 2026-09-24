@@ -1,0 +1,7 @@
+{
+  "status": "ACCEPTED",
+  "accepted_through_sequence": 1,
+  "agent_id": "agent-01",
+  "batch_id": "batch-agent-01-00000000000000000001-00000000000000000001-aaaaaaaaaaaaaaaa",
+  "correlation_id": "corr-agent-batch-001"
+}

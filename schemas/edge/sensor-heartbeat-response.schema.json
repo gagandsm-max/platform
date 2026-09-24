@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/edge/sensor-heartbeat-response.schema.json",
+  "title": "Sensor←Core Heartbeat Response v1",
+  "description": "CURRENT_IMPLEMENTED_V1 Core heartbeat authority only (B000-D008). desiredConfigVersion/assignmentVersion/drain MUST NOT appear as v1 response authority fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "authenticated", "sensor_identity", "tenant_id", "received_at"],
+  "properties": {
+    "status": {"type": "string", "minLength": 1, "maxLength": 64},
+    "authenticated": {"type": "boolean"},
+    "sensor_identity": {"$ref": "common-definitions.schema.json#/$defs/sensorId"},
+    "tenant_id": {"$ref": "common-definitions.schema.json#/$defs/tenantId"},
+    "received_at": {"$ref": "common-definitions.schema.json#/$defs/utcTimestamp"}
+  }
+}

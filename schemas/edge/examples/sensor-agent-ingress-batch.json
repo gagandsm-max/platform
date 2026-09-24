@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "sensorId": "sensor-01",
+  "batchId": "ingress-batch-001",
+  "firstIngressSequence": 1,
+  "lastIngressSequence": 1,
+  "recordCount": 1,
+  "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "correlationId": "corr-ingress-001",
+  "records": [
+    {
+      "sensorIngressSequence": 1,
+      "sensorIngressRecordId": "ingress-rec-1",
+      "tenantId": "11111111-1111-4111-8111-111111111111",
+      "agentId": "agent-01",
+      "acceptingSensorId": "sensor-01",
+      "assignmentGeneration": 1,
+      "agentFirstSequence": 1,
+      "agentLastSequence": 1,
+      "agentBatchId": "batch-agent-01-00000000000000000001-00000000000000000001-aaaaaaaaaaaaaaaa",
+      "correlationId": "corr-ingress-001",
+      "acceptedAt": "2026-09-24T10:00:00.000Z",
+      "records": [
+        {
+          "sequence": 1,
+          "id": "rec-1",
+          "createdAt": "2026-09-24T10:00:00.000Z",
+          "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "payload": {
+            "schemaVersion": 1,
+            "sourceType": "AGENT",
+            "tenantId": "11111111-1111-4111-8111-111111111111",
+            "agentId": "agent-01",
+            "hostId": "host-1"
+          }
+        }
+      ]
+    }
+  ]
+}

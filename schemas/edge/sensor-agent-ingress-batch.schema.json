@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/edge/sensor-agent-ingress-batch.schema.json",
+  "title": "Sensor→Core Agent-Ingress Batch v1",
+  "description": "CURRENT_IMPLEMENTED_V1 AgentTelemetryBatchRequest (Core acceptance max 1000; Sensor producer default may be 32). Outer sensorIngressSequence uses complete unordered set semantics matching Core AgentIngestionValidator. Nested records[] are original Agent DeliveryRecord arrays (1..100, strictly contiguous ascending). Semantics at-least-once; BUILD_003_TARGET owns V009-style reservation. Sequence ceiling FROZEN_BUILD_000_INVARIANT; runtime ceiling enforcement BUILD_003_TARGET.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sensorId", "batchId", "firstIngressSequence", "lastIngressSequence", "recordCount", "checksum", "correlationId", "records"],
+  "properties": {
+    "schemaVersion": {"$ref": "common-definitions.schema.json#/$defs/schemaVersionV1"},
+    "sensorId": {"$ref": "common-definitions.schema.json#/$defs/sensorId"},
+    "batchId": {"$ref": "common-definitions.schema.json#/$defs/coreBatchId"},
+    "firstIngressSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
+    "lastIngressSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
+    "recordCount": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "checksum": {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"},
+    "correlationId": {"$ref": "common-definitions.schema.json#/$defs/correlationId"},
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sensorIngressSequence",
+          "sensorIngressRecordId",
+          "tenantId",
+          "agentId",
+          "acceptingSensorId",
+          "assignmentGeneration",
+          "agentFirstSequence",
+          "agentLastSequence",
+          "agentBatchId",
+          "correlationId",
+          "acceptedAt",
+          "records"
+        ],
+        "properties": {
+          "sensorIngressSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
+          "sensorIngressRecordId": {"$ref": "common-definitions.schema.json#/$defs/opaqueRecordId"},
+          "tenantId": {"$ref": "common-definitions.schema.json#/$defs/tenantId"},
+          "agentId": {"$ref": "common-definitions.schema.json#/$defs/agentId"},
+          "acceptingSensorId": {"$ref": "common-definitions.schema.json#/$defs/sensorId"},
+          "assignmentGeneration": {"$ref": "common-definitions.schema.json#/$defs/controlCounterPositive"},
+          "agentFirstSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
+          "agentLastSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
+          "agentBatchId": {"$ref": "common-definitions.schema.json#/$defs/agentDeliveryBatchId"},
+          "correlationId": {"$ref": "common-definitions.schema.json#/$defs/correlationId"},
+          "acceptedAt": {"$ref": "common-definitions.schema.json#/$defs/utcTimestamp"},
+          "records": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {"$ref": "common-definitions.schema.json#/$defs/agentDeliveryRecord"},
+            "description": "Original Agent DeliveryRecord array accepted by Sensor Agent Receiver (1..100, strictly contiguous)."
+          }
+        }
+      }
+    }
+  }
+}

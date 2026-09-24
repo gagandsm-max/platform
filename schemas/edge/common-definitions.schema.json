@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/edge/common-definitions.schema.json",
+  "title": "Platform Edge Common Definitions (BUILD-000)",
+  "description": "Reusable edge/control definitions. FROZEN_BUILD_000_INVARIANT: MAX_SAFE_SEQUENCE=9007199254740991. Runtime ceiling enforcement is BUILD_002/BUILD_003. SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED.",
+  "$comment": "B000-D001/D002/D016/D017. Counter64 metric values are NOT sequences and MUST NOT use sequenceInteger.",
+  "$defs": {
+    "MAX_SAFE_SEQUENCE": {
+      "const": 9007199254740991,
+      "description": "FROZEN_BUILD_000_INVARIANT JSON-safe sequence/control ceiling (2^53-1). Explicit runtime enforcement owned by BUILD-002/003."
+    },
+    "AGENT_MAX_RECORDS": {
+      "const": 100,
+      "description": "CURRENT_IMPLEMENTED_V1 Agent→Sensor receiver DefaultMaxRecords."
+    },
+    "SENSOR_TELEMETRY_MAX_RECORDS": {
+      "const": 1000,
+      "description": "CURRENT_IMPLEMENTED_V1 Core IngestionValidator.MAX_RECORDS."
+    },
+    "AGENT_INGRESS_MAX_RECORDS": {
+      "const": 1000,
+      "description": "CURRENT_IMPLEMENTED_V1 Core AgentIngestionValidator.MAX_RECORDS (producer default may be smaller)."
+    },
+    "sequenceInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "JSON-carried durable delivery/replay sequence. Zero prohibited on wire. No wrap. Ceiling is FROZEN_BUILD_000_INVARIANT; hop enforcement is BUILD_002/003."
+    },
+    "controlCounter": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "JSON-carried assignment/config/policy/generation counters (B000-D016)."
+    },
+    "controlCounterPositive": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "Control counters that must be >= 1 when present (e.g. assignment generation)."
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "Canonical tenant identity as UUID text on production authority paths."
+    },
+    "siteId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "Site identity as UUID text when present on production authority paths."
+    },
+    "agentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Bounded opaque case-sensitive Agent identifier (PostgreSQL VARCHAR(128))."
+    },
+    "sensorId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "Bounded opaque Sensor identifier (PostgreSQL VARCHAR(255))."
+    },
+    "agentDeliveryBatchId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "CURRENT_IMPLEMENTED_V1 Agent→Sensor DeliveryEnvelope.batchId (receiver validateIdentifier max 256)."
+    },
+    "coreBatchId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "CURRENT_IMPLEMENTED_V1 Core-bound batchId (PostgreSQL VARCHAR(255) watermark/persistence)."
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "description": "Bounded opaque correlation identifier."
+    },
+    "checksumSha256Hex": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[A-Fa-f0-9]{64}$",
+      "description": "SHA-256 hex digest. Accepted wire: uppercase or lowercase (runtime EqualFold/isHex). Canonical producer emission: lowercase recommended."
+    },
+    "sensorStreamId": {
+      "type": "string",
+      "pattern": "^stream-[0-9a-f]{32}$",
+      "description": "Durable Sensor spool stream/generation identity carried as bootEpoch on v1 wire."
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 64,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
+      "description": "RFC3339/ISO-8601 UTC evidence timestamp with Z suffix (B000-D017)."
+    },
+    "schemaVersionV1": {
+      "type": "integer",
+      "const": 1
+    },
+    "opaqueRecordId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "agentDeliveryRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "id", "createdAt", "checksum", "payload"],
+      "description": "CURRENT_IMPLEMENTED_V1 Agent DeliveryRecord. Shared by Agent→Sensor batch and nested Sensor→Core agent-ingress delivery records. Sequences are strictly contiguous ascending (Sensor ValidateEnvelope).",
+      "properties": {
+        "sequence": {"$ref": "#/$defs/sequenceInteger"},
+        "id": {"$ref": "#/$defs/opaqueRecordId"},
+        "createdAt": {"$ref": "#/$defs/utcTimestamp"},
+        "checksum": {"$ref": "#/$defs/checksumSha256Hex"},
+        "payload": {
+          "description": "Non-empty JSON value. Receiver-compatible: Go json.RawMessage (any valid JSON). Producer-current shape: object collections. Do not falsely narrow the wire contract to object-only."
+        }
+      }
+    },
+    "standardError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "code", "message"],
+      "properties": {
+        "status": {"type": "string", "minLength": 1, "maxLength": 64},
+        "code": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+        "message": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    },
+    "semanticErrorClass": {
+      "enum": [
+        "INVALID_CONTRACT",
+        "AUTHENTICATION",
+        "AUTHORIZATION",
+        "STALE_OR_FENCED",
+        "UNSUPPORTED_VERSION",
+        "INTEGRITY",
+        "REPLAY_OR_DUPLICATE",
+        "CAPACITY_OR_RATE_LIMIT",
+        "TIMEOUT_OR_DEADLINE",
+        "CANCELLED",
+        "TRANSPORT",
+        "SERVER_UNAVAILABLE"
+      ]
+    }
+  }
+}

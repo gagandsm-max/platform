@@ -1,0 +1,5 @@
+{
+  "status": "ERROR",
+  "code": "ERR_INVALID_FIELD",
+  "message": "contract validation failed"
+}

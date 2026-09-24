@@ -1,0 +1,7 @@
+{
+  "status": "ACCEPTED",
+  "sensorId": "sensor-01",
+  "batchId": "ingress-batch-001",
+  "acceptedThroughIngressSequence": 1,
+  "correlationId": "corr-ingress-001"
+}

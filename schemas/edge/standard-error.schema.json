@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/edge/standard-error.schema.json",
+  "title": "Platform Edge Standard Error v1",
+  "description": "CURRENT_IMPLEMENTED_V1 structured error wire: status, code, message (B000-D010). Semantic class mapping is documented separately; do not require new runtime fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "code", "message"],
+  "properties": {
+    "status": {"type": "string", "minLength": 1, "maxLength": 64},
+    "code": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "message": {"type": "string", "minLength": 1, "maxLength": 2000}
+  }
+}

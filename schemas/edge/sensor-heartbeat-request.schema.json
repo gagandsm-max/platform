@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/edge/sensor-heartbeat-request.schema.json",
+  "title": "Sensor→Core Heartbeat Request v1",
+  "description": "CURRENT_IMPLEMENTED_V1 Sensor HeartbeatRequest shape. Core currently ignores body fields for desired-state authority (B000-D008). assignmentVersion/policyVersionWatermark are non-authoritative compatibility fields when present.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sensorId", "version", "role", "state"],
+  "properties": {
+    "sensorId": {"$ref": "common-definitions.schema.json#/$defs/sensorId"},
+    "version": {"type": "string", "minLength": 1, "maxLength": 128},
+    "role": {"type": "string", "minLength": 1, "maxLength": 64},
+    "state": {"type": "string", "minLength": 1, "maxLength": 64},
+    "capabilities": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {"type": "string", "minLength": 1, "maxLength": 128}
+    },
+    "queueBytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "oldestQueuedAgeSec": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "assignmentVersion": {
+      "$ref": "common-definitions.schema.json#/$defs/controlCounter",
+      "description": "NON-AUTHORITATIVE on heartbeat v1. Core ignores. BUILD_004_TARGET."
+    },
+    "policyVersionWatermark": {
+      "$ref": "common-definitions.schema.json#/$defs/controlCounter",
+      "description": "NON-AUTHORITATIVE on heartbeat v1. Core ignores. BUILD_004_TARGET."
+    }
+  }
+}
