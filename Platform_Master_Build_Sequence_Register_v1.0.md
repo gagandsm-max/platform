@@ -16,7 +16,7 @@
 | Active status | IMPLEMENTING |
 | Active GitHub issue | #112 |
 | Active PR | #113 |
-| Evidence | BUILD-001 activation after BUILD-000 post-merge certification; archaeology pending |
+| Evidence | production SpoolAcceptanceSink→agentdrain→mTLS mock-Core slice implemented and locally validated; exact-head CI pending |
 | Last updated | 2026-09-24 |
 | Sequencing authority | Master Chat only |
 
