@@ -13,7 +13,11 @@ TEST_NET="ui-f2-test-net-$$"
 UI_CONTAINER="ui-f2-test-ui-$$"
 TRUSTED_CORE_CONTAINER="ui-f2-trusted-core-$$"
 UNTRUSTED_CORE_CONTAINER="ui-f2-untrusted-core-$$"
-TEST_PORT="${PLATFORM_UI_TEST_PORT:-23099}"
+if [ -n "${PLATFORM_UI_TEST_PORT:-}" ]; then
+    TEST_PORT="${PLATFORM_UI_TEST_PORT}"
+else
+    TEST_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+fi
 
 TMP_DIR="$(mktemp -d)"
 
