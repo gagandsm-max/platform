@@ -5,8 +5,8 @@
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102); constitution unchanged in authority chain
-**Normalization state:** NORMALIZED_V1. Platform_01..06 and Platform_08 are NORMALIZED_V1 after A2.2; Platform_07 and Platform_09..23 remain TRANSITIONAL_LEGACY until later A2–A5 tranches.
+**Last reconciliation:** 2026-09-24 — A2.3 OSS catalogue normalization and formal OSS-008→REQ-OSS-008 migration (Issue #108)
+**Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Authority
 

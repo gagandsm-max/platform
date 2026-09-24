@@ -74,7 +74,7 @@
       "kind": "mother_reference",
       "expectedDocumentId": "PLATFORM-OSS-001",
       "governingRole": "Dependency, provenance and licensing authority",
-      "normalizationState": "TRANSITIONAL_LEGACY"
+      "normalizationState": "NORMALIZED_V1"
     },
     {
       "file": "Platform_08_Requirements_Traceability.md",
@@ -205,14 +205,7 @@
       "normalizationState": "TRANSITIONAL_LEGACY"
     }
   ],
-  "legacyIdExceptions": [
-    {
-      "id": "OSS-008",
-      "kind": "formal_requirement_legacy",
-      "reason": "Preserved beside REQ-OSS-001..007; pending controlled reconciliation under Issue #93",
-      "primaryRegistry": "Platform_08_Requirements_Traceability.md"
-    }
-  ],
+  "legacyIdExceptions": [],
   "historicalFilenameAllowlist": [
     "Platform_13_Engineering_Execution_Standards.md",
     "Platform_14_Docker_Development_Environment.md",
@@ -226,5 +219,16 @@
     "Platform_22_Performance_and_Benchmark_Plan.md",
     "Platform_23_Operational_Runbooks.md",
     "Platform_24_Release_Acceptance_Criteria.md"
+  ],
+  "historicalFormalIdMigrations": [
+    {
+      "oldId": "OSS-008",
+      "newId": "REQ-OSS-008",
+      "kind": "formal_requirement_id_migration",
+      "reason": "Namespace collision with Platform_07 dependency catalogue OSS-008 (ClickHouse); air-gap formal requirement migrated to REQ-OSS-008",
+      "status": "migrated_historical_only",
+      "issue": "#108",
+      "primaryRegistry": "Platform_08_Requirements_Traceability.md"
+    }
   ]
 }

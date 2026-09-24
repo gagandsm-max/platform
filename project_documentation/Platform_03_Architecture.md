@@ -7,7 +7,7 @@
 **Depends on:** `Platform_01_BRD.md`, `Platform_02_PRD.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-23 — A2.1 BRD/PRD/Architecture normalization (Issue #96)
+**Last reconciliation:** 2026-09-23 — A2.1 BRD/PRD/Architecture normalization (Issue #96); 2026-09-24 A2.3 UI dependency truth correction (Issue #108)
 
 ---
 
@@ -1242,15 +1242,11 @@ The following are recommended/approved candidates subject to version-level OSS c
 | Kubernetes | client-go | K8s |
 | OTel | OpenTelemetry Collector/libraries | OTLP ingest |
 | NCM | Nornir/scrapli/scrapli_cfg/NAPALM/NTC Templates/Jinja2 where licence/dependency scan passes | NCM execution/parsing |
-| UI | React/TypeScript | Web application |
+| UI (current implementation) | React 18 / TypeScript / Vite / plain CSS | Current web application stack (`ui/package.json`); no Tailwind/Radix/Redux/Zustand/Next.js |
 | UI build tooling | Node.js 20 / npm / Vite / TypeScript | Docker-only UI build toolchain (see OSS-111..115) |
 | UI HTTPS proxy (dev) | NGINX Open Source | Dev UI static/TLS reverse proxy only (OSS-110; not mandatory production Core) |
 | Core JSON logging | logstash-logback-encoder | Structured log encoding (OSS-116; Platform owns fields/redaction/taxonomy) |
-| Charts | Apache ECharts | Charts |
-| Tables | TanStack Table | Large grids |
-| Topology | Cytoscape.js | Graph visualization |
-| Geo | MapLibre GL JS | Map visualization; tile/data licence handled separately |
-| Terminal | xterm.js | Browser terminal |
+| UI approved future primitives | Apache ECharts, TanStack Table/Query, react-grid-layout, Cytoscape.js, MapLibre GL JS, xterm.js | Architecturally approved allow-list primitives; not current `ui/package.json` dependencies (see `Platform_07`) |
 | Expressions | CEL | Safe policy/formula expressions |
 | PDF/XLSX | Apache PDFBox / Apache POI | Reports |
 | Analytics | Polars, NumPy, scikit-learn | Batch/ML analytics |
@@ -1263,7 +1259,7 @@ Platform should not embed entire external NMS/IPAM/dashboard products as core pr
 
 
 ### Authoritative technology decision map (absorbed from ARCH-OSS-FULL)
-The v1 document listed only names. The v2 architecture freezes how OSS is used and where Platform code begins. Exact versions are pinned by release and governed by `Platform_07_OSS_Catalog.md`.
+The v1 document listed only names. The v2 architecture freezes how OSS is used and where Platform code begins. Exact versions are pinned by release and governed by `Platform_07_OSS_Catalog.md`. **Current UI implementation** is React + TypeScript + Vite + plain CSS. Chart/table/topology/map/terminal libraries listed below remain approved architectural primitives until implemented; Tailwind/Radix are not current dependencies. Authoritative dependency truth-state lives in `Platform_07_OSS_Catalog.md`.
 
 | ID | Domain | Capability | OSS / Technology | License | Decision | Runtime | How Platform uses it | What remains custom |
 |---|---|---|---|---|---|---|---|---|
@@ -1309,16 +1305,16 @@ The v1 document listed only names. The v2 architecture freezes how OSS is used a
 | OSS-063 | NCM | Multi-vendor abstraction | NAPALM | Apache-2.0 top-level; transitive review mandatory | YELLOW/CANDIDATE | NCM Worker | Use where driver coverage materially accelerates NCM. | Do not approve blindly: drivers/transitive dependencies can introduce additional license obligations. Prefer scrapli/scrapligo paths where practical. |
 | OSS-064 | NCM | CLI parsing templates | NTC Templates / TextFSM | Apache-2.0 | USE/WRAP | NCM Worker/Device Packs | Reusable TextFSM parsers/templates for CLI output. | Platform must track template provenance/vendor compatibility and may override with certified Device Pack parsers. |
 | OSS-065 | NCM | Configuration templating | Jinja2 | BSD-3-Clause | USE | NCM Worker | Safe parameterized configuration templates. | Platform owns template lifecycle, validation, approval and secret redaction. |
-| OSS-080 | UI | Web UI framework | React | MIT | USE | Browser | Primary component framework. | Platform owns product UX, accessibility and role-aware behavior. No embedded Grafana. |
-| OSS-081 | UI | Charts | Apache ECharts | Apache-2.0 with bundled BSD notices | USE | Browser | Time series, bar, gauge, heatmap, histogram, Sankey and other visualization primitives. | Platform owns panel/query/alert semantics and dashboard builder. |
-| OSS-082 | UI | Tables | TanStack Table | MIT | USE | Browser | Headless large-table features: sorting/filtering/grouping/columns. | Combine with server-side pagination/virtualization; do not load large estates into browser. |
-| OSS-083 | UI | Server state/query caching | TanStack Query | MIT | USE | Browser | Client-side server-state caching/retry/invalidation. | Platform API remains source of truth. |
-| OSS-084 | UI | Dashboard grid | react-grid-layout | MIT | USE | Browser | Drag/drop/resizable dashboard panels. | Platform owns permissions, dashboard schema, persistence, versioning and accessibility. |
-| OSS-085 | UI | Topology graph rendering | Cytoscape.js | MIT | USE | Browser | Interactive graph/topology/causal graph visualization. | Platform owns operational graph semantics, confidence, historical topology and RCA relationships. |
-| OSS-086 | UI | Geospatial maps | MapLibre GL JS | BSD-3-Clause | USE | Browser | Geo/site/region map rendering. | Map code license does not license map tiles/data. Tile/data provider rights and attribution are separately managed. |
-| OSS-087 | UI | Browser terminal | xterm.js | MIT | USE | Browser | Terminal emulator for privileged CLI sessions. | Browser never receives device credentials; Platform Session Broker owns access and audit. |
-| OSS-088 | UI | Styling | Tailwind CSS | MIT | USE | Browser | Utility styling where engineering chooses it. | Design tokens/accessibility and product theming remain Platform-owned. |
-| OSS-089 | UI | Accessible primitives | Radix UI | MIT | CANDIDATE/USE | Browser | Accessible low-level UI primitives. | Use only if it meets performance/design needs; Platform visual language remains custom. |
+| OSS-080 | UI | Web UI framework | React | MIT | USE | Browser | **CURRENT_RUNTIME:** primary UI framework (`ui/package.json`). | Platform owns product UX, accessibility and role-aware behavior. Current styling is plain CSS. No embedded Grafana. |
+| OSS-081 | UI | Charts | Apache ECharts | Apache-2.0 with bundled BSD notices | USE | Browser | **APPROVED_NOT_IMPLEMENTED:** approved chart primitive; not currently wired in `ui/package.json`. | Platform owns panel/query/alert semantics and dashboard builder. |
+| OSS-082 | UI | Tables | TanStack Table | MIT | USE | Browser | **APPROVED_NOT_IMPLEMENTED:** approved table primitive; not currently wired. | Combine with server-side pagination/virtualization when implemented. |
+| OSS-083 | UI | Server state/query caching | TanStack Query | MIT | USE | Browser | **APPROVED_NOT_IMPLEMENTED:** approved query-cache primitive; not currently wired. | Platform API remains source of truth. |
+| OSS-084 | UI | Dashboard grid | react-grid-layout | MIT | USE | Browser | **APPROVED_NOT_IMPLEMENTED:** approved dashboard-grid primitive; not currently wired. | Platform owns permissions, dashboard schema, persistence, versioning and accessibility. |
+| OSS-085 | UI | Topology graph rendering | Cytoscape.js | MIT | USE | Browser | **APPROVED_NOT_IMPLEMENTED:** approved topology primitive; not currently wired. | Platform owns operational graph semantics, confidence, historical topology and RCA relationships. |
+| OSS-086 | UI | Geospatial maps | MapLibre GL JS | BSD-3-Clause | USE | Browser | **APPROVED_NOT_IMPLEMENTED:** approved map primitive; not currently wired. | Map code license does not license map tiles/data. |
+| OSS-087 | UI | Browser terminal | xterm.js | MIT | USE | Browser | **APPROVED_NOT_IMPLEMENTED:** approved terminal primitive; not currently wired. | Browser never receives device credentials; Session Broker owns access and audit. |
+| OSS-088 | UI | Styling | Tailwind CSS | MIT | OPTIONAL | Browser | **NOT CURRENT:** Tailwind is not a current or required UI dependency. Current styling is plain CSS. | Design tokens/accessibility and product theming remain Platform-owned. |
+| OSS-089 | UI | Accessible primitives | Radix UI | MIT | CANDIDATE | Browser | **CANDIDATE only; not current.** Do not treat Radix as required. | Platform visual language remains custom; plain CSS is current styling. |
 | OSS-100 | Reporting | PDF | Apache PDFBox | Apache-2.0 with external-component notices | USE | Core/Report Worker | Generate and manipulate PDF reports. | Platform owns report template/layout/SLA semantics. |
 | OSS-101 | Reporting | XLSX | Apache POI | Apache-2.0 with subcomponent notices | USE | Core/Report Worker | Generate Excel reports/exports. | Platform owns report definitions and data/query safety. |
 | OSS-102 | Reporting | CSV | Apache Commons CSV | Apache-2.0 | USE | Core/Report Worker | CSV generation/parsing. | Commodity function; Platform owns export authorization and limits. |

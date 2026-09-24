@@ -34,7 +34,8 @@ CANONICAL_GLOBAL_REQUIREMENT_INDEX = "Platform_08_Requirements_Traceability.md"
 CANONICAL_GLOBAL_PRODUCT_REQUIREMENT_INDEX = (
     "Platform_08_Requirements_Traceability.md"
 )
-CANONICAL_ALLOWED_LEGACY_IDS = frozenset({"OSS-008"})
+CANONICAL_ALLOWED_LEGACY_IDS = frozenset()
+# A2.3: former formal OSS-008 migrated to REQ-OSS-008; no current formal legacy IDs.
 
 CANONICAL_FILES: tuple[str, ...] = (
     "AGENTS.md",
@@ -104,7 +105,7 @@ CANONICAL_NORMALIZATION: dict[str, str] = {
     "Platform_04_HLD.md": "NORMALIZED_V1",
     "Platform_05_LLD.md": "NORMALIZED_V1",
     "Platform_06_Dataflow.md": "NORMALIZED_V1",
-    "Platform_07_OSS_Catalog.md": "TRANSITIONAL_LEGACY",
+    "Platform_07_OSS_Catalog.md": "NORMALIZED_V1",
     "Platform_08_Requirements_Traceability.md": "NORMALIZED_V1",
     "Platform_09_UI_UX_Master.md": "TRANSITIONAL_LEGACY",
     "Platform_10_Protocol_Security_Connector_Master.md": "TRANSITIONAL_LEGACY",
@@ -208,6 +209,7 @@ class MotherReferenceValidator:
             "globalProductRequirementIndex",
             "documents",
             "legacyIdExceptions",
+            "historicalFormalIdMigrations",
         ]
         for key in required:
             if key not in manifest:
@@ -230,6 +232,9 @@ class MotherReferenceValidator:
             return
         if not isinstance(manifest["legacyIdExceptions"], list):
             self.fail("manifest.legacyIdExceptions must be a list")
+            return
+        if not isinstance(manifest["historicalFormalIdMigrations"], list):
+            self.fail("historicalFormalIdMigrations must be a list")
             return
         if "historicalFilenameAllowlist" in manifest:
             hfa = manifest["historicalFilenameAllowlist"]
@@ -419,10 +424,72 @@ class MotherReferenceValidator:
             for extra in sorted(legacy_ids - CANONICAL_ALLOWED_LEGACY_IDS):
                 self.fail(
                     f"unapproved legacy formal-ID exception: {extra} "
-                    f"(only {sorted(CANONICAL_ALLOWED_LEGACY_IDS)} permitted in A1)"
+                    f"(current canonical formal registry permits no legacy IDs; "
+                    f"former formal OSS-008 migrated to REQ-OSS-008 in A2.3)"
                 )
             for missing in sorted(CANONICAL_ALLOWED_LEGACY_IDS - legacy_ids):
                 self.fail(f"missing required legacy formal-ID exception: {missing}")
+
+        if "historicalFormalIdMigrations" not in manifest:
+            self.fail(
+                "manifest missing required field: historicalFormalIdMigrations "
+                "(A2.3 requires permanent OSS-008 → REQ-OSS-008 provenance)"
+            )
+            return
+        migrations = manifest["historicalFormalIdMigrations"]
+        if not isinstance(migrations, list):
+            self.fail("historicalFormalIdMigrations must be a list")
+            return
+        if not migrations:
+            self.fail(
+                "historicalFormalIdMigrations must not be empty "
+                "(required OSS-008 → REQ-OSS-008 historical migration)"
+            )
+            return
+        found = False
+        for i, mig in enumerate(migrations):
+            if not isinstance(mig, dict):
+                self.fail(f"historicalFormalIdMigrations[{i}] must be an object")
+                continue
+            for key in ("oldId", "newId", "reason", "status"):
+                if key not in mig or not isinstance(mig[key], str):
+                    self.fail(
+                        f"historicalFormalIdMigrations[{i}].{key} "
+                        f"must be a present string"
+                    )
+            if mig.get("oldId") == "OSS-008" and mig.get("newId") == "REQ-OSS-008":
+                found = True
+                kind = str(mig.get("kind", ""))
+                if kind and kind != "formal_requirement_id_migration":
+                    self.fail(
+                        "historicalFormalIdMigrations OSS-008→REQ-OSS-008 "
+                        "kind must be formal_requirement_id_migration "
+                        f"(got {kind!r})"
+                    )
+                reason = str(mig.get("reason", "")).strip()
+                if not reason:
+                    self.fail(
+                        "historicalFormalIdMigrations OSS-008→REQ-OSS-008 "
+                        "reason must be a non-empty string"
+                    )
+                elif not re.search(
+                    r"(?i)namespace|collision|catalogue|catalog",
+                    reason,
+                ):
+                    self.fail(
+                        "historicalFormalIdMigrations OSS-008→REQ-OSS-008 "
+                        "reason must identify the namespace migration context"
+                    )
+                status = str(mig.get("status", ""))
+                if "migrat" not in status.lower() and "historical" not in status.lower():
+                    self.fail(
+                        "historicalFormalIdMigrations OSS-008→REQ-OSS-008 "
+                        "status must indicate migrated/historical"
+                    )
+        if not found:
+            self.fail(
+                "historicalFormalIdMigrations must record OSS-008 → REQ-OSS-008"
+            )
 
     def validate_document_set(
         self, manifest: dict[str, Any], constitutional: dict[str, Path]
@@ -536,10 +603,6 @@ class MotherReferenceValidator:
         return rows
 
     def _id_occurs_in_text(self, rid: str, text: str) -> bool:
-        if rid == "OSS-008":
-            return bool(re.search(r"\|\s*OSS-008\s*\|", text)) or bool(
-                re.search(r"\bOSS-008\b", text)
-            )
         if rid.startswith("REQ-"):
             return rid in REQ_ID_RE.findall(text)
         if rid.startswith("PRD-"):
@@ -619,10 +682,19 @@ class MotherReferenceValidator:
                 text = strip_marker_block(text, REQ_MARKER_START, REQ_MARKER_END)
             for rid in REQ_ID_RE.findall(text):
                 authoritative.add(rid)
-            if rel == index_name and re.search(r"\|\s*OSS-008\s*\|", text):
-                authoritative.add("OSS-008")
 
         primary_set = set(primary)
+        if "OSS-008" in primary_set:
+            self.fail(
+                "Platform_08 primary REQ registry must not contain current canonical "
+                "formal ID OSS-008 (migrated to REQ-OSS-008; catalogue OSS-008 remains "
+                "ClickHouse in Platform_07)"
+            )
+        if "REQ-OSS-008" not in primary_set:
+            self.fail(
+                "Platform_08 primary REQ registry missing REQ-OSS-008 "
+                "(air-gap / no runtime internet dependency install)"
+            )
         for rid in sorted(authoritative):
             if rid not in primary_set:
                 self.fail(
@@ -852,6 +924,131 @@ class MotherReferenceValidator:
                         f"{rel}: unsupported maturity equality spelling: {pat.pattern}"
                     )
 
+    def validate_a23_oss_namespace_and_ui_truth(
+        self, manifest: dict[str, Any], paths: dict[str, Path]
+    ) -> None:
+        """A2.3: catalogue/formal namespace separation and UI implementation truth."""
+        p07 = paths.get("Platform_07_OSS_Catalog.md")
+        if p07 is not None and p07.is_file():
+            text = p07.read_text(encoding="utf-8")
+            # Deterministic catalogue rows: first cell is OSS-NNN.
+            catalogue_rows: list[tuple[str, str]] = []
+            for line in text.splitlines():
+                if not line.strip().startswith("|"):
+                    continue
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                if not cells:
+                    continue
+                rid = cells[0]
+                if not re.fullmatch(r"OSS-\d{3,}", rid):
+                    continue
+                catalogue_rows.append((rid, line))
+            oss_ids = {rid for rid, _ in catalogue_rows}
+            oss008_rows = [line for rid, line in catalogue_rows if rid == "OSS-008"]
+            # Live-sized catalogue must include the OSS-008 row.
+            if len(oss_ids) >= 50 and not oss008_rows:
+                self.fail(
+                    "Platform_07 live catalogue missing dependency OSS-008 (ClickHouse)"
+                )
+            # When an OSS-008 catalogue row exists, that row itself must name ClickHouse.
+            # No whole-document or cross-row fallback.
+            for line in oss008_rows:
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                row_body = " | ".join(cells[1:]) if len(cells) > 1 else ""
+                if "ClickHouse" not in row_body:
+                    self.fail(
+                        "Platform_07 catalogue row OSS-008 must identify ClickHouse "
+                        "in that same row (formal air-gap requirement is REQ-OSS-008); "
+                        "unrelated prose or other rows cannot satisfy this invariant"
+                    )
+
+        p08 = paths.get("Platform_08_Requirements_Traceability.md")
+        if p08 is not None and p08.is_file():
+            text = p08.read_text(encoding="utf-8")
+            rows = {
+                r["id"]: r
+                for r in self._parse_registry_rows(
+                    text, REQ_MARKER_START, REQ_MARKER_END, "REQ"
+                )
+            }
+            row = rows.get("REQ-OSS-008")
+            if row is not None:
+                blob = " ".join(
+                    [
+                        row.get("summary", ""),
+                        row.get("evidence", ""),
+                        row.get("locator", ""),
+                    ]
+                ).lower()
+                if "air-gap" not in blob and "air gap" not in blob:
+                    self.fail(
+                        "REQ-OSS-008 primary row must retain air-gap semantics"
+                    )
+                if "internet" not in blob:
+                    self.fail(
+                        "REQ-OSS-008 primary row must retain no-runtime-internet "
+                        "dependency install semantics"
+                    )
+
+        p03 = paths.get("Platform_03_Architecture.md")
+        if p03 is not None and p03.is_file():
+            text = p03.read_text(encoding="utf-8")
+            if "Tailwind" in text or "OSS-088" in text:
+                for line in text.splitlines():
+                    if "OSS-088" not in line and "Tailwind" not in line:
+                        continue
+                    # Stale current-USE claim without explicit NOT CURRENT marker.
+                    if re.search(r"\|\s*USE\s*\|", line) and "NOT CURRENT" not in line:
+                        self.fail(
+                            "Platform_03_Architecture.md: Tailwind/OSS-088 must not be "
+                            "presented as current USE UI implementation "
+                            "(current stack is React + TypeScript + Vite + plain CSS)"
+                        )
+                # Reject affirmative "current ... Tailwind" claims; allow negation.
+                for m in re.finditer(
+                    r"(?is)current\s+(?:ui\s+)?(?:implementation|stack|foundation)"
+                    r".{0,160}Tailwind",
+                    text,
+                ):
+                    window = m.group(0)
+                    if re.search(
+                        r"(?i)(?:not|no)\s+(?:a\s+)?(?:current|required).{0,40}Tailwind"
+                        r"|Tailwind.{0,40}(?:not|no)\s+(?:a\s+)?(?:current|required)"
+                        r"|Tailwind/\w+\s+are\s+not\s+current"
+                        r"|no\s+Tailwind",
+                        window,
+                    ):
+                        continue
+                    self.fail(
+                        "Platform_03_Architecture.md: must not claim Tailwind as "
+                        "current UI implementation/stack/foundation"
+                    )
+
+        # Current canonical formal IDs must not collide with catalogue OSS-NNN IDs.
+        if p07 is not None and p07.is_file() and p08 is not None and p08.is_file():
+            cat_ids = set(
+                re.findall(
+                    r"^\|\s*(OSS-\d{3,})\s*\|",
+                    p07.read_text(encoding="utf-8"),
+                    flags=re.M,
+                )
+            )
+            primary = {
+                r["id"]
+                for r in self._parse_registry_rows(
+                    p08.read_text(encoding="utf-8"),
+                    REQ_MARKER_START,
+                    REQ_MARKER_END,
+                    "REQ",
+                )
+            }
+            collisions = sorted(cat_ids & primary)
+            for cid in collisions:
+                self.fail(
+                    f"formal/catalogue ID collision: {cid} appears in both "
+                    f"Platform_07 catalogue and Platform_08 primary REQ registry"
+                )
+
     def validate_normalized_rtm_licence_grace(
         self, paths: dict[str, Path]
     ) -> None:
@@ -946,6 +1143,7 @@ class MotherReferenceValidator:
         self.validate_normalized_structure(paths)
         self.validate_maturity_language(paths)
         self.validate_normalized_rtm_licence_grace(paths)
+        self.validate_a23_oss_namespace_and_ui_truth(manifest, paths)
         return self.errors
 
 
