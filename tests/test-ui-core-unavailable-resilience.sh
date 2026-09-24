@@ -9,10 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ROOT_DIR}"
 
-TEST_NET="ui-f2-test-net-$$"
-UI_CONTAINER="ui-f2-test-ui-$$"
-TRUSTED_CORE_CONTAINER="ui-f2-trusted-core-$$"
-UNTRUSTED_CORE_CONTAINER="ui-f2-untrusted-core-$$"
+TEST_NET="platform-ui-f2-test-net-$$"
+UI_CONTAINER="platform-ui-f2-test-ui-$$"
+TRUSTED_CORE_CONTAINER="platform-ui-f2-trusted-core-$$"
+UNTRUSTED_CORE_CONTAINER="platform-ui-f2-untrusted-core-$$"
 if [ -n "${PLATFORM_UI_TEST_PORT:-}" ]; then
     TEST_PORT="${PLATFORM_UI_TEST_PORT}"
 else
