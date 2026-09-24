@@ -15,7 +15,7 @@
 | Active BUILD | BUILD-001 |
 | Active status | IMPLEMENTING |
 | Active GitHub issue | #112 |
-| Active PR | PENDING |
+| Active PR | #113 |
 | Evidence | BUILD-001 activation after BUILD-000 post-merge certification; archaeology pending |
 | Last updated | 2026-09-24 |
 | Sequencing authority | Master Chat only |
