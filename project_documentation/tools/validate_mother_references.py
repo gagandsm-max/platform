@@ -209,6 +209,7 @@ class MotherReferenceValidator:
             "globalProductRequirementIndex",
             "documents",
             "legacyIdExceptions",
+            "historicalFormalIdMigrations",
         ]
         for key in required:
             if key not in manifest:
@@ -231,6 +232,9 @@ class MotherReferenceValidator:
             return
         if not isinstance(manifest["legacyIdExceptions"], list):
             self.fail("manifest.legacyIdExceptions must be a list")
+            return
+        if not isinstance(manifest["historicalFormalIdMigrations"], list):
+            self.fail("historicalFormalIdMigrations must be a list")
             return
         if "historicalFilenameAllowlist" in manifest:
             hfa = manifest["historicalFilenameAllowlist"]
@@ -426,38 +430,66 @@ class MotherReferenceValidator:
             for missing in sorted(CANONICAL_ALLOWED_LEGACY_IDS - legacy_ids):
                 self.fail(f"missing required legacy formal-ID exception: {missing}")
 
-        if "historicalFormalIdMigrations" in manifest:
-            migrations = manifest["historicalFormalIdMigrations"]
-            if not isinstance(migrations, list):
-                self.fail("historicalFormalIdMigrations must be a list")
-            else:
-                found = False
-                for i, mig in enumerate(migrations):
-                    if not isinstance(mig, dict):
-                        self.fail(f"historicalFormalIdMigrations[{i}] must be an object")
-                        continue
-                    for key in ("oldId", "newId", "reason", "status"):
-                        if key not in mig or not isinstance(mig[key], str):
-                            self.fail(
-                                f"historicalFormalIdMigrations[{i}].{key} "
-                                f"must be a present string"
-                            )
-                    if (
-                        mig.get("oldId") == "OSS-008"
-                        and mig.get("newId") == "REQ-OSS-008"
-                    ):
-                        found = True
-                        status = str(mig.get("status", ""))
-                        if "migrat" not in status.lower() and "historical" not in status.lower():
-                            self.fail(
-                                "historicalFormalIdMigrations OSS-008→REQ-OSS-008 "
-                                "status must indicate migrated/historical"
-                            )
-                if migrations and not found:
+        if "historicalFormalIdMigrations" not in manifest:
+            self.fail(
+                "manifest missing required field: historicalFormalIdMigrations "
+                "(A2.3 requires permanent OSS-008 → REQ-OSS-008 provenance)"
+            )
+            return
+        migrations = manifest["historicalFormalIdMigrations"]
+        if not isinstance(migrations, list):
+            self.fail("historicalFormalIdMigrations must be a list")
+            return
+        if not migrations:
+            self.fail(
+                "historicalFormalIdMigrations must not be empty "
+                "(required OSS-008 → REQ-OSS-008 historical migration)"
+            )
+            return
+        found = False
+        for i, mig in enumerate(migrations):
+            if not isinstance(mig, dict):
+                self.fail(f"historicalFormalIdMigrations[{i}] must be an object")
+                continue
+            for key in ("oldId", "newId", "reason", "status"):
+                if key not in mig or not isinstance(mig[key], str):
                     self.fail(
-                        "historicalFormalIdMigrations must record OSS-008 → REQ-OSS-008 "
-                        "when present"
+                        f"historicalFormalIdMigrations[{i}].{key} "
+                        f"must be a present string"
                     )
+            if mig.get("oldId") == "OSS-008" and mig.get("newId") == "REQ-OSS-008":
+                found = True
+                kind = str(mig.get("kind", ""))
+                if kind and kind != "formal_requirement_id_migration":
+                    self.fail(
+                        "historicalFormalIdMigrations OSS-008→REQ-OSS-008 "
+                        "kind must be formal_requirement_id_migration "
+                        f"(got {kind!r})"
+                    )
+                reason = str(mig.get("reason", "")).strip()
+                if not reason:
+                    self.fail(
+                        "historicalFormalIdMigrations OSS-008→REQ-OSS-008 "
+                        "reason must be a non-empty string"
+                    )
+                elif not re.search(
+                    r"(?i)namespace|collision|catalogue|catalog",
+                    reason,
+                ):
+                    self.fail(
+                        "historicalFormalIdMigrations OSS-008→REQ-OSS-008 "
+                        "reason must identify the namespace migration context"
+                    )
+                status = str(mig.get("status", ""))
+                if "migrat" not in status.lower() and "historical" not in status.lower():
+                    self.fail(
+                        "historicalFormalIdMigrations OSS-008→REQ-OSS-008 "
+                        "status must indicate migrated/historical"
+                    )
+        if not found:
+            self.fail(
+                "historicalFormalIdMigrations must record OSS-008 → REQ-OSS-008"
+            )
 
     def validate_document_set(
         self, manifest: dict[str, Any], constitutional: dict[str, Path]
@@ -899,26 +931,36 @@ class MotherReferenceValidator:
         p07 = paths.get("Platform_07_OSS_Catalog.md")
         if p07 is not None and p07.is_file():
             text = p07.read_text(encoding="utf-8")
-            oss_ids = set(re.findall(r"^\|\s*(OSS-\d{3,})\s*\|", text, flags=re.M))
-            if "OSS-008" in oss_ids or re.search(r"\|\s*OSS-008\s*\|", text):
-                row_ok = False
-                for line in text.splitlines():
-                    if re.search(r"\|\s*OSS-008\s*\|", line) and "ClickHouse" in line:
-                        row_ok = True
-                        break
-                if not row_ok and "ClickHouse" in text and "OSS-008" in text:
-                    # Accept prose coupling when table row scan is inconclusive.
-                    row_ok = True
-                if not row_ok:
-                    self.fail(
-                        "Platform_07 catalogue OSS-008 must remain ClickHouse "
-                        "(formal air-gap requirement is REQ-OSS-008)"
-                    )
-            # Live-sized catalogue: require ClickHouse OSS-008 row.
-            if len(oss_ids) >= 50 and "OSS-008" not in oss_ids:
+            # Deterministic catalogue rows: first cell is OSS-NNN.
+            catalogue_rows: list[tuple[str, str]] = []
+            for line in text.splitlines():
+                if not line.strip().startswith("|"):
+                    continue
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                if not cells:
+                    continue
+                rid = cells[0]
+                if not re.fullmatch(r"OSS-\d{3,}", rid):
+                    continue
+                catalogue_rows.append((rid, line))
+            oss_ids = {rid for rid, _ in catalogue_rows}
+            oss008_rows = [line for rid, line in catalogue_rows if rid == "OSS-008"]
+            # Live-sized catalogue must include the OSS-008 row.
+            if len(oss_ids) >= 50 and not oss008_rows:
                 self.fail(
                     "Platform_07 live catalogue missing dependency OSS-008 (ClickHouse)"
                 )
+            # When an OSS-008 catalogue row exists, that row itself must name ClickHouse.
+            # No whole-document or cross-row fallback.
+            for line in oss008_rows:
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                row_body = " | ".join(cells[1:]) if len(cells) > 1 else ""
+                if "ClickHouse" not in row_body:
+                    self.fail(
+                        "Platform_07 catalogue row OSS-008 must identify ClickHouse "
+                        "in that same row (formal air-gap requirement is REQ-OSS-008); "
+                        "unrelated prose or other rows cannot satisfy this invariant"
+                    )
 
         p08 = paths.get("Platform_08_Requirements_Traceability.md")
         if p08 is not None and p08.is_file():

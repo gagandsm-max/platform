@@ -121,6 +121,8 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         historical_allowlist: list[str] | None = None,
         drop_manifest_files: set[str] | None = None,
         req_row_overrides: dict[str, str] | None = None,
+        historical_migrations: list[dict] | None = None,
+        omit_historical_migrations: bool = False,
     ) -> Path:
         omit_files = omit_files or set()
         drop_manifest_files = drop_manifest_files or set()
@@ -143,6 +145,26 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             legacy = []
         elif legacy is None:
             legacy = []
+
+        default_historical_migrations = [
+            {
+                "oldId": "OSS-008",
+                "newId": "REQ-OSS-008",
+                "kind": "formal_requirement_id_migration",
+                "reason": (
+                    "Namespace collision with Platform_07 dependency catalogue "
+                    "OSS-008 (ClickHouse); air-gap formal requirement migrated "
+                    "to REQ-OSS-008"
+                ),
+                "status": "migrated_historical_only",
+            }
+        ]
+        if omit_historical_migrations:
+            migrations_value = None
+        elif historical_migrations is not None:
+            migrations_value = historical_migrations
+        else:
+            migrations_value = default_historical_migrations
 
         docs_meta = []
         ordinal = 0
@@ -183,6 +205,8 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "legacyIdExceptions": [] if skip_manifest_legacy else legacy,
             "historicalFilenameAllowlist": historical_allowlist or [],
         }
+        if migrations_value is not None:
+            manifest["historicalFormalIdMigrations"] = migrations_value
         (self.tmp / "mother_reference_manifest.json").write_text(
             json.dumps(manifest, indent=2), encoding="utf-8"
         )
@@ -1624,19 +1648,18 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
 
     def test_60_historical_migration_alias_permitted(self) -> None:
-        root = self._write_minimal()
-        man_path = root / "mother_reference_manifest.json"
-        man = json.loads(man_path.read_text(encoding="utf-8"))
-        man["historicalFormalIdMigrations"] = [
-            {
-                "oldId": "OSS-008",
-                "newId": "REQ-OSS-008",
-                "kind": "formal_requirement_id_migration",
-                "reason": "Namespace collision with Platform_07 dependency OSS-008",
-                "status": "migrated_historical_only",
-            }
-        ]
-        man_path.write_text(json.dumps(man, indent=2), encoding="utf-8")
+        # TEST E — valid OSS-008 → REQ-OSS-008 migration passes.
+        root = self._write_minimal(
+            historical_migrations=[
+                {
+                    "oldId": "OSS-008",
+                    "newId": "REQ-OSS-008",
+                    "kind": "formal_requirement_id_migration",
+                    "reason": "Namespace collision with Platform_07 dependency OSS-008",
+                    "status": "migrated_historical_only",
+                }
+            ]
+        )
         p08 = root / "Platform_08_Requirements_Traceability.md"
         p08.write_text(
             p08.read_text(encoding="utf-8")
@@ -1714,6 +1737,77 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             any(
                 "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md" in e
                 and "TRANSITIONAL_LEGACY" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_65_wrong_oss008_row_not_rescued_by_prose_clickhouse(self) -> None:
+        # TEST A — OSS-008 row maps to non-ClickHouse; prose/other row cannot rescue.
+        root = self._write_minimal()
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
+            + "## 1. Catalogue\n\n"
+            + "| ID | Capability | OSS | Decision | Truth state |\n"
+            + "|---|---|---|---|---|\n"
+            + "| OSS-008 | Telemetry | PostgreSQL | USE | CURRENT_RUNTIME |\n"
+            + "| OSS-007 | Control DB | PostgreSQL | USE | CURRENT_RUNTIME |\n\n"
+            + "Historical prose mentions ClickHouse and OSS-008 elsewhere "
+            + "but must not satisfy the catalogue-row invariant.\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "OSS-008" in e
+                and "ClickHouse" in e
+                and ("same row" in e or "catalogue row" in e)
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_66_missing_historical_migration_key_fails(self) -> None:
+        # TEST B — omitting historicalFormalIdMigrations must fail.
+        root = self._write_minimal(omit_historical_migrations=True)
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "historicalFormalIdMigrations" in e and "missing" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_67_empty_historical_migration_list_fails(self) -> None:
+        # TEST C — empty migration list must fail.
+        root = self._write_minimal(historical_migrations=[])
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "historicalFormalIdMigrations" in e and "empty" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_68_wrong_historical_migration_mapping_fails(self) -> None:
+        # TEST D — migration that is not OSS-008 → REQ-OSS-008 must fail.
+        root = self._write_minimal(
+            historical_migrations=[
+                {
+                    "oldId": "OSS-999",
+                    "newId": "REQ-OSS-999",
+                    "kind": "formal_requirement_id_migration",
+                    "reason": "Namespace collision unrelated placeholder",
+                    "status": "migrated_historical_only",
+                }
+            ]
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "historicalFormalIdMigrations" in e
+                and "OSS-008" in e
+                and "REQ-OSS-008" in e
                 for e in errors
             ),
             errors,
