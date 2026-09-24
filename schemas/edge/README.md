@@ -43,6 +43,13 @@ JSON Schema Draft 2020-12 documents structure. `tools/validate.mjs` performs dep
 
 `MAX_SAFE_SEQUENCE = 9007199254740991` (`2^53 - 1`).
 
+| Maturity | Meaning |
+|---|---|
+| `FROZEN_BUILD_000_INVARIANT` | JSON-carried sequence/control ceiling is `2^53−1`. Schemas/validator encode this now. |
+| `CURRENT_IMPLEMENTED_V1` | Runtimes use Go `uint64` / Java `long` / SQL `BIGINT` and current positive/range behavior. They do **not** yet explicitly enforce `9007199254740991` at all hops. |
+| `BUILD_002_TARGET` | Agent→Sensor runtime ceiling enforcement |
+| `BUILD_003_TARGET` | Sensor→Core runtime ceiling enforcement |
+
 Applies to JSON-carried durable delivery/replay sequences and JSON-carried control counters/generations/versions.
 
 - Minimum sequence on wire: **1**
@@ -51,6 +58,30 @@ Applies to JSON-carried durable delivery/replay sequences and JSON-carried contr
 - Sequences MUST NOT wrap; exhaustion fails closed; fresh lineage requires explicit new stream/generation
 
 **Counter64 metric values are a different domain (B000-D002)** and MUST NOT use `MAX_SAFE_SEQUENCE`.
+
+## Current implemented bounds (runtime authority)
+
+Producer configurable defaults are **not** protocol maxima unless they are the actual receiver acceptance contract.
+
+| Surface | Current runtime batch max | Current body/request max where authoritative | Runtime authority |
+|---|---|---|---|
+| Agent→Sensor | **100** records | 512 KiB request/body | Sensor Agent Receiver (`DefaultMaxRecords=100`) |
+| Sensor→Core telemetry | **1000** records | 2 MiB batch, 512 KiB record | Core `IngestionValidator.MAX_RECORDS` |
+| Sensor→Core Agent-ingress | **1000** Core acceptance; Sensor producer default **32** | 2 MiB batch, 512 KiB record | Core `AgentIngestionValidator` / Sensor drain |
+
+## Batch ID bounds (surface-specific)
+
+| Definition | Bound | Used by |
+|---|---|---|
+| `agentDeliveryBatchId` | 1..**256** | Agent→Sensor `batchId` / ACK `batch_id`; nested ingress `agentBatchId` |
+| `coreBatchId` | 1..**255** | Sensor→Core telemetry/ingress outer `batchId` and ingress ACK |
+
+Do not silently truncate a 256-character Agent delivery batch ID during forwarding.
+
+## Checksum (SHA-256 hex)
+
+- **Accepted v1 wire:** `^[A-Fa-f0-9]{64}$` (uppercase or lowercase; runtime EqualFold / isHex).
+- **Canonical producer emission:** lowercase recommended / current producer behavior.
 
 ## Exact v1 field naming (B000-D003)
 
@@ -82,11 +113,13 @@ It survives Sensor process restart, changes when durable spool lineage is recrea
 
 ## Heartbeat v1 (B000-D008)
 
-Core heartbeat response authority:
+Core heartbeat response authority (wire):
 
 `status`, `authenticated`, `sensor_identity`, `tenant_id`, `received_at`
 
-`desiredConfigVersion` / `assignmentVersion` / `policyVersionWatermark` are **not** authoritative Core desired/applied-state values in heartbeat v1. Sensor request fields of that form are non-authoritative compatibility fields. **BUILD_004_TARGET** owns desired/received/applied/rejected/stale/fenced reconciliation.
+**Compatibility note (not a break):** current Sensor `HeartbeatResponse` models `desiredConfigVersion` / `assignmentVersion` / `drain` and does not declare `tenant_id` / `received_at`. `coreclient.doJSON` attempts strict `DisallowUnknownFields` then falls back to ordinary `json.Unmarshal`, so Core-emitted `tenant_id` / `received_at` are currently ignored by the Sensor client rather than failing heartbeat. Desired-state response cleanup/versioning belongs **BUILD_004_TARGET**. Heartbeat is not currently broken.
+
+`desiredConfigVersion` / `assignmentVersion` / `policyVersionWatermark` are **not** authoritative Core desired/applied-state values in heartbeat v1. Sensor request fields of that form are non-authoritative compatibility fields.
 
 ## Entity authority (B000-D009)
 

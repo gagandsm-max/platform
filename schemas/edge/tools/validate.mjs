@@ -3,6 +3,7 @@
  * Platform edge transport contract validator (BUILD-000).
  * Dependency-free Node stdlib only. Not a generic JSON Schema engine.
  * Enforces Number.isSafeInteger for JSON-carried sequences/control counters.
+ * Includes bounded schema-set self-check to prevent schema/validator drift.
  */
 
 import fs from 'node:fs';
@@ -11,14 +12,32 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
+
+/** FROZEN_BUILD_000_INVARIANT — JSON-safe ceiling (2^53-1). Runtime hop enforcement: BUILD-002/003. */
 const MAX_SAFE_SEQUENCE = 9007199254740991;
-const MAX_DOCUMENT_BYTES = 256 * 1024;
+/** CURRENT_IMPLEMENTED_V1 Agent→Sensor receiver DefaultMaxRecords. */
+const AGENT_MAX_RECORDS = 100;
+/** CURRENT_IMPLEMENTED_V1 Core IngestionValidator.MAX_RECORDS. */
+const SENSOR_TELEMETRY_MAX_RECORDS = 1000;
+/** CURRENT_IMPLEMENTED_V1 Core AgentIngestionValidator.MAX_RECORDS. */
+const AGENT_INGRESS_MAX_RECORDS = 1000;
+/** CURRENT_IMPLEMENTED_V1 Agent→Sensor DeliveryEnvelope.batchId (validateIdentifier max 256). */
+const AGENT_DELIVERY_BATCH_ID_MAX = 256;
+/** CURRENT_IMPLEMENTED_V1 Core-bound batchId (VARCHAR(255)). */
+const CORE_BATCH_ID_MAX = 255;
+/**
+ * Local fixture/input safety bound for this test tool only.
+ * NOT the Agent/Sensor/Core wire batch-size contract.
+ */
+const MAX_FIXTURE_DOCUMENT_BYTES = 256 * 1024;
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const CORR_RE = /^[A-Za-z0-9._:-]+$/;
-const CHECKSUM_RE = /^[a-f0-9]{64}$/;
+/** Accepted wire: A-F or a-f. Canonical producer emission: lowercase recommended. */
+const CHECKSUM_RE = /^[A-Fa-f0-9]{64}$/;
 const STREAM_RE = /^stream-[0-9a-f]{32}$/;
 const TS_Z_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$/;
+const DRAFT_2020_12 = 'https://json-schema.org/draft/2020-12/schema';
 
 const SECRET_KEYS = new Set([
   'password', 'passwd', 'token', 'bearer', 'apikey', 'privatekey', 'clientsecret',
@@ -129,8 +148,14 @@ function assertSensorId(value, field, codes) {
   }
 }
 
-function assertBatchId(value, field, codes) {
-  if (typeof value !== 'string' || value.length < 1 || value.length > 255) {
+function assertAgentDeliveryBatchId(value, field, codes) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > AGENT_DELIVERY_BATCH_ID_MAX) {
+    fail(codes, 'INVALID_BATCH_ID', field);
+  }
+}
+
+function assertCoreBatchId(value, field, codes) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > CORE_BATCH_ID_MAX) {
     fail(codes, 'INVALID_BATCH_ID', field);
   }
 }
@@ -159,6 +184,52 @@ function assertUtcTs(value, field, codes) {
   }
 }
 
+/**
+ * Core IngestionValidator semantics: complete unordered set of sequences
+ * in [firstSequence, lastSequence], no duplicates, count == last-first+1.
+ */
+function assertCompleteSequenceSet(records, first, last, codes, seqField = 'sequence') {
+  if (!Array.isArray(records)) {
+    fail(codes, 'INVALID_CONTRACT', 'records must be array');
+    return;
+  }
+  const expectedCount = last - first + 1;
+  if (!Number.isSafeInteger(expectedCount) || expectedCount < 1) {
+    fail(codes, 'SEQUENCE_BOUNDS_INVALID', 'invalid first/last span');
+    return;
+  }
+  if (records.length !== expectedCount) {
+    fail(codes, 'RECORD_COUNT_MISMATCH', `records.length ${records.length} != last-first+1 (${expectedCount})`);
+  }
+  const seen = new Set();
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
+    if (!isPlainObject(rec)) {
+      fail(codes, 'INVALID_CONTRACT', `records[${i}] must be object`);
+      continue;
+    }
+    if (!(seqField in rec)) {
+      fail(codes, 'MISSING_REQUIRED_FIELD', `records[${i}].${seqField}`);
+      continue;
+    }
+    assertSafeSequence(rec[seqField], `records[${i}].${seqField}`, codes);
+    const seq = rec[seqField];
+    if (typeof seq !== 'number' || !Number.isSafeInteger(seq)) continue;
+    if (seq < first) fail(codes, 'SEQUENCE_BELOW_RANGE', `records[${i}].${seqField}=${seq}`);
+    if (seq > last) fail(codes, 'SEQUENCE_ABOVE_RANGE', `records[${i}].${seqField}=${seq}`);
+    if (seen.has(seq)) fail(codes, 'DUPLICATE_SEQUENCE', `records[${i}].${seqField}=${seq}`);
+    seen.add(seq);
+  }
+  if (Number.isSafeInteger(first) && Number.isSafeInteger(last) && first <= last) {
+    for (let s = first; s <= last; s++) {
+      if (!seen.has(s)) {
+        fail(codes, 'SEQUENCE_GAP', `missing sequence ${s}`);
+        break;
+      }
+    }
+  }
+}
+
 function validateAgentBatch(doc, codes) {
   const allowed = new Set([
     'schemaVersion', 'agentId', 'tenantId', 'siteId', 'correlationId', 'batchId',
@@ -174,15 +245,20 @@ function validateAgentBatch(doc, codes) {
   assertUuid(doc.tenantId, 'tenantId', codes);
   if ('siteId' in doc) assertUuid(doc.siteId, 'siteId', codes);
   assertCorr(doc.correlationId, 'correlationId', codes);
-  assertBatchId(doc.batchId, 'batchId', codes);
+  assertAgentDeliveryBatchId(doc.batchId, 'batchId', codes);
   assertSafeSequence(doc.firstSequence, 'firstSequence', codes);
   assertSafeSequence(doc.lastSequence, 'lastSequence', codes);
   if (typeof doc.recordCount !== 'number' || !Number.isSafeInteger(doc.recordCount) || doc.recordCount < 1) {
     fail(codes, 'INVALID_RECORD_COUNT', 'recordCount');
+  } else if (doc.recordCount > AGENT_MAX_RECORDS) {
+    fail(codes, 'RECORD_COUNT_EXCEEDED', `recordCount ${doc.recordCount} > ${AGENT_MAX_RECORDS}`);
   }
   if (!Array.isArray(doc.records)) {
     fail(codes, 'INVALID_CONTRACT', 'records must be array');
     return;
+  }
+  if (doc.records.length > AGENT_MAX_RECORDS) {
+    fail(codes, 'RECORD_COUNT_EXCEEDED', `records.length ${doc.records.length} > ${AGENT_MAX_RECORDS}`);
   }
   if (doc.recordCount !== doc.records.length) fail(codes, 'RECORD_COUNT_MISMATCH', 'recordCount != records.length');
   if (doc.firstSequence > doc.lastSequence) fail(codes, 'SEQUENCE_BOUNDS_INVALID', 'firstSequence > lastSequence');
@@ -212,7 +288,6 @@ function validateAgentBatch(doc, codes) {
 function validateAgentAck(doc, codes, ctx = {}) {
   const allowed = new Set(['status', 'accepted_through_sequence', 'agent_id', 'batch_id', 'correlation_id']);
   assertExactKeys(doc, allowed, ['status', 'accepted_through_sequence', 'agent_id', 'batch_id', 'correlation_id'], codes);
-  // Wrong casing probes
   for (const bad of ['acceptedThroughSequence', 'agentId', 'batchId', 'correlationId']) {
     if (bad in (ctx.raw || {})) fail(codes, 'WRONG_ACK_CASING', bad);
   }
@@ -220,7 +295,7 @@ function validateAgentAck(doc, codes, ctx = {}) {
   if (doc.status !== 'ACCEPTED') fail(codes, 'INVALID_ACK_STATUS', 'status');
   assertSafeSequence(doc.accepted_through_sequence, 'accepted_through_sequence', codes);
   assertAgentId(doc.agent_id, 'agent_id', codes);
-  assertBatchId(doc.batch_id, 'batch_id', codes);
+  assertAgentDeliveryBatchId(doc.batch_id, 'batch_id', codes);
   assertCorr(doc.correlation_id, 'correlation_id', codes);
   if (ctx.submitted) {
     const first = ctx.submitted.firstSequence;
@@ -244,12 +319,20 @@ function validateSensorBatch(doc, codes) {
   if (doc.schemaVersion !== 1) fail(codes, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion must be 1');
   assertSensorId(doc.sensorId, 'sensorId', codes);
   assertStream(doc.bootEpoch, 'bootEpoch', codes);
-  assertBatchId(doc.batchId, 'batchId', codes);
+  assertCoreBatchId(doc.batchId, 'batchId', codes);
   assertSafeSequence(doc.firstSequence, 'firstSequence', codes);
   assertSafeSequence(doc.lastSequence, 'lastSequence', codes);
   assertChecksum(doc.checksum, 'checksum', codes);
-  if (!Array.isArray(doc.records) || doc.records.length < 1) fail(codes, 'INVALID_CONTRACT', 'records');
+  if (!Array.isArray(doc.records)) {
+    fail(codes, 'INVALID_CONTRACT', 'records must be array');
+    return;
+  }
+  if (doc.records.length < 1) fail(codes, 'INVALID_CONTRACT', 'records empty');
+  if (doc.records.length > SENSOR_TELEMETRY_MAX_RECORDS) {
+    fail(codes, 'RECORD_COUNT_EXCEEDED', `records.length ${doc.records.length} > ${SENSOR_TELEMETRY_MAX_RECORDS}`);
+  }
   if (doc.firstSequence > doc.lastSequence) fail(codes, 'SEQUENCE_BOUNDS_INVALID', 'first > last');
+  else assertCompleteSequenceSet(doc.records, doc.firstSequence, doc.lastSequence, codes, 'sequence');
   assertNoSecrets(doc, codes);
 }
 
@@ -284,18 +367,23 @@ function validateIngressBatch(doc, codes) {
   if (codes.length) return;
   if (doc.schemaVersion !== 1) fail(codes, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion');
   assertSensorId(doc.sensorId, 'sensorId', codes);
-  assertBatchId(doc.batchId, 'batchId', codes);
+  assertCoreBatchId(doc.batchId, 'batchId', codes);
   assertSafeSequence(doc.firstIngressSequence, 'firstIngressSequence', codes);
   assertSafeSequence(doc.lastIngressSequence, 'lastIngressSequence', codes);
   if (doc.firstIngressSequence > doc.lastIngressSequence) fail(codes, 'SEQUENCE_BOUNDS_INVALID', 'first > last');
   if (typeof doc.recordCount !== 'number' || !Number.isSafeInteger(doc.recordCount) || doc.recordCount < 1) {
     fail(codes, 'INVALID_RECORD_COUNT', 'recordCount');
+  } else if (doc.recordCount > AGENT_INGRESS_MAX_RECORDS) {
+    fail(codes, 'RECORD_COUNT_EXCEEDED', `recordCount ${doc.recordCount} > ${AGENT_INGRESS_MAX_RECORDS}`);
   }
   assertChecksum(doc.checksum, 'checksum', codes);
   assertCorr(doc.correlationId, 'correlationId', codes);
   if (!Array.isArray(doc.records)) {
     fail(codes, 'INVALID_CONTRACT', 'records');
     return;
+  }
+  if (doc.records.length > AGENT_INGRESS_MAX_RECORDS) {
+    fail(codes, 'RECORD_COUNT_EXCEEDED', `records.length ${doc.records.length} > ${AGENT_INGRESS_MAX_RECORDS}`);
   }
   if (doc.recordCount !== doc.records.length) fail(codes, 'RECORD_COUNT_MISMATCH', 'recordCount');
   const seen = new Set();
@@ -315,7 +403,7 @@ function validateIngressBatch(doc, codes) {
     assertSafeControl(rec.assignmentGeneration, `records[${i}].assignmentGeneration`, codes, { min: 1 });
     assertSafeSequence(rec.agentFirstSequence, `records[${i}].agentFirstSequence`, codes);
     assertSafeSequence(rec.agentLastSequence, `records[${i}].agentLastSequence`, codes);
-    assertBatchId(rec.agentBatchId, `records[${i}].agentBatchId`, codes);
+    assertAgentDeliveryBatchId(rec.agentBatchId, `records[${i}].agentBatchId`, codes);
     assertCorr(rec.correlationId, `records[${i}].correlationId`, codes);
     assertUtcTs(rec.acceptedAt, `records[${i}].acceptedAt`, codes);
     if (!Array.isArray(rec.records)) fail(codes, 'INVALID_CONTRACT', `records[${i}].records`);
@@ -332,7 +420,7 @@ function validateIngressAck(doc, codes, ctx = {}) {
   if (!doc) return;
   if (typeof doc.status !== 'string' || !doc.status) fail(codes, 'INVALID_ACK_STATUS', 'status');
   assertSensorId(doc.sensorId, 'sensorId', codes);
-  assertBatchId(doc.batchId, 'batchId', codes);
+  assertCoreBatchId(doc.batchId, 'batchId', codes);
   assertSafeSequence(doc.acceptedThroughIngressSequence, 'acceptedThroughIngressSequence', codes);
   assertCorr(doc.correlationId, 'correlationId', codes);
   if (ctx.submitted) {
@@ -367,14 +455,6 @@ function validateHeartbeatRequest(doc, codes) {
 function validateHeartbeatResponse(doc, codes) {
   const allowed = new Set(['status', 'authenticated', 'sensor_identity', 'tenant_id', 'received_at']);
   assertExactKeys(doc, allowed, ['status', 'authenticated', 'sensor_identity', 'tenant_id', 'received_at'], codes);
-  // Desired-state authority fields are forbidden on v1 response.
-  const forbiddenAuthority = [
-    'desiredConfigVersion', 'assignmentVersion', 'policyVersionWatermark', 'drain',
-    'desired_config_version', 'assignment_version',
-  ];
-  for (const k of forbiddenAuthority) {
-    // Detected via UNKNOWN_FIELD if present because additionalProperties false.
-  }
   if (!doc) return;
   if (typeof doc.status !== 'string' || !doc.status) fail(codes, 'INVALID_CONTRACT', 'status');
   if (typeof doc.authenticated !== 'boolean') fail(codes, 'INVALID_CONTRACT', 'authenticated');
@@ -396,15 +476,6 @@ function validateStandardError(doc, codes) {
 
 function deepClone(v) {
   return JSON.parse(JSON.stringify(v));
-}
-
-function getPath(obj, parts) {
-  let cur = obj;
-  for (const p of parts) {
-    if (cur == null) return undefined;
-    cur = cur[p];
-  }
-  return cur;
 }
 
 function setPath(obj, parts, value) {
@@ -435,7 +506,7 @@ function applyMutation(doc, mutation) {
 function loadJson(rel) {
   const full = path.join(ROOT, rel);
   const buf = fs.readFileSync(full);
-  if (buf.length > MAX_DOCUMENT_BYTES) throw new Error(`document too large: ${rel}`);
+  if (buf.length > MAX_FIXTURE_DOCUMENT_BYTES) throw new Error(`fixture document too large: ${rel}`);
   return JSON.parse(buf.toString('utf8'));
 }
 
@@ -450,6 +521,333 @@ function validateDocument(schemaName, doc, ctx = {}) {
   return [...new Set(codes)];
 }
 
+function listSchemaFiles() {
+  return fs.readdirSync(ROOT)
+    .filter((f) => f.endsWith('.schema.json'))
+    .sort();
+}
+
+function collectRefs(node, out = []) {
+  if (Array.isArray(node)) {
+    node.forEach((v) => collectRefs(v, out));
+    return out;
+  }
+  if (!isPlainObject(node)) return out;
+  for (const [k, v] of Object.entries(node)) {
+    if (k === '$ref' && typeof v === 'string') out.push(v);
+    else collectRefs(v, out);
+  }
+  return out;
+}
+
+function schemaMaxItems(schema, propPath) {
+  let cur = schema;
+  for (const p of propPath) {
+    cur = cur?.[p];
+  }
+  return cur;
+}
+
+/**
+ * Bounded schema-set self-check (not a generic JSON Schema engine).
+ */
+function runSchemaSetSelfCheck(loadedSchemas) {
+  const codes = [];
+  const ids = new Map();
+
+  for (const [file, schema] of Object.entries(loadedSchemas)) {
+    if (schema.$schema !== DRAFT_2020_12) {
+      codes.push(`SCHEMA_DRAFT_INVALID:${file}`);
+    }
+    if (typeof schema.$id !== 'string' || !schema.$id.trim()) {
+      codes.push(`SCHEMA_ID_EMPTY:${file}`);
+    } else if (ids.has(schema.$id)) {
+      codes.push(`SCHEMA_ID_DUPLICATE:${file}`);
+    } else {
+      ids.set(schema.$id, file);
+    }
+
+    for (const ref of collectRefs(schema)) {
+      if (ref.startsWith('http://') || ref.startsWith('https://')) {
+        if (!ref.startsWith('https://platform.invalid/schemas/edge/')) {
+          // $schema draft URI is not a $ref; only flag unexpected remote $refs.
+          codes.push(`UNEXPECTED_REMOTE_REF:${file}:${ref}`);
+        }
+        continue;
+      }
+      const [filePart, frag] = ref.split('#');
+      const targetFile = filePart || file;
+      if (!loadedSchemas[targetFile]) {
+        codes.push(`BROKEN_LOCAL_REF:${file}:${ref}`);
+        continue;
+      }
+      if (frag) {
+        const parts = frag.replace(/^\//, '').split('/');
+        let cur = loadedSchemas[targetFile];
+        for (const p of parts) {
+          cur = cur?.[p];
+        }
+        if (cur === undefined) codes.push(`BROKEN_LOCAL_REF_DEF:${file}:${ref}`);
+      }
+    }
+  }
+
+  const common = loadedSchemas['common-definitions.schema.json'];
+  if (!common) {
+    codes.push('MISSING_COMMON_DEFINITIONS');
+    return codes;
+  }
+  if (common.$defs?.MAX_SAFE_SEQUENCE?.const !== MAX_SAFE_SEQUENCE) {
+    codes.push('MAX_SAFE_SEQUENCE_MISMATCH');
+  }
+  if (common.$defs?.sequenceInteger?.maximum !== MAX_SAFE_SEQUENCE) {
+    codes.push('SEQUENCE_INTEGER_MAX_MISMATCH');
+  }
+  if (common.$defs?.agentDeliveryBatchId?.maxLength !== AGENT_DELIVERY_BATCH_ID_MAX) {
+    codes.push('AGENT_DELIVERY_BATCH_ID_MAX_MISMATCH');
+  }
+  if (common.$defs?.coreBatchId?.maxLength !== CORE_BATCH_ID_MAX) {
+    codes.push('CORE_BATCH_ID_MAX_MISMATCH');
+  }
+  if (common.$defs?.checksumSha256Hex?.pattern !== CHECKSUM_RE.source) {
+    codes.push('CHECKSUM_PATTERN_MISMATCH');
+  }
+  if (common.$defs?.sensorStreamId?.pattern !== STREAM_RE.source) {
+    codes.push('STREAM_PATTERN_MISMATCH');
+  }
+  if (common.$defs?.AGENT_MAX_RECORDS?.const !== AGENT_MAX_RECORDS) {
+    codes.push('AGENT_MAX_RECORDS_DEF_MISMATCH');
+  }
+  if (common.$defs?.SENSOR_TELEMETRY_MAX_RECORDS?.const !== SENSOR_TELEMETRY_MAX_RECORDS) {
+    codes.push('SENSOR_TELEMETRY_MAX_RECORDS_DEF_MISMATCH');
+  }
+  if (common.$defs?.AGENT_INGRESS_MAX_RECORDS?.const !== AGENT_INGRESS_MAX_RECORDS) {
+    codes.push('AGENT_INGRESS_MAX_RECORDS_DEF_MISMATCH');
+  }
+
+  const agentBatch = loadedSchemas['agent-telemetry-batch.schema.json'];
+  if (schemaMaxItems(agentBatch, ['properties', 'records', 'maxItems']) !== AGENT_MAX_RECORDS) {
+    codes.push('AGENT_BATCH_MAX_ITEMS_MISMATCH');
+  }
+  if (schemaMaxItems(agentBatch, ['properties', 'recordCount', 'maximum']) !== AGENT_MAX_RECORDS) {
+    codes.push('AGENT_BATCH_RECORD_COUNT_MAX_MISMATCH');
+  }
+  const sensorBatch = loadedSchemas['sensor-telemetry-batch.schema.json'];
+  if (schemaMaxItems(sensorBatch, ['properties', 'records', 'maxItems']) !== SENSOR_TELEMETRY_MAX_RECORDS) {
+    codes.push('SENSOR_TELEMETRY_MAX_ITEMS_MISMATCH');
+  }
+  const ingressBatch = loadedSchemas['sensor-agent-ingress-batch.schema.json'];
+  if (schemaMaxItems(ingressBatch, ['properties', 'records', 'maxItems']) !== AGENT_INGRESS_MAX_RECORDS) {
+    codes.push('AGENT_INGRESS_MAX_ITEMS_MISMATCH');
+  }
+  if (schemaMaxItems(ingressBatch, ['properties', 'recordCount', 'maximum']) !== AGENT_INGRESS_MAX_RECORDS) {
+    codes.push('AGENT_INGRESS_RECORD_COUNT_MAX_MISMATCH');
+  }
+
+  return codes;
+}
+
+function hex64(ch = 'a') {
+  return ch.repeat(64);
+}
+
+function makeAgentRecords(n, startSeq = 1) {
+  const records = [];
+  for (let i = 0; i < n; i++) {
+    const seq = startSeq + i;
+    records.push({
+      sequence: seq,
+      id: `rec-${seq}`,
+      createdAt: '2026-09-24T10:00:00.000Z',
+      checksum: hex64('a'),
+      payload: {},
+    });
+  }
+  return records;
+}
+
+function makeSensorRecords(n, startSeq = 1) {
+  const records = [];
+  for (let i = 0; i < n; i++) {
+    records.push({ sequence: startSeq + i, observationType: 'metric' });
+  }
+  return records;
+}
+
+function makeIngressRecord(seq) {
+  return {
+    sensorIngressSequence: seq,
+    sensorIngressRecordId: `ing-${seq}`,
+    tenantId: '11111111-1111-4111-8111-111111111111',
+    agentId: 'agent-1',
+    acceptingSensorId: 'sensor-1',
+    assignmentGeneration: 1,
+    agentFirstSequence: 1,
+    agentLastSequence: 1,
+    agentBatchId: 'agent-batch-1',
+    correlationId: 'corr-1',
+    acceptedAt: '2026-09-24T10:00:00.000Z',
+    records: [],
+  };
+}
+
+function runGeneratedBoundaryTests(examples) {
+  const results = [];
+  const agentBase = deepClone(examples.agentBatch);
+  const sensorBase = deepClone(examples.sensorBatch);
+  const ingressBase = deepClone(examples.ingressBatch);
+
+  // Agent 100 PASS
+  {
+    const doc = deepClone(agentBase);
+    doc.records = makeAgentRecords(AGENT_MAX_RECORDS);
+    doc.firstSequence = 1;
+    doc.lastSequence = AGENT_MAX_RECORDS;
+    doc.recordCount = AGENT_MAX_RECORDS;
+    const codes = validateDocument('agent-telemetry-batch', doc);
+    results.push({ name: 'boundary-agent-100-pass', ok: codes.length === 0, codes });
+  }
+  // Agent 101 FAIL
+  {
+    const doc = deepClone(agentBase);
+    doc.records = makeAgentRecords(AGENT_MAX_RECORDS + 1);
+    doc.firstSequence = 1;
+    doc.lastSequence = AGENT_MAX_RECORDS + 1;
+    doc.recordCount = AGENT_MAX_RECORDS + 1;
+    const codes = validateDocument('agent-telemetry-batch', doc);
+    results.push({
+      name: 'boundary-agent-101-fail',
+      ok: codes.includes('RECORD_COUNT_EXCEEDED'),
+      codes,
+    });
+  }
+  // Sensor 1000 PASS
+  {
+    const doc = deepClone(sensorBase);
+    doc.records = makeSensorRecords(SENSOR_TELEMETRY_MAX_RECORDS);
+    doc.firstSequence = 1;
+    doc.lastSequence = SENSOR_TELEMETRY_MAX_RECORDS;
+    const codes = validateDocument('sensor-telemetry-batch', doc);
+    results.push({ name: 'boundary-sensor-1000-pass', ok: codes.length === 0, codes });
+  }
+  // Sensor 1001 FAIL
+  {
+    const doc = deepClone(sensorBase);
+    doc.records = makeSensorRecords(SENSOR_TELEMETRY_MAX_RECORDS + 1);
+    doc.firstSequence = 1;
+    doc.lastSequence = SENSOR_TELEMETRY_MAX_RECORDS + 1;
+    const codes = validateDocument('sensor-telemetry-batch', doc);
+    results.push({
+      name: 'boundary-sensor-1001-fail',
+      ok: codes.includes('RECORD_COUNT_EXCEEDED'),
+      codes,
+    });
+  }
+  // Ingress 1000 PASS
+  {
+    const doc = deepClone(ingressBase);
+    doc.records = Array.from({ length: AGENT_INGRESS_MAX_RECORDS }, (_, i) => makeIngressRecord(i + 1));
+    doc.firstIngressSequence = 1;
+    doc.lastIngressSequence = AGENT_INGRESS_MAX_RECORDS;
+    doc.recordCount = AGENT_INGRESS_MAX_RECORDS;
+    const codes = validateDocument('sensor-agent-ingress-batch', doc);
+    results.push({ name: 'boundary-ingress-1000-pass', ok: codes.length === 0, codes });
+  }
+  // Ingress 1001 FAIL
+  {
+    const doc = deepClone(ingressBase);
+    doc.records = Array.from({ length: AGENT_INGRESS_MAX_RECORDS + 1 }, (_, i) => makeIngressRecord(i + 1));
+    doc.firstIngressSequence = 1;
+    doc.lastIngressSequence = AGENT_INGRESS_MAX_RECORDS + 1;
+    doc.recordCount = AGENT_INGRESS_MAX_RECORDS + 1;
+    const codes = validateDocument('sensor-agent-ingress-batch', doc);
+    results.push({
+      name: 'boundary-ingress-1001-fail',
+      ok: codes.includes('RECORD_COUNT_EXCEEDED'),
+      codes,
+    });
+  }
+  // Agent batchId 256 PASS / 257 FAIL
+  {
+    const doc = deepClone(agentBase);
+    doc.batchId = 'a'.repeat(AGENT_DELIVERY_BATCH_ID_MAX);
+    const codes = validateDocument('agent-telemetry-batch', doc);
+    results.push({ name: 'boundary-agent-batchid-256-pass', ok: codes.length === 0, codes });
+  }
+  {
+    const doc = deepClone(agentBase);
+    doc.batchId = 'a'.repeat(AGENT_DELIVERY_BATCH_ID_MAX + 1);
+    const codes = validateDocument('agent-telemetry-batch', doc);
+    results.push({
+      name: 'boundary-agent-batchid-257-fail',
+      ok: codes.includes('INVALID_BATCH_ID'),
+      codes,
+    });
+  }
+  // Core batchId 255 PASS / 256 FAIL
+  {
+    const doc = deepClone(sensorBase);
+    doc.batchId = 'c'.repeat(CORE_BATCH_ID_MAX);
+    const codes = validateDocument('sensor-telemetry-batch', doc);
+    results.push({ name: 'boundary-core-batchid-255-pass', ok: codes.length === 0, codes });
+  }
+  {
+    const doc = deepClone(sensorBase);
+    doc.batchId = 'c'.repeat(CORE_BATCH_ID_MAX + 1);
+    const codes = validateDocument('sensor-telemetry-batch', doc);
+    results.push({
+      name: 'boundary-core-batchid-256-fail',
+      ok: codes.includes('INVALID_BATCH_ID'),
+      codes,
+    });
+  }
+  return results;
+}
+
+/**
+ * In-memory negative probes for schema-set self-check (tests 17–19).
+ * Does not modify on-disk schemas.
+ */
+function runSchemaDriftNegativeTests(loadedSchemas) {
+  const results = [];
+
+  // 17: broken local $ref
+  {
+    const clone = deepClone(loadedSchemas);
+    clone['agent-telemetry-batch.schema.json'].properties.agentId.$ref =
+      'missing-file.schema.json#/$defs/agentId';
+    const codes = runSchemaSetSelfCheck(clone);
+    results.push({
+      name: 'schema-selfcheck-broken-ref-fail',
+      ok: codes.some((c) => c.startsWith('BROKEN_LOCAL_REF:')),
+      codes,
+    });
+  }
+  // 18: duplicate $id
+  {
+    const clone = deepClone(loadedSchemas);
+    clone['agent-telemetry-ack.schema.json'].$id = clone['agent-telemetry-batch.schema.json'].$id;
+    const codes = runSchemaSetSelfCheck(clone);
+    results.push({
+      name: 'schema-selfcheck-duplicate-id-fail',
+      ok: codes.some((c) => c.startsWith('SCHEMA_ID_DUPLICATE:')),
+      codes,
+    });
+  }
+  // 19: critical limit drift without validator parity
+  {
+    const clone = deepClone(loadedSchemas);
+    clone['agent-telemetry-batch.schema.json'].properties.records.maxItems = 9999;
+    const codes = runSchemaSetSelfCheck(clone);
+    results.push({
+      name: 'schema-selfcheck-limit-drift-fail',
+      ok: codes.includes('AGENT_BATCH_MAX_ITEMS_MISMATCH'),
+      codes,
+    });
+  }
+  return results;
+}
+
 function main() {
   const fixtures = loadJson('fixtures/cases.json');
   const examples = {};
@@ -460,6 +858,14 @@ function main() {
   let passed = 0;
   let failed = 0;
   const failures = [];
+
+  function record(name, ok, codes = [], expectedCodes = []) {
+    if (ok) passed += 1;
+    else {
+      failed += 1;
+      failures.push({ name, codes, expectedCodes });
+    }
+  }
 
   for (const testCase of fixtures.cases) {
     const schema = testCase.schema;
@@ -478,7 +884,6 @@ function main() {
         ? (typeof testCase.submitted === 'string' ? examples[testCase.submitted] : testCase.submitted)
         : undefined,
     };
-    // For wrong-casing ACK tests, mutations may introduce camelCase fields while deleting snake_case.
     const codes = validateDocument(schema, doc, ctx);
     const valid = codes.length === 0;
     const expectValid = testCase.valid === true;
@@ -486,30 +891,34 @@ function main() {
     if (!expectValid && testCase.expectedCodes?.length) {
       ok = testCase.expectedCodes.every((c) => codes.includes(c));
     }
-    if (ok) {
-      passed += 1;
-    } else {
-      failed += 1;
-      failures.push({
-        name: testCase.name,
-        expectValid,
-        codes,
-        expectedCodes: testCase.expectedCodes || [],
-      });
+    record(testCase.name, ok, codes, testCase.expectedCodes || []);
+  }
+
+  // Load and parse every *.schema.json
+  const loadedSchemas = {};
+  for (const file of listSchemaFiles()) {
+    try {
+      loadedSchemas[file] = loadJson(file);
+    } catch (e) {
+      record(`schema-parse-${file}`, false, [`PARSE_ERROR:${e.message}`]);
     }
   }
 
-  // Prove schema JSON parse + MAX_SAFE_SEQUENCE constant present in common defs.
-  const common = loadJson('common-definitions.schema.json');
-  if (common.$defs.MAX_SAFE_SEQUENCE.const !== MAX_SAFE_SEQUENCE) {
-    failed += 1;
-    failures.push({ name: 'common-max-safe-sequence-const', codes: ['MAX_SAFE_SEQUENCE_MISMATCH'] });
-  } else {
-    passed += 1;
+  const selfCheckCodes = runSchemaSetSelfCheck(loadedSchemas);
+  record('schema-set-self-check', selfCheckCodes.length === 0, selfCheckCodes);
+
+  for (const r of runGeneratedBoundaryTests(examples)) {
+    record(r.name, r.ok, r.codes);
+  }
+  for (const r of runSchemaDriftNegativeTests(loadedSchemas)) {
+    record(r.name, r.ok, r.codes);
   }
 
   console.log(`EDGE CONTRACT VALIDATION: ${passed} passed, ${failed} failed`);
   console.log(`MAX_SAFE_SEQUENCE=${MAX_SAFE_SEQUENCE}`);
+  console.log(`AGENT_MAX_RECORDS=${AGENT_MAX_RECORDS} SENSOR_TELEMETRY_MAX=${SENSOR_TELEMETRY_MAX_RECORDS} INGRESS_MAX=${AGENT_INGRESS_MAX_RECORDS}`);
+  console.log(`AGENT_BATCH_ID_MAX=${AGENT_DELIVERY_BATCH_ID_MAX} CORE_BATCH_ID_MAX=${CORE_BATCH_ID_MAX}`);
+  console.log(`MAX_FIXTURE_DOCUMENT_BYTES=${MAX_FIXTURE_DOCUMENT_BYTES} (fixture tool bound; not wire contract)`);
   if (failures.length) {
     for (const f of failures) {
       console.error(`  FAIL ${f.name}: codes=${JSON.stringify(f.codes)} expected=${JSON.stringify(f.expectedCodes || [])}`);

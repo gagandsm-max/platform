@@ -2,18 +2,30 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://platform.invalid/schemas/edge/common-definitions.schema.json",
   "title": "Platform Edge Common Definitions (BUILD-000)",
-  "description": "Reusable edge/control definitions. MAX_SAFE_SEQUENCE = 9007199254740991 (2^53-1). SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED.",
+  "description": "Reusable edge/control definitions. FROZEN_BUILD_000_INVARIANT: MAX_SAFE_SEQUENCE=9007199254740991. Runtime ceiling enforcement is BUILD_002/BUILD_003. SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED.",
   "$comment": "B000-D001/D002/D016/D017. Counter64 metric values are NOT sequences and MUST NOT use sequenceInteger.",
   "$defs": {
     "MAX_SAFE_SEQUENCE": {
       "const": 9007199254740991,
-      "description": "Largest integer exactly representable across Go, Java, PostgreSQL BIGINT, and IEEE-754 JSON tooling."
+      "description": "FROZEN_BUILD_000_INVARIANT JSON-safe sequence/control ceiling (2^53-1). Explicit runtime enforcement owned by BUILD-002/003."
+    },
+    "AGENT_MAX_RECORDS": {
+      "const": 100,
+      "description": "CURRENT_IMPLEMENTED_V1 Agent→Sensor receiver DefaultMaxRecords."
+    },
+    "SENSOR_TELEMETRY_MAX_RECORDS": {
+      "const": 1000,
+      "description": "CURRENT_IMPLEMENTED_V1 Core IngestionValidator.MAX_RECORDS."
+    },
+    "AGENT_INGRESS_MAX_RECORDS": {
+      "const": 1000,
+      "description": "CURRENT_IMPLEMENTED_V1 Core AgentIngestionValidator.MAX_RECORDS (producer default may be smaller)."
     },
     "sequenceInteger": {
       "type": "integer",
       "minimum": 1,
       "maximum": 9007199254740991,
-      "description": "JSON-carried durable delivery/replay sequence. Zero prohibited on wire. No wrap."
+      "description": "JSON-carried durable delivery/replay sequence. Zero prohibited on wire. No wrap. Ceiling is FROZEN_BUILD_000_INVARIANT; hop enforcement is BUILD_002/003."
     },
     "controlCounter": {
       "type": "integer",
@@ -53,11 +65,17 @@
       "maxLength": 255,
       "description": "Bounded opaque Sensor identifier (PostgreSQL VARCHAR(255))."
     },
-    "batchId": {
+    "agentDeliveryBatchId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "CURRENT_IMPLEMENTED_V1 Agent→Sensor DeliveryEnvelope.batchId (receiver validateIdentifier max 256)."
+    },
+    "coreBatchId": {
       "type": "string",
       "minLength": 1,
       "maxLength": 255,
-      "description": "Batch identity compatible with Core persistence VARCHAR(255)."
+      "description": "CURRENT_IMPLEMENTED_V1 Core-bound batchId (PostgreSQL VARCHAR(255) watermark/persistence)."
     },
     "correlationId": {
       "type": "string",
@@ -70,8 +88,8 @@
       "type": "string",
       "minLength": 64,
       "maxLength": 64,
-      "pattern": "^[a-f0-9]{64}$",
-      "description": "SHA-256 hex digest (lowercase)."
+      "pattern": "^[A-Fa-f0-9]{64}$",
+      "description": "SHA-256 hex digest. Accepted wire: uppercase or lowercase (runtime EqualFold/isHex). Canonical producer emission: lowercase recommended."
     },
     "sensorStreamId": {
       "type": "string",

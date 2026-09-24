@@ -428,9 +428,11 @@ Stable Core endpoint contracts may use DNS or IP/VIP only with normal certificat
 
 ### 10.2 Sequence / Counter64
 
-- **FROZEN_BUILD_000_INVARIANT:** JSON delivery/replay sequences ∈ `[1, 9007199254740991]`; no wrap; fail closed on exhaustion.
+- **FROZEN_BUILD_000_INVARIANT:** JSON-carried delivery/replay sequence maximum = `9007199254740991` (`2^53−1`); sequences ∈ `[1, MAX_SAFE_SEQUENCE]`; no wrap; fail closed on exhaustion. Schemas/edge validator encode this ceiling now.
 - **FROZEN_BUILD_000_INVARIANT:** Counter64 metric values remain full unsigned 64-bit exact-counter domain (not sequences).
-- **CURRENT_IMPLEMENTED_V1:** Agent/Sensor/Core use Go `uint64` / Java `long` / SQL `BIGINT` with MAX_SAFE_SEQUENCE as the JSON-safe ceiling.
+- **CURRENT_IMPLEMENTED_V1:** Agent/Sensor/Core use Go `uint64` / Java `long` / SQL `BIGINT` and current positive/range behavior. Explicit enforcement of `9007199254740991` at all hops is **not** yet present in runtime.
+- **BUILD_002_TARGET:** Agent→Sensor runtime ceiling enforcement.
+- **BUILD_003_TARGET:** Sensor→Core runtime ceiling enforcement.
 
 ### 10.3 Exact v1 ACK naming (do not “normalize” casing)
 
@@ -446,7 +448,9 @@ Stable Core endpoint contracts may use DNS or IP/VIP only with normal certificat
 
 ### 10.5 Heartbeat v1 vs desired-state
 
-**CURRENT_IMPLEMENTED_V1 Core response:** `status`, `authenticated`, `sensor_identity`, `tenant_id`, `received_at`.
+**CURRENT_IMPLEMENTED_V1 Core response (wire authority):** `status`, `authenticated`, `sensor_identity`, `tenant_id`, `received_at`.
+
+**Compatibility:** current Sensor client models additional desired-state fields and ignores unknown Core fields (`tenant_id` / `received_at`) via `doJSON` strict-decode fallback — heartbeat is not currently broken. Desired-state response cleanup/versioning is **BUILD_004_TARGET**.
 
 Older §3.3 “versioned desired configuration/assignment” language is **CORRECT_BUT_UNIMPLEMENTED / BUILD_004_TARGET** for heartbeat authority. Do not read Sensor optional request version fields as Core-applied truth.
 

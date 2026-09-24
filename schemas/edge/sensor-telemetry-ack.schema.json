@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://platform.invalid/schemas/edge/sensor-telemetry-ack.schema.json",
   "title": "Sensor→Core Telemetry ACK v1",
-  "description": "CURRENT_IMPLEMENTED_V1 TelemetryAckResponse. Exact snake_case ACK fields (B000-D003). No batchId/correlationId on this ACK.",
+  "description": "CURRENT_IMPLEMENTED_V1 TelemetryAckResponse. Exact snake_case ACK fields (B000-D003). Sequence ceiling FROZEN_BUILD_000_INVARIANT; runtime ceiling enforcement BUILD_003_TARGET.",
   "type": "object",
   "additionalProperties": false,
   "required": ["status", "accepted_through_sequence", "sensor_identity"],
