@@ -52,11 +52,14 @@ docker run --rm \
     maven:3.9.9-eclipse-temurin-21-alpine \
     sh -c "cp -r /src /build && cd /build && mvn test -B -DexcludedGroups=postgres"
 
-echo "--> [3/3] Running UI Typecheck..."
+echo "--> [3/4] Running UI Typecheck..."
 docker run --rm \
     -v "${ROOT_DIR}/ui:/src:ro" \
     node:20-alpine \
     sh -c "cp -r /src /app && cd /app && npm ci --silent && npx tsc --noEmit"
+
+echo "--> [4/4] Running UI Core-Unavailable Resilience Test..."
+bash "${ROOT_DIR}/tests/test-ui-core-unavailable-resilience.sh"
 
 echo "========================================================================"
 echo "ALL CONTAINERIZED UNIT TESTS PASSED SUCCESSFULLY"
