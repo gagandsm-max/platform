@@ -1,0 +1,13 @@
+{
+  "sensorId": "sensor-01",
+  "version": "0.1.0-dev",
+  "role": "NETWORK",
+  "state": "HEALTHY",
+  "capabilities": [
+    "SNMP"
+  ],
+  "queueBytes": 0,
+  "oldestQueuedAgeSec": 0,
+  "assignmentVersion": 1,
+  "policyVersionWatermark": 1
+}

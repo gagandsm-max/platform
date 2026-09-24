@@ -2,9 +2,11 @@
 
 **Document ID:** PLATFORM-CONTRACTDATA-001
 **Version:** 3.2.2
-**Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
+**Status:** **Authoritative Mother Reference — Consolidated Engineering Contract (TRANSITIONAL_LEGACY)**
+**Normalization state:** TRANSITIONAL_LEGACY. BUILD-000 freezes a bounded edge/control contract subsection below; the remainder awaits later normalization.
 **Product:** Platform
 **Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the approved v3.2.2 NOC troubleshooting plus enterprise-SNMP correctness API/event/data contracts. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
+**Last reconciliation:** 2026-09-24 — BUILD-000 edge transport contract freeze (Issue #110); document remains TRANSITIONAL_LEGACY.
 
 ## 1. Purpose
 
@@ -413,3 +415,65 @@ Sensor bootstrap uses a short-lived single-use enrollment authority scoped to te
 Agent bootstrap follows the same local-key/short-lived-authority model and results in an authoritative generation-fenced Agent→Sensor assignment. Normal telemetry remains Agent→assigned Sensor→Core.
 
 Stable Core endpoint contracts may use DNS or IP/VIP only with normal certificate trust/identity verification. APIs/installers must not require disabling hostname/SAN validation. Production Platform-owned Sensor↔Core and Agent↔Sensor control/telemetry contracts have no plaintext compatibility mode under this baseline.
+
+## 10. BUILD-000 edge/control contract freeze (Issue #110)
+
+> **Bounded subsection.** This section freezes the edge transport contract against exact base SHA `315a20980e89683666a64362f0ed3827bf613d4a` and machine-readable schemas under `schemas/edge/`. The remainder of Platform_17 remains **TRANSITIONAL_LEGACY** pending later normalization. Where older prose above is vaguer or uses illustrative naming (`boot_epoch`, uniform casing), **this section + `schemas/edge/` + Platform_05 §7.0 prevail for edge wire truth**.
+
+### 10.1 Maturity labels
+
+`CURRENT_IMPLEMENTED_V1` · `FROZEN_BUILD_000_INVARIANT` · `BUILD_002_TARGET` · `BUILD_003_TARGET` · `BUILD_004_TARGET`
+
+`SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED`.
+
+### 10.2 Sequence / Counter64
+
+- **FROZEN_BUILD_000_INVARIANT:** JSON delivery/replay sequences ∈ `[1, 9007199254740991]`; no wrap; fail closed on exhaustion.
+- **FROZEN_BUILD_000_INVARIANT:** Counter64 metric values remain full unsigned 64-bit exact-counter domain (not sequences).
+- **CURRENT_IMPLEMENTED_V1:** Agent/Sensor/Core use Go `uint64` / Java `long` / SQL `BIGINT` with MAX_SAFE_SEQUENCE as the JSON-safe ceiling.
+
+### 10.3 Exact v1 ACK naming (do not “normalize” casing)
+
+| Path | ACK fields (exact) | Durability |
+|---|---|---|
+| Agent→Sensor | `status`, `accepted_through_sequence`, `agent_id`, `batch_id`, `correlation_id` | Durable Sensor Agent spool accept |
+| Sensor→Core telemetry | `status`, `accepted_through_sequence`, `sensor_identity` | PG reserve → Kafka txn → PG finalize → ACK; CH async |
+| Sensor→Core agent-ingress | `status`, `sensorId`, `batchId`, `acceptedThroughIngressSequence`, `correlationId` | **at-least-once** (Kafka + PG watermark); **BUILD_003_TARGET** reservation parity |
+
+### 10.4 bootEpoch
+
+**CURRENT_IMPLEMENTED_V1 / FROZEN:** wire `bootEpoch` = Sensor stream/generation id `^stream-[0-9a-f]{32}$`. Historical LLD `boot_epoch` wording is an alias; not OS boot time.
+
+### 10.5 Heartbeat v1 vs desired-state
+
+**CURRENT_IMPLEMENTED_V1 Core response:** `status`, `authenticated`, `sensor_identity`, `tenant_id`, `received_at`.
+
+Older §3.3 “versioned desired configuration/assignment” language is **CORRECT_BUT_UNIMPLEMENTED / BUILD_004_TARGET** for heartbeat authority. Do not read Sensor optional request version fields as Core-applied truth.
+
+### 10.6 Entity authority
+
+Agent `hostId` is evidence. Agent-supplied `entityId` is not authoritative. Core owns canonical entity mapping (**FROZEN_BUILD_000_INVARIANT** / B000-D009).
+
+### 10.7 Agent stream generation
+
+**CURRENT V1 LIMITATION:** Sensor Agent replay keyed by `tenantId+agentId`; lineage restart fails closed.
+
+**BUILD_002_TARGET:** durable `agentStreamId` (working name) on versioned Agent→Sensor contract (B000-D015). Not implemented in BUILD-000.
+
+### 10.8 Monitoring correctness
+
+Collection/transport/credential/Agent/Sensor/Core/queue/ingestion failure, no telemetry, stale telemetry MUST NOT automatically assert monitored target DOWN. `No Data != Device Down` (**FROZEN_BUILD_000_INVARIANT** / B000-D012).
+
+### 10.9 Standard error
+
+Wire `{status, code, message}` remains. Semantic classes: `INVALID_CONTRACT`, `AUTHENTICATION`, `AUTHORIZATION`, `STALE_OR_FENCED`, `UNSUPPORTED_VERSION`, `INTEGRITY`, `REPLAY_OR_DUPLICATE`, `CAPACITY_OR_RATE_LIMIT`, `TIMEOUT_OR_DEADLINE`, `CANCELLED`, `TRANSPORT`, `SERVER_UNAVAILABLE`. Detailed `ERR_*` codes remain; mapping is documented in `schemas/edge/README.md`.
+
+### 10.10 Classification of conflicting transitional wording
+
+| Older Platform_17 wording | Classification |
+|---|---|
+| §3.3 desired config ACK via control channel | BUILD_004_TARGET / not heartbeat v1 |
+| §3.2.1 OpenAPI frozen before GA | FUTURE |
+| §7 telemetry ACK pipeline | CURRENT_IMPLEMENTED_V1 for main telemetry; agent-ingress weaker (BUILD_003_TARGET) |
+| Uniform identifier casing assumptions | STALE vs frozen dual naming |
+| Illustrative `boot_epoch` naming | Alias of wire `bootEpoch` stream id |

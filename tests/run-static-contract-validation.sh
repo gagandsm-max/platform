@@ -16,6 +16,7 @@ validators=(
   "device-packs/tools/validate.mjs"
   "schemas/provisioning/tools/validate.mjs"
   "schemas/presentation/tools/validate.mjs"
+  "schemas/edge/tools/validate.mjs"
 )
 
 for validator in "${validators[@]}"; do
@@ -48,7 +49,7 @@ docker run --rm -i \
 const fs = require('fs');
 const path = require('path');
 
-const roots = ['device-packs', 'schemas/provisioning', 'schemas/presentation'];
+const roots = ['device-packs', 'schemas/provisioning', 'schemas/presentation', 'schemas/edge'];
 let count = 0;
 
 function walk(dir) {
@@ -81,7 +82,7 @@ if (process.exitCode) process.exit(process.exitCode);
 console.log(`CONTRACT JSON PARSE OK: ${count} file(s).`);
 NODE
 
-for dir in device-packs schemas/provisioning schemas/presentation; do
+for dir in device-packs schemas/provisioning schemas/presentation schemas/edge; do
   if find "${dir}" -name package.json -o -name package-lock.json | grep -q .; then
     echo "[ERROR] Contract validator area must remain dependency-free: ${dir}"
     exit 1

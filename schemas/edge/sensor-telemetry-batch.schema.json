@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/edge/sensor-telemetry-batch.schema.json",
+  "title": "Sensor→Core Telemetry Batch v1",
+  "description": "CURRENT_IMPLEMENTED_V1 TelemetryBatchRequest. bootEpoch carries Sensor stream/generation identity (B000-D005).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sensorId", "bootEpoch", "batchId", "firstSequence", "lastSequence", "checksum", "records"],
+  "properties": {
+    "schemaVersion": {"$ref": "common-definitions.schema.json#/$defs/schemaVersionV1"},
+    "sensorId": {"$ref": "common-definitions.schema.json#/$defs/sensorId"},
+    "bootEpoch": {"$ref": "common-definitions.schema.json#/$defs/sensorStreamId"},
+    "batchId": {"$ref": "common-definitions.schema.json#/$defs/batchId"},
+    "firstSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
+    "lastSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
+    "checksum": {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"},
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {"type": "object"}
+    }
+  }
+}
