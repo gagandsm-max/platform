@@ -15,7 +15,7 @@
 | Status | IMPLEMENTING |
 | GitHub issue | #110 |
 | PR | #111 |
-| Evidence | local static validation passed; exact-head CI pending |
+| Evidence | corrective schema/runtime-alignment pass; local static validation passed; exact-head CI pending after push |
 | Last updated | 2026-09-24 |
 | Sequencing authority | Master Chat only |
 
