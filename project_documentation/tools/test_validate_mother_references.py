@@ -30,7 +30,7 @@ MINIMAL_DOCS = [
     ("Platform_04_HLD.md", "PLATFORM-HLD-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_05_LLD.md", "PLATFORM-LLD-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_06_Dataflow.md", "PLATFORM-DF-001", "NORMALIZED_V1", "mother_reference"),
-    ("Platform_07_OSS_Catalog.md", "PLATFORM-OSS-001", "TRANSITIONAL_LEGACY", "mother_reference"),
+    ("Platform_07_OSS_Catalog.md", "PLATFORM-OSS-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_08_Requirements_Traceability.md", "PLATFORM-RTM-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_09_UI_UX_Master.md", "PLATFORM-UIUX-001", "TRANSITIONAL_LEGACY", "mother_reference"),
     ("Platform_10_Protocol_Security_Connector_Master.md", "PLATFORM-PROTOCOL-001", "TRANSITIONAL_LEGACY", "mother_reference"),
@@ -127,17 +127,22 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         req_rows = req_rows or [
             ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md")
         ]
+        # A2.3: default fixtures carry REQ-OSS-008 (not formal OSS-008).
+        req_ids = {r[0] for r in req_rows}
+        if "REQ-OSS-008" not in req_ids and "OSS-008" not in req_ids:
+            req_rows = list(req_rows) + [
+                (
+                    "REQ-OSS-008",
+                    "Air-gap bundles contain all pinned/scanned artifacts; "
+                    "no runtime internet dependency install",
+                    "Platform_08_Requirements_Traceability.md",
+                )
+            ]
         prd_rows = prd_rows or [("PRD-HA-001", "HA pair", "Platform_02_PRD.md")]
         if skip_manifest_legacy:
             legacy = []
         elif legacy is None:
-            legacy = [
-                {
-                    "id": "OSS-008",
-                    "kind": "formal_requirement_legacy",
-                    "reason": "A1 approved legacy exception",
-                }
-            ]
+            legacy = []
 
         docs_meta = []
         ordinal = 0
@@ -284,10 +289,15 @@ class MotherReferenceValidatorTests(unittest.TestCase):
 
     def test_01_valid_minimal_fixture_passes(self) -> None:
         root = self._write_minimal(
-            legacy=[{"id": "OSS-008", "kind": "formal_requirement_legacy", "reason": "test"}],
+            legacy=[],
             req_rows=[
                 ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
-                ("OSS-008", "Air-gap", "Platform_08_Requirements_Traceability.md"),
+                (
+                    "REQ-OSS-008",
+                    "Air-gap bundles contain all pinned/scanned artifacts; "
+                    "no runtime internet dependency install",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
             ],
         )
         errors = validate_docs_root(root)
@@ -454,24 +464,23 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
-    def test_15_registered_oss008_legacy_passes(self) -> None:
+    def test_15_req_oss008_canonical_passes(self) -> None:
         root = self._write_minimal(
             req_rows=[
                 ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
-                ("OSS-008", "Air-gap", "Platform_08_Requirements_Traceability.md"),
+                (
+                    "REQ-OSS-008",
+                    "Air-gap bundles contain all pinned/scanned artifacts; "
+                    "no runtime internet dependency install",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
             ],
-            legacy=[
-                {
-                    "id": "OSS-008",
-                    "kind": "formal_requirement_legacy",
-                    "reason": "Issue #93",
-                }
-            ],
+            legacy=[],
         )
         errors = validate_docs_root(root)
         self.assertEqual(errors, [], errors)
 
-    def test_16_unregistered_malformed_legacy_fails(self) -> None:
+    def test_16_current_canonical_formal_oss008_fails(self) -> None:
         root = self._write_minimal(
             req_rows=[
                 ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
@@ -484,9 +493,10 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             any(
                 "OSS-008" in e
                 and (
-                    "invalid" in e
+                    "must not contain current canonical" in e
+                    or "invalid" in e
                     or "unregistered" in e
-                    or "missing required legacy" in e
+                    or "unapproved legacy" in e
                 )
                 for e in errors
             ),
@@ -512,17 +522,17 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
 
     def test_18_transitional_legacy_duplicate_sections_not_blocked(self) -> None:
-        # Platform_07 remains TRANSITIONAL_LEGACY after A2.2; duplicate ## numbers allowed.
+        # Platform_09+ remain TRANSITIONAL_LEGACY; duplicate ## numbers allowed.
         root = self._write_minimal()
-        (root / "Platform_07_OSS_Catalog.md").write_text(
-            _header("PLATFORM-OSS-001")
+        (root / "Platform_09_UI_UX_Master.md").write_text(
+            _header("PLATFORM-UIUX-001")
             + "## 1. One\n\n## 1. Two\n\n## 18.1 Nested historical\n\n",
             encoding="utf-8",
         )
         errors = validate_docs_root(root)
         self.assertFalse(
             any(
-                "Platform_07_OSS_Catalog.md: duplicate normalized" in e for e in errors
+                "Platform_09_UI_UX_Master.md: duplicate normalized" in e for e in errors
             ),
             errors,
         )
@@ -688,42 +698,42 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
-    def test_18f6_transitional_platform_07_bare_numeric_not_blocked(self) -> None:
-        # Platform_07 remains TRANSITIONAL_LEGACY; bare-numeric / TMP guards
+    def test_18f6_transitional_platform_09_bare_numeric_not_blocked(self) -> None:
+        # Platform_09+ remain TRANSITIONAL_LEGACY; bare-numeric / TMP guards
         # apply only to NORMALIZED_V1 documents.
         root = self._write_minimal()
-        (root / "Platform_07_OSS_Catalog.md").write_text(
-            _header("PLATFORM-OSS-001")
+        (root / "Platform_09_UI_UX_Master.md").write_text(
+            _header("PLATFORM-UIUX-001")
             + "## 9. Placement\n\n"
-            + "### 9 Historical OSS bare token retained until A2.3\n\n"
+            + "### 9 Historical UI bare token retained until later tranche\n\n"
             + "## 10. __TMP10__. Historical marker\n\n",
             encoding="utf-8",
         )
         errors = validate_docs_root(root)
         self.assertFalse(
-            any("Platform_07_OSS_Catalog.md" in e and "malformed bare-numeric" in e for e in errors),
+            any("Platform_09_UI_UX_Master.md" in e and "malformed bare-numeric" in e for e in errors),
             errors,
         )
         self.assertFalse(
             any(
-                "Platform_07_OSS_Catalog.md" in e and "temporary migration marker" in e
+                "Platform_09_UI_UX_Master.md" in e and "temporary migration marker" in e
                 for e in errors
             ),
             errors,
         )
 
-    def test_18g_transitional_platform_07_may_retain_historical_numbering(self) -> None:
+    def test_18g_transitional_platform_09_may_retain_historical_numbering(self) -> None:
         root = self._write_minimal()
-        (root / "Platform_07_OSS_Catalog.md").write_text(
-            _header("PLATFORM-OSS-001")
+        (root / "Platform_09_UI_UX_Master.md").write_text(
+            _header("PLATFORM-UIUX-001")
             + "## 9. Placement\n\n"
-            + "### 8.1 Historical OSS numbering retained until A2.3\n\n",
+            + "### 8.1 Historical UI numbering retained until later tranche\n\n",
             encoding="utf-8",
         )
         errors = validate_docs_root(root)
         self.assertFalse(
             any(
-                "Platform_07_OSS_Catalog.md" in e and "parent mismatch" in e for e in errors
+                "Platform_09_UI_UX_Master.md" in e and "parent mismatch" in e for e in errors
             ),
             errors,
         )
@@ -1140,16 +1150,31 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
 
     def test_43_premature_transitional_to_normalized_fails(self) -> None:
-        # Platform_07 remains TRANSITIONAL_LEGACY after A2.2; premature upgrade must fail.
+        # Platform_09+ remain TRANSITIONAL_LEGACY; premature upgrade must fail.
         root = self._write_minimal(
-            normalize_overrides={"Platform_07_OSS_Catalog.md": "NORMALIZED_V1"}
+            normalize_overrides={"Platform_09_UI_UX_Master.md": "NORMALIZED_V1"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_09_UI_UX_Master.md" in e
+                and "normalizationState" in e
+                and "TRANSITIONAL_LEGACY" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43h_platform_07_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_07_OSS_Catalog.md": "TRANSITIONAL_LEGACY"}
         )
         errors = validate_docs_root(root)
         self.assertTrue(
             any(
                 "Platform_07_OSS_Catalog.md" in e
                 and "normalizationState" in e
-                and "TRANSITIONAL_LEGACY" in e
+                and "NORMALIZED_V1" in e
                 for e in errors
             ),
             errors,
@@ -1249,15 +1274,15 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         root = self._write_minimal(
             req_rows=[
                 ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
-                ("OSS-008", "Air-gap", "Platform_08_Requirements_Traceability.md"),
+                (
+                    "REQ-OSS-008",
+                    "Air-gap bundles contain all pinned/scanned artifacts; "
+                    "no runtime internet dependency install",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
                 ("OSS-999", "Extra", "Platform_08_Requirements_Traceability.md"),
             ],
             legacy=[
-                {
-                    "id": "OSS-008",
-                    "kind": "formal_requirement_legacy",
-                    "reason": "approved",
-                },
                 {
                     "id": "OSS-999",
                     "kind": "formal_requirement_legacy",
@@ -1267,7 +1292,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             p08_historical=(
                 "### Historical\n"
                 "| REQ-P-001 | Quality | ✓ |\n"
-                "| OSS-008 | Air-gap | ✓ |\n"
+                "| REQ-OSS-008 | Air-gap | ✓ |\n"
                 "| OSS-999 | Extra | ✓ |\n"
             ),
         )
@@ -1548,6 +1573,149 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         self.assertFalse(
             any("stale fixed post-expiry licence-grace" in e for e in errors),
+            errors,
+        )
+
+    # --- A2.3 OSS catalogue + REQ-OSS-008 migration (Issue #108) ---
+
+    def test_57_platform_07_normalized_v1_passes(self) -> None:
+        root = self._write_minimal()
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+        man = json.loads(
+            (root / "mother_reference_manifest.json").read_text(encoding="utf-8")
+        )
+        by_file = {d["file"]: d for d in man["documents"]}
+        self.assertEqual(
+            by_file["Platform_07_OSS_Catalog.md"]["normalizationState"],
+            "NORMALIZED_V1",
+        )
+
+    def test_58_platform_07_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_07_OSS_Catalog.md": "TRANSITIONAL_LEGACY"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_07_OSS_Catalog.md" in e
+                and "normalizationState" in e
+                and "NORMALIZED_V1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_59_req_oss008_airgap_semantics_required(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                (
+                    "REQ-OSS-008",
+                    "Something unrelated without the required keywords",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ]
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("REQ-OSS-008" in e and ("air-gap" in e or "internet" in e) for e in errors),
+            errors,
+        )
+
+    def test_60_historical_migration_alias_permitted(self) -> None:
+        root = self._write_minimal()
+        man_path = root / "mother_reference_manifest.json"
+        man = json.loads(man_path.read_text(encoding="utf-8"))
+        man["historicalFormalIdMigrations"] = [
+            {
+                "oldId": "OSS-008",
+                "newId": "REQ-OSS-008",
+                "kind": "formal_requirement_id_migration",
+                "reason": "Namespace collision with Platform_07 dependency OSS-008",
+                "status": "migrated_historical_only",
+            }
+        ]
+        man_path.write_text(json.dumps(man, indent=2), encoding="utf-8")
+        p08 = root / "Platform_08_Requirements_Traceability.md"
+        p08.write_text(
+            p08.read_text(encoding="utf-8")
+            + "\n**Historical formal-ID migration:** former formal requirement ID "
+            "`OSS-008` migrated to `REQ-OSS-008`.\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_61_catalogue_oss008_clickhouse_permitted(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
+            + "## 1. Catalogue\n\n"
+            + "| ID | Capability | OSS | Decision | Truth state |\n"
+            + "|---|---|---|---|---|\n"
+            + "| OSS-008 | Telemetry | ClickHouse | USE | CURRENT_RUNTIME |\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_62_legacy_oss008_exception_no_longer_allowed(self) -> None:
+        root = self._write_minimal(
+            legacy=[
+                {
+                    "id": "OSS-008",
+                    "kind": "formal_requirement_legacy",
+                    "reason": "stale A1 exception",
+                }
+            ]
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "OSS-008" in e and "unapproved legacy formal-ID exception" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_63_platform_03_tailwind_current_use_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 1. Dependencies\n\n"
+            + "| ID | Domain | Capability | OSS | License | Decision | Runtime | Notes |\n"
+            + "|---|---|---|---|---|---|---|---|\n"
+            + "| OSS-088 | UI | Styling | Tailwind CSS | MIT | USE | Browser | "
+            + "Current Browser dependency |\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_03_Architecture.md" in e and "Tailwind" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_64_platform_09_plus_remain_transitional(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={
+                "Platform_09_UI_UX_Master.md": "NORMALIZED_V1",
+                "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md": "NORMALIZED_V1",
+            }
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("Platform_09_UI_UX_Master.md" in e and "TRANSITIONAL_LEGACY" in e for e in errors),
+            errors,
+        )
+        self.assertTrue(
+            any(
+                "Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md" in e
+                and "TRANSITIONAL_LEGACY" in e
+                for e in errors
+            ),
             errors,
         )
 

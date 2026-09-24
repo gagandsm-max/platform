@@ -2,21 +2,21 @@
 
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
-**Status:** **Authoritative Mother Reference — Global Traceability Index (A1/A2.1/A2.2 NORMALIZED_V1)**
+**Status:** **Authoritative Mother Reference — Global Traceability Index (A2.3 NORMALIZED_V1)**
 **Product:** Platform
-**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102); registries unchanged from A1 counts
-**Normalization state:** NORMALIZED_V1 (global index layer). Platform_01..06 and Platform_08 are NORMALIZED_V1 after A2.2; Platform_07 and Platform_09..23 remain TRANSITIONAL_LEGACY until later A2–A5 tranches.
+**Last reconciliation:** 2026-09-24 — A2.3 OSS catalogue + formal OSS-008→REQ-OSS-008 reconciliation (Issue #108); registry count remains 372/199
+**Normalization state:** NORMALIZED_V1 (global index layer). Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Purpose
 
 `Platform_08` is the **single global index** for every formal Platform requirement (`REQ-*`) and product requirement (`PRD-*`) identifier already present in the Mother Reference set.
 
 - Detailed normative prose remains in the owning Mother Reference.
-- This document **indexes** identifiers; it does **not** invent new product requirements in A1.
+- This document **indexes** identifiers; it does **not** invent new product requirements beyond controlled formal-ID migrations.
 - Documentation mapping is not implementation evidence. Implementation is not validation. Validation is not certification. Certification is not deployment.
 - `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
 
-Legacy ID note: `OSS-008` is preserved as a controlled legacy identifier beside `REQ-OSS-001..007`. It is registered in `mother_reference_manifest.json` and remains pending later controlled reconciliation under Issue #93. Do not silently rename it in A1.
+**Historical formal-ID migration (A2.3 / Issue #108):** the former formal requirement ID `OSS-008` (air-gap bundles / no runtime internet dependency install) is migrated to canonical **`REQ-OSS-008`**. Catalogue dependency **OSS-008 remains ClickHouse** in `Platform_07_OSS_Catalog.md` and must not be confused with the formal requirement namespace. Mentions of formal `OSS-008` below this note are historical/migrated only.
 
 ## 2. Global primary requirement registry
 
@@ -398,11 +398,11 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 | REQ-UI-030 | Common workspace-manifest envelope + class-specific definition contracts; dashboard schema only for dashboard-like classes | `Platform_08_Requirements_Traceability.md` | UI/UX specialized-master supplement — v3.2.2 | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-031 | Governed Presentation Query & Metric Catalogue + Presentation Capability Registry | `Platform_08_Requirements_Traceability.md` | UI/UX specialized-master supplement — v3.2.2 | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-032 | TEAM presentation scope blocked until authoritative tenant-scoped Team binding and IAM reconciliation | `Platform_08_Requirements_Traceability.md` | UI/UX specialized-master supplement — v3.2.2 | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
-| OSS-008 | Air-gap bundles contain all pinned/scanned artifacts; no runtime internet dependency install | `Platform_08_Requirements_Traceability.md` | OSS/IP | LEGACY_ID_INDEXED | SPECIFIED | Legacy ID exception in mother_reference_manifest.json; pending Issue #93 reconciliation |
+| REQ-OSS-008 | Air-gap bundles contain all pinned/scanned artifacts; no runtime internet dependency install | `Platform_08_Requirements_Traceability.md` | OSS/IP | BASE_RTM_INDEXED | SPECIFIED | Migrated from former formal ID OSS-008 in A2.3 to end collision with Platform_07 catalogue OSS-008 (ClickHouse); semantics unchanged |
 
 <!-- END GLOBAL PRIMARY REQ REGISTRY -->
 
-**Registry totals (A1 discovery against Platform_00..23):** 372 unique formal requirement IDs (including legacy `OSS-008`).
+**Registry totals:** 372 unique formal requirement IDs (all `REQ-*`, including `REQ-OSS-008`). Former formal ID `OSS-008` is historical/migrated only.
 
 Specialized-family rows (`REQ-OIV-*`, `REQ-ONB-*`, `REQ-EGC-*`, `REQ-MIA-*`, `REQ-EMC-*`) are indexed here for global completeness. Their cross-layer BRD/PRD/Architecture/HLD/LLD/Dataflow normalization may still be incomplete; A1 records that accurately and does not fabricate checkmarks.
 
@@ -617,9 +617,9 @@ The following marker-delimited table is the **only** canonical primary PRD regis
 
 <!-- END GLOBAL PRIMARY PRD REGISTRY -->
 
-**Registry totals (A1 discovery):** 199 unique formal PRD IDs.
+**Registry totals (A2.3 reconciliation):** 199 unique formal PRD IDs.
 
-Related REQ family is recorded only where the family relationship is explicitly supported by naming/owner structure. A1 does not invent REQ↔PRD mappings beyond that.
+Related REQ family is recorded only where the family relationship is explicitly supported by naming/owner structure. A2 does not invent REQ↔PRD mappings beyond that.
 
 ## 4. Completeness gate
 
@@ -1014,7 +1014,7 @@ The requirements below are owned by `Platform_09_UI_UX_Master.md` and quality-ga
 | REQ-OSS-005 | Transitive dependency license/CVE scan mandatory | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-OSS-006 | Vendor MIB/YANG/SDK/API examples/icons/templates require provenance/redistribution rights | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-OSS-007 | Customer-supplied MIBs may be used for that customer but not automatically redistributed | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| OSS-008 | Air-gap bundles contain all pinned/scanned artifacts; no runtime internet dependency install | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-OSS-008 | Air-gap bundles contain all pinned/scanned artifacts; no runtime internet dependency install | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Engineering governance (v3.2.1)
 
