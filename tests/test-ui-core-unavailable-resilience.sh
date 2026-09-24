@@ -214,16 +214,27 @@ docker run -d \
     -v "${TMP_DIR}/untrusted.key:/etc/nginx/certs/untrusted.key:ro" \
     nginx:1.27-alpine >/dev/null
 
-sleep 2
+# Prove the request reached the untrusted Core and failed specifically on TLS
+# verification. A bare 502 is insufficient because a cached DNS miss can also
+# produce 502 while the resolver's valid=10s window expires.
+TLS_REJECTED=false
+UNTRUSTED_API_CODE="000"
+for i in $(seq 1 15); do
+    UNTRUSTED_API_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://127.0.0.1:${TEST_PORT}/api/v1/version" || echo "000")
+    if [ "${UNTRUSTED_API_CODE}" = "502" ] && \
+       docker logs "${UI_CONTAINER}" 2>&1 | grep -q "upstream SSL certificate verify error"; then
+        TLS_REJECTED=true
+        break
+    fi
+    sleep 1
+done
 
-# Verify proxy connection rejected (502) due to TLS verification failure
-UNTRUSTED_API_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://127.0.0.1:${TEST_PORT}/api/v1/version" || echo "000")
 SHELL_UNTRUSTED_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://127.0.0.1:${TEST_PORT}/")
 
-if [ "${UNTRUSTED_API_CODE}" = "502" ] && [ "${SHELL_UNTRUSTED_CODE}" = "200" ]; then
-    echo "[PASS] Matrix D: Untrusted Core TLS certificate rejected (HTTP ${UNTRUSTED_API_CODE}), UI shell remains HTTPS 200."
+if [ "${TLS_REJECTED}" = "true" ] && [ "${SHELL_UNTRUSTED_CODE}" = "200" ]; then
+    echo "[PASS] Matrix D: Untrusted Core TLS certificate explicitly rejected by upstream verification (HTTP ${UNTRUSTED_API_CODE}); UI shell remains HTTPS 200."
 else
-    echo "[FAIL] Matrix D: TLS negative test failed. API code: ${UNTRUSTED_API_CODE}, Shell code: ${SHELL_UNTRUSTED_CODE}"
+    echo "[FAIL] Matrix D: TLS negative test did not prove upstream certificate rejection. API code: ${UNTRUSTED_API_CODE}, Shell code: ${SHELL_UNTRUSTED_CODE}"
     docker logs "${UI_CONTAINER}" || true
     exit 1
 fi
