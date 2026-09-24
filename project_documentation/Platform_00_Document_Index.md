@@ -5,8 +5,8 @@
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-09-23 — A1 Mother Reference constitution, maturity model, capability contract and global-traceability foundation (Issue #94)
-**Normalization state:** NORMALIZED_V1 for this constitution document only. Platform_01..07 and Platform_09..23 remain TRANSITIONAL_LEGACY until A2–A5.
+**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102); constitution unchanged in authority chain
+**Normalization state:** NORMALIZED_V1. Platform_01..06 and Platform_08 are NORMALIZED_V1 after A2.2; Platform_07 and Platform_09..23 remain TRANSITIONAL_LEGACY until later A2–A5 tranches.
 
 ## 1. Authority
 

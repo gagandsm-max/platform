@@ -1,13 +1,21 @@
 # Platform — Low-Level Design (LLD)
 
-**Document ID:** PLATFORM-LLD-001  
-**Version:** 3.2.2  
-**Status:** Authoritative Mother Reference — Engineering Source of Truth
-**Governing documents:** BRD → PRD → Architecture → HLD  
+**Document ID:** PLATFORM-LLD-001
+**Version:** 3.2.2
+**Status:** Authoritative Mother Reference — Low-Level Design Authority (**A2.2 NORMALIZED_V1**)
+**Product name:** Platform
+**Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
+**Companions:** `Platform_04_HLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`
+**Normalization state:** NORMALIZED_V1
+**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102)
+
+**Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
 ---
 
 ## 1. LLD conventions
+
+**Maturity boundary (mandatory):** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical schemas, topics, APIs and algorithms in this LLD are target design contracts. Presence here does **not** imply physical tables, APIs, events or production certification exist. Issue #92 implementation gaps remain binding truth until remediated with evidence.
 
 This document defines concrete implementation contracts, schemas, state machines, topic families, API resources, sequencing rules, persistence ownership, worker behavior, error taxonomies and failure-handling expectations.
 
@@ -98,6 +106,9 @@ Use globally unique stable identifiers such as UUIDv7/ULID-like ordered IDs afte
 ---
 
 ## 4. PostgreSQL logical schema
+
+**Maturity / Issue #92:** Logical schema is SPECIFIED. Runtime-vs-migration privilege separation remains uncertified; Region/Sensor Pool logical design is not equivalent to physical implementation.
+
 
 ### 4.1 Tenant/identity tables
 
@@ -309,6 +320,9 @@ Each is a dedicated schema/module. Avoid storing opaque application state only a
 
 ## 5. ClickHouse logical tables
 
+**Maturity / Issue #92:** Logical tables/lifecycle are SPECIFIED. Retention/rollup/lifecycle implementation remains incomplete.
+
+
 ### 5.1 `metric_numeric`
 
 Suggested columns:
@@ -499,6 +513,9 @@ Exact topic/partition counts are deployment-sized.
 
 ## 7. Ingestion acknowledgment and replay contract
 
+**Maturity / Issue #92:** Replay relational-integrity gap remains an implementation defect class; durable ACK is required design.
+
+
 This contract is critical.
 
 ### 7.1 Sensor spool segment
@@ -545,6 +562,9 @@ Late observations retain original `eventTime`. Query/RCA pipelines distinguish e
 ---
 
 ## 8. Sensor control protocol
+
+**Maturity / Issue #92:** Sensor production entrypoint/governed-runtime gap remains; this section is logical design, not production certification.
+
 
 ### 8.1 Heartbeat
 
@@ -725,6 +745,9 @@ Browser API never returns plaintext to a user lacking explicit `REVEAL`; normal 
 ---
 
 ## 12. SNMP LLD
+
+**Maturity / Issue #92:** Raw Counter64 acquisition path is IMPLEMENTED + TESTED only. Derived counter delta/rate/reset/wrap/discontinuity semantics remain unimplemented/uncertified.
+
 
 ### 12.1 Session profile
 
@@ -926,6 +949,9 @@ Raw sockets/capabilities should use minimal Linux capabilities rather than runni
 ---
 
 ## 14. Flow LLD
+
+**Maturity / Issue #92:** Flow/NTA production receiver remains not implemented/certified.
+
 
 Flow LLD must cover NetFlow v5/v9, IPFIX, sFlow and vendor/J-Flow where applicable; configured exporter/source/tenant authority (packet source IP alone is insufficient); template lifecycle; sampling provenance; sequence/gap/reset; UDP pre-acceptance loss; observation point; direction; duplicate/exporter-HA; raw-before-enrichment; temporal IP/entity mapping; enrichment confidence/provenance; privacy/RBAC for user-attributed Flow. ClickHouse remains analytics authority. Production high-volume path uses FLOW role.
 
@@ -1369,7 +1395,7 @@ NCM executor receives a short-lived signed job token referencing credentials, ne
 
 ---
 
-## 30A. Operational diagnostics and investigation LLD
+## 31. Operational diagnostics and investigation LLD
 
 Use existing PostgreSQL transactional state for bounded job/session metadata and existing ClickHouse/event/audit paths for historical result facts where appropriate. Do not add a diagnostics database.
 
@@ -1427,23 +1453,23 @@ A diagnostic pack is a versioned deterministic definition of permitted checks, d
 
 Live Evidence returns monitored state and latest applicable on-demand verification separately with timestamps, vantage/source, quality and correlation reference. `Why?` returns evidence/policy inputs used to derive displayed state and must not fabricate causality.
 
-## 31. IPAM LLD
+## 32. IPAM LLD
 
-### 31.1 Prefix model
+### 32.1 Prefix model
 
 Use canonical binary/network types capable of IPv4 and IPv6. Address uniqueness is scoped by tenant + address space/VRF.
 
-### 31.2 Conflict detection
+### 32.2 Conflict detection
 
 Conflicts combine authoritative reservations and discovered observations. A conflict record includes addresses, MAC/entity IDs, sources, first/last seen, site and remediation status.
 
-### 31.3 Forecast
+### 32.3 Forecast
 
 Historical utilization facts in ClickHouse feed simple trend/forecast models; report confidence and never present a precise exhaustion date when historical variability makes it unreliable.
 
 ---
 
-## 32. Reporting formula LLD
+## 33. Reporting formula LLD
 
 Use safe expression engine such as CEL for formulas. Supported aggregate primitives may include SUM, AVG, MIN, MAX, COUNT, percentile, rate, difference, IF/CASE-like expressions and time/group aggregation.
 
@@ -1451,9 +1477,9 @@ No arbitrary Python/JavaScript execution from report users.
 
 ---
 
-## 33. ITSM connector LLD
+## 34. ITSM connector LLD
 
-### 33.1 Mapping object
+### 34.1 Mapping object
 
 ```text
 connector
@@ -1469,21 +1495,21 @@ recovery_policy
 reopen_policy
 ```
 
-### 33.2 Idempotency
+### 34.2 Idempotency
 
 `idempotency_key = tenant + connector + incident + operation_type + lifecycle_version`
 
 Retries must not create duplicate tickets.
 
-### 33.3 Inbound sync
+### 34.3 Inbound sync
 
 Webhook/polling adapter maps external ack/assignment/state/work notes/change reference back to Platform when enabled.
 
 ---
 
-## 34. Dashboard query LLD
+## 35. Dashboard query LLD
 
-### 34.1 Request
+### 35.1 Request
 
 ```json
 {
@@ -1497,11 +1523,11 @@ Webhook/polling adapter maps external ack/assignment/state/work notes/change ref
 }
 ```
 
-### 34.2 Resolution planner
+### 35.2 Resolution planner
 
 `AUTO` selects highest resolution that fits available retention and query-cost limits. Response includes `effectiveResolution` and source table/rollup metadata for transparency.
 
-### 34.3 Query limits
+### 35.3 Query limits
 
 - per-request timeout;
 - max scanned time/rows/bytes;
@@ -1511,9 +1537,9 @@ Webhook/polling adapter maps external ack/assignment/state/work notes/change ref
 
 ---
 
-## 35. Storage retention LLD
+## 36. Storage retention LLD
 
-### 35.1 Policy object
+### 36.1 Policy object
 
 ```json
 {
@@ -1533,7 +1559,7 @@ Webhook/polling adapter maps external ack/assignment/state/work notes/change ref
 
 Durations shown are examples, not defaults.
 
-### 35.2 Numeric rollup
+### 36.2 Numeric rollup
 
 Fields depending on metric semantics:
 
@@ -1545,7 +1571,7 @@ Fields depending on metric semantics:
 - first/last;
 - percentile(s).
 
-### 35.3 Counter rollup
+### 36.3 Counter rollup
 
 - preserve exact raw counter semantics before aggregation;
 - delta;
@@ -1557,7 +1583,7 @@ Fields depending on metric semantics:
 - invalid/ambiguous delta → explicit degraded/unknown quality, never fabricated rate;
 - total where meaningful.
 
-### 35.4 State rollup
+### 36.4 State rollup
 
 - availability percent;
 - duration by state;
@@ -1567,9 +1593,9 @@ Fields depending on metric semantics:
 
 ---
 
-## 36. Storage Protection LLD
+## 37. Storage Protection LLD
 
-### 36.1 Volume state machine
+### 37.1 Volume state machine
 
 ```mermaid
 stateDiagram-v2
@@ -1585,7 +1611,7 @@ stateDiagram-v2
 
 Percentages except the 80% hard watermark can be product-tuned; customer can adjust warnings within safe limits.
 
-### 36.2 Purge planner
+### 37.2 Purge planner
 
 Inputs:
 
@@ -1600,7 +1626,7 @@ Inputs:
 
 Outputs ordered purge actions by oldest eligible partitions/segments.
 
-### 36.3 Core purge candidates
+### 37.3 Core purge candidates
 
 Normal priority examples:
 
@@ -1613,20 +1639,20 @@ Normal priority examples:
 
 Protected control data is excluded.
 
-### 36.4 Sensor purge candidates
+### 37.4 Sensor purge candidates
 
 - acknowledged spool segments first;
 - old local logs/diagnostics;
 - obsolete installer/update artifacts;
 - if disconnected and emergency persists, oldest low-priority unacknowledged telemetry may be dropped only under explicit emergency algorithm, with counters/audit/critical alert and continued current monitoring. Higher priority/recent data is retained preferentially.
 
-### 36.5 Audit record
+### 37.5 Audit record
 
 Every emergency deletion records volume, usage before/after, bytes freed, data class, time range, reason, policy version and monitoring impact.
 
 ---
 
-## 37. Legal hold LLD
+## 38. Legal hold LLD
 
 `retention_hold` fields:
 
@@ -1644,7 +1670,7 @@ Purge planner checks hold index before deletion.
 
 ---
 
-## 38. Asset lifecycle LLD
+## 39. Asset lifecycle LLD
 
 Lifecycle transition rules are explicit. Example:
 
@@ -1659,23 +1685,23 @@ Discovery absence does not automatically transition to DECOMMISSIONED. Reconcili
 
 ---
 
-## 39. Licence engine LLD
+## 40. Licence engine LLD
 
-### 39.1 States
+### 40.1 States
 
 - `VALID`;
 - `EXPIRING_30D`;
 - `EXPIRING_7D`;
-- `EXPIRED_GRACE`;
+- `EXPIRED_GRACE` (duration = **FOUNDER-LIC-GRACE**, UNRESOLVED; historical/source values 7-day and 15-day only; neither normative);
 - `EXPIRED_POLLING_STOPPED`;
 - `MANUAL_EXTENSION`;
 - `INVALID`.
 
-### 39.2 Behavior
+### 40.2 Behavior
 
 - 30d notification job.
 - 7d dashboard banner globally.
-- expiry + 7d grace: polling remains enabled.
+- post-expiry: polling remains enabled for the Founder-approved grace duration (**FOUNDER-LIC-GRACE** UNRESOLVED; do not hard-code 7 or 15 days).
 - grace elapsed: scheduler stops new polling jobs; Sensors receive signed polling-disabled policy while remaining manageable.
 - historical queries remain available.
 - licence admin endpoint remains available.
@@ -1685,9 +1711,9 @@ Do not delete telemetry due to licence state.
 
 ---
 
-## 40. Core installer LLD
+## 41. Core installer LLD
 
-### 40.1 Standalone inputs
+### 41.1 Standalone inputs
 
 - node hostname/IP;
 - HTTPS endpoint/cert mode;
@@ -1695,7 +1721,7 @@ Do not delete telemetry due to licence state.
 - admin bootstrap/auth mode;
 - optional proxy/NTP/DNS checks.
 
-### 40.2 HA inputs
+### 41.2 HA inputs
 
 - node identity;
 - peer IP/hostname;
@@ -1704,17 +1730,17 @@ Do not delete telemetry due to licence state.
 - data path/storage validation;
 - certificate mode.
 
-### 40.3 Pairing
+### 41.3 Pairing
 
 First Core creates deployment ID and one-time peer enrollment token. Second presents token, mutual node identity is established, cluster/deployment certificates exchanged, state baseline synchronized, active/standby roles committed and token invalidated.
 
-### 40.4 Health checks
+### 41.4 Health checks
 
 Installer must not report success until required local services are healthy and, in HA, synchronization reaches certified ready state.
 
 ---
 
-## 41. Sensor installer LLD
+## 42. Sensor installer LLD
 
 Inputs:
 
@@ -1741,7 +1767,7 @@ No normal inbound management port from Core is required if outbound/control conn
 
 ---
 
-## 42. Agent installer LLD
+## 43. Agent installer LLD
 
 Inputs:
 
@@ -1752,23 +1778,26 @@ Core authenticates Agent and returns current Sensor assignment/failover endpoint
 
 ---
 
-## 43. HA Manager LLD
+## 44. HA Manager LLD
 
-### 43.1 Heartbeats
+**Maturity / Issue #92:** Exactly-two-Core Active/Standby required; active authority/fencing/stateful failover/rejoin remains OPEN P0 / NOT PRODUCTION CERTIFIED.
+
+
+### 44.1 Heartbeats
 
 Core nodes exchange signed heartbeats over dedicated secure peer channel and independently check stable endpoint/data-service health.
 
-### 43.2 Promotion rule
+### 44.2 Promotion rule
 
 Automatic standby promotion only when supported failure-detection/fencing policy determines former Active cannot remain authoritative. If peer communication alone is lost and Active status is ambiguous, remain fail-safe (`SPLIT_BRAIN_PREVENTED`) rather than dual-active.
 
-### 43.3 Fencing
+### 44.3 Fencing
 
 **TBD/P0 SPIKE:** determine supported fencing mechanisms for VM/bare-metal environments without a mandatory third full node. Candidates may include VM/hypervisor power fencing, network/VIP ownership arbitration, storage lease mechanisms or fail-safe manual promotion for ambiguous partitions. Commercial HA claim requires certification of supported modes.
 
 ---
 
-## 44. PostgreSQL HA LLD
+## 45. PostgreSQL HA LLD
 
 Primary on Active, streaming replica on Standby.
 
@@ -1786,7 +1815,7 @@ Cluster epoch is included in internal write authorization where useful.
 
 ---
 
-## 45. ClickHouse two-Core LLD spike requirements
+## 46. ClickHouse two-Core LLD spike requirements
 
 The final design must choose and certify a mechanism meeting:
 
@@ -1809,7 +1838,7 @@ No option is accepted until chaos/failover testing proves data correctness and r
 
 ---
 
-## 46. Kafka two-Core LLD spike requirements
+## 47. Kafka two-Core LLD spike requirements
 
 Requirements:
 
@@ -1824,7 +1853,10 @@ Candidate active/passive approaches must be benchmarked; do not deploy a two-vot
 
 ---
 
-## 47. Backup/restore LLD
+## 48. Backup/restore LLD
+
+**Maturity / Issue #92:** Backup/restore/DR implementation evidence remains incomplete.
+
 
 Backup manifest contains:
 
@@ -1845,7 +1877,7 @@ Restore validates integrity/compatibility before destructive changes.
 
 ---
 
-## 48. DR LLD contract
+## 49. DR LLD contract
 
 DR v1.0 must implement configuration/state export/replication hooks and a tested activation runbook. Exact topology is TBD, therefore all endpoint assignments must support controlled redirection to an alternate Core endpoint without reinstalling every Sensor/Agent.
 
@@ -1853,7 +1885,7 @@ Sensor stores at least current Core endpoint set/DR redirection capability signe
 
 ---
 
-## 49. Upgrade LLD
+## 50. Upgrade LLD
 
 Version compatibility matrix includes:
 
@@ -1869,7 +1901,7 @@ Sensor/Agent reject incompatible assignments/packs with actionable error rather 
 
 ---
 
-## 50. Support error model
+## 51. Support error model
 
 All major errors use stable namespace:
 
@@ -1902,7 +1934,10 @@ Error payload:
 
 ---
 
-## 51. Audit event schema
+## 52. Audit event schema
+
+**Maturity / Issue #92:** Durable audit/common emitter/actor attribution gaps remain where applicable.
+
 
 ```json
 {
@@ -1930,7 +1965,7 @@ Secrets must be redacted before audit persistence.
 
 ---
 
-## 52. Telemetry quality scoring
+## 53. Telemetry quality scoring
 
 Quality score factors may include:
 
@@ -1946,7 +1981,7 @@ RCA receives both evidence and quality. Confidence must decrease if evidence is 
 
 ---
 
-## 53. Topology history LLD
+## 54. Topology history LLD
 
 Relationship changes emit immutable `topology.observation` facts. Current relationship table represents latest valid state; ClickHouse/history stores intervals/facts so Graph Service can reconstruct `asOf` topology.
 
@@ -1954,7 +1989,7 @@ Manual relationships are versioned/audited and never silently converted to disco
 
 ---
 
-## 54. Unified Operations Timeline LLD
+## 55. Unified Operations Timeline LLD
 
 Timeline query merges normalized records from:
 
@@ -1972,7 +2007,7 @@ Return a typed ordered stream with source links rather than flattening everythin
 
 ---
 
-## 55. Platform self-monitoring alerts
+## 56. Platform self-monitoring alerts
 
 Required internal alert families:
 
@@ -1996,7 +2031,7 @@ Internal monitoring failures must not be conflated with monitored-device failure
 
 ---
 
-## 56. UI route design
+## 57. UI route design
 
 Illustrative stable routes:
 
@@ -2026,7 +2061,10 @@ Deep links include tenant/scope safely and validate authorization on load.
 
 ---
 
-## 57. RBAC permission namespace
+## 58. RBAC permission namespace
+
+**Maturity / Issue #92:** Persistent IAM/RBAC production authority remains unimplemented; Discovery authorization integration remains incomplete/fail-closed.
+
 
 Examples:
 
@@ -2067,7 +2105,7 @@ Permission checks always include resource scope and conditions.
 
 ---
 
-## 58. Security protocol defaults
+## 59. Security protocol defaults
 
 Recommended default posture:
 
@@ -2085,7 +2123,7 @@ Recommended default posture:
 
 ---
 
-## 59. API versioning
+## 60. API versioning
 
 External APIs use versioned prefix such as `/api/v1`. Backward compatibility policy must be defined before GA. Breaking changes require new major API version or explicit migration strategy.
 
@@ -2093,7 +2131,7 @@ OpenAPI documentation is generated from source contracts and exposed according t
 
 ---
 
-## 60. Release engineering LLD
+## 61. Release engineering LLD
 
 Every build pipeline must produce:
 
@@ -2112,7 +2150,7 @@ Green licences are permissive catalogue entries; yellow dependencies require leg
 
 ---
 
-## 61. Performance test matrix
+## 62. Performance test matrix
 
 At minimum benchmark:
 
@@ -2138,7 +2176,7 @@ At minimum benchmark:
 
 ---
 
-## 62. Chaos/failure tests
+## 63. Chaos/failure tests
 
 Required cases:
 
@@ -2166,7 +2204,7 @@ Expected behavior must be deterministic and auditable.
 
 ---
 
-## 63. LLD P0 spikes / unresolved implementation items
+## 64. LLD P0 spikes / unresolved implementation items
 
 1. Two-Core Kafka failover topology and durable ack boundary.
 2. Two-Core ClickHouse synchronization/failover.
@@ -2181,7 +2219,7 @@ These items are explicitly open; implementation is not complete until design rev
 
 ---
 
-## 64. Desired-state reconciliation LLD
+## 65. Desired-state reconciliation LLD
 
 ```text
 desired_state
@@ -2211,9 +2249,9 @@ drift_case
 
 Reconciler compares desired vs latest observed state and emits `DRIFT_DETECTED`, `DRIFT_RESOLVED` audit/timeline facts.
 
-## 65. Migration Studio LLD
+## 66. Migration Studio LLD
 
-### 65.1 Staging model
+### 66.1 Staging model
 
 ```text
 migration_job
@@ -2228,11 +2266,11 @@ mapping_issue
 
 Each staged object records source tool/version/export reference and transformation status.
 
-### 65.2 Commit safety
+### 66.2 Commit safety
 
 Migration commit performs duplicate/identity checks, capacity simulation, credential reference validation and policy semantic validation. Unsupported proprietary semantics remain `NEEDS_REVIEW` rather than guessed.
 
-## 66. Technology lifecycle LLD
+## 67. Technology lifecycle LLD
 
 ```text
 lifecycle_catalog_entry
@@ -2250,7 +2288,7 @@ lifecycle_catalog_entry
 
 Entity-to-lifecycle matching is explainable and reversible.
 
-## 67. Intelligence Quality LLD
+## 68. Intelligence Quality LLD
 
 ```text
 rca_feedback
@@ -2274,7 +2312,7 @@ rca_quality_fact
 
 Production statistics must label whether values are validated ground truth, user feedback or inferred proxy.
 
-## 68. Alert policy effectiveness LLD
+## 69. Alert policy effectiveness LLD
 
 Per policy/window calculate:
 
@@ -2289,7 +2327,7 @@ Per policy/window calculate:
 
 Recommendations are advisory and require review before changing policy.
 
-## 69. Pipeline integrity LLD
+## 70. Pipeline integrity LLD
 
 Maintain watermarks/counters:
 
@@ -2308,7 +2346,7 @@ dropped_count_with_reason
 
 Perfect one-to-one counts may not exist for transformed/aggregated streams, so reconciliation is defined per stream stage/schema. Any unexplained loss must create a data-quality/internal Platform event.
 
-## 70. Shift handover / PIR / Runbook records
+## 71. Shift handover / PIR / Runbook records
 
 Shift handover is a snapshot/report over current incident, maintenance, change, platform-health and approval state plus operator notes.
 
@@ -2319,11 +2357,9 @@ PIR records reference incident/timeline/RCA source IDs and store human-approved 
 
 ---
 
-# Version 3.0 Reconciliation — Requirements That Must Not Be Lost
+## 72. Cross-cutting LLD capability completeness (absorbed)
 
-This section is part of the authoritative document. It was added after a complete reconciliation of the Platform design discussions because the earlier split-document version compressed or omitted details. The canonical requirement IDs are in `Platform_08_Requirements_Traceability.md`; OSS decisions are in `Platform_07_OSS_Catalog.md`.
-
-The following cross-cutting capabilities are mandatory where applicable and must be represented in design, UI, APIs, security, audit and QA:
+The following cross-cutting capabilities remain mandatory where applicable. Canonical IDs remain in `Platform_08_Requirements_Traceability.md`. OSS catalogue detail remains in `Platform_07_OSS_Catalog.md` (TRANSITIONAL_LEGACY until A2.3).
 
 - asset lifecycle/reconciliation, stale/disappeared/replaced device handling and decommission workflow;
 - technology lifecycle/EOL/EOS/firmware risk visibility without pretending to be a vulnerability scanner;
@@ -2348,8 +2384,20 @@ The following cross-cutting capabilities are mandatory where applicable and must
 - scheduled housekeeping and end-to-end pipeline-integrity visibility;
 - stable customer-facing error codes/correlation IDs and **No Silent Failure**.
 
+## 73. Supporting mother-reference ownership
 
-## LLD-OSS — Dependency and wrapper contracts
+- `Platform_03_Architecture.md` — architecture invariants.
+- `Platform_04_HLD.md` — high-level component/service design.
+- `Platform_06_Dataflow.md` — end-to-end sequences.
+- `Platform_07_OSS_Catalog.md` — OSS catalogue (not normalized in A2.2).
+- `Platform_10_Protocol_Security_Connector_Master.md` — protocol/security mechanics.
+- `Platform_11_Sizing_Capacity_Storage_Master.md` — capacity/sizing constants.
+- `Platform_14_Test_Performance_and_Release_Quality.md` — certification evidence.
+- `Platform_17_API_Event_and_Data_Model_Contracts.md` — exact API/event/data contracts.
+
+**OSS rule:** no runtime/build dependency may be added unless admitted to the Platform OSS Catalogue by exact version, transitive license/CVE scan and release policy.
+
+## 74. Dependency and wrapper contracts
 
 No domain package may import an OSS protocol/client library directly except its designated adapter module. This is an implementation rule, not a suggestion.
 
@@ -2374,7 +2422,7 @@ No domain package may import an OSS protocol/client library directly except its 
 
 Every adapter maps failures into the Platform provisioning/collection taxonomy. Raw vendor/library error is retained as diagnostic evidence for authorized support users, while customer UI receives a stable reason code and remediation guidance.
 
-## LLD-SNMP — SNMP security/configuration contract
+## 75. SNMP security/configuration contract
 
 Credential profile fields must support:
 
@@ -2393,11 +2441,11 @@ SNMPv3 `authPriv` with supported SHA-2/AES is the preferred default posture wher
 
 Credential Profile `USE` authorization allows monitoring execution but does not grant `REVEAL`. Reusable SNMP secret values are prohibited from general telemetry, Kafka events, ClickHouse rows, audit records, support bundles and ordinary scheduler-history payloads.
 
-## LLD-BULK — Bulk import normalization rules
+## 76. Bulk import normalization rules
 
 Safe text fields can be trimmed and Unicode/line-ending/BOM normalized with a `NORMALIZED` warning record. Secrets are never silently trimmed. Invalid IP/CIDR/port/version/enums produce row errors. Unknown site/group/credential/profile references are resolvable inline. Staging rows maintain original value, normalized value, reason code and operator disposition.
 
-## LLD-KAFKA — Topic/schema baseline
+## 77. Kafka topic/schema baseline
 
 Topic families remain internal and tenant-aware in payload/partition strategy. Minimum families:
 
@@ -2421,7 +2469,9 @@ integration.outbound.v1
 
 Schemas are registered in Apicurio and compatibility-tested in CI. Avro or Protobuf is selected per topic family and then frozen by schema contract; producers may not publish unregistered incompatible payloads.
 
-## LLD-CLICKHOUSE — Data-class tables
+## 78. ClickHouse data-class tables
+
+**Maturity / Issue #92:** ClickHouse retention/rollup/lifecycle implementation remains incomplete; logical tables here are SPECIFIED, not certified deployed lifecycle.
 
 At minimum keep physically/logically separate high-volume classes:
 
@@ -2437,11 +2487,11 @@ At minimum keep physically/logically separate high-volume classes:
 
 Common telemetry keys include tenant, entity, metric, timestamp, value/state, quality, Sensor/source and schema/version metadata. Repeated strings should be dictionary/ID normalized where benchmark proves value. Partitioning is time-oriented and designed for efficient TTL/drop without uncontrolled partition cardinality.
 
-## LLD-RETENTION — Rollup semantics
+## 79. Retention rollup semantics
 
 For each metric definition store `metric_kind = GAUGE | COUNTER | STATE | HISTOGRAM | EVENT` and allowed aggregations. Rollup jobs/materialized views must be complete before normal raw TTL deletion. Emergency 80% protection may reclaim eligible raw data earlier and records any lost target retention as a platform event/audit record.
 
-## LLD-GNN — GNN implementation contract
+## 80. GNN implementation contract
 
 Candidate runtime: PyTorch + PyTorch Geometric, isolated behind `GraphScoringService`. It consumes a versioned feature snapshot and returns only scored hypotheses/features; it cannot mutate graph truth or incidents.
 
@@ -2473,7 +2523,7 @@ inference_latency_ms
 
 RCA Fusion Service records the GNN scores as evidence of type `LEARNED_SCORE`, applies deterministic/protocol/topology/change evidence and may still return `INCONCLUSIVE`.
 
-## LLD-OSS-CI — Dependency admission/release gate
+## 81. Dependency admission/release gate
 
 ```text
 propose dependency
@@ -2488,7 +2538,9 @@ propose dependency
  -> archive SBOM/notices/licenses/checksums/provenance
 ```
 
-## LLD-HA — Two-Core invariants
+## 82. Two-Core HA invariants
+
+**Maturity / Issue #92:** HA fencing/failover/rejoin remains OPEN P0 / NOT PRODUCTION CERTIFIED.
 
 The exact internal replication technology is P0 spike, but code must satisfy these invariants:
 
@@ -2501,31 +2553,21 @@ The exact internal replication technology is P0 spike, but code must satisfy the
 - split-brain test must prove that network partition cannot create two externally authoritative control planes;
 - failover certification measures UI/API recovery, ingestion recovery and backlog replay separately.
 
-## LLD-LICENSE — License timer implementation
+## 83. License timer implementation
 
-Use absolute signed license expiry timestamp, deployment timezone-independent UTC evaluation and auditable state transitions. Dashboard banner derives remaining days from Core UTC and user display timezone. A manually signed extension/renewal must be accepted without Core/Sensor reinstall. At post-grace suspension, Scheduler stops issuing/renewing monitoring jobs; historical query, admin, license import and audit remain available.
+Use absolute signed license expiry timestamp, deployment timezone-independent UTC evaluation and auditable state transitions. Dashboard banner derives remaining days from Core UTC and user display timezone. A manually signed extension/renewal must be accepted without Core/Sensor reinstall. Post-expiry grace duration is **FOUNDER-LIC-GRACE** (UNRESOLVED; historical/source 7-day vs 15-day only). At post-grace suspension, Scheduler stops issuing/renewing monitoring jobs; historical query, admin, license import and audit remain available.
 
-## LLD-QUERY — Query safety
+## 84. Query safety
+
+**Maturity / Issue #92:** Cardinality/noisy-neighbour protection is not certified.
+
 
 Interactive queries enforce tenant scope, maximum scan/time/rows/concurrency and cancellation. Large exports run asynchronously and write authorized artifacts. UI tables use server-side page/filter/sort and virtualization. No API may permit an unbounded five-year raw Flow scan by default.
 
 
-## Mother-reference cross-document contract (v3.1)
+## 85. Docker, service supervision, logging and packaging LLD
 
-The following supporting mother references are normative and must be read together with this document:
-
-- `Platform_07_OSS_Catalog.md` — approved/candidate OSS by module, license class, usage, rationale and restrictions.
-- `Platform_08_Requirements_Traceability.md` — completeness control; a missing mapped requirement is a documentation defect.
-- `Platform_09_UI_UX_Master.md` — detailed global shell, Studios, 98 out-of-box dashboard/workspace screen contracts, filters/actions/states/RBAC behavior.
-- `Platform_10_Protocol_Security_Connector_Master.md` — protocol/security/authentication/credential/connectivity matrix and provisioning diagnostics.
-- `Platform_11_Sizing_Capacity_Storage_Master.md` — Core/Sensor compute targets, MWU, placement, retention/storage and 80% protection.
-- `Platform_12_Decision_Source_Register.md` — USER-FIXED vs ARCH-DELEGATED vs REFERENCE-LEARNING vs TBD/P0 decisions.
-
-**OSS rule:** implementation teams may not add a runtime/build dependency merely because it is open source. It must be admitted to the Platform OSS Catalogue by exact version, transitive license/CVE scan and release policy.
-
-## 71. Docker, service supervision, logging and packaging LLD — v3.1
-
-### 71.1 Compose contract
+### 85.1 Compose contract
 
 Every Compose service shall declare where applicable:
 
@@ -2541,11 +2583,11 @@ Every Compose service shall declare where applicable:
 
 `depends_on` shall not be treated as readiness. Services requiring another service must wait on health/readiness or implement retry/backoff.
 
-### 71.2 Docker reboot behavior
+### 85.2 Docker reboot behavior
 
 For the interactive development profile, long-lived stateful and Platform services shall use `restart: unless-stopped` unless a service has a documented reason not to. Docker daemon auto-start at host boot is required. Named volumes preserve state. Engineers must have explicit documented commands for clean stop, clean restart and destructive reset.
 
-### 71.3 Linux systemd unit contract
+### 85.3 Linux systemd unit contract
 
 Core, Sensor and Linux Agent packages shall install systemd units with at least:
 
@@ -2562,7 +2604,7 @@ NoNewPrivileges=true
 
 Units shall be enabled at package installation unless an explicit package option requests staging without startup. Exact hardening directives are component-specific and must be validated against required network/file capabilities.
 
-### 71.4 Windows Service contract
+### 85.4 Windows Service contract
 
 Windows Agent shall:
 
@@ -2574,7 +2616,7 @@ Windows Agent shall:
 - preserve enrollment identity/configuration across reboot and upgrade;
 - support silent install/uninstall for enterprise software distribution.
 
-### 71.5 Structured log schema
+### 85.5 Structured log schema
 
 Mandatory fields where applicable:
 
@@ -2600,21 +2642,21 @@ safe_context
 
 Forbidden fields include clear-text password/community/private key/API token/bearer token/session cookie and unredacted authorization headers.
 
-### 71.6 Log retention/rotation
+### 85.6 Log retention/rotation
 
 Logs shall be bounded. Linux packages integrate with journald/logrotate policy; Windows integrates with Windows Event Log and bounded Agent log files as specified. Local logs participate in storage forecasting and 80% disk protection. Debug logging is time-bound and must not remain enabled indefinitely without explicit operator choice.
 
-### 71.7 Package scripts
+### 85.7 Package scripts
 
 `.deb`/`.rpm` install/upgrade/uninstall scripts must be idempotent, must not destroy customer data on package removal unless an explicit purge operation is requested, and must preserve configuration/state across in-place upgrade. Package scripts must record failures with actionable error codes.
 
 ---
 
-## 72. Endpoint Diagnostic Snapshot implementation contract — v3.2.2 reconciliation
+## 86. Endpoint Diagnostic Snapshot implementation contract
 
 EDS is implemented as Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` on the existing diagnostic/Live Evidence architecture. It does not add a second scheduler, registry, evidence database or transport.
 
-### 72.1 Capture-eligibility state
+### 86.1 Capture-eligibility state
 
 For each effective diagnostic trigger, the Agent or agentless monitoring authority retains bounded **capture-eligibility** state sufficient to evaluate whether an automatic EDS Diagnostic Job may be created. This state is **not** authoritative host/operational health:
 
@@ -2636,7 +2678,7 @@ Evaluation uses the same normalized monitoring observations already collected wh
 
 Automatic capture executes only under currently valid Core-issued authority/generation. Stale, revoked, expired, reassigned or replayed authority fails closed.
 
-### 72.2 Linux Agent evidence collectors
+### 86.2 Linux Agent evidence collectors
 
 Linux EDS shall prefer bounded native reads/APIs such as `/proc`, `/sys`, stat/statfs and narrowly filtered journal/kernel evidence. Collector implementation shall be dependency-minimal and must not require spawning an unrestricted shell, `sh -c`, `bash -c` or arbitrary command strings from users/API/model output.
 
@@ -2651,13 +2693,13 @@ Supported evidence families should include where available:
 - systemd service state/restart/failure information;
 - bounded kernel/filesystem/MCE/AER/thermal/fan evidence where exposed safely.
 
-### 72.3 Windows Agent evidence collectors
+### 86.3 Windows Agent evidence collectors
 
 Windows EDS shall use supported native Windows interfaces/APIs appropriate to the metric, including performance-counter/PDH, Service Control Manager, Event Log, IP Helper/network, storage and WHEA/system evidence where required. Recurring collection shall not depend on continuously spawning PowerShell or on arbitrary PowerShell from users/API/model output.
 
 Evidence families normalize to the same Platform concepts as Linux while preserving Windows-specific provenance.
 
-### 72.4 Agentless query packs
+### 86.4 Agentless query packs
 
 Agentless EDS executes only versioned Platform-controlled diagnostic query definitions as Diagnostic Job parameters.
 
@@ -2676,7 +2718,7 @@ Each query definition declares:
 
 Linux query packs execute through the approved SSH transport as fixed operations with structured parameters. Windows query packs execute through approved WinRM HTTPS/WMI/CIM structured operations. Where a certified PowerShell fallback is unavoidable, the exact Platform-owned versioned template is read-only, typed-parameter constrained, output/timeout bounded, audited and separately security-certified. Neither path provides unrestricted generic remote command execution to normal monitoring/EDS workflows. Controlled sudo may exist only for explicitly certified read-only operations.
 
-### 72.5 Resource guard
+### 86.5 Resource guard
 
 EDS runtime enforces:
 
@@ -2691,18 +2733,18 @@ EDS runtime enforces:
 
 If collection would materially worsen endpoint or monitoring-path pressure, the capture is shortened, suppressed or returned `PARTIAL`/`SUPPRESSED` with an explicit reason. Incomplete diagnostic evidence must be observable; routine telemetry durability must not be silently destroyed to protect EDS.
 
-### 72.6 Endpoint classification boundary
+### 86.6 Endpoint classification boundary
 
 Endpoint code may emit deterministic observations/indicators such as `CPU_PRESSURE`, `MEMORY_PRESSURE`, `OOM_EVENT`, `FILESYSTEM_READ_ONLY`, `BLOCK_IO_PRESSURE`, `SERVICE_FAILED`, `PCIE_AER_EVENT` or `WHEA_HARDWARE_ERROR` only when directly supported by evidence.
 
 It must not convert an indicator into unsupported causal prose such as declaring hardware damage, thermal-paste failure, radio interference or a guaranteed repair. Causal fusion belongs to Core and may result in `INCONCLUSIVE`.
 
-### 72.7 Local intelligence runtime boundary
+### 86.7 Local intelligence runtime boundary
 
 No LLM/GNN/foundation-model runtime is packaged into normal Agent or Sensor EDS. Tier-0 endpoint intelligence is deterministic/bounded statistical capture-eligibility and evidence logic in the existing runtime. Tier-1/2 intelligence follows `Platform_22` and `Platform_11` resource governance and remains optional; a dedicated inference provider is not an EDS release prerequisite.
 
 
-## 71A. Display timezone logical preference — v3.2.2 handoff
+## 87. Display timezone logical preference
 
 Logical user preference field:
 
@@ -2712,10 +2754,10 @@ display_timezone  NULL | IANA TZDB identifier
 
 Persisted on the existing user preference/profile architecture. Nullable means “no saved preference → resolve browser/device local, then tenant.timezone, then UTC”. This documentation baseline allocates **no** PostgreSQL migration number. Existing `tenant.timezone` remains the tenant fallback. Invalid IANA identifiers are rejected.
 
-## 71B. Scheduler logical contracts — v3.2.2 handoff
+## 88. Scheduler logical contracts
 
 Recurring desired-state records carry at minimum: tenant, assignment identity, target entity, monitor definition, scheduling class, execution class, nominal cadence, freshness deadline, deterministic phase inputs/version, generation/fence, and quality/overrun counters. Phase calculation is a versionable deterministic 64-bit function. Exact hash library is not frozen here.
 
-## 71C. Redundant identifier index — P2 hygiene note
+## 89. Redundant identifier index — P2 hygiene note
 
 V001 unique constraint `uq_identifier_resolution (tenant_id, namespace, identifier_type, identifier_value)` already creates a unique btree. Secondary index `idx_identifier_lookup` on the same columns is redundant unless current query evidence proves otherwise. Future **P2** forward-only DB hygiene only. **No migration number is reserved** by this baseline; never rewrite V001–V009 in place.

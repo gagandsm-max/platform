@@ -1,9 +1,15 @@
 # Platform — High-Level Design (HLD)
 
-**Document ID:** PLATFORM-HLD-001  
-**Version:** 3.2.2  
-**Status:** Authoritative Mother Reference — Engineering Source of Truth
-**Governing documents:** BRD, PRD, Master Architecture  
+**Document ID:** PLATFORM-HLD-001
+**Version:** 3.2.2
+**Status:** Authoritative Mother Reference — High-Level Design Authority (**A2.2 NORMALIZED_V1**)
+**Product name:** Platform
+**Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
+**Companions:** `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
+**Normalization state:** NORMALIZED_V1
+**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102)
+
+**Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
 ---
 
@@ -228,7 +234,7 @@ Owns configuration metadata, job orchestration, approval, schedules, Device Pack
 
 Owns browser WebSocket terminal session, privilege policy, stored/personal/one-time credential resolution under policy, Sensor routing, command/session audit and optional recording metadata. One-time credentials are ephemeral and reusable credentials never return to normal browser clients.
 
-### 4.14A Operational Diagnostics & Investigation Service
+### 4.15 Operational Diagnostics & Investigation Service
 
 A logical module inside the modular Core owns contextual on-demand diagnostic orchestration and Investigation Session state. It coordinates existing protocol workers, Sensor Control, CLI Broker, Query, NCM, Graph, RCA, Alert Qualification and Platform_22 Active Evidence Acquisition rather than replacing them.
 
@@ -236,33 +242,36 @@ Owns: contextual action authorization and typed diagnostic-job lifecycle; source
 
 Sensors/Agents execute interactive diagnostics under bounded worker budgets so operator activity cannot starve routine monitoring. Results are normalized evidence, not free-form claims.
 
-### 4.15 IPAM Service
+### 4.16 IPAM Service
 
 Owns address spaces, prefixes, VRF/VLAN context, address assignments/reservations, DNS/DHCP integration metadata, conflicts, discovery reconciliation and forecast APIs.
 
-### 4.16 Integration Service
+### 4.17 Integration Service
 
 Owns ITSM/notification connector definitions, field mappings, outbound queues, retries, idempotency, health and bidirectional state synchronization.
 
-### 4.17 Reporting/SLA Service
+### 4.18 Reporting/SLA Service
 
 Owns report definitions, schedules, execution, formula evaluation, document rendering, SLA policy calculation and long-term aggregates.
 
-### 4.18 Audit Service
+### 4.19 Audit Service
 
 Creates/ingests structured audit records, protects scope/access, exports to SIEM and supports audit search.
 
-### 4.19 Storage Lifecycle Service
+### 4.20 Storage Lifecycle Service
 
 Owns retention policies, rollup status, archive, storage forecasting, 80% watermark actions, legal holds and audit of deletion/reclamation.
 
-### 4.20 Platform Operations Service
+### 4.21 Platform Operations Service
 
 Owns Core/Sensor/data-service health, support bundle orchestration, backup/restore status, upgrades, certificates, licence warnings and internal housekeeping dashboards.
 
 ---
 
 ## 5. Sensor service decomposition
+
+**Maturity / Issue #92:** Sensor production entrypoint/governed-runtime gap remains. This HLD describes target runtime/worker isolation, not production certification.
+
 
 ```mermaid
 flowchart TB
@@ -366,6 +375,8 @@ Agent does not permanently select a Sensor independently. Core decides placement
 
 ## 7. Core HA HLD
 
+**Maturity / Issue #92:** Exactly-two-Core Active/Standby topology remains USER-FIXED. Stateful fencing, failover, rejoin and production certification remain **OPEN P0 / NOT PRODUCTION CERTIFIED**. Do not treat this HLD section as HA production certification.
+
 ### 7.1 States
 
 Each Core HA Manager has logical state:
@@ -435,6 +446,9 @@ Synchronous vs asynchronous commit policy is an engineering benchmark/availabili
 ---
 
 ## 9. ClickHouse HLD
+
+**Maturity / Issue #92:** ClickHouse retention/rollup/lifecycle implementation remains incomplete; do not treat this HLD as certified lifecycle evidence.
+
 
 ### 9.1 Table families
 
@@ -514,6 +528,9 @@ Kafka is internal transport. Sensor local spools are required specifically so th
 ---
 
 ## 11. Valkey HLD
+
+**Maturity / Issue #92:** Valkey is reconstructable/ephemeral only and is not authoritative control state.
+
 
 Use for bounded ephemeral/cached data such as:
 
@@ -879,6 +896,9 @@ Outbound actions use durable queue and idempotency key such as `tenant + inciden
 
 ## 26. Security HLD
 
+**Maturity / Issue #92:** Persistent IAM/RBAC production authority remains unimplemented; Discovery authorization integration remains incomplete/fail-closed; secret-startup hardening and certificate rotation/concurrency gaps remain open where applicable.
+
+
 ### 26.1 Identity
 
 Authentication providers: local, AD/LDAP, SAML, OIDC, Entra. MFA policy. Session controls.
@@ -947,6 +967,9 @@ These are engineering starting targets, not contractual limits.
 ---
 
 ## 29. DR HLD
+
+**Maturity / Issue #92:** Backup/restore/DR implementation evidence remains incomplete; exact RPO/RTO remain TBD where already recorded.
+
 
 DR must be possible in v1.0. Required architecture hooks:
 
@@ -1080,11 +1103,9 @@ Reconciles sequence/watermark counters across Sensor spool, Ingestion Gateway, K
 
 ---
 
-# Version 3.0 Reconciliation — Requirements That Must Not Be Lost
+## 35. Cross-cutting capability completeness (absorbed)
 
-This section is part of the authoritative document. It was added after a complete reconciliation of the Platform design discussions because the earlier split-document version compressed or omitted details. The canonical requirement IDs are in `Platform_08_Requirements_Traceability.md`; OSS decisions are in `Platform_07_OSS_Catalog.md`.
-
-The following cross-cutting capabilities are mandatory where applicable and must be represented in design, UI, APIs, security, audit and QA:
+The following cross-cutting capabilities remain mandatory where applicable and must be represented in design, UI, APIs, security, audit and QA. Canonical requirement IDs remain in `Platform_08_Requirements_Traceability.md`; OSS decisions remain in `Platform_07_OSS_Catalog.md` (Platform_07 stays TRANSITIONAL_LEGACY until A2.3).
 
 - asset lifecycle/reconciliation, stale/disappeared/replaced device handling and decommission workflow;
 - technology lifecycle/EOL/EOS/firmware risk visibility without pretending to be a vulnerability scanner;
@@ -1109,8 +1130,25 @@ The following cross-cutting capabilities are mandatory where applicable and must
 - scheduled housekeeping and end-to-end pipeline-integrity visibility;
 - stable customer-facing error codes/correlation IDs and **No Silent Failure**.
 
+## 36. Supporting mother-reference ownership
 
-## HLD-OSS — OSS placement by deployment unit
+Exact detail owned elsewhere must not be re-litigated here:
+
+- `Platform_03_Architecture.md` — architecture/topology/invariants.
+- `Platform_05_LLD.md` — detailed logical schemas/algorithms.
+- `Platform_06_Dataflow.md` — end-to-end sequences.
+- `Platform_07_OSS_Catalog.md` — approved/candidate OSS (not normalized in A2.2).
+- `Platform_08_Requirements_Traceability.md` — global REQ/PRD index.
+- `Platform_09_UI_UX_Master.md` — UI shell/Studios/screen contracts.
+- `Platform_10_Protocol_Security_Connector_Master.md` — protocol/security/connectivity.
+- `Platform_11_Sizing_Capacity_Storage_Master.md` — capacity/sizing/storage constants.
+- `Platform_12_Decision_Source_Register.md` — decision classes.
+- `Platform_14_Test_Performance_and_Release_Quality.md` — quality/certification.
+- `Platform_17_API_Event_and_Data_Model_Contracts.md` — exact API/event/data contracts.
+
+**OSS rule:** implementation teams may not add a runtime/build dependency merely because it is open source. It must be admitted to the Platform OSS Catalogue by exact version, transitive license/CVE scan and release policy.
+
+## 37. OSS placement by deployment unit
 
 ### Core node
 
@@ -1162,7 +1200,7 @@ Python NCM worker can use Nornir, scrapli, scrapli_cfg, approved NAPALM drivers,
 
 React/TypeScript, ECharts, TanStack Table/Query, react-grid-layout, Cytoscape.js, MapLibre and xterm.js are visualization primitives. They must never become sources of authorization truth. All sensitive decisions are server-side.
 
-## HLD-ADAPTERS — Mandatory Platform adapter boundary
+## 38. Mandatory Platform adapter boundary
 
 Each OSS protocol/client library is wrapped behind a Platform interface so that:
 
@@ -1174,48 +1212,44 @@ Each OSS protocol/client library is wrapped behind a Platform interface so that:
 
 Minimum adapter families: `SnmpAdapter`, `MibCompiler`, `FlowDecoder`, `ProbeAdapter`, `SshAdapter`, `NetconfAdapter`, `GnmiAdapter`, `RestAdapter`, `WinrmAdapter`, `RedfishAdapter`, `VsphereAdapter`, `KubernetesAdapter`, `CloudProviderAdapter`, `NcmDriver`.
 
-## HLD-STORAGE-LIFECYCLE — Core and Sensor storage behavior
+## 39. Storage lifecycle behavior
 
 Storage Lifecycle Service runs continuously rather than only at 80%. It evaluates per-volume utilization, growth and data class. At 70/75% it warns/optimizes; at 80% it enters mandatory reclamation. Exact warning thresholds may be configurable, but the 80% safety action cannot be disabled.
 
 Sensor local-spool protection uses the same principle but prioritizes unshipped recent/critical telemetry and drops oldest eligible low-priority buffered samples only when necessary. Every drop/reclaim is counted and reported to Core once connectivity exists.
 
-## HLD-LICENSING — Expiry state machine
+## 40. Licensing expiry state machine
 
-`VALID -> EXPIRING_30D -> EXPIRING_7D_BANNER -> GRACE_7D -> POLLING_SUSPENDED`.
+`VALID -> EXPIRING_30D -> EXPIRING_7D_BANNER -> EXPIRED_GRACE (FOUNDER-LIC-GRACE duration UNRESOLVED) -> POLLING_SUSPENDED`.
 
-Historical query/UI remains operational in `POLLING_SUSPENDED`. Manual administrative license extension can move the deployment back to `VALID` without reinstalling Core/Sensors.
+**FOUNDER-LIC-GRACE (UNRESOLVED):** post-expiry grace duration is Founder-reserved. Historical/source values are 7 days and 15 days; neither is normative commercial truth. Engineering must not choose a compromise day-count. Polling continues during the Founder-approved grace duration; polling stops when that approved grace expires unless the licence is renewed/extended.
 
-## HLD-DR — V1 disaster-recovery design requirement
+Normative non-grace continuity (unchanged):
+
+- T-30 licence-expiry warning remains.
+- T-7 pre-expiry persistent dashboard banner remains (`Licence expires in X days`).
+- Historical query/UI/admin/licence-management/audit remain available in `POLLING_SUSPENDED`.
+- Manual administrative license extension can move the deployment back to `VALID` without reinstalling Core/Sensors.
+
+## 41. Disaster-recovery design requirement
 
 A DR deployment shall be installable from the same signed Core/Sensor builds. The HLD requires backup/replication of authoritative configuration, licensing, Device Packs, secrets/cert material per recovery procedure, and recoverable telemetry according to the eventual RPO. Exact RPO/RTO are TBD, but the software must provide preflight, backup, restore, integrity verification and DR activation/runbook hooks from V1.
 
 
-## Mother-reference cross-document contract (v3.1)
-
-The following supporting mother references are normative and must be read together with this document:
-
-- `Platform_07_OSS_Catalog.md` — approved/candidate OSS by module, license class, usage, rationale and restrictions.
-- `Platform_08_Requirements_Traceability.md` — completeness control; a missing mapped requirement is a documentation defect.
-- `Platform_09_UI_UX_Master.md` — detailed global shell, Studios, 98 out-of-box dashboard/workspace screen contracts, filters/actions/states/RBAC behavior.
-- `Platform_10_Protocol_Security_Connector_Master.md` — protocol/security/authentication/credential/connectivity matrix and provisioning diagnostics.
-- `Platform_11_Sizing_Capacity_Storage_Master.md` — Core/Sensor compute targets, MWU, placement, retention/storage and 80% protection.
-- `Platform_12_Decision_Source_Register.md` — USER-FIXED vs ARCH-DELEGATED vs REFERENCE-LEARNING vs TBD/P0 decisions.
-
-**OSS rule:** implementation teams may not add a runtime/build dependency merely because it is open source. It must be admitted to the Platform OSS Catalogue by exact version, transitive license/CVE scan and release policy.
-
-
-## HLD-X1 — Data Pipeline Integrity Service
+## 42. Data Pipeline Integrity Service
 
 The Core exposes a Pipeline Integrity service/dashboard that reconciles producer sequence/counters, ingestion acknowledgements, Kafka offsets/consumer progress, normalization rejects and ClickHouse insert counts. It emits health alerts when gaps exceed certified tolerances, attributes the affected tenant/Sensor/topic/data class and provides an investigation path.
 
-## HLD-X2 — Data placement metadata
+## 43. Data placement metadata
 
 Tenant, site, entity, data class and archive policies carry data-placement metadata so a future regional-Core deployment can route/store data according to customer sovereignty requirements. The initial deployment does not claim multi-region sovereignty until implemented/certified.
 
-## 35. Engineering-runtime and package HLD — v3.1
+## 44. Engineering-runtime and package HLD
 
-### 35.1 Development deployment units
+**Maturity / Issue #92:** Native production packaging remains incomplete; Docker Compose development profiles are not production packaging certification.
+
+
+### 44.1 Development deployment units
 
 The repository shall provide Docker Compose profiles for at minimum:
 
@@ -1226,29 +1260,29 @@ The repository shall provide Docker Compose profiles for at minimum:
 - `security`: security scanning and negative protocol/authentication tests;
 - `dr`: backup/restore and disaster-recovery exercises.
 
-### 35.2 Compose service groups
+### 44.2 Compose service groups
 
 A complete local stack shall be decomposable into logical groups: Core application, UI, ingestion, data services, Sensors, mock devices/exporters, integration mocks and test runners. Developers should be able to start a minimal profile rather than always consuming resources for the full scale stack.
 
-### 35.3 Linux package service layout
+### 44.3 Linux package service layout
 
 Each installable component has a dedicated package, OS service and data boundary. Standard paths shall follow Linux conventions, with exact final paths governed by `Platform_15_CI_CD_Packaging_and_Distribution.md`.
 
-### 35.4 Runtime health/logging subsystem
+### 44.4 Runtime health/logging subsystem
 
 Each deployment unit shall implement a common health/logging contract. Logs flow to journald/stdout plus bounded application log files where required by support policy. Platform Health ingests service status and relevant metrics without creating a monitoring dependency loop that can destabilize the monitored service.
 
-### 35.5 Windows Agent deployment unit
+### 44.5 Windows Agent deployment unit
 
 The Windows Agent is one compiled service executable plus configuration/certificate state and an installer. BAT wrappers are convenience automation; they are not the Agent runtime itself. GA packaging uses MSI and code signing.
 
 ---
 
-## 36. Endpoint Diagnostic Evidence subsystem — v3.2.2 reconciliation
+## 45. Endpoint Diagnostic Evidence subsystem
 
 EDS is a specialized Diagnostic Job profile (`ENDPOINT_DIAGNOSTIC_SNAPSHOT`) within the existing Troubleshoot / Live Evidence / Investigation architecture. It does not create a second diagnostic registry, scheduler, investigation state machine or evidence store.
 
-### 36.1 Agent responsibilities
+### 45.1 Agent responsibilities
 
 Windows/Linux Agent adds logical responsibilities within the existing Agent runtime:
 
@@ -1261,7 +1295,7 @@ Windows/Linux Agent adds logical responsibilities within the existing Agent runt
 
 These responsibilities do not require a second endpoint daemon, Python runtime or model service.
 
-### 36.2 Infrastructure Sensor responsibilities
+### 45.2 Infrastructure Sensor responsibilities
 
 Infrastructure Sensor owns:
 
@@ -1275,7 +1309,7 @@ Infrastructure Sensor owns:
 
 Sensor does not perform authoritative cross-domain RCA and does not host the local LLM for this capability.
 
-### 36.3 Core responsibilities
+### 45.3 Core responsibilities
 
 Core owns:
 
@@ -1289,12 +1323,12 @@ Core owns:
 - optional ML/GNN/LLM assistance under `Platform_22`;
 - UI/API exposure of eligibility, evidence, gaps and diagnostic status, visually distinct from Core RCA conclusions.
 
-### 36.4 Local/private inference provider boundary
+### 45.4 Local/private inference provider boundary
 
 **If** AI Gateway targets a separate local/private inference provider, that mode is an optional/conditional inference boundary only: no scheduling authority, no HA quorum role, no direct telemetry ingestion authority and no durable control-plane ownership. It is not required for EDS or base monitoring. All-AI-disabled remains supported.
 
 
-## 34A. Display timezone / scheduling / role ownership — v3.2.2 handoff
+## 46. Display timezone / scheduling / role ownership
 
 - **UI shell / preferences:** owns interactive timezone indicator, IANA picker, Local/Tenant Default/UTC shortcuts, saved `display_timezone`, session/view override and report timezone disclosure (`Platform_09`).
 - **Core control plane:** owns schedule/policy desired-state, placement, assignment generation/fencing, tenant timezone fallback and user preference persistence APIs.

@@ -101,9 +101,9 @@ CANONICAL_NORMALIZATION: dict[str, str] = {
     "Platform_01_BRD.md": "NORMALIZED_V1",
     "Platform_02_PRD.md": "NORMALIZED_V1",
     "Platform_03_Architecture.md": "NORMALIZED_V1",
-    "Platform_04_HLD.md": "TRANSITIONAL_LEGACY",
-    "Platform_05_LLD.md": "TRANSITIONAL_LEGACY",
-    "Platform_06_Dataflow.md": "TRANSITIONAL_LEGACY",
+    "Platform_04_HLD.md": "NORMALIZED_V1",
+    "Platform_05_LLD.md": "NORMALIZED_V1",
+    "Platform_06_Dataflow.md": "NORMALIZED_V1",
     "Platform_07_OSS_Catalog.md": "TRANSITIONAL_LEGACY",
     "Platform_08_Requirements_Traceability.md": "NORMALIZED_V1",
     "Platform_09_UI_UX_Master.md": "TRANSITIONAL_LEGACY",
@@ -770,12 +770,34 @@ class MotherReferenceValidator:
         """For NORMALIZED_V1 docs, numeric ###/#### headings must belong to
         the current ## N parent. Descriptive unnumbered ### headings are OK.
         TRANSITIONAL_LEGACY documents are not checked here.
+
+        Also rejects bare numeric-looking subsection tokens that lack a
+        hierarchical suffix (e.g. ``### 44 Description``), and rejects
+        temporary migration markers inside headings (e.g. ``__TMP29__``).
         """
         current_top: int | None = None
         for line in text.splitlines():
+            # Any markdown heading (## through ######) for TMP-marker guard.
+            heading = re.match(r"^(#{2,6})\s+(.+)$", line)
+            if heading:
+                title = heading.group(2)
+                if re.search(r"(?:__TMP\d+__|\*\*TMP\d+\*\*)", title):
+                    self.fail(
+                        f"{rel}: temporary migration marker in heading: "
+                        f"{line.strip()[:80]}"
+                    )
             top_match = re.match(r"^##\s+(\d+)\.", line)
             if top_match:
                 current_top = int(top_match.group(1))
+                continue
+            # Bare numeric parent token without hierarchical suffix:
+            # ### 44 Description  /  #### 44 Nested detail
+            bare = re.match(r"^(#{3,6})\s+(\d+)\s+\S", line)
+            if bare and not re.match(r"^(#{3,6})\s+\d+(?:\.\d+)+\s+\S", line):
+                self.fail(
+                    f"{rel}: malformed bare-numeric subsection heading "
+                    f"(missing hierarchical suffix): {line.strip()[:80]}"
+                )
                 continue
             sub = re.match(r"^(#{3,6})\s+(\d+)((?:\.\d+)+)\s+\S", line)
             if not sub:
@@ -830,6 +852,77 @@ class MotherReferenceValidator:
                         f"{rel}: unsupported maturity equality spelling: {pat.pattern}"
                     )
 
+    def validate_normalized_rtm_licence_grace(
+        self, paths: dict[str, Path]
+    ) -> None:
+        """NORMALIZED Platform_08 must not reintroduce fixed post-expiry grace.
+
+        Guards REQ-LIC-004 / REQ-EGC-007 / PRD-EGC-007 primary-registry rows.
+        Does not apply to TRANSITIONAL_LEGACY Platform_21. Does not reject
+        REQ-LIC-003 (T-7 PRE-EXPIRY banner) or historical 7-vs-15 provenance
+        when coupled to FOUNDER-LIC-GRACE UNRESOLVED.
+        """
+        rel = "Platform_08_Requirements_Traceability.md"
+        if CANONICAL_NORMALIZATION.get(rel) != "NORMALIZED_V1":
+            return
+        path = paths.get(rel)
+        if path is None or not path.is_file():
+            return
+        text = path.read_text(encoding="utf-8")
+
+        stale_forms = (
+            "7-day default grace after expiry",
+            "governed seven-day grace",
+            "existing seven-day grace requirement",
+        )
+        lowered = text.lower()
+        for stale in stale_forms:
+            if stale.lower() in lowered:
+                self.fail(
+                    f"{rel}: stale fixed post-expiry licence-grace wording "
+                    f"must not appear in NORMALIZED_V1 RTM: {stale!r}"
+                )
+
+        req_rows = {
+            r["id"]: r
+            for r in self._parse_registry_rows(
+                text, REQ_MARKER_START, REQ_MARKER_END, "REQ"
+            )
+        }
+        prd_rows = {
+            r["id"]: r
+            for r in self._parse_registry_rows(
+                text, PRD_MARKER_START, PRD_MARKER_END, "PRD"
+            )
+        }
+
+        required: list[tuple[str, dict[str, str] | None, str]] = [
+            ("REQ-LIC-004", req_rows.get("REQ-LIC-004"), "REQ"),
+            ("REQ-EGC-007", req_rows.get("REQ-EGC-007"), "REQ"),
+            ("PRD-EGC-007", prd_rows.get("PRD-EGC-007"), "PRD"),
+        ]
+        for rid, row, kind in required:
+            if row is None:
+                # Absence is covered by other registry completeness rules when
+                # the ID exists in the live set; skip here if fixture omits it.
+                continue
+            if kind == "REQ":
+                blob = " ".join(
+                    [
+                        row.get("summary", ""),
+                        row.get("evidence", ""),
+                        row.get("locator", ""),
+                    ]
+                )
+            else:
+                blob = row.get("summary", "")
+            if "FOUNDER-LIC-GRACE" not in blob or "UNRESOLVED" not in blob:
+                self.fail(
+                    f"{rel}: {rid} primary registry row must state "
+                    f"FOUNDER-LIC-GRACE and UNRESOLVED "
+                    f"(controlling truth: Platform_02 §33)"
+                )
+
     def validate(self) -> list[str]:
         self.errors = []
         constitutional = self.validate_constitutional_set()
@@ -852,6 +945,7 @@ class MotherReferenceValidator:
         self.validate_cross_references(manifest, paths)
         self.validate_normalized_structure(paths)
         self.validate_maturity_language(paths)
+        self.validate_normalized_rtm_licence_grace(paths)
         return self.errors
 
 

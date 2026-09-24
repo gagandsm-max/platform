@@ -27,9 +27,9 @@ MINIMAL_DOCS = [
     ("Platform_01_BRD.md", "PLATFORM-BRD-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_02_PRD.md", "PLATFORM-PRD-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_03_Architecture.md", "PLATFORM-ARC-001", "NORMALIZED_V1", "mother_reference"),
-    ("Platform_04_HLD.md", "PLATFORM-HLD-001", "TRANSITIONAL_LEGACY", "mother_reference"),
-    ("Platform_05_LLD.md", "PLATFORM-LLD-001", "TRANSITIONAL_LEGACY", "mother_reference"),
-    ("Platform_06_Dataflow.md", "PLATFORM-DF-001", "TRANSITIONAL_LEGACY", "mother_reference"),
+    ("Platform_04_HLD.md", "PLATFORM-HLD-001", "NORMALIZED_V1", "mother_reference"),
+    ("Platform_05_LLD.md", "PLATFORM-LLD-001", "NORMALIZED_V1", "mother_reference"),
+    ("Platform_06_Dataflow.md", "PLATFORM-DF-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_07_OSS_Catalog.md", "PLATFORM-OSS-001", "TRANSITIONAL_LEGACY", "mother_reference"),
     ("Platform_08_Requirements_Traceability.md", "PLATFORM-RTM-001", "NORMALIZED_V1", "mother_reference"),
     ("Platform_09_UI_UX_Master.md", "PLATFORM-UIUX-001", "TRANSITIONAL_LEGACY", "mother_reference"),
@@ -512,17 +512,17 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
 
     def test_18_transitional_legacy_duplicate_sections_not_blocked(self) -> None:
-        # Platform_04 remains TRANSITIONAL_LEGACY after A2.1; duplicate ## numbers allowed.
+        # Platform_07 remains TRANSITIONAL_LEGACY after A2.2; duplicate ## numbers allowed.
         root = self._write_minimal()
-        (root / "Platform_04_HLD.md").write_text(
-            _header("PLATFORM-HLD-001")
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
             + "## 1. One\n\n## 1. Two\n\n## 18.1 Nested historical\n\n",
             encoding="utf-8",
         )
         errors = validate_docs_root(root)
         self.assertFalse(
             any(
-                "Platform_04_HLD.md: duplicate normalized" in e for e in errors
+                "Platform_07_OSS_Catalog.md: duplicate normalized" in e for e in errors
             ),
             errors,
         )
@@ -618,18 +618,127 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
-    def test_18g_transitional_platform_04_may_retain_historical_numbering(self) -> None:
+    def test_18f2_normalized_proper_dotted_subsection_passes(self) -> None:
         root = self._write_minimal()
         (root / "Platform_04_HLD.md").write_text(
             _header("PLATFORM-HLD-001")
+            + "## 44. Engineering-runtime\n\n"
+            + "### 44.1 Development deployment units\n\n"
+            + "### Core node\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("malformed bare-numeric" in e for e in errors),
+            errors,
+        )
+        self.assertFalse(
+            any("parent mismatch" in e for e in errors),
+            errors,
+        )
+
+    def test_18f3_normalized_bare_numeric_subsection_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_04_HLD.md").write_text(
+            _header("PLATFORM-HLD-001")
+            + "## 44. Engineering-runtime\n\n"
+            + "### 44 Development deployment units\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_04_HLD.md" in e and "malformed bare-numeric" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18f4_normalized_bare_numeric_deep_heading_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_04_HLD.md").write_text(
+            _header("PLATFORM-HLD-001")
+            + "## 44. Engineering-runtime\n\n"
+            + "#### 44 Nested detail\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_04_HLD.md" in e and "malformed bare-numeric" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18f5_normalized_tmp_marker_in_heading_fails(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_06_Dataflow.md").write_text(
+            _header("PLATFORM-DF-001")
+            + "## 29. __TMP29__. Flow DF-027A — Example\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_06_Dataflow.md" in e
+                and "temporary migration marker" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18f6_transitional_platform_07_bare_numeric_not_blocked(self) -> None:
+        # Platform_07 remains TRANSITIONAL_LEGACY; bare-numeric / TMP guards
+        # apply only to NORMALIZED_V1 documents.
+        root = self._write_minimal()
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
             + "## 9. Placement\n\n"
-            + "### 8.1 Historical Sensor runtime numbering retained until A2.2\n\n",
+            + "### 9 Historical OSS bare token retained until A2.3\n\n"
+            + "## 10. __TMP10__. Historical marker\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("Platform_07_OSS_Catalog.md" in e and "malformed bare-numeric" in e for e in errors),
+            errors,
+        )
+        self.assertFalse(
+            any(
+                "Platform_07_OSS_Catalog.md" in e and "temporary migration marker" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_18g_transitional_platform_07_may_retain_historical_numbering(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
+            + "## 9. Placement\n\n"
+            + "### 8.1 Historical OSS numbering retained until A2.3\n\n",
             encoding="utf-8",
         )
         errors = validate_docs_root(root)
         self.assertFalse(
             any(
-                "Platform_04_HLD.md" in e and "parent mismatch" in e for e in errors
+                "Platform_07_OSS_Catalog.md" in e and "parent mismatch" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_18h_normalized_platform_04_duplicate_sections_blocked(self) -> None:
+        root = self._write_minimal()
+        (root / "Platform_04_HLD.md").write_text(
+            _header("PLATFORM-HLD-001")
+            + "## 1. One\n\n## 1. Two\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_04_HLD.md: duplicate normalized" in e for e in errors
             ),
             errors,
         )
@@ -1031,16 +1140,61 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
 
     def test_43_premature_transitional_to_normalized_fails(self) -> None:
-        # Platform_04 remains TRANSITIONAL_LEGACY after A2.1; premature upgrade must fail.
+        # Platform_07 remains TRANSITIONAL_LEGACY after A2.2; premature upgrade must fail.
         root = self._write_minimal(
-            normalize_overrides={"Platform_04_HLD.md": "NORMALIZED_V1"}
+            normalize_overrides={"Platform_07_OSS_Catalog.md": "NORMALIZED_V1"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_07_OSS_Catalog.md" in e
+                and "normalizationState" in e
+                and "TRANSITIONAL_LEGACY" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43e_platform_04_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_04_HLD.md": "TRANSITIONAL_LEGACY"}
         )
         errors = validate_docs_root(root)
         self.assertTrue(
             any(
                 "Platform_04_HLD.md" in e
                 and "normalizationState" in e
-                and "TRANSITIONAL_LEGACY" in e
+                and "NORMALIZED_V1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43f_platform_05_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_05_LLD.md": "TRANSITIONAL_LEGACY"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_05_LLD.md" in e
+                and "normalizationState" in e
+                and "NORMALIZED_V1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_43g_platform_06_normalization_downgrade_fails(self) -> None:
+        root = self._write_minimal(
+            normalize_overrides={"Platform_06_Dataflow.md": "TRANSITIONAL_LEGACY"}
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_06_Dataflow.md" in e
+                and "normalizationState" in e
+                and "NORMALIZED_V1" in e
                 for e in errors
             ),
             errors,
@@ -1178,6 +1332,222 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 )
                 for e in errors
             ),
+            errors,
+        )
+
+    # --- A2.2 normalized RTM licence-grace guard (Issue #102 / PR #103) ---
+
+    def test_48_req_lic_004_founder_grace_unresolved_passes(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace uses FOUNDER-LIC-GRACE UNRESOLVED; "
+                    "7-day vs 15-day; neither normative",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("licence-grace" in e or "FOUNDER-LIC-GRACE" in e for e in errors),
+            errors,
+        )
+
+    def test_49_req_egc_007_founder_grace_unresolved_passes(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-P-001",
+                    "Quality",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+                (
+                    "REQ-EGC-007",
+                    "Licensing tests preserve FOUNDER-LIC-GRACE UNRESOLVED behavior",
+                    "Platform_21_Enterprise_Gap_Closure_Master.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("REQ-EGC-007" in e and "FOUNDER-LIC-GRACE" in e for e in errors),
+            errors,
+        )
+        self.assertFalse(
+            any("stale fixed post-expiry" in e for e in errors),
+            errors,
+        )
+
+    def test_50_prd_egc_007_founder_grace_unresolved_passes(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+            ],
+            prd_rows=[
+                ("PRD-HA-001", "HA pair", "Platform_02_PRD.md"),
+                (
+                    "PRD-EGC-007",
+                    "Fail-safe licence enforcement; FOUNDER-LIC-GRACE UNRESOLVED "
+                    "between historical/source 7-day and 15-day; neither normative",
+                    "Platform_21_Enterprise_Gap_Closure_Master.md",
+                ),
+            ],
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("PRD-EGC-007" in e and "FOUNDER-LIC-GRACE" in e for e in errors),
+            errors,
+        )
+        self.assertFalse(
+            any("stale fixed post-expiry" in e for e in errors),
+            errors,
+        )
+
+    def test_51_req_lic_004_stale_seven_day_default_grace_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "7-day default grace after expiry; then polling stops",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "stale fixed post-expiry licence-grace" in e
+                and "7-day default grace after expiry" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_52_req_egc_007_stale_governed_seven_day_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                (
+                    "REQ-EGC-007",
+                    "Licensing tests preserve the governed seven-day grace",
+                    "Platform_21_Enterprise_Gap_Closure_Master.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "stale fixed post-expiry licence-grace" in e
+                and "governed seven-day grace" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_53_prd_egc_007_stale_existing_seven_day_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+            ],
+            prd_rows=[
+                ("PRD-HA-001", "HA pair", "Platform_02_PRD.md"),
+                (
+                    "PRD-EGC-007",
+                    "preserve the existing seven-day grace requirement where already governed",
+                    "Platform_21_Enterprise_Gap_Closure_Master.md",
+                ),
+            ],
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "stale fixed post-expiry licence-grace" in e
+                and "existing seven-day grace requirement" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_54_req_lic_003_pre_expiry_banner_still_passes(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-003",
+                    "7-day dashboard banner before expiry",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace FOUNDER-LIC-GRACE UNRESOLVED",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_55_historical_7_vs_15_provenance_allowed_with_founder_unresolved(
+        self,
+    ) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "FOUNDER-LIC-GRACE UNRESOLVED; 7-day vs 15-day; neither normative",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_56_platform_21_transitional_seven_day_not_blocked_by_rtm_guard(
+        self,
+    ) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                (
+                    "REQ-EGC-007",
+                    "Licensing tests preserve FOUNDER-LIC-GRACE UNRESOLVED behavior",
+                    "Platform_21_Enterprise_Gap_Closure_Master.md",
+                ),
+            ],
+            prd_rows=[
+                ("PRD-HA-001", "HA pair", "Platform_02_PRD.md"),
+                (
+                    "PRD-EGC-007",
+                    "Fail-safe licence; FOUNDER-LIC-GRACE UNRESOLVED",
+                    "Platform_21_Enterprise_Gap_Closure_Master.md",
+                ),
+            ],
+            extra_files={
+                "Platform_21_Enterprise_Gap_Closure_Master.md": (
+                    "# Doc\n"
+                    "**Document ID:** PLATFORM-EGC-001\n"
+                    "**Version:** 3.2.2\n\n"
+                    "## 1. Section\n\n"
+                    "Historical transitional prose retains the governed seven-day grace "
+                    "and the existing seven-day grace requirement until A5.\n"
+                    "| `REQ-EGC-007` | transitional |\n"
+                    "| `PRD-EGC-007` | transitional |\n"
+                ),
+            },
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any("Platform_21" in e and "stale fixed post-expiry" in e for e in errors),
+            errors,
+        )
+        self.assertFalse(
+            any("stale fixed post-expiry licence-grace" in e for e in errors),
             errors,
         )
 
