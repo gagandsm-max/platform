@@ -14,8 +14,8 @@
 | Active BUILD | BUILD-000 |
 | Status | IMPLEMENTING |
 | GitHub issue | #110 |
-| PR | PENDING |
-| Evidence | PENDING |
+| PR | #111 |
+| Evidence | local static validation passed; exact-head CI pending |
 | Last updated | 2026-09-24 |
 | Sequencing authority | Master Chat only |
 
