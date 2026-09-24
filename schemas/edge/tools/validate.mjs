@@ -185,8 +185,9 @@ function assertUtcTs(value, field, codes) {
 }
 
 /**
- * Core IngestionValidator semantics: complete unordered set of sequences
- * in [firstSequence, lastSequence], no duplicates, count == last-first+1.
+ * Core IngestionValidator / AgentIngestionValidator semantics:
+ * complete unordered set of sequences in [first, last], no duplicates,
+ * count == last-first+1. NOT used for Agent→Sensor delivery (stricter).
  */
 function assertCompleteSequenceSet(records, first, last, codes, seqField = 'sequence') {
   if (!Array.isArray(records)) {
@@ -230,6 +231,68 @@ function assertCompleteSequenceSet(records, first, last, codes, seqField = 'sequ
   }
 }
 
+/**
+ * Sensor ValidateEnvelope semantics: strictly ascending contiguous sequences.
+ * records[i].sequence == records[i-1].sequence + 1; endpoints match first/last;
+ * length == last-first+1. Do NOT use unordered-set semantics here.
+ */
+function assertStrictContiguousAgentSequences(records, first, last, codes, pathPrefix = 'records') {
+  if (!Array.isArray(records)) {
+    fail(codes, 'INVALID_CONTRACT', `${pathPrefix} must be array`);
+    return;
+  }
+  const expectedCount = last - first + 1;
+  if (!Number.isSafeInteger(expectedCount) || expectedCount < 1) {
+    fail(codes, 'SEQUENCE_BOUNDS_INVALID', `${pathPrefix} invalid first/last span`);
+    return;
+  }
+  if (records.length !== expectedCount) {
+    fail(codes, 'RECORD_COUNT_MISMATCH', `${pathPrefix}.length ${records.length} != last-first+1 (${expectedCount})`);
+  }
+  if (!records.length) return;
+  if (records[0]?.sequence !== first) {
+    fail(codes, 'SEQUENCE_BOUNDS_INVALID', `${pathPrefix}[0].sequence must equal firstSequence ${first}`);
+  }
+  if (records[records.length - 1]?.sequence !== last) {
+    fail(codes, 'SEQUENCE_BOUNDS_INVALID', `${pathPrefix}[last].sequence must equal lastSequence ${last}`);
+  }
+  for (let i = 0; i < records.length; i++) {
+    const seq = records[i]?.sequence;
+    if (typeof seq !== 'number' || !Number.isSafeInteger(seq)) continue;
+    if (i > 0) {
+      const prev = records[i - 1]?.sequence;
+      if (typeof prev === 'number' && Number.isSafeInteger(prev) && seq !== prev + 1) {
+        fail(codes, 'SEQUENCE_NOT_CONTIGUOUS', `${pathPrefix}[${i}].sequence expected ${prev + 1}, got ${seq}`);
+      }
+    }
+  }
+}
+
+function validateAgentDeliveryRecord(rec, pathPrefix, codes) {
+  const rAllowed = new Set(['sequence', 'id', 'createdAt', 'checksum', 'payload']);
+  assertExactKeys(rec, rAllowed, ['sequence', 'id', 'createdAt', 'checksum', 'payload'], codes);
+  assertSafeSequence(rec.sequence, `${pathPrefix}.sequence`, codes);
+  if (typeof rec.id !== 'string' || !CORR_RE.test(rec.id)) fail(codes, 'INVALID_RECORD_ID', `${pathPrefix}.id`);
+  assertUtcTs(rec.createdAt, `${pathPrefix}.createdAt`, codes);
+  assertChecksum(rec.checksum, `${pathPrefix}.checksum`, codes);
+  // Receiver-compatible: any non-empty JSON (json.RawMessage). Producer-current: object.
+  if (!('payload' in rec) || rec.payload === undefined) {
+    fail(codes, 'MISSING_REQUIRED_FIELD', `${pathPrefix}.payload`);
+  } else {
+    try {
+      const encoded = JSON.stringify(rec.payload);
+      if (encoded === undefined || encoded.length < 1) {
+        fail(codes, 'INVALID_CONTRACT', `${pathPrefix}.payload must be non-empty JSON`);
+      }
+    } catch {
+      fail(codes, 'INVALID_CONTRACT', `${pathPrefix}.payload must be JSON-serializable`);
+    }
+  }
+  if (isPlainObject(rec) && 'entityId' in rec) {
+    fail(codes, 'FORBIDDEN_ENTITY_ID', 'Agent v1 must not carry authoritative entityId');
+  }
+}
+
 function validateAgentBatch(doc, codes) {
   const allowed = new Set([
     'schemaVersion', 'agentId', 'tenantId', 'siteId', 'correlationId', 'batchId',
@@ -262,26 +325,14 @@ function validateAgentBatch(doc, codes) {
   }
   if (doc.recordCount !== doc.records.length) fail(codes, 'RECORD_COUNT_MISMATCH', 'recordCount != records.length');
   if (doc.firstSequence > doc.lastSequence) fail(codes, 'SEQUENCE_BOUNDS_INVALID', 'firstSequence > lastSequence');
-  const seen = new Set();
+  const expectedSpan = doc.lastSequence - doc.firstSequence + 1;
+  if (Number.isSafeInteger(expectedSpan) && doc.recordCount !== expectedSpan) {
+    fail(codes, 'RECORD_COUNT_MISMATCH', 'recordCount != lastSequence-firstSequence+1');
+  }
   for (const [i, rec] of doc.records.entries()) {
-    const rAllowed = new Set(['sequence', 'id', 'createdAt', 'checksum', 'payload']);
-    assertExactKeys(rec, rAllowed, ['sequence', 'id', 'createdAt', 'checksum', 'payload'], codes);
-    assertSafeSequence(rec.sequence, `records[${i}].sequence`, codes);
-    if (seen.has(rec.sequence)) fail(codes, 'DUPLICATE_SEQUENCE', `records[${i}].sequence`);
-    seen.add(rec.sequence);
-    if (typeof rec.id !== 'string' || !CORR_RE.test(rec.id)) fail(codes, 'INVALID_RECORD_ID', `records[${i}].id`);
-    assertUtcTs(rec.createdAt, `records[${i}].createdAt`, codes);
-    assertChecksum(rec.checksum, `records[${i}].checksum`, codes);
-    if (!isPlainObject(rec.payload)) fail(codes, 'INVALID_CONTRACT', `records[${i}].payload`);
-    if ('entityId' in rec) fail(codes, 'FORBIDDEN_ENTITY_ID', 'Agent v1 must not carry authoritative entityId');
+    validateAgentDeliveryRecord(rec, `records[${i}]`, codes);
   }
-  if (doc.records.length) {
-    const first = doc.records[0].sequence;
-    const last = doc.records[doc.records.length - 1].sequence;
-    if (first !== doc.firstSequence || last !== doc.lastSequence) {
-      fail(codes, 'SEQUENCE_BOUNDS_INVALID', 'envelope bounds must match first/last record sequences');
-    }
-  }
+  assertStrictContiguousAgentSequences(doc.records, doc.firstSequence, doc.lastSequence, codes, 'records');
   assertNoSecrets(doc, codes);
 }
 
@@ -386,7 +437,16 @@ function validateIngressBatch(doc, codes) {
     fail(codes, 'RECORD_COUNT_EXCEEDED', `records.length ${doc.records.length} > ${AGENT_INGRESS_MAX_RECORDS}`);
   }
   if (doc.recordCount !== doc.records.length) fail(codes, 'RECORD_COUNT_MISMATCH', 'recordCount');
-  const seen = new Set();
+  // Outer ingress: Core AgentIngestionValidator complete unordered set.
+  if (!(doc.firstIngressSequence > doc.lastIngressSequence)) {
+    assertCompleteSequenceSet(
+      doc.records,
+      doc.firstIngressSequence,
+      doc.lastIngressSequence,
+      codes,
+      'sensorIngressSequence',
+    );
+  }
   for (const [i, rec] of doc.records.entries()) {
     const rAllowed = new Set([
       'sensorIngressSequence', 'sensorIngressRecordId', 'tenantId', 'agentId', 'acceptingSensorId',
@@ -394,9 +454,6 @@ function validateIngressBatch(doc, codes) {
       'correlationId', 'acceptedAt', 'records',
     ]);
     assertExactKeys(rec, rAllowed, [...rAllowed], codes);
-    assertSafeSequence(rec.sensorIngressSequence, `records[${i}].sensorIngressSequence`, codes);
-    if (seen.has(rec.sensorIngressSequence)) fail(codes, 'DUPLICATE_SEQUENCE', `records[${i}]`);
-    seen.add(rec.sensorIngressSequence);
     assertUuid(rec.tenantId, `records[${i}].tenantId`, codes);
     assertAgentId(rec.agentId, `records[${i}].agentId`, codes);
     assertSensorId(rec.acceptingSensorId, `records[${i}].acceptingSensorId`, codes);
@@ -406,7 +463,36 @@ function validateIngressBatch(doc, codes) {
     assertAgentDeliveryBatchId(rec.agentBatchId, `records[${i}].agentBatchId`, codes);
     assertCorr(rec.correlationId, `records[${i}].correlationId`, codes);
     assertUtcTs(rec.acceptedAt, `records[${i}].acceptedAt`, codes);
-    if (!Array.isArray(rec.records)) fail(codes, 'INVALID_CONTRACT', `records[${i}].records`);
+    if (!Array.isArray(rec.records)) {
+      fail(codes, 'INVALID_CONTRACT', `records[${i}].records`);
+      continue;
+    }
+    if (rec.records.length < 1) {
+      fail(codes, 'INVALID_CONTRACT', `records[${i}].records must be non-empty`);
+    }
+    if (rec.records.length > AGENT_MAX_RECORDS) {
+      fail(codes, 'RECORD_COUNT_EXCEEDED', `records[${i}].records.length ${rec.records.length} > ${AGENT_MAX_RECORDS}`);
+    }
+    for (const [j, delivery] of rec.records.entries()) {
+      validateAgentDeliveryRecord(delivery, `records[${i}].records[${j}]`, codes);
+    }
+    if (
+      typeof rec.agentFirstSequence === 'number'
+      && typeof rec.agentLastSequence === 'number'
+      && Number.isSafeInteger(rec.agentFirstSequence)
+      && Number.isSafeInteger(rec.agentLastSequence)
+      && rec.agentFirstSequence <= rec.agentLastSequence
+    ) {
+      assertStrictContiguousAgentSequences(
+        rec.records,
+        rec.agentFirstSequence,
+        rec.agentLastSequence,
+        codes,
+        `records[${i}].records`,
+      );
+    } else if (rec.agentFirstSequence > rec.agentLastSequence) {
+      fail(codes, 'SEQUENCE_BOUNDS_INVALID', `records[${i}] agentFirst > agentLast`);
+    }
   }
   assertNoSecrets(doc, codes);
 }
@@ -643,6 +729,35 @@ function runSchemaSetSelfCheck(loadedSchemas) {
   if (schemaMaxItems(ingressBatch, ['properties', 'recordCount', 'maximum']) !== AGENT_INGRESS_MAX_RECORDS) {
     codes.push('AGENT_INGRESS_RECORD_COUNT_MAX_MISMATCH');
   }
+  const nestedMax = schemaMaxItems(
+    ingressBatch,
+    ['properties', 'records', 'items', 'properties', 'records', 'maxItems'],
+  );
+  if (nestedMax !== AGENT_MAX_RECORDS) {
+    codes.push('NESTED_AGENT_RECORDS_MAX_ITEMS_MISMATCH');
+  }
+  const nestedMin = schemaMaxItems(
+    ingressBatch,
+    ['properties', 'records', 'items', 'properties', 'records', 'minItems'],
+  );
+  if (nestedMin !== 1) {
+    codes.push('NESTED_AGENT_RECORDS_MIN_ITEMS_MISMATCH');
+  }
+  if (!common.$defs?.agentDeliveryRecord) {
+    codes.push('MISSING_AGENT_DELIVERY_RECORD_DEF');
+  }
+  const agentItemsRef = schemaMaxItems(agentBatch, ['properties', 'records', 'items', '$ref']);
+  const nestedItemsRef = schemaMaxItems(
+    ingressBatch,
+    ['properties', 'records', 'items', 'properties', 'records', 'items', '$ref'],
+  );
+  const expectedDeliveryRef = 'common-definitions.schema.json#/$defs/agentDeliveryRecord';
+  if (agentItemsRef !== expectedDeliveryRef) {
+    codes.push('AGENT_BATCH_DELIVERY_RECORD_REF_MISMATCH');
+  }
+  if (nestedItemsRef !== expectedDeliveryRef) {
+    codes.push('INGRESS_NESTED_DELIVERY_RECORD_REF_MISMATCH');
+  }
 
   return codes;
 }
@@ -674,7 +789,8 @@ function makeSensorRecords(n, startSeq = 1) {
   return records;
 }
 
-function makeIngressRecord(seq) {
+function makeIngressRecord(seq, nestedCount = 1, nestedStart = 1) {
+  const nested = makeAgentRecords(nestedCount, nestedStart);
   return {
     sensorIngressSequence: seq,
     sensorIngressRecordId: `ing-${seq}`,
@@ -682,12 +798,12 @@ function makeIngressRecord(seq) {
     agentId: 'agent-1',
     acceptingSensorId: 'sensor-1',
     assignmentGeneration: 1,
-    agentFirstSequence: 1,
-    agentLastSequence: 1,
+    agentFirstSequence: nestedStart,
+    agentLastSequence: nestedStart + nestedCount - 1,
     agentBatchId: 'agent-batch-1',
     correlationId: 'corr-1',
     acceptedAt: '2026-09-24T10:00:00.000Z',
-    records: [],
+    records: nested,
   };
 }
 
@@ -798,6 +914,42 @@ function runGeneratedBoundaryTests(examples) {
     results.push({
       name: 'boundary-core-batchid-256-fail',
       ok: codes.includes('INVALID_BATCH_ID'),
+      codes,
+    });
+  }
+  // Nested Agent delivery: 100 contiguous PASS / 101 FAIL / empty FAIL
+  {
+    const doc = deepClone(ingressBase);
+    doc.records = [makeIngressRecord(1, AGENT_MAX_RECORDS, 1)];
+    doc.firstIngressSequence = 1;
+    doc.lastIngressSequence = 1;
+    doc.recordCount = 1;
+    const codes = validateDocument('sensor-agent-ingress-batch', doc);
+    results.push({ name: 'boundary-nested-agent-100-pass', ok: codes.length === 0, codes });
+  }
+  {
+    const doc = deepClone(ingressBase);
+    doc.records = [makeIngressRecord(1, AGENT_MAX_RECORDS + 1, 1)];
+    doc.firstIngressSequence = 1;
+    doc.lastIngressSequence = 1;
+    doc.recordCount = 1;
+    const codes = validateDocument('sensor-agent-ingress-batch', doc);
+    results.push({
+      name: 'boundary-nested-agent-101-fail',
+      ok: codes.includes('RECORD_COUNT_EXCEEDED'),
+      codes,
+    });
+  }
+  {
+    const doc = deepClone(ingressBase);
+    doc.records = [makeIngressRecord(1, 1, 1)];
+    doc.records[0].records = [];
+    doc.records[0].agentFirstSequence = 1;
+    doc.records[0].agentLastSequence = 1;
+    const codes = validateDocument('sensor-agent-ingress-batch', doc);
+    results.push({
+      name: 'boundary-nested-agent-empty-fail',
+      ok: codes.includes('INVALID_CONTRACT') || codes.includes('RECORD_COUNT_MISMATCH'),
       codes,
     });
   }

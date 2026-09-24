@@ -69,6 +69,31 @@ Producer configurable defaults are **not** protocol maxima unless they are the a
 | Sensor→Core telemetry | **1000** records | 2 MiB batch, 512 KiB record | Core `IngestionValidator.MAX_RECORDS` |
 | Sensor→Core Agent-ingress | **1000** Core acceptance; Sensor producer default **32** | 2 MiB batch, 512 KiB record | Core `AgentIngestionValidator` / Sensor drain |
 
+### Agent→Sensor sequence continuity (strict)
+
+`CURRENT_IMPLEMENTED_V1` Sensor `ValidateEnvelope` requires **strictly ascending contiguous** delivery sequences:
+
+- `records[i].sequence == records[i-1].sequence + 1`
+- first record sequence == `firstSequence`
+- last record sequence == `lastSequence`
+- `recordCount == records.length == lastSequence - firstSequence + 1`
+- no duplicate, gap, or out-of-order sequence
+
+This is **stricter** than Sensor→Core normal telemetry / outer agent-ingress, which use complete unordered set semantics.
+
+### Nested Agent delivery records (agent-ingress)
+
+Each `AgentIngressRecord.records` is the original Agent `DeliveryRecord` array (shared `agentDeliveryRecord` definition): 1..100 records, same contiguous ascending rules against `agentFirstSequence`/`agentLastSequence`.
+
+### Agent delivery payload
+
+| Shape | Meaning |
+|---|---|
+| Receiver-compatible wire | Non-empty JSON value (`json.RawMessage`) |
+| Producer-current | Object collections |
+
+Do not falsely narrow the transport contract to object-only.
+
 ## Batch ID bounds (surface-specific)
 
 | Definition | Bound | Used by |

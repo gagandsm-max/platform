@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://platform.invalid/schemas/edge/agent-telemetry-batch.schema.json",
   "title": "Agent→Sensor Telemetry Delivery Envelope v1",
-  "description": "CURRENT_IMPLEMENTED_V1 Agent DeliveryEnvelope field shape (max 100 records). Sequence ceiling MAX_SAFE_SEQUENCE is FROZEN_BUILD_000_INVARIANT; runtime ceiling enforcement is BUILD_002_TARGET. No entityId. No agentStreamId (BUILD_002_TARGET).",
+  "description": "CURRENT_IMPLEMENTED_V1 Agent DeliveryEnvelope (max 100 records). Records must be strictly ascending and contiguous: records[i].sequence == records[i-1].sequence+1; first/last record sequences match envelope bounds; recordCount == records.length == lastSequence-firstSequence+1. Sequence ceiling MAX_SAFE_SEQUENCE is FROZEN_BUILD_000_INVARIANT; runtime ceiling enforcement is BUILD_002_TARGET. No entityId. No agentStreamId (BUILD_002_TARGET).",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "agentId", "tenantId", "correlationId", "batchId", "firstSequence", "lastSequence", "recordCount", "records"],
@@ -20,18 +20,7 @@
       "type": "array",
       "minItems": 1,
       "maxItems": 100,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["sequence", "id", "createdAt", "checksum", "payload"],
-        "properties": {
-          "sequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
-          "id": {"$ref": "common-definitions.schema.json#/$defs/opaqueRecordId"},
-          "createdAt": {"$ref": "common-definitions.schema.json#/$defs/utcTimestamp"},
-          "checksum": {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"},
-          "payload": {"type": "object"}
-        }
-      }
+      "items": {"$ref": "common-definitions.schema.json#/$defs/agentDeliveryRecord"}
     }
   }
 }

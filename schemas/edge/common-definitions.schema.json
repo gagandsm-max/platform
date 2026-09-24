@@ -113,6 +113,21 @@
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9._:-]+$"
     },
+    "agentDeliveryRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "id", "createdAt", "checksum", "payload"],
+      "description": "CURRENT_IMPLEMENTED_V1 Agent DeliveryRecord. Shared by Agent→Sensor batch and nested Sensor→Core agent-ingress delivery records. Sequences are strictly contiguous ascending (Sensor ValidateEnvelope).",
+      "properties": {
+        "sequence": {"$ref": "#/$defs/sequenceInteger"},
+        "id": {"$ref": "#/$defs/opaqueRecordId"},
+        "createdAt": {"$ref": "#/$defs/utcTimestamp"},
+        "checksum": {"$ref": "#/$defs/checksumSha256Hex"},
+        "payload": {
+          "description": "Non-empty JSON value. Receiver-compatible: Go json.RawMessage (any valid JSON). Producer-current shape: object collections. Do not falsely narrow the wire contract to object-only."
+        }
+      }
+    },
     "standardError": {
       "type": "object",
       "additionalProperties": false,

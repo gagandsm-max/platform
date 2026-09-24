@@ -1,7 +1,7 @@
 # Platform Master Build Sequence Register v1.0
 
-**Authority:** Master Chat / Platform CTO Control Plane  
-**Execution model:** Contract-first, bottom-up implementation, end-to-end certification per slice.  
+**Authority:** Master Chat / Platform CTO Control Plane
+**Execution model:** Contract-first, bottom-up implementation, end-to-end certification per slice.
 **Purpose:** Stable module-by-module build sequence that survives future chat handoffs.
 
 ## BUILD-000 execution status
