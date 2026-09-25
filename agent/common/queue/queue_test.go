@@ -3326,8 +3326,11 @@ func TestDurableQueueFirstRecordLossBlocksWithLineageStart(t *testing.T) {
 		}
 	}
 	meta := readSequenceMetaFile(t, tempDir)
-	if meta.Version != sequenceMetaVersion2 || meta.LineageStart != 1 || meta.HighestSequence != 3 {
-		t.Fatalf("expected v2 lineageStart=1 highest=3, got %+v", meta)
+	if meta.Version != sequenceMetaVersion3 || meta.LineageStart != 1 || meta.HighestSequence != 3 {
+		t.Fatalf("expected v3 lineageStart=1 highest=3, got %+v", meta)
+	}
+	if meta.AgentStreamID == "" || !validAgentStreamID(meta.AgentStreamID) {
+		t.Fatalf("expected durable agentStreamId, got %+v", meta)
 	}
 	if q.Stats().LineageStart != 1 {
 		t.Fatalf("stats lineageStart must be 1, got %d", q.Stats().LineageStart)
@@ -3350,7 +3353,7 @@ func TestDurableQueueFirstRecordLossBlocksWithLineageStart(t *testing.T) {
 			t.Fatalf("reopen %d: lineageStart must stay 1 and gap-blocked, stats=%+v", i, stats)
 		}
 		meta = readSequenceMetaFile(t, tempDir)
-		if meta.Version != sequenceMetaVersion2 || meta.LineageStart != 1 {
+		if meta.Version != sequenceMetaVersion3 || meta.LineageStart != 1 {
 			t.Fatalf("reopen %d: durable lineageStart must stay 1, got %+v", i, meta)
 		}
 	}
@@ -3455,8 +3458,8 @@ func TestDurableQueueLegacyEmptyHighestEnqueuesNewLineage(t *testing.T) {
 		t.Fatalf("expected next sequence 42, got %d", rec.Sequence)
 	}
 	meta := readSequenceMetaFile(t, tempDir)
-	if meta.Version != sequenceMetaVersion2 || meta.LineageStart != 42 || meta.HighestSequence != 42 {
-		t.Fatalf("enqueue must write v2 lineageStart=42 highest=42, got %+v", meta)
+	if meta.Version != sequenceMetaVersion3 || meta.LineageStart != 42 || meta.HighestSequence != 42 {
+		t.Fatalf("enqueue must write v3 lineageStart=42 highest=42, got %+v", meta)
 	}
 	if q.Stats().LineageStart != 42 {
 		t.Fatalf("stats lineageStart must be 42, got %d", q.Stats().LineageStart)
@@ -3606,5 +3609,151 @@ func TestDurableQueueQuarantineDifferentIDVsAcceptedRecordsConflict(t *testing.T
 	}
 	if !q2.Stats().AckRecoveryConflictBlock {
 		t.Fatalf("must report ack recovery conflict: %+v", q2.Stats())
+	}
+}
+
+func TestDurableQueueV3EmptyPersistsStreamWithoutLineageStart(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.Version != sequenceMetaVersion3 {
+		t.Fatalf("empty queue must persist v3 meta, got %+v", meta)
+	}
+	if !validAgentStreamID(meta.AgentStreamID) {
+		t.Fatalf("expected stream id, got %q", meta.AgentStreamID)
+	}
+	if meta.HighestSequence != 0 || meta.LineageStart != 0 || meta.LegacyCutoverSequence != 0 || meta.AcceptedThrough != 0 {
+		t.Fatalf("empty v3 must keep zero watermarks, got %+v", meta)
+	}
+	stream := q.AgentStreamID()
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q2.AgentStreamID() != stream {
+		t.Fatalf("stream id must not regenerate: %q vs %q", stream, q2.AgentStreamID())
+	}
+}
+
+func TestDurableQueueLegacyMetaMigratesOnce(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, 5, "rec-5", []byte("x"))
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(`{"highestSequence":5}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.Version != sequenceMetaVersion3 || !validAgentStreamID(meta.AgentStreamID) {
+		t.Fatalf("expected migrated v3, got %+v", meta)
+	}
+	if meta.LegacyCutoverSequence != 6 || meta.HighestSequence != 5 {
+		t.Fatalf("cutover must be highest+1, got %+v", meta)
+	}
+	if !q.IsLegacySequence(5) || q.IsLegacySequence(6) {
+		t.Fatalf("legacy classification wrong: cutover=%d", q.LegacyCutoverSequence())
+	}
+	stream := meta.AgentStreamID
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q2.AgentStreamID() != stream || q2.LegacyCutoverSequence() != 6 {
+		t.Fatalf("migration must be sticky: %+v", q2.Stats())
+	}
+}
+
+func TestDurableQueueReadBatchNeverCrossesCutover(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, 4, "rec-4", []byte("a"))
+	writeActiveRecord(t, tempDir, 5, "rec-5", []byte("b"))
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(`{"highestSequence":5}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.LegacyCutoverSequence() != 6 {
+		t.Fatalf("cutover=%d", q.LegacyCutoverSequence())
+	}
+	writeActiveRecord(t, tempDir, 6, "rec-6", []byte("c"))
+	// Refresh in-memory counters by reopening.
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q2.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 2 || batch[0].Sequence != 4 || batch[1].Sequence != 5 {
+		t.Fatalf("must stop before cutover, got %+v", batch)
+	}
+	if err := q2.CommitAccepted(batch, 5); err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 1 || batch[0].Sequence != 6 {
+		t.Fatalf("modern side after cutover, got %+v", batch)
+	}
+}
+
+func TestDurableQueueRejectsOverMaxSafeOnRecover(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"highestSequence":%d}`, MAX_SAFE_SEQUENCE+1)
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(payload), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024); err == nil {
+		t.Fatal("expected recover rejection above MAX_SAFE_SEQUENCE")
+	}
+}
+
+func TestDurableQueueEnqueueExhaustion(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"version":3,"agentStreamId":"stream-%s","highestSequence":%d,"lineageStart":%d}`,
+		strings.Repeat("ab", 16), MAX_SAFE_SEQUENCE, MAX_SAFE_SEQUENCE)
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(payload), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("overflow")); !errors.Is(err, ErrSequenceExhausted) {
+		t.Fatalf("expected ErrSequenceExhausted, got %v", err)
 	}
 }

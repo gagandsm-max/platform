@@ -1,6 +1,7 @@
 {
   "examples": {
     "agentBatch": "examples/agent-telemetry-batch.json",
+    "agentBatchV2": "examples/agent-telemetry-batch-v2.json",
     "agentBatchMax": "examples/agent-telemetry-batch-max-safe-sequence.json",
     "agentAck": "examples/agent-telemetry-ack.json",
     "sensorBatch": "examples/sensor-telemetry-batch.json",
@@ -13,6 +14,7 @@
   },
   "cases": [
     {"name": "valid-agent-batch", "base": "agentBatch", "schema": "agent-telemetry-batch", "valid": true},
+    {"name": "valid-agent-batch-v2", "base": "agentBatchV2", "schema": "agent-telemetry-batch", "valid": true},
     {"name": "valid-agent-batch-max-safe-sequence", "base": "agentBatchMax", "schema": "agent-telemetry-batch", "valid": true},
     {"name": "valid-agent-ack", "base": "agentAck", "schema": "agent-telemetry-ack", "valid": true, "submitted": "agentBatch"},
     {"name": "valid-sensor-batch", "base": "sensorBatch", "schema": "sensor-telemetry-batch", "valid": true},
@@ -30,7 +32,10 @@
     {"name": "sequence-negative", "base": "agentBatch", "schema": "agent-telemetry-batch", "valid": false, "expectedCodes": ["SEQUENCE_OUT_OF_BOUNDS"], "mutations": [{"op": "set", "path": ["firstSequence"], "value": -1}, {"op": "set", "path": ["lastSequence"], "value": -1}, {"op": "set", "path": ["records", 0, "sequence"], "value": -1}]},
     {"name": "sequence-fractional", "base": "agentBatch", "schema": "agent-telemetry-batch", "valid": false, "expectedCodes": ["SEQUENCE_FRACTIONAL"], "mutations": [{"op": "set", "path": ["firstSequence"], "value": 1.5}, {"op": "set", "path": ["lastSequence"], "value": 1.5}, {"op": "set", "path": ["records", 0, "sequence"], "value": 1.5}]},
     {"name": "sequence-numeric-string", "base": "agentBatch", "schema": "agent-telemetry-batch", "valid": false, "expectedCodes": ["SEQUENCE_TYPE_INVALID"], "mutations": [{"op": "set", "path": ["firstSequence"], "value": "1"}, {"op": "set", "path": ["lastSequence"], "value": "1"}, {"op": "set", "path": ["records", 0, "sequence"], "value": "1"}]},
-    {"name": "unsupported-schema-version", "base": "agentBatch", "schema": "agent-telemetry-batch", "valid": false, "expectedCodes": ["UNSUPPORTED_SCHEMA_VERSION"], "mutations": [{"op": "set", "path": ["schemaVersion"], "value": 2}]},
+    {"name": "unsupported-schema-version", "base": "agentBatch", "schema": "agent-telemetry-batch", "valid": false, "expectedCodes": ["UNSUPPORTED_SCHEMA_VERSION"], "mutations": [{"op": "set", "path": ["schemaVersion"], "value": 99}]},
+    {"name": "v1-with-agent-stream-id", "base": "agentBatch", "schema": "agent-telemetry-batch", "valid": false, "expectedCodes": ["AGENT_STREAM_ID_FORBIDDEN"], "mutations": [{"op": "set", "path": ["agentStreamId"], "value": "stream-00112233445566778899aabbccddeeff"}]},
+    {"name": "v2-without-agent-stream-id", "base": "agentBatchV2", "schema": "agent-telemetry-batch", "valid": false, "expectedCodes": ["MISSING_REQUIRED_FIELD", "AGENT_STREAM_ID_REQUIRED"], "mutations": [{"op": "delete", "path": ["agentStreamId"]}]},
+    {"name": "v2-malformed-agent-stream-id", "base": "agentBatchV2", "schema": "agent-telemetry-batch", "valid": false, "expectedCodes": ["INVALID_AGENT_STREAM_ID"], "mutations": [{"op": "set", "path": ["agentStreamId"], "value": "stream-NOT-HEX"}]},
     {"name": "missing-required-identity", "base": "agentBatch", "schema": "agent-telemetry-batch", "valid": false, "expectedCodes": ["MISSING_REQUIRED_FIELD"], "mutations": [{"op": "delete", "path": ["agentId"]}]},
     {"name": "malformed-sensor-stream-id", "base": "sensorBatch", "schema": "sensor-telemetry-batch", "valid": false, "expectedCodes": ["INVALID_SENSOR_STREAM_ID"], "mutations": [{"op": "set", "path": ["bootEpoch"], "value": "boot-1"}]},
     {"name": "wrong-agent-ack-casing", "base": "agentAck", "schema": "agent-telemetry-ack", "valid": false, "expectedCodes": ["UNKNOWN_FIELD", "MISSING_REQUIRED_FIELD"], "mutations": [{"op": "delete", "path": ["accepted_through_sequence"]}, {"op": "set", "path": ["acceptedThroughSequence"], "value": 1}]},

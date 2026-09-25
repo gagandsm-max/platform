@@ -178,6 +178,12 @@ function assertStream(value, field, codes) {
   }
 }
 
+function assertAgentStream(value, field, codes) {
+  if (typeof value !== 'string' || !STREAM_RE.test(value)) {
+    fail(codes, 'INVALID_AGENT_STREAM_ID', field);
+  }
+}
+
 function assertUtcTs(value, field, codes) {
   if (typeof value !== 'string' || !TS_Z_RE.test(value)) {
     fail(codes, 'INVALID_UTC_TIMESTAMP', field);
@@ -296,14 +302,26 @@ function validateAgentDeliveryRecord(rec, pathPrefix, codes) {
 function validateAgentBatch(doc, codes) {
   const allowed = new Set([
     'schemaVersion', 'agentId', 'tenantId', 'siteId', 'correlationId', 'batchId',
-    'firstSequence', 'lastSequence', 'recordCount', 'records',
+    'agentStreamId', 'firstSequence', 'lastSequence', 'recordCount', 'records',
   ]);
   assertExactKeys(doc, allowed, [
     'schemaVersion', 'agentId', 'tenantId', 'correlationId', 'batchId',
     'firstSequence', 'lastSequence', 'recordCount', 'records',
   ], codes);
   if (codes.length) return;
-  if (doc.schemaVersion !== 1) fail(codes, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion must be 1');
+  if (doc.schemaVersion !== 1 && doc.schemaVersion !== 2) {
+    fail(codes, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion must be 1 or 2');
+  }
+  if (doc.schemaVersion === 2) {
+    if (!('agentStreamId' in doc)) {
+      fail(codes, 'AGENT_STREAM_ID_REQUIRED', 'agentStreamId is required for schemaVersion 2');
+      fail(codes, 'MISSING_REQUIRED_FIELD', 'agentStreamId');
+    } else {
+      assertAgentStream(doc.agentStreamId, 'agentStreamId', codes);
+    }
+  } else if ('agentStreamId' in doc) {
+    fail(codes, 'AGENT_STREAM_ID_FORBIDDEN', 'agentStreamId must be absent for schemaVersion 1');
+  }
   assertAgentId(doc.agentId, 'agentId', codes);
   assertUuid(doc.tenantId, 'tenantId', codes);
   if ('siteId' in doc) assertUuid(doc.siteId, 'siteId', codes);
@@ -700,6 +718,12 @@ function runSchemaSetSelfCheck(loadedSchemas) {
   }
   if (common.$defs?.sensorStreamId?.pattern !== STREAM_RE.source) {
     codes.push('STREAM_PATTERN_MISMATCH');
+  }
+  if (common.$defs?.agentStreamId?.pattern !== STREAM_RE.source) {
+    codes.push('AGENT_STREAM_PATTERN_MISMATCH');
+  }
+  if (common.$defs?.schemaVersionV2?.const !== 2) {
+    codes.push('SCHEMA_VERSION_V2_MISMATCH');
   }
   if (common.$defs?.AGENT_MAX_RECORDS?.const !== AGENT_MAX_RECORDS) {
     codes.push('AGENT_MAX_RECORDS_DEF_MISMATCH');

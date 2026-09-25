@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,7 +35,10 @@ var (
 	ErrMetaUncertain              = errors.New("QUEUE_META_UNCERTAIN: durable sequence metadata state cannot be confirmed")
 	ErrAckRecoveryConflict        = errors.New("QUEUE_ACK_RECOVERY_CONFLICT: unauthorized or conflicting record at or below acceptedThrough")
 	ErrPendingAckCleanup          = errors.New("QUEUE_PENDING_ACK_CLEANUP: prior ACK cleanup not yet durable")
+	ErrSequenceExhausted          = errors.New("QUEUE_SEQUENCE_EXHAUSTED: sequence space exhausted at MAX_SAFE_SEQUENCE")
 )
+
+var agentStreamIDPattern = regexp.MustCompile(`^stream-[0-9a-f]{32}$`)
 
 const (
 	recordSequenceWidth     = 19
@@ -92,6 +96,8 @@ type QueueStats struct {
 	LastSequence             uint64
 	LineageStart             uint64
 	AcceptedThrough          uint64
+	AgentStreamID            string
+	LegacyCutoverSequence    uint64
 	MaxRecords               int
 	MaxBytes                 int64
 	MaxQuarantineRecords     int
@@ -123,6 +129,8 @@ type DurableQueue struct {
 	lineageStart             uint64
 	acceptedThrough          uint64
 	acceptedRecords          []acceptedRecordRef
+	agentStreamId            string
+	legacyCutoverSequence    uint64
 	activeCount              int
 	activeBytes              int64
 	quarantineCount          int
@@ -141,8 +149,11 @@ type DurableQueue struct {
 }
 
 const (
+	// MAX_SAFE_SEQUENCE is the JSON-safe delivery/replay sequence ceiling (2^53 - 1).
+	MAX_SAFE_SEQUENCE     = 9007199254740991
 	sequenceMetaFile      = "sequence.meta"
 	sequenceMetaVersion2  = 2
+	sequenceMetaVersion3  = 3
 )
 
 func NewDurableQueue(dir string, maxRecords int, maxBytes int64, maxRecordBytes int) (*DurableQueue, error) {
@@ -252,13 +263,21 @@ func (q *DurableQueue) recoverState() error {
 	if err != nil {
 		return err
 	}
+	if meta.HighestSequence > MAX_SAFE_SEQUENCE {
+		return errors.New("QUEUE_META_CORRUPT: highestSequence exceeds MAX_SAFE_SEQUENCE")
+	}
 	q.lastSeq = meta.HighestSequence
 	q.acceptedThrough = meta.AcceptedThrough
 	q.acceptedRecords = cloneAcceptedRecords(meta.AcceptedRecords)
-	if meta.Version == sequenceMetaVersion2 {
+	q.agentStreamId = meta.AgentStreamID
+	q.legacyCutoverSequence = meta.LegacyCutoverSequence
+	if meta.Version == sequenceMetaVersion2 || meta.Version == sequenceMetaVersion3 {
 		q.lineageStart = meta.LineageStart
 	} else {
 		q.lineageStart = 0
+	}
+	if q.agentStreamId != "" && !validAgentStreamID(q.agentStreamId) {
+		return errors.New("QUEUE_META_CORRUPT: invalid agentStreamId")
 	}
 
 	// 4. Scan quarantine / recover transition intent (existing A-E)
@@ -357,6 +376,17 @@ func (q *DurableQueue) recoverState() error {
 	if q.acceptedThrough > q.lastSeq {
 		return errors.New("QUEUE_META_CORRUPT: acceptedThrough exceeds highestSequence lineage")
 	}
+	if q.lastSeq > MAX_SAFE_SEQUENCE {
+		return errors.New("QUEUE_META_CORRUPT: recovered sequence exceeds MAX_SAFE_SEQUENCE")
+	}
+
+	// Migrate legacy/v2 meta (or initialize empty queue) to v3 stream identity once.
+	// Never regenerate agentStreamId on later restarts.
+	if q.agentStreamId == "" {
+		if err := q.migrateOrInitStreamLocked(); err != nil {
+			return err
+		}
+	}
 
 	// 6. Reconcile duplicates
 	if err := q.reconcileDuplicatesLocked(); err != nil {
@@ -379,11 +409,73 @@ type acceptedRecordRef struct {
 }
 
 type sequenceMeta struct {
-	Version         uint                `json:"version,omitempty"`
-	HighestSequence uint64              `json:"highestSequence"`
-	LineageStart    uint64              `json:"lineageStart,omitempty"`
-	AcceptedThrough uint64              `json:"acceptedThrough,omitempty"`
-	AcceptedRecords []acceptedRecordRef `json:"acceptedRecords,omitempty"`
+	Version               uint                `json:"version,omitempty"`
+	AgentStreamID         string              `json:"agentStreamId,omitempty"`
+	LegacyCutoverSequence uint64              `json:"legacyCutoverSequence,omitempty"`
+	HighestSequence       uint64              `json:"highestSequence"`
+	LineageStart          uint64              `json:"lineageStart,omitempty"`
+	AcceptedThrough       uint64              `json:"acceptedThrough,omitempty"`
+	AcceptedRecords       []acceptedRecordRef `json:"acceptedRecords,omitempty"`
+}
+
+func generateAgentStreamID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("QUEUE_STREAM_ID_FAILED: %w", err)
+	}
+	id := "stream-" + hex.EncodeToString(b)
+	if !validAgentStreamID(id) {
+		return "", errors.New("QUEUE_STREAM_ID_FAILED: generated agentStreamId failed validation")
+	}
+	return id, nil
+}
+
+func validAgentStreamID(id string) bool {
+	return agentStreamIDPattern.MatchString(id)
+}
+
+// migrateOrInitStreamLocked assigns a durable agentStreamId exactly once.
+// Empty queues (highest=0) persist cutover=0 and lineageStart=0 — never lineageStart=1 while highest=0.
+// Legacy/v2 opens preserve sequence watermarks and set cutover to highest+1 when highest>0.
+func (q *DurableQueue) migrateOrInitStreamLocked() error {
+	if q.agentStreamId != "" {
+		return nil
+	}
+	id, err := generateAgentStreamID()
+	if err != nil {
+		return err
+	}
+	q.agentStreamId = id
+	if q.lastSeq > 0 {
+		if q.lastSeq >= MAX_SAFE_SEQUENCE {
+			// Internal only; never emitted on the wire.
+			q.legacyCutoverSequence = MAX_SAFE_SEQUENCE + 1
+		} else {
+			q.legacyCutoverSequence = q.lastSeq + 1
+		}
+	} else {
+		q.legacyCutoverSequence = 0
+	}
+	// Do not invent lineageStart during stream migration/init.
+	return q.persistSequenceMetaLockedOpts(q.lastSeq, q.acceptedThrough, q.acceptedRecords, false)
+}
+
+func (q *DurableQueue) AgentStreamID() string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.agentStreamId
+}
+
+func (q *DurableQueue) LegacyCutoverSequence() uint64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.legacyCutoverSequence
+}
+
+func (q *DurableQueue) IsLegacySequence(seq uint64) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.legacyCutoverSequence > 0 && seq < q.legacyCutoverSequence
 }
 
 func cloneAcceptedRecords(in []acceptedRecordRef) []acceptedRecordRef {
@@ -437,8 +529,9 @@ func (q *DurableQueue) readSequenceMetaLocked() (sequenceMeta, error) {
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: trailing data in sequence metadata")
 	}
-	// version absent/0 = legacy; version 2 = new format; unknown nonzero = fail closed.
-	if meta.Version != 0 && meta.Version != sequenceMetaVersion2 {
+	// version absent/0 = legacy; version 2 = lineage format; version 3 = stream lineage;
+	// unknown nonzero = fail closed. Migration to v3 happens in recover, not here.
+	if meta.Version != 0 && meta.Version != sequenceMetaVersion2 && meta.Version != sequenceMetaVersion3 {
 		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: unknown sequence metadata version")
 	}
 	if meta.AcceptedThrough > meta.HighestSequence {
@@ -446,6 +539,14 @@ func (q *DurableQueue) readSequenceMetaLocked() (sequenceMeta, error) {
 	}
 	if meta.LineageStart > meta.HighestSequence {
 		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: lineageStart exceeds highestSequence")
+	}
+	if meta.HighestSequence > MAX_SAFE_SEQUENCE {
+		return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: highestSequence exceeds MAX_SAFE_SEQUENCE")
+	}
+	if meta.Version == sequenceMetaVersion3 {
+		if !validAgentStreamID(meta.AgentStreamID) {
+			return sequenceMeta{}, errors.New("QUEUE_META_CORRUPT: version 3 requires valid agentStreamId")
+		}
 	}
 	if meta.Version == sequenceMetaVersion2 && meta.HighestSequence > 0 && meta.AcceptedThrough == 0 {
 		if meta.LineageStart == 0 || meta.LineageStart > meta.HighestSequence {
@@ -471,8 +572,18 @@ func (q *DurableQueue) persistSequenceWatermarkLocked(seq uint64) error {
 }
 
 func (q *DurableQueue) persistSequenceMetaLocked(highest, accepted uint64, records []acceptedRecordRef) error {
+	return q.persistSequenceMetaLockedOpts(highest, accepted, records, true)
+}
+
+func (q *DurableQueue) persistSequenceMetaLockedOpts(highest, accepted uint64, records []acceptedRecordRef, establishLineage bool) error {
 	if q.metaUncertain {
 		return ErrMetaUncertain
+	}
+	if q.agentStreamId == "" || !validAgentStreamID(q.agentStreamId) {
+		return errors.New("QUEUE_META_CORRUPT: agentStreamId required before meta persist")
+	}
+	if highest > MAX_SAFE_SEQUENCE {
+		return ErrSequenceExhausted
 	}
 	if accepted > highest {
 		return errors.New("QUEUE_META_CORRUPT: acceptedThrough exceeds highestSequence")
@@ -487,11 +598,12 @@ func (q *DurableQueue) persistSequenceMetaLocked(highest, accepted uint64, recor
 	// lineageStart: once nonzero never move forward/change.
 	// Establish only when still unset and this write has no accepted boundary
 	// (first durable enqueue / watermark establish). Do not invent lineage from
-	// an ACK-only highest watermark.
+	// an ACK-only highest watermark. Never set lineageStart=1 while highest=0.
+	// Migration/init stream writes must not invent lineageStart (establishLineage=false).
 	lineageStart := q.lineageStart
 	if q.lineageStart != 0 {
 		lineageStart = q.lineageStart
-	} else if accepted == 0 && highest > 0 {
+	} else if establishLineage && accepted == 0 && highest > 0 {
 		lineageStart = highest
 	}
 	if lineageStart > highest {
@@ -499,11 +611,13 @@ func (q *DurableQueue) persistSequenceMetaLocked(highest, accepted uint64, recor
 	}
 
 	meta := sequenceMeta{
-		Version:         sequenceMetaVersion2,
-		HighestSequence: highest,
-		LineageStart:    lineageStart,
-		AcceptedThrough: accepted,
-		AcceptedRecords: cloneAcceptedRecords(records),
+		Version:               sequenceMetaVersion3,
+		AgentStreamID:         q.agentStreamId,
+		LegacyCutoverSequence: q.legacyCutoverSequence,
+		HighestSequence:       highest,
+		LineageStart:          lineageStart,
+		AcceptedThrough:       accepted,
+		AcceptedRecords:       cloneAcceptedRecords(records),
 	}
 	data, err := json.Marshal(meta)
 	if err != nil {
@@ -588,8 +702,15 @@ func (q *DurableQueue) adoptMetaAfterUncertainLocked(highest, accepted uint64, r
 		if disk.AcceptedThrough >= accepted {
 			q.acceptedRecords = cloneAcceptedRecords(disk.AcceptedRecords)
 		}
-		if disk.Version == sequenceMetaVersion2 {
+		if disk.Version == sequenceMetaVersion2 || disk.Version == sequenceMetaVersion3 {
 			diskLineage = disk.LineageStart
+		}
+		// Preserve stream identity / cutover; never regenerate after uncertain rename.
+		if q.agentStreamId == "" && validAgentStreamID(disk.AgentStreamID) {
+			q.agentStreamId = disk.AgentStreamID
+		}
+		if q.legacyCutoverSequence == 0 && disk.LegacyCutoverSequence > 0 {
+			q.legacyCutoverSequence = disk.LegacyCutoverSequence
 		}
 	}
 	q.lineageStart = earliestNonzeroLineage(q.lineageStart, intendedLineage, diskLineage)
@@ -609,6 +730,10 @@ func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
 
 	if q.activeCount >= q.maxRecords {
 		return nil, ErrQueueFull
+	}
+
+	if q.lastSeq >= MAX_SAFE_SEQUENCE {
+		return nil, ErrSequenceExhausted
 	}
 
 	q.lastSeq++
@@ -797,6 +922,12 @@ func (q *DurableQueue) ReadBatch(maxRecords int, maxBytes int64) ([]Record, erro
 			continue
 		}
 		if blocked > 0 && fileSeq >= blocked {
+			break
+		}
+		// Never cross LegacyCutoverSequence inside one batch.
+		if q.legacyCutoverSequence > 0 && len(batch) > 0 &&
+			batch[0].Sequence < q.legacyCutoverSequence &&
+			fileSeq >= q.legacyCutoverSequence {
 			break
 		}
 
@@ -2071,6 +2202,8 @@ func (q *DurableQueue) Stats() QueueStats {
 		LastSequence:             q.lastSeq,
 		LineageStart:             q.lineageStart,
 		AcceptedThrough:          q.acceptedThrough,
+		AgentStreamID:            q.agentStreamId,
+		LegacyCutoverSequence:    q.legacyCutoverSequence,
 		MaxRecords:               q.maxRecords,
 		MaxBytes:                 q.maxBytes,
 		MaxQuarantineRecords:     q.maxQuarantineRecords,

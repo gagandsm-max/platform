@@ -1169,3 +1169,36 @@ func TestTenantAndAgentStreamWatermarkIsolation(t *testing.T) {
 		t.Fatalf("tenant-a/agent-x watermark must still be 100, got %d", wm)
 	}
 }
+
+func TestLegacyV1PathUnchangedUnderSeparateModernOwner(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent-spool")
+	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sink, err := NewSpoolAcceptanceSink(s, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Distinct agents: legacy agent-legacy remains on v1 while agent-modern adopts v2.
+	legacy := sampleEnvelope("agent-legacy", "tenant-1", sampleRecord(1, "r1", []byte(`{"v":1}`)))
+	legacy.ReceivingSensorID = "sensor-infra-01"
+	legacy.AssignmentGeneration = 1
+	if _, err := sink.AcceptBatch(context.Background(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	modern := sampleV2Envelope("agent-modern", "tenant-1", testStreamA(), sampleRecord(1, "rm1", []byte(`{"v":2}`)))
+	modern.ReceivingSensorID = "sensor-infra-01"
+	modern.AssignmentGeneration = 1
+	if _, err := sink.AcceptBatch(context.Background(), modern); err != nil {
+		t.Fatal(err)
+	}
+	if sink.ContiguousWatermark("tenant-1", "agent-legacy") != 1 {
+		t.Fatal("legacy agent watermark must remain independent")
+	}
+	if sink.ActiveOwnerStreamID("tenant-1", "agent-legacy") != "" {
+		t.Fatal("legacy agent must not have modern owner")
+	}
+}

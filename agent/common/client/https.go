@@ -48,9 +48,9 @@ func computeBatchChecksum(records []DeliveryRecord) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// BuildBatchID returns the deterministic batch identity used on the wire.
+// BuildLegacyBatchID returns the deterministic v1 batch identity used on the wire.
 // Algorithm matches historical HTTPSTransport batch ID construction for wire compatibility.
-func BuildBatchID(agentID string, records []queue.Record) string {
+func BuildLegacyBatchID(agentID string, records []queue.Record) string {
 	if len(records) == 0 {
 		return ""
 	}
@@ -70,6 +70,32 @@ func BuildBatchID(agentID string, records []queue.Record) string {
 	return fmt.Sprintf("batch-%s-%020d-%020d-%s", agentID, firstSeq, lastSeq, batchChecksum[:16])
 }
 
+// BuildBatchID is an alias for BuildLegacyBatchID retained for callers and tests.
+func BuildBatchID(agentID string, records []queue.Record) string {
+	return BuildLegacyBatchID(agentID, records)
+}
+
+// BuildLineageBatchID returns the v2 stream-scoped batch identity.
+func BuildLineageBatchID(streamID, agentID string, records []queue.Record) string {
+	if len(records) == 0 || strings.TrimSpace(streamID) == "" || strings.TrimSpace(agentID) == "" {
+		return ""
+	}
+	recs := make([]DeliveryRecord, len(records))
+	for i, r := range records {
+		recs[i] = DeliveryRecord{
+			Sequence:  r.Sequence,
+			ID:        r.ID,
+			CreatedAt: r.CreatedAt,
+			Checksum:  r.Checksum,
+			Payload:   json.RawMessage(r.Payload),
+		}
+	}
+	firstSeq := records[0].Sequence
+	lastSeq := records[len(records)-1].Sequence
+	batchChecksum := computeBatchChecksum(recs)
+	return fmt.Sprintf("batch-%s-%s-%020d-%020d-%s", streamID, agentID, firstSeq, lastSeq, batchChecksum[:16])
+}
+
 type DeliveryEnvelope struct {
 	SchemaVersion int              `json:"schemaVersion"`
 	AgentID       string           `json:"agentId"`
@@ -77,6 +103,7 @@ type DeliveryEnvelope struct {
 	SiteID        string           `json:"siteId,omitempty"`
 	CorrelationID string           `json:"correlationId"`
 	BatchID       string           `json:"batchId"`
+	AgentStreamID string           `json:"agentStreamId,omitempty"`
 	FirstSequence uint64           `json:"firstSequence"`
 	LastSequence  uint64           `json:"lastSequence"`
 	RecordCount   int              `json:"recordCount"`
@@ -287,11 +314,22 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 	if strings.TrimSpace(batch.BatchID) == "" {
 		return Ack{}, &DeliveryError{Code: "DELIVERY_BATCH_ID_REQUIRED", Class: FailurePermanent, Err: errors.New("batch BatchID must be set before delivery")}
 	}
-	if !strings.EqualFold(batch.AgentID, t.cfg.AgentID) {
+	if batch.AgentID != t.cfg.AgentID {
 		return Ack{}, &DeliveryError{
 			Code:  "DELIVERY_BATCH_AGENT_MISMATCH",
 			Class: FailurePermanent,
 			Err:   fmt.Errorf("batch AgentID %q does not match transport configured AgentID %q", batch.AgentID, t.cfg.AgentID),
+		}
+	}
+
+	useV2 := batch.SchemaVersion == 2 || strings.TrimSpace(batch.AgentStreamID) != ""
+	if useV2 {
+		if strings.TrimSpace(batch.AgentStreamID) == "" {
+			return Ack{}, &DeliveryError{
+				Code:  "DELIVERY_BATCH_STREAM_REQUIRED",
+				Class: FailurePermanent,
+				Err:   errors.New("schemaVersion 2 requires agentStreamId"),
+			}
 		}
 	}
 
@@ -320,13 +358,21 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 	lastSeq := batch.Records[len(batch.Records)-1].Sequence
 	batchID := batch.BatchID
 
+	schemaVersion := 1
+	agentStreamID := ""
+	if useV2 {
+		schemaVersion = 2
+		agentStreamID = batch.AgentStreamID
+	}
+
 	env := DeliveryEnvelope{
-		SchemaVersion: 1,
+		SchemaVersion: schemaVersion,
 		AgentID:       batch.AgentID,
 		TenantID:      t.cfg.TenantID,
 		SiteID:        t.cfg.SiteID,
 		CorrelationID: corrID,
 		BatchID:       batchID,
+		AgentStreamID: agentStreamID,
 		FirstSequence: firstSeq,
 		LastSequence:  lastSeq,
 		RecordCount:   len(batch.Records),
@@ -430,7 +476,7 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 			}
 		}
 
-		if !strings.EqualFold(ack.AgentID, batch.AgentID) {
+		if ack.AgentID != batch.AgentID {
 			return Ack{}, &DeliveryError{
 				Code:  "DELIVERY_ACK_AGENT_MISMATCH",
 				Class: FailurePermanent,
@@ -438,10 +484,19 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 			}
 		}
 
+		if ack.CorrelationID != corrID {
+			return Ack{}, &DeliveryError{
+				Code:  "DELIVERY_ACK_CORRELATION_MISMATCH",
+				Class: FailurePermanent,
+				Err:   fmt.Errorf("sensor ACK correlation_id %q does not match submitted %q", ack.CorrelationID, corrID),
+			}
+		}
+
 		return Ack{
 			AcceptedThrough: ack.AcceptedThroughSequence,
 			AgentID:         ack.AgentID,
 			BatchID:         ack.BatchID,
+			CorrelationID:   ack.CorrelationID,
 		}, nil
 
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:

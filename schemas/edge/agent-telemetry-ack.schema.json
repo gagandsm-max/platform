@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://platform.invalid/schemas/edge/agent-telemetry-ack.schema.json",
   "title": "Agent→Sensor Telemetry Delivery ACK v1",
-  "description": "CURRENT_IMPLEMENTED_V1 DeliveryAck. Exact snake_case field names frozen (B000-D003). Sequence ceiling FROZEN_BUILD_000_INVARIANT; runtime ceiling enforcement BUILD_002_TARGET.",
+  "description": "CURRENT_IMPLEMENTED DeliveryAck. Exact snake_case field names frozen (B000-D003). Sequence ceiling FROZEN_BUILD_000_INVARIANT; BUILD-002 runtime hop binds correlation_id to the submitted batch correlationId (field names unchanged).",
   "type": "object",
   "additionalProperties": false,
   "required": ["status", "accepted_through_sequence", "agent_id", "batch_id", "correlation_id"],

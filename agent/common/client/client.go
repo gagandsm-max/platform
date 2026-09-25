@@ -50,6 +50,8 @@ type Batch struct {
 	CorrelationID string
 	AgentID       string
 	BatchID       string
+	SchemaVersion int
+	AgentStreamID string
 	Records       []queue.Record
 }
 
@@ -57,6 +59,7 @@ type Ack struct {
 	AcceptedThrough uint64
 	AgentID         string
 	BatchID         string
+	CorrelationID   string
 }
 
 // Transport is the Agent→Sensor delivery boundary. Production wiring uses
@@ -116,6 +119,10 @@ func Classify(err error) FailureClass {
 		return FailureBlocked
 	}
 	if errors.Is(err, queue.ErrAckRecoveryConflict) {
+		return FailureBlocked
+	}
+	if errors.Is(err, queue.ErrSequenceExhausted) {
+		// Exhaustion is not retryable; fail closed without a hot loop.
 		return FailureBlocked
 	}
 	if errors.Is(err, queue.ErrPendingAckCleanup) {

@@ -96,6 +96,11 @@
       "pattern": "^stream-[0-9a-f]{32}$",
       "description": "Durable Sensor spool stream/generation identity carried as bootEpoch on v1 wire."
     },
+    "agentStreamId": {
+      "type": "string",
+      "pattern": "^stream-[0-9a-f]{32}$",
+      "description": "BUILD-002 durable Agent delivery stream/generation identity. Required on schemaVersion 2; must be absent on schemaVersion 1."
+    },
     "utcTimestamp": {
       "type": "string",
       "minLength": 20,
@@ -106,6 +111,10 @@
     "schemaVersionV1": {
       "type": "integer",
       "const": 1
+    },
+    "schemaVersionV2": {
+      "type": "integer",
+      "const": 2
     },
     "opaqueRecordId": {
       "type": "string",

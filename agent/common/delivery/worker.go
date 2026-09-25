@@ -22,6 +22,13 @@ type DeliveryQueue interface {
 	Len() int
 }
 
+// lineageQueue is optional; DurableQueue implements it. Test fakes may omit it and
+// remain on legacy v1 batch identity.
+type lineageQueue interface {
+	AgentStreamID() string
+	LegacyCutoverSequence() uint64
+}
+
 type DeliveryStats struct {
 	Attempts          int64
 	Successes         int64
@@ -194,22 +201,60 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
-	corrID, err := client.CorrelationID()
-	if err != nil {
-		w.recordFailure(client.FailureTemporary, "DELIVERY_CORRELATION_ID_FAILED")
-		return false, err
+	streamID := ""
+	cutover := uint64(0)
+	if lq, ok := w.q.(lineageQueue); ok {
+		streamID = lq.AgentStreamID()
+		cutover = lq.LegacyCutoverSequence()
 	}
 
-	batchID := client.BuildBatchID(w.agentID, records)
+	if cutover > 0 {
+		firstLegacy := cutover > 0 && records[0].Sequence < cutover
+		for i := 1; i < len(records); i++ {
+			leg := records[i].Sequence < cutover
+			if leg != firstLegacy {
+				w.recordFailure(client.FailurePermanent, "DELIVERY_MIXED_CUTOVER_BATCH")
+				return false, errors.New("DELIVERY_MIXED_CUTOVER_BATCH: batch must not span legacy cutover")
+			}
+		}
+	}
+
+	// Optional lineage: missing stream falls back to legacy v1 (test fakes).
+	// DurableQueue always has a stream; cutover>0 + seq<cutover => legacy wire.
+	legacy := streamID == "" || (cutover > 0 && records[0].Sequence < cutover)
+
+	var batchID string
+	schemaVersion := 1
+	agentStreamID := ""
+	if legacy {
+		batchID = client.BuildLegacyBatchID(w.agentID, records)
+	} else {
+		if streamID == "" {
+			w.recordFailure(client.FailurePermanent, "DELIVERY_STREAM_ID_REQUIRED")
+			return false, errors.New("DELIVERY_STREAM_ID_REQUIRED: modern batch requires agentStreamId")
+		}
+		batchID = client.BuildLineageBatchID(streamID, w.agentID, records)
+		schemaVersion = 2
+		agentStreamID = streamID
+	}
 	if batchID == "" {
 		w.recordFailure(client.FailurePermanent, "DELIVERY_BATCH_ID_FAILED")
 		return false, errors.New("DELIVERY_BATCH_ID_FAILED: unable to compute batch identity")
+	}
+
+	// Each HTTP attempt gets a fresh correlation ID; batch ID stays stable across retries.
+	corrID, genErr := client.CorrelationID()
+	if genErr != nil {
+		w.recordFailure(client.FailureTemporary, "DELIVERY_CORRELATION_ID_FAILED")
+		return false, genErr
 	}
 
 	batch := client.Batch{
 		CorrelationID: corrID,
 		AgentID:       w.agentID,
 		BatchID:       batchID,
+		SchemaVersion: schemaVersion,
+		AgentStreamID: agentStreamID,
 		Records:       records,
 	}
 
@@ -231,16 +276,20 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 			code = de.Code
 		}
 		w.recordFailure(failClass, code)
-		w.logger.Debug("Delivery attempt failed",
+		logArgs := []any{
 			"class", failClass,
 			"code", code,
 			"records", len(records),
 			"error", err,
-		)
+		}
+		if schemaVersion == 2 {
+			logArgs = append(logArgs, "agentStreamId", agentStreamID)
+		}
+		w.logger.Debug("Delivery attempt failed", logArgs...)
 		return false, err
 	}
 
-	if err := validateAck(records, w.agentID, batchID, ack); err != nil {
+	if err := validateAck(records, w.agentID, batchID, corrID, ack); err != nil {
 		w.recordFailure(client.FailurePermanent, "DELIVERY_ACK_INVALID")
 		w.logger.Error("Invalid delivery ACK rejected; queue retained", "error", err)
 		return false, err
@@ -266,11 +315,15 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 	w.stats.ReceiverAvailable = w.transport.Available()
 	w.mu.Unlock()
 
-	w.logger.Debug("Delivery batch acknowledged", "records", len(records), "acceptedThrough", ack.AcceptedThrough, "correlation_id", corrID)
+	if schemaVersion == 2 {
+		w.logger.Debug("Delivery batch acknowledged", "records", len(records), "acceptedThrough", ack.AcceptedThrough, "correlation_id", corrID, "agentStreamId", agentStreamID)
+	} else {
+		w.logger.Debug("Delivery batch acknowledged", "records", len(records), "acceptedThrough", ack.AcceptedThrough, "correlation_id", corrID)
+	}
 	return true, nil
 }
 
-func validateAck(records []queue.Record, expectedAgentID, expectedBatchID string, ack client.Ack) error {
+func validateAck(records []queue.Record, expectedAgentID, expectedBatchID, expectedCorrID string, ack client.Ack) error {
 	if ack.AcceptedThrough == 0 {
 		return errors.New("DELIVERY_ACK_EMPTY: empty ACK does not authorize deletion")
 	}
@@ -280,11 +333,17 @@ func validateAck(records []queue.Record, expectedAgentID, expectedBatchID string
 	if strings.TrimSpace(ack.AgentID) == "" {
 		return errors.New("DELIVERY_ACK_MISSING_AGENT_ID: agent-bound ACK required before deletion")
 	}
+	if strings.TrimSpace(ack.CorrelationID) == "" {
+		return errors.New("DELIVERY_ACK_MISSING_CORRELATION_ID: correlation-bound ACK required before deletion")
+	}
 	if ack.BatchID != expectedBatchID {
 		return fmt.Errorf("DELIVERY_ACK_BATCH_MISMATCH: ack batch_id %q does not match submitted %q", ack.BatchID, expectedBatchID)
 	}
-	if strings.TrimSpace(ack.AgentID) != expectedAgentID {
+	if ack.AgentID != expectedAgentID {
 		return fmt.Errorf("DELIVERY_ACK_AGENT_MISMATCH: ack agent_id %q does not match submitted %q", ack.AgentID, expectedAgentID)
+	}
+	if ack.CorrelationID != expectedCorrID {
+		return fmt.Errorf("DELIVERY_ACK_CORRELATION_MISMATCH: ack correlation_id %q does not match submitted %q", ack.CorrelationID, expectedCorrID)
 	}
 	if len(records) == 0 {
 		return errors.New("DELIVERY_ACK_EMPTY_BATCH: ACK without submitted records")
@@ -360,6 +419,8 @@ func queueFailureCode(err error) string {
 		return "QUEUE_ACK_RECOVERY_CONFLICT"
 	case errors.Is(err, queue.ErrPendingAckCleanup):
 		return "QUEUE_PENDING_ACK_CLEANUP"
+	case errors.Is(err, queue.ErrSequenceExhausted):
+		return "QUEUE_SEQUENCE_EXHAUSTED"
 	default:
 		return "QUEUE_READ_FAILED"
 	}

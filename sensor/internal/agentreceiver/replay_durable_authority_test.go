@@ -1,6 +1,7 @@
 package agentreceiver
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
@@ -144,5 +145,78 @@ func TestReceiverLostAckAfterDrainReturnsEquivalentAcceptance(t *testing.T) {
 	defer conflict.Body.Close()
 	if conflict.StatusCode != http.StatusConflict {
 		t.Fatalf("mutated post-drain replay expected 409, got %d", conflict.StatusCode)
+	}
+}
+
+func TestReceiverExactReplayDoesNotBypassDurableOwnerAuthority(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent-spool")
+	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sink, err := NewSpoolAcceptanceSink(s, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-a", "agent-a")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.AllowGeneration("agent-a", "sensor-infra-01", "tenant-1", "site-1", 1)
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+	srv, client := mockTLSServer(rcv, "agent-a")
+	defer srv.Close()
+
+	stream := testStreamA()
+	env1 := sampleV2Envelope("agent-a", "tenant-1", stream, sampleRecord(1, "r1", []byte(`{"v":1}`)))
+	env1.SiteID = "site-1"
+	env1.BatchID = "batch-a-1"
+	body1, err := json.Marshal(env1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := postJSON(t, client, srv.URL+EndpointPath, body1)
+	defer first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("HTTP %d", first.StatusCode)
+	}
+
+	env2 := sampleV2Envelope("agent-a", "tenant-1", stream, sampleRecord(2, "r2", []byte(`{"v":2}`)))
+	env2.SiteID = "site-1"
+	env2.BatchID = "batch-a-2"
+	body2, err := json.Marshal(env2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := postJSON(t, client, srv.URL+EndpointPath, body2)
+	defer second.Body.Close()
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("HTTP %d", second.StatusCode)
+	}
+	if rcv.ReplayTracker().Size() < 1 {
+		t.Fatal("expected replay cache entry")
+	}
+
+	// Fence stream A by establishing B as owner via sink directly.
+	b := testStreamB()
+	replace := sampleV2Envelope("agent-a", "tenant-1", b, sampleRecord(1, "rb", []byte(`{"v":9}`)))
+	replace.ReceivingSensorID = "sensor-infra-01"
+	replace.AssignmentGeneration = 1
+	if _, err := sink.AcceptBatch(context.Background(), replace); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exact process-local replay of A's seq>1 batch must re-enter durable sink and get 409.
+	retry := postJSON(t, client, srv.URL+EndpointPath, body2)
+	defer retry.Body.Close()
+	if retry.StatusCode != http.StatusConflict {
+		t.Fatalf("exact replay must not bypass owner authority, HTTP %d", retry.StatusCode)
+	}
+	var er ErrorResponse
+	if err := json.NewDecoder(retry.Body).Decode(&er); err != nil {
+		t.Fatal(err)
+	}
+	if er.Code != ErrCodeStreamStaleOrFenced {
+		t.Fatalf("code %q", er.Code)
 	}
 }

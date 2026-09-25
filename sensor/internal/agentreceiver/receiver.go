@@ -242,7 +242,12 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	env.ReceivingSensorID = assignCtx.SensorID
 	env.AssignmentGeneration = assignCtx.Generation
 
-	replayID := ReplayIdentity{TenantID: assignCtx.TenantID, AgentID: assignCtx.AgentID, BatchID: env.BatchID}
+	replayID := ReplayIdentity{
+		TenantID:      assignCtx.TenantID,
+		AgentID:       assignCtx.AgentID,
+		AgentStreamID: env.AgentStreamID,
+		BatchID:       env.BatchID,
+	}
 	batchChecksum := ComputeBatchChecksum(env.Records)
 	repDecision, cachedAck := rcv.replay.Check(replayID, env.FirstSequence, env.LastSequence, batchChecksum)
 	if repDecision == ReplayExact {
@@ -256,6 +261,11 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logAttrs := []any{"agent_id", assignCtx.AgentID, "batch_id", env.BatchID, "schema_version", env.SchemaVersion}
+	if env.SchemaVersion == SchemaVersionV2 && env.AgentStreamID != "" {
+		logAttrs = append(logAttrs, "agent_stream_id", env.AgentStreamID)
+	}
+
 	result, err := rcv.sink.AcceptBatch(r.Context(), env)
 	if err != nil {
 		if IsDurableReplayConflict(err) {
@@ -263,8 +273,20 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rcv.writeJSONError(w, http.StatusConflict, ErrCodeReplayConflict, "Agent sequence range was previously accepted with conflicting contents")
 			return
 		}
+		if IsStreamStaleOrFenced(err) {
+			rcv.metrics.ReplayConflicts.Add(1)
+			rcv.logger.Warn("Agent stream stale or fenced", append(logAttrs, "reason_class", "stale_or_fenced", "error", err)...)
+			rcv.writeJSONError(w, http.StatusConflict, ErrCodeStreamStaleOrFenced, "Agent stream is stale or fenced")
+			return
+		}
+		if IsLegacyStreamClosed(err) {
+			rcv.metrics.ReplayConflicts.Add(1)
+			rcv.logger.Warn("Legacy agent stream closed", append(logAttrs, "reason_class", "legacy_stream_closed", "error", err)...)
+			rcv.writeJSONError(w, http.StatusConflict, ErrCodeLegacyStreamClosed, "Legacy v1 agent stream is closed")
+			return
+		}
 		rcv.metrics.SinkFailures.Add(1)
-		rcv.logger.Error("Acceptance sink refused or failed to process batch", "agent_id", assignCtx.AgentID, "batch_id", env.BatchID, "error", err, "reason_class", "sink_failure")
+		rcv.logger.Error("Acceptance sink refused or failed to process batch", append(logAttrs, "error", err, "reason_class", "sink_failure")...)
 		rcv.writeJSONError(w, http.StatusServiceUnavailable, ErrCodeSinkFailed, "Sensor acceptance sink unavailable")
 		return
 	}

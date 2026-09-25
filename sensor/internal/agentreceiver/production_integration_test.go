@@ -524,3 +524,36 @@ func writePEM(t *testing.T, dir, name, typ string, der []byte) string {
 	}
 	return path
 }
+
+func TestSpoolAcceptanceSinkRestartsWithModernOwner(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent-spool")
+	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink, err := NewSpoolAcceptanceSink(s, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := testStreamA()
+	env := sampleV2Envelope("agent-a", "tenant-1", stream, sampleRecord(1, "r1", []byte(`{"v":1}`)))
+	env.ReceivingSensorID = "sensor-infra-01"
+	env.AssignmentGeneration = 1
+	if _, err := sink.AcceptBatch(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	s2, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	sink2, err := NewSpoolAcceptanceSink(s2, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sink2.ActiveOwnerStreamID("tenant-1", "agent-a") != stream {
+		t.Fatal("owner must survive restart")
+	}
+}

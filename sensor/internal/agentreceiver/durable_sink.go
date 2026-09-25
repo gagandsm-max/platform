@@ -43,8 +43,10 @@ func IsDurableReplayConflict(err error) bool {
 }
 
 type batchIndexEntry struct {
+	Version         int    `json:"version,omitempty"`
 	TenantID        string `json:"tenantId"`
 	AgentID         string `json:"agentId"`
+	AgentStreamID   string `json:"agentStreamId,omitempty"`
 	BatchID         string `json:"batchId"`
 	FirstSequence   uint64 `json:"firstSequence"`
 	LastSequence    uint64 `json:"lastSequence"`
@@ -56,25 +58,29 @@ type batchIndexEntry struct {
 }
 
 type streamStateEntry struct {
+	Version                   int       `json:"version,omitempty"`
 	TenantID                  string    `json:"tenantId"`
 	AgentID                   string    `json:"agentId"`
+	AgentStreamID             string    `json:"agentStreamId,omitempty"`
 	ContiguousAcceptedThrough uint64    `json:"contiguousAcceptedThrough"`
 	UpdatedAt                 time.Time `json:"updatedAt"`
 }
 
 type durableBatchPayload struct {
-	TenantID      string           `json:"tenantId"`
-	AgentID       string           `json:"agentId"`
-	SensorID      string           `json:"sensorId"`
-	Generation    int64            `json:"assignmentGeneration"`
-	FirstSequence uint64           `json:"firstSequence"`
-	LastSequence  uint64           `json:"lastSequence"`
-	RecordIDs     []string         `json:"recordIds"`
-	BatchChecksum string           `json:"batchChecksum"`
-	BatchID       string           `json:"batchId"`
-	CorrelationID string           `json:"correlationId"`
-	Timestamp     time.Time        `json:"timestamp"`
-	Envelope      DeliveryEnvelope `json:"envelope"`
+	Version         int              `json:"version,omitempty"`
+	TenantID        string           `json:"tenantId"`
+	AgentID         string           `json:"agentId"`
+	AgentStreamID   string           `json:"agentStreamId,omitempty"`
+	SensorID        string           `json:"sensorId"`
+	Generation      int64            `json:"assignmentGeneration"`
+	FirstSequence   uint64           `json:"firstSequence"`
+	LastSequence    uint64           `json:"lastSequence"`
+	RecordIDs       []string         `json:"recordIds"`
+	BatchChecksum   string           `json:"batchChecksum"`
+	BatchID         string           `json:"batchId"`
+	CorrelationID   string           `json:"correlationId"`
+	Timestamp       time.Time        `json:"timestamp"`
+	Envelope        DeliveryEnvelope `json:"envelope"`
 }
 
 // SpoolAcceptanceSink durably accepts Agent batches into a dedicated DiskSpool
@@ -94,11 +100,15 @@ type SpoolAcceptanceSink struct {
 	reconcileRequired  bool
 	ranges             map[string][]batchIndexEntry
 	streams            map[string]*streamStateEntry
+	owners             map[string]*LineageOwnerRecord
+	tombstones         map[string]*LegacyTombstoneRecord
 	maxSparseRanges    int
 	maxDrainedReceipts int
 	// indexPublisher is an unexported test seam for exercising the critical
 	// append-succeeds/index-publication-fails boundary. Production leaves it nil.
 	indexPublisher func(string, batchIndexEntry) error
+	// appendHook is an unexported test seam invoked immediately before spool append.
+	appendHook func(DeliveryEnvelope) error
 }
 
 func NewSpoolAcceptanceSink(agentSpool *spool.DiskSpool, agentSpoolDir string) (*SpoolAcceptanceSink, error) {
@@ -135,8 +145,16 @@ func NewSpoolAcceptanceSink(agentSpool *spool.DiskSpool, agentSpoolDir string) (
 		stateDir:           stateDir,
 		ranges:             make(map[string][]batchIndexEntry),
 		streams:            make(map[string]*streamStateEntry),
+		owners:             make(map[string]*LineageOwnerRecord),
+		tombstones:         make(map[string]*LegacyTombstoneRecord),
 		maxSparseRanges:    defaultMaxSparseRanges,
 		maxDrainedReceipts: defaultMaxSparseRanges,
+	}
+	if err := sink.ensureOwnerDir(); err != nil {
+		return nil, err
+	}
+	if err := sink.ensureTombstoneDir(); err != nil {
+		return nil, err
 	}
 	if err := sink.rebuildIndexFromSpool(); err != nil {
 		return nil, err
@@ -172,11 +190,154 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 	if env.FirstSequence == 0 || env.LastSequence < env.FirstSequence {
 		return AcceptanceResult{}, fmt.Errorf("%s: sequence range [%d..%d] is invalid", ErrCodeSinkFailed, env.FirstSequence, env.LastSequence)
 	}
+	if env.FirstSequence > MAX_SAFE_SEQUENCE || env.LastSequence > MAX_SAFE_SEQUENCE {
+		return AcceptanceResult{}, fmt.Errorf("%s: sequence range exceeds MAX_SAFE_SEQUENCE", ErrCodeSinkFailed)
+	}
 
+	switch env.SchemaVersion {
+	case SchemaVersionV1, 0:
+		// schema 0 treated as legacy only if somehow stamped; production validator requires 1.
+		if env.SchemaVersion == 0 {
+			env.SchemaVersion = SchemaVersionV1
+		}
+		return s.acceptLegacyV1Locked(env)
+	case SchemaVersionV2:
+		return s.acceptModernV2Locked(env)
+	default:
+		return AcceptanceResult{}, fmt.Errorf("%s: unsupported schema version %d", ErrCodeUnsupportedSchema, env.SchemaVersion)
+	}
+}
+
+func (s *SpoolAcceptanceSink) acceptLegacyV1Locked(env DeliveryEnvelope) (AcceptanceResult, error) {
+	if s.getOwnerLocked(env.TenantID, env.AgentID) != nil || s.getTombstoneLocked(env.TenantID, env.AgentID) != nil {
+		return AcceptanceResult{}, &LegacyStreamClosedError{TenantID: env.TenantID, AgentID: env.AgentID}
+	}
 	streamKey := sourceRangeStreamKey(env.TenantID, env.AgentID)
-	state := s.getOrCreateStreamStateLocked(env.TenantID, env.AgentID)
+	state := s.getOrCreateStreamStateLocked(env.TenantID, env.AgentID, "")
+	return s.acceptAgainstStreamLocked(env, streamKey, state, "")
+}
+
+func (s *SpoolAcceptanceSink) acceptModernV2Locked(env DeliveryEnvelope) (AcceptanceResult, error) {
+	streamID := strings.TrimSpace(env.AgentStreamID)
+	if !ValidAgentStreamID(streamID) {
+		return AcceptanceResult{}, fmt.Errorf("%s: invalid agentStreamId", ErrCodeInvalidField)
+	}
+	env.AgentStreamID = streamID
+
+	owner := s.getOwnerLocked(env.TenantID, env.AgentID)
+	if owner != nil && owner.ActiveAgentStreamID == streamID {
+		streamKey := modernSourceRangeStreamKey(env.TenantID, env.AgentID, streamID)
+		state := s.getOrCreateStreamStateLocked(env.TenantID, env.AgentID, streamID)
+		return s.acceptAgainstStreamLocked(env, streamKey, state, streamID)
+	}
+
+	if owner == nil {
+		return s.establishModernOwnershipLocked(env, streamID)
+	}
+
+	// owner.Active == A, env.Stream == B
+	if env.FirstSequence == 1 {
+		return s.replaceActiveStreamLocked(env, owner, streamID)
+	}
+	return AcceptanceResult{}, &StreamStaleOrFencedError{
+		TenantID:            env.TenantID,
+		AgentID:             env.AgentID,
+		AgentStreamID:       streamID,
+		ActiveAgentStreamID: owner.ActiveAgentStreamID,
+		FirstSequence:       env.FirstSequence,
+		LastSequence:        env.LastSequence,
+	}
+}
+
+func (s *SpoolAcceptanceSink) establishModernOwnershipLocked(env DeliveryEnvelope, streamID string) (AcceptanceResult, error) {
+	legacyKey := sourceRangeStreamKey(env.TenantID, env.AgentID)
+	legacyState := s.streams[legacyKey]
+	hasLegacy := legacyState != nil && strings.TrimSpace(legacyState.AgentStreamID) == ""
+
+	inheritWatermark := uint64(0)
+	if hasLegacy && env.FirstSequence == legacyState.ContiguousAcceptedThrough+1 {
+		inheritWatermark = legacyState.ContiguousAcceptedThrough
+	}
+	// Native seq1, legacy-continuation, or sparse establish without synthetic contiguous coverage:
+	// always create modern state at inheritWatermark (0 unless exact legacy continuation).
+
+	streamKey := modernSourceRangeStreamKey(env.TenantID, env.AgentID, streamID)
+	state := &streamStateEntry{
+		Version:                   modernDurableVersion,
+		TenantID:                  env.TenantID,
+		AgentID:                   env.AgentID,
+		AgentStreamID:             streamID,
+		ContiguousAcceptedThrough: inheritWatermark,
+		UpdatedAt:                 time.Now().UTC(),
+	}
+	s.streams[streamKey] = state
+	if err := s.persistStreamStateLocked(streamKey); err != nil {
+		delete(s.streams, streamKey)
+		return AcceptanceResult{}, err
+	}
+
+	owner := LineageOwnerRecord{
+		Version:                            lineageOwnerVersion,
+		TenantID:                           env.TenantID,
+		AgentID:                            env.AgentID,
+		ActiveAgentStreamID:                streamID,
+		ActivatedAt:                        time.Now().UTC(),
+		ActivatedUnderAssignmentGeneration: env.AssignmentGeneration,
+	}
+	if err := s.publishOwnerLocked(owner); err != nil {
+		return AcceptanceResult{}, err
+	}
+
+	if hasLegacy || s.getTombstoneLocked(env.TenantID, env.AgentID) == nil {
+		// Close live v1 once modern ownership is established. Always write tombstone when
+		// establishing owner so subsequent v1 is rejected even without prior legacy state.
+		if err := s.tombstoneLegacyIfNeededLocked(env.TenantID, env.AgentID, streamID); err != nil {
+			return AcceptanceResult{}, err
+		}
+	}
+
+	return s.acceptAgainstStreamLocked(env, streamKey, state, streamID)
+}
+
+func (s *SpoolAcceptanceSink) replaceActiveStreamLocked(env DeliveryEnvelope, previous *LineageOwnerRecord, streamID string) (AcceptanceResult, error) {
+	streamKey := modernSourceRangeStreamKey(env.TenantID, env.AgentID, streamID)
+	state := &streamStateEntry{
+		Version:                   modernDurableVersion,
+		TenantID:                  env.TenantID,
+		AgentID:                   env.AgentID,
+		AgentStreamID:             streamID,
+		ContiguousAcceptedThrough: 0,
+		UpdatedAt:                 time.Now().UTC(),
+	}
+	s.streams[streamKey] = state
+	if err := s.persistStreamStateLocked(streamKey); err != nil {
+		delete(s.streams, streamKey)
+		return AcceptanceResult{}, err
+	}
+
+	owner := LineageOwnerRecord{
+		Version:                            lineageOwnerVersion,
+		TenantID:                           env.TenantID,
+		AgentID:                            env.AgentID,
+		ActiveAgentStreamID:                streamID,
+		ActivatedAt:                        time.Now().UTC(),
+		ActivatedUnderAssignmentGeneration: env.AssignmentGeneration,
+		PreviousAgentStreamID:              previous.ActiveAgentStreamID,
+	}
+	if err := s.publishOwnerLocked(owner); err != nil {
+		return AcceptanceResult{}, err
+	}
+	// Ensure legacy remains closed under the new owner.
+	if err := s.tombstoneLegacyIfNeededLocked(env.TenantID, env.AgentID, streamID); err != nil {
+		return AcceptanceResult{}, err
+	}
+
+	return s.acceptAgainstStreamLocked(env, streamKey, state, streamID)
+}
+
+func (s *SpoolAcceptanceSink) acceptAgainstStreamLocked(env DeliveryEnvelope, streamKey string, state *streamStateEntry, streamID string) (AcceptanceResult, error) {
 	checksum := ComputeBatchChecksum(env.Records)
-	key := batchIndexKey(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence)
+	key := indexKeyFor(env.TenantID, env.AgentID, streamID, env.FirstSequence, env.LastSequence)
 
 	// 1. Exact receipt lookup (if receipt is still present on disk)
 	if existing, ok, err := s.readVerifiedIndexLocked(key); err != nil {
@@ -199,21 +360,23 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 	}
 
 	// 4. Overlap with existing sparse ranges
-	if s.overlapsAcceptedRangeLocked(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence) {
+	if s.overlapsAcceptedRangeLocked(streamKey, env.FirstSequence, env.LastSequence) {
 		return AcceptanceResult{}, durableSequenceConflict(env.TenantID, env.AgentID, env.FirstSequence, env.LastSequence)
 	}
 
 	// 5. Sparse state capacity guard (Section 6.8)
-	// Contiguous gap-closing traffic (FirstSequence == ContiguousAcceptedThrough + 1)
-	// is allowed even if sparse limit is reached because it advances the watermark.
-	// A new disjoint sparse range (FirstSequence > ContiguousAcceptedThrough + 1)
-	// must fail closed if the number of sparse ranges reaches the limit.
 	isGapClosing := env.FirstSequence == state.ContiguousAcceptedThrough+1
 	if !isGapClosing {
 		limit := s.effectiveMaxSparseRanges()
 		sparseCount := s.countSparseRangesLocked(streamKey)
 		if sparseCount >= limit {
 			return AcceptanceResult{}, fmt.Errorf("%s: sparse accepted range capacity exceeded for agent stream", ErrCodeSinkFailed)
+		}
+	}
+
+	if s.appendHook != nil {
+		if err := s.appendHook(env); err != nil {
+			return AcceptanceResult{}, err
 		}
 	}
 
@@ -235,6 +398,10 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 		Timestamp:     time.Now().UTC(),
 		Envelope:      env,
 	}
+	if streamID != "" {
+		payload.Version = modernDurableVersion
+		payload.AgentStreamID = streamID
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return AcceptanceResult{}, fmt.Errorf("%s: failed to encode durable agent batch: %w", ErrCodeSinkFailed, err)
@@ -253,6 +420,7 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 	entry := batchIndexEntry{
 		TenantID:        env.TenantID,
 		AgentID:         env.AgentID,
+		AgentStreamID:   streamID,
 		BatchID:         env.BatchID,
 		FirstSequence:   env.FirstSequence,
 		LastSequence:    env.LastSequence,
@@ -261,6 +429,9 @@ func (s *SpoolAcceptanceSink) AcceptBatch(ctx context.Context, env DeliveryEnvel
 		SpoolSequence:   rec.Sequence,
 		AssignmentGen:   env.AssignmentGeneration,
 		ReceivingSensor: env.ReceivingSensorID,
+	}
+	if streamID != "" {
+		entry.Version = modernDurableVersion
 	}
 	if err := s.publishIndexLocked(key, entry); err != nil {
 		s.reconcileRequired = true
@@ -300,12 +471,28 @@ func sourceRangeStreamKey(tenantID, agentID string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func modernSourceRangeStreamKey(tenantID, agentID, streamID string) string {
+	var b []byte
+	b = appendLenPrefixed(b, tenantID)
+	b = appendLenPrefixed(b, agentID)
+	b = appendLenPrefixed(b, streamID)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func streamKeyFor(tenantID, agentID, streamID string) string {
+	if strings.TrimSpace(streamID) == "" {
+		return sourceRangeStreamKey(tenantID, agentID)
+	}
+	return modernSourceRangeStreamKey(tenantID, agentID, streamID)
+}
+
 func rangesOverlap(firstA, lastA, firstB, lastB uint64) bool {
 	return firstA <= lastB && firstB <= lastA
 }
 
-func (s *SpoolAcceptanceSink) overlapsAcceptedRangeLocked(tenantID, agentID string, firstSequence, lastSequence uint64) bool {
-	for _, existing := range s.ranges[sourceRangeStreamKey(tenantID, agentID)] {
+func (s *SpoolAcceptanceSink) overlapsAcceptedRangeLocked(streamKey string, firstSequence, lastSequence uint64) bool {
+	for _, existing := range s.ranges[streamKey] {
 		if rangesOverlap(firstSequence, lastSequence, existing.FirstSequence, existing.LastSequence) {
 			return true
 		}
@@ -314,7 +501,7 @@ func (s *SpoolAcceptanceSink) overlapsAcceptedRangeLocked(tenantID, agentID stri
 }
 
 func (s *SpoolAcceptanceSink) addRangeLocked(entry batchIndexEntry) {
-	stream := sourceRangeStreamKey(entry.TenantID, entry.AgentID)
+	stream := streamKeyFor(entry.TenantID, entry.AgentID, entry.AgentStreamID)
 	s.ranges[stream] = append(s.ranges[stream], entry)
 }
 
@@ -330,6 +517,24 @@ func batchIndexKey(tenantID, agentID string, firstSequence, lastSequence uint64)
 	return hex.EncodeToString(sum[:])
 }
 
+func modernBatchIndexKey(tenantID, agentID, streamID string, firstSequence, lastSequence uint64) string {
+	var b []byte
+	b = appendLenPrefixed(b, tenantID)
+	b = appendLenPrefixed(b, agentID)
+	b = appendLenPrefixed(b, streamID)
+	b = appendLenPrefixed(b, fmt.Sprintf("%d", firstSequence))
+	b = appendLenPrefixed(b, fmt.Sprintf("%d", lastSequence))
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func indexKeyFor(tenantID, agentID, streamID string, firstSequence, lastSequence uint64) string {
+	if strings.TrimSpace(streamID) == "" {
+		return batchIndexKey(tenantID, agentID, firstSequence, lastSequence)
+	}
+	return modernBatchIndexKey(tenantID, agentID, streamID, firstSequence, lastSequence)
+}
+
 func (s *SpoolAcceptanceSink) indexPath(key string) string {
 	return filepath.Join(s.indexDir, key+".json")
 }
@@ -338,15 +543,19 @@ func (s *SpoolAcceptanceSink) statePath(key string) string {
 	return filepath.Join(s.stateDir, key+".json")
 }
 
-func (s *SpoolAcceptanceSink) getOrCreateStreamStateLocked(tenantID, agentID string) *streamStateEntry {
-	streamKey := sourceRangeStreamKey(tenantID, agentID)
+func (s *SpoolAcceptanceSink) getOrCreateStreamStateLocked(tenantID, agentID, streamID string) *streamStateEntry {
+	streamKey := streamKeyFor(tenantID, agentID, streamID)
 	state, ok := s.streams[streamKey]
 	if !ok || state == nil {
 		state = &streamStateEntry{
 			TenantID:                  tenantID,
 			AgentID:                   agentID,
+			AgentStreamID:             streamID,
 			ContiguousAcceptedThrough: 0,
 			UpdatedAt:                 time.Now().UTC(),
+		}
+		if streamID != "" {
+			state.Version = modernDurableVersion
 		}
 		s.streams[streamKey] = state
 	}
@@ -417,42 +626,11 @@ func (s *SpoolAcceptanceSink) persistStreamStateLocked(streamKey string) error {
 	if !ok || state == nil {
 		return nil
 	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("%s: failed to encode stream state: %w", ErrCodeSinkFailed, err)
-	}
 	path := s.statePath(streamKey)
-	tmp, err := os.CreateTemp(s.stateDir, ".stream-state-*.tmp")
-	if err != nil {
-		return fmt.Errorf("%s: failed to create stream state temp file: %w", ErrCodeSinkFailed, err)
+	if err := atomicWriteJSONFile(s.stateDir, path, ".stream-state-*.tmp", state); err != nil {
+		return fmt.Errorf("%s: %w", ErrCodeSinkFailed, err)
 	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if err := tmp.Chmod(0640); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("%s: failed to chmod stream state temp file: %w", ErrCodeSinkFailed, err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("%s: failed to write stream state: %w", ErrCodeSinkFailed, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("%s: failed to fsync stream state: %w", ErrCodeSinkFailed, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("%s: failed to close stream state: %w", ErrCodeSinkFailed, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("%s: failed to publish stream state: %w", ErrCodeSinkFailed, err)
-	}
-	cleanup = false
-	return syncIndexDir(s.stateDir)
+	return nil
 }
 
 func (s *SpoolAcceptanceSink) compactDrainedReceiptsLocked(streamKey string) error {
@@ -470,11 +648,8 @@ func (s *SpoolAcceptanceSink) compactDrainedReceiptsLocked(streamKey string) err
 	compactedAny := false
 
 	for _, entry := range s.ranges[streamKey] {
-		// Compaction rule:
-		// 1. Fully covered by contiguous acceptance watermark: entry.LastSequence <= watermark
-		// 2. Spool payload has already been drained: entry.SpoolSequence <= acked
 		if entry.LastSequence <= watermark && entry.SpoolSequence > 0 && entry.SpoolSequence <= acked {
-			key := batchIndexKey(entry.TenantID, entry.AgentID, entry.FirstSequence, entry.LastSequence)
+			key := indexKeyFor(entry.TenantID, entry.AgentID, entry.AgentStreamID, entry.FirstSequence, entry.LastSequence)
 			if err := s.removeIndexLocked(key); err != nil {
 				return err
 			}
@@ -519,8 +694,6 @@ func (s *SpoolAcceptanceSink) readVerifiedIndexLocked(key string) (batchIndexEnt
 		return batchIndexEntry{}, false, fmt.Errorf("%s: failed to read spool acknowledgement watermark: %w", ErrCodeSinkFailed, err)
 	}
 	if entry.SpoolSequence <= acked {
-		// Pending payload has been drained. The fsynced index entry is the
-		// durable acceptance receipt used for lost-ACK replay.
 		return entry, true, nil
 	}
 	rec, err := s.spool.ReadPendingRecord(entry.SpoolSequence)
@@ -534,8 +707,9 @@ func (s *SpoolAcceptanceSink) readVerifiedIndexLocked(key string) (batchIndexEnt
 	if err := json.Unmarshal(rec.Payload, &payload); err != nil {
 		return batchIndexEntry{}, false, fmt.Errorf("%s: indexed durable payload is corrupt: %w", ErrCodeSinkFailed, err)
 	}
-	payloadKey := batchIndexKey(payload.TenantID, payload.AgentID, payload.FirstSequence, payload.LastSequence)
+	payloadKey := indexKeyFor(payload.TenantID, payload.AgentID, payload.AgentStreamID, payload.FirstSequence, payload.LastSequence)
 	if payloadKey != key || payload.TenantID != entry.TenantID || payload.AgentID != entry.AgentID ||
+		payload.AgentStreamID != entry.AgentStreamID ||
 		payload.FirstSequence != entry.FirstSequence || payload.LastSequence != entry.LastSequence ||
 		payload.BatchChecksum != entry.BatchChecksum || entry.AcceptedThrough != payload.LastSequence {
 		return batchIndexEntry{}, false, fmt.Errorf("%s: batch index does not match durable spool payload", ErrCodeSinkFailed)
@@ -552,7 +726,10 @@ func validateIndexReceipt(key string, entry batchIndexEntry) error {
 		strings.TrimSpace(entry.BatchChecksum) == "" || entry.AcceptedThrough != entry.LastSequence {
 		return fmt.Errorf("%s: incomplete batch index receipt", ErrCodeSinkFailed)
 	}
-	if batchIndexKey(entry.TenantID, entry.AgentID, entry.FirstSequence, entry.LastSequence) != key {
+	if entry.AgentStreamID != "" && !ValidAgentStreamID(entry.AgentStreamID) {
+		return fmt.Errorf("%s: batch index agentStreamId grammar invalid", ErrCodeSinkFailed)
+	}
+	if indexKeyFor(entry.TenantID, entry.AgentID, entry.AgentStreamID, entry.FirstSequence, entry.LastSequence) != key {
 		return fmt.Errorf("%s: batch index key does not match receipt identity", ErrCodeSinkFailed)
 	}
 	return nil
@@ -566,42 +743,11 @@ func (s *SpoolAcceptanceSink) publishIndexLocked(key string, entry batchIndexEnt
 }
 
 func (s *SpoolAcceptanceSink) writeIndexLocked(key string, entry batchIndexEntry) error {
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return fmt.Errorf("%s: failed to encode batch index: %w", ErrCodeSinkFailed, err)
-	}
 	path := s.indexPath(key)
-	tmp, err := os.CreateTemp(s.indexDir, ".batch-index-*.tmp")
-	if err != nil {
-		return fmt.Errorf("%s: failed to create batch index temp file: %w", ErrCodeSinkFailed, err)
+	if err := atomicWriteJSONFile(s.indexDir, path, ".batch-index-*.tmp", entry); err != nil {
+		return fmt.Errorf("%s: %w", ErrCodeSinkFailed, err)
 	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if err := tmp.Chmod(0640); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("%s: failed to chmod batch index temp file: %w", ErrCodeSinkFailed, err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("%s: failed to write batch index: %w", ErrCodeSinkFailed, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("%s: failed to fsync batch index: %w", ErrCodeSinkFailed, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("%s: failed to close batch index: %w", ErrCodeSinkFailed, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("%s: failed to publish batch index: %w", ErrCodeSinkFailed, err)
-	}
-	cleanup = false
-	return syncIndexDir(s.indexDir)
+	return nil
 }
 
 func syncIndexDir(dir string) error {
@@ -652,13 +798,73 @@ func (s *SpoolAcceptanceSink) loadStreamStateFilesLocked() (map[string]*streamSt
 		if strings.TrimSpace(state.TenantID) == "" || strings.TrimSpace(state.AgentID) == "" {
 			return nil, fmt.Errorf("%s: stream state entry missing tenant or agent identity", ErrCodeSinkFailed)
 		}
-		expectedKey := sourceRangeStreamKey(state.TenantID, state.AgentID)
+		expectedKey := streamKeyFor(state.TenantID, state.AgentID, state.AgentStreamID)
 		if key != expectedKey {
 			return nil, fmt.Errorf("%s: stream state file key does not match identity", ErrCodeSinkFailed)
+		}
+		if state.AgentStreamID != "" && !ValidAgentStreamID(state.AgentStreamID) {
+			return nil, fmt.Errorf("%s: stream state agentStreamId grammar invalid", ErrCodeSinkFailed)
 		}
 		loaded[key] = &state
 	}
 	return loaded, nil
+}
+
+func (s *SpoolAcceptanceSink) validateOwnerStateInvariantsLocked() error {
+	// Missing owner: any modern stream-state without an owner for tenant+agent.
+	for _, state := range s.streams {
+		if state == nil || strings.TrimSpace(state.AgentStreamID) == "" {
+			continue
+		}
+		ownerKey := sourceRangeStreamKey(state.TenantID, state.AgentID)
+		if s.owners[ownerKey] == nil {
+			return fmt.Errorf("%s: modern stream-state exists without lineage owner", ErrCodeStreamOwnerCorrupt)
+		}
+	}
+	// Owner must have matching modern stream-state for the active stream.
+	for _, owner := range s.owners {
+		if owner == nil {
+			continue
+		}
+		activeKey := modernSourceRangeStreamKey(owner.TenantID, owner.AgentID, owner.ActiveAgentStreamID)
+		state := s.streams[activeKey]
+		if state == nil {
+			return fmt.Errorf("%s: lineage owner active stream-state missing", ErrCodeStreamOwnerCorrupt)
+		}
+		if state.AgentStreamID != owner.ActiveAgentStreamID ||
+			state.TenantID != owner.TenantID || state.AgentID != owner.AgentID {
+			return fmt.Errorf("%s: lineage owner does not match modern stream-state", ErrCodeStreamOwnerCorrupt)
+		}
+	}
+	return nil
+}
+
+func (s *SpoolAcceptanceSink) reconcileStartupTombstonesLocked() error {
+	for _, owner := range s.owners {
+		if owner == nil {
+			continue
+		}
+		legacyKey := sourceRangeStreamKey(owner.TenantID, owner.AgentID)
+		legacyState := s.streams[legacyKey]
+		hasLegacy := legacyState != nil && strings.TrimSpace(legacyState.AgentStreamID) == ""
+		if !hasLegacy {
+			continue
+		}
+		if s.getTombstoneLocked(owner.TenantID, owner.AgentID) != nil {
+			continue
+		}
+		if err := s.publishTombstoneLocked(LegacyTombstoneRecord{
+			Version:                 legacyTombstoneVersion,
+			TenantID:                owner.TenantID,
+			AgentID:                 owner.AgentID,
+			ClosedToAgentStreamID:   owner.ActiveAgentStreamID,
+			MigratedThroughSequence: legacyState.ContiguousAcceptedThrough,
+			Timestamp:               time.Now().UTC(),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
@@ -668,12 +874,35 @@ func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
 		return fmt.Errorf("%s: failed to read spool acknowledgement watermark: %w", ErrCodeSinkFailed, err)
 	}
 
+	owners, err := s.loadOwnersLocked()
+	if err != nil {
+		s.reconcileRequired = true
+		return err
+	}
+	s.owners = owners
+
+	tombstones, err := s.loadTombstonesLocked()
+	if err != nil {
+		s.reconcileRequired = true
+		return err
+	}
+	s.tombstones = tombstones
+
 	loadedStates, err := s.loadStreamStateFilesLocked()
 	if err != nil {
 		s.reconcileRequired = true
 		return err
 	}
 	s.streams = loadedStates
+
+	if err := s.validateOwnerStateInvariantsLocked(); err != nil {
+		s.reconcileRequired = true
+		return err
+	}
+	if err := s.reconcileStartupTombstonesLocked(); err != nil {
+		s.reconcileRequired = true
+		return err
+	}
 
 	loaded, err := s.loadIndexFilesLocked()
 	if err != nil {
@@ -695,10 +924,12 @@ func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
 			strings.TrimSpace(payload.BatchChecksum) == "" {
 			return fmt.Errorf("%s: incomplete durable Agent payload during recovery", ErrCodeSinkFailed)
 		}
-		key := batchIndexKey(payload.TenantID, payload.AgentID, payload.FirstSequence, payload.LastSequence)
+		key := indexKeyFor(payload.TenantID, payload.AgentID, payload.AgentStreamID, payload.FirstSequence, payload.LastSequence)
 		entry := batchIndexEntry{
+			Version:         payload.Version,
 			TenantID:        payload.TenantID,
 			AgentID:         payload.AgentID,
+			AgentStreamID:   payload.AgentStreamID,
 			BatchID:         payload.BatchID,
 			FirstSequence:   payload.FirstSequence,
 			LastSequence:    payload.LastSequence,
@@ -711,6 +942,7 @@ func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
 		if existing, ok := loaded[key]; ok {
 			if existing.BatchChecksum != payload.BatchChecksum ||
 				existing.TenantID != payload.TenantID || existing.AgentID != payload.AgentID ||
+				existing.AgentStreamID != payload.AgentStreamID ||
 				existing.FirstSequence != payload.FirstSequence || existing.LastSequence != payload.LastSequence {
 				return durableSequenceConflict(payload.TenantID, payload.AgentID, payload.FirstSequence, payload.LastSequence)
 			}
@@ -744,7 +976,7 @@ func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
 				return fmt.Errorf("%s: batch index durable record unavailable", ErrCodeSinkFailed)
 			}
 		}
-		stream := sourceRangeStreamKey(entry.TenantID, entry.AgentID)
+		stream := streamKeyFor(entry.TenantID, entry.AgentID, entry.AgentStreamID)
 		for _, existing := range ranges[stream] {
 			if rangesOverlap(entry.FirstSequence, entry.LastSequence, existing.FirstSequence, existing.LastSequence) {
 				if existing.BatchChecksum != entry.BatchChecksum ||
@@ -755,7 +987,7 @@ func (s *SpoolAcceptanceSink) reconcileAllLocked() error {
 			}
 		}
 		ranges[stream] = append(ranges[stream], entry)
-		_ = s.getOrCreateStreamStateLocked(entry.TenantID, entry.AgentID)
+		_ = s.getOrCreateStreamStateLocked(entry.TenantID, entry.AgentID, entry.AgentStreamID)
 	}
 
 	s.ranges = ranges
@@ -817,11 +1049,16 @@ func (s *SpoolAcceptanceSink) removeIndexLocked(key string) error {
 }
 
 // ContiguousWatermark returns the durable contiguous accepted sequence watermark
-// for the given tenant and agent stream.
+// for the given tenant and agent legacy stream.
 func (s *SpoolAcceptanceSink) ContiguousWatermark(tenantID, agentID string) uint64 {
+	return s.ContiguousWatermarkForStream(tenantID, agentID, "")
+}
+
+// ContiguousWatermarkForStream returns the contiguous watermark for a legacy or modern stream.
+func (s *SpoolAcceptanceSink) ContiguousWatermarkForStream(tenantID, agentID, streamID string) uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	state := s.streams[sourceRangeStreamKey(tenantID, agentID)]
+	state := s.streams[streamKeyFor(tenantID, agentID, streamID)]
 	if state == nil {
 		return 0
 	}
@@ -829,11 +1066,34 @@ func (s *SpoolAcceptanceSink) ContiguousWatermark(tenantID, agentID string) uint
 }
 
 // SparseRangeCount returns the number of active sparse out-of-order ranges
-// for the given tenant and agent stream.
+// for the given tenant and agent legacy stream.
 func (s *SpoolAcceptanceSink) SparseRangeCount(tenantID, agentID string) int {
+	return s.SparseRangeCountForStream(tenantID, agentID, "")
+}
+
+// SparseRangeCountForStream returns sparse range count for a legacy or modern stream.
+func (s *SpoolAcceptanceSink) SparseRangeCountForStream(tenantID, agentID, streamID string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.countSparseRangesLocked(sourceRangeStreamKey(tenantID, agentID))
+	return s.countSparseRangesLocked(streamKeyFor(tenantID, agentID, streamID))
+}
+
+// ActiveOwnerStreamID returns the active modern stream ID for tenant+agent, or empty.
+func (s *SpoolAcceptanceSink) ActiveOwnerStreamID(tenantID, agentID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	owner := s.getOwnerLocked(tenantID, agentID)
+	if owner == nil {
+		return ""
+	}
+	return owner.ActiveAgentStreamID
+}
+
+// HasLegacyTombstone reports whether live v1 is closed for tenant+agent.
+func (s *SpoolAcceptanceSink) HasLegacyTombstone(tenantID, agentID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getTombstoneLocked(tenantID, agentID) != nil
 }
 
 // SetMaxSparseRangesForTest allows tests to set a smaller sparse state capacity limit.
@@ -842,4 +1102,11 @@ func (s *SpoolAcceptanceSink) SetMaxSparseRangesForTest(limit int) {
 	defer s.mu.Unlock()
 	s.maxSparseRanges = limit
 	s.maxDrainedReceipts = limit
+}
+
+// SetAppendHookForTest injects a pre-append failure seam for ownership crash-safety tests.
+func (s *SpoolAcceptanceSink) SetAppendHookForTest(hook func(DeliveryEnvelope) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendHook = hook
 }

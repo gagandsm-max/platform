@@ -28,10 +28,12 @@ type cachedBatchEntry struct {
 
 // ReplayIdentity uniquely identifies a batch for process-local replay tracking.
 // Encoding is length-prefixed to avoid delimiter-injection between fields.
+// AgentStreamID is empty for transitional v1 batches and set for modern v2.
 type ReplayIdentity struct {
-	TenantID string
-	AgentID  string
-	BatchID  string
+	TenantID      string
+	AgentID       string
+	AgentStreamID string
+	BatchID       string
 }
 
 // Key returns a length-prefixed map key safe against embedded separators.
@@ -39,6 +41,7 @@ func (id ReplayIdentity) Key() string {
 	var b []byte
 	b = appendLenPrefixed(b, id.TenantID)
 	b = appendLenPrefixed(b, id.AgentID)
+	b = appendLenPrefixed(b, id.AgentStreamID)
 	b = appendLenPrefixed(b, id.BatchID)
 	return string(b)
 }

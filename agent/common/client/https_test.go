@@ -925,3 +925,108 @@ func TestHTTPSDeliverRejectsEnvelopeOverSensorBodyLocally(t *testing.T) {
 		t.Fatalf("oversized envelope must not be POSTed, requests=%d", gotRequests)
 	}
 }
+
+func TestBuildLineageBatchID(t *testing.T) {
+	recs := []queue.Record{
+		{Sequence: 1, ID: "r1", Checksum: "c1"},
+		{Sequence: 2, ID: "r2", Checksum: "c2"},
+	}
+	legacy := BuildLegacyBatchID("agent-01", recs)
+	if legacy != BuildBatchID("agent-01", recs) {
+		t.Fatal("BuildBatchID must alias BuildLegacyBatchID")
+	}
+	stream := "stream-" + strings.Repeat("a", 32)
+	lineage := BuildLineageBatchID(stream, "agent-01", recs)
+	if !strings.HasPrefix(lineage, "batch-"+stream+"-agent-01-") {
+		t.Fatalf("unexpected lineage batch id %q", lineage)
+	}
+	if lineage == legacy {
+		t.Fatal("lineage and legacy batch ids must differ")
+	}
+}
+
+func TestHTTPSDeliverV2IncludesStreamAndCorrelation(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+	var gotEnv DeliveryEnvelope
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotEnv); err != nil {
+			t.Errorf("decode: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(DeliveryAck{
+			Status:                  "ACCEPTED",
+			AcceptedThroughSequence: gotEnv.LastSequence,
+			AgentID:                 gotEnv.AgentID,
+			BatchID:                 gotEnv.BatchID,
+			CorrelationID:           gotEnv.CorrelationID,
+		})
+	}))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := "stream-" + strings.Repeat("b", 32)
+	recs := []queue.Record{
+		{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
+	}
+	batch := Batch{
+		CorrelationID: "test-corr-v2",
+		AgentID:       "agent-01",
+		BatchID:       BuildLineageBatchID(stream, "agent-01", recs),
+		SchemaVersion: 2,
+		AgentStreamID: stream,
+		Records:       recs,
+	}
+	ack, err := tr.Deliver(context.Background(), batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotEnv.SchemaVersion != 2 || gotEnv.AgentStreamID != stream {
+		t.Fatalf("expected v2 envelope with stream, got %+v", gotEnv)
+	}
+	if ack.CorrelationID != "test-corr-v2" {
+		t.Fatalf("ack must return correlation id, got %+v", ack)
+	}
+}
+
+func TestHTTPSDeliverRejectsAgentIDCaseFold(t *testing.T) {
+	_, _, _, clientTLS, serverTLS := generateTestCertificates(t, "agent-01")
+	server := httptest.NewUnstartedServer(ackHandler(t, "agent-01"))
+	server.TLS = serverTLS
+	server.StartTLS()
+	defer server.Close()
+
+	tr, err := NewHTTPSTransportForTest(HTTPSConfig{
+		SensorURL: server.URL,
+		AgentID:   "agent-01",
+		TenantID:  "tenant-01",
+	}, clientTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recs := []queue.Record{
+		{Sequence: 1, ID: "r-1", CreatedAt: time.Now().UTC(), Checksum: "abc", Payload: []byte(`{"x":1}`)},
+	}
+	_, err = tr.Deliver(context.Background(), Batch{
+		CorrelationID: "c1",
+		AgentID:       "AGENT-01",
+		BatchID:       BuildBatchID("AGENT-01", recs),
+		Records:       recs,
+	})
+	if err == nil {
+		t.Fatal("expected exact AgentID mismatch")
+	}
+	if Classify(err) != FailurePermanent {
+		t.Fatalf("expected permanent, got %s", Classify(err))
+	}
+}
