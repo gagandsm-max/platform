@@ -1,7 +1,6 @@
 package agentreceiver
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -70,7 +69,7 @@ func (s *SpoolAcceptanceSink) loadTombstonesLocked() (map[string]*LegacyTombston
 			return nil, fmt.Errorf("%s: failed to read legacy tombstone: %w", ErrCodeSinkFailed, err)
 		}
 		var tomb LegacyTombstoneRecord
-		if err := json.Unmarshal(data, &tomb); err != nil {
+		if err := decodeStrictJSONObject(data, &tomb); err != nil {
 			return nil, fmt.Errorf("%s: corrupt legacy tombstone JSON: %w", ErrCodeSinkFailed, err)
 		}
 		if err := validateTombstoneRecord(tomb); err != nil {
@@ -91,8 +90,11 @@ func validateTombstoneRecord(tomb LegacyTombstoneRecord) error {
 	if tomb.Version != legacyTombstoneVersion {
 		return fmt.Errorf("%s: unsupported legacy tombstone version %d", ErrCodeSinkFailed, tomb.Version)
 	}
-	if strings.TrimSpace(tomb.TenantID) == "" || strings.TrimSpace(tomb.AgentID) == "" {
-		return fmt.Errorf("%s: legacy tombstone missing tenant or agent identity", ErrCodeSinkFailed)
+	if err := validateDurableIdentity("tenantId", tomb.TenantID); err != nil {
+		return fmt.Errorf("%s: %w", ErrCodeSinkFailed, err)
+	}
+	if err := validateDurableIdentity("agentId", tomb.AgentID); err != nil {
+		return fmt.Errorf("%s: %w", ErrCodeSinkFailed, err)
 	}
 	if !ValidAgentStreamID(tomb.ClosedToAgentStreamID) {
 		return fmt.Errorf("%s: legacy tombstone closedToAgentStreamId grammar invalid", ErrCodeSinkFailed)

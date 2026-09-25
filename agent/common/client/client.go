@@ -118,6 +118,9 @@ func Classify(err error) FailureClass {
 	if errors.Is(err, queue.ErrMetaUncertain) {
 		return FailureBlocked
 	}
+	if errors.Is(err, queue.ErrQueueStateUncertain) {
+		return FailureBlocked
+	}
 	if errors.Is(err, queue.ErrAckRecoveryConflict) {
 		return FailureBlocked
 	}

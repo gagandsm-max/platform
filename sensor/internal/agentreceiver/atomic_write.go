@@ -1,8 +1,11 @@
 package agentreceiver
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -43,4 +46,20 @@ func atomicWriteJSONFile(dir, path, tmpPattern string, v any) error {
 	}
 	cleanup = false
 	return syncIndexDir(dir)
+}
+
+// decodeStrictJSONObject decodes exactly one JSON object with unknown fields rejected.
+func decodeStrictJSONObject(data []byte, dest any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dest); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("trailing data after JSON object")
+		}
+		return fmt.Errorf("trailing data after JSON object: %w", err)
+	}
+	return nil
 }

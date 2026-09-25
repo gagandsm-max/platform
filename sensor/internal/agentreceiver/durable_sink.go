@@ -255,11 +255,28 @@ func (s *SpoolAcceptanceSink) establishModernOwnershipLocked(env DeliveryEnvelop
 	hasLegacy := legacyState != nil && strings.TrimSpace(legacyState.AgentStreamID) == ""
 
 	inheritWatermark := uint64(0)
-	if hasLegacy && env.FirstSequence == legacyState.ContiguousAcceptedThrough+1 {
-		inheritWatermark = legacyState.ContiguousAcceptedThrough
+	if hasLegacy {
+		// When legacy durable state exists, first modern ownership may be established only as:
+		//   CASE A: FirstSequence == 1 (explicit new/native lineage; do not inherit)
+		//   CASE B: FirstSequence == legacy.ContiguousAcceptedThrough + 1 (true continuation)
+		// Any other first sequence would strand pending legacy v1 drain — fail closed before mutation.
+		switch {
+		case env.FirstSequence == 1:
+			inheritWatermark = 0
+		case env.FirstSequence == legacyState.ContiguousAcceptedThrough+1:
+			inheritWatermark = legacyState.ContiguousAcceptedThrough
+		default:
+			return AcceptanceResult{}, &StreamStaleOrFencedError{
+				TenantID:            env.TenantID,
+				AgentID:             env.AgentID,
+				AgentStreamID:       streamID,
+				ActiveAgentStreamID: "",
+				FirstSequence:       env.FirstSequence,
+				LastSequence:        env.LastSequence,
+			}
+		}
 	}
-	// Native seq1, legacy-continuation, or sparse establish without synthetic contiguous coverage:
-	// always create modern state at inheritWatermark (0 unless exact legacy continuation).
+	// No legacy state: allow establish at watermark 0 (seq1 or sparse) without inventing contiguous coverage.
 
 	streamKey := modernSourceRangeStreamKey(env.TenantID, env.AgentID, streamID)
 	state := &streamStateEntry{

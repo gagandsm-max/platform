@@ -228,6 +228,144 @@ func TestLineageCase6_NativeV2Seq1DoesNotInheritLegacy(t *testing.T) {
 	}
 }
 
+func TestPrematureV2DoesNotCloseLegacyDrain(t *testing.T) {
+	s, sink, _ := openTestSink(t)
+	defer s.Close()
+
+	// Seed legacy contiguous watermark = 50 without requiring 50 spool appends.
+	sink.mu.Lock()
+	legacyKey := sourceRangeStreamKey("tenant-1", "agent-a")
+	state := &streamStateEntry{
+		TenantID:                  "tenant-1",
+		AgentID:                   "agent-a",
+		ContiguousAcceptedThrough: 50,
+		UpdatedAt:                 time.Now().UTC(),
+	}
+	sink.streams[legacyKey] = state
+	if err := sink.persistStreamStateLocked(legacyKey); err != nil {
+		sink.mu.Unlock()
+		t.Fatal(err)
+	}
+	sink.mu.Unlock()
+	if got := sink.ContiguousWatermark("tenant-1", "agent-a"); got != 50 {
+		t.Fatalf("legacy watermark=%d", got)
+	}
+
+	spoolBefore, _ := s.Stats()
+	stream := testStreamA()
+	premature := sampleV2Envelope("agent-a", "tenant-1", stream, sampleRecord(105, "r105", []byte(`{"v":105}`)))
+	stampEnvelope(&premature)
+	if _, err := sink.AcceptBatch(context.Background(), premature); !IsStreamStaleOrFenced(err) {
+		t.Fatalf("premature v2 must fail closed STALE_OR_FENCED, got %v", err)
+	}
+	if sink.ActiveOwnerStreamID("tenant-1", "agent-a") != "" {
+		t.Fatal("must not create modern owner")
+	}
+	if sink.HasLegacyTombstone("tenant-1", "agent-a") {
+		t.Fatal("must not tombstone legacy")
+	}
+	if _, ok := sink.streams[modernSourceRangeStreamKey("tenant-1", "agent-a", stream)]; ok {
+		t.Fatal("must not create modern stream state")
+	}
+	spoolAfter, _ := s.Stats()
+	if spoolAfter.RecordCount != spoolBefore.RecordCount {
+		t.Fatalf("must not append spool: before=%d after=%d", spoolBefore.RecordCount, spoolAfter.RecordCount)
+	}
+	if got := sink.ContiguousWatermark("tenant-1", "agent-a"); got != 50 {
+		t.Fatalf("legacy watermark must remain 50, got %d", got)
+	}
+
+	// Subsequent valid legacy v1 remains allowed.
+	legacy := sampleEnvelope("agent-a", "tenant-1", sampleRecord(51, "r51", []byte(`{"v":51}`)))
+	stampEnvelope(&legacy)
+	if _, err := sink.AcceptBatch(context.Background(), legacy); err != nil {
+		t.Fatalf("legacy v1 after rejected premature v2 must still work: %v", err)
+	}
+	if got := sink.ContiguousWatermark("tenant-1", "agent-a"); got != 51 {
+		t.Fatalf("legacy watermark want 51 got %d", got)
+	}
+
+	// Valid continuation at 52 succeeds after watermark advanced to 51.
+	cont := sampleV2Envelope("agent-a", "tenant-1", stream, sampleRecord(52, "r52", []byte(`{"v":52}`)))
+	stampEnvelope(&cont)
+	if _, err := sink.AcceptBatch(context.Background(), cont); err != nil {
+		t.Fatalf("valid continuation must succeed: %v", err)
+	}
+	if sink.ActiveOwnerStreamID("tenant-1", "agent-a") != stream {
+		t.Fatal("owner must be established on continuation")
+	}
+	if !sink.HasLegacyTombstone("tenant-1", "agent-a") {
+		t.Fatal("legacy must close on valid continuation")
+	}
+	if got := sink.ContiguousWatermarkForStream("tenant-1", "agent-a", stream); got != 52 {
+		t.Fatalf("modern watermark want 52 got %d", got)
+	}
+
+	// Separate fixture: seq1 new lineage does not inherit.
+	s2, sink2, _ := openTestSink(t)
+	defer s2.Close()
+	legacy2 := sampleEnvelope("agent-a", "tenant-1", sampleRecord(1, "r1", []byte(`{"v":1}`)), sampleRecord(2, "r2", []byte(`{"v":2}`)))
+	stampEnvelope(&legacy2)
+	if _, err := sink2.AcceptBatch(context.Background(), legacy2); err != nil {
+		t.Fatal(err)
+	}
+	native := sampleV2Envelope("agent-a", "tenant-1", testStreamB(), sampleRecord(1, "n1", []byte(`{"v":1}`)))
+	stampEnvelope(&native)
+	if _, err := sink2.AcceptBatch(context.Background(), native); err != nil {
+		t.Fatal(err)
+	}
+	if got := sink2.ContiguousWatermarkForStream("tenant-1", "agent-a", testStreamB()); got != 1 {
+		t.Fatalf("native seq1 must not inherit, watermark=%d", got)
+	}
+}
+
+func TestOwnerAndTombstoneStrictJSONDecode(t *testing.T) {
+	s, sink, dir := openTestSink(t)
+	defer s.Close()
+
+	stream := testStreamA()
+	env := sampleV2Envelope("agent-a", "tenant-1", stream, sampleRecord(1, "r1", []byte(`{"v":1}`)))
+	stampEnvelope(&env)
+	if _, err := sink.AcceptBatch(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	ownerPath := filepath.Join(dir, streamStateDirName, lineageOwnerDirName, sourceRangeStreamKey("tenant-1", "agent-a")+".json")
+	if err := os.WriteFile(ownerPath, []byte(`{"version":1,"tenantId":"tenant-1","agentId":"agent-a","activeAgentStreamId":"`+stream+`","activatedAt":"2026-01-01T00:00:00Z","unexpected":true}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if _, err := NewSpoolAcceptanceSink(s2, dir); err == nil {
+		t.Fatal("owner with unknown field must fail closed")
+	}
+
+	s3, sink3, dir3 := openTestSink(t)
+	defer s3.Close()
+	env3 := sampleV2Envelope("agent-a", "tenant-1", stream, sampleRecord(1, "r1", []byte(`{"v":1}`)))
+	stampEnvelope(&env3)
+	if _, err := sink3.AcceptBatch(context.Background(), env3); err != nil {
+		t.Fatal(err)
+	}
+	s3.Close()
+	tombPath := filepath.Join(dir3, streamStateDirName, legacyClosedDirName, sourceRangeStreamKey("tenant-1", "agent-a")+".json")
+	if err := os.WriteFile(tombPath, []byte(`{"version":1,"tenantId":"tenant-1","agentId":"agent-a","closedToAgentStreamId":"`+stream+`","migratedThroughSequence":0,"timestamp":"2026-01-01T00:00:00Z","extra":true}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	s4, err := spool.Open(spool.Config{Dir: dir3, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s4.Close()
+	if _, err := NewSpoolAcceptanceSink(s4, dir3); err == nil {
+		t.Fatal("tombstone with unknown field must fail closed")
+	}
+}
+
 func TestLineageCase7and8_StreamReplacementAndFence(t *testing.T) {
 	s, sink, _ := openTestSink(t)
 	defer s.Close()

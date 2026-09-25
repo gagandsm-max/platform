@@ -322,14 +322,35 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 		}
 	}
 
-	useV2 := batch.SchemaVersion == 2 || strings.TrimSpace(batch.AgentStreamID) != ""
-	if useV2 {
-		if strings.TrimSpace(batch.AgentStreamID) == "" {
+	var schemaVersion int
+	var agentStreamID string
+	switch batch.SchemaVersion {
+	case 1:
+		if strings.TrimSpace(batch.AgentStreamID) != "" {
+			return Ack{}, &DeliveryError{
+				Code:  "DELIVERY_BATCH_STREAM_FORBIDDEN",
+				Class: FailurePermanent,
+				Err:   errors.New("schemaVersion 1 must not include agentStreamId"),
+			}
+		}
+		schemaVersion = 1
+		agentStreamID = ""
+	case 2:
+		streamID := strings.TrimSpace(batch.AgentStreamID)
+		if streamID == "" {
 			return Ack{}, &DeliveryError{
 				Code:  "DELIVERY_BATCH_STREAM_REQUIRED",
 				Class: FailurePermanent,
 				Err:   errors.New("schemaVersion 2 requires agentStreamId"),
 			}
+		}
+		schemaVersion = 2
+		agentStreamID = streamID
+	default:
+		return Ack{}, &DeliveryError{
+			Code:  "DELIVERY_BATCH_SCHEMA_UNSUPPORTED",
+			Class: FailurePermanent,
+			Err:   fmt.Errorf("unsupported batch SchemaVersion %d", batch.SchemaVersion),
 		}
 	}
 
@@ -357,13 +378,6 @@ func (t *HTTPSTransport) Deliver(ctx context.Context, batch Batch) (Ack, error) 
 	firstSeq := batch.Records[0].Sequence
 	lastSeq := batch.Records[len(batch.Records)-1].Sequence
 	batchID := batch.BatchID
-
-	schemaVersion := 1
-	agentStreamID := ""
-	if useV2 {
-		schemaVersion = 2
-		agentStreamID = batch.AgentStreamID
-	}
 
 	env := DeliveryEnvelope{
 		SchemaVersion: schemaVersion,

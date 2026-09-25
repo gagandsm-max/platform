@@ -33,6 +33,7 @@ var (
 	ErrSequenceGap                = errors.New("QUEUE_SEQUENCE_GAP: missing unacknowledged sequence blocks delivery")
 	ErrSequenceConflict           = errors.New("QUEUE_SEQUENCE_CONFLICT: multiple active records share a sequence")
 	ErrMetaUncertain              = errors.New("QUEUE_META_UNCERTAIN: durable sequence metadata state cannot be confirmed")
+	ErrQueueStateUncertain        = errors.New("QUEUE_STATE_UNCERTAIN: sequence-bearing durable evidence exists without sequence.meta")
 	ErrAckRecoveryConflict        = errors.New("QUEUE_ACK_RECOVERY_CONFLICT: unauthorized or conflicting record at or below acceptedThrough")
 	ErrPendingAckCleanup          = errors.New("QUEUE_PENDING_ACK_CLEANUP: prior ACK cleanup not yet durable")
 	ErrSequenceExhausted          = errors.New("QUEUE_SEQUENCE_EXHAUSTED: sequence space exhausted at MAX_SAFE_SEQUENCE")
@@ -259,6 +260,17 @@ func (q *DurableQueue) recoverState() error {
 	}
 
 	// 3. Read/validate sequence.meta FIRST so ACK context is known before mutating active.
+	// Track physical existence separately from parsed content: missing meta + durable
+	// sequence-bearing evidence must fail closed (never mint a new lineage).
+	metaExisted := false
+	if fi, err := os.Lstat(q.metaPath); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return errors.New("QUEUE_META_CORRUPT: sequence.meta is a symlink")
+		}
+		metaExisted = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("QUEUE_META_STAT_FAILED: %w", err)
+	}
 	meta, err := q.readSequenceMetaLocked()
 	if err != nil {
 		return err
@@ -380,8 +392,16 @@ func (q *DurableQueue) recoverState() error {
 		return errors.New("QUEUE_META_CORRUPT: recovered sequence exceeds MAX_SAFE_SEQUENCE")
 	}
 
-	// Migrate legacy/v2 meta (or initialize empty queue) to v3 stream identity once.
-	// Never regenerate agentStreamId on later restarts.
+	// Migrate/init stream identity only when safe:
+	// - Fresh empty queue (no meta, no sequence-bearing evidence) may initialize v3.
+	// - Valid existing meta without agentStreamId may migrate while preserving sequences.
+	// - Missing meta + any sequence-bearing durable evidence fails closed (never mint lineage).
+	if !metaExisted {
+		hasSequenceEvidence := q.activeCount > 0 || qHigh > 0 || hasIntent || q.quarantineCount > 0
+		if hasSequenceEvidence {
+			return ErrQueueStateUncertain
+		}
+	}
 	if q.agentStreamId == "" {
 		if err := q.migrateOrInitStreamLocked(); err != nil {
 			return err

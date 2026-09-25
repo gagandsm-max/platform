@@ -1,7 +1,6 @@
 package agentreceiver
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -71,7 +70,7 @@ func (s *SpoolAcceptanceSink) loadOwnersLocked() (map[string]*LineageOwnerRecord
 			return nil, fmt.Errorf("%s: failed to read lineage owner: %w", ErrCodeStreamOwnerCorrupt, err)
 		}
 		var owner LineageOwnerRecord
-		if err := json.Unmarshal(data, &owner); err != nil {
+		if err := decodeStrictJSONObject(data, &owner); err != nil {
 			return nil, fmt.Errorf("%s: corrupt lineage owner JSON: %w", ErrCodeStreamOwnerCorrupt, err)
 		}
 		if err := validateOwnerRecord(owner); err != nil {
@@ -92,8 +91,11 @@ func validateOwnerRecord(owner LineageOwnerRecord) error {
 	if owner.Version != lineageOwnerVersion {
 		return fmt.Errorf("%s: unsupported lineage owner version %d", ErrCodeStreamOwnerCorrupt, owner.Version)
 	}
-	if strings.TrimSpace(owner.TenantID) == "" || strings.TrimSpace(owner.AgentID) == "" {
-		return fmt.Errorf("%s: lineage owner missing tenant or agent identity", ErrCodeStreamOwnerCorrupt)
+	if err := validateDurableIdentity("tenantId", owner.TenantID); err != nil {
+		return fmt.Errorf("%s: %w", ErrCodeStreamOwnerCorrupt, err)
+	}
+	if err := validateDurableIdentity("agentId", owner.AgentID); err != nil {
+		return fmt.Errorf("%s: %w", ErrCodeStreamOwnerCorrupt, err)
 	}
 	if !ValidAgentStreamID(owner.ActiveAgentStreamID) {
 		return fmt.Errorf("%s: lineage owner activeAgentStreamId grammar invalid", ErrCodeStreamOwnerCorrupt)
@@ -103,6 +105,17 @@ func validateOwnerRecord(owner LineageOwnerRecord) error {
 	}
 	if owner.ActivatedAt.IsZero() {
 		return fmt.Errorf("%s: lineage owner activatedAt must be set", ErrCodeStreamOwnerCorrupt)
+	}
+	return nil
+}
+
+func validateDurableIdentity(field, val string) error {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return fmt.Errorf("%s must not be empty", field)
+	}
+	if len(val) > 128 {
+		return fmt.Errorf("%s length %d exceeds maximum of 128", field, len(val))
 	}
 	return nil
 }
