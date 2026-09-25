@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -17,6 +18,7 @@ type LineageOwnerRecord struct {
 	TenantID                           string    `json:"tenantId"`
 	AgentID                            string    `json:"agentId"`
 	ActiveAgentStreamID                string    `json:"activeAgentStreamId"`
+	RetiredAgentStreamIDs              []string  `json:"retiredAgentStreamIds,omitempty"`
 	ActivatedAt                        time.Time `json:"activatedAt"`
 	ActivatedUnderAssignmentGeneration int64     `json:"activatedUnderAssignmentGeneration,omitempty"`
 	PreviousAgentStreamID              string    `json:"previousAgentStreamId,omitempty"`
@@ -106,6 +108,29 @@ func validateOwnerRecord(owner LineageOwnerRecord) error {
 	if owner.ActivatedAt.IsZero() {
 		return fmt.Errorf("%s: lineage owner activatedAt must be set", ErrCodeStreamOwnerCorrupt)
 	}
+	if err := validateRetiredAgentStreamIDs(owner.ActiveAgentStreamID, owner.RetiredAgentStreamIDs); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateRetiredAgentStreamIDs(active string, retired []string) error {
+	if len(retired) > maxRetiredAgentStreamIDs {
+		return fmt.Errorf("%s: retiredAgentStreamIds exceeds bound %d", ErrCodeStreamOwnerCorrupt, maxRetiredAgentStreamIDs)
+	}
+	seen := make(map[string]struct{}, len(retired))
+	for _, id := range retired {
+		if !ValidAgentStreamID(id) {
+			return fmt.Errorf("%s: retiredAgentStreamIds contains invalid stream grammar", ErrCodeStreamOwnerCorrupt)
+		}
+		if id == active {
+			return fmt.Errorf("%s: activeAgentStreamId must not appear in retiredAgentStreamIds", ErrCodeStreamOwnerCorrupt)
+		}
+		if _, ok := seen[id]; ok {
+			return fmt.Errorf("%s: retiredAgentStreamIds contains duplicate stream id", ErrCodeStreamOwnerCorrupt)
+		}
+		seen[id] = struct{}{}
+	}
 	return nil
 }
 
@@ -120,20 +145,111 @@ func validateDurableIdentity(field, val string) error {
 	return nil
 }
 
+func ownerHasRetiredStream(owner *LineageOwnerRecord, streamID string) bool {
+	if owner == nil {
+		return false
+	}
+	for _, id := range owner.RetiredAgentStreamIDs {
+		if id == streamID {
+			return true
+		}
+	}
+	return false
+}
+
+// buildRetiredAgentStreamIDs constructs the durable retired set for an ownership transition.
+// It includes prior retired IDs, the previous active stream, and any locally known modern
+// stream states for the same tenant+agent except the new active candidate.
+func buildRetiredAgentStreamIDs(previous *LineageOwnerRecord, tenantID, agentID, newActive string, streams map[string]*streamStateEntry) ([]string, error) {
+	set := make(map[string]struct{})
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" || id == newActive {
+			return
+		}
+		set[id] = struct{}{}
+	}
+	if previous != nil {
+		for _, id := range previous.RetiredAgentStreamIDs {
+			add(id)
+		}
+		add(previous.ActiveAgentStreamID)
+		add(previous.PreviousAgentStreamID)
+	}
+	for _, st := range streams {
+		if st == nil {
+			continue
+		}
+		if st.TenantID != tenantID || st.AgentID != agentID {
+			continue
+		}
+		if strings.TrimSpace(st.AgentStreamID) == "" {
+			continue
+		}
+		add(st.AgentStreamID)
+	}
+	if len(set) > maxRetiredAgentStreamIDs {
+		return nil, fmt.Errorf("%s: retiring stream would exceed retiredAgentStreamIds bound %d", ErrCodeStreamOwnerCorrupt, maxRetiredAgentStreamIDs)
+	}
+	out := make([]string, 0, len(set))
+	for id := range set {
+		if !ValidAgentStreamID(id) {
+			return nil, fmt.Errorf("%s: retired candidate stream grammar invalid", ErrCodeStreamOwnerCorrupt)
+		}
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 func (s *SpoolAcceptanceSink) getOwnerLocked(tenantID, agentID string) *LineageOwnerRecord {
 	return s.owners[sourceRangeStreamKey(tenantID, agentID)]
 }
 
 func (s *SpoolAcceptanceSink) publishOwnerLocked(owner LineageOwnerRecord) error {
 	if err := validateOwnerRecord(owner); err != nil {
+		s.reconcileRequired = true
 		return err
 	}
 	key := sourceRangeStreamKey(owner.TenantID, owner.AgentID)
 	path := s.ownerPath(owner.TenantID, owner.AgentID)
-	if err := atomicWriteJSONFile(s.ownerDirPath(), path, ".lineage-owner-*.tmp", owner); err != nil {
+	write := atomicWriteJSONFile
+	if s.ownerPublisher != nil {
+		write = s.ownerPublisher
+	}
+	if err := write(s.ownerDirPath(), path, ".lineage-owner-*.tmp", owner); err != nil {
+		// Rename may have succeeded while dirsync/hook failed — reload disk before next accept.
+		s.reconcileRequired = true
 		return fmt.Errorf("%s: %w", ErrCodeStreamOwnerCorrupt, err)
 	}
 	cp := owner
 	s.owners[key] = &cp
 	return nil
+}
+
+// SetOwnerPublisherForTest replaces durable owner publication (temp/fsync/rename/dirsync).
+func (s *SpoolAcceptanceSink) SetOwnerPublisherForTest(fn func(dir, path, tmpPattern string, v any) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ownerPublisher = fn
+}
+
+// RetiredStreamIDsForTest returns a copy of the durable retired set for tests.
+func (s *SpoolAcceptanceSink) RetiredStreamIDsForTest(tenantID, agentID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	owner := s.getOwnerLocked(tenantID, agentID)
+	if owner == nil {
+		return nil
+	}
+	out := make([]string, len(owner.RetiredAgentStreamIDs))
+	copy(out, owner.RetiredAgentStreamIDs)
+	return out
+}
+
+// ReconcileRequiredForTest exposes reconcileRequired for uncertainty tests.
+func (s *SpoolAcceptanceSink) ReconcileRequiredForTest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reconcileRequired
 }

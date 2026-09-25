@@ -27,6 +27,9 @@ const (
 	lineageOwnerVersion    = 1
 	legacyTombstoneVersion = 1
 	modernDurableVersion   = 2
+
+	// maxRetiredAgentStreamIDs bounds durable retired modern lineage history per tenant+agent.
+	maxRetiredAgentStreamIDs = 1024
 )
 
 // Standard stable error codes for agent receiver

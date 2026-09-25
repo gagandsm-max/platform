@@ -109,6 +109,10 @@ type SpoolAcceptanceSink struct {
 	indexPublisher func(string, batchIndexEntry) error
 	// appendHook is an unexported test seam invoked immediately before spool append.
 	appendHook func(DeliveryEnvelope) error
+	// ownerPublisher replaces atomicWriteJSONFile for lineage-owner publication (tests).
+	ownerPublisher func(dir, path, tmpPattern string, v any) error
+	// streamStatePublisher replaces atomicWriteJSONFile for stream-state publication (tests).
+	streamStatePublisher func(dir, path, tmpPattern string, v any) error
 }
 
 func NewSpoolAcceptanceSink(agentSpool *spool.DiskSpool, agentSpoolDir string) (*SpoolAcceptanceSink, error) {
@@ -231,11 +235,27 @@ func (s *SpoolAcceptanceSink) acceptModernV2Locked(env DeliveryEnvelope) (Accept
 		return s.acceptAgainstStreamLocked(env, streamKey, state, streamID)
 	}
 
+	// Retired modern lineages are permanently non-writable — including FirstSequence == 1.
+	if ownerHasRetiredStream(owner, streamID) {
+		active := ""
+		if owner != nil {
+			active = owner.ActiveAgentStreamID
+		}
+		return AcceptanceResult{}, &StreamStaleOrFencedError{
+			TenantID:            env.TenantID,
+			AgentID:             env.AgentID,
+			AgentStreamID:       streamID,
+			ActiveAgentStreamID: active,
+			FirstSequence:       env.FirstSequence,
+			LastSequence:        env.LastSequence,
+		}
+	}
+
 	if owner == nil {
 		return s.establishModernOwnershipLocked(env, streamID)
 	}
 
-	// owner.Active == A, env.Stream == B
+	// owner.Active == A, env.Stream == B (B not retired)
 	if env.FirstSequence == 1 {
 		return s.replaceActiveStreamLocked(env, owner, streamID)
 	}
@@ -278,6 +298,11 @@ func (s *SpoolAcceptanceSink) establishModernOwnershipLocked(env DeliveryEnvelop
 	}
 	// No legacy state: allow establish at watermark 0 (seq1 or sparse) without inventing contiguous coverage.
 
+	retired, err := buildRetiredAgentStreamIDs(nil, env.TenantID, env.AgentID, streamID, s.streams)
+	if err != nil {
+		return AcceptanceResult{}, err
+	}
+
 	streamKey := modernSourceRangeStreamKey(env.TenantID, env.AgentID, streamID)
 	state := &streamStateEntry{
 		Version:                   modernDurableVersion,
@@ -290,6 +315,7 @@ func (s *SpoolAcceptanceSink) establishModernOwnershipLocked(env DeliveryEnvelop
 	s.streams[streamKey] = state
 	if err := s.persistStreamStateLocked(streamKey); err != nil {
 		delete(s.streams, streamKey)
+		s.reconcileRequired = true
 		return AcceptanceResult{}, err
 	}
 
@@ -298,10 +324,12 @@ func (s *SpoolAcceptanceSink) establishModernOwnershipLocked(env DeliveryEnvelop
 		TenantID:                           env.TenantID,
 		AgentID:                            env.AgentID,
 		ActiveAgentStreamID:                streamID,
+		RetiredAgentStreamIDs:              retired,
 		ActivatedAt:                        time.Now().UTC(),
 		ActivatedUnderAssignmentGeneration: env.AssignmentGeneration,
 	}
 	if err := s.publishOwnerLocked(owner); err != nil {
+		// Candidate stream-state may remain; owner authority unchanged until durable publish succeeds.
 		return AcceptanceResult{}, err
 	}
 
@@ -309,6 +337,7 @@ func (s *SpoolAcceptanceSink) establishModernOwnershipLocked(env DeliveryEnvelop
 		// Close live v1 once modern ownership is established. Always write tombstone when
 		// establishing owner so subsequent v1 is rejected even without prior legacy state.
 		if err := s.tombstoneLegacyIfNeededLocked(env.TenantID, env.AgentID, streamID); err != nil {
+			s.reconcileRequired = true
 			return AcceptanceResult{}, err
 		}
 	}
@@ -317,6 +346,12 @@ func (s *SpoolAcceptanceSink) establishModernOwnershipLocked(env DeliveryEnvelop
 }
 
 func (s *SpoolAcceptanceSink) replaceActiveStreamLocked(env DeliveryEnvelope, previous *LineageOwnerRecord, streamID string) (AcceptanceResult, error) {
+	// Build retired set before any durable mutation. Fail closed on capacity — do not evict history.
+	retired, err := buildRetiredAgentStreamIDs(previous, env.TenantID, env.AgentID, streamID, s.streams)
+	if err != nil {
+		return AcceptanceResult{}, err
+	}
+
 	streamKey := modernSourceRangeStreamKey(env.TenantID, env.AgentID, streamID)
 	state := &streamStateEntry{
 		Version:                   modernDurableVersion,
@@ -329,6 +364,7 @@ func (s *SpoolAcceptanceSink) replaceActiveStreamLocked(env DeliveryEnvelope, pr
 	s.streams[streamKey] = state
 	if err := s.persistStreamStateLocked(streamKey); err != nil {
 		delete(s.streams, streamKey)
+		s.reconcileRequired = true
 		return AcceptanceResult{}, err
 	}
 
@@ -337,15 +373,19 @@ func (s *SpoolAcceptanceSink) replaceActiveStreamLocked(env DeliveryEnvelope, pr
 		TenantID:                           env.TenantID,
 		AgentID:                            env.AgentID,
 		ActiveAgentStreamID:                streamID,
+		RetiredAgentStreamIDs:              retired,
 		ActivatedAt:                        time.Now().UTC(),
 		ActivatedUnderAssignmentGeneration: env.AssignmentGeneration,
 		PreviousAgentStreamID:              previous.ActiveAgentStreamID,
 	}
 	if err := s.publishOwnerLocked(owner); err != nil {
+		// Owner A remains authoritative; candidate B state may remain as orphan for retry.
+		// Do not delete B or treat B as retired solely because owner publication failed.
 		return AcceptanceResult{}, err
 	}
 	// Ensure legacy remains closed under the new owner.
 	if err := s.tombstoneLegacyIfNeededLocked(env.TenantID, env.AgentID, streamID); err != nil {
+		s.reconcileRequired = true
 		return AcceptanceResult{}, err
 	}
 
@@ -644,7 +684,13 @@ func (s *SpoolAcceptanceSink) persistStreamStateLocked(streamKey string) error {
 		return nil
 	}
 	path := s.statePath(streamKey)
-	if err := atomicWriteJSONFile(s.stateDir, path, ".stream-state-*.tmp", state); err != nil {
+	write := atomicWriteJSONFile
+	if s.streamStatePublisher != nil {
+		write = s.streamStatePublisher
+	}
+	if err := write(s.stateDir, path, ".stream-state-*.tmp", state); err != nil {
+		// Rename may have succeeded while dirsync/hook failed — reconcile before next accept.
+		s.reconcileRequired = true
 		return fmt.Errorf("%s: %w", ErrCodeSinkFailed, err)
 	}
 	return nil
@@ -1126,4 +1172,11 @@ func (s *SpoolAcceptanceSink) SetAppendHookForTest(hook func(DeliveryEnvelope) e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.appendHook = hook
+}
+
+// SetStreamStatePublisherForTest replaces durable stream-state publication.
+func (s *SpoolAcceptanceSink) SetStreamStatePublisherForTest(fn func(dir, path, tmpPattern string, v any) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.streamStatePublisher = fn
 }
