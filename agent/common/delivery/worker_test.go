@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -89,6 +90,9 @@ func (m *mockTransport) Deliver(ctx context.Context, b client.Batch) (client.Ack
 	if m.echoID {
 		ack.AgentID = b.AgentID
 		ack.BatchID = b.BatchID
+	}
+	if ack.CorrelationID == "" {
+		ack.CorrelationID = b.CorrelationID
 	}
 	return ack, nil
 }
@@ -663,5 +667,95 @@ func TestDeliveryWorkerLocalQueueBlockDoesNotClearReceiverAvailable(t *testing.T
 				t.Fatalf("expected code %s, got %s", tc.code, stats.LastErrorCode)
 			}
 		})
+	}
+}
+
+type lineageMockQueue struct {
+	mockQueue
+	streamID string
+	cutover  uint64
+}
+
+func (m *lineageMockQueue) AgentStreamID() string         { return m.streamID }
+func (m *lineageMockQueue) LegacyCutoverSequence() uint64 { return m.cutover }
+
+func TestDeliveryWorkerModernLineageBatch(t *testing.T) {
+	stream := "stream-" + strings.Repeat("c", 32)
+	q := &lineageMockQueue{
+		mockQueue: mockQueue{records: []queue.Record{
+			{Sequence: 1, ID: "rec-1", Checksum: "c1", Payload: []byte("a")},
+			{Sequence: 2, ID: "rec-2", Checksum: "c2", Payload: []byte("b")},
+		}},
+		streamID: stream,
+		cutover:  0,
+	}
+	tr := &mockTransport{available: true, echoID: true, ack: client.Ack{AcceptedThrough: 2}}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered, err := w.DeliverOnce(context.Background())
+	if err != nil || !delivered {
+		t.Fatalf("delivered=%v err=%v", delivered, err)
+	}
+	if tr.batches[0].SchemaVersion != 2 || tr.batches[0].AgentStreamID != stream {
+		t.Fatalf("expected v2 batch, got %+v", tr.batches[0])
+	}
+	wantID := client.BuildLineageBatchID(stream, "agent-1", tr.batches[0].Records)
+	if tr.batches[0].BatchID != wantID {
+		t.Fatalf("batch id=%q want %q", tr.batches[0].BatchID, wantID)
+	}
+}
+
+func TestDeliveryWorkerLegacyCutoverUsesV1(t *testing.T) {
+	stream := "stream-" + strings.Repeat("d", 32)
+	recs := []queue.Record{
+		{Sequence: 4, ID: "rec-4", Checksum: "c4", Payload: []byte("a")},
+		{Sequence: 5, ID: "rec-5", Checksum: "c5", Payload: []byte("b")},
+	}
+	q := &lineageMockQueue{
+		mockQueue: mockQueue{records: recs},
+		streamID:  stream,
+		cutover:   6,
+	}
+	tr := &mockTransport{available: true, echoID: true, ack: client.Ack{AcceptedThrough: 5}}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered, err := w.DeliverOnce(context.Background())
+	if err != nil || !delivered {
+		t.Fatalf("delivered=%v err=%v", delivered, err)
+	}
+	if tr.batches[0].SchemaVersion != 1 || tr.batches[0].AgentStreamID != "" {
+		t.Fatalf("expected legacy v1 batch, got %+v", tr.batches[0])
+	}
+	wantID := client.BuildLegacyBatchID("agent-1", recs)
+	if tr.batches[0].BatchID != wantID {
+		t.Fatalf("batch id=%q want %q", tr.batches[0].BatchID, wantID)
+	}
+}
+
+func TestDeliveryWorkerRejectsMixedCutoverBatch(t *testing.T) {
+	stream := "stream-" + strings.Repeat("e", 32)
+	q := &lineageMockQueue{
+		mockQueue: mockQueue{records: []queue.Record{
+			{Sequence: 5, ID: "rec-5", Payload: []byte("a")},
+			{Sequence: 6, ID: "rec-6", Payload: []byte("b")},
+		}},
+		streamID: stream,
+		cutover:  6,
+	}
+	tr := &mockTransport{available: true, echoID: true, ack: client.Ack{AcceptedThrough: 6}}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered, err := w.DeliverOnce(context.Background())
+	if err == nil || delivered {
+		t.Fatal("expected mixed cutover rejection")
+	}
+	if tr.calls != 0 {
+		t.Fatalf("must fail closed before transport, calls=%d", tr.calls)
 	}
 }

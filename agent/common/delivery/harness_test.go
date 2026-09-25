@@ -39,6 +39,7 @@ type harnessDeliveryEnvelope struct {
 	SiteID        string                  `json:"siteId,omitempty"`
 	CorrelationID string                  `json:"correlationId"`
 	BatchID       string                  `json:"batchId"`
+	AgentStreamID string                  `json:"agentStreamId,omitempty"`
 	FirstSequence uint64                  `json:"firstSequence"`
 	LastSequence  uint64                  `json:"lastSequence"`
 	RecordCount   int                     `json:"recordCount"`
@@ -130,6 +131,9 @@ func (s *harnessTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	batchKey := fmt.Sprintf("%s:%s", env.AgentID, env.BatchID)
 	if cachedAck, exists := s.replays[batchKey]; exists {
+		// Match production Sensor: exact replay re-enters durable path and ACKs
+		// with THIS attempt's correlation_id (not the prior attempt's value).
+		cachedAck.CorrelationID = env.CorrelationID
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(cachedAck)

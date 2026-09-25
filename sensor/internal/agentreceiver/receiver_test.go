@@ -58,7 +58,7 @@ func sampleEnvelope(agentID, tenantID string, recs ...DeliveryRecord) DeliveryEn
 		last = recs[len(recs)-1].Sequence
 	}
 	return DeliveryEnvelope{
-		SchemaVersion: CurrentSchemaVersion,
+		SchemaVersion: SchemaVersionV1,
 		AgentID:       agentID,
 		TenantID:      tenantID,
 		SiteID:        "site-primary",
@@ -69,6 +69,17 @@ func sampleEnvelope(agentID, tenantID string, recs ...DeliveryRecord) DeliveryEn
 		RecordCount:   len(recs),
 		Records:       recs,
 	}
+}
+
+func sampleStreamID(hex32 string) string {
+	return "stream-" + hex32
+}
+
+func sampleV2Envelope(agentID, tenantID, streamID string, recs ...DeliveryRecord) DeliveryEnvelope {
+	env := sampleEnvelope(agentID, tenantID, recs...)
+	env.SchemaVersion = SchemaVersionV2
+	env.AgentStreamID = streamID
+	return env
 }
 
 func mockTLSServer(handler http.Handler, certCN string) (*httptest.Server, *http.Client) {
@@ -927,5 +938,31 @@ func TestReceiverHTTP413RequestTooLarge(t *testing.T) {
 	}
 	if er.Code != ErrCodeRequestTooLarge {
 		t.Fatalf("expected %s, got %q", ErrCodeRequestTooLarge, er.Code)
+	}
+}
+
+func TestReceiverLogsAndAcceptsV2StreamIdentity(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.AllowGeneration("agent-1", "sensor-infra-01", "tenant-1", "site-primary", 1)
+	sink := NewInMemoryAcceptanceSink()
+	rcv := newTestReceiver(t, runtime.RoleInfrastructure, ident, auth, sink)
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+
+	env := sampleV2Envelope("agent-1", "tenant-1", testStreamA(), sampleRecord(1, "r1", []byte(`{"ok":true}`)))
+	body, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("HTTP %d", resp.StatusCode)
+	}
+	batches := sink.Batches()
+	if len(batches) != 1 || batches[0].AgentStreamID != testStreamA() {
+		t.Fatalf("sink must receive agentStreamId, got %+v", batches)
 	}
 }

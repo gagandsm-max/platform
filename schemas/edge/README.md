@@ -13,7 +13,7 @@
 |---|---|
 | `CURRENT_IMPLEMENTED_V1` | Matches current runtime wire behavior at the BUILD-000 base SHA |
 | `FROZEN_BUILD_000_INVARIANT` | Approved BUILD-000 decision; must not silently diverge |
-| `BUILD_002_TARGET` | Required for Agent↔Sensor hardening; not implemented in BUILD-000 |
+| `BUILD_002_TARGET` | Agent↔Sensor hardening; `agentStreamId` / schemaVersion 2 now implemented on Agent hop (this branch) |
 | `BUILD_003_TARGET` | Required for Sensor↔Core hardening; not implemented in BUILD-000 |
 | `BUILD_004_TARGET` | Desired/observed control reconciliation; not heartbeat v1 authority |
 
@@ -152,20 +152,22 @@ Agent `hostId` is source evidence. Agent-supplied `entityId` is not authoritativ
 
 ## CURRENT V1 LIMITATION — Agent stream generation (B000-D015)
 
-Sensor durable Agent replay authority is keyed by `tenantId + agentId`.
+Sensor durable Agent replay authority was historically keyed by `tenantId + agentId`.
 
-If the same Agent identity loses/recreates its durable queue and sequences restart, current Sensor correctly fails closed because it cannot distinguish legitimate fresh lineage from replay.
+If the same Agent identity loses/recreates its durable queue and sequences restart, v1 Sensor correctly fails closed because it cannot distinguish legitimate fresh lineage from replay.
 
-**BUILD_002_TARGET:** introduce durable Agent stream/generation identifier (working name `agentStreamId`) on a versioned Agent→Sensor contract:
+**BUILD-002 (implemented on Agent↔Sensor hop):** durable `agentStreamId` on a versioned Agent→Sensor contract:
 
-- durable across Agent process restart;
+- durable across Agent process restart (`sequence.meta` version 3);
 - changes only when durable delivery lineage is intentionally recreated;
-- included in Sensor replay identity;
-- no automatic watermark reset for same `agentId`;
-- migration from v1 must fail safely;
-- old v1 replay state must not be silently reinterpreted as a new lineage.
+- included on `schemaVersion` 2 batches; must be absent on `schemaVersion` 1;
+- pattern `^stream-[0-9a-f]{32}$` (shared with Sensor spool stream grammar);
+- legacy/v2 queue meta migrates once: preserves watermarks, assigns one stream id, sets `legacyCutoverSequence` when prior `highestSequence > 0`;
+- legacy sequences below cutover continue on v1 wire; modern sequences use v2 + `agentStreamId`;
+- batches must not span the cutover;
+- `MAX_SAFE_SEQUENCE` exhaustion fails closed (`QUEUE_SEQUENCE_EXHAUSTED`);
+- ACK `correlation_id` is bound to the submitted batch `correlationId` (ACK field names unchanged).
 
-BUILD-000 does **not** implement this migration.
 
 ## Agent-ingress hardening ownership (B000-D013)
 

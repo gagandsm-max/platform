@@ -1,18 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://platform.invalid/schemas/edge/agent-telemetry-batch.schema.json",
-  "title": "Agent→Sensor Telemetry Delivery Envelope v1",
-  "description": "CURRENT_IMPLEMENTED_V1 Agent DeliveryEnvelope (max 100 records). Records must be strictly ascending and contiguous: records[i].sequence == records[i-1].sequence+1; first/last record sequences match envelope bounds; recordCount == records.length == lastSequence-firstSequence+1. Sequence ceiling MAX_SAFE_SEQUENCE is FROZEN_BUILD_000_INVARIANT; runtime ceiling enforcement is BUILD_002_TARGET. No entityId. No agentStreamId (BUILD_002_TARGET).",
+  "title": "Agent→Sensor Telemetry Delivery Envelope v1|v2",
+  "description": "CURRENT_IMPLEMENTED Agent DeliveryEnvelope (max 100 records). schemaVersion 1 omits agentStreamId; schemaVersion 2 requires agentStreamId. Records must be strictly ascending and contiguous. Sequence ceiling MAX_SAFE_SEQUENCE is FROZEN_BUILD_000_INVARIANT with BUILD-002 runtime hop enforcement. No entityId.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "agentId", "tenantId", "correlationId", "batchId", "firstSequence", "lastSequence", "recordCount", "records"],
   "properties": {
-    "schemaVersion": {"$ref": "common-definitions.schema.json#/$defs/schemaVersionV1"},
+    "schemaVersion": {
+      "type": "integer",
+      "enum": [1, 2]
+    },
     "agentId": {"$ref": "common-definitions.schema.json#/$defs/agentId"},
     "tenantId": {"$ref": "common-definitions.schema.json#/$defs/tenantId"},
     "siteId": {"$ref": "common-definitions.schema.json#/$defs/siteId"},
     "correlationId": {"$ref": "common-definitions.schema.json#/$defs/correlationId"},
     "batchId": {"$ref": "common-definitions.schema.json#/$defs/agentDeliveryBatchId"},
+    "agentStreamId": {"$ref": "common-definitions.schema.json#/$defs/agentStreamId"},
     "firstSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
     "lastSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
     "recordCount": {"type": "integer", "minimum": 1, "maximum": 100},
@@ -22,5 +26,19 @@
       "maxItems": 100,
       "items": {"$ref": "common-definitions.schema.json#/$defs/agentDeliveryRecord"}
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"schemaVersion": {"const": 2}},
+        "required": ["schemaVersion"]
+      },
+      "then": {
+        "required": ["agentStreamId"]
+      },
+      "else": {
+        "not": {"required": ["agentStreamId"]}
+      }
+    }
+  ]
 }

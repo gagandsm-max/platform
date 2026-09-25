@@ -1814,95 +1814,69 @@ func TestDurableQueueRecoverTransitionIntentMatrix(t *testing.T) {
 		}
 	})
 
-	t.Run("Case E: intent and neither exists -> location uncertain", func(t *testing.T) {
+	t.Run("Case E: intent and neither exists -> fail closed without meta", func(t *testing.T) {
 		dir := t.TempDir()
 		writeIntent(dir, "rec_0000000000000000001_missing.json", 1, "QUEUE_RECORD_CORRUPT")
-
-		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
-			t.Fatalf("missing both copies must enter location uncertain: %+v", q.Stats())
-		}
-		batch, err := q.ReadBatch(10, 1024*1024)
-		if !errors.Is(err, ErrQuarantineUncertain) || len(batch) != 0 {
-			t.Fatalf("expected ErrQuarantineUncertain, got batch=%+v err=%v", batch, err)
+		_, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if !errors.Is(err, ErrQueueStateUncertain) {
+			t.Fatalf("intent without sequence.meta must fail closed, got %v", err)
 		}
 	})
 
-	t.Run("corrupt intent JSON -> location uncertain", func(t *testing.T) {
+	t.Run("corrupt intent JSON without meta -> fail closed", func(t *testing.T) {
 		dir := t.TempDir()
 		_ = os.WriteFile(filepath.Join(dir, transitionIntentFile), []byte(`{not valid json`), 0600)
-		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
-			t.Fatalf("corrupt intent must enter location uncertain: %+v", q.Stats())
+		_, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if !errors.Is(err, ErrQueueStateUncertain) {
+			t.Fatalf("intent artifact without sequence.meta must fail closed, got %v", err)
 		}
 	})
 
-	t.Run("oversized intent JSON -> location uncertain", func(t *testing.T) {
+	t.Run("oversized intent JSON without meta -> fail closed", func(t *testing.T) {
 		dir := t.TempDir()
 		oversized := make([]byte, 5000)
 		_ = os.WriteFile(filepath.Join(dir, transitionIntentFile), oversized, 0600)
-		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
-			t.Fatalf("oversized intent must enter location uncertain: %+v", q.Stats())
+		_, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if !errors.Is(err, ErrQueueStateUncertain) {
+			t.Fatalf("intent artifact without sequence.meta must fail closed, got %v", err)
 		}
 	})
 
-	t.Run("empty intent JSON -> location uncertain", func(t *testing.T) {
+	t.Run("empty intent JSON without meta -> fail closed", func(t *testing.T) {
 		dir := t.TempDir()
 		_ = os.WriteFile(filepath.Join(dir, transitionIntentFile), []byte{}, 0600)
-		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
-			t.Fatalf("empty intent must enter location uncertain: %+v", q.Stats())
+		_, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if !errors.Is(err, ErrQueueStateUncertain) {
+			t.Fatalf("intent artifact without sequence.meta must fail closed, got %v", err)
 		}
 	})
 
-	t.Run("symlink intent file -> location uncertain", func(t *testing.T) {
+	t.Run("symlink intent file without meta -> fail closed", func(t *testing.T) {
 		dir := t.TempDir()
 		target := filepath.Join(dir, "target.json")
 		_ = os.WriteFile(target, []byte(`{"version":1,"record":"rec_0000000000000000001_a.json","sequence":1}`), 0600)
 		_ = os.Symlink(target, filepath.Join(dir, transitionIntentFile))
-		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
-			t.Fatalf("symlink intent must enter location uncertain: %+v", q.Stats())
+		_, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if !errors.Is(err, ErrQueueStateUncertain) {
+			t.Fatalf("intent artifact without sequence.meta must fail closed, got %v", err)
 		}
 	})
 
-	t.Run("intent sequence mismatch -> location uncertain", func(t *testing.T) {
+	t.Run("intent sequence mismatch without meta -> fail closed", func(t *testing.T) {
 		dir := t.TempDir()
 		writeIntent(dir, "rec_0000000000000000001_test.json", 99, "QUEUE_RECORD_CORRUPT")
-		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
-			t.Fatalf("sequence mismatch must enter location uncertain: %+v", q.Stats())
+		_, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if !errors.Is(err, ErrQueueStateUncertain) {
+			t.Fatalf("intent artifact without sequence.meta must fail closed, got %v", err)
 		}
 	})
 
-	t.Run("intent path traversal -> location uncertain", func(t *testing.T) {
+	t.Run("intent path traversal without meta -> fail closed", func(t *testing.T) {
 		dir := t.TempDir()
 		writeIntent(dir, "../outside.json", 1, "QUEUE_RECORD_CORRUPT")
-		q, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !q.Stats().LocationUncertain || !q.Stats().DeliveryBlocked {
-			t.Fatalf("path traversal in intent must enter location uncertain: %+v", q.Stats())
+		_, err := NewDurableQueue(dir, 10, 1024*1024, 1024)
+		if !errors.Is(err, ErrQueueStateUncertain) {
+			t.Fatalf("intent artifact without sequence.meta must fail closed, got %v", err)
 		}
 	})
 }
@@ -3326,8 +3300,11 @@ func TestDurableQueueFirstRecordLossBlocksWithLineageStart(t *testing.T) {
 		}
 	}
 	meta := readSequenceMetaFile(t, tempDir)
-	if meta.Version != sequenceMetaVersion2 || meta.LineageStart != 1 || meta.HighestSequence != 3 {
-		t.Fatalf("expected v2 lineageStart=1 highest=3, got %+v", meta)
+	if meta.Version != sequenceMetaVersion3 || meta.LineageStart != 1 || meta.HighestSequence != 3 {
+		t.Fatalf("expected v3 lineageStart=1 highest=3, got %+v", meta)
+	}
+	if meta.AgentStreamID == "" || !validAgentStreamID(meta.AgentStreamID) {
+		t.Fatalf("expected durable agentStreamId, got %+v", meta)
 	}
 	if q.Stats().LineageStart != 1 {
 		t.Fatalf("stats lineageStart must be 1, got %d", q.Stats().LineageStart)
@@ -3350,7 +3327,7 @@ func TestDurableQueueFirstRecordLossBlocksWithLineageStart(t *testing.T) {
 			t.Fatalf("reopen %d: lineageStart must stay 1 and gap-blocked, stats=%+v", i, stats)
 		}
 		meta = readSequenceMetaFile(t, tempDir)
-		if meta.Version != sequenceMetaVersion2 || meta.LineageStart != 1 {
+		if meta.Version != sequenceMetaVersion3 || meta.LineageStart != 1 {
 			t.Fatalf("reopen %d: durable lineageStart must stay 1, got %+v", i, meta)
 		}
 	}
@@ -3455,8 +3432,8 @@ func TestDurableQueueLegacyEmptyHighestEnqueuesNewLineage(t *testing.T) {
 		t.Fatalf("expected next sequence 42, got %d", rec.Sequence)
 	}
 	meta := readSequenceMetaFile(t, tempDir)
-	if meta.Version != sequenceMetaVersion2 || meta.LineageStart != 42 || meta.HighestSequence != 42 {
-		t.Fatalf("enqueue must write v2 lineageStart=42 highest=42, got %+v", meta)
+	if meta.Version != sequenceMetaVersion3 || meta.LineageStart != 42 || meta.HighestSequence != 42 {
+		t.Fatalf("enqueue must write v3 lineageStart=42 highest=42, got %+v", meta)
 	}
 	if q.Stats().LineageStart != 42 {
 		t.Fatalf("stats lineageStart must be 42, got %d", q.Stats().LineageStart)
@@ -3607,4 +3584,246 @@ func TestDurableQueueQuarantineDifferentIDVsAcceptedRecordsConflict(t *testing.T
 	if !q2.Stats().AckRecoveryConflictBlock {
 		t.Fatalf("must report ack recovery conflict: %+v", q2.Stats())
 	}
+}
+
+func TestDurableQueueV3EmptyPersistsStreamWithoutLineageStart(t *testing.T) {
+	tempDir := t.TempDir()
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.Version != sequenceMetaVersion3 {
+		t.Fatalf("empty queue must persist v3 meta, got %+v", meta)
+	}
+	if !validAgentStreamID(meta.AgentStreamID) {
+		t.Fatalf("expected stream id, got %q", meta.AgentStreamID)
+	}
+	if meta.HighestSequence != 0 || meta.LineageStart != 0 || meta.LegacyCutoverSequence != 0 || meta.AcceptedThrough != 0 {
+		t.Fatalf("empty v3 must keep zero watermarks, got %+v", meta)
+	}
+	stream := q.AgentStreamID()
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q2.AgentStreamID() != stream {
+		t.Fatalf("stream id must not regenerate: %q vs %q", stream, q2.AgentStreamID())
+	}
+}
+
+func TestDurableQueueLegacyMetaMigratesOnce(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, 5, "rec-5", []byte("x"))
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(`{"highestSequence":5}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := readSequenceMetaFile(t, tempDir)
+	if meta.Version != sequenceMetaVersion3 || !validAgentStreamID(meta.AgentStreamID) {
+		t.Fatalf("expected migrated v3, got %+v", meta)
+	}
+	if meta.LegacyCutoverSequence != 6 || meta.HighestSequence != 5 {
+		t.Fatalf("cutover must be highest+1, got %+v", meta)
+	}
+	if !q.IsLegacySequence(5) || q.IsLegacySequence(6) {
+		t.Fatalf("legacy classification wrong: cutover=%d", q.LegacyCutoverSequence())
+	}
+	stream := meta.AgentStreamID
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q2.AgentStreamID() != stream || q2.LegacyCutoverSequence() != 6 {
+		t.Fatalf("migration must be sticky: %+v", q2.Stats())
+	}
+}
+
+func TestDurableQueueReadBatchNeverCrossesCutover(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeActiveRecord(t, tempDir, 4, "rec-4", []byte("a"))
+	writeActiveRecord(t, tempDir, 5, "rec-5", []byte("b"))
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(`{"highestSequence":5}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.LegacyCutoverSequence() != 6 {
+		t.Fatalf("cutover=%d", q.LegacyCutoverSequence())
+	}
+	writeActiveRecord(t, tempDir, 6, "rec-6", []byte("c"))
+	// Refresh in-memory counters by reopening.
+	q2, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := q2.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 2 || batch[0].Sequence != 4 || batch[1].Sequence != 5 {
+		t.Fatalf("must stop before cutover, got %+v", batch)
+	}
+	if err := q2.CommitAccepted(batch, 5); err != nil {
+		t.Fatal(err)
+	}
+	batch, err = q2.ReadBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 1 || batch[0].Sequence != 6 {
+		t.Fatalf("modern side after cutover, got %+v", batch)
+	}
+}
+
+func TestDurableQueueRejectsOverMaxSafeOnRecover(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"highestSequence":%d}`, MAX_SAFE_SEQUENCE+1)
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(payload), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024); err == nil {
+		t.Fatal("expected recover rejection above MAX_SAFE_SEQUENCE")
+	}
+}
+
+func TestDurableQueueEnqueueExhaustion(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"version":3,"agentStreamId":"stream-%s","highestSequence":%d,"lineageStart":%d}`,
+		strings.Repeat("ab", 16), MAX_SAFE_SEQUENCE, MAX_SAFE_SEQUENCE)
+	if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(payload), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue([]byte("overflow")); !errors.Is(err, ErrSequenceExhausted) {
+		t.Fatalf("expected ErrSequenceExhausted, got %v", err)
+	}
+}
+
+func TestDurableQueueMissingMetaWithEvidenceFailsClosed(t *testing.T) {
+	t.Run("fresh_empty_initializes_v3", func(t *testing.T) {
+		tempDir := t.TempDir()
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		meta := readSequenceMetaFile(t, tempDir)
+		if meta.Version != sequenceMetaVersion3 || !validAgentStreamID(meta.AgentStreamID) {
+			t.Fatalf("expected v3 init, got %+v", meta)
+		}
+		if meta.HighestSequence != 0 || meta.LineageStart != 0 || meta.LegacyCutoverSequence != 0 {
+			t.Fatalf("empty queue must keep zero watermarks: %+v", meta)
+		}
+		_ = q
+	})
+
+	t.Run("active_record_without_meta", func(t *testing.T) {
+		tempDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		writeActiveRecord(t, tempDir, 3, "rec-3", []byte("x"))
+		_, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if !errors.Is(err, ErrQueueStateUncertain) {
+			t.Fatalf("expected ErrQueueStateUncertain, got %v", err)
+		}
+		if _, err := os.Lstat(filepath.Join(tempDir, sequenceMetaFile)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("must not mint sequence.meta")
+		}
+	})
+
+	t.Run("quarantine_record_without_meta", func(t *testing.T) {
+		tempDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		writeQuarantineRecord(t, tempDir, 7, "q-7", []byte("q"))
+		_, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if !errors.Is(err, ErrQueueStateUncertain) {
+			t.Fatalf("expected ErrQueueStateUncertain, got %v", err)
+		}
+	})
+
+	t.Run("transition_intent_without_meta", func(t *testing.T) {
+		tempDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		intent := transitionIntent{Version: 1, Record: recordFileName(4, "r-4"), Sequence: 4, Code: "QUEUE_RECORD_CORRUPT"}
+		data, err := json.Marshal(intent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tempDir, transitionIntentFile), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err = NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if !errors.Is(err, ErrQueueStateUncertain) {
+			t.Fatalf("expected ErrQueueStateUncertain, got %v", err)
+		}
+	})
+
+	t.Run("valid_legacy_meta_still_migrates", func(t *testing.T) {
+		tempDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(tempDir, "active"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(tempDir, "quarantine"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		writeActiveRecord(t, tempDir, 5, "rec-5", []byte("x"))
+		if err := os.WriteFile(filepath.Join(tempDir, sequenceMetaFile), []byte(`{"highestSequence":5}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		q, err := NewDurableQueue(tempDir, 10, 1024*1024, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		meta := readSequenceMetaFile(t, tempDir)
+		if meta.Version != sequenceMetaVersion3 || meta.LegacyCutoverSequence != 6 || meta.HighestSequence != 5 {
+			t.Fatalf("migration regression: %+v", meta)
+		}
+		_ = q
+	})
 }

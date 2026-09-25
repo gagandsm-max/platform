@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "agentId": "agent-01",
+  "tenantId": "11111111-1111-4111-8111-111111111111",
+  "siteId": "22222222-2222-4222-8222-222222222222",
+  "correlationId": "corr-agent-batch-v2-001",
+  "batchId": "batch-stream-00112233445566778899aabbccddeeff-agent-01-00000000000000000001-00000000000000000001-aaaaaaaaaaaaaaaa",
+  "agentStreamId": "stream-00112233445566778899aabbccddeeff",
+  "firstSequence": 1,
+  "lastSequence": 1,
+  "recordCount": 1,
+  "records": [
+    {
+      "sequence": 1,
+      "id": "rec-1",
+      "createdAt": "2026-09-24T10:00:00.000Z",
+      "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "payload": {
+        "schemaVersion": 1,
+        "sourceType": "AGENT",
+        "tenantId": "11111111-1111-4111-8111-111111111111",
+        "agentId": "agent-01",
+        "hostId": "host-1"
+      }
+    }
+  ]
+}

@@ -10,21 +10,21 @@
 |---|---|
 | Register version | 1.0 |
 | BUILD-001 activation base SHA | `b5ce7da76def70dc2110aafe5fd89810f7a93c10` |
-| BUILD-002 activation base SHA | `aae9cb4c5579e05f0ea50a50079c54341d648f41` |
+| BUILD-002 activation base SHA | `1738ce21800838afa4f1025106a775685685371d` |
 | Last certified BUILD | BUILD-001 |
 | BUILD-000 certification | CERTIFIED — PR #111 merged; post-merge Platform CI #517 / run DB `36001833784` SUCCESS |
 | BUILD-001 certification | CERTIFIED — PR #113 merged at `aae9cb4c5579e05f0ea50a50079c54341d648f41`; immutable audit PASS (0 P0/P1/P2); post-merge Platform CI #522 / run DB `36022560598` SUCCESS |
 | Active BUILD | BUILD-002 |
-| Active status | IMPLEMENTING |
+| Active status | CERTIFYING |
 | Active GitHub issue | #114 |
-| Active PR | PENDING |
-| Evidence | BUILD-002 activation after BUILD-001 certification; implementation not started |
-| Last updated | 2026-09-24 |
+| Active PR | #116 (DRAFT) |
+| Evidence | BUILD-002 implementation corrected through `033ffda684529d17b6e703f288fe53916bb0438a`. Exact-head CI #526 on prior head `d96f807714c5623e9b1143c5b46fce174458b685` passed, but immutable Antigravity audit FAILED_P0 due historical lineage seq1 resurrection. Corrective retired-lineage fencing implemented; fresh exact-head CI + fresh immutable audit REQUIRED before CERTIFIED |
+| Last updated | 2026-09-25 |
 | Sequencing authority | Master Chat only |
 
 BUILD-000 decision/certification trail: GitHub Issue #110, PR #111, exact audited head `0b25046c3c418ea5d30d565bd5d5ed7f55138f9c`, merge/main `b5ce7da76def70dc2110aafe5fd89810f7a93c10`, post-merge CI #517.
 BUILD-001 certification trail: GitHub Issue #112, PR #113, immutable audited head `a9d2313645c57ab02a40d44e5ac26cc626c01233`, merge/main `aae9cb4c5579e05f0ea50a50079c54341d648f41`, post-merge CI #522.
-BUILD-002 authority and evidence trail: GitHub Issue #114.
+BUILD-002 authority and evidence trail: GitHub Issue #114, draft PR #116; activation base `1738ce21800838afa4f1025106a775685685371d`; prior audited head `d96f807714c5623e9b1143c5b46fce174458b685` passed Platform CI #526 / run DB `36117860866` but immutable Antigravity audit returned FAIL_P0 for retired-lineage seq1 resurrection; corrective implementation head `033ffda684529d17b6e703f288fe53916bb0438a` adds bounded durable retired-lineage fencing and publication-reconciliation safety. Certification remains in progress — fresh exact-head CI, fresh immutable adversarial audit, merge gate and post-merge CI pending.
 
 ## Core rule
 

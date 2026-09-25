@@ -4,10 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
 )
+
+var agentStreamIDPattern = regexp.MustCompile(`^stream-[0-9a-f]{32}$`)
 
 // ValidationError represents a typed validation failure.
 type ValidationError struct {
@@ -17,6 +20,11 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+// ValidAgentStreamID reports whether id matches the BUILD-002 stream grammar.
+func ValidAgentStreamID(id string) bool {
+	return agentStreamIDPattern.MatchString(id)
 }
 
 // ComputeRecordChecksum computes the authoritative SHA-256 checksum for an agent record,
@@ -33,10 +41,13 @@ func ValidateEnvelope(env *DeliveryEnvelope, maxRecords int, maxRecordBytes int)
 	if env == nil {
 		return &ValidationError{Code: ErrCodeEmptyBody, Message: "envelope is nil"}
 	}
-	if env.SchemaVersion != CurrentSchemaVersion {
+	switch env.SchemaVersion {
+	case SchemaVersionV1, SchemaVersionV2:
+		// supported transitional v1 and current v2
+	default:
 		return &ValidationError{
 			Code:    ErrCodeUnsupportedSchema,
-			Message: fmt.Sprintf("unsupported schema version %d, expected %d", env.SchemaVersion, CurrentSchemaVersion),
+			Message: fmt.Sprintf("unsupported schema version %d; supported versions are %d and %d", env.SchemaVersion, SchemaVersionV1, SchemaVersionV2),
 		}
 	}
 	if err := validateIdentifier("agentId", env.AgentID, 128); err != nil {
@@ -55,6 +66,32 @@ func ValidateEnvelope(env *DeliveryEnvelope, maxRecords int, maxRecordBytes int)
 	}
 	if err := validateIdentifier("batchId", env.BatchID, 256); err != nil {
 		return err
+	}
+
+	streamID := strings.TrimSpace(env.AgentStreamID)
+	switch env.SchemaVersion {
+	case SchemaVersionV1:
+		if streamID != "" {
+			return &ValidationError{
+				Code:    ErrCodeInvalidField,
+				Message: "agentStreamId must be absent for schemaVersion 1",
+			}
+		}
+		env.AgentStreamID = ""
+	case SchemaVersionV2:
+		if streamID == "" {
+			return &ValidationError{
+				Code:    ErrCodeInvalidField,
+				Message: "agentStreamId is required for schemaVersion 2",
+			}
+		}
+		if !ValidAgentStreamID(streamID) {
+			return &ValidationError{
+				Code:    ErrCodeInvalidField,
+				Message: "agentStreamId must match ^stream-[0-9a-f]{32}$",
+			}
+		}
+		env.AgentStreamID = streamID
 	}
 
 	recordLen := len(env.Records)
@@ -82,6 +119,12 @@ func ValidateEnvelope(env *DeliveryEnvelope, maxRecords int, maxRecordBytes int)
 			Message: fmt.Sprintf("lastSequence %d cannot be less than firstSequence %d", env.LastSequence, env.FirstSequence),
 		}
 	}
+	if env.FirstSequence > MAX_SAFE_SEQUENCE || env.LastSequence > MAX_SAFE_SEQUENCE {
+		return &ValidationError{
+			Code:    ErrCodeSequenceMismatch,
+			Message: fmt.Sprintf("sequence range exceeds MAX_SAFE_SEQUENCE (%d)", MAX_SAFE_SEQUENCE),
+		}
+	}
 	if env.Records[0].Sequence != env.FirstSequence {
 		return &ValidationError{
 			Code:    ErrCodeSequenceMismatch,
@@ -105,6 +148,12 @@ func ValidateEnvelope(env *DeliveryEnvelope, maxRecords int, maxRecordBytes int)
 					Code:    ErrCodeSequenceGap,
 					Message: fmt.Sprintf("sequence gap or out-of-order at index %d: expected %d, got %d", i, prevSeq+1, rec.Sequence),
 				}
+			}
+		}
+		if rec.Sequence > MAX_SAFE_SEQUENCE {
+			return &ValidationError{
+				Code:    ErrCodeSequenceMismatch,
+				Message: fmt.Sprintf("records[%d].sequence exceeds MAX_SAFE_SEQUENCE (%d)", i, MAX_SAFE_SEQUENCE),
 			}
 		}
 

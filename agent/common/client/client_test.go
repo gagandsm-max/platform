@@ -71,3 +71,9 @@ func TestCorrelationID(t *testing.T) {
 		t.Fatalf("bad ids %q %q", a, b)
 	}
 }
+
+func TestClassifySequenceExhausted(t *testing.T) {
+	if got := Classify(queue.ErrSequenceExhausted); got != FailureBlocked {
+		t.Fatalf("got %s want %s", got, FailureBlocked)
+	}
+}

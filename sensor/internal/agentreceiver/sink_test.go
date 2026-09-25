@@ -2,6 +2,7 @@ package agentreceiver
 
 import (
 	"context"
+	"testing"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -176,4 +177,16 @@ func (s *DurableTestAcceptanceSink) BatchCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.n
+}
+
+func TestInMemoryAcceptanceSinkPreservesAgentStreamID(t *testing.T) {
+	sink := NewInMemoryAcceptanceSink()
+	env := sampleV2Envelope("agent-a", "tenant-1", testStreamA(), sampleRecord(1, "r1", []byte(`{"v":1}`)))
+	if _, err := sink.AcceptBatch(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	got := sink.Batches()
+	if len(got) != 1 || got[0].AgentStreamID != testStreamA() {
+		t.Fatalf("stream id not preserved: %+v", got)
+	}
 }
