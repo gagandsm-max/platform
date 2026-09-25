@@ -43,6 +43,9 @@ spring:
     producer:
       acks: all
       retries: 3
+      properties:
+        enable.idempotence: true
+        transaction.timeout.ms: 30000
       # Standalone transactional publication prefix for atomic batch publication.
       # Note: Two-Core HA transaction prefix coordination is an unresolved P0 design spike.
       transaction-id-prefix: ${SPRING_KAFKA_PRODUCER_TRANSACTION_ID_PREFIX:tx-telemetry-}
@@ -69,6 +72,8 @@ management:
 platform:
   node-id: ${CORE_NODE_ID:core-node-01}
   version: ${PLATFORM_VERSION:0.1.0-dev}
+  kafka:
+    batch-publish-deadline-seconds: ${PLATFORM_KAFKA_BATCH_PUBLISH_DEADLINE_SECONDS:20}
   migrations:
     enabled: ${PLATFORM_MIGRATIONS_ENABLED:true}
   clickhouse:

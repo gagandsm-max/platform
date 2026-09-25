@@ -13,17 +13,18 @@ import (
 
 const agentTelemetryPath = "/api/v1/sensor/agent-telemetry"
 
-// AgentTelemetryBatch is the Sensor→Core agent-ingress drain request.
+// AgentTelemetryBatch is the Sensor→Core agent-ingress drain request (BUILD-003 contract v2).
 type AgentTelemetryBatch struct {
-	SchemaVersion         int                   `json:"schemaVersion"`
-	SensorID              string                `json:"sensorId"`
-	BatchID               string                `json:"batchId"`
-	FirstIngressSequence  uint64                `json:"firstIngressSequence"`
-	LastIngressSequence   uint64                `json:"lastIngressSequence"`
-	RecordCount           int                   `json:"recordCount"`
-	Checksum              string                `json:"checksum"`
-	CorrelationID         string                `json:"correlationId"`
-	Records               []AgentIngressRecord  `json:"records"`
+	SchemaVersion            int                  `json:"schemaVersion"`
+	SensorID                 string               `json:"sensorId"`
+	SensorAgentSpoolStreamID string               `json:"sensorAgentSpoolStreamId"`
+	BatchID                  string               `json:"batchId"`
+	FirstIngressSequence     uint64               `json:"firstIngressSequence"`
+	LastIngressSequence      uint64               `json:"lastIngressSequence"`
+	RecordCount              int                  `json:"recordCount"`
+	Checksum                 string               `json:"checksum"`
+	CorrelationID            string               `json:"correlationId"`
+	Records                  []AgentIngressRecord `json:"records"`
 }
 
 // AgentIngressRecord preserves immutable accepted evidence from the Sensor Agent spool.
@@ -121,8 +122,10 @@ func (c *Client) UploadAgentTelemetry(ctx context.Context, batch AgentTelemetryB
 	if err := contextClassified(ctx); err != nil {
 		return AgentTelemetryAck{}, err
 	}
-	if batch.SchemaVersion <= 0 || strings.TrimSpace(batch.SensorID) == "" || strings.TrimSpace(batch.BatchID) == "" ||
+	if batch.SchemaVersion != 2 || strings.TrimSpace(batch.SensorID) == "" || strings.TrimSpace(batch.SensorAgentSpoolStreamID) == "" ||
+		strings.TrimSpace(batch.BatchID) == "" ||
 		batch.FirstIngressSequence == 0 || batch.LastIngressSequence < batch.FirstIngressSequence ||
+		batch.FirstIngressSequence > MaxSafeSequence || batch.LastIngressSequence > MaxSafeSequence ||
 		batch.RecordCount == 0 || len(batch.Records) == 0 || strings.TrimSpace(batch.Checksum) == "" ||
 		strings.TrimSpace(batch.CorrelationID) == "" {
 		return AgentTelemetryAck{}, newError(CodeInvalidConfig, "agent-telemetry batch metadata is incomplete or invalid", nil, false)

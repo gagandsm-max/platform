@@ -74,6 +74,7 @@ type envelopeLite struct {
 
 type Config struct {
 	SensorID             string
+	StreamID             string
 	AgentSpoolDir        string
 	MaxBatchRecords      int
 	MaxBatchPayloadBytes int
@@ -139,8 +140,11 @@ type Drain struct {
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
-	if strings.TrimSpace(cfg.SensorID) == "" || sp == nil || tr == nil {
-		return nil, codeErr(CodeInvalidConfig, "sensor id, spool and transport are required", nil, false)
+	if strings.TrimSpace(cfg.SensorID) == "" || strings.TrimSpace(cfg.StreamID) == "" || sp == nil || tr == nil {
+		return nil, codeErr(CodeInvalidConfig, "sensor id, stream id, spool and transport are required", nil, false)
+	}
+	if !validAgentSpoolStreamID(cfg.StreamID) {
+		return nil, codeErr(CodeInvalidConfig, "agent spool stream id grammar invalid", nil, false)
 	}
 	if cfg.MaxBatchRecords <= 0 {
 		cfg.MaxBatchRecords = 32
@@ -362,19 +366,24 @@ func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, 
 		records = append(records, ingress)
 	}
 	checksum := hex.EncodeToString(h.Sum(nil))
-	batchID := fmt.Sprintf("agent-ingress-%s-%020d-%020d-%s",
-		d.cfg.SensorID, batch.FirstSequence, batch.LastSequence, checksum[:16])
+	if batch.FirstSequence == 0 || batch.LastSequence < batch.FirstSequence ||
+		batch.FirstSequence > spool.MaxSafeSequence || batch.LastSequence > spool.MaxSafeSequence {
+		return coreclient.AgentTelemetryBatch{}, fmt.Errorf("agent spool batch sequence exceeds MAX_SAFE_SEQUENCE or is invalid")
+	}
+	batchID := fmt.Sprintf("agent-ingress-%s-%s-%020d-%020d-%s",
+		d.cfg.SensorID, d.cfg.StreamID, batch.FirstSequence, batch.LastSequence, checksum[:16])
 	corr := fmt.Sprintf("agentdrain-%s", batchID)
 	out := coreclient.AgentTelemetryBatch{
-		SchemaVersion:        1,
-		SensorID:             d.cfg.SensorID,
-		BatchID:              batchID,
-		FirstIngressSequence: batch.FirstSequence,
-		LastIngressSequence:  batch.LastSequence,
-		RecordCount:          len(records),
-		Checksum:             checksum,
-		CorrelationID:        corr,
-		Records:              records,
+		SchemaVersion:            2,
+		SensorID:                 d.cfg.SensorID,
+		SensorAgentSpoolStreamID: d.cfg.StreamID,
+		BatchID:                  batchID,
+		FirstIngressSequence:     batch.FirstSequence,
+		LastIngressSequence:      batch.LastSequence,
+		RecordCount:              len(records),
+		Checksum:                 checksum,
+		CorrelationID:            corr,
+		Records:                  records,
 	}
 	encoded, err := json.Marshal(out)
 	if err != nil {
@@ -593,4 +602,18 @@ func jitterDuration(d time.Duration, f float64) time.Duration {
 		return 0
 	}
 	return time.Duration(v)
+}
+
+func validAgentSpoolStreamID(streamID string) bool {
+	const prefix = "stream-"
+	if len(streamID) != len(prefix)+32 || !strings.HasPrefix(streamID, prefix) {
+		return false
+	}
+	for i := len(prefix); i < len(streamID); i++ {
+		c := streamID[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }

@@ -4,15 +4,18 @@ import com.platform.core.ingestion.authority.SensorAuthorityResolver;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.dto.TelemetryAckResponse;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
-import com.platform.core.ingestion.dto.TelemetryObservationBatch;
-import com.platform.core.ingestion.replay.TelemetryWatermarkStore;
+import com.platform.core.ingestion.replay.PublisherClaimResult;
 import com.platform.core.ingestion.replay.ReplayReservation;
+import com.platform.core.ingestion.replay.TelemetryWatermarkStore;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.security.cert.X509Certificate;
+import java.util.Objects;
+import java.util.UUID;
 
 @Service
 public class SensorIngestionService {
@@ -46,7 +49,6 @@ public class SensorIngestionService {
     ) {
         metrics.recordBatchReceived();
 
-        // 1. Resolve Sensor Authority (fingerprint → enrollment; never CN/SAN). Payload claims cannot grant authority.
         SensorScope scope = validator.resolveAuthority(clientCert);
         if (scope == null) {
             metrics.recordBatchRejected("ERR_SENSOR_AUTHORITY_UNAVAILABLE");
@@ -57,14 +59,10 @@ public class SensorIngestionService {
             );
         }
 
-        // 2. Validate payload bounds, checksum, entity/tenant scope, and extract observations
+        requireIdempotencyKey(idempotencyHeader, request.batchId());
+
         TelemetryObservationBatch observations = validator.validateAndExtract(rawBody, request, scope);
 
-        // 3. Durably reserve this exact sequence range/checksum in PostgreSQL BEFORE Kafka.
-        // The reservation commits independently and survives a Core crash. This closes the
-        // conflict hole where Kafka had committed but the ACK watermark had not: a retry with
-        // different payload bytes for the same sequence range is rejected, while the exact
-        // same retry is allowed to republish idempotently.
         ReplayReservation reservation = watermarkStore.reserveBatch(
                 scope.tenantId(),
                 scope.sensorId(),
@@ -86,25 +84,24 @@ public class SensorIngestionService {
         if (reservation.status() == ReplayReservation.Status.REJECTED) {
             String code = reservation.rejectionCode();
             metrics.recordBatchRejected(code);
-            HttpStatus status = "ERR_SEQUENCE_GAP".equals(code)
+            if ("ERR_PREVIOUS_BATCH_PENDING".equals(code)) {
+                metrics.recordPreviousBatchPending();
+            } else if ("ERR_IDEMPOTENCY_CONFLICT".equals(code)) {
+                metrics.recordReplayConflict();
+            } else if ("ERR_SEQUENCE_GAP".equals(code)) {
+                metrics.recordSequenceGap();
+            } else if ("ERR_SEQUENCE_REGRESSION".equals(code)) {
+                metrics.recordSequenceRegression();
+            } else if ("ERR_SENSOR_STREAM_CHANGED".equals(code)) {
+                metrics.recordStreamMismatch();
+            }
+            HttpStatus status = "ERR_SEQUENCE_GAP".equals(code) || "ERR_SEQUENCE_OUT_OF_BOUNDS".equals(code)
                     ? HttpStatus.BAD_REQUEST
                     : HttpStatus.CONFLICT;
             throw new IngestionException(status, code, reservation.rejectionMessage());
         }
 
-        // 4. Publish atomically in a single Kafka transaction.
-        // Kafka and PostgreSQL are intentionally not XA/2PC. If Core crashes after Kafka commit,
-        // the pending reservation remains and the Sensor retries. Stable logical observation IDs
-        // plus replay-safe ClickHouse reads make the duplicate publication harmless
-        // (at-least-once, not exactly-once). Concurrent HTTP retries of the same reserved batch
-        // may all republish under RETRY_PENDING; that amplification is a P1 hardening concern
-        // because the normal Sensor uploader path serializes retries. Do not introduce a
-        // publisher lease/new datastore here without production evidence.
-        kafkaProducer.publishBatchTransactionally(observations);
-
-        // 5. Finalize the reserved batch in a new PostgreSQL transaction only after Kafka commit.
-        // If this step fails, no ACK is returned; the same reserved checksum may safely retry.
-        watermarkStore.finalizeReservedBatch(
+        PublisherClaimResult claim = watermarkStore.claimPublisherLease(
                 scope.tenantId(),
                 scope.sensorId(),
                 request.bootEpoch(),
@@ -113,8 +110,83 @@ public class SensorIngestionService {
                 request.checksum(),
                 request.batchId()
         );
+        if (claim.status() == PublisherClaimResult.Status.BUSY) {
+            metrics.recordPublisherLeaseContention();
+            throw new IngestionException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    claim.rejectionCode(),
+                    claim.rejectionMessage()
+            );
+        }
+        if (claim.status() == PublisherClaimResult.Status.REJECTED) {
+            metrics.recordBatchRejected(claim.rejectionCode());
+            throw new IngestionException(HttpStatus.CONFLICT, claim.rejectionCode(), claim.rejectionMessage());
+        }
 
-        // 6. Return durable ACK indicating accepted-through watermark
+        UUID owner = claim.ownerToken();
+        long epoch = claim.publisherEpoch();
+        try {
+            kafkaProducer.publishBatchTransactionally(observations);
+            watermarkStore.finalizeReservedBatch(
+                    scope.tenantId(),
+                    scope.sensorId(),
+                    request.bootEpoch(),
+                    request.firstSequence(),
+                    request.lastSequence(),
+                    request.checksum(),
+                    request.batchId(),
+                    owner,
+                    epoch
+            );
+        } catch (RuntimeException publishOrFinalizeFailure) {
+            try {
+                watermarkStore.releasePublisherLease(
+                        scope.tenantId(),
+                        scope.sensorId(),
+                        request.bootEpoch(),
+                        request.firstSequence(),
+                        request.lastSequence(),
+                        request.checksum(),
+                        request.batchId(),
+                        owner,
+                        epoch
+                );
+            } catch (RuntimeException releaseFailure) {
+                log.warn("Failed to release telemetry publisher lease after failure: {}", releaseFailure.getMessage());
+            }
+            if (publishOrFinalizeFailure instanceof IngestionException ingestionException
+                    && "ERR_KAFKA_PUBLICATION_FAILED".equals(ingestionException.getCode())) {
+                metrics.recordKafkaFailure(ingestionException.getMessage());
+            } else {
+                metrics.recordFinalizeFailure(publishOrFinalizeFailure.getMessage());
+            }
+            throw publishOrFinalizeFailure;
+        }
+
         return new TelemetryAckResponse("ACCEPTED", request.lastSequence(), scope.sensorId());
+    }
+
+    public static void requireIdempotencyKey(String idempotencyHeader, String batchId) {
+        if (batchId == null || batchId.isBlank()) {
+            throw new IngestionException(
+                    HttpStatus.BAD_REQUEST,
+                    "ERR_BATCH_ID_REQUIRED",
+                    "batchId is required"
+            );
+        }
+        if (idempotencyHeader == null || idempotencyHeader.isBlank()) {
+            throw new IngestionException(
+                    HttpStatus.BAD_REQUEST,
+                    "ERR_IDEMPOTENCY_KEY_REQUIRED",
+                    "Idempotency-Key header is required and must equal batchId"
+            );
+        }
+        if (!Objects.equals(idempotencyHeader, batchId)) {
+            throw new IngestionException(
+                    HttpStatus.BAD_REQUEST,
+                    "ERR_IDEMPOTENCY_KEY_MISMATCH",
+                    "Idempotency-Key must exactly equal body batchId"
+            );
+        }
     }
 }

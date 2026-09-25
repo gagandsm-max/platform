@@ -43,8 +43,8 @@ func rec(seq uint64) spool.Record {
 func cfg() Config {
 	return Config{SensorID: "s1", StreamID: "stream-00112233445566778899aabbccddeeff", MaxBatchRecords: 10, MaxBatchPayloadBytes: 1000, MaxRequestBytes: 10000, MaxAttempts: 3, InitialBackoff: time.Millisecond, MaxBackoff: 10 * time.Millisecond, JitterFraction: 0, IdleInterval: time.Second}
 }
-func TestSuccessAndPartialAck(t *testing.T) {
-	v := uint64(1)
+func TestSuccessRequiresExactTerminalAck(t *testing.T) {
+	v := uint64(2)
 	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 2, Records: []spool.Record{rec(1), rec(2)}, PayloadBytes: 2}}
 	tr := &fakeTransport{fn: func(_ int, b coreclient.Batch) (coreclient.UploadAck, error) {
 		if b.FirstSequence != 1 || b.LastSequence != 2 || b.BatchID == "" || b.CorrelationID == "" {
@@ -53,15 +53,28 @@ func TestSuccessAndPartialAck(t *testing.T) {
 		if b.BootEpoch != "stream-00112233445566778899aabbccddeeff" {
 			t.Fatalf("wire bootEpoch must carry durable spool stream ID, got %q", b.BootEpoch)
 		}
-		return coreclient.UploadAck{AcceptedThroughSequence: &v}, nil
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
 	}}
 	u, _ := New(cfg(), sp, tr)
 	ok, err := u.RunOnce(context.Background())
 	if err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
-	if len(sp.acks) != 1 || sp.acks[0] != 1 {
+	if len(sp.acks) != 1 || sp.acks[0] != 2 {
 		t.Fatalf("acks %#v", sp.acks)
+	}
+}
+
+func TestPartialAckRetainsSpool(t *testing.T) {
+	v := uint64(1)
+	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 2, Records: []spool.Record{rec(1), rec(2)}, PayloadBytes: 2}}
+	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}}
+	u, _ := New(cfg(), sp, tr)
+	_, err := u.RunOnce(context.Background())
+	if !isCode(err, CodeAckInvalid) || len(sp.acks) != 0 {
+		t.Fatalf("err=%v acks=%v", err, sp.acks)
 	}
 }
 func TestAckMissingRetainsSpool(t *testing.T) {
@@ -79,7 +92,7 @@ func TestInvalidAckRetainsSpool(t *testing.T) {
 	v := uint64(9)
 	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 2, Records: []spool.Record{rec(1), rec(2)}, PayloadBytes: 2}}
 	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
-		return coreclient.UploadAck{AcceptedThroughSequence: &v}, nil
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
 	}}
 	u, _ := New(cfg(), sp, tr)
 	_, err := u.RunOnce(context.Background())
@@ -97,7 +110,7 @@ func TestTransientRetryThenSuccess(t *testing.T) {
 		if n < 3 {
 			return coreclient.UploadAck{}, transientErr{}
 		}
-		return coreclient.UploadAck{AcceptedThroughSequence: &v}, nil
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
 	}}
 	u, _ := New(cfg(), sp, tr)
 	u.wait = func(context.Context, time.Duration) error { return nil }

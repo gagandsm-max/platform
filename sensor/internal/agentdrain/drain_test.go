@@ -79,7 +79,7 @@ func TestDrainAcksOnlyAfterValidCoreAck(t *testing.T) {
 	// Transport returns ACK matching whatever request was built.
 	tr.err = nil
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
 		IdleInterval: 10 * time.Millisecond, ShutdownGrace: time.Second,
@@ -130,7 +130,7 @@ func TestDrainRetainsSpoolOnTransientFailure(t *testing.T) {
 	_ = appendDurable(t, s, 1)
 	tr := &fakeTransport{err: transientErr{}}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
@@ -160,7 +160,7 @@ func TestDrainParksTerminalEntityUnresolved(t *testing.T) {
 		Code: "ERR_AGENT_ENTITY_UNRESOLVED", Message: "missing", HTTPStatus: 422,
 	}}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
@@ -196,7 +196,7 @@ func TestPoisonParkingDirectorySyncFailurePreventsAckAndAllowsRetry(t *testing.T
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
@@ -314,7 +314,7 @@ func TestPoisonParkingDirectorySyncSuccessPermitsSourceAck(t *testing.T) {
 	}}
 	syncCalled := false
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
@@ -350,7 +350,7 @@ func TestShutdownIdempotent(t *testing.T) {
 	s, dir := openSpool(t)
 	tr := &echoTransport{inner: &fakeTransport{}}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: 50 * time.Millisecond, ShutdownGrace: time.Second,
@@ -380,7 +380,7 @@ func TestDrainParksRecordTooLarge(t *testing.T) {
 		Code: "ERR_RECORD_TOO_LARGE", Message: "record exceeds maximum size", HTTPStatus: 413,
 	}}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
@@ -468,7 +468,7 @@ func TestDrainContinuesUnderSpoolProtection(t *testing.T) {
 	rec := appendDurable(t, s, 1)
 	tr := &echoingTransport{}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
 		JitterFraction: 0, IdleInterval: 10 * time.Millisecond, ShutdownGrace: time.Second,
@@ -509,7 +509,7 @@ func TestDrainDoesNotAdvanceSpoolOnInvalidAck(t *testing.T) {
 		CorrelationID:                  "corr-1",
 	}}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
 		JitterFraction: 0, IdleInterval: 10 * time.Millisecond, ShutdownGrace: time.Second,

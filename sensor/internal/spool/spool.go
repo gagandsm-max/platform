@@ -61,6 +61,9 @@ func (s *DiskSpool) Append(req AppendRequest) (Record, error) {
 		created = time.Now().UTC()
 	}
 	seq := s.state.NextSequence
+	if seq == 0 || seq > MaxSafeSequence {
+		return Record{}, newError(CodeSequenceExhausted, "spool sequence is exhausted or invalid; fail closed without wrap", nil)
+	}
 	sum := sha256.Sum256(req.Payload)
 	checksum := hex.EncodeToString(sum[:])
 	rec := Record{SchemaVersion: recordSchemaVersion, Sequence: seq, Class: req.Class, Type: req.Type, CreatedAt: created, ContentLength: len(req.Payload), Checksum: checksum, Payload: append([]byte(nil), req.Payload...)}

@@ -9,7 +9,8 @@ import (
 
 func validAgentBatch() AgentTelemetryBatch {
 	return AgentTelemetryBatch{
-		SchemaVersion:        1,
+		SchemaVersion:            2,
+		SensorAgentSpoolStreamID: "stream-00112233445566778899aabbccddeeff",
 		SensorID:             "sensor-infra-01",
 		BatchID:              "batch-agent-1",
 		FirstIngressSequence: 1,
@@ -149,7 +150,8 @@ func TestUploadAgentTelemetrySurfacesTerminalCoreCode(t *testing.T) {
 
 func multiRecordAgentBatch() AgentTelemetryBatch {
 	return AgentTelemetryBatch{
-		SchemaVersion:        1,
+		SchemaVersion:            2,
+		SensorAgentSpoolStreamID: "stream-00112233445566778899aabbccddeeff",
 		SensorID:             "sensor-infra-01",
 		BatchID:              "batch-agent-multi",
 		FirstIngressSequence: 10,

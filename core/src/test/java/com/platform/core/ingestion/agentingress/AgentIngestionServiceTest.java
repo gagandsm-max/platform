@@ -8,7 +8,8 @@ import com.platform.core.ingestion.agentingress.dto.AgentTelemetryBatchRequest;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import com.platform.core.ingestion.dto.TelemetryObservationBatch;
-import com.platform.core.ingestion.replay.WatermarkState;
+import com.platform.core.ingestion.replay.PublisherClaimResult;
+import com.platform.core.ingestion.replay.ReplayReservation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -24,6 +25,8 @@ import static org.mockito.Mockito.*;
 
 class AgentIngestionServiceTest {
 
+    private static final String STREAM = "stream-00112233445566778899aabbccddeeff";
+
     private AgentIngestionValidator validator;
     private AgentIngressWatermarkStore watermarkStore;
     private KafkaTelemetryProducer kafkaProducer;
@@ -33,6 +36,8 @@ class AgentIngestionServiceTest {
     private final UUID tenantId = UUID.fromString("018f0e0a-0000-7000-8000-000000000001");
     private final UUID entityId = UUID.fromString("018f0e0a-0000-7000-8000-000000000011");
     private final SensorScope scope = new SensorScope("sensor-infra-01", tenantId, null, Set.of(entityId), true);
+    private final UUID ownerToken = UUID.fromString("018f0e0a-0000-7000-8000-00000000beef");
+    private static final long PUBLISHER_EPOCH = 1L;
 
     @BeforeEach
     void setUp() {
@@ -41,6 +46,12 @@ class AgentIngestionServiceTest {
         kafkaProducer = mock(KafkaTelemetryProducer.class);
         metrics = new IngestionMetrics();
         service = new AgentIngestionService(validator, watermarkStore, kafkaProducer, metrics);
+        when(watermarkStore.reserveBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString()))
+                .thenReturn(ReplayReservation.reserved(0));
+        when(watermarkStore.claimPublisherLease(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString()))
+                .thenReturn(PublisherClaimResult.claimed(ownerToken, PUBLISHER_EPOCH));
     }
 
     private X509Certificate cert() {
@@ -49,7 +60,7 @@ class AgentIngestionServiceTest {
 
     private AgentTelemetryBatchRequest req(long first, long last, String checksum) {
         return new AgentTelemetryBatchRequest(
-                1, "sensor-infra-01", "batch-1", first, last, (int) (last - first + 1),
+                2, "sensor-infra-01", STREAM, "batch-1", first, last, (int) (last - first + 1),
                 checksum, "corr-1", List.of()
         );
     }
@@ -67,18 +78,35 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(10, 12, "chk-abc");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.getWatermarkForUpdate(tenantId, "sensor-infra-01"))
-                .thenReturn(new WatermarkState(
-                        "sensor-infra-01", tenantId, 12, 10, 12, "chk-abc", "batch-1", Instant.now()
-                ));
+        when(watermarkStore.reserveBatch(
+                tenantId, "sensor-infra-01", STREAM, 10L, 12L, "chk-abc", "batch-1", "corr-1"))
+                .thenReturn(ReplayReservation.alreadyAcked(12L));
 
-        AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, c);
+        AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c);
         assertEquals("ACCEPTED", ack.status());
         assertEquals(12L, ack.acceptedThroughIngressSequence());
         assertEquals("batch-1", ack.batchId());
         assertEquals("corr-1", ack.correlationId());
         verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
-        verify(watermarkStore, never()).updateWatermark(any(), any(), anyLong(), anyLong(), anyLong(), any(), any());
+        verify(watermarkStore, never()).claimPublisherLease(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString());
+        verify(watermarkStore, never()).finalizeReservedBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString(),
+                any(), anyLong());
+    }
+
+    @Test
+    void idempotencyKeyMismatchRejectsBeforeReserve() {
+        X509Certificate c = cert();
+        AgentTelemetryBatchRequest request = req(10, 12, "chk-abc");
+        when(validator.resolveAuthority(c)).thenReturn(scope);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                service.ingestAgentTelemetry("{}".getBytes(), request, "wrong-key", c));
+        assertEquals("ERR_IDEMPOTENCY_KEY_MISMATCH", ex.getCode());
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verify(watermarkStore, never()).reserveBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString());
     }
 
     @Test
@@ -87,15 +115,17 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(10, 12, "chk-new");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.getWatermarkForUpdate(tenantId, "sensor-infra-01"))
-                .thenReturn(new WatermarkState(
-                        "sensor-infra-01", tenantId, 12, 10, 12, "chk-old", "batch-1", Instant.now()
-                ));
+        when(watermarkStore.reserveBatch(
+                tenantId, "sensor-infra-01", STREAM, 10L, 12L, "chk-new", "batch-1", "corr-1"))
+                .thenReturn(ReplayReservation.rejected(
+                        12L, "ERR_IDEMPOTENCY_CONFLICT",
+                        "sequence range was accepted/reserved with a different checksum"));
 
         IngestionException ex = assertThrows(IngestionException.class, () ->
-                service.ingestAgentTelemetry("{}".getBytes(), request, c));
+                service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c));
         assertEquals("ERR_IDEMPOTENCY_CONFLICT", ex.getCode());
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
     }
 
     @Test
@@ -104,13 +134,13 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(5, 8, "chk");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.getWatermarkForUpdate(tenantId, "sensor-infra-01"))
-                .thenReturn(new WatermarkState(
-                        "sensor-infra-01", tenantId, 12, 10, 12, "chk-old", "batch-1", Instant.now()
-                ));
+        when(watermarkStore.reserveBatch(
+                tenantId, "sensor-infra-01", STREAM, 5L, 8L, "chk", "batch-1", "corr-1"))
+                .thenReturn(ReplayReservation.rejected(
+                        12L, "ERR_SEQUENCE_REGRESSION", "sequence already accepted"));
 
         IngestionException ex = assertThrows(IngestionException.class, () ->
-                service.ingestAgentTelemetry("{}".getBytes(), request, c));
+                service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c));
         assertEquals("ERR_SEQUENCE_REGRESSION", ex.getCode());
     }
 
@@ -120,32 +150,39 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(20, 22, "chk");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.getWatermarkForUpdate(tenantId, "sensor-infra-01"))
-                .thenReturn(new WatermarkState(
-                        "sensor-infra-01", tenantId, 12, 10, 12, "chk-old", "batch-1", Instant.now()
-                ));
+        when(watermarkStore.reserveBatch(
+                tenantId, "sensor-infra-01", STREAM, 20L, 22L, "chk", "batch-1", "corr-1"))
+                .thenReturn(ReplayReservation.rejected(
+                        12L, "ERR_SEQUENCE_GAP", "unexpected sequence gap"));
 
         IngestionException ex = assertThrows(IngestionException.class, () ->
-                service.ingestAgentTelemetry("{}".getBytes(), request, c));
+                service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c));
         assertEquals("ERR_SEQUENCE_GAP", ex.getCode());
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
     }
 
     @Test
-    void happyPathPublishesAndUpdatesWatermark() {
+    void happyPathPublishesAndFinalizesWatermark() {
         X509Certificate c = cert();
         AgentTelemetryBatchRequest request = req(13, 15, "chk-new");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.getWatermarkForUpdate(tenantId, "sensor-infra-01"))
-                .thenReturn(new WatermarkState(
-                        "sensor-infra-01", tenantId, 12, 10, 12, "chk-old", "batch-1", Instant.now()
-                ));
+        when(watermarkStore.reserveBatch(
+                tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1"))
+                .thenReturn(ReplayReservation.reserved(12L));
 
-        AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, c);
+        AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c);
         assertEquals(15L, ack.acceptedThroughIngressSequence());
         assertEquals("sensor-infra-01", ack.sensorId());
         verify(kafkaProducer).publishBatchTransactionally(any(TelemetryObservationBatch.class));
-        verify(watermarkStore).updateWatermark(tenantId, "sensor-infra-01", 15L, 13L, 15L, "chk-new", "batch-1");
+        verify(watermarkStore).claimPublisherLease(
+                tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1");
+        verify(watermarkStore).finalizeReservedBatch(
+                tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1",
+                ownerToken, PUBLISHER_EPOCH);
+        verify(watermarkStore, never()).releasePublisherLease(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString(),
+                any(), anyLong());
     }
 
     @Test
@@ -154,20 +191,29 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(13, 15, "chk-new");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.getWatermarkForUpdate(tenantId, "sensor-infra-01")).thenReturn(null);
+        when(watermarkStore.reserveBatch(
+                tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1"))
+                .thenReturn(ReplayReservation.reserved(12L))
+                .thenReturn(ReplayReservation.retryPending(12L));
 
         doThrow(new RuntimeException("PostgreSQL connection terminated unexpectedly"))
                 .doNothing()
-                .when(watermarkStore).updateWatermark(
-                        eq(tenantId), eq("sensor-infra-01"), eq(15L), eq(13L), eq(15L), eq("chk-new"), eq("batch-1"));
+                .when(watermarkStore).finalizeReservedBatch(
+                        eq(tenantId), eq("sensor-infra-01"), eq(STREAM), eq(13L), eq(15L),
+                        eq("chk-new"), eq("batch-1"), eq("corr-1"), eq(ownerToken), eq(PUBLISHER_EPOCH));
 
         RuntimeException first = assertThrows(RuntimeException.class, () ->
-                service.ingestAgentTelemetry("{}".getBytes(), request, c));
+                service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c));
         assertTrue(first.getMessage().contains("PostgreSQL connection terminated"));
 
-        AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, c);
+        AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c);
         assertEquals("ACCEPTED", ack.status());
         assertEquals(15L, ack.acceptedThroughIngressSequence());
         verify(kafkaProducer, times(2)).publishBatchTransactionally(any(TelemetryObservationBatch.class));
+        verify(watermarkStore, times(2)).claimPublisherLease(
+                tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1");
+        verify(watermarkStore, times(1)).releasePublisherLease(
+                eq(tenantId), eq("sensor-infra-01"), eq(STREAM), eq(13L), eq(15L),
+                eq("chk-new"), eq("batch-1"), eq("corr-1"), eq(ownerToken), eq(PUBLISHER_EPOCH));
     }
 }

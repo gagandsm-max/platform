@@ -10,6 +10,7 @@ import com.platform.core.ingestion.dto.CanonicalObservation;
 import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.ingestion.dto.TelemetryAckResponse;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
+import com.platform.core.ingestion.replay.PublisherClaimResult;
 import com.platform.core.ingestion.replay.TelemetryWatermarkStore;
 import com.platform.core.ingestion.replay.ReplayReservation;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -195,7 +196,7 @@ public class TelemetryPipelineIntegrationTest {
             assertEquals(10L, ack.acceptedThroughSequence());
             verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
             verify(watermarkStore, never()).finalizeReservedBatch(
-                    any(), any(), any(), anyLong(), anyLong(), any(), any());
+                    any(), any(), any(), anyLong(), anyLong(), any(), any(), any(), anyLong());
         }
 
         @Test
@@ -304,6 +305,9 @@ public class TelemetryPipelineIntegrationTest {
             when(watermarkStore.reserveBatch(
                     tenantId, sensorId, "ep-1", 1L, 1L, "chk-1", "b-1"))
                     .thenReturn(ReplayReservation.reserved(0L));
+            when(watermarkStore.claimPublisherLease(
+                    tenantId, sensorId, "ep-1", 1L, 1L, "chk-1", "b-1"))
+                    .thenReturn(PublisherClaimResult.claimed(UUID.randomUUID(), 1L));
             doThrow(new IngestionException(HttpStatus.SERVICE_UNAVAILABLE, "ERR_KAFKA_PUBLISH_FAILED", "Broker connection failed"))
                     .when(kafkaProducer).publishBatchTransactionally(any(TelemetryObservationBatch.class));
 
@@ -313,7 +317,7 @@ public class TelemetryPipelineIntegrationTest {
 
             assertEquals("ERR_KAFKA_PUBLISH_FAILED", ex.getCode());
             verify(watermarkStore, never()).finalizeReservedBatch(
-                    any(), any(), any(), anyLong(), anyLong(), any(), any());
+                    any(), any(), any(), anyLong(), anyLong(), any(), any(), any(), anyLong());
         }
 
         @Test

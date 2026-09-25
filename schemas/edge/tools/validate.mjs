@@ -426,15 +426,27 @@ function validateSensorAck(doc, codes, ctx = {}) {
 
 function validateIngressBatch(doc, codes) {
   const allowed = new Set([
-    'schemaVersion', 'sensorId', 'batchId', 'firstIngressSequence', 'lastIngressSequence',
+    'schemaVersion', 'sensorId', 'sensorAgentSpoolStreamId', 'batchId', 'firstIngressSequence', 'lastIngressSequence',
     'recordCount', 'checksum', 'correlationId', 'records',
   ]);
-  assertExactKeys(doc, allowed, [
+  const required = [
     'schemaVersion', 'sensorId', 'batchId', 'firstIngressSequence', 'lastIngressSequence',
     'recordCount', 'checksum', 'correlationId', 'records',
-  ], codes);
+  ];
+  assertExactKeys(doc, allowed, required, codes);
   if (codes.length) return;
-  if (doc.schemaVersion !== 1) fail(codes, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion');
+  if (doc.schemaVersion !== 1 && doc.schemaVersion !== 2) {
+    fail(codes, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion must be 1 or 2');
+  }
+  if (doc.schemaVersion === 2) {
+    if (!Object.prototype.hasOwnProperty.call(doc, 'sensorAgentSpoolStreamId')) {
+      fail(codes, 'SENSOR_AGENT_SPOOL_STREAM_ID_REQUIRED', 'sensorAgentSpoolStreamId is required for schemaVersion 2');
+    } else {
+      assertStream(doc.sensorAgentSpoolStreamId, 'sensorAgentSpoolStreamId', codes);
+    }
+  } else if (Object.prototype.hasOwnProperty.call(doc, 'sensorAgentSpoolStreamId')) {
+    fail(codes, 'SENSOR_AGENT_SPOOL_STREAM_ID_FORBIDDEN', 'sensorAgentSpoolStreamId must be absent for schemaVersion 1');
+  }
   assertSensorId(doc.sensorId, 'sensorId', codes);
   assertCoreBatchId(doc.batchId, 'batchId', codes);
   assertSafeSequence(doc.firstIngressSequence, 'firstIngressSequence', codes);

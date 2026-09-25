@@ -144,6 +144,7 @@ func main() {
 
 		agentDrain, err = agentdrain.New(agentdrain.Config{
 			SensorID:             cfg.SensorID,
+			StreamID:             agentSpool.StreamID(),
 			AgentSpoolDir:        cfg.AgentSpoolDir,
 			MaxBatchRecords:      cfg.AgentDrainMaxBatchRecords,
 			MaxBatchPayloadBytes: cfg.AgentDrainMaxBatchPayloadBytes,

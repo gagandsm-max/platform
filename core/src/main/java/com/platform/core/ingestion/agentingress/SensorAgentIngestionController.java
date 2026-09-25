@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -47,6 +48,7 @@ public class SensorAgentIngestionController {
 
     @PostMapping(value = "/sensor/agent-telemetry", consumes = "application/json", produces = "application/json")
     public ResponseEntity<?> ingestAgentTelemetry(
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody(required = false) byte[] rawBody,
             HttpServletRequest request
     ) {
@@ -91,7 +93,8 @@ public class SensorAgentIngestionController {
         }
 
         try {
-            AgentTelemetryAckResponse ack = ingestionService.ingestAgentTelemetry(rawBody, batchRequest, clientCert);
+            AgentTelemetryAckResponse ack = ingestionService.ingestAgentTelemetry(
+                    rawBody, batchRequest, idempotencyKey, clientCert);
             return ResponseEntity.ok(ack);
         } catch (IngestionException e) {
             log.warn("Agent-telemetry ingestion rejected: code={}, status={} ({}), remoteAddr={}",

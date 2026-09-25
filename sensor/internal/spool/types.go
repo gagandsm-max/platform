@@ -15,6 +15,9 @@ const (
 	stateFileName           = "state.json"
 	streamIDFileName        = "stream-id"
 	quarantineDirName       = "quarantine"
+
+	// MaxSafeSequence is the JSON-safe transport sequence ceiling (2^53 - 1).
+	MaxSafeSequence = uint64(9007199254740991)
 )
 
 type ErrorCode string
@@ -29,6 +32,7 @@ const (
 	CodeIO              ErrorCode = "SPOOL_IO"
 	CodeUnsafePath      ErrorCode = "SPOOL_UNSAFE_PATH"
 	CodeUnsafeLegacyAPI ErrorCode = "SPOOL_UNSAFE_LEGACY_API"
+	CodeSequenceExhausted ErrorCode = "SPOOL_SEQUENCE_EXHAUSTED"
 )
 
 type Error struct {

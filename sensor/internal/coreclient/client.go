@@ -92,6 +92,9 @@ type UploadAck struct {
 	SensorIdentity          string  `json:"sensor_identity,omitempty"`
 }
 
+// MaxSafeSequence is the JSON-safe transport sequence ceiling (2^53 - 1).
+const MaxSafeSequence = uint64(9007199254740991)
+
 type DiscoveryTaskResponse struct {
 	Status               string   `json:"status"`
 	HasTask              bool     `json:"has_task"`
@@ -216,16 +219,45 @@ func (c *Client) Upload(ctx context.Context, batch Batch) (UploadAck, error) {
 		batch.FirstSequence == 0 || batch.LastSequence < batch.FirstSequence || batch.Checksum == "" || len(batch.Records) == 0 {
 		return UploadAck{}, newError(CodeInvalidConfig, "upload batch metadata is incomplete or invalid", nil, false)
 	}
-	var ack UploadAck
-	if err := c.doJSON(ctx, http.MethodPost, telemetryPath, batch, batch.CorrelationID, batch.BatchID, &ack); err != nil { return UploadAck{}, err }
-	if ack.AcceptedThroughSequence == nil {
-		return ack, newError(CodeAckContractMissing,
-			"Core accepted telemetry transport but did not return the durable accepted-through sequence contract", nil, false)
+	if batch.FirstSequence > MaxSafeSequence || batch.LastSequence > MaxSafeSequence {
+		return UploadAck{}, newError(CodeInvalidConfig, "upload batch sequence exceeds MAX_SAFE_SEQUENCE", nil, false)
 	}
-	if *ack.AcceptedThroughSequence < batch.FirstSequence || *ack.AcceptedThroughSequence > batch.LastSequence {
-		return ack, newError(CodeProtocol, "Core acknowledgement sequence is outside the submitted batch range", nil, false)
+	var ack UploadAck
+	if err := c.doJSON(ctx, http.MethodPost, telemetryPath, batch, batch.CorrelationID, batch.BatchID, &ack); err != nil {
+		return UploadAck{}, err
+	}
+	if err := validateTelemetryUploadAck(batch, ack); err != nil {
+		return ack, err
 	}
 	return ack, nil
+}
+
+// validateTelemetryUploadAck enforces BUILD-003 exact-terminal ACK binding without expanding frozen D003 fields.
+func validateTelemetryUploadAck(batch Batch, ack UploadAck) error {
+	if !strings.EqualFold(strings.TrimSpace(ack.Status), "ACCEPTED") {
+		return newError(CodeProtocol, "Core telemetry acknowledgement status is not ACCEPTED", nil, false)
+	}
+	if strings.TrimSpace(ack.SensorIdentity) == "" {
+		return newError(CodeAckContractMissing,
+			"Core accepted telemetry transport but did not return sensor_identity", nil, false)
+	}
+	if ack.SensorIdentity != batch.SensorID {
+		return newError(CodeProtocol, "Core telemetry acknowledgement sensor_identity does not match submitted Sensor", nil, false)
+	}
+	if ack.AcceptedThroughSequence == nil {
+		return newError(CodeAckContractMissing,
+			"Core accepted telemetry transport but did not return the durable accepted-through sequence contract", nil, false)
+	}
+	if *ack.AcceptedThroughSequence != batch.LastSequence {
+		if *ack.AcceptedThroughSequence < batch.FirstSequence {
+			return newError(CodeProtocol, "Core acknowledgement sequence is below submitted batch first sequence", nil, false)
+		}
+		if *ack.AcceptedThroughSequence > batch.LastSequence {
+			return newError(CodeProtocol, "Core acknowledgement sequence is above submitted batch last sequence", nil, false)
+		}
+		return newError(CodeProtocol, "Core acknowledgement sequence is not the submitted batch terminal sequence", nil, false)
+	}
+	return nil
 }
 
 // Sensor identity is deliberately absent from the discovery task body. Core binds this request to the mTLS certificate.

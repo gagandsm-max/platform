@@ -89,12 +89,12 @@ func TestUploadRequiresDurableAckAndUsesIdempotencyHeader(t *testing.T) {
 }
 
 func TestUploadAcceptsBoundedDurableAck(t *testing.T) {
-	pki := makeTestPKI(t); accepted := uint64(2); server := startMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _ = json.NewEncoder(w).Encode(UploadAck{Status: "ACCEPTED", AcceptedThroughSequence: &accepted}) })); client := newTestClient(t, server.URL, pki, 4096)
+	pki := makeTestPKI(t); accepted := uint64(2); server := startMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _ = json.NewEncoder(w).Encode(UploadAck{Status: "ACCEPTED", SensorIdentity: "sensor-test", AcceptedThroughSequence: &accepted}) })); client := newTestClient(t, server.URL, pki, 4096)
 	ack, err := client.Upload(context.Background(), validBatch()); if err != nil || ack.AcceptedThroughSequence == nil || *ack.AcceptedThroughSequence != 2 { t.Fatalf("ack=%+v err=%v", ack, err) }
 }
 
 func TestUploadRejectsAckOutsideSubmittedRange(t *testing.T) {
-	pki := makeTestPKI(t); accepted := uint64(99); server := startMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _ = json.NewEncoder(w).Encode(UploadAck{Status: "ACCEPTED", AcceptedThroughSequence: &accepted}) })); client := newTestClient(t, server.URL, pki, 4096)
+	pki := makeTestPKI(t); accepted := uint64(99); server := startMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _ = json.NewEncoder(w).Encode(UploadAck{Status: "ACCEPTED", SensorIdentity: "sensor-test", AcceptedThroughSequence: &accepted}) })); client := newTestClient(t, server.URL, pki, 4096)
 	if _, err := client.Upload(context.Background(), validBatch()); !IsCode(err, CodeProtocol) { t.Fatalf("error=%v", err) }
 }
 
