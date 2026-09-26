@@ -93,7 +93,9 @@ type Transport interface {
 }
 
 type Spool interface {
-	ReadBatch(int, int) (spool.Batch, error)
+	ReadOrReserveOutboundBatch(int, int) (spool.Batch, error)
+	CompleteOutboundBatch(uint64) error
+	AbandonOutboundBatch() error
 	AcknowledgeThrough(uint64) error
 	Stats() (spool.Stats, error)
 }
@@ -247,7 +249,7 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	d.refreshStats()
-	batch, err := d.spool.ReadBatch(d.cfg.MaxBatchRecords, d.cfg.MaxBatchPayloadBytes)
+	batch, err := d.spool.ReadOrReserveOutboundBatch(d.cfg.MaxBatchRecords, d.cfg.MaxBatchPayloadBytes)
 	if err != nil {
 		return false, codeErr(CodeSpool, "failed reading agent spool batch", err, false)
 	}
@@ -265,7 +267,10 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 
 	req, err := d.makeRequest(batch)
 	if err != nil {
-		// Malformed durable payload is terminal for the head record — park it.
+		// Malformed durable payload is terminal for the head record — abandon frozen window, then park.
+		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
+			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
+		}
 		if parkErr := d.parkHead(batch, "ERR_MALFORMED_DURABLE_PAYLOAD", err); parkErr != nil {
 			return false, parkErr
 		}
@@ -277,7 +282,7 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 	d.metrics.Attempts.Add(1)
 	ack, err := d.transport.UploadAgentTelemetry(uploadCtx, req)
 	if err == nil {
-		if aerr := d.spool.AcknowledgeThrough(ack.AcceptedThroughIngressSequence); aerr != nil {
+		if aerr := d.spool.CompleteOutboundBatch(ack.AcceptedThroughIngressSequence); aerr != nil {
 			return false, codeErr(CodeSpool, "failed applying durable agent ACK to spool", aerr, false)
 		}
 		d.metrics.Successes.Add(1)
@@ -289,6 +294,11 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 
 	if isTerminalCoreError(err) {
 		code := terminalCode(err)
+		// Explicit poison allowlist: Core rejected before durable reservation.
+		// Abandon local outbound window before acknowledging the poison head.
+		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
+			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
+		}
 		if parkErr := d.parkHead(batch, code, err); parkErr != nil {
 			return false, parkErr
 		}

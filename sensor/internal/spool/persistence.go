@@ -48,7 +48,7 @@ func (s *DiskSpool) recover() error {
 	var maxSeq uint64
 	for _, entry := range entries {
 		name := entry.Name()
-		if name == stateFileName || name == streamIDFileName || name == quarantineDirName {
+		if name == stateFileName || name == streamIDFileName || name == quarantineDirName || name == outboundWindowFileName {
 			continue
 		}
 		full := filepath.Join(s.dir, name)

@@ -629,3 +629,154 @@ func TestDrainDoesNotAdvanceSpoolOnInvalidAck(t *testing.T) {
 		t.Fatalf("durable acks must remain 0 on invalid ACK, got %d", d.Metrics().DurableAcks.Load())
 	}
 }
+
+func appendNDurable(t *testing.T, s *spool.DiskSpool, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		_ = appendDurable(t, s, uint64(i+1))
+	}
+}
+
+func TestDrainFrozenWindowSurvivesGrowthRestartAndExactIdentity(t *testing.T) {
+	dir := t.TempDir()
+	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendNDurable(t, s, 5)
+
+	var first coreclient.AgentTelemetryBatch
+	calls := 0
+	tr := &fakeTransport{}
+	tr.err = errors.New("transport down")
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 5, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond,
+		JitterFraction: 0, IdleInterval: time.Hour, ShutdownGrace: time.Second,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := &captureTransport{inner: tr, onCall: func(b coreclient.AgentTelemetryBatch) {
+		calls++
+		if calls == 1 {
+			first = b
+		} else if b.FirstIngressSequence != first.FirstIngressSequence ||
+			b.LastIngressSequence != first.LastIngressSequence ||
+			b.Checksum != first.Checksum || b.BatchID != first.BatchID {
+			t.Fatalf("retry must reuse exact frozen Agent-ingress identity\n first=%+v\n retry=%+v", first, b)
+		}
+	}}
+	d.transport = capture
+
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("first drain must fail, ok=%v err=%v", ok, err)
+	}
+	if first.FirstIngressSequence != 1 || first.LastIngressSequence != 5 {
+		t.Fatalf("first range=%d..%d", first.FirstIngressSequence, first.LastIngressSequence)
+	}
+
+	appendNDurable(t, s, 5) // sequences 6..10
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+
+	tr.err = nil
+	tr.ack = coreclient.AgentTelemetryAck{} // filled by capture echo
+	d2, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s2.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond,
+		JitterFraction: 0, IdleInterval: time.Hour, ShutdownGrace: time.Second,
+	}, s2, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2.transport = &echoCaptureTransport{onCall: func(b coreclient.AgentTelemetryBatch) {
+		calls++
+		if b.FirstIngressSequence != first.FirstIngressSequence ||
+			b.LastIngressSequence != first.LastIngressSequence ||
+			b.Checksum != first.Checksum || b.BatchID != first.BatchID {
+			t.Fatalf("post-restart retry must reuse exact frozen identity\n first=%+v\n retry=%+v", first, b)
+		}
+	}}
+	ok, err = d2.RunOnce(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("retry after growth/restart must succeed: ok=%v err=%v", ok, err)
+	}
+	next, err := s2.ReadOrReserveOutboundBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.FirstSequence != 6 || next.LastSequence != 10 {
+		t.Fatalf("after ACK next Agent window must be 6..10, got %#v", next)
+	}
+}
+
+func TestDrainPoisonAbandonsWindowBeforeHeadAck(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 3)
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{
+		Code: "ERR_RECORD_TOO_LARGE", HTTPStatus: 400, Message: "too large",
+	}}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 3, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond,
+		JitterFraction: 0, IdleInterval: time.Hour, ShutdownGrace: time.Second,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("expected poison, ok=%v err=%v", ok, err)
+	}
+	st, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.RecordCount != 2 {
+		t.Fatalf("poison head ACK must leave remaining records, got %d", st.RecordCount)
+	}
+	next, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.FirstSequence != 2 || next.LastSequence != 3 {
+		t.Fatalf("after poison abandon, new window over remaining records: %#v", next)
+	}
+}
+
+type captureTransport struct {
+	inner  *fakeTransport
+	onCall func(coreclient.AgentTelemetryBatch)
+}
+
+func (c *captureTransport) UploadAgentTelemetry(ctx context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+	if c.onCall != nil {
+		c.onCall(batch)
+	}
+	return c.inner.UploadAgentTelemetry(ctx, batch)
+}
+
+type echoCaptureTransport struct {
+	onCall func(coreclient.AgentTelemetryBatch)
+}
+
+func (e *echoCaptureTransport) UploadAgentTelemetry(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+	if e.onCall != nil {
+		e.onCall(batch)
+	}
+	return coreclient.AgentTelemetryAck{
+		Status: "ACCEPTED", SensorID: batch.SensorID, BatchID: batch.BatchID,
+		AcceptedThroughIngressSequence: batch.LastIngressSequence, CorrelationID: batch.CorrelationID,
+	}, nil
+}

@@ -14,7 +14,10 @@ const (
 	recordSchemaVersion     = 1
 	stateFileName           = "state.json"
 	streamIDFileName        = "stream-id"
+	outboundWindowFileName  = "outbound-window.json"
 	quarantineDirName       = "quarantine"
+	outboundWindowSchema    = 1
+	maxOutboundWindowBytes  = 4096
 
 	// MaxSafeSequence is the JSON-safe transport sequence ceiling (2^53 - 1).
 	MaxSafeSequence = uint64(9007199254740991)
@@ -33,6 +36,7 @@ const (
 	CodeUnsafePath      ErrorCode = "SPOOL_UNSAFE_PATH"
 	CodeUnsafeLegacyAPI ErrorCode = "SPOOL_UNSAFE_LEGACY_API"
 	CodeSequenceExhausted ErrorCode = "SPOOL_SEQUENCE_EXHAUSTED"
+	CodeOutboundWindow    ErrorCode = "SPOOL_OUTBOUND_WINDOW"
 )
 
 type Error struct {

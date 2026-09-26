@@ -11,7 +11,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -263,7 +262,10 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                 """
                 SELECT stream_id, pending_first_sequence, pending_last_sequence, pending_checksum,
                        pending_batch_id, pending_correlation_id,
-                       pending_publisher_owner, pending_publisher_epoch, pending_publisher_lease_until
+                       pending_publisher_owner, pending_publisher_epoch, pending_publisher_lease_until,
+                       (pending_publisher_owner IS NOT NULL
+                        AND pending_publisher_lease_until IS NOT NULL
+                        AND pending_publisher_lease_until > clock_timestamp()) AS lease_active
                   FROM platform.sensor_agent_ingress_watermark
                  WHERE tenant_id = ? AND sensor_id = ?
                  FOR UPDATE
@@ -277,7 +279,8 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                         rs.getString("pending_correlation_id"),
                         (UUID) rs.getObject("pending_publisher_owner"),
                         rs.getLong("pending_publisher_epoch"),
-                        rs.getTimestamp("pending_publisher_lease_until")
+                        rs.getTimestamp("pending_publisher_lease_until"),
+                        rs.getBoolean("lease_active")
                 ),
                 tenantId,
                 sensorId
@@ -301,24 +304,22 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                     "Publisher claim requires the exact pending agent-ingress reservation identity"
             );
         }
-        Instant now = Instant.now();
-        if (row.owner() != null && row.leaseUntil() != null && row.leaseUntil().toInstant().isAfter(now)) {
+        if (row.leaseActive()) {
             return PublisherClaimResult.busy();
         }
         UUID owner = UUID.randomUUID();
         long epoch = row.publisherEpoch() + 1;
-        Instant leaseUntil = now.plusSeconds(PUBLISHER_LEASE_SECONDS);
         int updated = jdbcTemplate.update(
                 """
                 UPDATE platform.sensor_agent_ingress_watermark
                    SET pending_publisher_owner = ?,
                        pending_publisher_epoch = ?,
-                       pending_publisher_claimed_at = ?,
-                       pending_publisher_lease_until = ?,
+                       pending_publisher_claimed_at = clock_timestamp(),
+                       pending_publisher_lease_until = clock_timestamp() + make_interval(secs => ?),
                        updated_at = CURRENT_TIMESTAMP
                  WHERE tenant_id = ? AND sensor_id = ?
                 """,
-                owner, epoch, Timestamp.from(now), Timestamp.from(leaseUntil), tenantId, sensorId
+                owner, epoch, PUBLISHER_LEASE_SECONDS, tenantId, sensorId
         );
         if (updated != 1) {
             throw new IllegalStateException("Failed to claim agent-ingress publisher lease");
@@ -483,7 +484,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                    AND pending_publisher_owner = ?
                    AND pending_publisher_epoch = ?
                    AND pending_publisher_lease_until IS NOT NULL
-                   AND pending_publisher_lease_until > CURRENT_TIMESTAMP
+                   AND pending_publisher_lease_until > clock_timestamp()
                 """,
                 lastSeq, firstSeq, lastSeq, checksum, batchId,
                 tenantId, sensorId, ownerToken, publisherEpoch
@@ -574,7 +575,8 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
             String pendingCorrelationId,
             UUID owner,
             long publisherEpoch,
-            Timestamp leaseUntil
+            Timestamp leaseUntil,
+            boolean leaseActive
     ) {}
 
     private record FinalizeRow(

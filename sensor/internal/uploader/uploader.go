@@ -72,8 +72,8 @@ type Transport interface {
 	Upload(context.Context, coreclient.Batch) (coreclient.UploadAck, error)
 }
 type Spool interface {
-	ReadBatch(int, int) (spool.Batch, error)
-	AcknowledgeThrough(uint64) error
+	ReadOrReserveOutboundBatch(int, int) (spool.Batch, error)
+	CompleteOutboundBatch(uint64) error
 	Stats() (spool.Stats, error)
 }
 
@@ -176,7 +176,7 @@ func (u *Uploader) RunOnce(ctx context.Context) (bool, error) {
 	if err := ctxErr(ctx); err != nil {
 		return false, err
 	}
-	batch, err := u.spool.ReadBatch(u.cfg.MaxBatchRecords, u.cfg.MaxBatchPayloadBytes)
+	batch, err := u.spool.ReadOrReserveOutboundBatch(u.cfg.MaxBatchRecords, u.cfg.MaxBatchPayloadBytes)
 	if err != nil {
 		u.setState(StateDegraded, CodeSpool, time.Time{})
 		return false, codeErr(CodeSpool, "failed reading durable spool batch", err, false)
@@ -206,7 +206,7 @@ func (u *Uploader) RunOnce(ctx context.Context) (bool, error) {
 				}
 				u.setState(StateDegraded, CodeAckInvalid, time.Time{})
 				return false, err
-			} else if aerr := u.spool.AcknowledgeThrough(*ack.AcceptedThroughSequence); aerr != nil {
+			} else if aerr := u.spool.CompleteOutboundBatch(*ack.AcceptedThroughSequence); aerr != nil {
 				u.setState(StateDegraded, CodeSpool, time.Time{})
 				return false, codeErr(CodeSpool, "failed applying durable acknowledgement to spool", aerr, false)
 			} else {
@@ -283,7 +283,7 @@ func (u *Uploader) makeBatch(b spool.Batch) (coreclient.Batch, error) {
 
 // validateUploaderAck re-checks the frozen telemetry ACK contract before spool deletion.
 func validateUploaderAck(batch coreclient.Batch, ack coreclient.UploadAck) error {
-	if !strings.EqualFold(strings.TrimSpace(ack.Status), "ACCEPTED") {
+	if ack.Status != "ACCEPTED" {
 		return codeErr(CodeAckInvalid, "Core telemetry acknowledgement status is not ACCEPTED", nil, false)
 	}
 	if strings.TrimSpace(ack.SensorIdentity) == "" {
