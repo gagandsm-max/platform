@@ -21,6 +21,7 @@ from control_plane import (
     assert_schema_tool_enums_match_authority,
     load_tool_authority,
 )
+from skill_structure import format_structure_errors, validate_skill_structure
 
 AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 SKILL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -584,6 +585,7 @@ def validate_agent_pack(repo: Path) -> list[str]:
                 continue
             body = canonical_skill.read_text(encoding="utf-8")
             errors.extend(policy_scan(canonical_skill.relative_to(repo), body))
+            errors.extend(format_structure_errors(name, validate_skill_structure(body)))
             try:
                 meta, _rest = parse_frontmatter(body, f"project_agents/skills/{name}/SKILL.md")
             except AgentPackError as exc:

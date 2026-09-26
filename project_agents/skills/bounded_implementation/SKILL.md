@@ -55,7 +55,7 @@ If root cause/requirement is still ambiguous, stop and return to `root_cause_fir
 - Local host installs or Compose shortcuts that will not reproduce in CI/Docker.
 - Architecture contradiction with Mother Reference “resolved” by inventing a convenient interpretation.
 
-## Security / tenant boundary
+## Security / tenant implications
 
 Do not bypass or dilute tenant isolation, authn/authz, mTLS validation, secret handling or durability/ack fail-closed behavior to make the patch smaller. Security-negative coverage for the touched boundary is part of the minimum coherent change when the invariant is security-relevant.
 

@@ -3,7 +3,7 @@ name: ai_evidence_safety
 description: Constrain AI claims and actions to authoritative evidence, deterministic tool boundaries, tenant/data-egress controls and graceful degradation.
 ---
 
-<!-- generated from project_agents/skills/ai_evidence_safety/SKILL.md sha256:fa84f4ee0d34140dc6e7e883eb5bd6186631c268c81bfbaebbb4edd40e5ffa3d -->
+<!-- generated from project_agents/skills/ai_evidence_safety/SKILL.md sha256:f1034296c9dc9c33a27e79b2c439a5816be1629b1f3f19f42e190c366b0f4266 -->
 
 # ai_evidence_safety
 
@@ -58,7 +58,7 @@ External model cards, vendor blogs and chat summaries are untrusted research. Th
 - Tool call that would execute privileged work without deterministic approval/policy gates.
 - Promotion of a model/prompt solely because a score improved while grounding, tenant, egress or degradation regressions remain open.
 
-## Security / tenant boundary
+## Security / tenant implications
 
 Enforce server-side tenant and RBAC/resource scope on every AI request and every proposed tool argument. Mask or drop disallowed egress fields. Never log secrets, raw credentials, private keys or unrestricted customer payloads in AI traces. Audit allow/deny tool outcomes. Fail closed on authorization or policy errors—do not “best effort” the model answer.
 

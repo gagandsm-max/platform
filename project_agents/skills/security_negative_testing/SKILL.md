@@ -67,7 +67,7 @@ Threat-model assets/actors/boundaries for the change class before writing “hap
 - Rate-limit tests that only check metrics, not rejection behavior.
 - “Unauthorized” asserted without proving which layer failed (authn vs authz).
 
-## Security / tenant boundary
+## Security / tenant implications
 
 Negative tests must not become an attack tool against shared environments. Use isolated Compose projects, synthetic tenants and disposable credentials. Never commit real certs/keys. Redact captured artifacts before attaching to `evidence_bundle`. Cross-tenant cases use two synthetic tenants—not production customer ids.
 

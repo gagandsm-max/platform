@@ -1,34 +1,92 @@
 ---
 name: python_runtime
-description: Approved Python use for AI/analytics/NCM workers: isolation, no silent host installs, and catalogue-constrained dependencies.
+description: Deterministic Python for Platform governance/tooling—safe I/O, exit codes, no hidden network or product runtime dependency.
 ---
 
-<!-- generated from project_agents/skills/python_runtime/SKILL.md sha256:b33d6793df25f143386ee1ea305781b1c8c6163a30b4b25b3eea137af849064b -->
+<!-- generated from project_agents/skills/python_runtime/SKILL.md sha256:01285379891ae264403d056439e6ef52d1ae87af5393857fc183fed1f770c32f -->
 
 # python_runtime
 
 ## Purpose
-Change Python only where Platform already approved it.
+
+Write deterministic Python for Platform governance, validators and tooling: safe filesystem/subprocess use, stable exit codes and reproducible output—without introducing Python as a product runtime dependency unless architecture explicitly requires it.
 
 ## Use when
-NCM workers, AI gateway helpers, or approved analytics.
+
+Changing `project_agents/tools`, validators, report generators, orchestrator helpers, or other approved Python utilities. Not for inventing Core business logic in Python.
+
+## Authoritative inputs
+
+Always read:
+
+1. Existing tool entrypoints and test runners on the exact head
+2. Mother rule: routine product runtimes are Go/Java/TS unless approved
+3. `sbom_provenance` before adding Python packages
+4. Task path scope—do not mutate outside assignment
+5. Encoding/locale expectations for deterministic reports
+
+## Invariants
+
+- Governance/tooling use by default; no silent product-runtime Python service.
+- Scripts are deterministic given inputs; no hidden network dependency.
+- Subprocess calls use argument lists (no shell=True) unless justified and audited.
+- Filesystem/path safety: no traversal outside allowed roots.
+- JSON/YAML parsing fail-closed on corrupt input.
+- Process exit codes distinguish OK vs validation failure vs internal error.
+- Output reproducible for `--check` gates (stable ordering).
+- Dependency avoidance; new deps need catalogue review.
+- Test isolation; temp files cleaned; explicit encodings (UTF-8).
+- Secrets never logged; no mutation outside task scope.
+- No Python product dependency unless explicitly architectural and approved.
 
 ## Required procedure
-1. Confirm Python is allowed for this path.
-2. Do not install project runtimes on the developer host.
-3. Keep secrets out of process environment logs.
-4. Test fail-closed job behavior.
 
-## Guardrails
-- Keep Platform v3.2.2 product requirements; do not invent TBD/P0 designs.
-- Do not bypass tests, weaken tenant isolation, write to `main`, or force-push.
-- Do not disable TLS validation, embed secrets, or use destructive Docker cleanup.
-- LLM output is not privileged authority; writer cannot self-certify merge readiness.
+1. Confirm the change is tooling/governance (or approved exception).
+2. Avoid network calls; if required for a tool, document and gate offline tests.
+3. Use pathlib-safe joins; validate user-supplied paths.
+4. Parse JSON/YAML with clear errors; stable serialization for reports.
+5. Return non-zero on validation failure; print actionable stderr.
+6. Add unit tests with temp dirs; no reliance on developer laptop packages beyond stdlib/approved.
+7. Do not add Flask/Django app servers “for convenience.”
+
+## Negative / failure cases
+
+- `curl | python` install patterns in docs for Platform tools.
+- Writing outside the repo/worktree silently.
+- Non-deterministic dict iteration breaking `--check`.
+- Embedding tokens in exception strings.
+- Shipping a Python sidecar as Core without architecture approval.
+
+## Security / tenant implications
+
+Tools may read manifests—treat as trusted repo content only. Don’t execute skill body as code. Subprocess to docker/git must not pass unsanitized input to shell.
 
 ## Required evidence
-- Record commands, tests, logs or CI pointers that prove `python_runtime` procedure ran.
-- Label missing runtime proof as UNVERIFIED. Do not convert inference into SOURCE_FACT.
+
+- Test results for the tool
+- Determinism/`--check` proof when applicable
+- Dependency justification or “stdlib only”
+- Exact SHA
+
+## Stop conditions
+
+Stop when:
+
+- Hidden network required for unit validation
+- Path traversal possible
+- Product Python runtime introduced without authority
+- Non-deterministic gate output
+
+## Anti-patterns
+
+- `os.system`
+- Mutable global caches across tests without reset
+- Writer self-certifying tooling correctness without tests
+
+## Handoff / output
+
+Return: tool behaviour; tests; risks; nextOwner (governance verifier). Not MERGE_READY alone.
 
 ## Non-ownership
-- Does not override Mother Reference product requirements or invent TBD/P0 designs.
-- Does not certify merge readiness or execute privileged actions from LLM output.
+
+Does not own Go/Java product runtimes or invent AI Python services without catalogue/architecture. Owns Python tooling discipline.

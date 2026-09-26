@@ -59,7 +59,7 @@ Prior chat summaries are not repository truth. Re-fetch before reusing older bun
 - Claiming absence of a class of bugs because one path did not fail.
 - Using `INFERENCE` to satisfy a required `EXECUTION_EVIDENCE`/`CI_EVIDENCE` gate.
 
-## Security / tenant boundary
+## Security / tenant implications
 
 Redact secrets and tenant-sensitive payloads before capture. Evidence remains bounded and tenant-scoped where applicable. Do not exfiltrate production data into the bundle to “prove” a fix. Support-bundle references must follow secrets_handling redaction rules.
 

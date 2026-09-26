@@ -3,7 +3,7 @@ name: evidence_bundle
 description: Package typed SOURCE_FACT, EXECUTION_EVIDENCE, CI_EVIDENCE, INFERENCE and UNVERIFIED claims with reproducible references.
 ---
 
-<!-- generated from project_agents/skills/evidence_bundle/SKILL.md sha256:274e9dbfff13de68fca8417d4a7baa8e2954a3e4c1ed6a24dd7d97dc1afd3476 -->
+<!-- generated from project_agents/skills/evidence_bundle/SKILL.md sha256:bda8f09916977ab622415dd4fb39804c1daa00db05323dcba88338e0b2858813 -->
 
 # evidence_bundle
 
@@ -61,7 +61,7 @@ Prior chat summaries are not repository truth. Re-fetch before reusing older bun
 - Claiming absence of a class of bugs because one path did not fail.
 - Using `INFERENCE` to satisfy a required `EXECUTION_EVIDENCE`/`CI_EVIDENCE` gate.
 
-## Security / tenant boundary
+## Security / tenant implications
 
 Redact secrets and tenant-sensitive payloads before capture. Evidence remains bounded and tenant-scoped where applicable. Do not exfiltrate production data into the bundle to “prove” a fix. Support-bundle references must follow secrets_handling redaction rules.
 

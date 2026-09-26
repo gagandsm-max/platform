@@ -55,7 +55,7 @@ Do not invent universal quality thresholds. Governing requirements and contract 
 - Active evidence acquisition that is unbounded, cross-tenant, or capable of inducing outage.
 - Silent ACTIVE policy mutation from operator chat/feedback.
 
-## Security / tenant boundary
+## Security / tenant implications
 
 Alert evaluation, fixtures, shadow comparisons and Copilot citations must remain tenant-scoped and RBAC/resource-scoped. Do not leak cross-tenant incident labels into evaluation sets. Active validation requires authorization, rate/resource limits and audit. Secrets used for probes stay in Credential Profiles—never in alert payloads or logs.
 

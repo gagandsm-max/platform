@@ -14,6 +14,30 @@ from tools.engineering_orchestrator.models import (
 )
 from tools.engineering_orchestrator.store import OrchestratorStore
 
+# B4 strict Skill headings for pack-safety fixtures (must match skill_structure.py).
+FIXTURE_SKILL_HEADINGS = (
+    "Purpose",
+    "Use when",
+    "Authoritative inputs",
+    "Invariants",
+    "Required procedure",
+    "Negative / failure cases",
+    "Security / tenant implications",
+    "Required evidence",
+    "Stop conditions",
+    "Anti-patterns",
+    "Handoff / output",
+    "Non-ownership",
+)
+
+
+def fixture_skill_markdown(name: str, description: str) -> str:
+    """Minimal structurally valid canonical Skill body for temporary pack fixtures."""
+    parts = [f"---\nname: {name}\ndescription: {description}\n---\n", f"# {name}\n"]
+    for heading in FIXTURE_SKILL_HEADINGS:
+        parts.append(f"## {heading}\n\nFixture {heading} body for `{name}`.\n")
+    return "\n".join(parts)
+
 
 def engine(tmp: str) -> OrchestratorEngine:
     return OrchestratorEngine(OrchestratorStore(tmp))

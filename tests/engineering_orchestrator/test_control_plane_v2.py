@@ -16,6 +16,7 @@ if str(TOOLS) not in sys.path:
 
 import agent_pack  # noqa: E402
 import control_plane  # noqa: E402
+from tests.engineering_orchestrator.helpers import fixture_skill_markdown  # noqa: E402
 
 SHA_A = "a" * 40
 SHA_B = "b" * 40
@@ -98,19 +99,9 @@ def _build_fixture(root: Path) -> None:
         "## Conditional Skills\n"
         "- `demo_conditional_skill`\n"
     )
-    skill = (
-        "---\n"
-        "name: demo_skill\n"
-        "description: Fixture skill\n"
-        "---\n\n"
-        "# demo_skill\n\nFixture canonical skill.\n"
-    )
-    conditional_skill = (
-        "---\n"
-        "name: demo_conditional_skill\n"
-        "description: Fixture conditional skill\n"
-        "---\n\n"
-        "# demo_conditional_skill\n\nFixture conditional skill.\n"
+    skill = fixture_skill_markdown("demo_skill", "Fixture skill")
+    conditional_skill = fixture_skill_markdown(
+        "demo_conditional_skill", "Fixture conditional skill"
     )
     manifest = [
         {

@@ -3,7 +3,7 @@ name: bounded_implementation
 description: Apply the smallest defensible change inside the approved scope with explicit non-goals and no unrelated refactor.
 ---
 
-<!-- generated from project_agents/skills/bounded_implementation/SKILL.md sha256:3ada45e1f98bb653ee3510d2471ba65ddc059416e689189c3c00d2ba862c0652 -->
+<!-- generated from project_agents/skills/bounded_implementation/SKILL.md sha256:17e53fbc23a6cf316be8afd8a433095f74f262869ae01fe49a5c1651d7ccb4ef -->
 
 # bounded_implementation
 
@@ -57,7 +57,7 @@ If root cause/requirement is still ambiguous, stop and return to `root_cause_fir
 - Local host installs or Compose shortcuts that will not reproduce in CI/Docker.
 - Architecture contradiction with Mother Reference “resolved” by inventing a convenient interpretation.
 
-## Security / tenant boundary
+## Security / tenant implications
 
 Do not bypass or dilute tenant isolation, authn/authz, mTLS validation, secret handling or durability/ack fail-closed behavior to make the patch smaller. Security-negative coverage for the touched boundary is part of the minimum coherent change when the invariant is security-relevant.
 

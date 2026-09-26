@@ -10,6 +10,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPORT_TOOL = REPO_ROOT / "project_agents" / "tools" / "skill_depth_report.py"
+TOOLS = REPO_ROOT / "project_agents" / "tools"
 
 EXPLICIT_HEADINGS = (
     "## Purpose",
@@ -28,6 +29,10 @@ EXPLICIT_HEADINGS = (
 
 
 def _load_depth_report():
+    import sys
+
+    if str(TOOLS) not in sys.path:
+        sys.path.insert(0, str(TOOLS))
     spec = importlib.util.spec_from_file_location("skill_depth_report", REPORT_TOOL)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

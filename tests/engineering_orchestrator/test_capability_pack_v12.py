@@ -16,6 +16,7 @@ if str(TOOLS) not in sys.path:
 
 import agent_pack  # noqa: E402
 import control_plane  # noqa: E402
+from tests.engineering_orchestrator.helpers import fixture_skill_markdown  # noqa: E402
 
 NEW_P1 = (
     "platform-sensor-runtime-engineer",
@@ -67,20 +68,8 @@ def _build_fixture(root: Path) -> None:
         "- `demo_skill`\n\n"
         "## Conditional Skills\n"
     )
-    skill = (
-        "---\n"
-        "name: demo_skill\n"
-        "description: Fixture skill\n"
-        "---\n\n"
-        "# demo_skill\n\nFixture canonical skill.\n"
-    )
-    unused_skill = (
-        "---\n"
-        "name: unused_skill\n"
-        "description: Fixture unused skill\n"
-        "---\n\n"
-        "# unused_skill\n\nUnused so routing stays bounded.\n"
-    )
+    skill = fixture_skill_markdown("demo_skill", "Fixture skill")
+    unused_skill = fixture_skill_markdown("unused_skill", "Fixture unused skill")
     manifest = [
         {
             "name": "demo-agent",

@@ -3,7 +3,7 @@ name: security_negative_testing
 description: Prove security boundaries with adversarial and negative cases rather than success-path evidence alone.
 ---
 
-<!-- generated from project_agents/skills/security_negative_testing/SKILL.md sha256:eb437c92c9a73ae269e90dd431d0ebf3405e198e2e641b6a32a119d3816e778a -->
+<!-- generated from project_agents/skills/security_negative_testing/SKILL.md sha256:14e94ed0951a14ebba2c29577436ee7fa6263e286ec3a51e2668fb144a0bd4a4 -->
 
 # security_negative_testing
 
@@ -69,7 +69,7 @@ Threat-model assets/actors/boundaries for the change class before writing “hap
 - Rate-limit tests that only check metrics, not rejection behavior.
 - “Unauthorized” asserted without proving which layer failed (authn vs authz).
 
-## Security / tenant boundary
+## Security / tenant implications
 
 Negative tests must not become an attack tool against shared environments. Use isolated Compose projects, synthetic tenants and disposable credentials. Never commit real certs/keys. Redact captured artifacts before attaching to `evidence_bundle`. Cross-tenant cases use two synthetic tenants—not production customer ids.
 

@@ -59,7 +59,7 @@ Platform owns schema. Do not invent automatic down-migration requirements the go
 - Assuming standby apply equals restore validation without a restore/PITR exercise when risk warrants it.
 - Treating schema success alone as data-invariant proof.
 
-## Security / tenant boundary
+## Security / tenant implications
 
 Migrations run with appropriate DB privileges (runtime vs migration role separation where required). Do not embed secrets in migration SQL. Tenant id remains server-enforced. Audit who applied what version in which environment. Fail closed if migration privilege or connectivity is wrong—do not fall back to permissive DDL from the app role.
 

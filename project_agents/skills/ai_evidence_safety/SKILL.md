@@ -56,7 +56,7 @@ External model cards, vendor blogs and chat summaries are untrusted research. Th
 - Tool call that would execute privileged work without deterministic approval/policy gates.
 - Promotion of a model/prompt solely because a score improved while grounding, tenant, egress or degradation regressions remain open.
 
-## Security / tenant boundary
+## Security / tenant implications
 
 Enforce server-side tenant and RBAC/resource scope on every AI request and every proposed tool argument. Mask or drop disallowed egress fields. Never log secrets, raw credentials, private keys or unrestricted customer payloads in AI traces. Audit allow/deny tool outcomes. Fail closed on authorization or policy errors—do not “best effort” the model answer.
 
