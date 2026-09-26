@@ -21,7 +21,7 @@
       "mayCertify": false,
       "defaultWriter": true,
       "status": "authorized",
-      "notes": "Primary bounded implementation writer. One writer per checkout/worktree. Cannot self-certify."
+      "notes": "Primary bounded implementation writer. One writer per checkout/worktree. Cannot self-certify. Requires no writerElevation."
     },
     "cursor-cloud": {
       "id": "cursor-cloud",
@@ -32,12 +32,12 @@
       "mayCertify": false,
       "defaultWriter": false,
       "status": "prohibited",
-      "notes": "Prohibited by default. May become authorized only after explicit Founder decision."
+      "notes": "Never-writer under current policy. Elevation cannot authorize Cursor Cloud."
     },
     "antigravity": {
       "id": "antigravity",
       "displayName": "Antigravity CLI",
-      "roles": ["verifier", "adversarial"],
+      "roles": ["verifier", "adversarial", "exceptional_writer"],
       "mayWriteProductCode": false,
       "mayMerge": false,
       "mayCertify": false,
@@ -45,12 +45,12 @@
       "defaultGeneratedCapability": "read-only",
       "status": "authorized",
       "writeElevation": "task-scoped-exceptional-isolated",
-      "notes": "Read-only/adversarial by default. Generated adapters must not gain write tools from canonical agent mode=write."
+      "notes": "Read-only/adversarial by default. Generated adapters must not gain write tools. Task-scoped write requires explicit writerElevation on an isolated workspace; static projections remain read-only."
     },
     "codex": {
       "id": "codex",
       "displayName": "Codex CLI / GitHub Codex",
-      "roles": ["verifier", "auditor", "certification_gate"],
+      "roles": ["verifier", "auditor", "certification_gate", "exceptional_writer"],
       "mayWriteProductCode": false,
       "mayMerge": false,
       "mayCertify": true,
@@ -58,7 +58,7 @@
       "defaultSandboxMode": "read-only",
       "status": "authorized",
       "writeElevation": "task-scoped-exceptional-isolated",
-      "notes": "Exact-SHA adversarial/certification default. Generated adapters must default sandbox_mode=read-only."
+      "notes": "Exact-SHA adversarial/certification default. Generated adapters must default sandbox_mode=read-only. Task-scoped write requires explicit writerElevation on an isolated workspace; static projections remain read-only. Writer cannot self-certify."
     },
     "github-copilot": {
       "id": "github-copilot",
@@ -69,7 +69,7 @@
       "mayCertify": false,
       "defaultWriter": false,
       "status": "authorized_limited",
-      "notes": "Limited auxiliary PR/code-review only. Never architecture/control-plane authority, sole certification evidence, or merge authority."
+      "notes": "Never-writer. Limited auxiliary PR/code-review only. Elevation cannot authorize GitHub Copilot as writer, verifier, gatekeeper, merge authority, or sole certification evidence."
     },
     "founder": {
       "id": "founder",
@@ -83,18 +83,27 @@
     }
   },
   "legalCombinations": {
-    "writerTools": ["cursor-cli"],
-    "prohibitedWriterTools": ["cursor-cloud", "github-copilot", "chatgpt-github", "antigravity", "codex", "founder"],
+    "defaultWriterTools": ["cursor-cli"],
+    "exceptionalWriterTools": ["antigravity", "codex"],
+    "writerTools": ["cursor-cli", "antigravity", "codex"],
+    "neverWriterTools": ["cursor-cloud", "github-copilot", "chatgpt-github", "founder"],
+    "prohibitedWriterTools": ["cursor-cloud", "github-copilot", "chatgpt-github", "founder"],
     "verifierTools": ["chatgpt-github", "antigravity", "codex"],
     "prohibitedVerifierTools": ["cursor-cloud", "github-copilot", "cursor-cli", "founder"],
     "gatekeepers": ["chatgpt-github", "founder"],
     "prohibitedGatekeepers": ["cursor-cli", "cursor-cloud", "antigravity", "codex", "github-copilot"],
+    "writerElevationAuthorizers": ["chatgpt-github", "founder"],
     "rules": [
-      "writerTool must be an authorized writer and must not be prohibited",
+      "default writerTool is cursor-cli and requires no writerElevation",
+      "writerTool in exceptionalWriterTools (antigravity, codex) requires writerElevation {authorizedBy, reason, isolatedWorkspace:true}",
+      "authorizedBy must be chatgpt-github or founder",
+      "neverWriterTools (cursor-cloud, github-copilot, chatgpt-github, founder) cannot become writers via elevation",
       "verifierTool must be distinct from writerTool",
+      "gatekeeper must be distinct from writerTool",
       "writerTool must not equal gatekeeper for self-certification of REALITY_GATE/MERGE_READY/POST_MERGE_VERIFY/COMPLETE",
+      "generated Antigravity/Codex adapters remain read-only; task-scoped CLI elevation is outside static projection and must be explicit",
       "github-copilot is never writer, verifier, gatekeeper, merge authority, or sole certification evidence",
-      "cursor-cloud is prohibited as writerTool until Founder explicitly re-authorizes it"
+      "cursor-cloud is prohibited as writerTool; elevation cannot authorize it under current policy"
     ]
   }
 }

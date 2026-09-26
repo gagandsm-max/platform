@@ -44,12 +44,12 @@ If documents conflict, stop and resolve through the precedence defined in `Platf
 
 ## Tool authority model
 
-- **ChatGPT + GitHub is the Platform control plane.** It owns source-truth rebaselining, architecture/technical decisions, task sequencing, PR integration, merge authority, progress accounting and final technical acceptance.
-- **Cursor CLI is the primary bounded implementation writer.** It operates only on explicitly assigned branches/worktrees and bounded scope. A Cursor writer never self-certifies merge readiness.
-- **Cursor Cloud is prohibited by default.** It may become authorized only after an explicit Founder decision recorded in `project_agents/tool_authority.json`.
-- **Antigravity CLI is verifier-first and read-only/adversarial by default.** Write authority is exceptional, explicit and isolated to a dedicated branch/worktree; Antigravity must not become a second writer on an active Cursor branch.
-- **Codex CLI / GitHub Codex is an independent exact-SHA adversarial auditor and certification gate when explicitly invoked.** It is not a routine developer/fixer and must not write production changes unless ChatGPT explicitly assigns an isolated implementation lane.
-- **GitHub Copilot is limited auxiliary PR/code-review only.** It is never architecture/control-plane authority, sole certification evidence, or merge authority.
+- **ChatGPT + GitHub is the Platform control plane.** It owns source-truth rebaselining, architecture/technical decisions, task sequencing, PR integration, merge authority, progress accounting and final technical acceptance. It (or the Founder) may authorize exceptional isolated write elevation via task-manifest `writerElevation`.
+- **Cursor CLI is the default bounded implementation writer.** It operates only on explicitly assigned branches/worktrees and bounded scope. A Cursor writer never self-certifies merge readiness and requires no `writerElevation`.
+- **Cursor Cloud is a never-writer under current policy.** Elevation cannot authorize it; any future change requires an explicit Founder decision recorded in `project_agents/tool_authority.json`.
+- **Antigravity CLI is verifier-first and read-only/adversarial by default.** Generated adapters remain read-only. Write authority is exceptional, explicit and isolated (`writerElevation` with `isolatedWorkspace: true`); Antigravity must not become a second writer on an active Cursor branch and cannot self-certify.
+- **Codex CLI / GitHub Codex is an independent exact-SHA adversarial auditor and certification gate when explicitly invoked.** Generated adapters default to read-only sandbox. It is not a routine developer/fixer; exceptional isolated write requires the same `writerElevation` contract and cannot self-certify.
+- **GitHub Copilot is a never-writer** and limited auxiliary PR/code-review only. Elevation cannot authorize it as writer, verifier, gatekeeper, merge authority, or sole certification evidence.
 - **One writer per branch/worktree.** Parallelism is for independent review/evidence by default; parallel writes require isolated branches/worktrees and later controlled integration.
 - Every tool must re-fetch authoritative `main` and exact task/PR head before acting. Main/head drift invalidates stale review.
 - No writer may close `REALITY_GATE`, `MERGE_READY`, `POST_MERGE_VERIFY` or `COMPLETE` for its own work.
@@ -162,9 +162,9 @@ For enterprise-monitoring-coverage / Capability Pack capabilities governed by `P
 - OEM/customer extensions use supported pack/SDK mechanisms. Core forks are prohibited.
 - Always-on full DPI, unrestricted SIEM replacement, full bytecode APM, broad BMS/DCIM and uncontrolled automated NCM remain excluded or deferred as recorded in `Platform_23`.
 
-## Cursor Cloud policy (prohibited by default)
+## Cursor Cloud policy (never-writer)
 
-Cursor Cloud is **not** an authorized writer under current `project_agents/tool_authority.json`. Do not route product implementation to Cursor Cloud unless the Founder explicitly re-authorizes it and updates that file.
+Cursor Cloud is a **never-writer** under current `project_agents/tool_authority.json`. Task-manifest `writerElevation` cannot authorize it. Do not route product implementation to Cursor Cloud unless the Founder explicitly changes that policy file.
 
 If a Founder-authorized Cloud environment is later approved, it must still obey the laptop contract (Docker Compose only; no host-installed project runtimes; no secrets in git; UI `23000` / Core `28443`). Until that decision exists, use Cursor CLI on an assigned local/worktree checkout.
 

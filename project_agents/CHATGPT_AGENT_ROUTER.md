@@ -46,10 +46,11 @@ First map the actual implementation with platform-codebase-onboarding-engineer. 
 
 ### Tool/runtime boundaries
 
-- ChatGPT+GitHub coordinates repository truth, GitHub writes, PR state and CI evidence; it does not claim local Cursor/Antigravity execution and has no native filesystem subagent loader.
-- Cursor CLI is the primary bounded writer and uses `.cursor/agents/` plus shared `.agents/skills/` with the proven flags in `TOOL_COMPATIBILITY.md`. Cursor Cloud is prohibited by default unless the Founder explicitly re-authorizes it. Do not invent `--agent`.
-- Antigravity uses `.agents/agents/` and `.agents/skills/`. `--agent` is supported. Default Platform posture is read-only/adversarial; write mode requires explicit authority.
-- Codex compatibility projection remains `.codex/agents/`. Codex CLI/GitHub Codex is an independent exact-SHA adversarial auditor/certification lane when explicitly invoked by ChatGPT; it is not the routine writer. Do not invent a native Codex Skill path—task prompts may direct Codex to the canonical `project_agents/skills/` files that apply.
+- ChatGPT+GitHub coordinates repository truth, GitHub writes, PR state and CI evidence; it does not claim local Cursor/Antigravity execution and has no native filesystem subagent loader. It may authorize exceptional isolated write elevation for Antigravity or Codex via task-manifest `writerElevation`.
+- Cursor CLI is the primary/default bounded writer and uses `.cursor/agents/` plus shared `.agents/skills/` with the proven flags in `TOOL_COMPATIBILITY.md`. Cursor Cloud is a never-writer under current policy (elevation cannot authorize it). Do not invent `--agent`.
+- Antigravity uses `.agents/agents/` and `.agents/skills/`. `--agent` is supported. Default Platform posture is read-only/adversarial. Generated adapters remain read-only. Task-scoped write requires ChatGPT/Founder `writerElevation` with `isolatedWorkspace: true` on an isolated branch/worktree; verifierTool and gatekeeper must differ from writerTool.
+- Codex compatibility projection remains `.codex/agents/` with default `sandbox_mode=read-only`. Codex CLI/GitHub Codex is an independent exact-SHA adversarial auditor/certification lane when explicitly invoked by ChatGPT; it is not the routine writer. Exceptional isolated Codex write uses the same `writerElevation` contract. Do not invent a native Codex Skill path—task prompts may direct Codex to the canonical `project_agents/skills/` files that apply.
+- GitHub Copilot is never a writer (elevation cannot authorize it), never a verifier/gatekeeper, and never sole certification evidence.
 - Never use destructive generic Docker cleanup such as broad prune or `down -v` as an orchestration shortcut.
 
 ## Routing chain
@@ -76,4 +77,4 @@ Do not load every Skill body. Use this table, `AGENT_MATRIX.md` and `skills/AGEN
 
 Material UI pipeline: requirements/source review → `platform-ux-architect` → `platform-product-ui-designer` → implementation-ready UI specification → `platform-frontend-developer` → runtime/UI tests → `platform-accessibility-auditor` → large-estate/performance review where applicable → `platform-ui-finish-gate-reviewer` → `platform-evidence-collector`. Tiny UI fixes need not invoke the entire chain.
 
-Writer self-certification is prohibited. Antigravity verifier-first means default read-only/adversarial review before any write grant.
+Writer self-certification is prohibited. Antigravity verifier-first means default read-only/adversarial review before any write grant. Exceptional Antigravity/Codex write tasks must carry `writerElevation` (`authorizedBy`, non-empty `reason`, `isolatedWorkspace: true`) and still cannot self-verify or self-certify.

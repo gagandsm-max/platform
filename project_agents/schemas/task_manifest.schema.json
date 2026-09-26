@@ -54,8 +54,28 @@
     "stopConditions": {"type": "array", "items": {"type": "string"}},
     "writerTool": {
       "type": "string",
-      "enum": ["cursor-cli"],
-      "description": "Authorized product writer. Derived from project_agents/tool_authority.json. cursor-cloud is prohibited."
+      "enum": ["cursor-cli", "antigravity", "codex"],
+      "description": "Product writer. Default is cursor-cli (no elevation). antigravity/codex require writerElevation on an isolated workspace. never-writers (cursor-cloud, github-copilot, chatgpt-github, founder) cannot be selected. Derived from project_agents/tool_authority.json."
+    },
+    "writerElevation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorizedBy", "reason", "isolatedWorkspace"],
+      "description": "Required only when writerTool is an exceptional writer (antigravity or codex). Forbidden for cursor-cli. Cannot authorize never-writers.",
+      "properties": {
+        "authorizedBy": {
+          "type": "string",
+          "enum": ["chatgpt-github", "founder"]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "isolatedWorkspace": {
+          "const": true,
+          "description": "Exceptional writers must use an isolated branch/worktree; must be true."
+        }
+      }
     },
     "verifierTool": {
       "type": "string",
@@ -65,7 +85,7 @@
     "gatekeeper": {
       "type": "string",
       "enum": ["chatgpt-github", "founder"],
-      "description": "Control-plane gatekeeper. Writers cannot self-certify. Derived from project_agents/tool_authority.json."
+      "description": "Control-plane gatekeeper. Must differ from writerTool. Writers cannot self-certify. Derived from project_agents/tool_authority.json."
     },
     "status": {
       "type": "string",

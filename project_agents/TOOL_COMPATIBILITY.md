@@ -21,12 +21,24 @@ subagent loaders.
 
 | Tool | Authority |
 |---|---|
-| ChatGPT + GitHub | Control plane; architecture/technical authority; sequencing; PR/merge; certification/progress |
-| Cursor CLI | Primary bounded implementation writer; one writer per checkout/worktree; cannot self-certify |
-| Cursor Cloud | **Prohibited by default**; may become authorized only after explicit Founder decision |
-| Antigravity CLI | Read-only/adversarial default; task-scoped write is exceptional and isolated |
-| Codex CLI / GitHub Codex | Read-only exact-SHA adversarial/certification default; task-scoped write is exceptional and isolated |
-| GitHub Copilot | Limited auxiliary PR/code-review only; never architecture/control-plane authority, sole certification evidence, or merge authority |
+| ChatGPT + GitHub | Control plane; architecture/technical authority; sequencing; PR/merge; certification/progress; may authorize exceptional isolated writer elevation |
+| Cursor CLI | **Default** bounded implementation writer; one writer per checkout/worktree; cannot self-certify; no `writerElevation` required |
+| Cursor Cloud | **Never-writer** under current policy; elevation cannot authorize it |
+| Antigravity CLI | Read-only/adversarial default; generated adapters stay read-only; exceptional task-scoped write only with explicit `writerElevation` on an isolated workspace |
+| Codex CLI / GitHub Codex | Read-only exact-SHA adversarial/certification default; generated adapters stay `sandbox_mode=read-only`; exceptional task-scoped write only with explicit `writerElevation` on an isolated workspace |
+| GitHub Copilot | Never-writer; limited auxiliary PR/code-review only; elevation cannot authorize writer/verifier/gatekeeper/merge/sole certification |
+
+Exceptional elevation object (task manifest only; outside static projections):
+
+```json
+"writerElevation": {
+  "authorizedBy": "chatgpt-github|founder",
+  "reason": "non-empty justification",
+  "isolatedWorkspace": true
+}
+```
+
+Rules: `writerTool=cursor-cli` forbids elevation; `antigravity`/`codex` require it; never-writers remain rejected even with elevation; `verifierTool` and `gatekeeper` must differ from `writerTool`.
 
 ## CURSOR CLOUD
 

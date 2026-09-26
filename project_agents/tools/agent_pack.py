@@ -727,12 +727,35 @@ def validate_agent_pack(repo: Path) -> list[str]:
     # Tool authority source must exist and be coherent.
     try:
         authority = load_tool_authority(pa / "tool_authority.json")
-        if authority["tools"].get("cursor-cloud", {}).get("status") != "prohibited":
+        legal = authority["legalCombinations"]
+        tools = authority["tools"]
+        if tools.get("cursor-cloud", {}).get("status") != "prohibited":
             errors.append("tool_authority.json must mark cursor-cloud as prohibited")
-        if "cursor-cli" not in set(authority["legalCombinations"]["writerTools"]):
+        if "cursor-cli" not in set(legal["defaultWriterTools"]):
+            errors.append("tool_authority.json must authorize cursor-cli as default writer")
+        if "cursor-cli" not in set(legal["writerTools"]):
             errors.append("tool_authority.json must authorize cursor-cli as writer")
-        if "cursor-cloud" in set(authority["legalCombinations"]["writerTools"]):
-            errors.append("tool_authority.json must not list cursor-cloud as an authorized writer")
+        if "cursor-cloud" in set(legal["writerTools"]) or "github-copilot" in set(legal["writerTools"]):
+            errors.append(
+                "tool_authority.json must not list cursor-cloud or github-copilot as authorized writers"
+            )
+        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder"):
+            if never not in set(legal["neverWriterTools"]):
+                errors.append(f"tool_authority.json neverWriterTools must include {never}")
+        for exceptional in ("antigravity", "codex"):
+            if exceptional not in set(legal["exceptionalWriterTools"]):
+                errors.append(
+                    f"tool_authority.json exceptionalWriterTools must include {exceptional}"
+                )
+            if tools.get(exceptional, {}).get("mayWriteProductCode") is not False:
+                errors.append(
+                    f"{exceptional} must keep mayWriteProductCode=false; "
+                    "write is task-scoped via writerElevation only"
+                )
+        if tools.get("antigravity", {}).get("defaultGeneratedCapability") != "read-only":
+            errors.append("antigravity defaultGeneratedCapability must remain read-only")
+        if tools.get("codex", {}).get("defaultSandboxMode") != "read-only":
+            errors.append("codex defaultSandboxMode must remain read-only")
     except (OSError, json.JSONDecodeError, ControlPlaneError) as exc:
         errors.append(f"tool authority validation failed: {exc}")
 
