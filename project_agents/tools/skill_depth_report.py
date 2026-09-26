@@ -184,6 +184,22 @@ B3B_FOCUS = frozenset(
     }
 )
 
+# Phase B3C monitoring/protocol/integration batch (Issue #93 controlled Skill-depth).
+B3C_FOCUS = frozenset(
+    {
+        "api_event_contracts",
+        "connector_framework",
+        "device_control_protocols",
+        "flow_telemetry",
+        "snmp_mib",
+        "syslog_traps",
+        "topology_routing",
+        "monitoring_work_units",
+        "incident_flight_recorder",
+        "remediation_safety",
+    }
+)
+
 
 def priority(name: str, missing: list[str], lines: int) -> str:
     """Deterministic severity. Critical Skills never hide as P2 when incomplete."""
@@ -312,6 +328,9 @@ def build_report(skills_root: Path = SKILLS_ROOT) -> tuple[str, dict[str, int]]:
         "",
         "## Issue #93 Phase B3B Skill-depth focus",
         *_focus_status(rows, B3B_FOCUS),
+        "",
+        "## Issue #93 Phase B3C Skill-depth focus",
+        *_focus_status(rows, B3C_FOCUS),
         "",
         "## Phase B3 recommendation",
         "Continue remaining non-critical P2 Skills in controlled domain batches—"
