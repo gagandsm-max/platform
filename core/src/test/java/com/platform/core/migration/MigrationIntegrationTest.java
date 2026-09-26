@@ -9,6 +9,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,7 +66,7 @@ class MigrationIntegrationTest {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, checksum FROM platform.schema_history ORDER BY version"
         );
-        assertEquals(12, history.size());
+        assertEquals(13, history.size());
         assertEquals("V001", history.get(0).get("version"));
         assertEquals("V002", history.get(1).get("version"));
         assertEquals("V003", history.get(2).get("version"));
@@ -78,11 +79,12 @@ class MigrationIntegrationTest {
         assertEquals("V010", history.get(9).get("version"));
         assertEquals("V011", history.get(10).get("version"));
         assertEquals("V012", history.get(11).get("version"));
+        assertEquals("V013", history.get(12).get("version"));
         String checksum = String.valueOf(history.get(0).get("checksum"));
         assertTrue(checksum.matches("[a-f0-9]{64}"));
 
         pg.migrate();
-        assertEquals(12, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(13, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
 
         jdbc.update("UPDATE platform.schema_history SET checksum='deadbeef' WHERE version='V001'");
         MigrationException ex = assertThrows(MigrationException.class, pg::migrate);
@@ -192,11 +194,12 @@ class MigrationIntegrationTest {
 
         // 10. Assert restart is idempotent and does not alter data
         pg.migrate();
-        assertEquals(12, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(13, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
 
-        // 11. V001→V012 upgrade must materialize Sensor/Agent Control/Capability Pack,
-        // replay-reservation, publisher-lease, entity management-endpoint and enrollment-authority schema
+        // 11. V001→V013 upgrade must materialize Sensor/Agent Control/Capability Pack,
+        // replay-reservation, publisher-lease, entity management-endpoint, enrollment-authority
+        // and BUILD-004 control-generation safety schema
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V004'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
@@ -215,6 +218,8 @@ class MigrationIntegrationTest {
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V011'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V012'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V013'", Integer.class));
         Integer sensorControlTables = jdbc.queryForObject(
                 """
                 SELECT COUNT(*) FROM information_schema.tables
@@ -262,6 +267,156 @@ class MigrationIntegrationTest {
                 Integer.class
         );
         assertEquals(1, enrollmentAuthorityTables);
+    }
+
+    @Test
+    void v013ControlGenerationMaxSafeConstraintsRejectDirectWritesAboveCeiling() {
+        pg.migrate();
+        JdbcTemplate jdbc = pg.jdbc();
+
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V013'", Integer.class));
+        Integer maxSafeConstraints = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM pg_constraint
+                 WHERE conname IN (
+                     'chk_discovery_assignment_version_max_safe',
+                     'chk_agent_sensor_assignment_generation_max_safe',
+                     'chk_tcpa_generation_max_safe',
+                     'chk_scps_desired_generation_max_safe',
+                     'chk_scps_applied_generation_max_safe'
+                 )
+                """, Integer.class);
+        assertEquals(5, maxSafeConstraints);
+
+        UUID tenantId = UUID.fromString("018f0e0a-0000-7000-8000-0000000000c1");
+        jdbc.update("""
+                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                VALUES (?::uuid, 'MaxSafe Tenant', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
+                """, tenantId);
+
+        long overMax = 9007199254740992L;
+
+        UUID requestId = UUID.fromString("018f0e0a-0000-7000-8000-0000000000d1");
+        assertThrows(Exception.class, () -> jdbc.update("""
+                INSERT INTO platform.discovery_request (
+                    request_id, tenant_id, name, status, correlation_id, idempotency_key,
+                    assigned_sensor_id, assignment_version, requested_methods, snmp_port,
+                    timeout_ms, max_retries, created_by, created_at)
+                VALUES (?::uuid, ?::uuid, 'x', 'PENDING', 'c', 'i', NULL, ?,
+                        '["ICMP"]'::jsonb, 161, 2000, 1, 't', NOW())
+                """, requestId, tenantId, overMax));
+
+        jdbc.update("""
+                INSERT INTO platform.agent (agent_id, tenant_id, site_id, status, created_at, updated_at)
+                VALUES ('agent-max', ?::uuid, NULL, 'ACTIVE', NOW(), NOW())
+                """, tenantId);
+        jdbc.update("""
+                INSERT INTO platform.sensor (
+                    sensor_id, tenant_id, site_id, role, status, allow_all_tenant_entities,
+                    created_at, updated_at)
+                VALUES ('sensor-max', ?::uuid, NULL, 'INFRASTRUCTURE', 'ACTIVE', FALSE, NOW(), NOW())
+                """, tenantId);
+        assertThrows(Exception.class, () -> jdbc.update("""
+                INSERT INTO platform.agent_sensor_assignment (
+                    assignment_id, tenant_id, agent_id, sensor_id, generation, status,
+                    created_at, updated_at, revoked_at)
+                VALUES (?::uuid, ?::uuid, 'agent-max', 'sensor-max', ?, 'ACTIVE',
+                        NOW(), NOW(), NULL)
+                """, UUID.fromString("018f0e0a-0000-7000-8000-0000000000a1"), tenantId, overMax));
+
+        String sha = "a".repeat(64);
+        jdbc.update("""
+                INSERT INTO platform.tenant_capability_pack (
+                    tenant_id, pack_id, pack_version, schema_version, pack_class, name,
+                    publisher_type, publisher_name, certification, manifest_sha256, manifest_bytes,
+                    created_by, created_at)
+                VALUES (?::uuid, 'pack.max', '1.0.0', '1.0.0', 'DEVICE_NETWORK', 'Max Pack',
+                        'PLATFORM', 'Platform', 'NONE', ?, E'\\\\x7b7d', 't', NOW())
+                """, tenantId, sha);
+        assertThrows(Exception.class, () -> jdbc.update("""
+                INSERT INTO platform.tenant_capability_pack_activation (
+                    activation_id, tenant_id, pack_id, pack_version, generation, status,
+                    activated_by, activated_at, revoked_by, revoked_at, correlation_id)
+                VALUES (?::uuid, ?::uuid, 'pack.max', '1.0.0', ?, 'ACTIVE',
+                        't', NOW(), NULL, NULL, NULL)
+                """, UUID.fromString("018f0e0a-0000-7000-8000-0000000000b1"), tenantId, overMax));
+
+        assertThrows(Exception.class, () -> jdbc.update("""
+                INSERT INTO platform.sensor_capability_pack_state (
+                    tenant_id, sensor_id, desired_generation, desired_checksum,
+                    applied_generation, applied_checksum, applied_at, updated_by, updated_at)
+                VALUES (?::uuid, 'sensor-max', ?, NULL, 0, NULL, NULL, 't', NOW())
+                """, tenantId, overMax));
+
+        jdbc.update("""
+                INSERT INTO platform.sensor_capability_pack_state (
+                    tenant_id, sensor_id, desired_generation, desired_checksum,
+                    applied_generation, applied_checksum, applied_at, updated_by, updated_at)
+                VALUES (?::uuid, 'sensor-max', 1, NULL, 0, NULL, NULL, 't', NOW())
+                """, tenantId);
+        assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_capability_pack_state
+                   SET applied_generation = ?, desired_generation = ?
+                 WHERE tenant_id = ?::uuid AND sensor_id = 'sensor-max'
+                """, overMax, overMax, tenantId));
+    }
+
+    @Test
+    void v012DirtyControlRowCausesV013ValidationFailureThenSucceedsAfterRepair() {
+        JdbcTemplate jdbc = pg.jdbc();
+
+        pg.runner(catalogThroughVersion("V012")).applyPendingMigrations();
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V012'", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V013'", Integer.class));
+        assertEquals(0, countBuild004MaxSafeConstraints(jdbc));
+
+        UUID tenantId = UUID.fromString("018f0e0a-0000-7000-8000-0000000000d2");
+        UUID requestId = UUID.fromString("018f0e0a-0000-7000-8000-0000000000d3");
+        long dirty = 9007199254740992L;
+        jdbc.update("""
+                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                VALUES (?::uuid, 'Dirty MaxSafe Tenant', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
+                """, tenantId);
+        jdbc.update("""
+                INSERT INTO platform.discovery_request (
+                    request_id, tenant_id, name, status, correlation_id, idempotency_key,
+                    assigned_sensor_id, assignment_version, requested_methods, snmp_port,
+                    timeout_ms, max_retries, created_by, created_at)
+                VALUES (?::uuid, ?::uuid, 'dirty-fence', 'PENDING', 'corr-dirty', 'idem-dirty', NULL, ?,
+                        '["ICMP"]'::jsonb, 161, 2000, 1, 'tester', NOW())
+                """, requestId, tenantId, dirty);
+        assertEquals(dirty, jdbc.queryForObject("""
+                SELECT assignment_version FROM platform.discovery_request WHERE request_id = ?::uuid
+                """, Long.class, requestId));
+
+        MigrationException failed = assertThrows(MigrationException.class, pg::migrate);
+        assertEquals("MIGRATION_SQL_FAILED", failed.getCode());
+
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V013'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V012'", Integer.class));
+        assertEquals(dirty, jdbc.queryForObject("""
+                SELECT assignment_version FROM platform.discovery_request WHERE request_id = ?::uuid
+                """, Long.class, requestId));
+        assertEquals(0, countBuild004MaxSafeConstraints(jdbc),
+                "Failed V013 must roll back partially added MAX_SAFE constraints");
+
+        jdbc.update("""
+                UPDATE platform.discovery_request
+                   SET assignment_version = 0
+                 WHERE request_id = ?::uuid
+                """, requestId);
+
+        pg.migrate();
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V013'", Integer.class));
+        assertEquals(5, countBuild004MaxSafeConstraints(jdbc));
+        assertEquals(0L, jdbc.queryForObject("""
+                SELECT assignment_version FROM platform.discovery_request WHERE request_id = ?::uuid
+                """, Long.class, requestId));
     }
 
     @Test
@@ -340,6 +495,8 @@ class MigrationIntegrationTest {
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V011'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V012'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V013'", Integer.class));
         assertEquals("uuid", jdbc.queryForObject("""
                 SELECT data_type FROM information_schema.columns
                  WHERE table_schema='platform' AND table_name='tenant' AND column_name='tenant_id'
@@ -613,6 +770,37 @@ class MigrationIntegrationTest {
                         '018f0e0a-0000-7000-8000-000000000012'::uuid,
                         '018f0e0a-0000-7000-8000-000000000041'::uuid,NOW())
                 """));
+    }
+
+    private static MigrationCatalog catalogThroughVersion(String maxInclusiveVersion) {
+        MigrationCatalog real = new MigrationCatalog();
+        return new MigrationCatalog() {
+            @Override
+            public List<MigrationDefinition> load() {
+                return real.load().stream()
+                        .filter(definition -> definition.version().compareTo(maxInclusiveVersion) <= 0)
+                        .toList();
+            }
+
+            @Override
+            public String loadSql(MigrationDefinition definition) {
+                return real.loadSql(definition);
+            }
+        };
+    }
+
+    private static int countBuild004MaxSafeConstraints(JdbcTemplate jdbc) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM pg_constraint
+                 WHERE conname IN (
+                     'chk_discovery_assignment_version_max_safe',
+                     'chk_agent_sensor_assignment_generation_max_safe',
+                     'chk_tcpa_generation_max_safe',
+                     'chk_scps_desired_generation_max_safe',
+                     'chk_scps_applied_generation_max_safe'
+                 )
+                """, Integer.class);
+        return count == null ? 0 : count;
     }
 
     private static MigrationCatalog catalog(String version, String description, String sql) {

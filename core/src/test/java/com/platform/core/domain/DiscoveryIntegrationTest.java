@@ -1,6 +1,7 @@
 package com.platform.core.domain;
 
 import com.platform.core.api.PageResult;
+import com.platform.core.control.ControlGenerationLimits;
 import com.platform.core.domain.DomainException;
 import com.platform.core.domain.discovery.CandidateReviewStatus;
 import com.platform.core.domain.discovery.DiscoveryCandidate;
@@ -263,5 +264,44 @@ class DiscoveryIntegrationTest {
         Integer entityCountAfter = pg.jdbc().queryForObject(
                 "SELECT count(*) FROM platform.entity WHERE tenant_id = ?", Integer.class, tenant.tenantId());
         assertEquals(entityCountBefore, entityCountAfter, "discovery completion must not auto-provision platform.entity");
+    }
+
+    @Test
+    void controlGenerationBoundary_assignmentVersionExhaustionPreservesAssignment() {
+        Tenant tenant = tenantService.create("Gen Fence Discovery", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        DiscoveryRequest created = discoveryService.createDiscovery(
+                tenant.tenantId(), "Fence Scan", List.of("10.1.1.1"), List.of(DiscoveryMethod.ICMP),
+                null, null, null, 161, 2000, 2, "fence-1", "corr-fence", "operator");
+        assertEquals(DiscoveryStatus.PENDING, created.status());
+
+        long maxSafe = ControlGenerationLimits.MAX_SAFE_CONTROL_GENERATION;
+        pg.jdbc().update("""
+                UPDATE platform.discovery_request
+                   SET assignment_version = ?
+                 WHERE request_id = ?::uuid
+                """, maxSafe - 1L, created.requestId());
+
+        DiscoveryRequest atMax = discoveryService.assignSensorFromControlPlane(
+                tenant.tenantId(), created.requestId(), "sensor-fence-01");
+        assertEquals(DiscoveryStatus.ASSIGNED, atMax.status());
+        assertEquals("sensor-fence-01", atMax.assignedSensorId());
+        Long version = discoveryRepo.findAssignmentVersion(tenant.tenantId(), created.requestId()).orElseThrow();
+        assertEquals(maxSafe, version);
+
+        DomainException exhausted = assertThrows(DomainException.class,
+                () -> discoveryService.assignSensorFromControlPlane(
+                        tenant.tenantId(), created.requestId(), "sensor-fence-02"));
+        assertEquals(ControlGenerationLimits.ERR_CONTROL_GENERATION_EXHAUSTED, exhausted.getCode());
+
+        DiscoveryRequest preserved = discoveryService.getRequest(tenant.tenantId(), created.requestId());
+        assertEquals(DiscoveryStatus.ASSIGNED, preserved.status());
+        assertEquals("sensor-fence-01", preserved.assignedSensorId());
+        assertEquals(maxSafe,
+                discoveryRepo.findAssignmentVersion(tenant.tenantId(), created.requestId()).orElseThrow());
+
+        DomainException overMax = assertThrows(DomainException.class,
+                () -> discoveryService.ingestResultsFromSensor(
+                        "sensor-fence-01", created.requestId(), maxSafe + 1L, List.of(), "COMPLETED", null));
+        assertEquals("VALIDATION_FAILED", overMax.getCode());
     }
 }

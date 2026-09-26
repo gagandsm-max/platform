@@ -1,5 +1,6 @@
 package com.platform.core.agentcontrol;
 
+import com.platform.core.control.ControlGenerationLimits;
 import com.platform.core.id.UuidV7;
 import com.platform.core.security.audit.AuditActions;
 import com.platform.core.security.audit.AuditCategory;
@@ -259,12 +260,22 @@ public class AgentControlService {
                     repository.findActiveAssignmentForAgentForUpdate(tenantId, agent.agentId());
             long nextGeneration;
             if (prior.isPresent()) {
+                // Fail closed before revoke so an exhausted ACTIVE assignment remains ACTIVE.
+                nextGeneration = ControlGenerationLimits.nextOrThrow(
+                        prior.get().generation(),
+                        new AgentControlException(
+                                AgentControlException.ERR_CONTROL_GENERATION_EXHAUSTED,
+                                ControlGenerationLimits.EXHAUSTED_MESSAGE));
                 repository.revokeAssignmentById(prior.get().assignmentId(), now, now);
-                nextGeneration = prior.get().generation() + 1L;
             } else {
                 // No ACTIVE row: serialize on agent principal, then advance past any historical fence.
                 repository.lockPrincipalForUpdate(tenantId, agent.agentId());
-                nextGeneration = repository.maxGenerationForAgent(tenantId, agent.agentId()) + 1L;
+                long historicalMax = repository.maxGenerationForAgent(tenantId, agent.agentId());
+                nextGeneration = ControlGenerationLimits.nextOrThrow(
+                        historicalMax,
+                        new AgentControlException(
+                                AgentControlException.ERR_CONTROL_GENERATION_EXHAUSTED,
+                                ControlGenerationLimits.EXHAUSTED_MESSAGE));
             }
 
             AgentSensorAssignment created = new AgentSensorAssignment(
@@ -316,11 +327,29 @@ public class AgentControlService {
                 throw new AgentControlException(AgentControlException.ERR_AGENT_STATE_INVALID,
                         "expectedGeneration must be >= 1");
             }
+            if (!ControlGenerationLimits.isPositiveJsonSafe(expectedGeneration)) {
+                throw new AgentControlException(AgentControlException.ERR_AGENT_STATE_INVALID,
+                        "expectedGeneration exceeds MAX_SAFE_CONTROL_GENERATION");
+            }
             AgentPrincipal agent = requireActiveAgent(tenantId, agentId);
             SensorPrincipal sensor = requireEligibleSensor(tenantId, sensorId);
             assertSiteCompatible(agent, sensor);
 
             Instant now = Instant.now();
+            // Authoritative ACTIVE generation must match CAS claim before exhaustion is evaluated.
+            Optional<AgentSensorAssignment> active =
+                    repository.findActiveAssignmentForAgentForUpdate(tenantId, agent.agentId());
+            if (active.isEmpty() || active.get().generation() != expectedGeneration) {
+                throw new AgentControlException(
+                        AgentControlException.ERR_AGENT_ASSIGNMENT_CONFLICT,
+                        "Active assignment generation conflict");
+            }
+            long authoritativeGeneration = active.get().generation();
+            long nextGeneration = ControlGenerationLimits.nextOrThrow(
+                    authoritativeGeneration,
+                    new AgentControlException(
+                            AgentControlException.ERR_CONTROL_GENERATION_EXHAUSTED,
+                            ControlGenerationLimits.EXHAUSTED_MESSAGE));
             int revoked = repository.revokeActiveAssignmentCas(
                     tenantId, agent.agentId(), expectedGeneration, now, now);
             if (revoked != 1) {
@@ -329,7 +358,6 @@ public class AgentControlService {
                         "Active assignment generation conflict");
             }
 
-            long nextGeneration = expectedGeneration + 1L;
             AgentSensorAssignment created = new AgentSensorAssignment(
                     UuidV7.generate(),
                     tenantId,

@@ -1,6 +1,7 @@
 package com.platform.core.domain.capabilitypack;
 
 import com.platform.core.domain.DomainException;
+import com.platform.core.control.ControlGenerationLimits;
 import com.platform.core.domain.tenant.Tenant;
 import com.platform.core.domain.tenant.TenantMode;
 import com.platform.core.domain.tenant.TenantService;
@@ -289,6 +290,50 @@ class CapabilityPackCatalogIntegrationTest {
         tx.executeWithoutResult(status -> catalog.activate(tenantB.tenantId(), BASE, "1.0.0", 0L));
         assertEquals(1L, catalog.requireActive(tenantA.tenantId(), BASE).generation());
         assertEquals(1L, catalog.requireActive(tenantB.tenantId(), BASE).generation());
+    }
+
+    @Test
+    void controlGenerationBoundary_activationExhaustionPreservesActiveVersion() {
+        byte[] v1 = CapabilityPackTestSupport.minimalManifestBytes(BASE, "1.0.0", "BaseProduct");
+        byte[] v2 = CapabilityPackTestSupport.minimalManifestBytes(BASE, "2.0.0", "BaseProduct");
+        catalog.register(tenantA.tenantId(), BASE, "1.0.0", v1);
+        catalog.register(tenantA.tenantId(), BASE, "2.0.0", v2);
+
+        CapabilityPackActivation first = tx.execute(status ->
+                catalog.activate(tenantA.tenantId(), BASE, "1.0.0", 0L));
+        assertEquals(1L, first.generation());
+
+        long maxSafe = ControlGenerationLimits.MAX_SAFE_CONTROL_GENERATION;
+        jdbc.update("""
+                UPDATE platform.tenant_capability_pack_activation
+                   SET generation = ?
+                 WHERE tenant_id = ? AND pack_id = ? AND status = 'ACTIVE'
+                """, maxSafe - 1L, tenantA.tenantId(), BASE);
+
+        CapabilityPackActivation atMax = tx.execute(status ->
+                catalog.activate(tenantA.tenantId(), BASE, "2.0.0", maxSafe - 1L));
+        assertEquals(maxSafe, atMax.generation());
+        assertEquals("2.0.0", atMax.packVersion());
+
+        // Idempotent same-version at MAX_SAFE must succeed without increment.
+        CapabilityPackActivation idempotent = tx.execute(status ->
+                catalog.activate(tenantA.tenantId(), BASE, "2.0.0", maxSafe));
+        assertEquals(maxSafe, idempotent.generation());
+        assertEquals("2.0.0", idempotent.packVersion());
+
+        DomainException exhausted = assertThrows(DomainException.class, () ->
+                tx.executeWithoutResult(status -> catalog.activate(tenantA.tenantId(), BASE, "1.0.0", maxSafe)));
+        assertEquals(ControlGenerationLimits.ERR_CONTROL_GENERATION_EXHAUSTED, exhausted.getCode());
+
+        CapabilityPackActivation still = catalog.requireActive(tenantA.tenantId(), BASE);
+        assertEquals(maxSafe, still.generation());
+        assertEquals("2.0.0", still.packVersion());
+        assertEquals(CapabilityPackActivation.STATUS_ACTIVE, still.status());
+
+        DomainException overMax = assertThrows(DomainException.class, () ->
+                tx.executeWithoutResult(status ->
+                        catalog.activate(tenantA.tenantId(), BASE, "1.0.0", maxSafe + 1L)));
+        assertEquals("VALIDATION_FAILED", overMax.getCode());
     }
 
     @Test

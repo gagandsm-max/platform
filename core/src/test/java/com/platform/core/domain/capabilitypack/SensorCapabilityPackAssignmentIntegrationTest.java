@@ -1,5 +1,6 @@
 package com.platform.core.domain.capabilitypack;
 
+import com.platform.core.control.ControlGenerationLimits;
 import com.platform.core.domain.DomainException;
 import com.platform.core.domain.tenant.Tenant;
 import com.platform.core.domain.tenant.TenantMode;
@@ -285,6 +286,65 @@ class SensorCapabilityPackAssignmentIntegrationTest {
                    applied_generation, applied_checksum, applied_at, updated_by, updated_at)
                 VALUES (?, 'sensor-b', 1, NULL, 0, NULL, NULL, 'x', NOW())
                 """, tenantA.tenantId()));
+    }
+
+    @Test
+    void controlGenerationBoundary_desiredExhaustionPreservesAssignmentSet() {
+        String packB = "fixture.fictional.assign.b";
+        sensors.enrollSensor("sensor-gen", tenantA.tenantId(), null, SensorRole.NETWORK, true);
+        catalog.register(tenantA.tenantId(), PACK, "1.0.0",
+                CapabilityPackTestSupport.minimalManifestBytes(PACK, "1.0.0", "GenA"));
+        catalog.register(tenantA.tenantId(), packB, "1.0.0",
+                CapabilityPackTestSupport.minimalManifestBytes(packB, "1.0.0", "GenB"));
+        catalog.activate(tenantA.tenantId(), PACK, "1.0.0", 0L);
+        catalog.activate(tenantA.tenantId(), packB, "1.0.0", 0L);
+
+        var first = assignments.assign(tenantA.tenantId(), "sensor-gen", PACK, "1.0.0", 0L);
+        assertEquals(1L, first.desiredGeneration());
+
+        long maxSafe = ControlGenerationLimits.MAX_SAFE_CONTROL_GENERATION;
+        jdbc.update("""
+                UPDATE platform.sensor_capability_pack_state
+                   SET desired_generation = ?
+                 WHERE tenant_id = ? AND sensor_id = 'sensor-gen'
+                """, maxSafe - 1L, tenantA.tenantId());
+
+        var atMax = assignments.assign(tenantA.tenantId(), "sensor-gen", packB, "1.0.0", maxSafe - 1L);
+        assertEquals(maxSafe, atMax.desiredGeneration());
+        assertEquals(2, atMax.assignments().size());
+
+        // Idempotent same assignment at MAX_SAFE: no increment required.
+        var idempotent = assignments.assign(tenantA.tenantId(), "sensor-gen", PACK, "1.0.0", maxSafe);
+        assertEquals(maxSafe, idempotent.desiredGeneration());
+        assertEquals(2, idempotent.assignments().size());
+
+        // Unassign of unknown pack is no-op even at MAX_SAFE.
+        var noopUnassign = assignments.unassign(tenantA.tenantId(), "sensor-gen", "missing.pack", maxSafe);
+        assertEquals(maxSafe, noopUnassign.desiredGeneration());
+        assertEquals(2, noopUnassign.assignments().size());
+
+        DomainException exhausted = assertThrows(DomainException.class,
+                () -> assignments.unassign(tenantA.tenantId(), "sensor-gen", PACK, maxSafe));
+        assertEquals(ControlGenerationLimits.ERR_CONTROL_GENERATION_EXHAUSTED, exhausted.getCode());
+
+        var preserved = assignments.getAssignments(tenantA.tenantId(), "sensor-gen");
+        assertEquals(maxSafe, preserved.desiredGeneration());
+        assertEquals(2, preserved.assignments().size());
+
+        DomainException overMax = assertThrows(DomainException.class,
+                () -> assignments.assign(tenantA.tenantId(), "sensor-gen", PACK, "1.0.0", maxSafe + 1L));
+        assertEquals("VALIDATION_FAILED", overMax.getCode());
+
+        DomainException ackOverMax = assertThrows(DomainException.class,
+                () -> assignments.ackAppliedState(
+                        tenantA.tenantId(), "sensor-gen", maxSafe + 1L, preserved.desiredChecksum()));
+        assertEquals("VALIDATION_FAILED", ackOverMax.getCode());
+
+        // MAX_SAFE itself remains a valid applied generation input (may still fail stale/checksum).
+        DomainException ackStale = assertThrows(DomainException.class,
+                () -> assignments.ackAppliedState(
+                        tenantA.tenantId(), "sensor-gen", maxSafe, "0".repeat(64)));
+        assertEquals(SensorCapabilityPackAssignmentService.ERR_PACK_CHECKSUM_MISMATCH, ackStale.getCode());
     }
 
     private void authenticateAs(String subjectId) {

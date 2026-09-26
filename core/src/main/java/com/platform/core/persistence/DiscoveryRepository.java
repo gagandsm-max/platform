@@ -161,6 +161,20 @@ public class DiscoveryRepository {
                 Map.of("tenantId", tenantId, "requestId", requestId), REQUEST_MAPPER).stream().findFirst();
     }
 
+    /**
+     * Read {@code assignment_version} for a row already locked in the current transaction.
+     * Returns empty when the request does not exist.
+     */
+    public Optional<Long> findAssignmentVersion(UUID tenantId, UUID requestId) {
+        List<Long> rows = jdbc.query("""
+                SELECT assignment_version FROM platform.discovery_request
+                 WHERE tenant_id=:tenantId AND request_id=:requestId
+                """,
+                Map.of("tenantId", tenantId, "requestId", requestId),
+                (rs, rowNum) -> rs.getLong("assignment_version"));
+        return rows.stream().findFirst();
+    }
+
     public Optional<AssignedRequest> findAssignedForUpdate(String sensorId, UUID requestId) {
         return jdbc.query("""
                 SELECT * FROM platform.discovery_request

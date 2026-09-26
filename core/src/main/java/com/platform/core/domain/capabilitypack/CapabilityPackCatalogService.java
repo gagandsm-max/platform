@@ -1,6 +1,7 @@
 package com.platform.core.domain.capabilitypack;
 
 import com.platform.core.api.PageResult;
+import com.platform.core.control.ControlGenerationLimits;
 import com.platform.core.domain.DomainException;
 import com.platform.core.id.UuidV7;
 import com.platform.core.logging.CorrelationIdFilter;
@@ -150,6 +151,10 @@ public class CapabilityPackCatalogService {
         if (expectedGeneration < 0) {
             throw new DomainException("VALIDATION_FAILED", "expectedGeneration must be >= 0");
         }
+        if (!ControlGenerationLimits.isJsonSafe(expectedGeneration)) {
+            throw new DomainException("VALIDATION_FAILED",
+                    "expectedGeneration exceeds MAX_SAFE_CONTROL_GENERATION");
+        }
 
         StoredCapabilityPack target = repository.findPack(tenantId, packId, packVersion)
                 .orElseThrow(() -> new DomainException(ERR_NOT_FOUND, "Capability pack version not found"));
@@ -175,6 +180,14 @@ public class CapabilityPackCatalogService {
         List<CapabilityPackDescriptor> candidate = buildCandidateSnapshot(tenantId, packId, target);
         validateCandidateSnapshot(candidate, false);
 
+        // Allocate next generation before revoke so exhaustion leaves the current ACTIVE intact.
+        long historicalMax = repository.maxActivationGeneration(tenantId, packId);
+        long nextGeneration = ControlGenerationLimits.nextOrThrow(
+                historicalMax,
+                new DomainException(
+                        ControlGenerationLimits.ERR_CONTROL_GENERATION_EXHAUSTED,
+                        ControlGenerationLimits.EXHAUSTED_MESSAGE));
+
         String actor = PlatformSecurityContext.requirePrincipal().subjectId();
         Instant now = Instant.now();
         if (currentActive.isPresent()) {
@@ -185,7 +198,6 @@ public class CapabilityPackCatalogService {
             }
         }
 
-        long nextGeneration = repository.maxActivationGeneration(tenantId, packId) + 1L;
         CapabilityPackActivation created = new CapabilityPackActivation(
                 UuidV7.generate(),
                 tenantId,
@@ -209,6 +221,10 @@ public class CapabilityPackCatalogService {
         Objects.requireNonNull(packId, "packId");
         if (expectedGeneration < 1) {
             throw new DomainException("VALIDATION_FAILED", "expectedGeneration must be >= 1");
+        }
+        if (!ControlGenerationLimits.isPositiveJsonSafe(expectedGeneration)) {
+            throw new DomainException("VALIDATION_FAILED",
+                    "expectedGeneration exceeds MAX_SAFE_CONTROL_GENERATION");
         }
 
         CapabilityPackActivation current = repository.findActiveActivation(tenantId, packId)

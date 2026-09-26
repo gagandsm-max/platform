@@ -10,3 +10,4 @@ V009__telemetry_pending_replay_reservation.sql|Bounded per-Sensor pending replay
 V010__entity_management_endpoint.sql|Authoritative entity management/poll endpoint binding (host identity, no credentials)
 V011__sensor_enrollment_authority.sql|Sensor enrollment short-lived single-use scoped bootstrap token authority (digest only)
 V012__build003_publisher_lease_and_agent_ingress_reservation.sql|BUILD-003 publisher lease, Agent-ingress reservation/stream, MAX_SAFE transport constraints
+V013__build004_control_generation_safety.sql|BUILD-004 Slice 1 MAX_SAFE upper bounds for discovery/agent/capability-pack control generations
