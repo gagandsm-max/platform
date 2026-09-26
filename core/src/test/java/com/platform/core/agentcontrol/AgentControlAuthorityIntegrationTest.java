@@ -566,6 +566,44 @@ class AgentControlAuthorityIntegrationTest {
     }
 
     @Test
+    void reassignStaleMaxSafeClaimAgainstLowerAuthoritativeGenerationIsConflictNotExhaustion()
+            throws Exception {
+        Tenant tenant = tenantService.create("Stale MaxSafe Claim Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-stale-1", tenant.tenantId(), null, SensorRole.INFRASTRUCTURE, true);
+        sensorControl.enrollSensor("sensor-stale-2", tenant.tenantId(), null, SensorRole.INFRASTRUCTURE, true);
+        agentControl.enrollAgent("agent-stale", tenant.tenantId(), null);
+
+        AgentSensorAssignment active = agentControl.assignToSensor(
+                tenant.tenantId(), "agent-stale", "sensor-stale-1");
+        assertEquals(1L, active.generation());
+        assertEquals("sensor-stale-1", active.sensorId());
+
+        long maxSafe = com.platform.core.control.ControlGenerationLimits.MAX_SAFE_CONTROL_GENERATION;
+        long assignmentCountBefore = pg.jdbc().queryForObject("""
+                SELECT COUNT(*) FROM platform.agent_sensor_assignment
+                 WHERE tenant_id = ? AND agent_id = 'agent-stale'
+                """, Long.class, tenant.tenantId());
+
+        AgentControlException conflict = assertThrows(AgentControlException.class,
+                () -> agentControl.reassignToSensor(
+                        tenant.tenantId(), "agent-stale", "sensor-stale-2", maxSafe));
+        assertEquals(AgentControlException.ERR_AGENT_ASSIGNMENT_CONFLICT, conflict.getCode());
+
+        AgentSensorAssignment preserved = agentRepo.findActiveAssignmentForAgent(tenant.tenantId(), "agent-stale")
+                .orElseThrow();
+        assertEquals(1L, preserved.generation());
+        assertEquals("sensor-stale-1", preserved.sensorId());
+        assertEquals(AgentAssignmentStatus.ACTIVE, preserved.status());
+        assertEquals(active.assignmentId(), preserved.assignmentId());
+
+        long assignmentCountAfter = pg.jdbc().queryForObject("""
+                SELECT COUNT(*) FROM platform.agent_sensor_assignment
+                 WHERE tenant_id = ? AND agent_id = 'agent-stale'
+                """, Long.class, tenant.tenantId());
+        assertEquals(assignmentCountBefore, assignmentCountAfter);
+    }
+
+    @Test
     void springManagedRotationRollbackKeepsOldCredentialActive() throws Exception {
         Tenant tenant = tenantService.create("Tx Rollback Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
         agentControl.enrollAgent("agent-tx", tenant.tenantId(), null);

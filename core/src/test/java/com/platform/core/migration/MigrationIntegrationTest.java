@@ -362,6 +362,64 @@ class MigrationIntegrationTest {
     }
 
     @Test
+    void v012DirtyControlRowCausesV013ValidationFailureThenSucceedsAfterRepair() {
+        JdbcTemplate jdbc = pg.jdbc();
+
+        pg.runner(catalogThroughVersion("V012")).applyPendingMigrations();
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V012'", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V013'", Integer.class));
+        assertEquals(0, countBuild004MaxSafeConstraints(jdbc));
+
+        UUID tenantId = UUID.fromString("018f0e0a-0000-7000-8000-0000000000d2");
+        UUID requestId = UUID.fromString("018f0e0a-0000-7000-8000-0000000000d3");
+        long dirty = 9007199254740992L;
+        jdbc.update("""
+                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                VALUES (?::uuid, 'Dirty MaxSafe Tenant', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
+                """, tenantId);
+        jdbc.update("""
+                INSERT INTO platform.discovery_request (
+                    request_id, tenant_id, name, status, correlation_id, idempotency_key,
+                    assigned_sensor_id, assignment_version, requested_methods, snmp_port,
+                    timeout_ms, max_retries, created_by, created_at)
+                VALUES (?::uuid, ?::uuid, 'dirty-fence', 'PENDING', 'corr-dirty', 'idem-dirty', NULL, ?,
+                        '["ICMP"]'::jsonb, 161, 2000, 1, 'tester', NOW())
+                """, requestId, tenantId, dirty);
+        assertEquals(dirty, jdbc.queryForObject("""
+                SELECT assignment_version FROM platform.discovery_request WHERE request_id = ?::uuid
+                """, Long.class, requestId));
+
+        MigrationException failed = assertThrows(MigrationException.class, pg::migrate);
+        assertEquals("MIGRATION_SQL_FAILED", failed.getCode());
+
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V013'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V012'", Integer.class));
+        assertEquals(dirty, jdbc.queryForObject("""
+                SELECT assignment_version FROM platform.discovery_request WHERE request_id = ?::uuid
+                """, Long.class, requestId));
+        assertEquals(0, countBuild004MaxSafeConstraints(jdbc),
+                "Failed V013 must roll back partially added MAX_SAFE constraints");
+
+        jdbc.update("""
+                UPDATE platform.discovery_request
+                   SET assignment_version = 0
+                 WHERE request_id = ?::uuid
+                """, requestId);
+
+        pg.migrate();
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V013'", Integer.class));
+        assertEquals(5, countBuild004MaxSafeConstraints(jdbc));
+        assertEquals(0L, jdbc.queryForObject("""
+                SELECT assignment_version FROM platform.discovery_request WHERE request_id = ?::uuid
+                """, Long.class, requestId));
+    }
+
+    @Test
     void injectedFailureDuringLegacyTenantUpgradeRollsBackAndReleasesLock() {
         JdbcTemplate jdbc = pg.jdbc();
         jdbc.execute("""
@@ -712,6 +770,37 @@ class MigrationIntegrationTest {
                         '018f0e0a-0000-7000-8000-000000000012'::uuid,
                         '018f0e0a-0000-7000-8000-000000000041'::uuid,NOW())
                 """));
+    }
+
+    private static MigrationCatalog catalogThroughVersion(String maxInclusiveVersion) {
+        MigrationCatalog real = new MigrationCatalog();
+        return new MigrationCatalog() {
+            @Override
+            public List<MigrationDefinition> load() {
+                return real.load().stream()
+                        .filter(definition -> definition.version().compareTo(maxInclusiveVersion) <= 0)
+                        .toList();
+            }
+
+            @Override
+            public String loadSql(MigrationDefinition definition) {
+                return real.loadSql(definition);
+            }
+        };
+    }
+
+    private static int countBuild004MaxSafeConstraints(JdbcTemplate jdbc) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM pg_constraint
+                 WHERE conname IN (
+                     'chk_discovery_assignment_version_max_safe',
+                     'chk_agent_sensor_assignment_generation_max_safe',
+                     'chk_tcpa_generation_max_safe',
+                     'chk_scps_desired_generation_max_safe',
+                     'chk_scps_applied_generation_max_safe'
+                 )
+                """, Integer.class);
+        return count == null ? 0 : count;
     }
 
     private static MigrationCatalog catalog(String version, String description, String sql) {

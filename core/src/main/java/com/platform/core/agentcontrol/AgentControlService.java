@@ -336,9 +336,17 @@ public class AgentControlService {
             assertSiteCompatible(agent, sensor);
 
             Instant now = Instant.now();
-            // Exhaustion before CAS revoke so the ACTIVE row remains authoritative.
+            // Authoritative ACTIVE generation must match CAS claim before exhaustion is evaluated.
+            Optional<AgentSensorAssignment> active =
+                    repository.findActiveAssignmentForAgentForUpdate(tenantId, agent.agentId());
+            if (active.isEmpty() || active.get().generation() != expectedGeneration) {
+                throw new AgentControlException(
+                        AgentControlException.ERR_AGENT_ASSIGNMENT_CONFLICT,
+                        "Active assignment generation conflict");
+            }
+            long authoritativeGeneration = active.get().generation();
             long nextGeneration = ControlGenerationLimits.nextOrThrow(
-                    expectedGeneration,
+                    authoritativeGeneration,
                     new AgentControlException(
                             AgentControlException.ERR_CONTROL_GENERATION_EXHAUSTED,
                             ControlGenerationLimits.EXHAUSTED_MESSAGE));
