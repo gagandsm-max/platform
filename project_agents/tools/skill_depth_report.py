@@ -218,6 +218,20 @@ B3D_FOCUS = frozenset(
     }
 )
 
+# Phase B3E value/UX/RCA/supply-chain batch (Issue #93 controlled Skill-depth).
+B3E_FOCUS = frozenset(
+    {
+        "accessibility_inclusive_design",
+        "customer_value_mttr",
+        "rca_hypothesis_fusion",
+        "sbom_provenance",
+        "temporal_operational_graph",
+        "typescript_react",
+        "ux_operational_design",
+        "web_interface_quality",
+    }
+)
+
 
 def priority(name: str, missing: list[str], lines: int) -> str:
     """Deterministic severity. Critical Skills never hide as P2 when incomplete."""
@@ -353,9 +367,12 @@ def build_report(skills_root: Path = SKILLS_ROOT) -> tuple[str, dict[str, int]]:
         "## Issue #93 Phase B3D Skill-depth focus",
         *_focus_status(rows, B3D_FOCUS),
         "",
+        "## Issue #93 Phase B3E Skill-depth focus",
+        *_focus_status(rows, B3E_FOCUS),
+        "",
         "## Phase B3 recommendation",
-        "Continue remaining non-critical P2 Skills in controlled domain batches—"
-        "author real procedures, not cosmetic headings.",
+        "Visible heuristic P2 backlog may be closed after B3E; B4 strict structural "
+        "scanning across all 60 Skills remains required before governance completion claims.",
         "",
     ]
     return "\n".join(lines_out) + "\n", counts

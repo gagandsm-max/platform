@@ -11,6 +11,21 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPORT_TOOL = REPO_ROOT / "project_agents" / "tools" / "skill_depth_report.py"
 
+EXPLICIT_HEADINGS = (
+    "## Purpose",
+    "## Use when",
+    "## Authoritative inputs",
+    "## Invariants",
+    "## Required procedure",
+    "## Negative / failure cases",
+    "## Security / tenant implications",
+    "## Required evidence",
+    "## Stop conditions",
+    "## Anti-patterns",
+    "## Handoff / output",
+    "## Non-ownership",
+)
+
 
 def _load_depth_report():
     spec = importlib.util.spec_from_file_location("skill_depth_report", REPORT_TOOL)
@@ -25,17 +40,8 @@ class SkillDepthBatchTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.sdr = _load_depth_report()
 
-    def test_report_matches_disk(self) -> None:
-        report, counts = self.sdr.build_report()
-        on_disk = Path(self.sdr.REPORT_PATH).read_text(encoding="utf-8")
-        self.assertEqual(on_disk, report)
-        self.assertEqual(counts["P0"], 0)
-
-    def test_agent_architecture_is_operational_critical(self) -> None:
-        self.assertIn("agent_architecture", self.sdr.OPERATIONAL_CRITICAL_SKILLS)
-
-    def test_b3d_skills_are_depth_complete(self) -> None:
-        for name in sorted(self.sdr.B3D_FOCUS):
+    def _assert_batch_depth_complete(self, focus: frozenset[str]) -> None:
+        for name in sorted(focus):
             path = REPO_ROOT / "project_agents" / "skills" / name / "SKILL.md"
             text = path.read_text(encoding="utf-8")
             present, missing = self.sdr.scan_skill(text)
@@ -44,22 +50,26 @@ class SkillDepthBatchTests(unittest.TestCase):
             self.assertEqual(self.sdr.priority(name, missing, lines), "OK", msg=name)
             for signal in self.sdr.EXECUTABLE_SIGNALS:
                 self.assertIn(signal, present, msg=f"{name}:{signal}")
-            # B4-ready explicit headings (not keyword-only prose).
-            for heading in (
-                "## Purpose",
-                "## Use when",
-                "## Authoritative inputs",
-                "## Invariants",
-                "## Required procedure",
-                "## Negative / failure cases",
-                "## Security / tenant implications",
-                "## Required evidence",
-                "## Stop conditions",
-                "## Anti-patterns",
-                "## Handoff / output",
-                "## Non-ownership",
-            ):
+            for heading in EXPLICIT_HEADINGS:
                 self.assertIn(heading, text, msg=f"{name} lacks explicit {heading}")
+
+    def test_report_matches_disk(self) -> None:
+        report, counts = self.sdr.build_report()
+        on_disk = Path(self.sdr.REPORT_PATH).read_text(encoding="utf-8")
+        self.assertEqual(on_disk, report)
+        self.assertEqual(counts["P0"], 0)
+        self.assertEqual(counts["P1"], 0)
+        self.assertEqual(counts["P2"], 0)
+        self.assertEqual(counts["OK"], 60)
+
+    def test_agent_architecture_is_operational_critical(self) -> None:
+        self.assertIn("agent_architecture", self.sdr.OPERATIONAL_CRITICAL_SKILLS)
+
+    def test_b3d_skills_are_depth_complete(self) -> None:
+        self._assert_batch_depth_complete(self.sdr.B3D_FOCUS)
+
+    def test_b3e_skills_are_depth_complete(self) -> None:
+        self._assert_batch_depth_complete(self.sdr.B3E_FOCUS)
 
     def test_incomplete_agent_architecture_would_not_hide_as_p2(self) -> None:
         # Severity guard: critical Skills with missing executable signals escalate.
