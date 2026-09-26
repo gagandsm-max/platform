@@ -377,7 +377,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
                 SELECT stream_id, acked_through_sequence, last_first_sequence, last_last_sequence,
                        last_checksum, pending_first_sequence, pending_last_sequence,
                        pending_checksum, pending_batch_id,
-                       pending_publisher_owner, pending_publisher_epoch
+                       pending_publisher_owner, pending_publisher_epoch, pending_publisher_lease_until
                   FROM platform.sensor_telemetry_watermark
                  WHERE tenant_id = ? AND sensor_id = ?
                  FOR UPDATE
@@ -393,7 +393,8 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
                         rs.getString("pending_checksum"),
                         rs.getString("pending_batch_id"),
                         (UUID) rs.getObject("pending_publisher_owner"),
-                        rs.getLong("pending_publisher_epoch")
+                        rs.getLong("pending_publisher_epoch"),
+                        rs.getTimestamp("pending_publisher_lease_until")
                 ),
                 tenantId,
                 sensorId
@@ -428,6 +429,9 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
                 || row.publisherEpoch() != publisherEpoch) {
             throw new IllegalStateException("Stale or mismatched telemetry publisher cannot finalize");
         }
+        if (row.leaseUntil() == null) {
+            throw new IllegalStateException("Telemetry publisher lease missing; cannot finalize");
+        }
 
         int updated = jdbcTemplate.update(
                 """
@@ -447,11 +451,17 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
                        pending_publisher_lease_until = NULL,
                        updated_at = CURRENT_TIMESTAMP
                  WHERE tenant_id = ? AND sensor_id = ?
+                   AND pending_publisher_owner = ?
+                   AND pending_publisher_epoch = ?
+                   AND pending_publisher_lease_until IS NOT NULL
+                   AND pending_publisher_lease_until > CURRENT_TIMESTAMP
                 """,
-                lastSeq, firstSeq, lastSeq, checksum, batchId, tenantId, sensorId
+                lastSeq, firstSeq, lastSeq, checksum, batchId,
+                tenantId, sensorId, ownerToken, publisherEpoch
         );
         if (updated != 1) {
-            throw new IllegalStateException("Failed to finalize telemetry replay watermark for Sensor");
+            throw new IllegalStateException(
+                    "Telemetry publisher lease expired or ownership changed before finalize; pending reservation retained");
         }
     }
 
@@ -539,6 +549,7 @@ public class PostgresTelemetryWatermarkStore implements TelemetryWatermarkStore 
             String pendingChecksum,
             String pendingBatchId,
             UUID owner,
-            long publisherEpoch
+            long publisherEpoch,
+            Timestamp leaseUntil
     ) {}
 }

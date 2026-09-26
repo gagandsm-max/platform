@@ -403,7 +403,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                 SELECT stream_id, acked_through_sequence, last_first_sequence, last_last_sequence,
                        last_checksum, pending_first_sequence, pending_last_sequence,
                        pending_checksum, pending_batch_id, pending_correlation_id,
-                       pending_publisher_owner, pending_publisher_epoch
+                       pending_publisher_owner, pending_publisher_epoch, pending_publisher_lease_until
                   FROM platform.sensor_agent_ingress_watermark
                  WHERE tenant_id = ? AND sensor_id = ?
                  FOR UPDATE
@@ -420,7 +420,8 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                         rs.getString("pending_batch_id"),
                         rs.getString("pending_correlation_id"),
                         (UUID) rs.getObject("pending_publisher_owner"),
-                        rs.getLong("pending_publisher_epoch")
+                        rs.getLong("pending_publisher_epoch"),
+                        rs.getTimestamp("pending_publisher_lease_until")
                 ),
                 tenantId,
                 sensorId
@@ -456,6 +457,9 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                 || row.publisherEpoch() != publisherEpoch) {
             throw new IllegalStateException("Stale or mismatched agent-ingress publisher cannot finalize");
         }
+        if (row.leaseUntil() == null) {
+            throw new IllegalStateException("Agent-ingress publisher lease missing; cannot finalize");
+        }
 
         int updated = jdbcTemplate.update(
                 """
@@ -476,11 +480,17 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                        pending_publisher_lease_until = NULL,
                        updated_at = CURRENT_TIMESTAMP
                  WHERE tenant_id = ? AND sensor_id = ?
+                   AND pending_publisher_owner = ?
+                   AND pending_publisher_epoch = ?
+                   AND pending_publisher_lease_until IS NOT NULL
+                   AND pending_publisher_lease_until > CURRENT_TIMESTAMP
                 """,
-                lastSeq, firstSeq, lastSeq, checksum, batchId, tenantId, sensorId
+                lastSeq, firstSeq, lastSeq, checksum, batchId,
+                tenantId, sensorId, ownerToken, publisherEpoch
         );
         if (updated != 1) {
-            throw new IllegalStateException("Failed to finalize agent-ingress replay watermark for Sensor");
+            throw new IllegalStateException(
+                    "Agent-ingress publisher lease expired or ownership changed before finalize; pending reservation retained");
         }
     }
 
@@ -579,6 +589,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
             String pendingBatchId,
             String pendingCorrelationId,
             UUID owner,
-            long publisherEpoch
+            long publisherEpoch,
+            Timestamp leaseUntil
     ) {}
 }

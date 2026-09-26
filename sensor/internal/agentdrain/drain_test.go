@@ -153,11 +153,11 @@ type transientErr struct{}
 func (transientErr) Error() string   { return "temporary core outage" }
 func (transientErr) Transient() bool { return true }
 
-func TestDrainParksTerminalEntityUnresolved(t *testing.T) {
+func TestDrainParksMalformedPayload(t *testing.T) {
 	s, dir := openSpool(t)
 	rec := appendDurable(t, s, 1)
 	tr := &fakeTransport{err: &coreclient.CoreAPIError{
-		Code: "ERR_AGENT_ENTITY_UNRESOLVED", Message: "missing", HTTPStatus: 422,
+		Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400,
 	}}
 	d, err := New(Config{
 		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
@@ -190,7 +190,7 @@ func TestPoisonParkingDirectorySyncFailurePreventsAckAndAllowsRetry(t *testing.T
 	s, dir := openSpool(t)
 	rec := appendDurable(t, s, 1)
 	tr := &fakeTransport{err: &coreclient.CoreAPIError{
-		Code: "ERR_AGENT_ENTITY_UNRESOLVED", Message: "missing", HTTPStatus: 422,
+		Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400,
 	}}
 	var logBuf strings.Builder
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -310,7 +310,7 @@ func TestPoisonParkingDirectorySyncSuccessPermitsSourceAck(t *testing.T) {
 	s, dir := openSpool(t)
 	_ = appendDurable(t, s, 1)
 	tr := &fakeTransport{err: &coreclient.CoreAPIError{
-		Code: "ERR_AGENT_ENTITY_UNRESOLVED", Message: "missing", HTTPStatus: 422,
+		Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400,
 	}}
 	syncCalled := false
 	d, err := New(Config{
@@ -406,26 +406,30 @@ func TestDrainParksRecordTooLarge(t *testing.T) {
 }
 
 func TestIsTerminalCoreError(t *testing.T) {
-	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_AGENT_ENTITY_UNRESOLVED", HTTPStatus: 422}) {
-		t.Fatal("expected terminal")
-	}
-	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_RECORD_TOO_LARGE", HTTPStatus: 413}) {
-		t.Fatal("413 ERR_RECORD_TOO_LARGE must be terminal so drain is not head-of-line blocked")
-	}
-	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_OTHER_CONTRACT", HTTPStatus: 413}) {
-		t.Fatal("non-transient 413 must be terminal")
-	}
 	for _, code := range []string{
-		"ERR_AUTH_IDENTITY_MISMATCH",
-		"ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH",
-		"ERR_AGENT_ACCEPTING_SENSOR_MISMATCH",
-		"ERR_TENANT_SCOPE_MISMATCH",
+		"ERR_MALFORMED_JSON",
+		"ERR_MALFORMED_RECORD",
+		"ERR_MALFORMED_RECORD_PAYLOAD",
+		"ERR_UNSUPPORTED_SCHEMA_VERSION",
+		"ERR_CHECKSUM_MISMATCH",
+		"ERR_AGENT_HOST_ID_REQUIRED",
+		"ERR_RECORD_TOO_LARGE",
+		"ERR_BATCH_TOO_LARGE",
+		"ERR_REQUEST_TOO_LARGE",
 	} {
-		if !isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 403}) {
-			t.Fatalf("expected terminal for %s", code)
+		if !isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 400}) {
+			t.Fatalf("expected poison allowlist terminal for %s", code)
 		}
 	}
 	for _, code := range []string{
+		"ERR_AGENT_ENTITY_UNRESOLVED",
+		"ERR_AGENT_ASSIGNMENT_UNKNOWN",
+		"ERR_AUTH_IDENTITY_MISMATCH",
+		"ERR_AUTH_CLIENT_CERT_REQUIRED",
+		"ERR_SENSOR_AUTHORITY_UNAVAILABLE",
+		"ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH",
+		"ERR_AGENT_ACCEPTING_SENSOR_MISMATCH",
+		"ERR_TENANT_SCOPE_MISMATCH",
 		"ERR_PREVIOUS_BATCH_PENDING",
 		"ERR_BATCH_PUBLICATION_IN_PROGRESS",
 		"ERR_SENSOR_STREAM_CHANGED",
@@ -434,24 +438,24 @@ func TestIsTerminalCoreError(t *testing.T) {
 		"ERR_SEQUENCE_GAP",
 		"ERR_SEQUENCE_OUT_OF_BOUNDS",
 		"ERR_AGENT_STREAM_ID_INVALID",
+		"ERR_OTHER_CONTRACT",
+		"ERR_UNKNOWN_APPLICATION",
 	} {
-		if isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 409}) {
+		if isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 403}) {
 			t.Fatalf("%s must not be poison-terminal", code)
 		}
 	}
-	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_OTHER_CONTRACT", HTTPStatus: 409}) {
-		t.Fatal("non-transient unknown 409 must remain terminal")
+	for _, status := range []int{400, 401, 403, 409, 413, 422} {
+		if isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_UNKNOWN_APP", HTTPStatus: status}) {
+			t.Fatalf("unknown HTTP %d must not be poison-terminal by status alone", status)
+		}
 	}
-	if isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_INTERNAL", HTTPStatus: 500, Message: "x"}) {
-		// 500 is transient via classifyAgentTelemetry; without transient flag still not status-terminal here
-	}
-	err := errors.New("other")
-	if isTerminalCoreError(err) {
+	if isTerminalCoreError(errors.New("other")) {
 		t.Fatal("generic error must not be terminal")
 	}
 }
 
-func TestDrainRetainsSpoolOnBuild003ContinuityErrors(t *testing.T) {
+func TestDrainRetainsSpoolOnAuthorityAndContinuityErrors(t *testing.T) {
 	cases := []struct {
 		name      string
 		code      string
@@ -466,12 +470,25 @@ func TestDrainRetainsSpoolOnBuild003ContinuityErrors(t *testing.T) {
 		{"sequence_gap", "ERR_SEQUENCE_GAP", 400, false},
 		{"sequence_out_of_bounds", "ERR_SEQUENCE_OUT_OF_BOUNDS", 400, false},
 		{"agent_stream_id_invalid", "ERR_AGENT_STREAM_ID_INVALID", 400, false},
+		{"sensor_authority_unavailable", "ERR_SENSOR_AUTHORITY_UNAVAILABLE", 403, false},
+		{"auth_client_cert_required", "ERR_AUTH_CLIENT_CERT_REQUIRED", 401, false},
+		{"auth_identity_mismatch", "ERR_AUTH_IDENTITY_MISMATCH", 403, false},
+		{"agent_assignment_unknown", "ERR_AGENT_ASSIGNMENT_UNKNOWN", 422, false},
+		{"agent_assignment_sensor_mismatch", "ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH", 403, false},
+		{"agent_accepting_sensor_mismatch", "ERR_AGENT_ACCEPTING_SENSOR_MISMATCH", 403, false},
+		{"tenant_scope_mismatch", "ERR_TENANT_SCOPE_MISMATCH", 403, false},
+		{"agent_entity_unresolved", "ERR_AGENT_ENTITY_UNRESOLVED", 422, false},
+		{"unknown_400", "ERR_UNKNOWN_APPLICATION_400", 400, false},
+		{"unknown_403", "ERR_UNKNOWN_APPLICATION_403", 403, false},
+		{"unknown_409", "ERR_UNKNOWN_APPLICATION_409", 409, false},
+		{"unknown_413", "ERR_UNKNOWN_APPLICATION_413", 413, false},
+		{"unknown_422", "ERR_UNKNOWN_APPLICATION_422", 422, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s, dir := openSpool(t)
 			_ = appendDurable(t, s, 1)
-			body := []byte(`{"status":"REJECTED","code":"` + tc.code + `","message":"continuity"}`)
+			body := []byte(`{"status":"REJECTED","code":"` + tc.code + `","message":"retain"}`)
 			tr := &fakeTransport{err: coreclient.ClassifyAgentTelemetryFailure(tc.status, body)}
 			d, err := New(Config{
 				SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,

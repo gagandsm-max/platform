@@ -226,8 +226,10 @@ func ClassifyAgentTelemetryFailure(httpStatus int, body []byte) error {
 	return classifyAgentTelemetryStatus(httpStatus, body)
 }
 
-// IsAgentIngressSpoolRetainingCode reports BUILD-003 transport/replay/lineage/state failures
-// that must retain durable Agent spool data (no poison park / AcknowledgeThrough).
+// IsAgentIngressSpoolRetainingCode reports BUILD-003 transport/replay/lineage/state
+// and authority/assignment failures that must retain durable Agent spool data
+// (no poison park / AcknowledgeThrough). Unknown application 4xx also retain by default
+// via the explicit poison allowlist in agentdrain — this helper documents the known set.
 func IsAgentIngressSpoolRetainingCode(code string) bool {
 	switch strings.TrimSpace(code) {
 	case "ERR_PREVIOUS_BATCH_PENDING",
@@ -238,7 +240,15 @@ func IsAgentIngressSpoolRetainingCode(code string) bool {
 		"ERR_SEQUENCE_REGRESSION",
 		"ERR_SEQUENCE_GAP",
 		"ERR_SEQUENCE_OUT_OF_BOUNDS",
-		"ERR_AGENT_STREAM_ID_INVALID":
+		"ERR_AGENT_STREAM_ID_INVALID",
+		"ERR_SENSOR_AUTHORITY_UNAVAILABLE",
+		"ERR_AUTH_CLIENT_CERT_REQUIRED",
+		"ERR_AUTH_IDENTITY_MISMATCH",
+		"ERR_AGENT_ASSIGNMENT_UNKNOWN",
+		"ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH",
+		"ERR_AGENT_ACCEPTING_SENSOR_MISMATCH",
+		"ERR_TENANT_SCOPE_MISMATCH",
+		"ERR_AGENT_ENTITY_UNRESOLVED":
 		return true
 	default:
 		return false

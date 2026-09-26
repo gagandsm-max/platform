@@ -35,6 +35,9 @@ public class IngestionKafkaConfiguration {
         producerProperties.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         producerProperties.put(ProducerConfig.ACKS_CONFIG, "all");
         producerProperties.put(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, 30_000);
+        // Bound Kafka client blocking (including commitTransaction wait) below the 60s publisher lease.
+        // This is not a hard wall-clock cancel of executeInTransaction; it limits max.block.ms wait.
+        producerProperties.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 20_000);
         DefaultKafkaProducerFactory<String, String> factory = new DefaultKafkaProducerFactory<>(producerProperties);
         if (transactionIdPrefix != null && !transactionIdPrefix.isBlank()) {
             factory.setTransactionIdPrefix(transactionIdPrefix);

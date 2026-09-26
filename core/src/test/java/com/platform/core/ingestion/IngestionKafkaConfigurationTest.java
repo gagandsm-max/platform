@@ -19,6 +19,7 @@ class IngestionKafkaConfigurationTest {
         properties.getProducer().getProperties().put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "false");
         properties.getProducer().getProperties().put(ProducerConfig.ACKS_CONFIG, "1");
         properties.getProducer().getProperties().put(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, "120000");
+        properties.getProducer().getProperties().put(ProducerConfig.MAX_BLOCK_MS_CONFIG, "120000");
 
         IngestionKafkaConfiguration configuration = new IngestionKafkaConfiguration();
         ProducerFactory<String, String> factory = configuration.kafkaProducerFactory(properties);
@@ -29,5 +30,6 @@ class IngestionKafkaConfigurationTest {
         assertEquals(true, effective.get(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG));
         assertEquals("all", effective.get(ProducerConfig.ACKS_CONFIG));
         assertEquals(30_000, effective.get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG));
+        assertEquals(20_000, effective.get(ProducerConfig.MAX_BLOCK_MS_CONFIG));
     }
 }
