@@ -139,7 +139,13 @@ public class ApiExceptionHandler {
                  "CAPABILITY_PACK_SENSOR_ASSIGNMENTS_EXIST",
                  "ERR_SENSOR_PACK_STATE_STALE", "ERR_SENSOR_PACK_CHECKSUM_MISMATCH",
                  "MANAGEMENT_ENDPOINT_PRIMARY_CONFLICT",
-                 "ERR_CONTROL_GENERATION_EXHAUSTED" ->
+                 "ERR_CONTROL_GENERATION_EXHAUSTED",
+                 "SENSOR_CONTROL_GENERATION_CONFLICT",
+                 "ERR_SENSOR_CONTROL_ACK_STALE",
+                 "ERR_SENSOR_CONTROL_ACK_FUTURE",
+                 "ERR_SENSOR_CONTROL_CHECKSUM_MISMATCH",
+                 "ERR_SENSOR_CONTROL_OUTCOME_CONFLICT",
+                 "ERR_SENSOR_CONTROL_SCHEMA_UNSUPPORTED" ->
                     HttpStatus.CONFLICT;
             case "DATABASE_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
             default -> HttpStatus.BAD_REQUEST;

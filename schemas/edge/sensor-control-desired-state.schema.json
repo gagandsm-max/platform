@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/edge/sensor-control-desired-state.schema.json",
+  "title": "Sensor←Core Control Desired-State Response v1",
+  "description": "BUILD-004 Slice 2 machine GET /api/v1/sensor/control/desired-state response. Identity is mTLS-derived; response never carries desired_by, credentials, or secrets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "desiredGeneration",
+    "desiredChecksum",
+    "configuration",
+    "appliedGeneration",
+    "observedGeneration"
+  ],
+  "properties": {
+    "schemaVersion": {"$ref": "common-definitions.schema.json#/$defs/schemaVersionV1"},
+    "desiredGeneration": {"$ref": "common-definitions.schema.json#/$defs/controlCounterPositive"},
+    "desiredChecksum": {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"},
+    "configuration": {"$ref": "#/$defs/desiredConfigurationV1"},
+    "appliedGeneration": {"$ref": "common-definitions.schema.json#/$defs/controlCounter"},
+    "appliedChecksum": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"}
+      ]
+    },
+    "observedGeneration": {"$ref": "common-definitions.schema.json#/$defs/controlCounter"},
+    "observedChecksum": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"}
+      ]
+    },
+    "observedOutcome": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "enum": ["APPLIED", "REJECTED"]}
+      ]
+    },
+    "rejectionCode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    }
+  },
+  "$defs": {
+    "desiredConfigurationV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logLevel", "scheduler", "transport"],
+      "properties": {
+        "logLevel": {"type": "string", "enum": ["DEBUG", "INFO", "WARN", "ERROR"]},
+        "scheduler": {"$ref": "#/$defs/schedulerV1"},
+        "transport": {"$ref": "#/$defs/transportV1"}
+      }
+    },
+    "schedulerV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxWorkers",
+        "maxQueueDepth",
+        "maxTrackedAssignments",
+        "maxTrackedJobs",
+        "maxPayloadBytes",
+        "defaultExecutionTimeoutMs",
+        "shutdownGracePeriodMs",
+        "retryMaxAttempts",
+        "retryInitialBackoffMs",
+        "retryMaxBackoffMs",
+        "retryJitterBasisPoints",
+        "pools"
+      ],
+      "properties": {
+        "maxWorkers": {"type": "integer", "minimum": 1, "maximum": 256},
+        "maxQueueDepth": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "maxTrackedAssignments": {"type": "integer", "minimum": 1, "maximum": 50000},
+        "maxTrackedJobs": {"type": "integer", "minimum": 1, "maximum": 50000},
+        "maxPayloadBytes": {"type": "integer", "minimum": 1, "maximum": 4194304},
+        "defaultExecutionTimeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
+        "shutdownGracePeriodMs": {"type": "integer", "minimum": 1, "maximum": 600000},
+        "retryMaxAttempts": {"type": "integer", "minimum": 1, "maximum": 100},
+        "retryInitialBackoffMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
+        "retryMaxBackoffMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
+        "retryJitterBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000},
+        "pools": {"$ref": "#/$defs/poolsV1"}
+      }
+    },
+    "poolsV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 6,
+      "properties": {
+        "NETWORK_POLL": {"$ref": "#/$defs/poolV1"},
+        "STREAMING": {"$ref": "#/$defs/poolV1"},
+        "INFRA": {"$ref": "#/$defs/poolV1"},
+        "DISCOVERY": {"$ref": "#/$defs/poolV1"},
+        "NCM": {"$ref": "#/$defs/poolV1"},
+        "SYNTHETIC": {"$ref": "#/$defs/poolV1"}
+      }
+    },
+    "poolV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workers", "queueDepth"],
+      "properties": {
+        "workers": {"type": "integer", "minimum": 1, "maximum": 256},
+        "queueDepth": {"type": "integer", "minimum": 1, "maximum": 10000}
+      }
+    },
+    "transportV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestTimeoutMs",
+        "maxRequestBytes",
+        "maxResponseBytes",
+        "uploadBatchRecords",
+        "uploadBatchBytes"
+      ],
+      "properties": {
+        "requestTimeoutMs": {"type": "integer", "minimum": 1, "maximum": 3600000},
+        "maxRequestBytes": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "maxResponseBytes": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "uploadBatchRecords": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "uploadBatchBytes": {"type": "integer", "minimum": 1, "maximum": 16777216}
+      }
+    }
+  }
+}
