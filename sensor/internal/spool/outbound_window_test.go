@@ -88,6 +88,56 @@ func TestOutboundWindowCorruptSidecarFailsClosed(t *testing.T) {
 	}
 }
 
+func TestOutboundWindowUnknownFieldFailsClosed(t *testing.T) {
+	s := openTest(t, 1024)
+	add(t, s, "a")
+	if _, err := s.ReadOrReserveOutboundBatch(1, 1024); err != nil {
+		t.Fatal(err)
+	}
+	raw := fmt.Sprintf(
+		`{"schemaVersion":1,"streamId":%q,"firstSequence":1,"lastSequence":1,"extra":true}`,
+		s.StreamID(),
+	)
+	if err := os.WriteFile(filepath.Join(s.dir, outboundWindowFileName), []byte(raw), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReadOrReserveOutboundBatch(1, 1024); CodeOf(err) != CodeOutboundWindow {
+		t.Fatalf("unknown field must fail closed, got %v", err)
+	}
+}
+
+func TestOutboundWindowTrailingJSONFailsClosed(t *testing.T) {
+	s := openTest(t, 1024)
+	add(t, s, "a")
+	if _, err := s.ReadOrReserveOutboundBatch(1, 1024); err != nil {
+		t.Fatal(err)
+	}
+	base, err := json.Marshal(outboundWindow{
+		SchemaVersion: outboundWindowSchema,
+		StreamID:      s.StreamID(),
+		FirstSequence: 1,
+		LastSequence:  1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(s.dir, outboundWindowFileName)
+	if err := os.WriteFile(path, append(base, []byte(`{"x":1}`)...), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReadOrReserveOutboundBatch(1, 1024); CodeOf(err) != CodeOutboundWindow {
+		t.Fatalf("trailing JSON value must fail closed, got %v", err)
+	}
+	// Trailing whitespace alone remains valid.
+	if err := os.WriteFile(path, append(base, []byte("  \n\t")...), 0640); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ReadOrReserveOutboundBatch(1, 1024)
+	if err != nil || got.FirstSequence != 1 || got.LastSequence != 1 {
+		t.Fatalf("trailing whitespace must remain valid: %#v err=%v", got, err)
+	}
+}
+
 func TestOutboundWindowStreamMismatchFailsClosed(t *testing.T) {
 	s := openTest(t, 1024)
 	add(t, s, "a")

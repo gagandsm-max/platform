@@ -3,7 +3,9 @@ package spool
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,6 +139,12 @@ func (s *DiskSpool) loadOutboundWindowLocked() (outboundWindow, bool, error) {
 	var win outboundWindow
 	if err := dec.Decode(&win); err != nil {
 		return outboundWindow{}, false, newError(CodeOutboundWindow, "outbound window sidecar JSON is corrupt", err)
+	}
+	// Strict sidecar contract: exactly one JSON value. Trailing whitespace is fine;
+	// any trailing token/value fails closed.
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return outboundWindow{}, false, newError(CodeOutboundWindow, "outbound window sidecar has trailing JSON", err)
 	}
 	if err := s.validateOutboundWindowLocked(win); err != nil {
 		return outboundWindow{}, false, err
