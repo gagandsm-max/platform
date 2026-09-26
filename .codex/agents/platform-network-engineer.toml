@@ -1,6 +1,6 @@
 name = "platform-network-engineer"
 description = "Network monitoring and Sensor specialist. Use for SNMP, ICMP, flow, syslog, gNMI, NETCONF, SSH, routing/topology, discovery, Device Pack collection and Sensor worker behavior."
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-network-engineer.md sha256:ed0fe4806dbfab2bcf077d100caebf3267bc5b9427d5477f1bdd2d1a02636369
 

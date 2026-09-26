@@ -1,6 +1,6 @@
 name = "platform-integration-connector-engineer"
 description = "Connector framework and SaaS/ITSM/webhooks/carrier/change telemetry including auth, rate limiting, retry, idempotency, outbound durability and certification."
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-integration-connector-engineer.md sha256:3157decb9af407bb10deb5c0d7350d41e7728acbbbe15dcab529e9a59cf547b0
 

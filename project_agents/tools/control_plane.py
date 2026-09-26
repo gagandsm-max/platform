@@ -21,6 +21,7 @@ TASK_SCHEMA_PATH = AGENTS_ROOT / "schemas" / "task_manifest.schema.json"
 HANDOFF_SCHEMA_PATH = AGENTS_ROOT / "schemas" / "handoff.schema.json"
 MANIFEST_PATH = AGENTS_ROOT / "manifest.json"
 SKILLS_MANIFEST_PATH = AGENTS_ROOT / "skills" / "manifest.json"
+TOOL_AUTHORITY_PATH = AGENTS_ROOT / "tool_authority.json"
 
 SCHEMA_VERSION = "v2"
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -100,6 +101,164 @@ def load_state_machine(path: Path = STATE_MACHINE_PATH) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ControlPlaneError("state machine must be a JSON object")
     return data
+
+
+def load_tool_authority(path: Path = TOOL_AUTHORITY_PATH) -> dict[str, Any]:
+    data = load_json(path)
+    if not isinstance(data, dict):
+        raise ControlPlaneError("tool_authority.json must be an object")
+    if data.get("schemaVersion") != 1:
+        raise ControlPlaneError("tool_authority.json schemaVersion must be 1")
+    tools = data.get("tools")
+    legal = data.get("legalCombinations")
+    if not isinstance(tools, dict) or not tools:
+        raise ControlPlaneError("tool_authority.json tools must be a non-empty object")
+    if not isinstance(legal, dict):
+        raise ControlPlaneError("tool_authority.json legalCombinations must be an object")
+    for key in (
+        "defaultWriterTools",
+        "exceptionalWriterTools",
+        "writerTools",
+        "neverWriterTools",
+        "verifierTools",
+        "gatekeepers",
+        "prohibitedWriterTools",
+        "writerElevationAuthorizers",
+    ):
+        if key not in legal or not isinstance(legal[key], list) or not legal[key]:
+            raise ControlPlaneError(
+                f"tool_authority.json legalCombinations.{key} must be a non-empty array"
+            )
+    default_writers = set(legal["defaultWriterTools"])
+    exceptional_writers = set(legal["exceptionalWriterTools"])
+    never_writers = set(legal["neverWriterTools"])
+    writer_tools = set(legal["writerTools"])
+    if default_writers | exceptional_writers != writer_tools:
+        raise ControlPlaneError(
+            "tool_authority.json writerTools must equal defaultWriterTools ∪ exceptionalWriterTools"
+        )
+    if never_writers & writer_tools:
+        raise ControlPlaneError(
+            "tool_authority.json neverWriterTools must not intersect writerTools"
+        )
+    if "cursor-cli" not in default_writers:
+        raise ControlPlaneError("tool_authority.json defaultWriterTools must include cursor-cli")
+    if "cursor-cloud" in writer_tools or "github-copilot" in writer_tools:
+        raise ControlPlaneError(
+            "tool_authority.json must not authorize cursor-cloud or github-copilot as writers"
+        )
+    return data
+
+
+def validate_writer_elevation(
+    elevation: Any,
+    *,
+    label: str = "writerElevation",
+    authority: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate the exceptional-writer elevation object."""
+    auth = dict(authority) if authority is not None else load_tool_authority()
+    legal = auth["legalCombinations"]
+    obj = _require_object(elevation, label)
+    _unknown_keys(obj, {"authorizedBy", "reason", "isolatedWorkspace"}, label)
+    authorized_by = _require_enum(
+        obj.get("authorizedBy"),
+        f"{label}.authorizedBy",
+        set(legal["writerElevationAuthorizers"]),
+    )
+    reason = _require_string(obj.get("reason"), f"{label}.reason")
+    if obj.get("isolatedWorkspace") is not True:
+        raise ControlPlaneError(f"{label}.isolatedWorkspace must be true")
+    return {
+        "authorizedBy": authorized_by,
+        "reason": reason,
+        "isolatedWorkspace": True,
+    }
+
+
+def assert_legal_tool_roles(
+    *,
+    writer_tool: str,
+    verifier_tool: str,
+    gatekeeper: str,
+    status: str,
+    writer_elevation: Any | None = None,
+    authority: Mapping[str, Any] | None = None,
+) -> None:
+    """Enforce canonical tool-authority combinations for task manifests."""
+    auth = dict(authority) if authority is not None else load_tool_authority()
+    tools = auth["tools"]
+    legal = auth["legalCombinations"]
+    default_writers = set(legal["defaultWriterTools"])
+    exceptional_writers = set(legal["exceptionalWriterTools"])
+    never_writers = set(legal["neverWriterTools"])
+    if writer_tool not in tools:
+        raise ControlPlaneError(f"writerTool {writer_tool!r} is not a declared tool id")
+    if verifier_tool not in tools:
+        raise ControlPlaneError(f"verifierTool {verifier_tool!r} is not a declared tool id")
+    if gatekeeper not in tools:
+        raise ControlPlaneError(f"gatekeeper {gatekeeper!r} is not a declared tool id")
+
+    writer_status = tools[writer_tool].get("status")
+    if (
+        writer_tool in never_writers
+        or writer_tool in set(legal.get("prohibitedWriterTools") or [])
+        or writer_status == "prohibited"
+    ):
+        raise ControlPlaneError(
+            f"writerTool {writer_tool!r} is prohibited by tool_authority.json"
+            + (" and cannot be authorized via writerElevation" if writer_elevation is not None else "")
+        )
+    if writer_tool not in set(legal["writerTools"]):
+        raise ControlPlaneError(
+            f"writerTool {writer_tool!r} is not an authorized writer under tool_authority.json"
+        )
+
+    if writer_tool in default_writers:
+        if writer_elevation is not None:
+            raise ControlPlaneError(
+                f"writerTool {writer_tool!r} is the default writer and must not include writerElevation"
+            )
+    elif writer_tool in exceptional_writers:
+        if writer_elevation is None:
+            raise ControlPlaneError(
+                f"writerTool {writer_tool!r} requires explicit writerElevation "
+                "(authorizedBy, reason, isolatedWorkspace=true)"
+            )
+        validate_writer_elevation(writer_elevation, authority=auth)
+    else:
+        raise ControlPlaneError(
+            f"writerTool {writer_tool!r} is not classified as default or exceptional writer"
+        )
+
+    if verifier_tool in set(legal.get("prohibitedVerifierTools") or []):
+        raise ControlPlaneError(
+            f"verifierTool {verifier_tool!r} is prohibited by tool_authority.json"
+        )
+    if verifier_tool not in set(legal["verifierTools"]):
+        raise ControlPlaneError(
+            f"verifierTool {verifier_tool!r} is not an authorized verifier under tool_authority.json"
+        )
+    if gatekeeper in set(legal.get("prohibitedGatekeepers") or []):
+        raise ControlPlaneError(
+            f"gatekeeper {gatekeeper!r} is prohibited by tool_authority.json"
+        )
+    if gatekeeper not in set(legal["gatekeepers"]):
+        raise ControlPlaneError(
+            f"gatekeeper {gatekeeper!r} is not an authorized gatekeeper under tool_authority.json"
+        )
+    if writer_tool == verifier_tool:
+        raise ControlPlaneError(
+            "writerTool and verifierTool must be distinct; writers cannot self-verify"
+        )
+    if writer_tool == gatekeeper:
+        raise ControlPlaneError(
+            "writerTool and gatekeeper must be distinct; writers cannot self-certify"
+        )
+    if status in WRITER_SELF_CERTIFY_FORBIDDEN and writer_tool == gatekeeper:
+        raise ControlPlaneError(
+            f"writerTool cannot be gatekeeper for self-certification status {status}"
+        )
 
 
 def authoritative_states(machine: Mapping[str, Any] | None = None) -> list[str]:
@@ -192,6 +351,111 @@ def assert_schema_state_enums_match_machine(
             raise ControlPlaneError(
                 f"{label} enum {values!r} does not match authoritative state machine {states!r}"
             )
+
+
+def assert_schema_tool_enums_match_authority(
+    authority: Mapping[str, Any] | None = None,
+    task_schema: Mapping[str, Any] | None = None,
+) -> None:
+    """Prove task_manifest writer/verifier/gatekeeper enums match tool_authority.json."""
+    auth = dict(authority) if authority is not None else load_tool_authority()
+    task_schema = task_schema or load_json(TASK_SCHEMA_PATH)
+    legal = auth["legalCombinations"]
+    expected = {
+        "writerTool": list(legal["writerTools"]),
+        "verifierTool": list(legal["verifierTools"]),
+        "gatekeeper": list(legal["gatekeepers"]),
+    }
+    for field, want in expected.items():
+        got = schema_enum(task_schema, "properties", field, "enum")
+        if got != want:
+            raise ControlPlaneError(
+                f"task_manifest.{field} enum {got!r} does not match "
+                f"tool_authority.json legalCombinations ({want!r})"
+            )
+    never_writers = set(legal["neverWriterTools"])
+    if set(expected["writerTool"]) & never_writers:
+        raise ControlPlaneError(
+            "tool_authority writerTools must not include never-writer tools"
+        )
+    if "cursor-cloud" in expected["writerTool"] or "github-copilot" in expected["writerTool"]:
+        raise ControlPlaneError(
+            "tool_authority writerTools must not include prohibited cursor-cloud or github-copilot"
+        )
+    elevation = task_schema.get("properties", {}).get("writerElevation")
+    if not isinstance(elevation, dict):
+        raise ControlPlaneError("task_manifest.writerElevation schema object is required")
+    auth_by = schema_enum(elevation, "properties", "authorizedBy", "enum")
+    if auth_by != list(legal["writerElevationAuthorizers"]):
+        raise ControlPlaneError(
+            "task_manifest.writerElevation.authorizedBy enum must match "
+            "tool_authority writerElevationAuthorizers"
+        )
+    assert_schema_writer_elevation_conditionals(task_schema)
+
+
+def assert_schema_writer_elevation_conditionals(
+    task_schema: Mapping[str, Any] | None = None,
+) -> None:
+    """Prove JSON Schema encodes the same elevation rules as runtime validation."""
+    task_schema = task_schema or load_json(TASK_SCHEMA_PATH)
+    allof = task_schema.get("allOf")
+    if not isinstance(allof, list) or not allof:
+        raise ControlPlaneError(
+            "task_manifest.schema.json must declare allOf writerElevation conditionals"
+        )
+
+    def _writer_const(branch: Mapping[str, Any]) -> str | None:
+        props = branch.get("properties")
+        if not isinstance(props, dict):
+            return None
+        writer = props.get("writerTool")
+        if isinstance(writer, dict) and isinstance(writer.get("const"), str):
+            return writer["const"]
+        return None
+
+    by_writer: dict[str, Mapping[str, Any]] = {}
+    for item in allof:
+        if not isinstance(item, dict):
+            continue
+        cond = item.get("if")
+        then = item.get("then")
+        if not isinstance(cond, dict) or not isinstance(then, dict):
+            continue
+        writer = _writer_const(cond)
+        if writer is None:
+            continue
+        by_writer[writer] = then
+
+    for writer in ("cursor-cli", "antigravity", "codex"):
+        if writer not in by_writer:
+            raise ControlPlaneError(
+                f"task_manifest.schema.json missing writerElevation conditional for {writer}"
+            )
+
+    cursor_then = by_writer["cursor-cli"]
+    forbidden = cursor_then.get("not")
+    if not (
+        isinstance(forbidden, dict)
+        and forbidden.get("required") == ["writerElevation"]
+    ):
+        raise ControlPlaneError(
+            "cursor-cli conditional must forbid writerElevation via not.required"
+        )
+
+    for writer in ("antigravity", "codex"):
+        then = by_writer[writer]
+        if then.get("required") != ["writerElevation"]:
+            raise ControlPlaneError(
+                f"{writer} conditional must require writerElevation"
+            )
+
+    never = {"cursor-cloud", "github-copilot", "chatgpt-github", "founder"}
+    writer_enum = set(schema_enum(task_schema, "properties", "writerTool", "enum"))
+    if writer_enum & never:
+        raise ControlPlaneError(
+            "task_manifest.writerTool enum must not include never-writer tools"
+        )
 
 
 def is_legal_transition(source: str, target: str, machine: Mapping[str, Any] | None = None) -> bool:
@@ -341,7 +605,7 @@ def validate_task_manifest(
         raise ControlPlaneError("task manifest must use writerTool/verifierTool/status; aliases are forbidden")
     _unknown_keys(
         obj,
-        required_always | {"exactHead"},
+        required_always | {"exactHead", "writerElevation"},
         "task manifest",
     )
     if _require_string(obj["schemaVersion"], "schemaVersion") != SCHEMA_VERSION:
@@ -376,6 +640,14 @@ def validate_task_manifest(
     _require_string(obj["writerTool"], "writerTool")
     _require_string(obj["verifierTool"], "verifierTool")
     _require_string(obj["gatekeeper"], "gatekeeper")
+    writer_elevation = obj["writerElevation"] if "writerElevation" in obj else None
+    assert_legal_tool_roles(
+        writer_tool=str(obj["writerTool"]),
+        verifier_tool=str(obj["verifierTool"]),
+        gatekeeper=str(obj["gatekeeper"]),
+        status=status,
+        writer_elevation=writer_elevation,
+    )
     created_at = _require_iso_time(obj["createdAt"], "createdAt")
     updated_at = _require_iso_time(obj["updatedAt"], "updatedAt")
     if datetime.fromisoformat(updated_at.replace("Z", "+00:00")) < datetime.fromisoformat(

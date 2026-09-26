@@ -84,7 +84,6 @@ Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without
 - `evidence_bundle`
 - `root_cause_first`
 - `bounded_implementation`
-- `source_truth_rebaseline`
 - `post_merge_rebaseline`
 
 ## Conditional Skills

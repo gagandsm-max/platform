@@ -3,32 +3,94 @@ name: linux_systems
 description: Linux OS, systemd, process, disk, and host-path semantics for Core/Sensor/Agent packaging and monitoring targets.
 ---
 
-<!-- generated from project_agents/skills/linux_systems/SKILL.md sha256:add2d9121a9473b5d90b8b123a21f4d5ebebd712230db29ecbd72fd4ffb70e8e -->
+<!-- generated from project_agents/skills/linux_systems/SKILL.md sha256:4da75ffdf008aff66d5b3bdf5db5c11eed666c8f3153eaa0c67b6d23fdef6124 -->
 
 # linux_systems
 
 ## Purpose
-Change Linux-facing behavior with service lifecycle and disk protection in mind.
+
+Monitor and operate Linux hosts with stable identity, least-privilege collection and honest separation of collector failure from host DOWN—across Agent and remote methods.
 
 ## Use when
-systemd units, host metrics, package postinst, or Linux monitoring.
+
+Linux host monitoring, Agent host metrics, systemd/service checks, filesystem/mount evidence, or packaging/runtime behaviour that depends on Linux semantics. Required for Linux Agent and host-target paths.
+
+## Authoritative inputs
+
+Always read:
+
+1. Existing Linux Agent/collector code on the exact head
+2. `agent_architecture` for identity/spool when Agent-backed
+3. Packaging/install Skills for Core/Sensor/Agent on Linux
+4. Least-privilege / permissions expectations in security docs
+5. Distro matrix actually tested (do not assume universal)
+
+If remote-only SSH host monitoring or specific distros are unimplemented, mark `UNVERIFIED`.
+
+## Invariants
+
+- Host identity prefers stable Agent/`entity_id` anchors—not DHCP IP.
+- Agent vs remote monitoring paths are declared; capabilities differ.
+- CPU/memory/disk/network/process metrics have documented sources (proc/sysfs, etc.).
+- Filesystem/mount monitoring handles bind mounts and container host distinction.
+- systemd/services: unit state is evidence; missing systemd ≠ generic DOWN without classification.
+- Permissions: collectors run least privilege; privilege escalation only where packaging requires and is reviewed.
+- proc/sysfs parsing is version-tolerant; kernel differences documented.
+- Container host vs guest/container identity must not be confused.
+- Reboot detection and time sync (NTP/chrony) are operational evidence classes.
+- Log access is scoped; not unbounded sensitive file read.
+- Command safety: no arbitrary root shell from monitoring paths.
+- **Collector failure ≠ host DOWN** when corroboration policy requires more.
+- Distro/version differences are explicit in support claims.
 
 ## Required procedure
-1. Services must auto-start and supervise recovery.
-2. Honor 80% disk protection.
-3. Do not require host Python/Java/Go installs for tests.
-4. Prove reboot/start evidence when lifecycle changes.
 
-## Guardrails
-- Keep Platform v3.2.2 product requirements; do not invent TBD/P0 designs.
-- Do not bypass tests, weaken tenant isolation, write to `main`, or force-push.
-- Do not disable TLS validation, embed secrets, or use destructive Docker cleanup.
-- LLM output is not privileged authority; writer cannot self-certify merge readiness.
+1. State collection method (Agent/remote) and verify code on this SHA.
+2. Confirm host identity rules and reboot/time-sync signals.
+3. Define metric sources and units; test on at least the claimed distros or mark `UNVERIFIED`.
+4. Handle mounts/disk: capacity, inodes, read-only; respect 80% themes where applicable to Platform nodes.
+5. systemd: map active/failed/inactive without collapsing to DOWN incorrectly.
+6. Enforce least privilege; review file ACLs for Agent.
+7. Separate Agent disconnect / permission errors from host operational failure.
+8. Forbid arbitrary command execution unless device_control/remediation allowlisted.
+
+## Negative / failure cases
+
+- Host DOWN solely because Agent stopped (without policy).
+- Parsing container cgroup CPU as bare-metal host capacity wrongly.
+- Reading `/etc/shadow` for “inventory.”
+- Assuming Debian paths on RHEL without tests.
+
+## Security / tenant implications
+
+Host Agents are privileged endpoints—tenant-bound. Minimize collected process command lines if secrets appear. Support bundles exclude key material. SELinux/AppArmor contexts respected.
 
 ## Required evidence
-- Record commands, tests, logs or CI pointers that prove `linux_systems` procedure ran.
-- Label missing runtime proof as UNVERIFIED. Do not convert inference into SOURCE_FACT.
+
+- Method/distro matrix + `UNVERIFIED`
+- Identity and DOWN-separation tests
+- Permission model notes
+- Exact SHA
+
+## Stop conditions
+
+Stop when:
+
+- IP used as sole host identity
+- Collector errors map straight to DOWN improperly
+- Arbitrary root execution introduced
+- Distro support over-claimed
+
+## Anti-patterns
+
+- “It works on Ubuntu 22 so all Linux is fine”
+- Disabling Agent sandboxing for metrics
+- Writer self-certifying Linux coverage estate-wide
+
+## Handoff / output
+
+Return: collection model; identity notes; gaps; nextOwner (Agent/linux verifier). Not MERGE_READY alone.
 
 ## Non-ownership
-- Does not override Mother Reference product requirements or invent TBD/P0 designs.
-- Does not certify merge readiness or execute privileged actions from LLM output.
+
+Does not own Windows (`windows_monitoring`), K8s, or invent full EDR. Owns Linux host monitoring discipline.

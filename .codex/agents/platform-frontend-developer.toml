@@ -1,6 +1,6 @@
 name = "platform-frontend-developer"
 description = "React/TypeScript implementation specialist for Platform UI. Use after UX/workflow contract is clear to build role-aware, server-driven, accessible, fast operational screens without generic dashboard filler."
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-frontend-developer.md sha256:f651c9c32de1d494d67fe5cf18a26b63439abed3bc90301372b4e24f590bc328
 

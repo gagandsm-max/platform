@@ -15,7 +15,13 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from control_plane import ControlPlaneError, assert_schema_state_enums_match_machine
+from control_plane import (
+    ControlPlaneError,
+    assert_schema_state_enums_match_machine,
+    assert_schema_tool_enums_match_authority,
+    load_tool_authority,
+)
+from skill_structure import format_structure_errors, validate_skill_structure
 
 AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 SKILL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -28,6 +34,11 @@ CODEX_MARK_RE = re.compile(
 SKILL_MARK_RE = re.compile(
     r"<!-- generated from project_agents/skills/[a-z0-9_]+/SKILL\.md sha256:[0-9a-f]{64} -->"
 )
+CANONICAL_SKILL_SECTION_RE = re.compile(
+    r"^##\s+(?P<title>Required Skills|Conditional Skills)\s*\n(?P<body>.*?)(?=^##\s|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+CANONICAL_SKILL_BULLET_RE = re.compile(r"^-\s+`([^`]+)`\s*$", re.MULTILINE)
 TMP_SUFFIX = ".platform-sync.tmp"
 ALLOWED_FRONTMATTER_KEYS = frozenset({"name", "description"})
 POLICY_PERMIT_RE = re.compile(
@@ -127,9 +138,9 @@ def render_cursor(entry: dict[str, Any], body: str, sha: str, canonical: Path, r
 
 
 def render_antigravity(entry: dict[str, Any], body: str, sha: str, canonical: Path, repo: Path) -> str:
+    # Antigravity defaults to read-only/adversarial. Do NOT grant replace_file_content
+    # merely because the canonical agent mode is write.
     tools = ["view_file", "grep_search", "run_command"]
-    if entry["mode"] == "write":
-        tools.append("replace_file_content")
     tool_yaml = "\n".join(f"  - {tool}" for tool in tools)
     return (
         f"---\nname: {entry['name']}\n"
@@ -142,7 +153,9 @@ def render_antigravity(entry: dict[str, Any], body: str, sha: str, canonical: Pa
 
 def render_codex(entry: dict[str, Any], body: str, sha: str, canonical: Path, repo: Path) -> str:
     escaped_body = body.replace('"""', '\\"\\"\\"')
-    sandbox = "read-only" if entry["mode"] == "read" else "workspace-write"
+    # Codex defaults to exact-SHA read-only audit. Do NOT map canonical write mode
+    # to workspace-write.
+    sandbox = "read-only"
     return (
         f"name = {json.dumps(entry['name'])}\n"
         f"description = {json.dumps(entry['description'])}\n"
@@ -203,6 +216,25 @@ def parse_frontmatter(text: str, label: str) -> tuple[dict[str, str], str]:
     body = text[end + 5 :]
     return data, body
 
+
+def parse_canonical_agent_skills(text: str) -> dict[str, list[str]]:
+    """Extract ordered Required/Conditional Skills lists from a canonical agent."""
+    found: dict[str, list[str]] = {"requiredSkills": [], "conditionalSkills": []}
+    for match in CANONICAL_SKILL_SECTION_RE.finditer(text):
+        title = match.group("title")
+        skills = CANONICAL_SKILL_BULLET_RE.findall(match.group("body"))
+        key = "requiredSkills" if title.startswith("Required") else "conditionalSkills"
+        found[key] = skills
+    return found
+
+
+def assert_unique_skill_list(skills: list[Any], label: str) -> list[str]:
+    if not isinstance(skills, list) or not all(isinstance(item, str) for item in skills):
+        raise AgentPackError(f"{label} must be a string array")
+    duplicates = sorted(name for name, count in Counter(skills).items() if count > 1)
+    if duplicates:
+        raise AgentPackError(f"{label} contains duplicate Skills: {', '.join(duplicates)}")
+    return list(skills)
 
 def validate_generated_skill_mirror(
     rel: str,
@@ -553,6 +585,7 @@ def validate_agent_pack(repo: Path) -> list[str]:
                 continue
             body = canonical_skill.read_text(encoding="utf-8")
             errors.extend(policy_scan(canonical_skill.relative_to(repo), body))
+            errors.extend(format_structure_errors(name, validate_skill_structure(body)))
             try:
                 meta, _rest = parse_frontmatter(body, f"project_agents/skills/{name}/SKILL.md")
             except AgentPackError as exc:
@@ -638,18 +671,124 @@ def validate_agent_pack(repo: Path) -> list[str]:
                     if not isinstance(spec, dict):
                         errors.append(f"agent skill matrix {agent_name} must be an object")
                         continue
-                    required = spec.get("requiredSkills") or []
-                    conditional = spec.get("conditionalSkills") or []
+                    try:
+                        required = assert_unique_skill_list(
+                            spec.get("requiredSkills") or [],
+                            f"{agent_name} requiredSkills",
+                        )
+                        conditional = assert_unique_skill_list(
+                            spec.get("conditionalSkills") or [],
+                            f"{agent_name} conditionalSkills",
+                        )
+                    except AgentPackError as exc:
+                        errors.append(str(exc))
+                        continue
                     if not required:
                         errors.append(f"{agent_name} has no required Skills")
                     required_sizes.append(len(required))
                     for skill_name in list(required) + list(conditional):
                         if skill_name not in declared:
                             errors.append(f"{agent_name} references unknown skill {skill_name}")
-                if declared and required_sizes and all(set(matrix[name]["requiredSkills"]) == declared for name in matrix if isinstance(matrix.get(name), dict)):
+                    # Exact agreement with canonical agent Required/Conditional Skills sections.
+                    entry = next((item for item in manifest if item.get("name") == agent_name), None)
+                    if entry is None:
+                        continue
+                    try:
+                        canonical = canonical_path(repo, entry)
+                        canonical_text = canonical.read_text(encoding="utf-8")
+                        declared_skills = parse_canonical_agent_skills(canonical_text)
+                        assert_unique_skill_list(
+                            declared_skills["requiredSkills"],
+                            f"{agent_name} canonical requiredSkills",
+                        )
+                        assert_unique_skill_list(
+                            declared_skills["conditionalSkills"],
+                            f"{agent_name} canonical conditionalSkills",
+                        )
+                        if declared_skills["requiredSkills"] != required:
+                            errors.append(
+                                f"{agent_name} requiredSkills mismatch between canonical agent and matrix"
+                            )
+                        if declared_skills["conditionalSkills"] != conditional:
+                            errors.append(
+                                f"{agent_name} conditionalSkills mismatch between canonical agent and matrix"
+                            )
+                    except (OSError, AgentPackError) as exc:
+                        errors.append(f"{agent_name} canonical skill parse failed: {exc}")
+                if declared and required_sizes and all(
+                    set(matrix[name]["requiredSkills"]) == declared
+                    for name in matrix
+                    if isinstance(matrix.get(name), dict)
+                ):
                     errors.append("every agent requires every skill; routing is not bounded")
                 if declared and required_sizes and max(required_sizes) >= len(declared):
                     errors.append("an agent requires the entire skill inventory")
+        else:
+            errors.append("missing project_agents/skills/agent_skill_matrix.json")
+
+    # Tool authority source must exist and be coherent.
+    try:
+        authority = load_tool_authority(pa / "tool_authority.json")
+        legal = authority["legalCombinations"]
+        tools = authority["tools"]
+        if tools.get("cursor-cloud", {}).get("status") != "prohibited":
+            errors.append("tool_authority.json must mark cursor-cloud as prohibited")
+        if "cursor-cli" not in set(legal["defaultWriterTools"]):
+            errors.append("tool_authority.json must authorize cursor-cli as default writer")
+        if "cursor-cli" not in set(legal["writerTools"]):
+            errors.append("tool_authority.json must authorize cursor-cli as writer")
+        if "cursor-cloud" in set(legal["writerTools"]) or "github-copilot" in set(legal["writerTools"]):
+            errors.append(
+                "tool_authority.json must not list cursor-cloud or github-copilot as authorized writers"
+            )
+        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder"):
+            if never not in set(legal["neverWriterTools"]):
+                errors.append(f"tool_authority.json neverWriterTools must include {never}")
+        for exceptional in ("antigravity", "codex"):
+            if exceptional not in set(legal["exceptionalWriterTools"]):
+                errors.append(
+                    f"tool_authority.json exceptionalWriterTools must include {exceptional}"
+                )
+            if tools.get(exceptional, {}).get("mayWriteProductCode") is not False:
+                errors.append(
+                    f"{exceptional} must keep mayWriteProductCode=false; "
+                    "write is task-scoped via writerElevation only"
+                )
+        if tools.get("antigravity", {}).get("defaultGeneratedCapability") != "read-only":
+            errors.append("antigravity defaultGeneratedCapability must remain read-only")
+        if tools.get("codex", {}).get("defaultSandboxMode") != "read-only":
+            errors.append("codex defaultSandboxMode must remain read-only")
+    except (OSError, json.JSONDecodeError, ControlPlaneError) as exc:
+        errors.append(f"tool authority validation failed: {exc}")
+
+    # Generated Antigravity/Codex adapters must remain read-only by default.
+    for entry in manifest:
+        name = entry.get("name")
+        if not name:
+            continue
+        agy = repo / ".agents" / "agents" / f"{name}.md"
+        if agy.is_file():
+            text = agy.read_text(encoding="utf-8")
+            fm_end = text.find("\n---\n", 4) if text.startswith("---\n") else -1
+            front = text[4:fm_end] if fm_end > 0 else ""
+            if "replace_file_content" in front:
+                errors.append(
+                    f"Antigravity adapter must default read-only (found replace_file_content): "
+                    f".agents/agents/{name}.md"
+                )
+        codex = repo / ".codex" / "agents" / f"{name}.toml"
+        if not codex.is_file():
+            errors.append(f"missing Codex adapter: .codex/agents/{name}.toml")
+        else:
+            text = codex.read_text(encoding="utf-8")
+            if 'sandbox_mode = "workspace-write"' in text or "sandbox_mode = 'workspace-write'" in text:
+                errors.append(
+                    f"Codex adapter must default sandbox_mode=read-only: .codex/agents/{name}.toml"
+                )
+            if 'sandbox_mode = "read-only"' not in text and "sandbox_mode = 'read-only'" not in text:
+                errors.append(
+                    f"Codex adapter missing sandbox_mode=read-only: .codex/agents/{name}.toml"
+                )
 
     agents_md = repo / "AGENTS.md"
     if agents_md.exists() or agents_md.is_symlink():
@@ -665,6 +804,10 @@ def validate_agent_pack(repo: Path) -> list[str]:
                 load_json(machine_path),
                 load_json(task_schema_path),
                 load_json(handoff_schema_path),
+            )
+            assert_schema_tool_enums_match_authority(
+                load_tool_authority(pa / "tool_authority.json"),
+                load_json(task_schema_path),
             )
         except ControlPlaneError as exc:
             errors.append(str(exc))

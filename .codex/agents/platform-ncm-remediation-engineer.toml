@@ -1,6 +1,6 @@
 name = "platform-ncm-remediation-engineer"
 description = "Privileged configuration/remediation workflow: maker-checker, deterministic execution, rollback, blast-radius and evidence. No direct LLM privileged execution."
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-ncm-remediation-engineer.md sha256:11f6befbef8451d78343d7bb0d5d35f2f176a0cc340edd28daed4efbf43a7173
 

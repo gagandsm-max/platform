@@ -1,6 +1,6 @@
 name = "platform-telemetry-pipeline-engineer"
 description = "Streaming specialist after acceptance: normalization, Kafka, replay/idempotency, event time, backpressure, lag and reconciliation."
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-telemetry-pipeline-engineer.md sha256:e53e1ba3b45a16d85c88f6346f10714dda4ca3073f14808839a8aa2b9e114fad
 

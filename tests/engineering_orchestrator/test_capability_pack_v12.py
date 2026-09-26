@@ -16,6 +16,7 @@ if str(TOOLS) not in sys.path:
 
 import agent_pack  # noqa: E402
 import control_plane  # noqa: E402
+from tests.engineering_orchestrator.helpers import fixture_skill_markdown  # noqa: E402
 
 NEW_P1 = (
     "platform-sensor-runtime-engineer",
@@ -60,14 +61,15 @@ def _write(path: Path, content: str) -> None:
 
 
 def _build_fixture(root: Path) -> None:
-    canonical = "# Demo Agent\n\nFixture canonical agent.\n"
-    skill = (
-        "---\n"
-        "name: demo_skill\n"
-        "description: Fixture skill\n"
-        "---\n\n"
-        "# demo_skill\n\nFixture canonical skill.\n"
+    canonical = (
+        "# Demo Agent\n\n"
+        "Fixture canonical agent.\n\n"
+        "## Required Skills\n"
+        "- `demo_skill`\n\n"
+        "## Conditional Skills\n"
     )
+    skill = fixture_skill_markdown("demo_skill", "Fixture skill")
+    unused_skill = fixture_skill_markdown("unused_skill", "Fixture unused skill")
     manifest = [
         {
             "name": "demo-agent",
@@ -79,12 +81,29 @@ def _build_fixture(root: Path) -> None:
             "sha256": "0" * 64,
         }
     ]
-    skills = [{"name": "demo_skill", "description": "Fixture skill"}]
+    skills = [
+        {"name": "demo_skill", "description": "Fixture skill"},
+        {"name": "unused_skill", "description": "Fixture unused skill"},
+    ]
+    matrix = {
+        "demo-agent": {
+            "requiredSkills": ["demo_skill"],
+            "conditionalSkills": [],
+        }
+    }
+    authority = json.loads((REPO_ROOT / "project_agents" / "tool_authority.json").read_text(encoding="utf-8"))
     _write(root / "project_agents" / "manifest.json", json.dumps(manifest, indent=2) + "\n")
     _write(root / "project_agents" / "canonical" / "p0" / "demo-agent.md", canonical)
     _write(root / "project_agents" / "skills" / "manifest.json", json.dumps(skills, indent=2) + "\n")
     _write(root / "project_agents" / "skills" / "demo_skill" / "SKILL.md", skill)
-    os.symlink("project_agents/manifest.json", root / "AGENTS.md")
+    _write(root / "project_agents" / "skills" / "unused_skill" / "SKILL.md", unused_skill)
+    _write(
+        root / "project_agents" / "skills" / "agent_skill_matrix.json",
+        json.dumps(matrix, indent=2) + "\n",
+    )
+    _write(root / "project_agents" / "tool_authority.json", json.dumps(authority, indent=2) + "\n")
+    os.symlink("project_documentation/AGENTS.md", root / "AGENTS.md")
+    _write(root / "project_documentation" / "AGENTS.md", "# Fixture AGENTS\n")
 
 
 def _manifest() -> list[dict]:

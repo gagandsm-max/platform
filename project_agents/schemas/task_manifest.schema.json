@@ -52,9 +52,41 @@
     "requiredTests": {"type": "array", "items": {"type": "string"}},
     "requiredEvidence": {"type": "array", "items": {"type": "string"}},
     "stopConditions": {"type": "array", "items": {"type": "string"}},
-    "writerTool": {"type": "string", "minLength": 1},
-    "verifierTool": {"type": "string", "minLength": 1},
-    "gatekeeper": {"type": "string", "minLength": 1},
+    "writerTool": {
+      "type": "string",
+      "enum": ["cursor-cli", "antigravity", "codex"],
+      "description": "Product writer. Default is cursor-cli (no elevation). antigravity/codex require writerElevation on an isolated workspace. never-writers (cursor-cloud, github-copilot, chatgpt-github, founder) cannot be selected. Derived from project_agents/tool_authority.json."
+    },
+    "writerElevation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorizedBy", "reason", "isolatedWorkspace"],
+      "description": "Required only when writerTool is an exceptional writer (antigravity or codex). Forbidden for cursor-cli. Cannot authorize never-writers.",
+      "properties": {
+        "authorizedBy": {
+          "type": "string",
+          "enum": ["chatgpt-github", "founder"]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "isolatedWorkspace": {
+          "const": true,
+          "description": "Exceptional writers must use an isolated branch/worktree; must be true."
+        }
+      }
+    },
+    "verifierTool": {
+      "type": "string",
+      "enum": ["chatgpt-github", "antigravity", "codex"],
+      "description": "Independent verifier/auditor. Must differ from writerTool. Derived from project_agents/tool_authority.json."
+    },
+    "gatekeeper": {
+      "type": "string",
+      "enum": ["chatgpt-github", "founder"],
+      "description": "Control-plane gatekeeper. Must differ from writerTool. Writers cannot self-certify. Derived from project_agents/tool_authority.json."
+    },
     "status": {
       "type": "string",
       "enum": [
@@ -79,5 +111,34 @@
     },
     "createdAt": {"type": "string", "minLength": 1},
     "updatedAt": {"type": "string", "minLength": 1}
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"writerTool": {"const": "cursor-cli"}},
+        "required": ["writerTool"]
+      },
+      "then": {
+        "not": {"required": ["writerElevation"]}
+      }
+    },
+    {
+      "if": {
+        "properties": {"writerTool": {"const": "antigravity"}},
+        "required": ["writerTool"]
+      },
+      "then": {
+        "required": ["writerElevation"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"writerTool": {"const": "codex"}},
+        "required": ["writerTool"]
+      },
+      "then": {
+        "required": ["writerElevation"]
+      }
+    }
+  ]
 }

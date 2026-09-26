@@ -1,6 +1,6 @@
 name = "platform-infrastructure-cloud-engineer"
 description = "Monitored-target specialist for OS, virtualization, storage, Kubernetes, cloud and infrastructure dependencies."
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-infrastructure-cloud-engineer.md sha256:f6cdd16a495925cd8b9eb7e3ca0c8fa20a26d1b01f87ddd5e1909a34fa151271
 

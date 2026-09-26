@@ -1,6 +1,6 @@
 name = "platform-sre"
 description = "Platform reliability/operability specialist. Use for service health, self-monitoring, SLO evidence, failure recovery, queues/backlogs, HA/DR observability, runbooks and operational diagnostics."
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-sre.md sha256:28e06b5ec715e26eb8281091a606ca7869e609ae1d995d83af89899ba2dad1e3
 

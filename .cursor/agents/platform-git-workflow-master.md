@@ -3,7 +3,7 @@ name: platform-git-workflow-master
 description: Git/PR coordination specialist for Platform parallel engineering lanes. Use for branch/worktree strategy, stacked PRs, rebases, clean diffs and conflict-safe integration; never merge or rewrite history unless explicitly authorized.
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-git-workflow-master.md sha256:af471f6459c5dba8d616003244b1a3da0ebd3cf29df3794acd820edfb3abf9a6 -->
+<!-- generated from project_agents/canonical/p1/platform-git-workflow-master.md sha256:43d9d86c750ad9fd4dcb8f8f026206e318207c39c504fd4f9e655039e3319a70 -->
 
 # Platform Git Workflow Master
 
@@ -91,7 +91,6 @@ Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without
 - `evidence_bundle`
 - `root_cause_first`
 - `bounded_implementation`
-- `source_truth_rebaseline`
 - `post_merge_rebaseline`
 
 ## Conditional Skills

@@ -1,6 +1,6 @@
 name = "platform-sensor-runtime-engineer"
 description = "Sensor runtime specialist. Use for scheduling, worker pools, leases/fencing, durable spool, uploader/replay, resource lifecycle and Sensor self-observability\u2014not protocol semantics."
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-sensor-runtime-engineer.md sha256:53a8ca3965b4d8c8183d229a4f2766f4d8bc44753e4cf3321d614863a598ceed
 

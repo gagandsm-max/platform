@@ -57,7 +57,7 @@
     "source": "testing/testing-evidence-collector.md",
     "description": "Evidence gathering specialist for Platform. Use after implementation to collect reproducible build, test, runtime, API, log, UI, performance and package evidence without making quality claims beyond the evidence.",
     "canonical_path": "canonical/p0/platform-evidence-collector.md",
-    "sha256": "caf7a3ccd5cef11aad471aba8894c88c4dc1830bd1bd91f0586bb9f0d2b02777"
+    "sha256": "f0806712fefece4f83be4cb5fe66126d4c1e533a8f5156c237ba531d531ebe40"
   },
   {
     "name": "platform-security-architect",
@@ -217,7 +217,7 @@
     "source": "engineering/engineering-git-workflow-master.md",
     "description": "Git/PR coordination specialist for Platform parallel engineering lanes. Use for branch/worktree strategy, stacked PRs, rebases, clean diffs and conflict-safe integration; never merge or rewrite history unless explicitly authorized.",
     "canonical_path": "canonical/p1/platform-git-workflow-master.md",
-    "sha256": "af471f6459c5dba8d616003244b1a3da0ebd3cf29df3794acd820edfb3abf9a6"
+    "sha256": "43d9d86c750ad9fd4dcb8f8f026206e318207c39c504fd4f9e655039e3319a70"
   },
   {
     "name": "platform-workflow-architect",

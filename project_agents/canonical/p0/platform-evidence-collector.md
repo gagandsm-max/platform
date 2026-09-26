@@ -86,7 +86,6 @@ Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without
 - `source_truth_rebaseline`
 - `mother_reference_reconciliation`
 - `evidence_bundle`
-- `evidence_bundle`
 
 ## Conditional Skills
 - `runtime_failure_injection`

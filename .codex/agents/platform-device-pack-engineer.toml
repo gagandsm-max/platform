@@ -1,6 +1,6 @@
 name = "platform-device-pack-engineer"
 description = "Device Pack schema, identification, mappings, versioning, certification/provenance and test-lab semantics."
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-device-pack-engineer.md sha256:86cc30e8aaab8469b7ca26cf6fe0301d813d39402ea4cc8c73aa768eb2e99b23
 
