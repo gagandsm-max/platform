@@ -213,10 +213,17 @@ func sampleEnvelope(t *testing.T) agentreceiver.DeliveryEnvelope {
 	}
 }
 
+const sliceAgentSpoolStreamID = "stream-0123456789abcdef0123456789abcdef"
+
 func newDrain(t *testing.T, spoolDir string, sp *spool.DiskSpool, client *coreclient.Client) *agentdrain.Drain {
 	t.Helper()
+	streamID := sp.StreamID()
+	if streamID == "" {
+		streamID = sliceAgentSpoolStreamID
+	}
 	d, err := agentdrain.New(agentdrain.Config{
 		SensorID:             sliceSensorID,
+		StreamID:             streamID,
 		AgentSpoolDir:        spoolDir,
 		MaxBatchRecords:      32,
 		MaxBatchPayloadBytes: 1024 * 1024,
@@ -339,11 +346,14 @@ func TestProductionDrainSliceHappyPath(t *testing.T) {
 		t.Fatal("Mock Core did not receive AgentTelemetryBatch")
 	}
 
-	if gotBatch.SchemaVersion != 1 {
-		t.Fatalf("schemaVersion=%d", gotBatch.SchemaVersion)
+	if gotBatch.SchemaVersion != 2 {
+		t.Fatalf("schemaVersion=%d want 2", gotBatch.SchemaVersion)
 	}
 	if gotBatch.SensorID != sliceSensorID {
 		t.Fatalf("sensorId=%q", gotBatch.SensorID)
+	}
+	if gotBatch.SensorAgentSpoolStreamID == "" {
+		t.Fatal("sensorAgentSpoolStreamId must be present for BUILD-003 Agent-ingress v2")
 	}
 	if gotBatch.FirstIngressSequence != 1 || gotBatch.LastIngressSequence != 1 {
 		t.Fatalf("ingress range [%d..%d]", gotBatch.FirstIngressSequence, gotBatch.LastIngressSequence)

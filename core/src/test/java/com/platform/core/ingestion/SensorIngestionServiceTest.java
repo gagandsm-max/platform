@@ -8,6 +8,7 @@ import com.platform.core.ingestion.dto.CanonicalObservation;
 import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.ingestion.dto.TelemetryAckResponse;
 import com.platform.core.ingestion.dto.TelemetryBatchRequest;
+import com.platform.core.ingestion.replay.PublisherClaimResult;
 import com.platform.core.ingestion.replay.TelemetryWatermarkStore;
 import com.platform.core.ingestion.replay.ReplayReservation;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +38,8 @@ class SensorIngestionServiceTest {
     private final UUID tenantId = UUID.fromString("018f0e0a-0000-7000-8000-000000000001");
     private final UUID entityId = UUID.fromString("018f0e0a-0000-7000-8000-000000000011");
     private final SensorScope testScope = new SensorScope("sensor-net-01", tenantId, null, Set.of(entityId), true);
+    private final UUID ownerToken = UUID.fromString("018f0e0a-0000-7000-8000-00000000cafe");
+    private static final long PUBLISHER_EPOCH = 1L;
 
     @BeforeEach
     void setUp() {
@@ -49,6 +52,9 @@ class SensorIngestionServiceTest {
         when(watermarkStore.reserveBatch(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString()))
                 .thenReturn(ReplayReservation.reserved(0));
+        when(watermarkStore.claimPublisherLease(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString()))
+                .thenReturn(PublisherClaimResult.claimed(ownerToken, PUBLISHER_EPOCH));
     }
 
     private X509Certificate createMockCert(String cn) {
@@ -99,9 +105,31 @@ class SensorIngestionServiceTest {
         verify(watermarkStore, times(1)).reserveBatch(
                 eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-123"), eq("b-1")
         );
-        verify(watermarkStore, times(1)).finalizeReservedBatch(
+        verify(watermarkStore, times(1)).claimPublisherLease(
                 eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-123"), eq("b-1")
         );
+        verify(watermarkStore, times(1)).finalizeReservedBatch(
+                eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-123"), eq("b-1"),
+                eq(ownerToken), eq(PUBLISHER_EPOCH)
+        );
+        verify(watermarkStore, never()).releasePublisherLease(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
+    }
+
+    @Test
+    void testIdempotencyKeyMismatchRejectsBeforeReserve() {
+        X509Certificate cert = createMockCert("sensor-net-01");
+        TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-1", 100, 105, "sum-123", List.of());
+        when(validator.resolveAuthority(cert)).thenReturn(testScope);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                service.ingestTelemetry("{}".getBytes(), req, "other-key", cert));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_IDEMPOTENCY_KEY_MISMATCH", ex.getCode());
+
+        verify(watermarkStore, never()).reserveBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
     }
 
     @Test
@@ -127,10 +155,12 @@ class SensorIngestionServiceTest {
         assertEquals(105L, ack.acceptedThroughSequence());
         assertEquals("sensor-net-01", ack.sensorIdentity());
 
-        // Exact accepted replay does not republish and does not finalize again.
+        // Exact accepted replay does not claim, republish, or finalize again.
         verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
-        verify(watermarkStore, never()).finalizeReservedBatch(
+        verify(watermarkStore, never()).claimPublisherLease(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+        verify(watermarkStore, never()).finalizeReservedBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
     }
 
     @Test
@@ -157,6 +187,8 @@ class SensorIngestionServiceTest {
         assertEquals("ERR_IDEMPOTENCY_CONFLICT", ex.getCode());
 
         verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
+        verify(watermarkStore, never()).claimPublisherLease(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
     }
 
     @Test
@@ -241,7 +273,30 @@ class SensorIngestionServiceTest {
         assertEquals("ERR_SENSOR_STREAM_CHANGED", ex.getCode());
         verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
         verify(watermarkStore, never()).finalizeReservedBatch(
-                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
+    }
+
+    @Test
+    void testPublisherLeaseBusyRejectsWithoutKafka() {
+        X509Certificate cert = createMockCert("sensor-net-01");
+        TelemetryBatchRequest req = new TelemetryBatchRequest(1, "sensor-net-01", "epoch-1", "b-busy", 1, 1, "sum-busy", List.of());
+        byte[] rawBody = "{}".getBytes();
+        TelemetryObservationBatch observations = TelemetryObservationBatch.ofNumeric(List.of(
+                new CanonicalObservation(tenantId.toString(), entityId.toString(), "cpu.util", "sensor-net-01", Instant.now(), 42.0, 1, 0, "1", "snmp")
+        ));
+        when(validator.resolveAuthority(cert)).thenReturn(testScope);
+        when(validator.validateAndExtract(rawBody, req, testScope)).thenReturn(observations);
+        when(watermarkStore.claimPublisherLease(
+                tenantId, "sensor-net-01", "epoch-1", 1L, 1L, "sum-busy", "b-busy"))
+                .thenReturn(PublisherClaimResult.busy());
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                service.ingestTelemetry(rawBody, req, "b-busy", cert));
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, ex.getStatus());
+        assertEquals("ERR_BATCH_PUBLICATION_IN_PROGRESS", ex.getCode());
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
+        verify(watermarkStore, never()).finalizeReservedBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
     }
 
     @Test
@@ -266,7 +321,11 @@ class SensorIngestionServiceTest {
 
         // Reservation remains pending for exact retry; ACK watermark MUST NOT finalize.
         verify(watermarkStore, never()).finalizeReservedBatch(
-                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
+        verify(watermarkStore, times(1)).releasePublisherLease(
+                eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(1L), eq(1L), eq("sum-fail"), eq("b-2"),
+                eq(ownerToken), eq(PUBLISHER_EPOCH)
+        );
     }
 
     @Test
@@ -293,7 +352,7 @@ class SensorIngestionServiceTest {
                 .doNothing()
                 .when(watermarkStore).finalizeReservedBatch(
                         eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L),
-                        eq("sum-fault"), eq("b-fault"));
+                        eq("sum-fault"), eq("b-fault"), eq(ownerToken), eq(PUBLISHER_EPOCH));
 
         // Ingestion call 1 fails -> NO ACK to Sensor!
         RuntimeException ex = assertThrows(RuntimeException.class, () ->
@@ -311,8 +370,16 @@ class SensorIngestionServiceTest {
         verify(watermarkStore, times(2)).reserveBatch(
                 eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-fault"), eq("b-fault")
         );
-        verify(watermarkStore, times(2)).finalizeReservedBatch(
+        verify(watermarkStore, times(2)).claimPublisherLease(
                 eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-fault"), eq("b-fault")
+        );
+        verify(watermarkStore, times(2)).finalizeReservedBatch(
+                eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-fault"), eq("b-fault"),
+                eq(ownerToken), eq(PUBLISHER_EPOCH)
+        );
+        verify(watermarkStore, times(1)).releasePublisherLease(
+                eq(tenantId), eq("sensor-net-01"), eq("epoch-1"), eq(100L), eq(105L), eq("sum-fault"), eq("b-fault"),
+                eq(ownerToken), eq(PUBLISHER_EPOCH)
         );
     }
 
@@ -362,7 +429,9 @@ class SensorIngestionServiceTest {
         // Prove 9: invalid source data never reaches durable replay reservation/finalization.
         verify(watermarkStore, never()).reserveBatch(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
-        verify(watermarkStore, never()).finalizeReservedBatch(
+        verify(watermarkStore, never()).claimPublisherLease(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+        verify(watermarkStore, never()).finalizeReservedBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
     }
 }

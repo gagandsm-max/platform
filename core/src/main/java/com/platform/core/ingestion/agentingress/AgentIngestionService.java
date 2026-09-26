@@ -3,31 +3,33 @@ package com.platform.core.ingestion.agentingress;
 import com.platform.core.ingestion.IngestionException;
 import com.platform.core.ingestion.IngestionMetrics;
 import com.platform.core.ingestion.KafkaTelemetryProducer;
+import com.platform.core.ingestion.SensorIngestionService;
 import com.platform.core.ingestion.agentingress.dto.AgentTelemetryAckResponse;
 import com.platform.core.ingestion.agentingress.dto.AgentTelemetryBatchRequest;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import com.platform.core.ingestion.dto.TelemetryObservationBatch;
-import com.platform.core.ingestion.replay.WatermarkState;
+import com.platform.core.ingestion.replay.PublisherClaimResult;
+import com.platform.core.ingestion.replay.ReplayReservation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.UUID;
 
 /**
- * Agent → Sensor → Core agent-telemetry ingestion.
+ * Agent → Sensor → Core agent-telemetry ingestion with reserve/claim/finalize semantics.
  * <p>
  * Delivery semantics (at-least-once, not XA): Kafka publication and PostgreSQL watermark
- * updates are not bound by a distributed 2PC/XA transaction. Exact replay of a batch after
- * durable watermark commit is recognized via watermark CAS and is not republished. Observation
+ * finalize are not bound by a distributed 2PC/XA transaction. Exact replay after durable
+ * watermark commit is recognized via reservation and is not republished. Observation
  * {@code sequenceId} values are deterministic across Sensor retry so consumers can correlate
  * retries. Because Kafka+PostgreSQL are not XA, at-least-once delivery applies: duplicate Kafka
- * messages remain possible in the failure window between Kafka commit and durable watermark
- * persistence. This path does not guarantee downstream physical deduplication.
+ * messages remain possible in the failure window between Kafka commit and durable finalize.
+ * This path does not guarantee downstream physical deduplication.
  */
 @Service
 public class AgentIngestionService {
@@ -50,10 +52,10 @@ public class AgentIngestionService {
         this.metrics = metrics;
     }
 
-    @Transactional("transactionManager")
     public AgentTelemetryAckResponse ingestAgentTelemetry(
             byte[] rawBody,
             AgentTelemetryBatchRequest request,
+            String idempotencyKey,
             X509Certificate clientCert
     ) {
         metrics.recordBatchReceived();
@@ -68,71 +70,123 @@ public class AgentIngestionService {
             );
         }
 
+        SensorIngestionService.requireIdempotencyKey(idempotencyKey, request.batchId());
+
         List<CanonicalObservation> observations = validator.validateAndExtract(rawBody, request, scope);
 
-        WatermarkState watermark = watermarkStore.getWatermarkForUpdate(scope.tenantId(), scope.sensorId());
-        if (watermark != null) {
-            if (request.firstIngressSequence() == watermark.lastFirstSequence()
-                    && request.lastIngressSequence() == watermark.lastLastSequence()) {
-                if (request.checksum().equalsIgnoreCase(watermark.lastChecksum())) {
-                    metrics.recordDuplicateReplay();
-                    log.info("Idempotent agent-ingress replay tenant={} sensor={} range=[{}..{}] watermark={}",
-                            scope.tenantId(), scope.sensorId(),
-                            request.firstIngressSequence(), request.lastIngressSequence(),
-                            watermark.ackedThroughSequence());
-                    return new AgentTelemetryAckResponse(
-                            "ACCEPTED",
-                            scope.sensorId(),
-                            request.batchId(),
-                            watermark.ackedThroughSequence(),
-                            request.correlationId()
-                    );
-                }
-                metrics.recordBatchRejected("ERR_IDEMPOTENCY_CONFLICT");
-                throw new IngestionException(
-                        HttpStatus.CONFLICT,
-                        "ERR_IDEMPOTENCY_CONFLICT",
-                        "Agent ingress sequence range [" + request.firstIngressSequence() + ".."
-                                + request.lastIngressSequence()
-                                + "] was previously accepted with a different payload checksum"
-                );
-            }
-
-            if (request.firstIngressSequence() <= watermark.ackedThroughSequence()) {
-                metrics.recordBatchRejected("ERR_SEQUENCE_REGRESSION");
-                throw new IngestionException(
-                        HttpStatus.CONFLICT,
-                        "ERR_SEQUENCE_REGRESSION",
-                        "Batch firstIngressSequence " + request.firstIngressSequence()
-                                + " has already been accepted (current watermark: "
-                                + watermark.ackedThroughSequence() + ")"
-                );
-            }
-
-            if (request.firstIngressSequence() > watermark.ackedThroughSequence() + 1) {
-                metrics.recordBatchRejected("ERR_SEQUENCE_GAP");
-                throw new IngestionException(
-                        HttpStatus.BAD_REQUEST,
-                        "ERR_SEQUENCE_GAP",
-                        "Batch firstIngressSequence " + request.firstIngressSequence()
-                                + " leaves an unexpected gap from watermark "
-                                + watermark.ackedThroughSequence()
-                );
-            }
-        }
-
-        // At-least-once across Kafka+PG (not XA); Sensor retries on missing ACK.
-        kafkaProducer.publishBatchTransactionally(TelemetryObservationBatch.ofNumeric(observations));
-
-        watermarkStore.updateWatermark(
+        ReplayReservation reservation = watermarkStore.reserveBatch(
                 scope.tenantId(),
                 scope.sensorId(),
-                request.lastIngressSequence(),
+                request.sensorAgentSpoolStreamId(),
                 request.firstIngressSequence(),
                 request.lastIngressSequence(),
                 request.checksum(),
-                request.batchId()
+                request.batchId(),
+                request.correlationId()
         );
+
+        if (reservation.status() == ReplayReservation.Status.ALREADY_ACKED) {
+            metrics.recordDuplicateReplay();
+            log.info("Idempotent agent-ingress replay tenant={} sensor={} range=[{}..{}] watermark={}",
+                    scope.tenantId(), scope.sensorId(),
+                    request.firstIngressSequence(), request.lastIngressSequence(),
+                    reservation.ackedThroughSequence());
+            return new AgentTelemetryAckResponse(
+                    "ACCEPTED",
+                    scope.sensorId(),
+                    request.batchId(),
+                    reservation.ackedThroughSequence(),
+                    request.correlationId()
+            );
+        }
+
+        if (reservation.status() == ReplayReservation.Status.REJECTED) {
+            String code = reservation.rejectionCode();
+            metrics.recordBatchRejected(code);
+            if ("ERR_PREVIOUS_BATCH_PENDING".equals(code)) {
+                metrics.recordPreviousBatchPending();
+            } else if ("ERR_IDEMPOTENCY_CONFLICT".equals(code)) {
+                metrics.recordReplayConflict();
+            } else if ("ERR_SEQUENCE_GAP".equals(code)) {
+                metrics.recordSequenceGap();
+            } else if ("ERR_SEQUENCE_REGRESSION".equals(code)) {
+                metrics.recordSequenceRegression();
+            } else if ("ERR_SENSOR_STREAM_CHANGED".equals(code)) {
+                metrics.recordStreamMismatch();
+            }
+            HttpStatus status = "ERR_SEQUENCE_GAP".equals(code) || "ERR_SEQUENCE_OUT_OF_BOUNDS".equals(code)
+                    || "ERR_AGENT_STREAM_ID_INVALID".equals(code)
+                    ? HttpStatus.BAD_REQUEST
+                    : HttpStatus.CONFLICT;
+            throw new IngestionException(status, code, reservation.rejectionMessage());
+        }
+
+        PublisherClaimResult claim = watermarkStore.claimPublisherLease(
+                scope.tenantId(),
+                scope.sensorId(),
+                request.sensorAgentSpoolStreamId(),
+                request.firstIngressSequence(),
+                request.lastIngressSequence(),
+                request.checksum(),
+                request.batchId(),
+                request.correlationId()
+        );
+        if (claim.status() == PublisherClaimResult.Status.BUSY) {
+            metrics.recordPublisherLeaseContention();
+            throw new IngestionException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    claim.rejectionCode(),
+                    claim.rejectionMessage()
+            );
+        }
+        if (claim.status() == PublisherClaimResult.Status.REJECTED) {
+            metrics.recordBatchRejected(claim.rejectionCode());
+            throw new IngestionException(HttpStatus.CONFLICT, claim.rejectionCode(), claim.rejectionMessage());
+        }
+
+        UUID owner = claim.ownerToken();
+        long epoch = claim.publisherEpoch();
+        try {
+            // At-least-once across Kafka+PG (not XA); Sensor retries on missing ACK.
+            kafkaProducer.publishBatchTransactionally(TelemetryObservationBatch.ofNumeric(observations));
+            watermarkStore.finalizeReservedBatch(
+                    scope.tenantId(),
+                    scope.sensorId(),
+                    request.sensorAgentSpoolStreamId(),
+                    request.firstIngressSequence(),
+                    request.lastIngressSequence(),
+                    request.checksum(),
+                    request.batchId(),
+                    request.correlationId(),
+                    owner,
+                    epoch
+            );
+        } catch (RuntimeException publishOrFinalizeFailure) {
+            try {
+                watermarkStore.releasePublisherLease(
+                        scope.tenantId(),
+                        scope.sensorId(),
+                        request.sensorAgentSpoolStreamId(),
+                        request.firstIngressSequence(),
+                        request.lastIngressSequence(),
+                        request.checksum(),
+                        request.batchId(),
+                        request.correlationId(),
+                        owner,
+                        epoch
+                );
+            } catch (RuntimeException releaseFailure) {
+                log.warn("Failed to release agent-ingress publisher lease after failure: {}",
+                        releaseFailure.getMessage());
+            }
+            if (publishOrFinalizeFailure instanceof IngestionException ingestionException
+                    && "ERR_KAFKA_PUBLICATION_FAILED".equals(ingestionException.getCode())) {
+                metrics.recordKafkaFailure(ingestionException.getMessage());
+            } else {
+                metrics.recordFinalizeFailure(publishOrFinalizeFailure.getMessage());
+            }
+            throw publishOrFinalizeFailure;
+        }
 
         return new AgentTelemetryAckResponse(
                 "ACCEPTED",

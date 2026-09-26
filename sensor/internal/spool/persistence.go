@@ -48,7 +48,7 @@ func (s *DiskSpool) recover() error {
 	var maxSeq uint64
 	for _, entry := range entries {
 		name := entry.Name()
-		if name == stateFileName || name == streamIDFileName || name == quarantineDirName {
+		if name == stateFileName || name == streamIDFileName || name == quarantineDirName || name == outboundWindowFileName {
 			continue
 		}
 		full := filepath.Join(s.dir, name)
@@ -176,6 +176,9 @@ func (s *DiskSpool) loadStateLocked() error {
 	}
 	if st.SchemaVersion != stateSchemaVersion || st.NextSequence == 0 || st.AckedThrough >= st.NextSequence {
 		return newError(CodeCorruption, "spool state contains invalid sequence metadata", nil)
+	}
+	if st.NextSequence > MaxSafeSequence+1 || st.AckedThrough > MaxSafeSequence {
+		return newError(CodeCorruption, "spool state sequence exceeds MAX_SAFE_SEQUENCE", nil)
 	}
 	s.state = st
 	return nil

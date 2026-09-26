@@ -61,6 +61,9 @@ func (s *DiskSpool) Append(req AppendRequest) (Record, error) {
 		created = time.Now().UTC()
 	}
 	seq := s.state.NextSequence
+	if seq == 0 || seq > MaxSafeSequence {
+		return Record{}, newError(CodeSequenceExhausted, "spool sequence is exhausted or invalid; fail closed without wrap", nil)
+	}
 	sum := sha256.Sum256(req.Payload)
 	checksum := hex.EncodeToString(sum[:])
 	rec := Record{SchemaVersion: recordSchemaVersion, Sequence: seq, Class: req.Class, Type: req.Type, CreatedAt: created, ContentLength: len(req.Payload), Checksum: checksum, Payload: append([]byte(nil), req.Payload...)}
@@ -98,42 +101,7 @@ func (s *DiskSpool) ReadBatch(maxRecords, maxPayloadBytes int) (Batch, error) {
 	if maxRecords <= 0 || maxPayloadBytes <= 0 {
 		return Batch{}, newError(CodeInvalidConfig, "batch bounds must be greater than zero", nil)
 	}
-	seqs, err := s.pendingSequencesLocked()
-	if err != nil {
-		return Batch{}, err
-	}
-	batch := Batch{Records: make([]Record, 0, minInt(maxRecords, len(seqs)))}
-	expected := s.state.AckedThrough + 1
-	for _, seq := range seqs {
-		if seq < expected {
-			continue
-		}
-		if seq != expected {
-			s.degraded = true
-			return Batch{}, newError(CodeSequence, "pending spool contains a sequence gap", nil)
-		}
-		path := filepath.Join(s.dir, recordFileName(seq))
-		rec, err := s.readRecordFileLocked(path, seq)
-		if err != nil {
-			_ = s.quarantineLocked(path, "corrupt")
-			s.degraded = true
-			return Batch{}, err
-		}
-		if len(batch.Records) == maxRecords || (len(batch.Records) > 0 && batch.PayloadBytes+rec.ContentLength > maxPayloadBytes) {
-			break
-		}
-		if len(batch.Records) == 0 && rec.ContentLength > maxPayloadBytes {
-			return Batch{}, newError(CodeInvalidConfig, "next record exceeds requested batch byte bound", nil)
-		}
-		batch.Records = append(batch.Records, rec)
-		batch.PayloadBytes += rec.ContentLength
-		if batch.FirstSequence == 0 {
-			batch.FirstSequence = rec.Sequence
-		}
-		batch.LastSequence = rec.Sequence
-		expected++
-	}
-	return batch, nil
+	return s.readBatchLocked(maxRecords, maxPayloadBytes)
 }
 
 func (s *DiskSpool) AcknowledgeThrough(sequence uint64) error {
@@ -142,6 +110,10 @@ func (s *DiskSpool) AcknowledgeThrough(sequence uint64) error {
 	if s.closed {
 		return newError(CodeClosed, "spool is closed", nil)
 	}
+	return s.acknowledgeThroughLocked(sequence)
+}
+
+func (s *DiskSpool) acknowledgeThroughLocked(sequence uint64) error {
 	if sequence <= s.state.AckedThrough {
 		return nil
 	}

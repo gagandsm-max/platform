@@ -159,4 +159,22 @@ class KafkaTelemetryProducerTest {
         assertEquals(2, sends.get());
         verify(kafkaTemplate, times(1)).executeInTransaction(any());
     }
+
+    @Test
+    void rejectsBatchDeadlineAboveLeaseCompatibleBound() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new KafkaTelemetryProducer(kafkaTemplate, objectMapper, metrics, 21));
+        assertThrows(IllegalArgumentException.class, () ->
+                new KafkaTelemetryProducer(kafkaTemplate, objectMapper, metrics, 0));
+        assertThrows(IllegalArgumentException.class, () ->
+                new KafkaTelemetryProducer(kafkaTemplate, objectMapper, metrics, -1));
+        assertThrows(IllegalArgumentException.class, () ->
+                new KafkaTelemetryProducer(kafkaTemplate, objectMapper, metrics, 60));
+    }
+
+    @Test
+    void acceptsBatchDeadlineAtLeaseCompatibleBound() {
+        assertDoesNotThrow(() -> new KafkaTelemetryProducer(kafkaTemplate, objectMapper, metrics, 20));
+        assertDoesNotThrow(() -> new KafkaTelemetryProducer(kafkaTemplate, objectMapper, metrics, 1));
+    }
 }

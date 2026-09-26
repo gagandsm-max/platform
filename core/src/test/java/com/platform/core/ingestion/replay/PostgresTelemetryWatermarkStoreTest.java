@@ -47,6 +47,19 @@ class PostgresTelemetryWatermarkStoreTest {
         }
     }
 
+    private void claimAndFinalize(
+            String sensorId, long first, long last, String checksum, String batchId
+    ) {
+        PublisherClaimResult claim = store.claimPublisherLease(
+                tenantId, sensorId, streamId, first, last, checksum, batchId);
+        assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
+        assertNotNull(claim.ownerToken());
+        assertTrue(claim.publisherEpoch() > 0);
+        store.finalizeReservedBatch(
+                tenantId, sensorId, streamId, first, last, checksum, batchId,
+                claim.ownerToken(), claim.publisherEpoch());
+    }
+
     @Test
     void invalidStreamAndHiddenInitialGapAreRejectedWithoutCreatingState() {
         String sensorId = "sensor-new-stream";
@@ -73,7 +86,7 @@ class PostgresTelemetryWatermarkStoreTest {
     }
 
     @Test
-    void reserveFinalizeCycleIsDurableBoundedAndIdempotent() {
+    void reserveClaimFinalizeCycleIsDurableBoundedAndIdempotent() {
         String sensorId = "sensor-reservation-01";
 
         ReplayReservation first = store.reserveBatch(
@@ -83,7 +96,7 @@ class PostgresTelemetryWatermarkStoreTest {
 
         Map<String, Object> pending = pg.jdbc().queryForMap("""
                 SELECT stream_id, acked_through_sequence, pending_first_sequence, pending_last_sequence,
-                       pending_checksum, pending_batch_id
+                       pending_checksum, pending_batch_id, pending_publisher_owner, pending_publisher_epoch
                   FROM platform.sensor_telemetry_watermark
                  WHERE tenant_id=? AND sensor_id=?
                 """, tenantId, sensorId);
@@ -93,9 +106,11 @@ class PostgresTelemetryWatermarkStoreTest {
         assertEquals(10L, ((Number) pending.get("pending_last_sequence")).longValue());
         assertEquals("checksum-a", pending.get("pending_checksum"));
         assertEquals("batch-a", pending.get("pending_batch_id"));
+        assertNull(pending.get("pending_publisher_owner"));
+        assertEquals(0L, ((Number) pending.get("pending_publisher_epoch")).longValue());
 
         ReplayReservation exactPendingRetry = store.reserveBatch(
-                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a-retry");
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a");
         assertEquals(ReplayReservation.Status.RETRY_PENDING, exactPendingRetry.status());
 
         ReplayReservation conflictingPending = store.reserveBatch(
@@ -108,13 +123,24 @@ class PostgresTelemetryWatermarkStoreTest {
         assertEquals(ReplayReservation.Status.REJECTED, outOfOrderWhilePending.status());
         assertEquals("ERR_PREVIOUS_BATCH_PENDING", outOfOrderWhilePending.rejectionCode());
 
-        store.finalizeReservedBatch(
+        PublisherClaimResult claim = store.claimPublisherLease(
                 tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a");
+        assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
+
+        PublisherClaimResult busy = store.claimPublisherLease(
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a");
+        assertEquals(PublisherClaimResult.Status.BUSY, busy.status());
+        assertEquals("ERR_BATCH_PUBLICATION_IN_PROGRESS", busy.rejectionCode());
+
+        store.finalizeReservedBatch(
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a",
+                claim.ownerToken(), claim.publisherEpoch());
 
         Map<String, Object> finalized = pg.jdbc().queryForMap("""
                 SELECT acked_through_sequence, last_first_sequence, last_last_sequence,
                        last_checksum, pending_first_sequence, pending_last_sequence,
-                       pending_checksum, pending_batch_id, pending_reserved_at
+                       pending_checksum, pending_batch_id, pending_reserved_at,
+                       pending_publisher_owner, pending_publisher_lease_until
                   FROM platform.sensor_telemetry_watermark
                  WHERE tenant_id=? AND sensor_id=?
                 """, tenantId, sensorId);
@@ -127,15 +153,49 @@ class PostgresTelemetryWatermarkStoreTest {
         assertNull(finalized.get("pending_checksum"));
         assertNull(finalized.get("pending_batch_id"));
         assertNull(finalized.get("pending_reserved_at"));
+        assertNull(finalized.get("pending_publisher_owner"));
+        assertNull(finalized.get("pending_publisher_lease_until"));
 
         ReplayReservation alreadyAcked = store.reserveBatch(
                 tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a-replay");
         assertEquals(ReplayReservation.Status.ALREADY_ACKED, alreadyAcked.status());
         assertEquals(10L, alreadyAcked.ackedThroughSequence());
 
-        // Finalize is itself idempotent for the exact accepted batch.
+        // Finalize is itself idempotent for the exact accepted batch (no pending lease required).
         assertDoesNotThrow(() -> store.finalizeReservedBatch(
-                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a-replay"));
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a-replay",
+                UUID.randomUUID(), 1L));
+    }
+
+    @Test
+    void releasePublisherLeaseKeepsPendingAndAllowsReclaim() {
+        String sensorId = "sensor-lease-release-01";
+        assertEquals(ReplayReservation.Status.RESERVED,
+                store.reserveBatch(tenantId, sensorId, streamId, 1L, 1L, "chk", "batch-r").status());
+
+        PublisherClaimResult claim = store.claimPublisherLease(
+                tenantId, sensorId, streamId, 1L, 1L, "chk", "batch-r");
+        assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
+
+        store.releasePublisherLease(
+                tenantId, sensorId, streamId, 1L, 1L, "chk", "batch-r",
+                claim.ownerToken(), claim.publisherEpoch());
+
+        Map<String, Object> pending = pg.jdbc().queryForMap("""
+                SELECT pending_first_sequence, pending_publisher_owner, pending_publisher_lease_until,
+                       pending_publisher_epoch
+                  FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensorId);
+        assertEquals(1L, ((Number) pending.get("pending_first_sequence")).longValue());
+        assertNull(pending.get("pending_publisher_owner"));
+        assertNull(pending.get("pending_publisher_lease_until"));
+        assertEquals(claim.publisherEpoch(), ((Number) pending.get("pending_publisher_epoch")).longValue());
+
+        PublisherClaimResult reclaim = store.claimPublisherLease(
+                tenantId, sensorId, streamId, 1L, 1L, "chk", "batch-r");
+        assertEquals(PublisherClaimResult.Status.CLAIMED, reclaim.status());
+        assertEquals(claim.publisherEpoch() + 1, reclaim.publisherEpoch());
     }
 
     @Test
@@ -150,7 +210,7 @@ class PostgresTelemetryWatermarkStoreTest {
 
         assertEquals(ReplayReservation.Status.RESERVED,
                 store.reserveBatch(tenantId, sensorId, streamId, 1L, 5L, "t1-a", "t1-a").status());
-        store.finalizeReservedBatch(tenantId, sensorId, streamId, 1L, 5L, "t1-a", "t1-a");
+        claimAndFinalize(sensorId, 1L, 5L, "t1-a", "t1-a");
 
         ReplayReservation regression = store.reserveBatch(
                 tenantId, sensorId, streamId, 4L, 4L, "t1-old", "t1-old");
@@ -274,9 +334,7 @@ class PostgresTelemetryWatermarkStoreTest {
         assertEquals(workers - 1, retryPending.get(), "concurrent exact retries must observe the same reservation");
         assertEquals(0, unexpected.get());
 
-        store.finalizeReservedBatch(
-                tenantId, sensorId, streamId,
-                1L, 1L, "same-checksum", "same-batch");
+        claimAndFinalize(sensorId, 1L, 1L, "same-checksum", "same-batch");
 
         Map<String, Object> state = pg.jdbc().queryForMap("""
                 SELECT acked_through_sequence, pending_first_sequence, pending_last_sequence,
@@ -290,6 +348,202 @@ class PostgresTelemetryWatermarkStoreTest {
         assertNull(state.get("pending_checksum"));
         assertNull(state.get("pending_batch_id"));
         assertNull(state.get("pending_reserved_at"));
+    }
+
+    @Test
+    void expiredPublisherLeaseCannotFinalizeAndExactRetryCanTakeover() {
+        String sensorId = "sensor-lease-expire-01";
+        assertEquals(ReplayReservation.Status.RESERVED,
+                store.reserveBatch(tenantId, sensorId, streamId, 1L, 5L, "chk-exp", "batch-exp").status());
+
+        PublisherClaimResult claim = store.claimPublisherLease(
+                tenantId, sensorId, streamId, 1L, 5L, "chk-exp", "batch-exp");
+        assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
+
+        int expired = pg.jdbc().update("""
+                UPDATE platform.sensor_telemetry_watermark
+                   SET pending_publisher_claimed_at = CURRENT_TIMESTAMP - INTERVAL '2 seconds',
+                       pending_publisher_lease_until = CURRENT_TIMESTAMP - INTERVAL '1 second'
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensorId);
+        assertEquals(1, expired);
+
+        IllegalStateException finalizeEx = assertThrows(IllegalStateException.class, () ->
+                store.finalizeReservedBatch(
+                        tenantId, sensorId, streamId, 1L, 5L, "chk-exp", "batch-exp",
+                        claim.ownerToken(), claim.publisherEpoch()));
+        assertTrue(finalizeEx.getMessage().contains("lease expired")
+                || finalizeEx.getMessage().contains("ownership changed"));
+
+        Map<String, Object> pending = pg.jdbc().queryForMap("""
+                SELECT acked_through_sequence, pending_first_sequence, pending_last_sequence,
+                       pending_checksum, pending_batch_id, pending_publisher_owner, pending_publisher_epoch
+                  FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensorId);
+        assertEquals(0L, ((Number) pending.get("acked_through_sequence")).longValue());
+        assertEquals(1L, ((Number) pending.get("pending_first_sequence")).longValue());
+        assertEquals(5L, ((Number) pending.get("pending_last_sequence")).longValue());
+        assertEquals("chk-exp", pending.get("pending_checksum"));
+        assertEquals("batch-exp", pending.get("pending_batch_id"));
+        assertEquals(claim.ownerToken(), pending.get("pending_publisher_owner"));
+        assertEquals(claim.publisherEpoch(), ((Number) pending.get("pending_publisher_epoch")).longValue());
+
+        PublisherClaimResult takeover = store.claimPublisherLease(
+                tenantId, sensorId, streamId, 1L, 5L, "chk-exp", "batch-exp");
+        assertEquals(PublisherClaimResult.Status.CLAIMED, takeover.status());
+        assertEquals(claim.publisherEpoch() + 1, takeover.publisherEpoch());
+        assertNotEquals(claim.ownerToken(), takeover.ownerToken());
+
+        assertDoesNotThrow(() -> store.finalizeReservedBatch(
+                tenantId, sensorId, streamId, 1L, 5L, "chk-exp", "batch-exp",
+                takeover.ownerToken(), takeover.publisherEpoch()));
+
+        assertEquals(5L, pg.jdbc().queryForObject(
+                "SELECT acked_through_sequence FROM platform.sensor_telemetry_watermark WHERE tenant_id=? AND sensor_id=?",
+                Long.class, tenantId, sensorId));
+    }
+
+    @Test
+    void staleOwnerAfterTakeoverCannotFinalizeOrReleaseNewerLease() {
+        String sensorId = "sensor-lease-stale-01";
+        assertEquals(ReplayReservation.Status.RESERVED,
+                store.reserveBatch(tenantId, sensorId, streamId, 1L, 1L, "chk-stale", "batch-stale").status());
+
+        PublisherClaimResult oldClaim = store.claimPublisherLease(
+                tenantId, sensorId, streamId, 1L, 1L, "chk-stale", "batch-stale");
+        assertEquals(PublisherClaimResult.Status.CLAIMED, oldClaim.status());
+
+        pg.jdbc().update("""
+                UPDATE platform.sensor_telemetry_watermark
+                   SET pending_publisher_claimed_at = CURRENT_TIMESTAMP - INTERVAL '2 seconds',
+                       pending_publisher_lease_until = CURRENT_TIMESTAMP - INTERVAL '1 second'
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensorId);
+
+        PublisherClaimResult newClaim = store.claimPublisherLease(
+                tenantId, sensorId, streamId, 1L, 1L, "chk-stale", "batch-stale");
+        assertEquals(PublisherClaimResult.Status.CLAIMED, newClaim.status());
+        assertEquals(oldClaim.publisherEpoch() + 1, newClaim.publisherEpoch());
+
+        assertThrows(IllegalStateException.class, () ->
+                store.finalizeReservedBatch(
+                        tenantId, sensorId, streamId, 1L, 1L, "chk-stale", "batch-stale",
+                        oldClaim.ownerToken(), oldClaim.publisherEpoch()));
+
+        store.releasePublisherLease(
+                tenantId, sensorId, streamId, 1L, 1L, "chk-stale", "batch-stale",
+                oldClaim.ownerToken(), oldClaim.publisherEpoch());
+
+        Map<String, Object> owned = pg.jdbc().queryForMap("""
+                SELECT pending_publisher_owner, pending_publisher_epoch, pending_first_sequence
+                  FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensorId);
+        assertEquals(newClaim.ownerToken(), owned.get("pending_publisher_owner"));
+        assertEquals(newClaim.publisherEpoch(), ((Number) owned.get("pending_publisher_epoch")).longValue());
+        assertEquals(1L, ((Number) owned.get("pending_first_sequence")).longValue());
+
+        assertDoesNotThrow(() -> store.finalizeReservedBatch(
+                tenantId, sensorId, streamId, 1L, 1L, "chk-stale", "batch-stale",
+                newClaim.ownerToken(), newClaim.publisherEpoch()));
+    }
+
+    @Test
+    void finalizeFailsWhenLockDelayPushesPastLeaseUsingWallClock() throws Exception {
+        String sensorId = "sensor-lease-lock-delay-01";
+        assertEquals(ReplayReservation.Status.RESERVED,
+                store.reserveBatch(tenantId, sensorId, streamId, 1L, 3L, "chk-ld", "batch-ld").status());
+        PublisherClaimResult claim = store.claimPublisherLease(
+                tenantId, sensorId, streamId, 1L, 3L, "chk-ld", "batch-ld");
+        assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
+
+        // Short controlled lease while preserving DB wall-clock coherence.
+        assertEquals(1, pg.jdbc().update("""
+                UPDATE platform.sensor_telemetry_watermark
+                   SET pending_publisher_claimed_at = clock_timestamp(),
+                       pending_publisher_lease_until = clock_timestamp() + INTERVAL '250 milliseconds'
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensorId));
+
+        CountDownLatch holderReady = new CountDownLatch(1);
+        CountDownLatch releaseHold = new CountDownLatch(1);
+        CountDownLatch finalizeStarted = new CountDownLatch(1);
+        AtomicInteger finalizeOutcome = new AtomicInteger(0); // 1=success, -1=fail
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            pool.submit(() -> {
+                try (var conn = pg.dataSource().getConnection()) {
+                    conn.setAutoCommit(false);
+                    try (var ps = conn.prepareStatement(
+                            "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+                        ps.setString(1, "sensor_telemetry_watermark:" + tenantId + ":" + sensorId);
+                        ps.execute();
+                    }
+                    holderReady.countDown();
+                    assertTrue(releaseHold.await(5, TimeUnit.SECONDS));
+                    // Hold past lease expiry: wait until DB wall clock exceeds lease_until.
+                    Boolean expired;
+                    do {
+                        expired = pg.jdbc().queryForObject("""
+                                SELECT pending_publisher_lease_until <= clock_timestamp()
+                                  FROM platform.sensor_telemetry_watermark
+                                 WHERE tenant_id=? AND sensor_id=?
+                                """, Boolean.class, tenantId, sensorId);
+                        Thread.sleep(20);
+                    } while (!Boolean.TRUE.equals(expired));
+                    conn.commit();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+
+            assertTrue(holderReady.await(5, TimeUnit.SECONDS));
+            pool.submit(() -> {
+                finalizeStarted.countDown();
+                try {
+                    store.finalizeReservedBatch(
+                            tenantId, sensorId, streamId, 1L, 3L, "chk-ld", "batch-ld",
+                            claim.ownerToken(), claim.publisherEpoch());
+                    finalizeOutcome.set(1);
+                } catch (IllegalStateException ex) {
+                    assertTrue(ex.getMessage().contains("lease expired")
+                            || ex.getMessage().contains("ownership changed"));
+                    finalizeOutcome.set(-1);
+                }
+            });
+
+            assertTrue(finalizeStarted.await(5, TimeUnit.SECONDS));
+            // Give finalizer time to begin its transaction (CURRENT_TIMESTAMP would freeze here)
+            // before releasing the lock after real lease expiry.
+            Thread.sleep(50);
+            releaseHold.countDown();
+
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(15, TimeUnit.SECONDS));
+            assertEquals(-1, finalizeOutcome.get(), "finalizer must fail after wall-clock lease expiry");
+
+            Map<String, Object> pending = pg.jdbc().queryForMap("""
+                    SELECT acked_through_sequence, pending_first_sequence, pending_last_sequence,
+                           pending_batch_id, pending_publisher_owner
+                      FROM platform.sensor_telemetry_watermark
+                     WHERE tenant_id=? AND sensor_id=?
+                    """, tenantId, sensorId);
+            assertEquals(0L, ((Number) pending.get("acked_through_sequence")).longValue());
+            assertEquals(1L, ((Number) pending.get("pending_first_sequence")).longValue());
+            assertEquals(3L, ((Number) pending.get("pending_last_sequence")).longValue());
+            assertEquals("batch-ld", pending.get("pending_batch_id"));
+            assertEquals(claim.ownerToken(), pending.get("pending_publisher_owner"));
+
+            PublisherClaimResult takeover = store.claimPublisherLease(
+                    tenantId, sensorId, streamId, 1L, 3L, "chk-ld", "batch-ld");
+            assertEquals(PublisherClaimResult.Status.CLAIMED, takeover.status());
+            assertDoesNotThrow(() -> store.finalizeReservedBatch(
+                    tenantId, sensorId, streamId, 1L, 3L, "chk-ld", "batch-ld",
+                    takeover.ownerToken(), takeover.publisherEpoch()));
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
 }

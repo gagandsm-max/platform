@@ -9,6 +9,7 @@ import java.util.List;
 public record AgentTelemetryBatchRequest(
         @JsonProperty("schemaVersion") int schemaVersion,
         @JsonProperty("sensorId") String sensorId,
+        @JsonProperty("sensorAgentSpoolStreamId") String sensorAgentSpoolStreamId,
         @JsonProperty("batchId") String batchId,
         @JsonProperty("firstIngressSequence") long firstIngressSequence,
         @JsonProperty("lastIngressSequence") long lastIngressSequence,

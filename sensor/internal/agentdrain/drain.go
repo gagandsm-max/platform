@@ -74,6 +74,7 @@ type envelopeLite struct {
 
 type Config struct {
 	SensorID             string
+	StreamID             string
 	AgentSpoolDir        string
 	MaxBatchRecords      int
 	MaxBatchPayloadBytes int
@@ -92,7 +93,9 @@ type Transport interface {
 }
 
 type Spool interface {
-	ReadBatch(int, int) (spool.Batch, error)
+	ReadOrReserveOutboundBatch(int, int) (spool.Batch, error)
+	CompleteOutboundBatch(uint64) error
+	AbandonOutboundBatch() error
 	AcknowledgeThrough(uint64) error
 	Stats() (spool.Stats, error)
 }
@@ -139,8 +142,11 @@ type Drain struct {
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
-	if strings.TrimSpace(cfg.SensorID) == "" || sp == nil || tr == nil {
-		return nil, codeErr(CodeInvalidConfig, "sensor id, spool and transport are required", nil, false)
+	if strings.TrimSpace(cfg.SensorID) == "" || strings.TrimSpace(cfg.StreamID) == "" || sp == nil || tr == nil {
+		return nil, codeErr(CodeInvalidConfig, "sensor id, stream id, spool and transport are required", nil, false)
+	}
+	if !validAgentSpoolStreamID(cfg.StreamID) {
+		return nil, codeErr(CodeInvalidConfig, "agent spool stream id grammar invalid", nil, false)
 	}
 	if cfg.MaxBatchRecords <= 0 {
 		cfg.MaxBatchRecords = 32
@@ -243,7 +249,7 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	d.refreshStats()
-	batch, err := d.spool.ReadBatch(d.cfg.MaxBatchRecords, d.cfg.MaxBatchPayloadBytes)
+	batch, err := d.spool.ReadOrReserveOutboundBatch(d.cfg.MaxBatchRecords, d.cfg.MaxBatchPayloadBytes)
 	if err != nil {
 		return false, codeErr(CodeSpool, "failed reading agent spool batch", err, false)
 	}
@@ -261,7 +267,10 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 
 	req, err := d.makeRequest(batch)
 	if err != nil {
-		// Malformed durable payload is terminal for the head record — park it.
+		// Malformed durable payload is terminal for the head record — abandon frozen window, then park.
+		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
+			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
+		}
 		if parkErr := d.parkHead(batch, "ERR_MALFORMED_DURABLE_PAYLOAD", err); parkErr != nil {
 			return false, parkErr
 		}
@@ -273,7 +282,7 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 	d.metrics.Attempts.Add(1)
 	ack, err := d.transport.UploadAgentTelemetry(uploadCtx, req)
 	if err == nil {
-		if aerr := d.spool.AcknowledgeThrough(ack.AcceptedThroughIngressSequence); aerr != nil {
+		if aerr := d.spool.CompleteOutboundBatch(ack.AcceptedThroughIngressSequence); aerr != nil {
 			return false, codeErr(CodeSpool, "failed applying durable agent ACK to spool", aerr, false)
 		}
 		d.metrics.Successes.Add(1)
@@ -285,6 +294,11 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 
 	if isTerminalCoreError(err) {
 		code := terminalCode(err)
+		// Explicit poison allowlist: Core rejected before durable reservation.
+		// Abandon local outbound window before acknowledging the poison head.
+		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
+			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
+		}
 		if parkErr := d.parkHead(batch, code, err); parkErr != nil {
 			return false, parkErr
 		}
@@ -362,19 +376,24 @@ func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, 
 		records = append(records, ingress)
 	}
 	checksum := hex.EncodeToString(h.Sum(nil))
-	batchID := fmt.Sprintf("agent-ingress-%s-%020d-%020d-%s",
-		d.cfg.SensorID, batch.FirstSequence, batch.LastSequence, checksum[:16])
+	if batch.FirstSequence == 0 || batch.LastSequence < batch.FirstSequence ||
+		batch.FirstSequence > spool.MaxSafeSequence || batch.LastSequence > spool.MaxSafeSequence {
+		return coreclient.AgentTelemetryBatch{}, fmt.Errorf("agent spool batch sequence exceeds MAX_SAFE_SEQUENCE or is invalid")
+	}
+	batchID := fmt.Sprintf("agent-ingress-%s-%s-%020d-%020d-%s",
+		d.cfg.SensorID, d.cfg.StreamID, batch.FirstSequence, batch.LastSequence, checksum[:16])
 	corr := fmt.Sprintf("agentdrain-%s", batchID)
 	out := coreclient.AgentTelemetryBatch{
-		SchemaVersion:        1,
-		SensorID:             d.cfg.SensorID,
-		BatchID:              batchID,
-		FirstIngressSequence: batch.FirstSequence,
-		LastIngressSequence:  batch.LastSequence,
-		RecordCount:          len(records),
-		Checksum:             checksum,
-		CorrelationID:        corr,
-		Records:              records,
+		SchemaVersion:            2,
+		SensorID:                 d.cfg.SensorID,
+		SensorAgentSpoolStreamID: d.cfg.StreamID,
+		BatchID:                  batchID,
+		FirstIngressSequence:     batch.FirstSequence,
+		LastIngressSequence:      batch.LastSequence,
+		RecordCount:              len(records),
+		Checksum:                 checksum,
+		CorrelationID:            corr,
+		Records:                  records,
 	}
 	encoded, err := json.Marshal(out)
 	if err != nil {
@@ -501,15 +520,11 @@ func (d *Drain) Shutdown(ctx context.Context) error {
 }
 
 func isTerminalCoreError(err error) bool {
-	if coreclient.IsCoreAPICode(err, "ERR_AGENT_ENTITY_UNRESOLVED") ||
-		coreclient.IsCoreAPICode(err, "ERR_AGENT_ASSIGNMENT_UNKNOWN") ||
-		coreclient.IsCoreAPICode(err, "ERR_AUTH_IDENTITY_MISMATCH") ||
-		coreclient.IsCoreAPICode(err, "ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH") ||
-		coreclient.IsCoreAPICode(err, "ERR_AGENT_ACCEPTING_SENSOR_MISMATCH") ||
-		coreclient.IsCoreAPICode(err, "ERR_TENANT_SCOPE_MISMATCH") ||
-		coreclient.IsCoreAPICode(err, "ERR_IDEMPOTENCY_CONFLICT") ||
-		coreclient.IsCoreAPICode(err, "ERR_SEQUENCE_REGRESSION") ||
-		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_JSON") ||
+	// BUILD-003: poison parking is an EXPLICIT allowlist of genuinely malformed /
+	// intrinsically un-ingestable durable payloads. Default for unknown/application/
+	// authority/assignment/state Core errors is retain spool and fail closed.
+	// HTTP status alone must never authorize AcknowledgeThrough.
+	return coreclient.IsCoreAPICode(err, "ERR_MALFORMED_JSON") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD_PAYLOAD") ||
 		coreclient.IsCoreAPICode(err, "ERR_UNSUPPORTED_SCHEMA_VERSION") ||
@@ -517,17 +532,7 @@ func isTerminalCoreError(err error) bool {
 		coreclient.IsCoreAPICode(err, "ERR_AGENT_HOST_ID_REQUIRED") ||
 		coreclient.IsCoreAPICode(err, "ERR_RECORD_TOO_LARGE") ||
 		coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") ||
-		coreclient.IsCoreAPICode(err, "ERR_REQUEST_TOO_LARGE") {
-		return true
-	}
-	var api *coreclient.CoreAPIError
-	if errors.As(err, &api) && !api.Transient() {
-		switch api.HTTPStatus {
-		case 400, 403, 409, 413, 422:
-			return true
-		}
-	}
-	return false
+		coreclient.IsCoreAPICode(err, "ERR_REQUEST_TOO_LARGE")
 }
 
 func terminalCode(err error) string {
@@ -593,4 +598,18 @@ func jitterDuration(d time.Duration, f float64) time.Duration {
 		return 0
 	}
 	return time.Duration(v)
+}
+
+func validAgentSpoolStreamID(streamID string) bool {
+	const prefix = "stream-"
+	if len(streamID) != len(prefix)+32 || !strings.HasPrefix(streamID, prefix) {
+		return false
+	}
+	for i := len(prefix); i < len(streamID); i++ {
+		c := streamID[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }

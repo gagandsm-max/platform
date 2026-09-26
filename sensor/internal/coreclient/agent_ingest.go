@@ -13,17 +13,18 @@ import (
 
 const agentTelemetryPath = "/api/v1/sensor/agent-telemetry"
 
-// AgentTelemetryBatch is the Sensor→Core agent-ingress drain request.
+// AgentTelemetryBatch is the Sensor→Core agent-ingress drain request (BUILD-003 contract v2).
 type AgentTelemetryBatch struct {
-	SchemaVersion         int                   `json:"schemaVersion"`
-	SensorID              string                `json:"sensorId"`
-	BatchID               string                `json:"batchId"`
-	FirstIngressSequence  uint64                `json:"firstIngressSequence"`
-	LastIngressSequence   uint64                `json:"lastIngressSequence"`
-	RecordCount           int                   `json:"recordCount"`
-	Checksum              string                `json:"checksum"`
-	CorrelationID         string                `json:"correlationId"`
-	Records               []AgentIngressRecord  `json:"records"`
+	SchemaVersion            int                  `json:"schemaVersion"`
+	SensorID                 string               `json:"sensorId"`
+	SensorAgentSpoolStreamID string               `json:"sensorAgentSpoolStreamId"`
+	BatchID                  string               `json:"batchId"`
+	FirstIngressSequence     uint64               `json:"firstIngressSequence"`
+	LastIngressSequence      uint64               `json:"lastIngressSequence"`
+	RecordCount              int                  `json:"recordCount"`
+	Checksum                 string               `json:"checksum"`
+	CorrelationID            string               `json:"correlationId"`
+	Records                  []AgentIngressRecord `json:"records"`
 }
 
 // AgentIngressRecord preserves immutable accepted evidence from the Sensor Agent spool.
@@ -121,8 +122,10 @@ func (c *Client) UploadAgentTelemetry(ctx context.Context, batch AgentTelemetryB
 	if err := contextClassified(ctx); err != nil {
 		return AgentTelemetryAck{}, err
 	}
-	if batch.SchemaVersion <= 0 || strings.TrimSpace(batch.SensorID) == "" || strings.TrimSpace(batch.BatchID) == "" ||
+	if batch.SchemaVersion != 2 || strings.TrimSpace(batch.SensorID) == "" || strings.TrimSpace(batch.SensorAgentSpoolStreamID) == "" ||
+		strings.TrimSpace(batch.BatchID) == "" ||
 		batch.FirstIngressSequence == 0 || batch.LastIngressSequence < batch.FirstIngressSequence ||
+		batch.FirstIngressSequence > MaxSafeSequence || batch.LastIngressSequence > MaxSafeSequence ||
 		batch.RecordCount == 0 || len(batch.Records) == 0 || strings.TrimSpace(batch.Checksum) == "" ||
 		strings.TrimSpace(batch.CorrelationID) == "" {
 		return AgentTelemetryAck{}, newError(CodeInvalidConfig, "agent-telemetry batch metadata is incomplete or invalid", nil, false)
@@ -170,7 +173,7 @@ func (c *Client) UploadAgentTelemetry(ctx context.Context, batch AgentTelemetryB
 }
 
 func validateAgentTelemetryAck(batch AgentTelemetryBatch, ack AgentTelemetryAck) error {
-	if !strings.EqualFold(ack.Status, "ACCEPTED") {
+	if ack.Status != "ACCEPTED" {
 		return newError(CodeProtocol, "Core agent-telemetry acknowledgement status is not ACCEPTED", nil, false)
 	}
 	if ack.SensorID != batch.SensorID {
@@ -207,8 +210,47 @@ func classifyAgentTelemetryStatus(status int, body []byte) error {
 		msg = fmt.Sprintf("Core returned HTTP status %d", status)
 	}
 	transient := status == http.StatusTooManyRequests || status >= 500
+	// BUILD-003 publisher-lease / prior-pending conditions are retryable and must retain spool.
+	switch code {
+	case "ERR_PREVIOUS_BATCH_PENDING", "ERR_BATCH_PUBLICATION_IN_PROGRESS":
+		transient = true
+	}
 	if code != "" {
 		return &CoreAPIError{Status: apiErr.Status, Code: code, Message: msg, HTTPStatus: status, transient: transient}
 	}
 	return classifyStatus(status)
+}
+
+// ClassifyAgentTelemetryFailure maps a Core agent-ingress HTTP failure for drain classification tests.
+func ClassifyAgentTelemetryFailure(httpStatus int, body []byte) error {
+	return classifyAgentTelemetryStatus(httpStatus, body)
+}
+
+// IsAgentIngressSpoolRetainingCode reports BUILD-003 transport/replay/lineage/state
+// and authority/assignment failures that must retain durable Agent spool data
+// (no poison park / AcknowledgeThrough). Unknown application 4xx also retain by default
+// via the explicit poison allowlist in agentdrain — this helper documents the known set.
+func IsAgentIngressSpoolRetainingCode(code string) bool {
+	switch strings.TrimSpace(code) {
+	case "ERR_PREVIOUS_BATCH_PENDING",
+		"ERR_BATCH_PUBLICATION_IN_PROGRESS",
+		"ERR_SENSOR_STREAM_CHANGED",
+		"ERR_SENSOR_AGENT_SPOOL_STREAM_CHANGED",
+		"ERR_IDEMPOTENCY_CONFLICT",
+		"ERR_SEQUENCE_REGRESSION",
+		"ERR_SEQUENCE_GAP",
+		"ERR_SEQUENCE_OUT_OF_BOUNDS",
+		"ERR_AGENT_STREAM_ID_INVALID",
+		"ERR_SENSOR_AUTHORITY_UNAVAILABLE",
+		"ERR_AUTH_CLIENT_CERT_REQUIRED",
+		"ERR_AUTH_IDENTITY_MISMATCH",
+		"ERR_AGENT_ASSIGNMENT_UNKNOWN",
+		"ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH",
+		"ERR_AGENT_ACCEPTING_SENSOR_MISMATCH",
+		"ERR_TENANT_SCOPE_MISMATCH",
+		"ERR_AGENT_ENTITY_UNRESOLVED":
+		return true
+	default:
+		return false
+	}
 }

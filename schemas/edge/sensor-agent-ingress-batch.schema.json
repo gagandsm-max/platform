@@ -1,14 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://platform.invalid/schemas/edge/sensor-agent-ingress-batch.schema.json",
-  "title": "Sensor→Core Agent-Ingress Batch v1",
-  "description": "CURRENT_IMPLEMENTED_V1 AgentTelemetryBatchRequest (Core acceptance max 1000; Sensor producer default may be 32). Outer sensorIngressSequence uses complete unordered set semantics matching Core AgentIngestionValidator. Nested records[] are original Agent DeliveryRecord arrays (1..100, strictly contiguous ascending). Semantics at-least-once; BUILD_003_TARGET owns V009-style reservation. Sequence ceiling FROZEN_BUILD_000_INVARIANT; runtime ceiling enforcement BUILD_003_TARGET.",
+  "title": "Sensor→Core Agent-Ingress Batch",
+  "description": "BUILD-003 contract: schemaVersion 2 requires sensorAgentSpoolStreamId (Sensor Agent DiskSpool stream). schemaVersion 1 retained as historical evidence only; production path is v2. Outer sensorIngressSequence uses complete unordered set semantics. Nested records[] are original Agent DeliveryRecord arrays. Sequence ceiling FROZEN_BUILD_000_INVARIANT with BUILD-003 runtime enforcement.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "sensorId", "batchId", "firstIngressSequence", "lastIngressSequence", "recordCount", "checksum", "correlationId", "records"],
   "properties": {
-    "schemaVersion": {"$ref": "common-definitions.schema.json#/$defs/schemaVersionV1"},
+    "schemaVersion": {
+      "oneOf": [
+        {"$ref": "common-definitions.schema.json#/$defs/schemaVersionV1"},
+        {"$ref": "common-definitions.schema.json#/$defs/schemaVersionV2"}
+      ]
+    },
     "sensorId": {"$ref": "common-definitions.schema.json#/$defs/sensorId"},
+    "sensorAgentSpoolStreamId": {"$ref": "common-definitions.schema.json#/$defs/sensorStreamId"},
     "batchId": {"$ref": "common-definitions.schema.json#/$defs/coreBatchId"},
     "firstIngressSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
     "lastIngressSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"},
@@ -58,5 +64,25 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"schemaVersion": {"const": 2}},
+        "required": ["schemaVersion"]
+      },
+      "then": {
+        "required": ["sensorAgentSpoolStreamId"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"schemaVersion": {"const": 1}},
+        "required": ["schemaVersion"]
+      },
+      "then": {
+        "not": {"required": ["sensorAgentSpoolStreamId"]}
+      }
+    }
+  ]
 }

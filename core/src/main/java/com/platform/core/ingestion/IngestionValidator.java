@@ -141,6 +141,15 @@ public class IngestionValidator {
             throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_BATCH_BOUNDS_INVALID", "firstSequence must be positive");
         }
 
+        if (!TransportSequenceLimits.isValidWireSequence(batch.firstSequence())
+                || !TransportSequenceLimits.isValidWireSequence(batch.lastSequence())) {
+            throw new IngestionException(
+                    HttpStatus.BAD_REQUEST,
+                    "ERR_SEQUENCE_OUT_OF_BOUNDS",
+                    "Batch sequences must be within 1..9007199254740991"
+            );
+        }
+
         if (batch.lastSequence() < batch.firstSequence()) {
             throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_BATCH_BOUNDS_INVALID", "lastSequence cannot be less than firstSequence");
         }

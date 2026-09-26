@@ -12,7 +12,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -21,10 +20,13 @@ public class KafkaTelemetryProducer {
     private static final Logger log = LoggerFactory.getLogger(KafkaTelemetryProducer.class);
     public static final String TOPIC_TELEMETRY_NUMERIC = "telemetry.numeric.v1";
 
+    /** Whole-batch wall-clock deadline compatible with the 60s publisher lease. */
+    public static final long BATCH_PUBLICATION_DEADLINE_SECONDS = 20L;
+
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
     private final IngestionMetrics metrics;
-    private final long timeoutSeconds;
+    private final long batchDeadlineSeconds;
     private final String topic;
 
     @Autowired
@@ -32,12 +34,20 @@ public class KafkaTelemetryProducer {
             KafkaTemplate<String, String> kafkaTemplate,
             ObjectMapper objectMapper,
             IngestionMetrics metrics,
-            @Value("${platform.kafka.publish-timeout-seconds:5}") long timeoutSeconds
+            @Value("${platform.kafka.batch-publish-deadline-seconds:20}") long batchDeadlineSeconds
     ) {
+        if (batchDeadlineSeconds <= 0 || batchDeadlineSeconds > BATCH_PUBLICATION_DEADLINE_SECONDS) {
+            throw new IllegalArgumentException(
+                    "platform.kafka.batch-publish-deadline-seconds must be >0 and <="
+                            + BATCH_PUBLICATION_DEADLINE_SECONDS
+                            + " to remain compatible with the 60s publisher lease; got "
+                            + batchDeadlineSeconds
+            );
+        }
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.metrics = metrics;
-        this.timeoutSeconds = timeoutSeconds;
+        this.batchDeadlineSeconds = batchDeadlineSeconds;
         this.topic = TOPIC_TELEMETRY_NUMERIC;
     }
 
@@ -49,6 +59,7 @@ public class KafkaTelemetryProducer {
      * Publishes all numeric and Counter64 observations of a batch in one atomic Kafka transaction.
      * Mixed batches remain inside the same transactional boundary (PR #81).
      * Agent numeric-only callers should wrap with {@link TelemetryObservationBatch#ofNumeric(List)}.
+     * Whole-batch wall-clock deadline is bounded (default 20s) for publisher-lease compatibility.
      */
     public void publishBatchTransactionally(TelemetryObservationBatch batch) {
         if (batch == null || batch.isEmpty()) {
@@ -65,14 +76,15 @@ public class KafkaTelemetryProducer {
         }
 
         long startTime = System.currentTimeMillis();
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(batchDeadlineSeconds);
         try {
             kafkaTemplate.executeInTransaction(operations -> {
                 try {
                     for (CanonicalObservation obs : batch.numericObservations()) {
-                        sendOne(operations, obs.sequenceId(), objectMapper.writeValueAsString(obs));
+                        sendOne(operations, obs.sequenceId(), objectMapper.writeValueAsString(obs), deadlineNanos);
                     }
                     for (CanonicalCounterObservation obs : batch.counterObservations()) {
-                        sendOne(operations, obs.sequenceId(), objectMapper.writeValueAsString(obs));
+                        sendOne(operations, obs.sequenceId(), objectMapper.writeValueAsString(obs), deadlineNanos);
                     }
                 } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
                     throw new RuntimeException("Failed to serialize telemetry observation for Kafka", e);
@@ -97,11 +109,17 @@ public class KafkaTelemetryProducer {
     private void sendOne(
             org.springframework.kafka.core.KafkaOperations<String, String> operations,
             String key,
-            String payload
+            String payload,
+            long deadlineNanos
     ) {
+        long remainingNanos = deadlineNanos - System.nanoTime();
+        if (remainingNanos <= 0) {
+            throw new RuntimeException("Kafka batch publication exceeded whole-batch deadline of "
+                    + batchDeadlineSeconds + "s");
+        }
         try {
             CompletableFuture<?> future = operations.send(topic, key, payload);
-            future.get(timeoutSeconds, TimeUnit.SECONDS);
+            future.get(remainingNanos, TimeUnit.NANOSECONDS);
         } catch (Exception e) {
             throw new RuntimeException(
                     "Failed to send observation to Kafka topic=" + topic + " key=" + key + ": " + e.getMessage(),
