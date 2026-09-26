@@ -517,6 +517,55 @@ class AgentControlAuthorityIntegrationTest {
     }
 
     @Test
+    void controlGenerationBoundary_maxSafeMinusOneAdvancesAndExhaustionPreservesActive() throws Exception {
+        Tenant tenant = tenantService.create("Gen Fence Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-g1", tenant.tenantId(), null, SensorRole.INFRASTRUCTURE, true);
+        sensorControl.enrollSensor("sensor-g2", tenant.tenantId(), null, SensorRole.INFRASTRUCTURE, true);
+        agentControl.enrollAgent("agent-gen", tenant.tenantId(), null);
+
+        AgentSensorAssignment seeded = agentControl.assignToSensor(
+                tenant.tenantId(), "agent-gen", "sensor-g1");
+        assertEquals(1L, seeded.generation());
+
+        long maxSafe = com.platform.core.control.ControlGenerationLimits.MAX_SAFE_CONTROL_GENERATION;
+        pg.jdbc().update("""
+                UPDATE platform.agent_sensor_assignment
+                   SET generation = ?
+                 WHERE assignment_id = ?::uuid
+                """, maxSafe - 1L, seeded.assignmentId());
+
+        AgentSensorAssignment atMax = agentControl.reassignToSensor(
+                tenant.tenantId(), "agent-gen", "sensor-g2", maxSafe - 1L);
+        assertEquals(maxSafe, atMax.generation());
+        assertEquals("sensor-g2", atMax.sensorId());
+        assertEquals(AgentAssignmentStatus.ACTIVE, atMax.status());
+
+        // Idempotent path is N/A for assignment; mutation requiring increment must exhaust.
+        AgentControlException exhausted = assertThrows(AgentControlException.class,
+                () -> agentControl.reassignToSensor(tenant.tenantId(), "agent-gen", "sensor-g1", maxSafe));
+        assertEquals(AgentControlException.ERR_CONTROL_GENERATION_EXHAUSTED, exhausted.getCode());
+
+        AgentSensorAssignment stillActive = agentRepo.findActiveAssignmentForAgent(tenant.tenantId(), "agent-gen")
+                .orElseThrow();
+        assertEquals(maxSafe, stillActive.generation());
+        assertEquals("sensor-g2", stillActive.sensorId());
+        assertEquals(AgentAssignmentStatus.ACTIVE, stillActive.status());
+
+        // Historical max at MAX_SAFE with no ACTIVE: assign must not reset to 1.
+        agentControl.revokeAssignment(tenant.tenantId(), "agent-gen");
+        assertTrue(agentRepo.findActiveAssignmentForAgent(tenant.tenantId(), "agent-gen").isEmpty());
+        AgentControlException histExhausted = assertThrows(AgentControlException.class,
+                () -> agentControl.assignToSensor(tenant.tenantId(), "agent-gen", "sensor-g1"));
+        assertEquals(AgentControlException.ERR_CONTROL_GENERATION_EXHAUSTED, histExhausted.getCode());
+        assertTrue(agentRepo.findActiveAssignmentForAgent(tenant.tenantId(), "agent-gen").isEmpty());
+
+        AgentControlException overMax = assertThrows(AgentControlException.class,
+                () -> agentControl.reassignToSensor(
+                        tenant.tenantId(), "agent-gen", "sensor-g1", maxSafe + 1L));
+        assertEquals(AgentControlException.ERR_AGENT_STATE_INVALID, overMax.getCode());
+    }
+
+    @Test
     void springManagedRotationRollbackKeepsOldCredentialActive() throws Exception {
         Tenant tenant = tenantService.create("Tx Rollback Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
         agentControl.enrollAgent("agent-tx", tenant.tenantId(), null);

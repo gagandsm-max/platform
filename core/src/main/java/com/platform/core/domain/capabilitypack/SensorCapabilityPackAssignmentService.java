@@ -1,5 +1,6 @@
 package com.platform.core.domain.capabilitypack;
 
+import com.platform.core.control.ControlGenerationLimits;
 import com.platform.core.domain.DomainException;
 import com.platform.core.persistence.CapabilityPackRepository;
 import com.platform.core.persistence.SensorCapabilityPackAssignmentRepository;
@@ -98,6 +99,13 @@ public class SensorCapabilityPackAssignmentService {
             return snapshot(tenantId, sensorId, ctx.state());
         }
 
+        // Exhaustion before assignment-row mutation so rollback is not the only safety net.
+        if (!ControlGenerationLimits.canIncrement(ctx.state().desiredGeneration())) {
+            throw new DomainException(
+                    ControlGenerationLimits.ERR_CONTROL_GENERATION_EXHAUSTED,
+                    ControlGenerationLimits.EXHAUSTED_MESSAGE);
+        }
+
         requireActivePackVersion(tenantId, packId, packVersion);
 
         String actor = PlatformSecurityContext.requirePrincipal().subjectId();
@@ -128,6 +136,19 @@ public class SensorCapabilityPackAssignmentService {
         requireExpectedGeneration(expectedGeneration);
 
         MutationContext ctx = beginMutation(tenantId, sensorId, expectedGeneration);
+        Optional<SensorCapabilityPackAssignment> existing =
+                assignmentRepository.findAssignment(tenantId, sensorId, packId);
+        if (existing.isEmpty()) {
+            return snapshot(tenantId, sensorId, ctx.state());
+        }
+
+        // Exhaustion before delete so the assignment set stays intact on failure.
+        if (!ControlGenerationLimits.canIncrement(ctx.state().desiredGeneration())) {
+            throw new DomainException(
+                    ControlGenerationLimits.ERR_CONTROL_GENERATION_EXHAUSTED,
+                    ControlGenerationLimits.EXHAUSTED_MESSAGE);
+        }
+
         int deleted = assignmentRepository.deleteAssignment(tenantId, sensorId, packId);
         if (deleted == 0) {
             return snapshot(tenantId, sensorId, ctx.state());
@@ -186,6 +207,10 @@ public class SensorCapabilityPackAssignmentService {
     ) {
         if (generation < 0) {
             throw new DomainException("VALIDATION_FAILED", "generation must be >= 0");
+        }
+        if (!ControlGenerationLimits.isJsonSafe(generation)) {
+            throw new DomainException("VALIDATION_FAILED",
+                    "generation exceeds MAX_SAFE_CONTROL_GENERATION");
         }
         if (checksum != null && !checksum.matches("^[a-f0-9]{64}$")) {
             throw new DomainException("VALIDATION_FAILED", "checksum must be lowercase 64-hex when present");
@@ -273,7 +298,13 @@ public class SensorCapabilityPackAssignmentService {
                     "Assignment count exceeds max " + CapabilityPackRegistry.MAX_PACK_COUNT);
         }
         String checksum = SensorPackDesiredChecksum.compute(digests);
-        long nextGen = increment ? ctx.state().desiredGeneration() + 1L : ctx.state().desiredGeneration();
+        long nextGen = increment
+                ? ControlGenerationLimits.nextOrThrow(
+                        ctx.state().desiredGeneration(),
+                        new DomainException(
+                                ControlGenerationLimits.ERR_CONTROL_GENERATION_EXHAUSTED,
+                                ControlGenerationLimits.EXHAUSTED_MESSAGE))
+                : ctx.state().desiredGeneration();
         assignmentRepository.upsertDesiredState(tenantId, sensorId, nextGen, checksum, actor, now);
         return new SensorCapabilityPackState(
                 tenantId,
@@ -330,6 +361,10 @@ public class SensorCapabilityPackAssignmentService {
         }
         if (expectedGeneration < 0) {
             throw new DomainException("VALIDATION_FAILED", "expectedGeneration must be >= 0");
+        }
+        if (!ControlGenerationLimits.isJsonSafe(expectedGeneration)) {
+            throw new DomainException("VALIDATION_FAILED",
+                    "expectedGeneration exceeds MAX_SAFE_CONTROL_GENERATION");
         }
     }
 

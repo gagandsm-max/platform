@@ -1,6 +1,7 @@
 package com.platform.core.domain.discovery;
 
 import com.platform.core.api.PageResult;
+import com.platform.core.control.ControlGenerationLimits;
 import com.platform.core.domain.DomainException;
 import com.platform.core.domain.tenant.TenantService;
 import com.platform.core.id.UuidV7;
@@ -124,12 +125,24 @@ public class DiscoveryService {
     /**
      * First placement only (PENDING + unassigned). Concurrent losers receive
      * {@code DISCOVERY_PLACEMENT_CONFLICT}; does not overwrite an existing assignment.
+     * Exhausted {@code assignment_version} fails with {@code ERR_CONTROL_GENERATION_EXHAUSTED}.
      */
     @Transactional("transactionManager")
     public DiscoveryRequest assignSensorFirstPlacementFromControlPlane(UUID tenantId, UUID requestId, String sensorId) {
         tenantService.get(tenantId);
         String sensor = boundedRequired(sensorId, 128, "Sensor identity");
         DiscoveryLimits.validateNoSecrets(sensor);
+        DiscoveryRequest locked = repository.findByIdForUpdate(tenantId, requestId)
+                .orElseThrow(() -> new DomainException("RESOURCE_NOT_FOUND", "Discovery request not found"));
+        long assignmentVersion = repository.findAssignmentVersion(tenantId, requestId)
+                .orElseThrow(() -> new DomainException("RESOURCE_NOT_FOUND", "Discovery request not found"));
+        if (locked.status() == DiscoveryStatus.PENDING
+                && locked.assignedSensorId() == null
+                && !ControlGenerationLimits.canIncrement(assignmentVersion)) {
+            throw new DomainException(
+                    ControlGenerationLimits.ERR_CONTROL_GENERATION_EXHAUSTED,
+                    ControlGenerationLimits.EXHAUSTED_MESSAGE);
+        }
         if (!repository.assignSensorFirstPlacement(tenantId, requestId, sensor)) {
             throw new DomainException("DISCOVERY_PLACEMENT_CONFLICT",
                     "Discovery request placement lost a concurrent assignment race or is no longer pending");
@@ -143,12 +156,23 @@ public class DiscoveryService {
      * Internal control-plane boundary for intentional Sensor (re)assignment including ASSIGNED→ASSIGNED.
      * It is deliberately not exposed by the Discovery public API. The caller is responsible for supplying
      * an authoritative enrolled Sensor identity after normal Sensor eligibility/placement checks.
+     * Exhausted {@code assignment_version} fails with {@code ERR_CONTROL_GENERATION_EXHAUSTED}.
      */
     @Transactional("transactionManager")
     public DiscoveryRequest assignSensorFromControlPlane(UUID tenantId, UUID requestId, String sensorId) {
         tenantService.get(tenantId);
         String sensor = boundedRequired(sensorId, 128, "Sensor identity");
         DiscoveryLimits.validateNoSecrets(sensor);
+        DiscoveryRequest locked = repository.findByIdForUpdate(tenantId, requestId)
+                .orElseThrow(() -> new DomainException("RESOURCE_NOT_FOUND", "Discovery request not found"));
+        long assignmentVersion = repository.findAssignmentVersion(tenantId, requestId)
+                .orElseThrow(() -> new DomainException("RESOURCE_NOT_FOUND", "Discovery request not found"));
+        if ((locked.status() == DiscoveryStatus.PENDING || locked.status() == DiscoveryStatus.ASSIGNED)
+                && !ControlGenerationLimits.canIncrement(assignmentVersion)) {
+            throw new DomainException(
+                    ControlGenerationLimits.ERR_CONTROL_GENERATION_EXHAUSTED,
+                    ControlGenerationLimits.EXHAUSTED_MESSAGE);
+        }
         if (!repository.assignSensor(tenantId, requestId, sensor)) {
             throw new DomainException("INVALID_STATE_TRANSITION", "Discovery request cannot be assigned in its current state");
         }
@@ -212,6 +236,10 @@ public class DiscoveryService {
             String failureReason
     ) {
         String sensorId = boundedRequired(authenticatedSensorId, 128, "Authenticated Sensor identity");
+        if (!ControlGenerationLimits.isPositiveJsonSafe(assignmentVersion)) {
+            throw new DomainException("VALIDATION_FAILED",
+                    "assignment_version exceeds MAX_SAFE_CONTROL_GENERATION");
+        }
         AssignedRequest locked = repository.findAssignedForUpdate(sensorId, requestId)
                 .orElseThrow(() -> new DomainException("RESOURCE_NOT_FOUND", "Assigned discovery request not found"));
         DiscoveryRequest request = locked.request();

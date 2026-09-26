@@ -1,6 +1,7 @@
 package com.platform.core.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.core.control.ControlGenerationLimits;
 import com.platform.core.domain.DomainException;
 import com.platform.core.domain.discovery.DiscoveryLimits;
 import com.platform.core.domain.discovery.DiscoveryService;
@@ -302,6 +303,10 @@ public class SensorIngestionController {
 
         UUID requestId = parseUuid(payload.get("request_id"), "request_id");
         long assignmentVersion = parsePositiveLong(payload.get("assignment_version"), "assignment_version");
+        if (!ControlGenerationLimits.isPositiveJsonSafe(assignmentVersion)) {
+            throw new DomainException("VALIDATION_FAILED",
+                    "assignment_version exceeds MAX_SAFE_CONTROL_GENERATION");
+        }
         String overallStatus = requiredString(payload.get("status"), "status");
         String failureReason = optionalString(payload.get("failure_reason"));
 
