@@ -84,7 +84,10 @@ OPERATIONAL_CRITICAL_SKILLS = frozenset(
     }
 )
 
-H2_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+H2_ATX_RE = re.compile(r"^##\s+(.+?)\s*$")
+# CommonMark fence open: optional ≤3 spaces, 3+ backticks/tildes, optional info string.
+FENCE_OPEN_RE = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
+FENCE_CLOSE_RE = re.compile(r"^( {0,3})(`{3,}|~{3,})[ \t]*$")
 FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n?", re.DOTALL)
 
 
@@ -115,15 +118,118 @@ def strip_frontmatter(text: str) -> str:
     return text
 
 
+def _strip_html_comments_from_line(line: str, in_comment: bool) -> tuple[str, bool]:
+    """Remove HTML comment spans from a line; return (visible_text, in_comment)."""
+    out: list[str] = []
+    i = 0
+    n = len(line)
+    while i < n:
+        if in_comment:
+            end = line.find("-->", i)
+            if end == -1:
+                return "".join(out), True
+            i = end + 3
+            in_comment = False
+            continue
+        start = line.find("<!--", i)
+        if start == -1:
+            out.append(line[i:])
+            break
+        out.append(line[i:start])
+        i = start + 4
+        in_comment = True
+    return "".join(out), in_comment
+
+
+def _try_open_fence(line: str) -> tuple[str, int] | None:
+    """Return (fence_char, fence_length) if line opens a fenced code block."""
+    match = FENCE_OPEN_RE.match(line)
+    if not match:
+        return None
+    marker = match.group(2)
+    info = match.group(3)
+    char = marker[0]
+    # CommonMark: backtick fence info string must not contain backticks.
+    if char == "`" and "`" in info:
+        return None
+    return char, len(marker)
+
+
+def _is_closing_fence(line: str, fence_char: str, fence_len: int) -> bool:
+    match = FENCE_CLOSE_RE.match(line)
+    if not match:
+        return False
+    marker = match.group(2)
+    if marker[0] != fence_char:
+        return False
+    return len(marker) >= fence_len
+
+
+def _is_real_atx_h2(visible_line: str, original_line: str) -> str | None:
+    """Return heading title if original line is an unindented ATX H2 outside noise."""
+    if original_line.startswith((" ", "\t")):
+        return None
+    # Heading recognition uses comment-stripped visible text so trailing/inline
+    # comments do not invent headings, while `## Title <!-- n -->` still counts.
+    candidate = visible_line.rstrip("\n\r")
+    match = H2_ATX_RE.match(candidate)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
 def iter_h2_sections(body: str) -> list[tuple[str, str]]:
-    """Return (title, section_body) for each Markdown H2 in body."""
-    matches = list(H2_RE.finditer(body))
+    """Return (title, section_body) for each real Markdown H2 in body.
+
+    Line-state scanner: ignores ATX-looking lines inside fenced code blocks and
+    HTML comments. Fake headings inside fences/comments do not end the current
+    real section body.
+    """
+    # Preserve line breaks for body slices; splitlines() drops trailing newline semantics.
+    raw_lines = body.splitlines(keepends=True)
+    if not raw_lines and body == "":
+        return []
+
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+    in_comment = False
+
+    # (title, start_index_in_raw_lines) for each real H2 line index.
+    heading_marks: list[tuple[str, int]] = []
+
+    for index, raw in enumerate(raw_lines):
+        line = raw.rstrip("\n\r")
+
+        if in_fence:
+            if _is_closing_fence(line, fence_char, fence_len):
+                in_fence = False
+                fence_char = ""
+                fence_len = 0
+            continue
+
+        # HTML comments may wrap fence markers; strip comments before fence open.
+        visible, in_comment = _strip_html_comments_from_line(line, in_comment)
+        if in_comment:
+            # Still inside a multiline comment — no headings/fences from this line.
+            continue
+
+        opened = _try_open_fence(visible)
+        if opened is not None:
+            fence_char, fence_len = opened
+            in_fence = True
+            continue
+
+        title = _is_real_atx_h2(visible, line)
+        if title is not None:
+            heading_marks.append((title, index))
+
     sections: list[tuple[str, str]] = []
-    for index, match in enumerate(matches):
-        title = match.group(1).strip()
-        content_start = match.end()
-        content_end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
-        sections.append((title, body[content_start:content_end]))
+    for mark_i, (title, start_idx) in enumerate(heading_marks):
+        body_start = start_idx + 1
+        body_end = heading_marks[mark_i + 1][1] if mark_i + 1 < len(heading_marks) else len(raw_lines)
+        section_body = "".join(raw_lines[body_start:body_end])
+        sections.append((title, section_body))
     return sections
 
 

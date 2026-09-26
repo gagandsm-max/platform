@@ -221,6 +221,148 @@ Only purpose exists.
         }
         self.assertTrue(required <= self.ss.OPERATIONAL_CRITICAL_SKILLS)
 
+    def _fake_heading_block(self, fence: str) -> str:
+        """Canonical-looking headings that must NOT count when fenced."""
+        lines = [f"{fence}text"]
+        for heading in self.ss.CANONICAL_HEADINGS:
+            lines.append(f"## {heading}")
+            lines.append("fake")
+        lines.append(fence)
+        return "\n".join(lines)
+
+    def test_backtick_fenced_headings_do_not_count(self) -> None:
+        text = (
+            "---\nname: demo\ndescription: demo\n---\n\n# demo\n\n"
+            + self._fake_heading_block("```")
+            + "\n"
+        )
+        result = self.ss.validate_skill_structure(text)
+        self.assertFalse(result.ok)
+        for heading in self.ss.CANONICAL_HEADINGS:
+            self.assertIn(heading, result.missing_headings, msg=heading)
+        self.assertEqual(result.h2_titles, [])
+
+    def test_tilde_fenced_headings_do_not_count(self) -> None:
+        text = (
+            "---\nname: demo\ndescription: demo\n---\n\n# demo\n\n"
+            + self._fake_heading_block("~~~")
+            + "\n"
+        )
+        result = self.ss.validate_skill_structure(text)
+        self.assertFalse(result.ok)
+        for heading in self.ss.CANONICAL_HEADINGS:
+            self.assertIn(heading, result.missing_headings, msg=heading)
+        self.assertEqual(result.h2_titles, [])
+
+    def test_longer_and_matching_fence_semantics(self) -> None:
+        # Open with four backticks; three backticks must not close; four close.
+        inner = "\n".join(f"## {h}\nfake" for h in self.ss.CANONICAL_HEADINGS)
+        text = (
+            "---\nname: demo\ndescription: demo\n---\n\n"
+            "## Purpose\n\nBefore fence.\n\n"
+            "````text\n"
+            f"{inner}\n"
+            "```\n"  # shorter — must NOT close
+            "still fenced ## Use when\n"
+            "````\n"
+            "\nAfter fence still in Purpose.\n\n"
+            "## Use when\n\nReal use when.\n"
+        )
+        # Complete remaining required headings after Use when for order checks on those two.
+        for heading in self.ss.CANONICAL_HEADINGS[2:]:
+            text += f"\n## {heading}\n\nBody for {heading}.\n"
+        result = self.ss.validate_skill_structure(text)
+        self.assertTrue(result.ok, msg=result.errors)
+        self.assertEqual(result.h2_titles.count("Purpose"), 1)
+        self.assertEqual(result.h2_titles.count("Use when"), 1)
+        purpose_body = dict(self.ss.iter_h2_sections(self.ss.strip_frontmatter(text)))["Purpose"]
+        self.assertIn("still fenced ## Use when", purpose_body)
+        self.assertIn("```\n", purpose_body)  # shorter fence remains inside Purpose
+
+    def test_html_comment_headings_do_not_count(self) -> None:
+        commented = "\n".join(f"## {h}\nfake" for h in self.ss.CANONICAL_HEADINGS)
+        text = (
+            "---\nname: demo\ndescription: demo\n---\n\n# demo\n\n"
+            f"<!--\n{commented}\n-->\n"
+        )
+        result = self.ss.validate_skill_structure(text)
+        self.assertFalse(result.ok)
+        for heading in self.ss.CANONICAL_HEADINGS:
+            self.assertIn(heading, result.missing_headings, msg=heading)
+
+    def test_inline_html_comment_handling(self) -> None:
+        text = (
+            "---\nname: demo\ndescription: demo\n---\n\n"
+            "<!-- ## Purpose -->\n"
+            "<!-- ## Use when -->\n"
+            "## Purpose\n\nReal purpose.\n"
+        )
+        for heading in self.ss.CANONICAL_HEADINGS[1:]:
+            text += f"\n## {heading}\n\nBody for {heading}.\n"
+        result = self.ss.validate_skill_structure(text)
+        self.assertTrue(result.ok, msg=result.errors)
+        self.assertEqual(result.h2_titles.count("Purpose"), 1)
+
+    def test_fake_heading_does_not_split_real_section(self) -> None:
+        text = (
+            "---\nname: demo\ndescription: demo\n---\n\n"
+            "## Purpose\n\n"
+            "Real purpose text.\n\n"
+            "```text\n"
+            "## Use when\n"
+            "fake\n"
+            "```\n\n"
+            "More purpose text.\n\n"
+            "## Use when\n\n"
+            "Real use-when text.\n"
+        )
+        for heading in self.ss.CANONICAL_HEADINGS[2:]:
+            text += f"\n## {heading}\n\nBody for {heading}.\n"
+        result = self.ss.validate_skill_structure(text)
+        self.assertTrue(result.ok, msg=result.errors)
+        self.assertEqual(result.h2_titles.count("Use when"), 1)
+        sections = dict(self.ss.iter_h2_sections(self.ss.strip_frontmatter(text)))
+        self.assertIn("More purpose text.", sections["Purpose"])
+        self.assertIn("## Use when", sections["Purpose"])
+        self.assertIn("Real use-when text.", sections["Use when"])
+
+    def test_frontmatter_fence_text_cannot_interfere(self) -> None:
+        text = (
+            "---\n"
+            "name: demo\n"
+            "description: |\n"
+            "  ```text\n"
+            "  ## Purpose\n"
+            "  ## Use when\n"
+            "  ```\n"
+            "---\n\n"
+            "## Purpose\n\nReal purpose.\n"
+        )
+        for heading in self.ss.CANONICAL_HEADINGS[1:]:
+            text += f"\n## {heading}\n\nBody for {heading}.\n"
+        result = self.ss.validate_skill_structure(text)
+        self.assertTrue(result.ok, msg=result.errors)
+        self.assertEqual(result.h2_titles[0], "Purpose")
+
+    def test_validator_rejects_fenced_heading_bypass(self) -> None:
+        text = (
+            "---\nname: demo\ndescription: demo\n---\n\n"
+            + self._fake_heading_block("```")
+            + "\n"
+        )
+        result = self.ss.validate_skill_structure(text)
+        errs = self.ss.format_structure_errors("demo", result)
+        self.assertTrue(errs)
+        self.assertTrue(any("missing required H2: ## Purpose" in e for e in errs))
+
+    def test_validator_rejects_html_comment_bypass(self) -> None:
+        commented = "\n".join(f"## {h}" for h in self.ss.CANONICAL_HEADINGS)
+        text = f"---\nname: demo\ndescription: demo\n---\n\n<!--\n{commented}\n-->\n"
+        result = self.ss.validate_skill_structure(text)
+        errs = self.ss.format_structure_errors("demo", result)
+        self.assertTrue(errs)
+        self.assertTrue(any("missing required H2" in e for e in errs))
+
 
 class SkillDepthBatchRegressionTests(unittest.TestCase):
     """Keep B3 batch heading assertions working under strict parse."""
