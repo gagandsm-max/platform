@@ -3,32 +3,101 @@ name: install_upgrade
 description: deb/rpm/MSI packaging, systemd lifecycle, upgrade/rollback and reboot auto-start evidence.
 ---
 
-<!-- generated from project_agents/skills/install_upgrade/SKILL.md sha256:6bcd3dcaa25dac38929c3571ef88b53b1862b15cf183438f1876dd5432bb8ad1 -->
+<!-- generated from project_agents/skills/install_upgrade/SKILL.md sha256:c869075e4887f561e75f030049b2cdaa9dd80c7d1c93f9762bd82474da5c7d2a -->
 
 # install_upgrade
 
 ## Purpose
-Change install/upgrade without silent data loss.
+
+Prove Core/Sensor/Agent install and upgrade behaviour—including skew, migration, rollback constraints and post-upgrade health—without unsupported destructive rollback stories.
 
 ## Use when
-Packaging, postinst, upgrade, rollback, or service files.
+
+Packaging (deb/rpm/MSI), installers, systemd units, version skew between Core/Sensor/Agent, upgrade runbooks, rollback/roll-forward decisions, or claims about reboot auto-start / supervised recovery.
+
+## Authoritative inputs
+
+Always read:
+
+1. Packaging/layout docs and existing install scripts for the component
+2. Mother constraints: native packages, auto-start after reboot, supervised recovery
+3. Compatibility/skew window for the release (Core↔Sensor↔Agent)
+4. Migration catalogues affecting the upgrade path (`migration_safety`)
+5. Backup prerequisites and secret/config preservation requirements
+6. Signature/provenance expectations for packages
+
+## Invariants
+
+- Cover **install**, **upgrade**, and stated **compatibility window**.
+- Forward migration is expected; do not invent silent destructive downgrades.
+- Sensor/Core/Agent version skew must be explicit—what is supported, what fails closed.
+- Rollback vs roll-forward: only support paths that preserve data/config or documented restore-from-backup.
+- Config and secrets preservation across upgrade is mandatory unless a breaking change is explicitly versioned.
+- Backup prerequisites before upgrade when control-state/telemetry stores are touched.
+- Failure halfway must leave a diagnosable state (not silent corruption).
+- Restart/reboot auto-start and supervised recovery remain mandatory.
+- Downgrade constraints must be documented; unsupported downgrade is refused.
+- Package signature/provenance must be verifiable for release claims.
+- Operational health after upgrade must be evidenced (health endpoints/units).
+- No unsupported destructive rollback (“just delete the DB”).
 
 ## Required procedure
-1. Core/Sensor/Agents auto-start after reboot.
-2. Upgrade path from supported origins.
-3. Rollback/compat assessed; no assumed down migrations.
-4. Crash-loop diagnostics must remain visible.
 
-## Guardrails
-- Keep Platform v3.2.2 product requirements; do not invent TBD/P0 designs.
-- Do not bypass tests, weaken tenant isolation, write to `main`, or force-push.
-- Do not disable TLS validation, embed secrets, or use destructive Docker cleanup.
-- LLM output is not privileged authority; writer cannot self-certify merge readiness.
+1. State component(s), from→to versions, and supported skew matrix.
+2. Declare backup/snapshot prerequisites and secret/config paths preserved.
+3. Exercise clean install on a representative OS/package format when in scope.
+4. Exercise upgrade from supported N-1 (or stated window); record migration outcomes.
+5. Inject/observe mid-upgrade failure where feasible; document recovery (roll-forward/restore).
+6. Verify systemd/MSI service enablement, reboot auto-start and crash-loop diagnostics visibility.
+7. Verify package signatures/hashes when making release claims.
+8. Run post-upgrade health checks (Core/Sensor/Agent as applicable) and skew negotiation behaviour.
+9. Document unsupported downgrade explicitly; do not test fiction as supported.
+10. Capture evidence on exact SHA/artifacts under test.
+
+## Negative / failure cases
+
+- Upgrading without backup when PG migrations run.
+- Leaving credentials world-readable after package unpack.
+- Claiming rollback while only uninstall+data-loss works.
+- Mixing unsupported Agent version against Core and calling it “fine”.
+- Skipping reboot auto-start verification.
+- Shipping unsigned artifacts as GA.
+
+## Security / tenant implications
+
+Packages must not embed live secrets. Upgrade must preserve mTLS material safely (`pki_mtls`, `secrets_handling`). Multi-tenant Core upgrades must not drop tenant isolation. Windows MSI/BAT paths follow least privilege. Compromise of update channel is a security incident path—do not invent ad-hoc HTTP unsigned upgrade.
 
 ## Required evidence
-- Record commands, tests, logs or CI pointers that prove `install_upgrade` procedure ran.
-- Label missing runtime proof as UNVERIFIED. Do not convert inference into SOURCE_FACT.
+
+- Version matrix and package artifact IDs/hashes
+- Install/upgrade command transcripts
+- Migration result or N/A
+- Service enablement + reboot/auto-start proof
+- Mid-failure recovery notes or `UNVERIFIED`
+- Post-upgrade health evidence
+- Signature/provenance proof for release claims
+
+## Stop conditions
+
+Stop release/cert claims when:
+
+- Compatibility skew is undefined
+- Backup prerequisite cannot be met for stateful upgrade
+- Mid-upgrade failure leaves undefined corruption
+- Auto-start/supervision regresses
+- Rollback story requires silent data destruction
+
+## Anti-patterns
+
+- “Uninstall and reinstall” as the only upgrade path for stateful Core
+- Testing only happy-path install on one distro then claiming GA
+- Ignoring Agent skew
+- Writer self-certifying upgrade safety without runtime evidence
+
+## Handoff / output
+
+Return: matrix; transcripts; health results; residual risks; nextOwner (`platform-sre` / verifier). Does not self-certify MERGE_READY.
 
 ## Non-ownership
-- Does not override Mother Reference product requirements or invent TBD/P0 designs.
-- Does not certify merge readiness or execute privileged actions from LLM output.
+
+Does not invent BUILD-120 HA package topology, authorize production change windows, or replace `migration_safety` / `backup_restore`. Owns install/upgrade evidence discipline.

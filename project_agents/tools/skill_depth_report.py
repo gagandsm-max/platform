@@ -168,6 +168,22 @@ B3A_FOCUS = frozenset(
     }
 )
 
+# Phase B3B governance/runtime batch (Issue #93 controlled Skill-depth).
+B3B_FOCUS = frozenset(
+    {
+        "source_truth_rebaseline",
+        "mother_reference_reconciliation",
+        "root_cause_first",
+        "post_merge_rebaseline",
+        "ci_cd",
+        "install_upgrade",
+        "docker_compose",
+        "postgresql",
+        "clickhouse",
+        "capacity_performance",
+    }
+)
+
 
 def priority(name: str, missing: list[str], lines: int) -> str:
     """Deterministic severity. Critical Skills never hide as P2 when incomplete."""
@@ -293,6 +309,9 @@ def build_report(skills_root: Path = SKILLS_ROOT) -> tuple[str, dict[str, int]]:
         "",
         "## Issue #93 Phase B3A critical Skill focus",
         *_focus_status(rows, B3A_FOCUS),
+        "",
+        "## Issue #93 Phase B3B Skill-depth focus",
+        *_focus_status(rows, B3B_FOCUS),
         "",
         "## Phase B3 recommendation",
         "Continue remaining non-critical P2 Skills in controlled domain batches—"
