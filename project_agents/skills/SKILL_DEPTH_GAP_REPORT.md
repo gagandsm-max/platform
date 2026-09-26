@@ -159,4 +159,3 @@ Skills in the operational-critical set failing structural/executable contract ar
 
 ## Phase B4 status
 Strict structural scanning is authoritative. Semantic quality remains independently audited.
-

@@ -185,6 +185,15 @@ Only purpose exists.
         # Stale detection: mutate temp copy path behaviour via direct compare.
         self.assertNotEqual(report + "\n# stale\n", on_disk)
 
+    def test_generated_report_has_single_terminal_newline(self) -> None:
+        report, _counts = self.sdr.build_report()
+        self.assertTrue(report.endswith("\n"))
+        self.assertFalse(report.endswith("\n\n"))
+        on_disk = Path(self.sdr.REPORT_PATH).read_text(encoding="utf-8")
+        self.assertEqual(on_disk, report)
+        self.assertTrue(on_disk.endswith("\n"))
+        self.assertFalse(on_disk.endswith("\n\n"))
+
     def test_validator_fails_on_structural_defect(self) -> None:
         sys.path.insert(0, str(TOOLS))
         import agent_pack

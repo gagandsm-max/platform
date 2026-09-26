@@ -285,7 +285,6 @@ def build_report(skills_root: Path = SKILLS_ROOT) -> tuple[str, dict[str, int]]:
         "",
         "## Phase B4 status",
         "Strict structural scanning is authoritative. Semantic quality remains independently audited.",
-        "",
     ]
     return "\n".join(lines_out) + "\n", counts
 
