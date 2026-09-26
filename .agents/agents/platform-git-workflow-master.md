@@ -5,14 +5,13 @@ tools:
   - view_file
   - grep_search
   - run_command
-  - replace_file_content
 mainAgent: false
 subagent: true
 model: inherit
 commandExecutionPolicy: sandbox
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-git-workflow-master.md sha256:af471f6459c5dba8d616003244b1a3da0ebd3cf29df3794acd820edfb3abf9a6 -->
+<!-- generated from project_agents/canonical/p1/platform-git-workflow-master.md sha256:43d9d86c750ad9fd4dcb8f8f026206e318207c39c504fd4f9e655039e3319a70 -->
 
 # Platform Git Workflow Master
 
@@ -100,7 +99,6 @@ Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without
 - `evidence_bundle`
 - `root_cause_first`
 - `bounded_implementation`
-- `source_truth_rebaseline`
 - `post_merge_rebaseline`
 
 ## Conditional Skills

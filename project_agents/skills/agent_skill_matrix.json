@@ -80,7 +80,6 @@
     "requiredSkills": [
       "source_truth_rebaseline",
       "mother_reference_reconciliation",
-      "evidence_bundle",
       "evidence_bundle"
     ],
     "conditionalSkills": [
@@ -363,7 +362,6 @@
       "evidence_bundle",
       "root_cause_first",
       "bounded_implementation",
-      "source_truth_rebaseline",
       "post_merge_rebaseline"
     ],
     "conditionalSkills": [

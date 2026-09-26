@@ -52,9 +52,21 @@
     "requiredTests": {"type": "array", "items": {"type": "string"}},
     "requiredEvidence": {"type": "array", "items": {"type": "string"}},
     "stopConditions": {"type": "array", "items": {"type": "string"}},
-    "writerTool": {"type": "string", "minLength": 1},
-    "verifierTool": {"type": "string", "minLength": 1},
-    "gatekeeper": {"type": "string", "minLength": 1},
+    "writerTool": {
+      "type": "string",
+      "enum": ["cursor-cli"],
+      "description": "Authorized product writer. Derived from project_agents/tool_authority.json. cursor-cloud is prohibited."
+    },
+    "verifierTool": {
+      "type": "string",
+      "enum": ["chatgpt-github", "antigravity", "codex"],
+      "description": "Independent verifier/auditor. Must differ from writerTool. Derived from project_agents/tool_authority.json."
+    },
+    "gatekeeper": {
+      "type": "string",
+      "enum": ["chatgpt-github", "founder"],
+      "description": "Control-plane gatekeeper. Writers cannot self-certify. Derived from project_agents/tool_authority.json."
+    },
     "status": {
       "type": "string",
       "enum": [

@@ -49,7 +49,7 @@ Routing: task intent → owning agent → required Skills → risk-triggered rev
 
 - **Tier / mode:** P0 / read
 - **Typical triggers:** After implementation when evidence must be packaged.
-- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `evidence_bundle`
+- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`
 - **Conditional Skills:** `runtime_failure_injection`, `security_negative_testing`, `capacity_performance`
 - **Forbidden ownership assumptions:** Does not make quality claims beyond collected evidence.
 
@@ -177,7 +177,7 @@ Routing: task intent → owning agent → required Skills → risk-triggered rev
 
 - **Tier / mode:** P1 / write
 - **Typical triggers:** Parallel branches, stacked PRs, integration, rebase coordination when authorized.
-- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `root_cause_first`, `bounded_implementation`, `source_truth_rebaseline`, `post_merge_rebaseline`
+- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `root_cause_first`, `bounded_implementation`, `post_merge_rebaseline`
 - **Conditional Skills:** `exact_head_merge_gate`
 - **Forbidden ownership assumptions:** Does not merge, force-push shared branches, or rewrite published history unless explicitly authorized.
 

@@ -3,7 +3,7 @@ name: platform-evidence-collector
 description: Evidence gathering specialist for Platform. Use after implementation to collect reproducible build, test, runtime, API, log, UI, performance and package evidence without making quality claims beyond the evidence.
 ---
 
-<!-- generated from project_agents/canonical/p0/platform-evidence-collector.md sha256:caf7a3ccd5cef11aad471aba8894c88c4dc1830bd1bd91f0586bb9f0d2b02777 -->
+<!-- generated from project_agents/canonical/p0/platform-evidence-collector.md sha256:f0806712fefece4f83be4cb5fe66126d4c1e533a8f5156c237ba531d531ebe40 -->
 
 # Platform Evidence Collector
 
@@ -92,7 +92,6 @@ Never claim `done`, `fixed`, `secure`, `production-ready`, or `GA-ready` without
 ## Required Skills
 - `source_truth_rebaseline`
 - `mother_reference_reconciliation`
-- `evidence_bundle`
 - `evidence_bundle`
 
 ## Conditional Skills

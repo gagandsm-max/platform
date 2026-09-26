@@ -5,7 +5,6 @@ tools:
   - view_file
   - grep_search
   - run_command
-  - replace_file_content
 mainAgent: false
 subagent: true
 model: inherit

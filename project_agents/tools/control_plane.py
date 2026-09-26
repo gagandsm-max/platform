@@ -21,6 +21,7 @@ TASK_SCHEMA_PATH = AGENTS_ROOT / "schemas" / "task_manifest.schema.json"
 HANDOFF_SCHEMA_PATH = AGENTS_ROOT / "schemas" / "handoff.schema.json"
 MANIFEST_PATH = AGENTS_ROOT / "manifest.json"
 SKILLS_MANIFEST_PATH = AGENTS_ROOT / "skills" / "manifest.json"
+TOOL_AUTHORITY_PATH = AGENTS_ROOT / "tool_authority.json"
 
 SCHEMA_VERSION = "v2"
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -100,6 +101,80 @@ def load_state_machine(path: Path = STATE_MACHINE_PATH) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ControlPlaneError("state machine must be a JSON object")
     return data
+
+
+def load_tool_authority(path: Path = TOOL_AUTHORITY_PATH) -> dict[str, Any]:
+    data = load_json(path)
+    if not isinstance(data, dict):
+        raise ControlPlaneError("tool_authority.json must be an object")
+    if data.get("schemaVersion") != 1:
+        raise ControlPlaneError("tool_authority.json schemaVersion must be 1")
+    tools = data.get("tools")
+    legal = data.get("legalCombinations")
+    if not isinstance(tools, dict) or not tools:
+        raise ControlPlaneError("tool_authority.json tools must be a non-empty object")
+    if not isinstance(legal, dict):
+        raise ControlPlaneError("tool_authority.json legalCombinations must be an object")
+    for key in ("writerTools", "verifierTools", "gatekeepers", "prohibitedWriterTools"):
+        if key not in legal or not isinstance(legal[key], list) or not legal[key]:
+            raise ControlPlaneError(
+                f"tool_authority.json legalCombinations.{key} must be a non-empty array"
+            )
+    return data
+
+
+def assert_legal_tool_roles(
+    *,
+    writer_tool: str,
+    verifier_tool: str,
+    gatekeeper: str,
+    status: str,
+    authority: Mapping[str, Any] | None = None,
+) -> None:
+    """Enforce canonical tool-authority combinations for task manifests."""
+    auth = dict(authority) if authority is not None else load_tool_authority()
+    tools = auth["tools"]
+    legal = auth["legalCombinations"]
+    if writer_tool not in tools:
+        raise ControlPlaneError(f"writerTool {writer_tool!r} is not a declared tool id")
+    if verifier_tool not in tools:
+        raise ControlPlaneError(f"verifierTool {verifier_tool!r} is not a declared tool id")
+    if gatekeeper not in tools:
+        raise ControlPlaneError(f"gatekeeper {gatekeeper!r} is not a declared tool id")
+
+    writer_status = tools[writer_tool].get("status")
+    if writer_tool in set(legal.get("prohibitedWriterTools") or []) or writer_status == "prohibited":
+        raise ControlPlaneError(
+            f"writerTool {writer_tool!r} is prohibited by tool_authority.json"
+        )
+    if writer_tool not in set(legal["writerTools"]):
+        raise ControlPlaneError(
+            f"writerTool {writer_tool!r} is not an authorized writer under tool_authority.json"
+        )
+    if verifier_tool in set(legal.get("prohibitedVerifierTools") or []):
+        raise ControlPlaneError(
+            f"verifierTool {verifier_tool!r} is prohibited by tool_authority.json"
+        )
+    if verifier_tool not in set(legal["verifierTools"]):
+        raise ControlPlaneError(
+            f"verifierTool {verifier_tool!r} is not an authorized verifier under tool_authority.json"
+        )
+    if gatekeeper in set(legal.get("prohibitedGatekeepers") or []):
+        raise ControlPlaneError(
+            f"gatekeeper {gatekeeper!r} is prohibited by tool_authority.json"
+        )
+    if gatekeeper not in set(legal["gatekeepers"]):
+        raise ControlPlaneError(
+            f"gatekeeper {gatekeeper!r} is not an authorized gatekeeper under tool_authority.json"
+        )
+    if writer_tool == verifier_tool:
+        raise ControlPlaneError(
+            "writerTool and verifierTool must be distinct; writers cannot self-verify"
+        )
+    if status in WRITER_SELF_CERTIFY_FORBIDDEN and writer_tool == gatekeeper:
+        raise ControlPlaneError(
+            f"writerTool cannot be gatekeeper for self-certification status {status}"
+        )
 
 
 def authoritative_states(machine: Mapping[str, Any] | None = None) -> list[str]:
@@ -192,6 +267,30 @@ def assert_schema_state_enums_match_machine(
             raise ControlPlaneError(
                 f"{label} enum {values!r} does not match authoritative state machine {states!r}"
             )
+
+
+def assert_schema_tool_enums_match_authority(
+    authority: Mapping[str, Any] | None = None,
+    task_schema: Mapping[str, Any] | None = None,
+) -> None:
+    """Prove task_manifest writer/verifier/gatekeeper enums match tool_authority.json."""
+    auth = dict(authority) if authority is not None else load_tool_authority()
+    task_schema = task_schema or load_json(TASK_SCHEMA_PATH)
+    legal = auth["legalCombinations"]
+    expected = {
+        "writerTool": list(legal["writerTools"]),
+        "verifierTool": list(legal["verifierTools"]),
+        "gatekeeper": list(legal["gatekeepers"]),
+    }
+    for field, want in expected.items():
+        got = schema_enum(task_schema, "properties", field, "enum")
+        if got != want:
+            raise ControlPlaneError(
+                f"task_manifest.{field} enum {got!r} does not match "
+                f"tool_authority.json legalCombinations ({want!r})"
+            )
+    if "cursor-cloud" in expected["writerTool"]:
+        raise ControlPlaneError("tool_authority writerTools must not include prohibited cursor-cloud")
 
 
 def is_legal_transition(source: str, target: str, machine: Mapping[str, Any] | None = None) -> bool:
@@ -376,6 +475,12 @@ def validate_task_manifest(
     _require_string(obj["writerTool"], "writerTool")
     _require_string(obj["verifierTool"], "verifierTool")
     _require_string(obj["gatekeeper"], "gatekeeper")
+    assert_legal_tool_roles(
+        writer_tool=str(obj["writerTool"]),
+        verifier_tool=str(obj["verifierTool"]),
+        gatekeeper=str(obj["gatekeeper"]),
+        status=status,
+    )
     created_at = _require_iso_time(obj["createdAt"], "createdAt")
     updated_at = _require_iso_time(obj["updatedAt"], "updatedAt")
     if datetime.fromisoformat(updated_at.replace("Z", "+00:00")) < datetime.fromisoformat(

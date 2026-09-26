@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "description": "Canonical Platform engineering tool authority. Routers, schemas and validators must derive from this file.",
+  "tools": {
+    "chatgpt-github": {
+      "id": "chatgpt-github",
+      "displayName": "ChatGPT + GitHub",
+      "roles": ["control_plane", "gatekeeper", "verifier", "certification"],
+      "mayWriteProductCode": false,
+      "mayMerge": true,
+      "mayCertify": true,
+      "defaultWriter": false,
+      "status": "authorized"
+    },
+    "cursor-cli": {
+      "id": "cursor-cli",
+      "displayName": "Cursor CLI",
+      "roles": ["writer"],
+      "mayWriteProductCode": true,
+      "mayMerge": false,
+      "mayCertify": false,
+      "defaultWriter": true,
+      "status": "authorized",
+      "notes": "Primary bounded implementation writer. One writer per checkout/worktree. Cannot self-certify."
+    },
+    "cursor-cloud": {
+      "id": "cursor-cloud",
+      "displayName": "Cursor Cloud",
+      "roles": ["writer"],
+      "mayWriteProductCode": true,
+      "mayMerge": false,
+      "mayCertify": false,
+      "defaultWriter": false,
+      "status": "prohibited",
+      "notes": "Prohibited by default. May become authorized only after explicit Founder decision."
+    },
+    "antigravity": {
+      "id": "antigravity",
+      "displayName": "Antigravity CLI",
+      "roles": ["verifier", "adversarial"],
+      "mayWriteProductCode": false,
+      "mayMerge": false,
+      "mayCertify": false,
+      "defaultWriter": false,
+      "defaultGeneratedCapability": "read-only",
+      "status": "authorized",
+      "writeElevation": "task-scoped-exceptional-isolated",
+      "notes": "Read-only/adversarial by default. Generated adapters must not gain write tools from canonical agent mode=write."
+    },
+    "codex": {
+      "id": "codex",
+      "displayName": "Codex CLI / GitHub Codex",
+      "roles": ["verifier", "auditor", "certification_gate"],
+      "mayWriteProductCode": false,
+      "mayMerge": false,
+      "mayCertify": true,
+      "defaultWriter": false,
+      "defaultSandboxMode": "read-only",
+      "status": "authorized",
+      "writeElevation": "task-scoped-exceptional-isolated",
+      "notes": "Exact-SHA adversarial/certification default. Generated adapters must default sandbox_mode=read-only."
+    },
+    "github-copilot": {
+      "id": "github-copilot",
+      "displayName": "GitHub Copilot",
+      "roles": ["auxiliary_pr_review"],
+      "mayWriteProductCode": false,
+      "mayMerge": false,
+      "mayCertify": false,
+      "defaultWriter": false,
+      "status": "authorized_limited",
+      "notes": "Limited auxiliary PR/code-review only. Never architecture/control-plane authority, sole certification evidence, or merge authority."
+    },
+    "founder": {
+      "id": "founder",
+      "displayName": "Founder",
+      "roles": ["gatekeeper"],
+      "mayWriteProductCode": false,
+      "mayMerge": true,
+      "mayCertify": true,
+      "defaultWriter": false,
+      "status": "authorized"
+    }
+  },
+  "legalCombinations": {
+    "writerTools": ["cursor-cli"],
+    "prohibitedWriterTools": ["cursor-cloud", "github-copilot", "chatgpt-github", "antigravity", "codex", "founder"],
+    "verifierTools": ["chatgpt-github", "antigravity", "codex"],
+    "prohibitedVerifierTools": ["cursor-cloud", "github-copilot", "cursor-cli", "founder"],
+    "gatekeepers": ["chatgpt-github", "founder"],
+    "prohibitedGatekeepers": ["cursor-cli", "cursor-cloud", "antigravity", "codex", "github-copilot"],
+    "rules": [
+      "writerTool must be an authorized writer and must not be prohibited",
+      "verifierTool must be distinct from writerTool",
+      "writerTool must not equal gatekeeper for self-certification of REALITY_GATE/MERGE_READY/POST_MERGE_VERIFY/COMPLETE",
+      "github-copilot is never writer, verifier, gatekeeper, merge authority, or sole certification evidence",
+      "cursor-cloud is prohibited as writerTool until Founder explicitly re-authorizes it"
+    ]
+  }
+}

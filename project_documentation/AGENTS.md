@@ -45,12 +45,15 @@ If documents conflict, stop and resolve through the precedence defined in `Platf
 ## Tool authority model
 
 - **ChatGPT + GitHub is the Platform control plane.** It owns source-truth rebaselining, architecture/technical decisions, task sequencing, PR integration, merge authority, progress accounting and final technical acceptance.
-- **Cursor CLI / Cursor Cloud are the primary implementation writers.** They operate only on explicitly assigned branches/worktrees and bounded scope. A Cursor writer never self-certifies merge readiness.
+- **Cursor CLI is the primary bounded implementation writer.** It operates only on explicitly assigned branches/worktrees and bounded scope. A Cursor writer never self-certifies merge readiness.
+- **Cursor Cloud is prohibited by default.** It may become authorized only after an explicit Founder decision recorded in `project_agents/tool_authority.json`.
 - **Antigravity CLI is verifier-first and read-only/adversarial by default.** Write authority is exceptional, explicit and isolated to a dedicated branch/worktree; Antigravity must not become a second writer on an active Cursor branch.
 - **Codex CLI / GitHub Codex is an independent exact-SHA adversarial auditor and certification gate when explicitly invoked.** It is not a routine developer/fixer and must not write production changes unless ChatGPT explicitly assigns an isolated implementation lane.
+- **GitHub Copilot is limited auxiliary PR/code-review only.** It is never architecture/control-plane authority, sole certification evidence, or merge authority.
 - **One writer per branch/worktree.** Parallelism is for independent review/evidence by default; parallel writes require isolated branches/worktrees and later controlled integration.
 - Every tool must re-fetch authoritative `main` and exact task/PR head before acting. Main/head drift invalidates stale review.
 - No writer may close `REALITY_GATE`, `MERGE_READY`, `POST_MERGE_VERIFY` or `COMPLETE` for its own work.
+- Authoritative machine-readable source: `project_agents/tool_authority.json`.
 
 ## Mother-document change control (READ-MOSTLY)
 
@@ -159,19 +162,11 @@ For enterprise-monitoring-coverage / Capability Pack capabilities governed by `P
 - OEM/customer extensions use supported pack/SDK mechanisms. Core forks are prohibited.
 - Always-on full DPI, unrestricted SIEM replacement, full bytecode APM, broad BMS/DCIM and uncontrolled automated NCM remain excluded or deferred as recorded in `Platform_23`.
 
-## Cursor Cloud specific instructions
+## Cursor Cloud policy (prohibited by default)
 
-Hosted Cloud Agents use `.cursor/environment.json` and `.cursor/Dockerfile`. The GitHub repository is `https://github.com/gagandsm-max/platform`.
+Cursor Cloud is **not** an authorized writer under current `project_agents/tool_authority.json`. Do not route product implementation to Cursor Cloud unless the Founder explicitly re-authorizes it and updates that file.
 
-Cloud VMs follow the same contract as a developer laptop:
-
-- Do not install project-specific Java, Go, Python, Node, Kafka, PostgreSQL, ClickHouse, or Valkey on the Cloud VM host.
-- All routine development and automated testing run through Docker Compose (`make doctor`, `make certs`, `make dev-up`, `make test-unit`).
-- Copy `.env.example` to `.env` when `.env` is missing. Never commit `.env`, generated certs, or keys.
-- The environment `start` command starts Docker. Then run `make certs` if `deploy/docker/certs/platform-dev.crt` is missing.
-- Do not start the full Compose stack unless the assigned task needs running services. The stack is memory-heavy.
-- Default loopback ports: UI `23000`, Core `28443`.
-- A personal My Machines worker named `platform-dev` can execute Cloud Agent tool calls against this local checkout.
+If a Founder-authorized Cloud environment is later approved, it must still obey the laptop contract (Docker Compose only; no host-installed project runtimes; no secrets in git; UI `23000` / Core `28443`). Until that decision exists, use Cursor CLI on an assigned local/worktree checkout.
 
 ## Engineering capability pack (routing)
 

@@ -1,6 +1,6 @@
 name = "platform-ai-engineer"
 description = "Platform AI/ML engineer. Use for AI Gateway, evidence-grounded LLM features, anomaly/baseline models and GNN scoring under deterministic RCA and model-governance constraints."
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-ai-engineer.md sha256:41709739f476cb1993a013e0852a2fc184106189de7f7736f3d53e122ab3415f
 

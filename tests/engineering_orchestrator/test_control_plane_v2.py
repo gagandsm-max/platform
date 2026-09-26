@@ -43,7 +43,7 @@ def _task(**overrides):
         "requiredTests": ["tests/engineering_orchestrator/test_control_plane_v2.py"],
         "requiredEvidence": ["tests/engineering_orchestrator/test_control_plane_v2.py"],
         "stopConditions": ["head drift"],
-        "writerTool": "cursor-cloud",
+        "writerTool": "cursor-cli",
         "verifierTool": "chatgpt-github",
         "gatekeeper": "founder",
         "status": "INTAKE",
@@ -90,7 +90,14 @@ def _write(path: Path, content: str) -> None:
 
 
 def _build_fixture(root: Path) -> None:
-    canonical = "# Demo Agent\n\nFixture canonical agent.\n"
+    canonical = (
+        "# Demo Agent\n\n"
+        "Fixture canonical agent.\n\n"
+        "## Required Skills\n"
+        "- `demo_skill`\n\n"
+        "## Conditional Skills\n"
+        "- `demo_conditional_skill`\n"
+    )
     skill = (
         "---\n"
         "name: demo_skill\n"
@@ -98,23 +105,47 @@ def _build_fixture(root: Path) -> None:
         "---\n\n"
         "# demo_skill\n\nFixture canonical skill.\n"
     )
+    conditional_skill = (
+        "---\n"
+        "name: demo_conditional_skill\n"
+        "description: Fixture conditional skill\n"
+        "---\n\n"
+        "# demo_conditional_skill\n\nFixture conditional skill.\n"
+    )
     manifest = [
         {
             "name": "demo-agent",
             "title": "Demo Agent",
             "tier": "P0",
-            "mode": "read",
+            "mode": "write",
             "description": "Fixture agent",
             "canonical_path": "canonical/p0/demo-agent.md",
             "sha256": "0" * 64,
         }
     ]
-    skills = [{"name": "demo_skill", "description": "Fixture skill"}]
+    skills = [
+        {"name": "demo_skill", "description": "Fixture skill"},
+        {"name": "demo_conditional_skill", "description": "Fixture conditional skill"},
+    ]
+    matrix = {
+        "demo-agent": {
+            "requiredSkills": ["demo_skill"],
+            "conditionalSkills": ["demo_conditional_skill"],
+        }
+    }
+    authority = json.loads((REPO_ROOT / "project_agents" / "tool_authority.json").read_text(encoding="utf-8"))
     _write(root / "project_agents" / "manifest.json", json.dumps(manifest, indent=2) + "\n")
     _write(root / "project_agents" / "canonical" / "p0" / "demo-agent.md", canonical)
     _write(root / "project_agents" / "skills" / "manifest.json", json.dumps(skills, indent=2) + "\n")
     _write(root / "project_agents" / "skills" / "demo_skill" / "SKILL.md", skill)
-    os.symlink("project_agents/manifest.json", root / "AGENTS.md")
+    _write(root / "project_agents" / "skills" / "demo_conditional_skill" / "SKILL.md", conditional_skill)
+    _write(
+        root / "project_agents" / "skills" / "agent_skill_matrix.json",
+        json.dumps(matrix, indent=2) + "\n",
+    )
+    _write(root / "project_agents" / "tool_authority.json", json.dumps(authority, indent=2) + "\n")
+    os.symlink("project_documentation/AGENTS.md", root / "AGENTS.md")
+    _write(root / "project_documentation" / "AGENTS.md", "# Fixture AGENTS\n")
 
 
 class ControlPlaneContractTests(unittest.TestCase):
@@ -445,6 +476,148 @@ class RepositoryGovernanceTests(unittest.TestCase):
         self.assertNotIn("P1=15", source)
         self.assertNotIn("P1=21", source)
         self.assertNotIn("P1=22", source)
+
+
+class ToolAuthorityTests(unittest.TestCase):
+    def test_prohibited_cursor_cloud_writer_rejected(self) -> None:
+        with self.assertRaises(control_plane.ControlPlaneError) as ctx:
+            control_plane.validate_task_manifest(_task(writerTool="cursor-cloud"))
+        self.assertIn("prohibited", str(ctx.exception).lower())
+
+    def test_illegal_writer_verifier_pairing_rejected(self) -> None:
+        with self.assertRaises(control_plane.ControlPlaneError):
+            control_plane.validate_task_manifest(
+                _task(writerTool="cursor-cli", verifierTool="cursor-cli")
+            )
+        with self.assertRaises(control_plane.ControlPlaneError):
+            control_plane.validate_task_manifest(
+                _task(writerTool="cursor-cli", verifierTool="github-copilot")
+            )
+
+    def test_writer_self_certification_as_gatekeeper_rejected(self) -> None:
+        with self.assertRaises(control_plane.ControlPlaneError):
+            control_plane.validate_task_manifest(
+                _task(
+                    writerTool="cursor-cli",
+                    verifierTool="chatgpt-github",
+                    gatekeeper="cursor-cli",
+                    status="MERGE_READY",
+                    exactHead=SHA_B,
+                    scope=["project_agents/"],
+                    requiredEvidence=["tests/engineering_orchestrator/test_control_plane_v2.py"],
+                )
+            )
+
+    def test_authorized_cursor_cli_writer_accepted(self) -> None:
+        control_plane.validate_task_manifest(
+            _task(writerTool="cursor-cli", verifierTool="antigravity", gatekeeper="founder")
+        )
+
+    def test_antigravity_and_codex_default_read_only_renderers(self) -> None:
+        entry = {
+            "name": "platform-minimal-change-engineer",
+            "description": "demo",
+            "mode": "write",
+            "tier": "P0",
+        }
+        body = "# demo\n"
+        sha = "a" * 64
+        canonical = REPO_ROOT / "project_agents" / "canonical" / "p0" / "platform-minimal-change-engineer.md"
+        agy = agent_pack.render_antigravity(entry, body, sha, canonical, REPO_ROOT)
+        self.assertNotIn("replace_file_content", agy.split("---", 2)[1])
+        codex = agent_pack.render_codex(entry, body, sha, canonical, REPO_ROOT)
+        self.assertIn('sandbox_mode = "read-only"', codex)
+        self.assertNotIn("workspace-write", codex)
+
+    def test_duplicate_required_skill_rejected(self) -> None:
+        with self.assertRaises(agent_pack.AgentPackError) as ctx:
+            agent_pack.assert_unique_skill_list(
+                ["evidence_bundle", "evidence_bundle"],
+                "demo requiredSkills",
+            )
+        self.assertIn("duplicate", str(ctx.exception).lower())
+
+    def test_duplicate_conditional_skill_rejected(self) -> None:
+        with self.assertRaises(agent_pack.AgentPackError) as ctx:
+            agent_pack.assert_unique_skill_list(
+                ["kafka", "kafka"],
+                "demo conditionalSkills",
+            )
+        self.assertIn("duplicate", str(ctx.exception).lower())
+
+    def test_unknown_skill_in_matrix_fails_pack_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _build_fixture(root)
+            agent_pack.sync_agent_pack(root)
+            matrix_path = root / "project_agents" / "skills" / "agent_skill_matrix.json"
+            matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+            matrix["demo-agent"]["requiredSkills"] = ["demo_skill", "not_a_real_skill"]
+            matrix_path.write_text(json.dumps(matrix, indent=2) + "\n", encoding="utf-8")
+            errors = agent_pack.validate_agent_pack(root)
+            self.assertTrue(
+                any("unknown skill" in item for item in errors),
+                errors,
+            )
+
+    def test_canonical_agent_matrix_skill_mismatch_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _build_fixture(root)
+            agent_pack.sync_agent_pack(root)
+            matrix_path = root / "project_agents" / "skills" / "agent_skill_matrix.json"
+            matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+            matrix["demo-agent"]["requiredSkills"] = ["demo_conditional_skill"]
+            matrix["demo-agent"]["conditionalSkills"] = ["demo_skill"]
+            matrix_path.write_text(json.dumps(matrix, indent=2) + "\n", encoding="utf-8")
+            errors = agent_pack.validate_agent_pack(root)
+            self.assertTrue(
+                any("mismatch between canonical agent and matrix" in item for item in errors),
+                errors,
+            )
+
+    def test_missing_codex_adapter_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _build_fixture(root)
+            agent_pack.sync_agent_pack(root)
+            codex = root / ".codex" / "agents" / "demo-agent.toml"
+            self.assertTrue(codex.is_file())
+            codex.unlink()
+            errors = agent_pack.validate_agent_pack(root)
+            self.assertTrue(
+                any("missing Codex adapter" in item or "missing adapters" in item for item in errors),
+                errors,
+            )
+
+    def test_adapter_drift_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _build_fixture(root)
+            agent_pack.sync_agent_pack(root)
+            adapter = root / ".cursor" / "agents" / "demo-agent.md"
+            adapter.write_text(adapter.read_text(encoding="utf-8") + "\n# drift\n", encoding="utf-8")
+            errors = agent_pack.validate_agent_pack(root)
+            self.assertTrue(any("adapter drift" in item for item in errors), errors)
+
+    def test_skill_mirror_drift_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _build_fixture(root)
+            agent_pack.sync_agent_pack(root)
+            mirror = root / "skills" / "demo_skill" / "SKILL.md"
+            mirror.write_text(mirror.read_text(encoding="utf-8") + "\n# drift\n", encoding="utf-8")
+            errors = agent_pack.validate_agent_pack(root)
+            self.assertTrue(
+                any("generated skill drift" in item for item in errors),
+                errors,
+            )
+
+    def test_tool_authority_source_present_and_cursor_cloud_prohibited(self) -> None:
+        authority = control_plane.load_tool_authority()
+        self.assertEqual(authority["tools"]["cursor-cloud"]["status"], "prohibited")
+        self.assertIn("cursor-cli", authority["legalCombinations"]["writerTools"])
+        self.assertNotIn("cursor-cloud", authority["legalCombinations"]["writerTools"])
 
 
 if __name__ == "__main__":
