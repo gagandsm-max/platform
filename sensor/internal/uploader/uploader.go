@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -71,8 +72,8 @@ type Transport interface {
 	Upload(context.Context, coreclient.Batch) (coreclient.UploadAck, error)
 }
 type Spool interface {
-	ReadBatch(int, int) (spool.Batch, error)
-	AcknowledgeThrough(uint64) error
+	ReadOrReserveOutboundBatch(int, int) (spool.Batch, error)
+	CompleteOutboundBatch(uint64) error
 	Stats() (spool.Stats, error)
 }
 
@@ -175,7 +176,7 @@ func (u *Uploader) RunOnce(ctx context.Context) (bool, error) {
 	if err := ctxErr(ctx); err != nil {
 		return false, err
 	}
-	batch, err := u.spool.ReadBatch(u.cfg.MaxBatchRecords, u.cfg.MaxBatchPayloadBytes)
+	batch, err := u.spool.ReadOrReserveOutboundBatch(u.cfg.MaxBatchRecords, u.cfg.MaxBatchPayloadBytes)
 	if err != nil {
 		u.setState(StateDegraded, CodeSpool, time.Time{})
 		return false, codeErr(CodeSpool, "failed reading durable spool batch", err, false)
@@ -198,11 +199,14 @@ func (u *Uploader) RunOnce(ctx context.Context) (bool, error) {
 		u.uploads.Add(1)
 		ack, err := u.transport.Upload(ctx, request)
 		if err == nil {
-			if ack.AcceptedThroughSequence == nil {
-				err = codeErr(CodeAckContractUnavailable, "Core did not provide authoritative durable acknowledgement watermark", nil, false)
-			} else if *ack.AcceptedThroughSequence < batch.FirstSequence || *ack.AcceptedThroughSequence > batch.LastSequence {
-				err = codeErr(CodeAckInvalid, "Core acknowledgement is outside submitted sequence range", nil, false)
-			} else if aerr := u.spool.AcknowledgeThrough(*ack.AcceptedThroughSequence); aerr != nil {
+			if err := validateUploaderAck(request, ack); err != nil {
+				if isCode(err, CodeAckContractUnavailable) || coreclient.IsCode(err, coreclient.CodeAckContractMissing) {
+					u.setState(StateAckContractUnavailable, CodeAckContractUnavailable, time.Time{})
+					return false, err
+				}
+				u.setState(StateDegraded, CodeAckInvalid, time.Time{})
+				return false, err
+			} else if aerr := u.spool.CompleteOutboundBatch(*ack.AcceptedThroughSequence); aerr != nil {
 				u.setState(StateDegraded, CodeSpool, time.Time{})
 				return false, codeErr(CodeSpool, "failed applying durable acknowledgement to spool", aerr, false)
 			} else {
@@ -245,9 +249,18 @@ func (u *Uploader) RunOnce(ctx context.Context) (bool, error) {
 }
 
 func (u *Uploader) makeBatch(b spool.Batch) (coreclient.Batch, error) {
+	if b.FirstSequence == 0 || b.LastSequence < b.FirstSequence {
+		return coreclient.Batch{}, codeErr(CodeInvalidConfig, "spool batch sequence bounds are invalid", nil, false)
+	}
+	if b.FirstSequence > spool.MaxSafeSequence || b.LastSequence > spool.MaxSafeSequence {
+		return coreclient.Batch{}, codeErr(CodeInvalidConfig, "spool batch sequence exceeds MAX_SAFE_SEQUENCE", nil, false)
+	}
 	records := make([]json.RawMessage, 0, len(b.Records))
 	h := sha256.New()
 	for _, r := range b.Records {
+		if r.Sequence > spool.MaxSafeSequence {
+			return coreclient.Batch{}, codeErr(CodeInvalidConfig, "spool record sequence exceeds MAX_SAFE_SEQUENCE", nil, false)
+		}
 		enc, err := json.Marshal(r)
 		if err != nil {
 			return coreclient.Batch{}, codeErr(CodeSpool, "failed encoding spool record for upload", err, false)
@@ -266,6 +279,26 @@ func (u *Uploader) makeBatch(b spool.Batch) (coreclient.Batch, error) {
 		return coreclient.Batch{}, codeErr(CodeInvalidConfig, "serialized upload batch exceeds configured request byte bound", nil, false)
 	}
 	return out, nil
+}
+
+// validateUploaderAck re-checks the frozen telemetry ACK contract before spool deletion.
+func validateUploaderAck(batch coreclient.Batch, ack coreclient.UploadAck) error {
+	if ack.Status != "ACCEPTED" {
+		return codeErr(CodeAckInvalid, "Core telemetry acknowledgement status is not ACCEPTED", nil, false)
+	}
+	if strings.TrimSpace(ack.SensorIdentity) == "" {
+		return codeErr(CodeAckContractUnavailable, "Core did not provide authoritative sensor_identity", nil, false)
+	}
+	if ack.SensorIdentity != batch.SensorID {
+		return codeErr(CodeAckInvalid, "Core telemetry acknowledgement sensor_identity does not match submitted Sensor", nil, false)
+	}
+	if ack.AcceptedThroughSequence == nil {
+		return codeErr(CodeAckContractUnavailable, "Core did not provide authoritative durable acknowledgement watermark", nil, false)
+	}
+	if *ack.AcceptedThroughSequence != batch.LastSequence {
+		return codeErr(CodeAckInvalid, "Core acknowledgement is not the submitted batch terminal sequence", nil, false)
+	}
+	return nil
 }
 
 func (u *Uploader) Snapshot() (Snapshot, error) {

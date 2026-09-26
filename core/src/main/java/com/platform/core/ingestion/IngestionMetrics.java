@@ -26,6 +26,15 @@ public class IngestionMetrics {
     private final AtomicBoolean consumerDegraded = new AtomicBoolean(false);
     private final AtomicReference<String> consumerDegradedReason = new AtomicReference<>("");
 
+    private final AtomicLong previousBatchPending = new AtomicLong(0);
+    private final AtomicLong replayConflicts = new AtomicLong(0);
+    private final AtomicLong sequenceGaps = new AtomicLong(0);
+    private final AtomicLong sequenceRegressions = new AtomicLong(0);
+    private final AtomicLong streamMismatches = new AtomicLong(0);
+    private final AtomicLong publisherLeaseContentions = new AtomicLong(0);
+    private final AtomicLong finalizeFailures = new AtomicLong(0);
+    private final AtomicLong pendingReservationsObserved = new AtomicLong(0);
+
     private final AtomicReference<Instant> lastPersistenceTimestamp = new AtomicReference<>(null);
     private final AtomicReference<String> lastError = new AtomicReference<>("");
 
@@ -86,6 +95,18 @@ public class IngestionMetrics {
         consumerDegradedReason.set("");
     }
 
+    public void recordPreviousBatchPending() { previousBatchPending.incrementAndGet(); }
+    public void recordReplayConflict() { replayConflicts.incrementAndGet(); }
+    public void recordSequenceGap() { sequenceGaps.incrementAndGet(); }
+    public void recordSequenceRegression() { sequenceRegressions.incrementAndGet(); }
+    public void recordStreamMismatch() { streamMismatches.incrementAndGet(); }
+    public void recordPublisherLeaseContention() { publisherLeaseContentions.incrementAndGet(); }
+    public void recordFinalizeFailure(String error) {
+        finalizeFailures.incrementAndGet();
+        lastError.set(error);
+    }
+    public void recordPendingReservationObserved() { pendingReservationsObserved.incrementAndGet(); }
+
     public long getBatchesReceived() { return batchesReceived.get(); }
     public long getBatchesRejected() { return batchesRejected.get(); }
     public long getBatchesReplayed() { return batchesReplayed.get(); }
@@ -102,6 +123,15 @@ public class IngestionMetrics {
     public long getConsumerPoisonEvents() { return consumerPoisonEvents.get(); }
     public boolean isConsumerDegraded() { return consumerDegraded.get(); }
     public String getConsumerDegradedReason() { return consumerDegradedReason.get(); }
+
+    public long getPreviousBatchPending() { return previousBatchPending.get(); }
+    public long getReplayConflicts() { return replayConflicts.get(); }
+    public long getSequenceGaps() { return sequenceGaps.get(); }
+    public long getSequenceRegressions() { return sequenceRegressions.get(); }
+    public long getStreamMismatches() { return streamMismatches.get(); }
+    public long getPublisherLeaseContentions() { return publisherLeaseContentions.get(); }
+    public long getFinalizeFailures() { return finalizeFailures.get(); }
+    public long getPendingReservationsObserved() { return pendingReservationsObserved.get(); }
 
     public Instant getLastPersistenceTimestamp() { return lastPersistenceTimestamp.get(); }
     public String getLastError() { return lastError.get(); }

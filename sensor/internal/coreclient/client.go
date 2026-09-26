@@ -92,6 +92,9 @@ type UploadAck struct {
 	SensorIdentity          string  `json:"sensor_identity,omitempty"`
 }
 
+// MaxSafeSequence is the JSON-safe transport sequence ceiling (2^53 - 1).
+const MaxSafeSequence = uint64(9007199254740991)
+
 type DiscoveryTaskResponse struct {
 	Status               string   `json:"status"`
 	HasTask              bool     `json:"has_task"`
@@ -216,16 +219,56 @@ func (c *Client) Upload(ctx context.Context, batch Batch) (UploadAck, error) {
 		batch.FirstSequence == 0 || batch.LastSequence < batch.FirstSequence || batch.Checksum == "" || len(batch.Records) == 0 {
 		return UploadAck{}, newError(CodeInvalidConfig, "upload batch metadata is incomplete or invalid", nil, false)
 	}
-	var ack UploadAck
-	if err := c.doJSON(ctx, http.MethodPost, telemetryPath, batch, batch.CorrelationID, batch.BatchID, &ack); err != nil { return UploadAck{}, err }
-	if ack.AcceptedThroughSequence == nil {
-		return ack, newError(CodeAckContractMissing,
-			"Core accepted telemetry transport but did not return the durable accepted-through sequence contract", nil, false)
+	if batch.FirstSequence > MaxSafeSequence || batch.LastSequence > MaxSafeSequence {
+		return UploadAck{}, newError(CodeInvalidConfig, "upload batch sequence exceeds MAX_SAFE_SEQUENCE", nil, false)
 	}
-	if *ack.AcceptedThroughSequence < batch.FirstSequence || *ack.AcceptedThroughSequence > batch.LastSequence {
-		return ack, newError(CodeProtocol, "Core acknowledgement sequence is outside the submitted batch range", nil, false)
+	// Decode the full response body through UploadAck.UnmarshalJSON (unknown/trailing reject).
+	// Do not use doJSON's Decoder+fallback path: Decoder only feeds the first JSON value into
+	// UnmarshalJSON, which would miss trailing tokens, and the fallback Unmarshal would accept
+	// unknown fields for types without a strict UnmarshalJSON.
+	status, responseBody, err := c.exchangeJSON(ctx, http.MethodPost, telemetryPath, batch, batch.CorrelationID, batch.BatchID)
+	if err != nil {
+		return UploadAck{}, err
+	}
+	if status < 200 || status >= 300 {
+		return UploadAck{}, classifyStatus(status)
+	}
+	var ack UploadAck
+	if err := json.Unmarshal(responseBody, &ack); err != nil {
+		return UploadAck{}, newError(CodeProtocol, "Core telemetry acknowledgement failed strict ACK contract", err, false)
+	}
+	if err := validateTelemetryUploadAck(batch, ack); err != nil {
+		return ack, err
 	}
 	return ack, nil
+}
+
+// validateTelemetryUploadAck enforces BUILD-003 exact-terminal ACK binding without expanding frozen D003 fields.
+func validateTelemetryUploadAck(batch Batch, ack UploadAck) error {
+	if ack.Status != "ACCEPTED" {
+		return newError(CodeProtocol, "Core telemetry acknowledgement status is not ACCEPTED", nil, false)
+	}
+	if strings.TrimSpace(ack.SensorIdentity) == "" {
+		return newError(CodeAckContractMissing,
+			"Core accepted telemetry transport but did not return sensor_identity", nil, false)
+	}
+	if ack.SensorIdentity != batch.SensorID {
+		return newError(CodeProtocol, "Core telemetry acknowledgement sensor_identity does not match submitted Sensor", nil, false)
+	}
+	if ack.AcceptedThroughSequence == nil {
+		return newError(CodeAckContractMissing,
+			"Core accepted telemetry transport but did not return the durable accepted-through sequence contract", nil, false)
+	}
+	if *ack.AcceptedThroughSequence != batch.LastSequence {
+		if *ack.AcceptedThroughSequence < batch.FirstSequence {
+			return newError(CodeProtocol, "Core acknowledgement sequence is below submitted batch first sequence", nil, false)
+		}
+		if *ack.AcceptedThroughSequence > batch.LastSequence {
+			return newError(CodeProtocol, "Core acknowledgement sequence is above submitted batch last sequence", nil, false)
+		}
+		return newError(CodeProtocol, "Core acknowledgement sequence is not the submitted batch terminal sequence", nil, false)
+	}
+	return nil
 }
 
 // Sensor identity is deliberately absent from the discovery task body. Core binds this request to the mTLS certificate.
@@ -253,37 +296,45 @@ func (c *Client) SendBatch(context.Context, []byte) error {
 	return newError(CodeAckContractMissing, "raw unsequenced telemetry upload is disabled; use Upload with replay metadata", nil, false)
 }
 
-func (c *Client) doJSON(ctx context.Context, method, path string, body any, correlationID, idempotencyKey string, out any) error {
-	if c == nil { return newError(CodeInvalidConfig, "Core client is nil", nil, false) }
-	if c.initErr != nil { return c.initErr }
-	if ctx == nil { return newError(CodeInvalidConfig, "context must not be nil", nil, false) }
-	if err := contextClassified(ctx); err != nil { return err }
+func (c *Client) exchangeJSON(ctx context.Context, method, path string, body any, correlationID, idempotencyKey string) (int, []byte, error) {
+	if c == nil { return 0, nil, newError(CodeInvalidConfig, "Core client is nil", nil, false) }
+	if c.initErr != nil { return 0, nil, c.initErr }
+	if ctx == nil { return 0, nil, newError(CodeInvalidConfig, "context must not be nil", nil, false) }
+	if err := contextClassified(ctx); err != nil { return 0, nil, err }
 	endpoint := *c.baseURL
 	endpoint.Path = strings.TrimRight(c.baseURL.Path, "/") + path
 
 	var reader io.Reader
 	if body != nil {
 		payload, err := json.Marshal(body)
-		if err != nil { return newError(CodeProtocol, "failed to encode Core request", err, false) }
+		if err != nil { return 0, nil, newError(CodeProtocol, "failed to encode Core request", err, false) }
 		reader = bytes.NewReader(payload)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), reader)
-	if err != nil { return newError(CodeProtocol, "failed to create Core request", err, false) }
+	if err != nil { return 0, nil, newError(CodeProtocol, "failed to create Core request", err, false) }
 	req.Header.Set("Accept", "application/json")
 	if body != nil { req.Header.Set("Content-Type", "application/json") }
 	if correlationID != "" { req.Header.Set("X-Correlation-ID", correlationID) }
 	if idempotencyKey != "" { req.Header.Set("Idempotency-Key", idempotencyKey) }
 
 	resp, err := c.httpClient.Do(req)
-	if err != nil { return classifyTransport(ctx, err) }
+	if err != nil { return 0, nil, classifyTransport(ctx, err) }
 	defer resp.Body.Close()
 	responseBody, err := readBounded(resp.Body, c.maxResponseBytes)
+	if err != nil { return 0, nil, err }
+	return resp.StatusCode, responseBody, nil
+}
+
+func (c *Client) doJSON(ctx context.Context, method, path string, body any, correlationID, idempotencyKey string, out any) error {
+	status, responseBody, err := c.exchangeJSON(ctx, method, path, body, correlationID, idempotencyKey)
 	if err != nil { return err }
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 { return classifyStatus(resp.StatusCode) }
+	if status < 200 || status >= 300 { return classifyStatus(status) }
 	if out == nil || len(bytes.TrimSpace(responseBody)) == 0 { return nil }
 	decoder := json.NewDecoder(bytes.NewReader(responseBody))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
+		// Compatibility fallback for non-ACK Core surfaces (heartbeat/status) that tolerate
+		// additive fields. Durable telemetry ACK must not use this path — see Upload().
 		if err := json.Unmarshal(responseBody, out); err != nil { return newError(CodeProtocol, "Core response is not valid JSON", err, false) }
 	}
 	return nil

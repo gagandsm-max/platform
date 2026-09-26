@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,9 +25,14 @@ type fakeSpool struct {
 	ackErr  error
 }
 
-func (f *fakeSpool) ReadBatch(int, int) (spool.Batch, error) { return f.batch, f.readErr }
-func (f *fakeSpool) AcknowledgeThrough(v uint64) error       { f.acks = append(f.acks, v); return f.ackErr }
-func (f *fakeSpool) Stats() (spool.Stats, error)             { return f.stats, nil }
+func (f *fakeSpool) ReadOrReserveOutboundBatch(int, int) (spool.Batch, error) {
+	return f.batch, f.readErr
+}
+func (f *fakeSpool) CompleteOutboundBatch(v uint64) error {
+	f.acks = append(f.acks, v)
+	return f.ackErr
+}
+func (f *fakeSpool) Stats() (spool.Stats, error) { return f.stats, nil }
 
 type fakeTransport struct {
 	calls int
@@ -43,8 +49,8 @@ func rec(seq uint64) spool.Record {
 func cfg() Config {
 	return Config{SensorID: "s1", StreamID: "stream-00112233445566778899aabbccddeeff", MaxBatchRecords: 10, MaxBatchPayloadBytes: 1000, MaxRequestBytes: 10000, MaxAttempts: 3, InitialBackoff: time.Millisecond, MaxBackoff: 10 * time.Millisecond, JitterFraction: 0, IdleInterval: time.Second}
 }
-func TestSuccessAndPartialAck(t *testing.T) {
-	v := uint64(1)
+func TestSuccessRequiresExactTerminalAck(t *testing.T) {
+	v := uint64(2)
 	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 2, Records: []spool.Record{rec(1), rec(2)}, PayloadBytes: 2}}
 	tr := &fakeTransport{fn: func(_ int, b coreclient.Batch) (coreclient.UploadAck, error) {
 		if b.FirstSequence != 1 || b.LastSequence != 2 || b.BatchID == "" || b.CorrelationID == "" {
@@ -53,15 +59,28 @@ func TestSuccessAndPartialAck(t *testing.T) {
 		if b.BootEpoch != "stream-00112233445566778899aabbccddeeff" {
 			t.Fatalf("wire bootEpoch must carry durable spool stream ID, got %q", b.BootEpoch)
 		}
-		return coreclient.UploadAck{AcceptedThroughSequence: &v}, nil
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
 	}}
 	u, _ := New(cfg(), sp, tr)
 	ok, err := u.RunOnce(context.Background())
 	if err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
-	if len(sp.acks) != 1 || sp.acks[0] != 1 {
+	if len(sp.acks) != 1 || sp.acks[0] != 2 {
 		t.Fatalf("acks %#v", sp.acks)
+	}
+}
+
+func TestPartialAckRetainsSpool(t *testing.T) {
+	v := uint64(1)
+	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 2, Records: []spool.Record{rec(1), rec(2)}, PayloadBytes: 2}}
+	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}}
+	u, _ := New(cfg(), sp, tr)
+	_, err := u.RunOnce(context.Background())
+	if !isCode(err, CodeAckInvalid) || len(sp.acks) != 0 {
+		t.Fatalf("err=%v acks=%v", err, sp.acks)
 	}
 }
 func TestAckMissingRetainsSpool(t *testing.T) {
@@ -79,7 +98,7 @@ func TestInvalidAckRetainsSpool(t *testing.T) {
 	v := uint64(9)
 	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 2, Records: []spool.Record{rec(1), rec(2)}, PayloadBytes: 2}}
 	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
-		return coreclient.UploadAck{AcceptedThroughSequence: &v}, nil
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
 	}}
 	u, _ := New(cfg(), sp, tr)
 	_, err := u.RunOnce(context.Background())
@@ -97,7 +116,7 @@ func TestTransientRetryThenSuccess(t *testing.T) {
 		if n < 3 {
 			return coreclient.UploadAck{}, transientErr{}
 		}
-		return coreclient.UploadAck{AcceptedThroughSequence: &v}, nil
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
 	}}
 	u, _ := New(cfg(), sp, tr)
 	u.wait = func(context.Context, time.Duration) error { return nil }
@@ -215,5 +234,104 @@ func TestUnknownAckFieldsFailClosedPreventsSpoolAck(t *testing.T) {
 	}
 	if len(sp.acks) != 0 {
 		t.Fatalf("spool was acknowledged despite unknown fields: %v", sp.acks)
+	}
+}
+
+func TestUploaderFrozenWindowSurvivesGrowthRestartAndExactChecksum(t *testing.T) {
+	dir := t.TempDir()
+	sp, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sp.Close() })
+	spSpace := func(int64) (spool.Stats, error) { return spool.Stats{}, nil }
+	_ = spSpace
+	// Bypass 80% protection in unit test by using high free capacity via unexported hook:
+	// DiskSpool.space is package-private to spool; Append uses real FS which is fine in TempDir.
+
+	for i := 1; i <= 5; i++ {
+		payload := []byte(fmt.Sprintf(`{"n":%d}`, i))
+		if _, err := sp.Append(spool.AppendRequest{Class: spool.ClassMetric, Type: "m", Payload: payload, CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var firstBatch coreclient.Batch
+	failOnce := true
+	tr := &fakeTransport{fn: func(call int, b coreclient.Batch) (coreclient.UploadAck, error) {
+		if failOnce {
+			failOnce = false
+			firstBatch = b
+			return coreclient.UploadAck{}, &transientErr{}
+		}
+		if b.FirstSequence != firstBatch.FirstSequence || b.LastSequence != firstBatch.LastSequence ||
+			b.Checksum != firstBatch.Checksum || b.BatchID != firstBatch.BatchID {
+			t.Fatalf("retry must replay exact frozen batch\n first=%+v\n retry=%+v", firstBatch, b)
+		}
+		v := b.LastSequence
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}}
+
+	cfg := cfg()
+	cfg.StreamID = sp.StreamID()
+	cfg.MaxAttempts = 1
+	u1, err := New(cfg, sp, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := u1.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("first RunOnce must fail transport, ok=%v err=%v", ok, err)
+	}
+	if firstBatch.FirstSequence != 1 || firstBatch.LastSequence != 5 {
+		t.Fatalf("first submission range=%d..%d", firstBatch.FirstSequence, firstBatch.LastSequence)
+	}
+
+	for i := 6; i <= 10; i++ {
+		payload := []byte(fmt.Sprintf(`{"n":%d}`, i))
+		if _, err := sp.Append(spool.AppendRequest{Class: spool.ClassMetric, Type: "m", Payload: payload, CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := sp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sp2, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sp2.Close() })
+
+	cfg2 := cfg
+	cfg2.StreamID = sp2.StreamID()
+	cfg2.MaxAttempts = 1
+	u2, err := New(cfg2, sp2, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err = u2.RunOnce(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("retry after growth/restart must succeed: ok=%v err=%v", ok, err)
+	}
+
+	next, err := sp2.ReadOrReserveOutboundBatch(10, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.FirstSequence != 6 || next.LastSequence != 10 {
+		t.Fatalf("after ACK next outbound must be 6..10, got %#v", next)
+	}
+}
+
+func TestUploaderAckStatusExactAccepted(t *testing.T) {
+	v := uint64(1)
+	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}, PayloadBytes: 1}}
+	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "accepted", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}}
+	u, _ := New(cfg(), sp, tr)
+	_, err := u.RunOnce(context.Background())
+	if !isCode(err, CodeAckInvalid) || len(sp.acks) != 0 {
+		t.Fatalf("Equal-fold ACCEPTED must be rejected: err=%v acks=%v", err, sp.acks)
 	}
 }

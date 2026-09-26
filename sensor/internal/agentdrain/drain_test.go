@@ -79,7 +79,7 @@ func TestDrainAcksOnlyAfterValidCoreAck(t *testing.T) {
 	// Transport returns ACK matching whatever request was built.
 	tr.err = nil
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
 		IdleInterval: 10 * time.Millisecond, ShutdownGrace: time.Second,
@@ -130,7 +130,7 @@ func TestDrainRetainsSpoolOnTransientFailure(t *testing.T) {
 	_ = appendDurable(t, s, 1)
 	tr := &fakeTransport{err: transientErr{}}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
@@ -153,14 +153,14 @@ type transientErr struct{}
 func (transientErr) Error() string   { return "temporary core outage" }
 func (transientErr) Transient() bool { return true }
 
-func TestDrainParksTerminalEntityUnresolved(t *testing.T) {
+func TestDrainParksMalformedPayload(t *testing.T) {
 	s, dir := openSpool(t)
 	rec := appendDurable(t, s, 1)
 	tr := &fakeTransport{err: &coreclient.CoreAPIError{
-		Code: "ERR_AGENT_ENTITY_UNRESOLVED", Message: "missing", HTTPStatus: 422,
+		Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400,
 	}}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
@@ -190,13 +190,13 @@ func TestPoisonParkingDirectorySyncFailurePreventsAckAndAllowsRetry(t *testing.T
 	s, dir := openSpool(t)
 	rec := appendDurable(t, s, 1)
 	tr := &fakeTransport{err: &coreclient.CoreAPIError{
-		Code: "ERR_AGENT_ENTITY_UNRESOLVED", Message: "missing", HTTPStatus: 422,
+		Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400,
 	}}
 	var logBuf strings.Builder
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
@@ -310,11 +310,11 @@ func TestPoisonParkingDirectorySyncSuccessPermitsSourceAck(t *testing.T) {
 	s, dir := openSpool(t)
 	_ = appendDurable(t, s, 1)
 	tr := &fakeTransport{err: &coreclient.CoreAPIError{
-		Code: "ERR_AGENT_ENTITY_UNRESOLVED", Message: "missing", HTTPStatus: 422,
+		Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400,
 	}}
 	syncCalled := false
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
@@ -350,7 +350,7 @@ func TestShutdownIdempotent(t *testing.T) {
 	s, dir := openSpool(t)
 	tr := &echoTransport{inner: &fakeTransport{}}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: 50 * time.Millisecond, ShutdownGrace: time.Second,
@@ -380,7 +380,7 @@ func TestDrainParksRecordTooLarge(t *testing.T) {
 		Code: "ERR_RECORD_TOO_LARGE", Message: "record exceeds maximum size", HTTPStatus: 413,
 	}}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second,
@@ -406,36 +406,129 @@ func TestDrainParksRecordTooLarge(t *testing.T) {
 }
 
 func TestIsTerminalCoreError(t *testing.T) {
-	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_AGENT_ENTITY_UNRESOLVED", HTTPStatus: 422}) {
-		t.Fatal("expected terminal")
-	}
-	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_RECORD_TOO_LARGE", HTTPStatus: 413}) {
-		t.Fatal("413 ERR_RECORD_TOO_LARGE must be terminal so drain is not head-of-line blocked")
-	}
-	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_OTHER_CONTRACT", HTTPStatus: 413}) {
-		t.Fatal("non-transient 413 must be terminal")
+	for _, code := range []string{
+		"ERR_MALFORMED_JSON",
+		"ERR_MALFORMED_RECORD",
+		"ERR_MALFORMED_RECORD_PAYLOAD",
+		"ERR_UNSUPPORTED_SCHEMA_VERSION",
+		"ERR_CHECKSUM_MISMATCH",
+		"ERR_AGENT_HOST_ID_REQUIRED",
+		"ERR_RECORD_TOO_LARGE",
+		"ERR_BATCH_TOO_LARGE",
+		"ERR_REQUEST_TOO_LARGE",
+	} {
+		if !isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 400}) {
+			t.Fatalf("expected poison allowlist terminal for %s", code)
+		}
 	}
 	for _, code := range []string{
+		"ERR_AGENT_ENTITY_UNRESOLVED",
+		"ERR_AGENT_ASSIGNMENT_UNKNOWN",
 		"ERR_AUTH_IDENTITY_MISMATCH",
+		"ERR_AUTH_CLIENT_CERT_REQUIRED",
+		"ERR_SENSOR_AUTHORITY_UNAVAILABLE",
 		"ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH",
 		"ERR_AGENT_ACCEPTING_SENSOR_MISMATCH",
 		"ERR_TENANT_SCOPE_MISMATCH",
+		"ERR_PREVIOUS_BATCH_PENDING",
+		"ERR_BATCH_PUBLICATION_IN_PROGRESS",
+		"ERR_SENSOR_STREAM_CHANGED",
 		"ERR_IDEMPOTENCY_CONFLICT",
 		"ERR_SEQUENCE_REGRESSION",
+		"ERR_SEQUENCE_GAP",
+		"ERR_SEQUENCE_OUT_OF_BOUNDS",
+		"ERR_AGENT_STREAM_ID_INVALID",
+		"ERR_OTHER_CONTRACT",
+		"ERR_UNKNOWN_APPLICATION",
 	} {
-		if !isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 403}) {
-			t.Fatalf("expected terminal for %s", code)
+		if isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 403}) {
+			t.Fatalf("%s must not be poison-terminal", code)
 		}
 	}
-	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_OTHER_CONTRACT", HTTPStatus: 409}) {
-		t.Fatal("non-transient 409 must be terminal")
+	for _, status := range []int{400, 401, 403, 409, 413, 422} {
+		if isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_UNKNOWN_APP", HTTPStatus: status}) {
+			t.Fatalf("unknown HTTP %d must not be poison-terminal by status alone", status)
+		}
 	}
-	if isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_INTERNAL", HTTPStatus: 500, Message: "x"}) {
-		// 500 is transient via classifyAgentTelemetry; without transient flag still not status-terminal here
-	}
-	err := errors.New("other")
-	if isTerminalCoreError(err) {
+	if isTerminalCoreError(errors.New("other")) {
 		t.Fatal("generic error must not be terminal")
+	}
+}
+
+func TestDrainRetainsSpoolOnAuthorityAndContinuityErrors(t *testing.T) {
+	cases := []struct {
+		name      string
+		code      string
+		status    int
+		transient bool
+	}{
+		{"previous_batch_pending", "ERR_PREVIOUS_BATCH_PENDING", 409, true},
+		{"publication_in_progress", "ERR_BATCH_PUBLICATION_IN_PROGRESS", 429, true},
+		{"stream_changed", "ERR_SENSOR_STREAM_CHANGED", 409, false},
+		{"idempotency_conflict", "ERR_IDEMPOTENCY_CONFLICT", 409, false},
+		{"sequence_regression", "ERR_SEQUENCE_REGRESSION", 409, false},
+		{"sequence_gap", "ERR_SEQUENCE_GAP", 400, false},
+		{"sequence_out_of_bounds", "ERR_SEQUENCE_OUT_OF_BOUNDS", 400, false},
+		{"agent_stream_id_invalid", "ERR_AGENT_STREAM_ID_INVALID", 400, false},
+		{"sensor_authority_unavailable", "ERR_SENSOR_AUTHORITY_UNAVAILABLE", 403, false},
+		{"auth_client_cert_required", "ERR_AUTH_CLIENT_CERT_REQUIRED", 401, false},
+		{"auth_identity_mismatch", "ERR_AUTH_IDENTITY_MISMATCH", 403, false},
+		{"agent_assignment_unknown", "ERR_AGENT_ASSIGNMENT_UNKNOWN", 422, false},
+		{"agent_assignment_sensor_mismatch", "ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH", 403, false},
+		{"agent_accepting_sensor_mismatch", "ERR_AGENT_ACCEPTING_SENSOR_MISMATCH", 403, false},
+		{"tenant_scope_mismatch", "ERR_TENANT_SCOPE_MISMATCH", 403, false},
+		{"agent_entity_unresolved", "ERR_AGENT_ENTITY_UNRESOLVED", 422, false},
+		{"unknown_400", "ERR_UNKNOWN_APPLICATION_400", 400, false},
+		{"unknown_403", "ERR_UNKNOWN_APPLICATION_403", 403, false},
+		{"unknown_409", "ERR_UNKNOWN_APPLICATION_409", 409, false},
+		{"unknown_413", "ERR_UNKNOWN_APPLICATION_413", 413, false},
+		{"unknown_422", "ERR_UNKNOWN_APPLICATION_422", 422, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, dir := openSpool(t)
+			_ = appendDurable(t, s, 1)
+			body := []byte(`{"status":"REJECTED","code":"` + tc.code + `","message":"retain"}`)
+			tr := &fakeTransport{err: coreclient.ClassifyAgentTelemetryFailure(tc.status, body)}
+			d, err := New(Config{
+				SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
+				MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+				RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
+				IdleInterval: time.Millisecond, ShutdownGrace: time.Second, JitterFraction: 0,
+			}, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ok, err := d.RunOnce(context.Background())
+			if ok {
+				t.Fatal("expected no successful drain")
+			}
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			st, _ := s.Stats()
+			if st.RecordCount != 1 {
+				t.Fatalf("spool must be retained for %s, got count=%d", tc.code, st.RecordCount)
+			}
+			if d.Metrics().PoisonCount.Load() != 0 {
+				t.Fatalf("poison must not be created for %s", tc.code)
+			}
+			entries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
+			if len(entries) != 0 {
+				t.Fatalf("poison file created for %s: %v", tc.code, entries)
+			}
+			if tc.transient {
+				var drainErr *Error
+				if !errors.As(err, &drainErr) || !drainErr.Transient() {
+					t.Fatalf("%s must be retryable/transient, got %v", tc.code, err)
+				}
+			} else {
+				var drainErr *Error
+				if errors.As(err, &drainErr) && drainErr.Transient() {
+					t.Fatalf("%s must fail closed (non-transient) with spool retained, got %v", tc.code, err)
+				}
+			}
+		})
 	}
 }
 
@@ -468,7 +561,7 @@ func TestDrainContinuesUnderSpoolProtection(t *testing.T) {
 	rec := appendDurable(t, s, 1)
 	tr := &echoingTransport{}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
 		JitterFraction: 0, IdleInterval: 10 * time.Millisecond, ShutdownGrace: time.Second,
@@ -509,7 +602,7 @@ func TestDrainDoesNotAdvanceSpoolOnInvalidAck(t *testing.T) {
 		CorrelationID:                  "corr-1",
 	}}
 	d, err := New(Config{
-		SensorID: "sensor-infra-01", AgentSpoolDir: dir,
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
 		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
 		JitterFraction: 0, IdleInterval: 10 * time.Millisecond, ShutdownGrace: time.Second,
@@ -535,4 +628,155 @@ func TestDrainDoesNotAdvanceSpoolOnInvalidAck(t *testing.T) {
 	if d.Metrics().DurableAcks.Load() != 0 {
 		t.Fatalf("durable acks must remain 0 on invalid ACK, got %d", d.Metrics().DurableAcks.Load())
 	}
+}
+
+func appendNDurable(t *testing.T, s *spool.DiskSpool, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		_ = appendDurable(t, s, uint64(i+1))
+	}
+}
+
+func TestDrainFrozenWindowSurvivesGrowthRestartAndExactIdentity(t *testing.T) {
+	dir := t.TempDir()
+	s, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendNDurable(t, s, 5)
+
+	var first coreclient.AgentTelemetryBatch
+	calls := 0
+	tr := &fakeTransport{}
+	tr.err = errors.New("transport down")
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 5, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond,
+		JitterFraction: 0, IdleInterval: time.Hour, ShutdownGrace: time.Second,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := &captureTransport{inner: tr, onCall: func(b coreclient.AgentTelemetryBatch) {
+		calls++
+		if calls == 1 {
+			first = b
+		} else if b.FirstIngressSequence != first.FirstIngressSequence ||
+			b.LastIngressSequence != first.LastIngressSequence ||
+			b.Checksum != first.Checksum || b.BatchID != first.BatchID {
+			t.Fatalf("retry must reuse exact frozen Agent-ingress identity\n first=%+v\n retry=%+v", first, b)
+		}
+	}}
+	d.transport = capture
+
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("first drain must fail, ok=%v err=%v", ok, err)
+	}
+	if first.FirstIngressSequence != 1 || first.LastIngressSequence != 5 {
+		t.Fatalf("first range=%d..%d", first.FirstIngressSequence, first.LastIngressSequence)
+	}
+
+	appendNDurable(t, s, 5) // sequences 6..10
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+
+	tr.err = nil
+	tr.ack = coreclient.AgentTelemetryAck{} // filled by capture echo
+	d2, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s2.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond,
+		JitterFraction: 0, IdleInterval: time.Hour, ShutdownGrace: time.Second,
+	}, s2, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2.transport = &echoCaptureTransport{onCall: func(b coreclient.AgentTelemetryBatch) {
+		calls++
+		if b.FirstIngressSequence != first.FirstIngressSequence ||
+			b.LastIngressSequence != first.LastIngressSequence ||
+			b.Checksum != first.Checksum || b.BatchID != first.BatchID {
+			t.Fatalf("post-restart retry must reuse exact frozen identity\n first=%+v\n retry=%+v", first, b)
+		}
+	}}
+	ok, err = d2.RunOnce(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("retry after growth/restart must succeed: ok=%v err=%v", ok, err)
+	}
+	next, err := s2.ReadOrReserveOutboundBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.FirstSequence != 6 || next.LastSequence != 10 {
+		t.Fatalf("after ACK next Agent window must be 6..10, got %#v", next)
+	}
+}
+
+func TestDrainPoisonAbandonsWindowBeforeHeadAck(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 3)
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{
+		Code: "ERR_RECORD_TOO_LARGE", HTTPStatus: 400, Message: "too large",
+	}}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 3, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond,
+		JitterFraction: 0, IdleInterval: time.Hour, ShutdownGrace: time.Second,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("expected poison, ok=%v err=%v", ok, err)
+	}
+	st, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.RecordCount != 2 {
+		t.Fatalf("poison head ACK must leave remaining records, got %d", st.RecordCount)
+	}
+	next, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.FirstSequence != 2 || next.LastSequence != 3 {
+		t.Fatalf("after poison abandon, new window over remaining records: %#v", next)
+	}
+}
+
+type captureTransport struct {
+	inner  *fakeTransport
+	onCall func(coreclient.AgentTelemetryBatch)
+}
+
+func (c *captureTransport) UploadAgentTelemetry(ctx context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+	if c.onCall != nil {
+		c.onCall(batch)
+	}
+	return c.inner.UploadAgentTelemetry(ctx, batch)
+}
+
+type echoCaptureTransport struct {
+	onCall func(coreclient.AgentTelemetryBatch)
+}
+
+func (e *echoCaptureTransport) UploadAgentTelemetry(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+	if e.onCall != nil {
+		e.onCall(batch)
+	}
+	return coreclient.AgentTelemetryAck{
+		Status: "ACCEPTED", SensorID: batch.SensorID, BatchID: batch.BatchID,
+		AcceptedThroughIngressSequence: batch.LastIngressSequence, CorrelationID: batch.CorrelationID,
+	}, nil
 }

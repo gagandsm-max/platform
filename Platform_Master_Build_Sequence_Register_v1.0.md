@@ -17,17 +17,17 @@
 | BUILD-001 certification | CERTIFIED — PR #113 merged at `aae9cb4c5579e05f0ea50a50079c54341d648f41`; immutable audit PASS (0 P0/P1/P2); post-merge Platform CI #522 / run DB `36022560598` SUCCESS |
 | BUILD-002 certification | CERTIFIED — PR #116; final audited head `1d89439e002588ea29a5f1f1eb275baf8e5fd8be`; exact-head Platform CI #528 / run DB `36126454664` SUCCESS; second immutable Antigravity audit PASS (0 P0/P1, 1 non-blocking P2); merged/main `1e7efbd1d4cb616cf10c875e3a40dd82ab2c1472`; post-merge Platform CI #529 / run DB `36129166078` SUCCESS |
 | Active BUILD | BUILD-003 |
-| Active status | NOT_STARTED — architecture closure active; writer blocked |
+| Active status | CERTIFYING — implementation complete at code SHA `63a27a381fe0b87f6a78de10df8f2c30a9125a01`; draft PR #119 open; exact-head CI + independent Antigravity/Codex + production-slice evidence pending |
 | Active GitHub issue | #117 |
-| Active PR | PENDING |
-| Evidence | BUILD-002 fully certified and closed after exact-head CI, two immutable adversarial audit cycles (first FAIL_P0, corrected second PASS), guarded merge and post-merge exact-main CI. BUILD-003 activated on canonical main `1e7efbd1d4cb616cf10c875e3a40dd82ab2c1472`; architecture closure is required before any implementation branch/writer authorization |
+| Active PR | #119 (DRAFT) |
+| Evidence | BUILD-002 fully certified and closed after exact-head CI, two immutable adversarial audit cycles (first FAIL_P0, corrected second PASS), guarded merge and post-merge exact-main CI. BUILD-003 activated from `1e7efbd1d4cb616cf10c875e3a40dd82ab2c1472`; source/architecture closure completed and independently synchronized at canonical main `8bb4b20d206ac7bf95286509b12e127b8fbb8dba`; holds A–F closed; single implementation branch `build/build-003-sensor-core-transport` created; bounded Cursor CLI writer authorized |
 | Last updated | 2026-09-25 |
 | Sequencing authority | Master Chat only |
 
 BUILD-000 decision/certification trail: GitHub Issue #110, PR #111, exact audited head `0b25046c3c418ea5d30d565bd5d5ed7f55138f9c`, merge/main `b5ce7da76def70dc2110aafe5fd89810f7a93c10`, post-merge CI #517.
 BUILD-001 certification trail: GitHub Issue #112, PR #113, immutable audited head `a9d2313645c57ab02a40d44e5ac26cc626c01233`, merge/main `aae9cb4c5579e05f0ea50a50079c54341d648f41`, post-merge CI #522.
 BUILD-002 certification trail: GitHub Issue #114 (closed), PR #116; activation base `1738ce21800838afa4f1025106a775685685371d`; first immutable audited head `d96f807714c5623e9b1143c5b46fce174458b685` passed CI #526 / DB `36117860866` but audit returned FAIL_P0 for historical-lineage seq1 resurrection; corrective implementation `033ffda684529d17b6e703f288fe53916bb0438a`; final immutable audited head `1d89439e002588ea29a5f1f1eb275baf8e5fd8be` passed CI #528 / DB `36126454664` and second immutable audit PASS (0 P0/P1); merge/main `1e7efbd1d4cb616cf10c875e3a40dd82ab2c1472`; post-merge CI #529 / DB `36129166078` SUCCESS.
-BUILD-003 authority and evidence trail: GitHub Issue #117; activation base `1e7efbd1d4cb616cf10c875e3a40dd82ab2c1472`; active for architecture closure only; no implementation branch or writer authorization exists yet.
+BUILD-003 authority and evidence trail: GitHub Issue #117; activation base `1e7efbd1d4cb616cf10c875e3a40dd82ab2c1472`; architecture/source closure independently completed against canonical main `8bb4b20d206ac7bf95286509b12e127b8fbb8dba`; publisher lease, shared-connector mTLS, frozen telemetry ACK binding, Agent-ingress transport lineage v2, forward-only DB migration and heartbeat authority holds A–F closed; implementation branch `build/build-003-sensor-core-transport`; implementation code stabilized at `63a27a381fe0b87f6a78de10df8f2c30a9125a01`; draft PR #119 opened; status CERTIFYING pending exact-head CI, fresh immutable Antigravity and Codex audits, and production-slice evidence.
 
 ## Core rule
 
@@ -44,7 +44,7 @@ ARCHITECTURE/CAPABILITY CONTRACT CLOSED → IMPLEMENTED → UNIT TESTED → INTE
 | BUILD-000 | Contract & invariant freeze | Canonical IDs, tenant/site/entity identity, telemetry envelope, sequence bounds, timestamps, error model, No Data != Down | Mother References A2 complete | Specified/partial | Versioned contracts and compatibility tests frozen |
 | BUILD-001 | Test harness & simulators | Mock Core/Sensor/Agent, fake SNMP devices, syslog/flow senders, fault injection, reproducible fixtures | BUILD-000 | Partial | Deterministic edge/Core testing independently |
 | BUILD-002 | Agent↔Sensor transport | Enrollment, mTLS, batch/sequence, ACK/retry/replay, backpressure, provenance | BUILD-000 | Partial | Loss/duplicate/replay contract tests |
-| BUILD-003 | Sensor↔Core transport | Enrollment, mTLS, desired state, heartbeat, telemetry batch, durable ACK, replay, fencing | BUILD-000 | Partial | Durable ACK/replay invariant proven |
+| BUILD-003 | Sensor↔Core transport | Enrollment, mTLS, heartbeat/liveness, telemetry batch, durable ACK, replay, reservation and fencing; desired-state authority remains BUILD-004 | BUILD-000 | Partial | Durable ACK/replay invariant proven |
 | BUILD-004 | Desired-state/control | Config/version, assignment, lease/fencing, capability/packs, policy, acknowledgement | BUILD-000 | Partial | Desired/observed reconciliation contract |
 | BUILD-005 | Common health/logging | Structured logs, correlation IDs, liveness/readiness, internal metrics, support evidence | BUILD-000 | Partial | Common supportability contract |
 | BUILD-010 | Linux Agent runtime | Go service, config, identity, health, scheduler, collector registry, resource limits | 002/005 | Partial exists | systemd/reboot/restart verified |

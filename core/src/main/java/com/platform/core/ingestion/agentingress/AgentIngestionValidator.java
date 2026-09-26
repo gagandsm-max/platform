@@ -8,6 +8,7 @@ import com.platform.core.agentcontrol.AgentSensorAssignment;
 import com.platform.core.domain.inventory.EntityIdentifier;
 import com.platform.core.ingestion.IngestionException;
 import com.platform.core.ingestion.IngestionMetrics;
+import com.platform.core.ingestion.TransportSequenceLimits;
 import com.platform.core.ingestion.agentingress.dto.AgentIngressRecord;
 import com.platform.core.ingestion.agentingress.dto.AgentTelemetryBatchRequest;
 import com.platform.core.ingestion.authority.SensorAuthorityResolver;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Component
 public class AgentIngestionValidator {
@@ -41,6 +43,8 @@ public class AgentIngestionValidator {
     public static final String AGENT_HOST_ID_TYPE = "HOST_ID";
     public static final String SOURCE_TYPE_AGENT = "AGENT";
     public static final String SOURCE_PROTOCOL_AGENT_HOST = "AGENT_HOST";
+
+    private static final Pattern AGENT_STREAM_ID = Pattern.compile("^stream-[0-9a-f]{32}$");
 
     private final ObjectMapper objectMapper;
     private final SensorAuthorityResolver authorityResolver;
@@ -116,11 +120,11 @@ public class AgentIngestionValidator {
         if (batch == null) {
             throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_EMPTY_BODY", "Request body is empty");
         }
-        if (batch.schemaVersion() != 1) {
+        if (batch.schemaVersion() != 2) {
             throw new IngestionException(
                     HttpStatus.BAD_REQUEST,
                     "ERR_UNSUPPORTED_SCHEMA_VERSION",
-                    "Unsupported schema version: " + batch.schemaVersion() + ", expected 1"
+                    "Unsupported schema version: " + batch.schemaVersion() + ", expected 2"
             );
         }
         if (batch.sensorId() == null || batch.sensorId().isBlank()) {
@@ -133,6 +137,13 @@ public class AgentIngestionValidator {
                     "ERR_AUTH_IDENTITY_MISMATCH",
                     "Sensor ID '" + claimedSensorId + "' does not match authoritative scope sensorId '"
                             + scope.sensorId() + "'"
+            );
+        }
+        if (!isValidAgentStreamId(batch.sensorAgentSpoolStreamId())) {
+            throw new IngestionException(
+                    HttpStatus.BAD_REQUEST,
+                    "ERR_AGENT_STREAM_ID_INVALID",
+                    "sensorAgentSpoolStreamId must match ^stream-[0-9a-f]{32}$"
             );
         }
         if (batch.batchId() == null || batch.batchId().isBlank()) {
@@ -150,6 +161,14 @@ public class AgentIngestionValidator {
                     HttpStatus.BAD_REQUEST,
                     "ERR_BATCH_BOUNDS_INVALID",
                     "firstIngressSequence must be positive"
+            );
+        }
+        if (!TransportSequenceLimits.isValidWireSequence(batch.firstIngressSequence())
+                || !TransportSequenceLimits.isValidWireSequence(batch.lastIngressSequence())) {
+            throw new IngestionException(
+                    HttpStatus.BAD_REQUEST,
+                    "ERR_SEQUENCE_OUT_OF_BOUNDS",
+                    "Batch ingress sequences must be within 1..9007199254740991"
             );
         }
         if (batch.lastIngressSequence() < batch.firstIngressSequence()) {
@@ -239,6 +258,11 @@ public class AgentIngestionValidator {
                     "Batch checksum mismatch"
             );
         }
+    }
+
+    /** Durable Sensor agent-spool stream grammar: {@code ^stream-[0-9a-f]{32}$}. */
+    public static boolean isValidAgentStreamId(String streamId) {
+        return streamId != null && AGENT_STREAM_ID.matcher(streamId).matches();
     }
 
     /**

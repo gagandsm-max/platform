@@ -30,6 +30,8 @@ import static org.mockito.Mockito.*;
 
 class AgentIngestionValidatorTest {
 
+    private static final String STREAM = "stream-00112233445566778899aabbccddeeff";
+
     private ObjectMapper objectMapper;
     private AgentControlRepository agentRepo;
     private EntityIdentifierRepository identifierRepo;
@@ -78,7 +80,7 @@ class AgentIngestionValidatorTest {
     private AgentTelemetryBatchRequest batchWith(AgentIngressRecord record, String sensorId) throws Exception {
         String checksum = AgentIngestionValidator.calculateStableChecksum(List.of(record));
         return new AgentTelemetryBatchRequest(
-                1, sensorId, "batch-1", record.sensorIngressSequence(), record.sensorIngressSequence(),
+                2, sensorId, STREAM, "batch-1", record.sensorIngressSequence(), record.sensorIngressSequence(),
                 1, checksum, "corr-batch", List.of(record)
         );
     }
@@ -116,7 +118,7 @@ class AgentIngestionValidatorTest {
         // Batch sensor matches scope, but acceptingSensorId does not
         String checksum = AgentIngestionValidator.calculateStableChecksum(List.of(record));
         AgentTelemetryBatchRequest batch = new AgentTelemetryBatchRequest(
-                1, "sensor-infra-01", "batch-1", 1, 1, 1, checksum, "corr", List.of(record)
+                2, "sensor-infra-01", STREAM, "batch-1", 1, 1, 1, checksum, "corr", List.of(record)
         );
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 validator.validateAndExtract("{}".getBytes(), batch, scope));
@@ -289,12 +291,38 @@ class AgentIngestionValidatorTest {
         );
         String checksum = AgentIngestionValidator.calculateStableChecksum(List.of(record));
         AgentTelemetryBatchRequest batch = new AgentTelemetryBatchRequest(
-                1, "sensor-infra-01", "batch-1", 1, 1, 1, checksum, "corr", List.of(record)
+                2, "sensor-infra-01", STREAM, "batch-1", 1, 1, 1, checksum, "corr", List.of(record)
         );
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 validator.validateAndExtract("{}".getBytes(), batch, scope));
         assertEquals("ERR_TENANT_SCOPE_MISMATCH", ex.getCode());
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+    }
+
+    @Test
+    void unsupportedSchemaVersionRejected() throws Exception {
+        AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 1);
+        String checksum = AgentIngestionValidator.calculateStableChecksum(List.of(record));
+        AgentTelemetryBatchRequest batch = new AgentTelemetryBatchRequest(
+                1, "sensor-infra-01", STREAM, "batch-1", 1, 1, 1, checksum, "corr", List.of(record)
+        );
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract("{}".getBytes(), batch, scope));
+        assertEquals("ERR_UNSUPPORTED_SCHEMA_VERSION", ex.getCode());
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+    }
+
+    @Test
+    void invalidAgentStreamIdRejected() throws Exception {
+        AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 1);
+        String checksum = AgentIngestionValidator.calculateStableChecksum(List.of(record));
+        AgentTelemetryBatchRequest batch = new AgentTelemetryBatchRequest(
+                2, "sensor-infra-01", "not-a-stream", "batch-1", 1, 1, 1, checksum, "corr", List.of(record)
+        );
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract("{}".getBytes(), batch, scope));
+        assertEquals("ERR_AGENT_STREAM_ID_INVALID", ex.getCode());
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
     }
 
     @Test
