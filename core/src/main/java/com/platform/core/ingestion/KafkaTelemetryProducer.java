@@ -36,10 +36,18 @@ public class KafkaTelemetryProducer {
             IngestionMetrics metrics,
             @Value("${platform.kafka.batch-publish-deadline-seconds:20}") long batchDeadlineSeconds
     ) {
+        if (batchDeadlineSeconds <= 0 || batchDeadlineSeconds > BATCH_PUBLICATION_DEADLINE_SECONDS) {
+            throw new IllegalArgumentException(
+                    "platform.kafka.batch-publish-deadline-seconds must be >0 and <="
+                            + BATCH_PUBLICATION_DEADLINE_SECONDS
+                            + " to remain compatible with the 60s publisher lease; got "
+                            + batchDeadlineSeconds
+            );
+        }
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.metrics = metrics;
-        this.batchDeadlineSeconds = batchDeadlineSeconds > 0 ? batchDeadlineSeconds : BATCH_PUBLICATION_DEADLINE_SECONDS;
+        this.batchDeadlineSeconds = batchDeadlineSeconds;
         this.topic = TOPIC_TELEMETRY_NUMERIC;
     }
 

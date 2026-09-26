@@ -510,14 +510,18 @@ func (d *Drain) Shutdown(ctx context.Context) error {
 }
 
 func isTerminalCoreError(err error) bool {
+	// BUILD-003 continuity/replay/lease/state failures must retain durable spool data.
+	// They are fail-closed or retryable, but never poison-parked.
+	var api *coreclient.CoreAPIError
+	if errors.As(err, &api) && coreclient.IsAgentIngressSpoolRetainingCode(api.Code) {
+		return false
+	}
 	if coreclient.IsCoreAPICode(err, "ERR_AGENT_ENTITY_UNRESOLVED") ||
 		coreclient.IsCoreAPICode(err, "ERR_AGENT_ASSIGNMENT_UNKNOWN") ||
 		coreclient.IsCoreAPICode(err, "ERR_AUTH_IDENTITY_MISMATCH") ||
 		coreclient.IsCoreAPICode(err, "ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH") ||
 		coreclient.IsCoreAPICode(err, "ERR_AGENT_ACCEPTING_SENSOR_MISMATCH") ||
 		coreclient.IsCoreAPICode(err, "ERR_TENANT_SCOPE_MISMATCH") ||
-		coreclient.IsCoreAPICode(err, "ERR_IDEMPOTENCY_CONFLICT") ||
-		coreclient.IsCoreAPICode(err, "ERR_SEQUENCE_REGRESSION") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_JSON") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD_PAYLOAD") ||
@@ -529,7 +533,6 @@ func isTerminalCoreError(err error) bool {
 		coreclient.IsCoreAPICode(err, "ERR_REQUEST_TOO_LARGE") {
 		return true
 	}
-	var api *coreclient.CoreAPIError
 	if errors.As(err, &api) && !api.Transient() {
 		switch api.HTTPStatus {
 		case 400, 403, 409, 413, 422:

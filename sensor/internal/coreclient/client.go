@@ -222,9 +222,20 @@ func (c *Client) Upload(ctx context.Context, batch Batch) (UploadAck, error) {
 	if batch.FirstSequence > MaxSafeSequence || batch.LastSequence > MaxSafeSequence {
 		return UploadAck{}, newError(CodeInvalidConfig, "upload batch sequence exceeds MAX_SAFE_SEQUENCE", nil, false)
 	}
-	var ack UploadAck
-	if err := c.doJSON(ctx, http.MethodPost, telemetryPath, batch, batch.CorrelationID, batch.BatchID, &ack); err != nil {
+	// Decode the full response body through UploadAck.UnmarshalJSON (unknown/trailing reject).
+	// Do not use doJSON's Decoder+fallback path: Decoder only feeds the first JSON value into
+	// UnmarshalJSON, which would miss trailing tokens, and the fallback Unmarshal would accept
+	// unknown fields for types without a strict UnmarshalJSON.
+	status, responseBody, err := c.exchangeJSON(ctx, http.MethodPost, telemetryPath, batch, batch.CorrelationID, batch.BatchID)
+	if err != nil {
 		return UploadAck{}, err
+	}
+	if status < 200 || status >= 300 {
+		return UploadAck{}, classifyStatus(status)
+	}
+	var ack UploadAck
+	if err := json.Unmarshal(responseBody, &ack); err != nil {
+		return UploadAck{}, newError(CodeProtocol, "Core telemetry acknowledgement failed strict ACK contract", err, false)
 	}
 	if err := validateTelemetryUploadAck(batch, ack); err != nil {
 		return ack, err
@@ -234,7 +245,7 @@ func (c *Client) Upload(ctx context.Context, batch Batch) (UploadAck, error) {
 
 // validateTelemetryUploadAck enforces BUILD-003 exact-terminal ACK binding without expanding frozen D003 fields.
 func validateTelemetryUploadAck(batch Batch, ack UploadAck) error {
-	if !strings.EqualFold(strings.TrimSpace(ack.Status), "ACCEPTED") {
+	if ack.Status != "ACCEPTED" {
 		return newError(CodeProtocol, "Core telemetry acknowledgement status is not ACCEPTED", nil, false)
 	}
 	if strings.TrimSpace(ack.SensorIdentity) == "" {
@@ -285,37 +296,45 @@ func (c *Client) SendBatch(context.Context, []byte) error {
 	return newError(CodeAckContractMissing, "raw unsequenced telemetry upload is disabled; use Upload with replay metadata", nil, false)
 }
 
-func (c *Client) doJSON(ctx context.Context, method, path string, body any, correlationID, idempotencyKey string, out any) error {
-	if c == nil { return newError(CodeInvalidConfig, "Core client is nil", nil, false) }
-	if c.initErr != nil { return c.initErr }
-	if ctx == nil { return newError(CodeInvalidConfig, "context must not be nil", nil, false) }
-	if err := contextClassified(ctx); err != nil { return err }
+func (c *Client) exchangeJSON(ctx context.Context, method, path string, body any, correlationID, idempotencyKey string) (int, []byte, error) {
+	if c == nil { return 0, nil, newError(CodeInvalidConfig, "Core client is nil", nil, false) }
+	if c.initErr != nil { return 0, nil, c.initErr }
+	if ctx == nil { return 0, nil, newError(CodeInvalidConfig, "context must not be nil", nil, false) }
+	if err := contextClassified(ctx); err != nil { return 0, nil, err }
 	endpoint := *c.baseURL
 	endpoint.Path = strings.TrimRight(c.baseURL.Path, "/") + path
 
 	var reader io.Reader
 	if body != nil {
 		payload, err := json.Marshal(body)
-		if err != nil { return newError(CodeProtocol, "failed to encode Core request", err, false) }
+		if err != nil { return 0, nil, newError(CodeProtocol, "failed to encode Core request", err, false) }
 		reader = bytes.NewReader(payload)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), reader)
-	if err != nil { return newError(CodeProtocol, "failed to create Core request", err, false) }
+	if err != nil { return 0, nil, newError(CodeProtocol, "failed to create Core request", err, false) }
 	req.Header.Set("Accept", "application/json")
 	if body != nil { req.Header.Set("Content-Type", "application/json") }
 	if correlationID != "" { req.Header.Set("X-Correlation-ID", correlationID) }
 	if idempotencyKey != "" { req.Header.Set("Idempotency-Key", idempotencyKey) }
 
 	resp, err := c.httpClient.Do(req)
-	if err != nil { return classifyTransport(ctx, err) }
+	if err != nil { return 0, nil, classifyTransport(ctx, err) }
 	defer resp.Body.Close()
 	responseBody, err := readBounded(resp.Body, c.maxResponseBytes)
+	if err != nil { return 0, nil, err }
+	return resp.StatusCode, responseBody, nil
+}
+
+func (c *Client) doJSON(ctx context.Context, method, path string, body any, correlationID, idempotencyKey string, out any) error {
+	status, responseBody, err := c.exchangeJSON(ctx, method, path, body, correlationID, idempotencyKey)
 	if err != nil { return err }
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 { return classifyStatus(resp.StatusCode) }
+	if status < 200 || status >= 300 { return classifyStatus(status) }
 	if out == nil || len(bytes.TrimSpace(responseBody)) == 0 { return nil }
 	decoder := json.NewDecoder(bytes.NewReader(responseBody))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
+		// Compatibility fallback for non-ACK Core surfaces (heartbeat/status) that tolerate
+		// additive fields. Durable telemetry ACK must not use this path — see Upload().
 		if err := json.Unmarshal(responseBody, out); err != nil { return newError(CodeProtocol, "Core response is not valid JSON", err, false) }
 	}
 	return nil

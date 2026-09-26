@@ -31,9 +31,10 @@ public class IngestionKafkaConfiguration {
     @ConditionalOnMissingBean(ProducerFactory.class)
     public ProducerFactory<String, String> kafkaProducerFactory(KafkaProperties properties) {
         Map<String, Object> producerProperties = properties.buildProducerProperties(null);
-        producerProperties.putIfAbsent(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        producerProperties.putIfAbsent(ProducerConfig.ACKS_CONFIG, "all");
-        producerProperties.putIfAbsent(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, 30_000);
+        // BUILD-003 safety pins: hostile/external producer properties must not weaken fencing.
+        producerProperties.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        producerProperties.put(ProducerConfig.ACKS_CONFIG, "all");
+        producerProperties.put(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, 30_000);
         DefaultKafkaProducerFactory<String, String> factory = new DefaultKafkaProducerFactory<>(producerProperties);
         if (transactionIdPrefix != null && !transactionIdPrefix.isBlank()) {
             factory.setTransactionIdPrefix(transactionIdPrefix);

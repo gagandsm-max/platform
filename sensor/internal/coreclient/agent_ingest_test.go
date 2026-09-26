@@ -341,3 +341,53 @@ func TestUploadAgentTelemetryRejectsMalformedAck(t *testing.T) {
 		t.Fatalf("expected CodeAckContractMissing for malformed json, got %v", err)
 	}
 }
+
+func TestUploadAgentTelemetryRejectsNonExactAcceptedStatus(t *testing.T) {
+	for _, status := range []string{"accepted", "Accepted", " ACCEPTED ", "OK"} {
+		t.Run(status, func(t *testing.T) {
+			pki := makeTestPKI(t)
+			batch := multiRecordAgentBatch()
+			server := startMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"status":                         status,
+					"sensorId":                       batch.SensorID,
+					"batchId":                        batch.BatchID,
+					"acceptedThroughIngressSequence": batch.LastIngressSequence,
+					"correlationId":                  batch.CorrelationID,
+				})
+			}))
+			client := newTestClient(t, server.URL, pki, 4096)
+			_, err := client.UploadAgentTelemetry(context.Background(), batch)
+			if !IsCode(err, CodeProtocol) {
+				t.Fatalf("status %q must be rejected exactly, got %v", status, err)
+			}
+		})
+	}
+}
+
+func TestClassifyAgentTelemetryFailureRetryableAndSpoolRetaining(t *testing.T) {
+	pending := ClassifyAgentTelemetryFailure(409, []byte(`{"code":"ERR_PREVIOUS_BATCH_PENDING","message":"x"}`))
+	if !IsTransient(pending) {
+		t.Fatalf("ERR_PREVIOUS_BATCH_PENDING must be transient, got %v", pending)
+	}
+	busy := ClassifyAgentTelemetryFailure(429, []byte(`{"code":"ERR_BATCH_PUBLICATION_IN_PROGRESS","message":"x"}`))
+	if !IsTransient(busy) {
+		t.Fatalf("ERR_BATCH_PUBLICATION_IN_PROGRESS must be transient, got %v", busy)
+	}
+	for _, code := range []string{
+		"ERR_SENSOR_STREAM_CHANGED",
+		"ERR_IDEMPOTENCY_CONFLICT",
+		"ERR_SEQUENCE_GAP",
+		"ERR_SEQUENCE_REGRESSION",
+		"ERR_SEQUENCE_OUT_OF_BOUNDS",
+		"ERR_AGENT_STREAM_ID_INVALID",
+	} {
+		err := ClassifyAgentTelemetryFailure(409, []byte(`{"code":"`+code+`","message":"x"}`))
+		if IsTransient(err) {
+			t.Fatalf("%s must fail closed (non-transient)", code)
+		}
+		if !IsAgentIngressSpoolRetainingCode(code) {
+			t.Fatalf("%s must retain spool", code)
+		}
+	}
+}

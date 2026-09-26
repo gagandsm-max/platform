@@ -173,7 +173,7 @@ func (c *Client) UploadAgentTelemetry(ctx context.Context, batch AgentTelemetryB
 }
 
 func validateAgentTelemetryAck(batch AgentTelemetryBatch, ack AgentTelemetryAck) error {
-	if !strings.EqualFold(ack.Status, "ACCEPTED") {
+	if ack.Status != "ACCEPTED" {
 		return newError(CodeProtocol, "Core agent-telemetry acknowledgement status is not ACCEPTED", nil, false)
 	}
 	if ack.SensorID != batch.SensorID {
@@ -210,8 +210,37 @@ func classifyAgentTelemetryStatus(status int, body []byte) error {
 		msg = fmt.Sprintf("Core returned HTTP status %d", status)
 	}
 	transient := status == http.StatusTooManyRequests || status >= 500
+	// BUILD-003 publisher-lease / prior-pending conditions are retryable and must retain spool.
+	switch code {
+	case "ERR_PREVIOUS_BATCH_PENDING", "ERR_BATCH_PUBLICATION_IN_PROGRESS":
+		transient = true
+	}
 	if code != "" {
 		return &CoreAPIError{Status: apiErr.Status, Code: code, Message: msg, HTTPStatus: status, transient: transient}
 	}
 	return classifyStatus(status)
+}
+
+// ClassifyAgentTelemetryFailure maps a Core agent-ingress HTTP failure for drain classification tests.
+func ClassifyAgentTelemetryFailure(httpStatus int, body []byte) error {
+	return classifyAgentTelemetryStatus(httpStatus, body)
+}
+
+// IsAgentIngressSpoolRetainingCode reports BUILD-003 transport/replay/lineage/state failures
+// that must retain durable Agent spool data (no poison park / AcknowledgeThrough).
+func IsAgentIngressSpoolRetainingCode(code string) bool {
+	switch strings.TrimSpace(code) {
+	case "ERR_PREVIOUS_BATCH_PENDING",
+		"ERR_BATCH_PUBLICATION_IN_PROGRESS",
+		"ERR_SENSOR_STREAM_CHANGED",
+		"ERR_SENSOR_AGENT_SPOOL_STREAM_CHANGED",
+		"ERR_IDEMPOTENCY_CONFLICT",
+		"ERR_SEQUENCE_REGRESSION",
+		"ERR_SEQUENCE_GAP",
+		"ERR_SEQUENCE_OUT_OF_BOUNDS",
+		"ERR_AGENT_STREAM_ID_INVALID":
+		return true
+	default:
+		return false
+	}
 }

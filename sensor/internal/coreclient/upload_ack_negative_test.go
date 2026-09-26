@@ -15,6 +15,9 @@ func TestUploadAckNegativeMatrix(t *testing.T) {
 		code ErrorCode
 	}{
 		{"wrong-status", map[string]any{"status": "OK", "accepted_through_sequence": 2, "sensor_identity": "sensor-test"}, CodeProtocol},
+		{"status-lowercase", map[string]any{"status": "accepted", "accepted_through_sequence": 2, "sensor_identity": "sensor-test"}, CodeProtocol},
+		{"status-mixed-case", map[string]any{"status": "Accepted", "accepted_through_sequence": 2, "sensor_identity": "sensor-test"}, CodeProtocol},
+		{"status-padded", map[string]any{"status": " ACCEPTED ", "accepted_through_sequence": 2, "sensor_identity": "sensor-test"}, CodeProtocol},
 		{"wrong-sensor", map[string]any{"status": "ACCEPTED", "accepted_through_sequence": 2, "sensor_identity": "other"}, CodeProtocol},
 		{"missing-watermark", map[string]any{"status": "ACCEPTED", "sensor_identity": "sensor-test"}, CodeAckContractMissing},
 		{"below-first", map[string]any{"status": "ACCEPTED", "accepted_through_sequence": 0, "sensor_identity": "sensor-test"}, CodeProtocol},

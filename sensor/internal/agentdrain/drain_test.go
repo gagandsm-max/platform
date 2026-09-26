@@ -420,15 +420,27 @@ func TestIsTerminalCoreError(t *testing.T) {
 		"ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH",
 		"ERR_AGENT_ACCEPTING_SENSOR_MISMATCH",
 		"ERR_TENANT_SCOPE_MISMATCH",
-		"ERR_IDEMPOTENCY_CONFLICT",
-		"ERR_SEQUENCE_REGRESSION",
 	} {
 		if !isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 403}) {
 			t.Fatalf("expected terminal for %s", code)
 		}
 	}
+	for _, code := range []string{
+		"ERR_PREVIOUS_BATCH_PENDING",
+		"ERR_BATCH_PUBLICATION_IN_PROGRESS",
+		"ERR_SENSOR_STREAM_CHANGED",
+		"ERR_IDEMPOTENCY_CONFLICT",
+		"ERR_SEQUENCE_REGRESSION",
+		"ERR_SEQUENCE_GAP",
+		"ERR_SEQUENCE_OUT_OF_BOUNDS",
+		"ERR_AGENT_STREAM_ID_INVALID",
+	} {
+		if isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 409}) {
+			t.Fatalf("%s must not be poison-terminal", code)
+		}
+	}
 	if !isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_OTHER_CONTRACT", HTTPStatus: 409}) {
-		t.Fatal("non-transient 409 must be terminal")
+		t.Fatal("non-transient unknown 409 must remain terminal")
 	}
 	if isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_INTERNAL", HTTPStatus: 500, Message: "x"}) {
 		// 500 is transient via classifyAgentTelemetry; without transient flag still not status-terminal here
@@ -436,6 +448,70 @@ func TestIsTerminalCoreError(t *testing.T) {
 	err := errors.New("other")
 	if isTerminalCoreError(err) {
 		t.Fatal("generic error must not be terminal")
+	}
+}
+
+func TestDrainRetainsSpoolOnBuild003ContinuityErrors(t *testing.T) {
+	cases := []struct {
+		name      string
+		code      string
+		status    int
+		transient bool
+	}{
+		{"previous_batch_pending", "ERR_PREVIOUS_BATCH_PENDING", 409, true},
+		{"publication_in_progress", "ERR_BATCH_PUBLICATION_IN_PROGRESS", 429, true},
+		{"stream_changed", "ERR_SENSOR_STREAM_CHANGED", 409, false},
+		{"idempotency_conflict", "ERR_IDEMPOTENCY_CONFLICT", 409, false},
+		{"sequence_regression", "ERR_SEQUENCE_REGRESSION", 409, false},
+		{"sequence_gap", "ERR_SEQUENCE_GAP", 400, false},
+		{"sequence_out_of_bounds", "ERR_SEQUENCE_OUT_OF_BOUNDS", 400, false},
+		{"agent_stream_id_invalid", "ERR_AGENT_STREAM_ID_INVALID", 400, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, dir := openSpool(t)
+			_ = appendDurable(t, s, 1)
+			body := []byte(`{"status":"REJECTED","code":"` + tc.code + `","message":"continuity"}`)
+			tr := &fakeTransport{err: coreclient.ClassifyAgentTelemetryFailure(tc.status, body)}
+			d, err := New(Config{
+				SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
+				MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+				RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
+				IdleInterval: time.Millisecond, ShutdownGrace: time.Second, JitterFraction: 0,
+			}, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ok, err := d.RunOnce(context.Background())
+			if ok {
+				t.Fatal("expected no successful drain")
+			}
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			st, _ := s.Stats()
+			if st.RecordCount != 1 {
+				t.Fatalf("spool must be retained for %s, got count=%d", tc.code, st.RecordCount)
+			}
+			if d.Metrics().PoisonCount.Load() != 0 {
+				t.Fatalf("poison must not be created for %s", tc.code)
+			}
+			entries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
+			if len(entries) != 0 {
+				t.Fatalf("poison file created for %s: %v", tc.code, entries)
+			}
+			if tc.transient {
+				var drainErr *Error
+				if !errors.As(err, &drainErr) || !drainErr.Transient() {
+					t.Fatalf("%s must be retryable/transient, got %v", tc.code, err)
+				}
+			} else {
+				var drainErr *Error
+				if errors.As(err, &drainErr) && drainErr.Transient() {
+					t.Fatalf("%s must fail closed (non-transient) with spool retained, got %v", tc.code, err)
+				}
+			}
+		})
 	}
 }
 
