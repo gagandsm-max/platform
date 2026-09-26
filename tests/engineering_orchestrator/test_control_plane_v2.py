@@ -765,6 +765,158 @@ class ToolAuthorityTests(unittest.TestCase):
         )
         self.assertEqual(authority["tools"]["codex"]["defaultSandboxMode"], "read-only")
 
+    def test_schema_writer_elevation_conditionals_match_runtime(self) -> None:
+        schema = json.loads(
+            (REPO_ROOT / "project_agents" / "schemas" / "task_manifest.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        control_plane.assert_schema_writer_elevation_conditionals(schema)
+        control_plane.assert_schema_tool_enums_match_authority(task_schema=schema)
+        writer_enum = schema["properties"]["writerTool"]["enum"]
+        self.assertEqual(writer_enum, ["cursor-cli", "antigravity", "codex"])
+        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder"):
+            self.assertNotIn(never, writer_enum)
+
+    def test_schema_and_runtime_agree_on_writer_elevation_matrix(self) -> None:
+        """Deterministic agreement matrix; optional JSON Schema engine is best-effort."""
+        import importlib.util
+
+        valid_elevation = {
+            "authorizedBy": "founder",
+            "reason": "isolated exceptional write lane",
+            "isolatedWorkspace": True,
+        }
+        cases = [
+            ("cursor-cli-no-elevation", {"writerTool": "cursor-cli"}, True),
+            (
+                "cursor-cli-with-elevation",
+                {"writerTool": "cursor-cli", "writerElevation": valid_elevation},
+                False,
+            ),
+            ("antigravity-no-elevation", {"writerTool": "antigravity"}, False),
+            (
+                "antigravity-valid-elevation",
+                {
+                    "writerTool": "antigravity",
+                    "verifierTool": "chatgpt-github",
+                    "writerElevation": valid_elevation,
+                },
+                True,
+            ),
+            (
+                "codex-no-elevation",
+                {"writerTool": "codex", "verifierTool": "chatgpt-github"},
+                False,
+            ),
+            (
+                "codex-valid-elevation",
+                {
+                    "writerTool": "codex",
+                    "verifierTool": "antigravity",
+                    "gatekeeper": "chatgpt-github",
+                    "writerElevation": valid_elevation,
+                },
+                True,
+            ),
+            (
+                "elevation-isolated-false",
+                {
+                    "writerTool": "antigravity",
+                    "verifierTool": "chatgpt-github",
+                    "writerElevation": {
+                        "authorizedBy": "founder",
+                        "reason": "bad isolation",
+                        "isolatedWorkspace": False,
+                    },
+                },
+                False,
+            ),
+            (
+                "elevation-bad-authorizedBy",
+                {
+                    "writerTool": "codex",
+                    "verifierTool": "chatgpt-github",
+                    "writerElevation": {
+                        "authorizedBy": "cursor-cli",
+                        "reason": "wrong authorizer",
+                        "isolatedWorkspace": True,
+                    },
+                },
+                False,
+            ),
+        ]
+
+        schema = json.loads(
+            (REPO_ROOT / "project_agents" / "schemas" / "task_manifest.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        control_plane.assert_schema_writer_elevation_conditionals(schema)
+
+        jsonschema_mod = None
+        if importlib.util.find_spec("jsonschema") is not None:
+            import jsonschema  # type: ignore
+
+            jsonschema_mod = jsonschema
+
+        engine_results: list[str] = []
+        for name, overrides, expect_valid in cases:
+            payload = _task(**overrides)
+            runtime_ok = True
+            try:
+                control_plane.validate_task_manifest(payload)
+            except control_plane.ControlPlaneError:
+                runtime_ok = False
+            self.assertEqual(
+                runtime_ok,
+                expect_valid,
+                f"runtime mismatch for {name}: expected_valid={expect_valid}",
+            )
+
+            # Structural expectation encoded in schema allOf (defense for schema-only consumers).
+            writer = payload["writerTool"]
+            has_elevation = "writerElevation" in payload
+            if writer == "cursor-cli":
+                structural_ok = not has_elevation
+            elif writer in {"antigravity", "codex"}:
+                structural_ok = has_elevation
+                if has_elevation:
+                    elev = payload["writerElevation"]
+                    structural_ok = (
+                        isinstance(elev, dict)
+                        and elev.get("isolatedWorkspace") is True
+                        and elev.get("authorizedBy") in {"chatgpt-github", "founder"}
+                        and isinstance(elev.get("reason"), str)
+                        and bool(str(elev.get("reason")).strip())
+                    )
+            else:
+                structural_ok = False
+            self.assertEqual(
+                structural_ok,
+                expect_valid,
+                f"schema-structure expectation mismatch for {name}",
+            )
+
+            if jsonschema_mod is None:
+                engine_results.append(f"{name}=NOT_RUN")
+            else:
+                try:
+                    jsonschema_mod.Draft202012Validator(schema).validate(payload)
+                    engine_ok = True
+                except Exception:
+                    engine_ok = False
+                self.assertEqual(
+                    engine_ok,
+                    expect_valid,
+                    f"jsonschema engine mismatch for {name}",
+                )
+                engine_results.append(f"{name}={'PASS' if engine_ok else 'FAIL'}")
+
+        if jsonschema_mod is None:
+            # Keep an explicit evidence marker when no standards engine is wired into CI deps.
+            self.assertTrue(all(item.endswith("=NOT_RUN") for item in engine_results))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -391,6 +391,71 @@ def assert_schema_tool_enums_match_authority(
             "task_manifest.writerElevation.authorizedBy enum must match "
             "tool_authority writerElevationAuthorizers"
         )
+    assert_schema_writer_elevation_conditionals(task_schema)
+
+
+def assert_schema_writer_elevation_conditionals(
+    task_schema: Mapping[str, Any] | None = None,
+) -> None:
+    """Prove JSON Schema encodes the same elevation rules as runtime validation."""
+    task_schema = task_schema or load_json(TASK_SCHEMA_PATH)
+    allof = task_schema.get("allOf")
+    if not isinstance(allof, list) or not allof:
+        raise ControlPlaneError(
+            "task_manifest.schema.json must declare allOf writerElevation conditionals"
+        )
+
+    def _writer_const(branch: Mapping[str, Any]) -> str | None:
+        props = branch.get("properties")
+        if not isinstance(props, dict):
+            return None
+        writer = props.get("writerTool")
+        if isinstance(writer, dict) and isinstance(writer.get("const"), str):
+            return writer["const"]
+        return None
+
+    by_writer: dict[str, Mapping[str, Any]] = {}
+    for item in allof:
+        if not isinstance(item, dict):
+            continue
+        cond = item.get("if")
+        then = item.get("then")
+        if not isinstance(cond, dict) or not isinstance(then, dict):
+            continue
+        writer = _writer_const(cond)
+        if writer is None:
+            continue
+        by_writer[writer] = then
+
+    for writer in ("cursor-cli", "antigravity", "codex"):
+        if writer not in by_writer:
+            raise ControlPlaneError(
+                f"task_manifest.schema.json missing writerElevation conditional for {writer}"
+            )
+
+    cursor_then = by_writer["cursor-cli"]
+    forbidden = cursor_then.get("not")
+    if not (
+        isinstance(forbidden, dict)
+        and forbidden.get("required") == ["writerElevation"]
+    ):
+        raise ControlPlaneError(
+            "cursor-cli conditional must forbid writerElevation via not.required"
+        )
+
+    for writer in ("antigravity", "codex"):
+        then = by_writer[writer]
+        if then.get("required") != ["writerElevation"]:
+            raise ControlPlaneError(
+                f"{writer} conditional must require writerElevation"
+            )
+
+    never = {"cursor-cloud", "github-copilot", "chatgpt-github", "founder"}
+    writer_enum = set(schema_enum(task_schema, "properties", "writerTool", "enum"))
+    if writer_enum & never:
+        raise ControlPlaneError(
+            "task_manifest.writerTool enum must not include never-writer tools"
+        )
 
 
 def is_legal_transition(source: str, target: str, machine: Mapping[str, Any] | None = None) -> bool:

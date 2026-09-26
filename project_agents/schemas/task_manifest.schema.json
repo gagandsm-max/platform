@@ -111,5 +111,34 @@
     },
     "createdAt": {"type": "string", "minLength": 1},
     "updatedAt": {"type": "string", "minLength": 1}
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"writerTool": {"const": "cursor-cli"}},
+        "required": ["writerTool"]
+      },
+      "then": {
+        "not": {"required": ["writerElevation"]}
+      }
+    },
+    {
+      "if": {
+        "properties": {"writerTool": {"const": "antigravity"}},
+        "required": ["writerTool"]
+      },
+      "then": {
+        "required": ["writerElevation"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"writerTool": {"const": "codex"}},
+        "required": ["writerTool"]
+      },
+      "then": {
+        "required": ["writerElevation"]
+      }
+    }
+  ]
 }

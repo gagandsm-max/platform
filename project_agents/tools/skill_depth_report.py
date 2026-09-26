@@ -4,6 +4,10 @@
 Recomputes project_agents/skills/SKILL_DEPTH_GAP_REPORT.md from canonical
 SKILL.md bodies. Does not fail validate_agents.py. Do not hand-edit the report
 into a false PASS — regenerate with this script after Skill changes.
+
+Severity is not heading-presence alone for operationally critical Skills:
+incompleteness that can affect security, durability, HA/recovery, migration or
+certification is escalated above generic P2.
 """
 
 from __future__ import annotations
@@ -16,7 +20,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_ROOT = REPO_ROOT / "project_agents" / "skills"
-MANIFEST_PATH = SKILLS_ROOT / "manifest.json"
 REPORT_PATH = SKILLS_ROOT / "SKILL_DEPTH_GAP_REPORT.md"
 
 # Heuristic regexes matching the Phase B2 audit used at control-plane hardening.
@@ -95,8 +98,53 @@ SECTIONS: dict[str, list[str]] = {
     ],
 }
 
-CRITICAL = frozenset({"trigger", "invariants", "procedure", "evidence"})
-# Historical P0 thin Skills named by Master on Issue #93; used only for reporting.
+# Signals whose absence breaks executable procedure for any Skill.
+CRITICAL_SIGNALS = frozenset({"trigger", "invariants", "procedure", "evidence"})
+
+# Executable procedure contract expected of operationally critical Skills.
+EXECUTABLE_SIGNALS = frozenset(
+    {
+        "trigger",
+        "authoritative_inputs",
+        "invariants",
+        "procedure",
+        "negative_failure",
+        "security_tenancy",
+        "evidence",
+        "stop_conditions",
+        "anti_patterns",
+        "handoff",
+    }
+)
+
+# Skills whose incompleteness can directly affect security, durability/data
+# integrity, HA/recovery, migration or certification. Missing executable signals
+# on these Skills must not be classified as generic P2.
+OPERATIONAL_CRITICAL_SKILLS = frozenset(
+    {
+        # security
+        "secrets_handling",
+        "security_negative_testing",
+        "tenant_isolation",
+        "pki_mtls",
+        "ai_evidence_safety",
+        # durability / data integrity
+        "replay_idempotency",
+        "runtime_failure_injection",
+        "evidence_bundle",
+        # HA / recovery
+        "ha_dr",
+        "backup_restore",
+        # migration
+        "migration_safety",
+        # certification / bounded change
+        "exact_head_merge_gate",
+        "alert_quality_evidence",
+        "bounded_implementation",
+    }
+)
+
+# Historical Issue #93 Phase B2 P0 focus (kept for continuity in the report).
 P0_FOCUS = frozenset(
     {
         "ai_evidence_safety",
@@ -108,16 +156,43 @@ P0_FOCUS = frozenset(
     }
 )
 
+# Phase B3A critical batch named by Master/Antigravity operational priority.
+B3A_FOCUS = frozenset(
+    {
+        "ha_dr",
+        "replay_idempotency",
+        "runtime_failure_injection",
+        "exact_head_merge_gate",
+        "backup_restore",
+        "secrets_handling",
+    }
+)
 
-def priority(missing: list[str], lines: int) -> str:
-    miss_crit = CRITICAL & set(missing)
+
+def priority(name: str, missing: list[str], lines: int) -> str:
+    """Deterministic severity. Critical Skills never hide as P2 when incomplete."""
+    missing_set = set(missing)
+    miss_crit = CRITICAL_SIGNALS & missing_set
+    miss_exec = EXECUTABLE_SIGNALS & missing_set
+    critical_skill = name in OPERATIONAL_CRITICAL_SKILLS
+
+    if not missing_set:
+        return "OK"
+
+    if critical_skill:
+        # Any missing executable/critical signal on a critical Skill is P0/P1.
+        if miss_crit or miss_exec:
+            if miss_crit or lines < 40:
+                return "P0"
+            return "P1"
+        # Should be unreachable while EXECUTABLE_SIGNALS is the full set; keep safe.
+        return "P1"
+
     if miss_crit and lines < 28:
         return "P0"
     if miss_crit:
         return "P1"
-    if missing:
-        return "P2"
-    return "OK"
+    return "P2"
 
 
 def scan_skill(text: str) -> tuple[list[str], list[str]]:
@@ -129,6 +204,26 @@ def scan_skill(text: str) -> tuple[list[str], list[str]]:
         else:
             missing.append(key)
     return present, missing
+
+
+def _focus_status(
+    rows: list[tuple[str, list[str], list[str], int]], names: frozenset[str]
+) -> list[str]:
+    out: list[str] = []
+    for name in sorted(names):
+        match = next((r for r in rows if r[0] == name), None)
+        if match is None:
+            out.append(f"- `{name}`: **MISSING from manifest**")
+            continue
+        _, _present, missing, nlines = match
+        pri = priority(name, missing, nlines)
+        state = (
+            "depth-complete"
+            if pri == "OK"
+            else f"{pri} missing={', '.join(missing) or '_none_'}"
+        )
+        out.append(f"- `{name}` ({nlines} lines): **{state}**")
+    return out
 
 
 def build_report(skills_root: Path = SKILLS_ROOT) -> tuple[str, dict[str, int]]:
@@ -150,53 +245,58 @@ def build_report(skills_root: Path = SKILLS_ROOT) -> tuple[str, dict[str, int]]:
         "Do **not** mass-template generic filler to clear this list. Author real procedures in Phase B2/B3.",
         "",
         f"- Canonical skills scanned: **{len(rows)}**",
+        f"- Operationally critical Skills (security/durability/HA/migration/certification): "
+        f"**{len(OPERATIONAL_CRITICAL_SKILLS)}**",
         "",
         "| Priority | Skill | Lines | Present | Missing |",
         "|---|---|---:|---|---|",
     ]
     sorted_rows = sorted(
         rows,
-        key=lambda r: ({"P0": 0, "P1": 1, "P2": 2, "OK": 3}[priority(r[2], r[3])], r[0]),
+        key=lambda r: (
+            {"P0": 0, "P1": 1, "P2": 2, "OK": 3}[priority(r[0], r[2], r[3])],
+            r[0],
+        ),
     )
     for name, present, missing, nlines in sorted_rows:
-        pri = priority(missing, nlines)
+        pri = priority(name, missing, nlines)
         counts[pri] += 1
+        critical_mark = " critical" if name in OPERATIONAL_CRITICAL_SKILLS else ""
         lines_out.append(
-            f"| {pri} | `{name}` | {nlines} | "
+            f"| {pri} | `{name}`{critical_mark} | {nlines} | "
             f"{', '.join(present) if present else '_none_'} | "
             f"{', '.join(missing) if missing else '_none_'} |"
         )
 
     lines_out[7:7] = [
         f"- Depth OK (all 10 signals detected): **{counts['OK']}**",
-        f"- P0 (thin + missing critical signals): **{counts['P0']}**",
-        f"- P1 (missing critical signals): **{counts['P1']}**",
-        f"- P2 (missing non-critical signals only): **{counts['P2']}**",
+        f"- P0 (thin/critical missing executable signals): **{counts['P0']}**",
+        f"- P1 (missing critical/executable signals): **{counts['P1']}**",
+        f"- P2 (non-critical Skills missing non-critical signals only): **{counts['P2']}**",
         "",
     ]
-
-    p0_focus_status = []
-    for name in sorted(P0_FOCUS):
-        match = next((r for r in rows if r[0] == name), None)
-        if match is None:
-            p0_focus_status.append(f"- `{name}`: **MISSING from manifest**")
-            continue
-        _, present, missing, nlines = match
-        pri = priority(missing, nlines)
-        state = "depth-complete" if pri == "OK" else f"{pri} missing={', '.join(missing) or '_none_'}"
-        p0_focus_status.append(f"- `{name}` ({nlines} lines): **{state}**")
 
     lines_out += [
         "",
         "## Critical signals",
         "`trigger`/`purpose`, `invariants`/`guardrails`, `procedure`, `evidence`",
         "",
-        "## Issue #93 P0 Skill focus",
-        *p0_focus_status,
+        "## Executable procedure signals",
+        ", ".join(f"`{s}`" for s in sorted(EXECUTABLE_SIGNALS)),
+        "",
+        "## Severity rule for operationally critical Skills",
+        "Skills in the operational-critical set missing any executable procedure signal are "
+        "classified **P0/P1**, never generic **P2**.",
+        "",
+        "## Issue #93 Phase B2 P0 Skill focus",
+        *_focus_status(rows, P0_FOCUS),
+        "",
+        "## Issue #93 Phase B3A critical Skill focus",
+        *_focus_status(rows, B3A_FOCUS),
         "",
         "## Phase B3 recommendation",
-        "For remaining P2 Skills, add missing `authoritative_inputs`, `negative_failure`, and explicit "
-        "`handoff` sections where the Skill currently relies only on guardrail bullets—in controlled batches.",
+        "Continue remaining non-critical P2 Skills in controlled domain batches—"
+        "author real procedures, not cosmetic headings.",
         "",
     ]
     return "\n".join(lines_out) + "\n", counts
