@@ -132,6 +132,8 @@ OPERATIONAL_CRITICAL_SKILLS = frozenset(
         "replay_idempotency",
         "runtime_failure_injection",
         "evidence_bundle",
+        # Agent identity / durable endpoint collection
+        "agent_architecture",
         # HA / recovery
         "ha_dr",
         "backup_restore",
@@ -197,6 +199,22 @@ B3C_FOCUS = frozenset(
         "monitoring_work_units",
         "incident_flight_recorder",
         "remediation_safety",
+    }
+)
+
+# Phase B3D Agent/cloud/host/pack batch (Issue #93 controlled Skill-depth).
+B3D_FOCUS = frozenset(
+    {
+        "agent_architecture",
+        "change_intelligence",
+        "cloud_monitoring",
+        "device_pack_authoring",
+        "icmp_path",
+        "itsm_change_telemetry",
+        "kubernetes_monitoring",
+        "linux_systems",
+        "virtualization_storage",
+        "windows_monitoring",
     }
 )
 
@@ -331,6 +349,9 @@ def build_report(skills_root: Path = SKILLS_ROOT) -> tuple[str, dict[str, int]]:
         "",
         "## Issue #93 Phase B3C Skill-depth focus",
         *_focus_status(rows, B3C_FOCUS),
+        "",
+        "## Issue #93 Phase B3D Skill-depth focus",
+        *_focus_status(rows, B3D_FOCUS),
         "",
         "## Phase B3 recommendation",
         "Continue remaining non-critical P2 Skills in controlled domain batches—"

@@ -3,32 +3,91 @@ name: virtualization_storage
 description: Virtualization, datastore and storage-target monitoring without turning Platform into DCIM/BMS.
 ---
 
-<!-- generated from project_agents/skills/virtualization_storage/SKILL.md sha256:ac27beeabfab85877add4a8c5281e20d7295e9797d44fad13b03a8ca21c69e2f -->
+<!-- generated from project_agents/skills/virtualization_storage/SKILL.md sha256:280cf14115e81c264a92ae8589acb77b65c60b9089ac6efb305e021e094a6523 -->
 
 # virtualization_storage
 
 ## Purpose
-Monitor virt/storage as infrastructure dependencies.
+
+Monitor virtualization and storage targets (where actually supported) with stable VM/datastore identity, capacity/latency evidence and migration-safe topology—without claiming unsupported platforms or becoming DCIM/BMS.
 
 ## Use when
-VM, hypervisor, SAN/NAS, or volume metrics.
+
+VMware/Hyper-V/storage collector work, datastore capacity/latency, VM inventory, or dependency impact from storage paths—only for platforms implemented on the exact head.
+
+## Authoritative inputs
+
+Always read:
+
+1. Existing virtualization/storage connector code on the exact head—**verify support**
+2. Mother exclusions: Platform is not broad BMS/DCIM
+3. `Platform_07` approved dependencies
+4. Credential and rate-limit patterns (`connector_framework`)
+5. Topology identity rules (`topology_routing`, `Platform_20` where relevant)
+
+Unsupported hypervisors/arrays ⇒ `UNVERIFIED`. Do not claim them as implemented.
+
+## Invariants
+
+- Supported platforms only (e.g. VMware/Hyper-V/storage arrays **where code exists**).
+- vCenter/host/VM/datastore (or equivalents) identities are stable; VM mobility must not duplicate entities.
+- Cluster relationships and datastore attachments carry provenance/timestamps.
+- Stale topology after vMotion/storage vMotion is detected and reconciled—not silently duplicated.
+- Capacity and datastore latency are measured with stated units/intervals.
+- Path/multipath and storage controller health are separate evidence classes when implemented.
+- Credentials least-privilege; API rate limits honored.
+- Discovery consistency: list pagination/eventual consistency handled.
+- Dependency impact may explain incidents but does not expand Platform into facilities monitoring.
+- **No duplicate VM identity after migration.**
 
 ## Required procedure
-1. Normalize vendor IDs into Platform entities.
-2. Facilities/power may explain, not expand product scope.
-3. Preserve tenant isolation on shared hypervisors.
-4. Capacity evidence must include protection thresholds.
 
-## Guardrails
-- Keep Platform v3.2.2 product requirements; do not invent TBD/P0 designs.
-- Do not bypass tests, weaken tenant isolation, write to `main`, or force-push.
-- Do not disable TLS validation, embed secrets, or use destructive Docker cleanup.
-- LLM output is not privileged authority; writer cannot self-certify merge readiness.
+1. Build the supported-platform matrix from code; mark others `UNVERIFIED`.
+2. Define identity keys (BIOS UUID, instance UUID, datastore moRef, etc.) and migration reconcile rules.
+3. Wire credentials via secrets; test auth failure vs target failure separation.
+4. Implement/verify rate limits and pagination.
+5. Collect capacity/latency with cardinality bounds.
+6. On topology churn (vMotion), prove no duplicate entity; add tests if changing identity code.
+7. Keep facilities/power out of scope except as optional external evidence per Mother.
+8. Refuse DCIM feature creep in the same change.
+
+## Negative / failure cases
+
+- New entity_id on every vMotion.
+- Declaring all VMs DOWN because vCenter API is down.
+- Claiming NetApp/Pure/Hyper-V support from VMware-only stubs.
+- Using overly broad vCenter admin roles permanently.
+
+## Security / tenant implications
+
+Hypervisor creds are crown jewels. Tenant isolation if multi-tenant vCenter folding is ever allowed (default: careful binding). Redact connection strings. No guest credential harvesting.
 
 ## Required evidence
-- Record commands, tests, logs or CI pointers that prove `virtualization_storage` procedure ran.
-- Label missing runtime proof as UNVERIFIED. Do not convert inference into SOURCE_FACT.
+
+- Platform support matrix + `UNVERIFIED`
+- Identity/migration tests
+- Rate-limit/auth failure classification
+- Exact SHA
+
+## Stop conditions
+
+Stop when:
+
+- Unsupported platform claimed live
+- Migration duplicates identities
+- API outage maps to all-VM DOWN improperly
+- DCIM/BMS scope creep requested
+
+## Anti-patterns
+
+- Scraping HTML clients instead of supported APIs
+- “Storage latency high ⇒ datacenter power issue” as Platform assertion
+- Writer self-certifying virtualization coverage
+
+## Handoff / output
+
+Return: support matrix; identity rules; gaps; nextOwner (infra verifier). Not MERGE_READY alone.
 
 ## Non-ownership
-- Does not override Mother Reference product requirements or invent TBD/P0 designs.
-- Does not certify merge readiness or execute privileged actions from LLM output.
+
+Does not own pure network topology, invent SAN fabric controller product, or BMS. Owns virtualization/storage monitoring discipline for implemented targets.
