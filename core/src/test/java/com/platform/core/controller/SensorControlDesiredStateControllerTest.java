@@ -183,6 +183,34 @@ class SensorControlDesiredStateControllerTest {
     }
 
     @Test
+    void putAckRejectsTenantIdSnakeClaim() throws Exception {
+        expectAckValidationFailed("""
+                {"schemaVersion":1,"generation":1,"checksum":"%s","outcome":"APPLIED","tenant_id":"%s"}
+                """.formatted("a".repeat(64), OTHER));
+    }
+
+    @Test
+    void putAckRejectsSensorIdSnakeClaim() throws Exception {
+        expectAckValidationFailed("""
+                {"schemaVersion":1,"generation":1,"checksum":"%s","outcome":"APPLIED","sensor_id":"evil"}
+                """.formatted("a".repeat(64)));
+    }
+
+    @Test
+    void putAckRejectsDesiredByClaim() throws Exception {
+        expectAckValidationFailed("""
+                {"schemaVersion":1,"generation":1,"checksum":"%s","outcome":"APPLIED","desired_by":"x"}
+                """.formatted("a".repeat(64)));
+    }
+
+    @Test
+    void putAckUppercaseChecksumIsValidationFailedAndDoesNotInvokeService() throws Exception {
+        expectAckValidationFailed("""
+                {"schemaVersion":1,"generation":1,"checksum":"%s","outcome":"APPLIED"}
+                """.formatted("A".repeat(64)));
+    }
+
+    @Test
     void putAckInvalidOutcomeIsValidationFailedNot500() throws Exception {
         expectAckValidationFailed("""
                 {"schemaVersion":1,"generation":1,"checksum":"%s","outcome":"BOGUS"}

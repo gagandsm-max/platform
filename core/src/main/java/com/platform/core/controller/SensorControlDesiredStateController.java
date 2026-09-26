@@ -197,6 +197,10 @@ public class SensorControlDesiredStateController {
         int schemaVersion = requireExactInt(root.get("schemaVersion"), "schemaVersion");
         long generation = requireExactLong(root.get("generation"), "generation");
         String checksum = requireNonBlankString(root.get("checksum"), "checksum");
+        if (!checksum.matches("^[a-f0-9]{64}$")) {
+            // Wire-boundary mirror of Core service + V014 lowercase SHA-256 contract.
+            throw new DomainException("VALIDATION_FAILED", "checksum must be lowercase 64-hex");
+        }
         SensorControlObservationOutcome outcome =
                 SensorControlObservationOutcome.parse(requireNonBlankString(root.get("outcome"), "outcome"));
         String rejectionCode = optionalPresentString(root, "rejectionCode");

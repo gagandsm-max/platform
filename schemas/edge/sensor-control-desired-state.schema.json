@@ -19,20 +19,20 @@
   "properties": {
     "schemaVersion": {"$ref": "common-definitions.schema.json#/$defs/schemaVersionV1"},
     "desiredGeneration": {"$ref": "common-definitions.schema.json#/$defs/controlCounterPositive"},
-    "desiredChecksum": {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"},
+    "desiredChecksum": {"$ref": "#/$defs/checksumSha256HexLower"},
     "configuration": {"$ref": "#/$defs/desiredConfigurationV1"},
     "appliedGeneration": {"$ref": "common-definitions.schema.json#/$defs/controlCounter"},
     "appliedChecksum": {
       "oneOf": [
         {"type": "null"},
-        {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"}
+        {"$ref": "#/$defs/checksumSha256HexLower"}
       ]
     },
     "observedGeneration": {"$ref": "common-definitions.schema.json#/$defs/controlCounter"},
     "observedChecksum": {
       "oneOf": [
         {"type": "null"},
-        {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"}
+        {"$ref": "#/$defs/checksumSha256HexLower"}
       ]
     },
     "observedOutcome": {
@@ -65,7 +65,7 @@
       },
       "then": {
         "properties": {
-          "appliedChecksum": {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"}
+          "appliedChecksum": {"$ref": "#/$defs/checksumSha256HexLower"}
         }
       }
     },
@@ -89,7 +89,7 @@
       },
       "then": {
         "properties": {
-          "observedChecksum": {"$ref": "common-definitions.schema.json#/$defs/checksumSha256Hex"},
+          "observedChecksum": {"$ref": "#/$defs/checksumSha256HexLower"},
           "observedOutcome": {"type": "string", "enum": ["APPLIED", "REJECTED"]}
         }
       }
@@ -114,6 +114,13 @@
     }
   ],
   "$defs": {
+    "checksumSha256HexLower": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "BUILD-004 Slice 2 Sensor-control SHA-256 lowercase hex only (matches Core runtime and V014)."
+    },
     "desiredConfigurationV1": {
       "type": "object",
       "additionalProperties": false,
