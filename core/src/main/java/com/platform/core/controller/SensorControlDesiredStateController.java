@@ -1,6 +1,8 @@
 package com.platform.core.controller;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.domain.DomainException;
 import com.platform.core.ingestion.IngestionException;
@@ -19,20 +21,26 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.security.cert.X509Certificate;
+import java.util.Arrays;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Sensor machine control desired-state GET and APPLIED/REJECTED ACK (BUILD-004 Slice 2).
- * Identity is exclusively mTLS → {@link SensorAuthorityResolver}; payload tenant/sensor claims ignored.
+ * Identity is exclusively mTLS → {@link SensorAuthorityResolver}.
+ * ACK bodies are read only after authority resolution, under a hard byte ceiling,
+ * and reject unknown / identity fields (no silent strip).
  */
 @RestController
 @RequestMapping("/api/v1/sensor/control")
@@ -40,7 +48,18 @@ public class SensorControlDesiredStateController {
 
     private static final Logger log = LoggerFactory.getLogger(SensorControlDesiredStateController.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper ACK_MAPPER = new ObjectMapper()
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+
+    private static final Set<String> ACK_ALLOWED_FIELDS = Set.of(
+            "schemaVersion",
+            "generation",
+            "checksum",
+            "outcome",
+            "rejectionCode",
+            "rejectionMessage"
+    );
 
     private final SensorAuthorityResolver authorityResolver;
     private final SensorControlDesiredStateService desiredStateService;
@@ -72,43 +91,29 @@ public class SensorControlDesiredStateController {
     }
 
     @PutMapping(path = "/applied-state", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> appliedState(
-            @RequestBody(required = false) Map<String, Object> body,
-            HttpServletRequest request
-    ) {
+    public ResponseEntity<?> appliedState(HttpServletRequest request) {
         try {
+            // 1–2. Authority before any body materialization.
             SensorScope scope = resolveScope(request);
             if (scope == null) {
                 return clientCertRequired();
             }
-            if (body == null) {
-                throw new DomainException("VALIDATION_FAILED", "ACK body is required");
-            }
-            // Explicitly ignore any client-claimed identity / actor fields.
-            body.remove("tenantId");
-            body.remove("tenant_id");
-            body.remove("sensorId");
-            body.remove("sensor_id");
-            body.remove("desired_by");
-            body.remove("actor");
 
-            int schemaVersion = requireInt(body.get("schemaVersion"), "schemaVersion");
-            long generation = requireLong(body.get("generation"), "generation");
-            String checksum = requireString(body.get("checksum"), "checksum");
-            SensorControlObservationOutcome outcome =
-                    SensorControlObservationOutcome.parse(requireString(body.get("outcome"), "outcome"));
-            String rejectionCode = optionalString(body.get("rejectionCode"));
-            String rejectionMessage = optionalString(body.get("rejectionMessage"));
+            // 3–6. Bounded read then strict parse (covers missing/dishonest Content-Length and chunked).
+            byte[] rawBody = readBoundedBody(
+                    request.getInputStream(),
+                    SensorControlDesiredLimits.MAX_ACK_REQUEST_BYTES);
+            ParsedAck ack = parseAppliedAck(rawBody);
 
             SensorControlState updated = desiredStateService.acknowledgeAppliedState(
                     scope.tenantId(),
                     scope.sensorId(),
-                    schemaVersion,
-                    generation,
-                    checksum,
-                    outcome,
-                    rejectionCode,
-                    rejectionMessage
+                    ack.schemaVersion(),
+                    ack.generation(),
+                    ack.checksum(),
+                    ack.outcome(),
+                    ack.rejectionCode(),
+                    ack.rejectionMessage()
             );
 
             Map<String, Object> resp = new LinkedHashMap<>();
@@ -120,6 +125,8 @@ public class SensorControlDesiredStateController {
             return ResponseEntity.ok(resp);
         } catch (IngestionException e) {
             return ingestionError(e);
+        } catch (IOException e) {
+            throw new DomainException("VALIDATION_FAILED", "ACK body is unreadable");
         }
     }
 
@@ -139,6 +146,111 @@ public class SensorControlDesiredStateController {
             );
         }
         return scope;
+    }
+
+    /**
+     * Reads at most {@code maxBytes + 1} from the stream. Oversized bodies fail closed
+     * without relying on Content-Length.
+     */
+    static byte[] readBoundedBody(InputStream in, int maxBytes) throws IOException {
+        Objects.requireNonNull(in, "in");
+        if (maxBytes < 0) {
+            throw new DomainException("VALIDATION_FAILED", "invalid ACK size bound");
+        }
+        byte[] buf = new byte[maxBytes + 1];
+        int offset = 0;
+        while (offset < buf.length) {
+            int n = in.read(buf, offset, buf.length - offset);
+            if (n < 0) {
+                break;
+            }
+            offset += n;
+        }
+        if (offset > maxBytes) {
+            throw new DomainException("VALIDATION_FAILED", "ACK body exceeds maximum size");
+        }
+        return Arrays.copyOf(buf, offset);
+    }
+
+    static ParsedAck parseAppliedAck(byte[] rawBody) {
+        if (rawBody == null || rawBody.length == 0) {
+            throw new DomainException("VALIDATION_FAILED", "ACK body is required");
+        }
+        final JsonNode root;
+        try {
+            root = ACK_MAPPER.readValue(rawBody, JsonNode.class);
+        } catch (IOException ex) {
+            throw new DomainException("VALIDATION_FAILED", "ACK body is malformed");
+        }
+        if (root == null || !root.isObject()) {
+            throw new DomainException("VALIDATION_FAILED", "ACK body must be a JSON object");
+        }
+
+        Iterator<String> names = root.fieldNames();
+        while (names.hasNext()) {
+            String name = names.next();
+            if (!ACK_ALLOWED_FIELDS.contains(name)) {
+                throw new DomainException("VALIDATION_FAILED", "unknown ACK field: " + name);
+            }
+        }
+
+        int schemaVersion = requireExactInt(root.get("schemaVersion"), "schemaVersion");
+        long generation = requireExactLong(root.get("generation"), "generation");
+        String checksum = requireNonBlankString(root.get("checksum"), "checksum");
+        SensorControlObservationOutcome outcome =
+                SensorControlObservationOutcome.parse(requireNonBlankString(root.get("outcome"), "outcome"));
+        String rejectionCode = optionalPresentString(root, "rejectionCode");
+        String rejectionMessage = optionalPresentString(root, "rejectionMessage");
+        return new ParsedAck(schemaVersion, generation, checksum, outcome, rejectionCode, rejectionMessage);
+    }
+
+    /**
+     * Present property must be a non-null, non-blank JSON string. Absent → null.
+     * Explicit null / empty / non-string → VALIDATION_FAILED (never coerced to absent).
+     */
+    private static String optionalPresentString(JsonNode root, String field) {
+        if (!root.has(field)) {
+            return null;
+        }
+        JsonNode node = root.get(field);
+        if (node == null || node.isNull() || !node.isTextual()) {
+            throw new DomainException("VALIDATION_FAILED", field + " must be a non-null string when present");
+        }
+        String value = node.asText();
+        if (value.isBlank()) {
+            throw new DomainException("VALIDATION_FAILED", field + " must not be blank when present");
+        }
+        return value;
+    }
+
+    private static String requireNonBlankString(JsonNode node, String field) {
+        if (node == null || node.isNull() || !node.isTextual()) {
+            throw new DomainException("VALIDATION_FAILED", field + " is required");
+        }
+        String value = node.asText();
+        if (value.isBlank()) {
+            throw new DomainException("VALIDATION_FAILED", field + " is required");
+        }
+        return value;
+    }
+
+    private static int requireExactInt(JsonNode node, String field) {
+        long v = requireExactLong(node, field);
+        if (v < Integer.MIN_VALUE || v > Integer.MAX_VALUE) {
+            throw new DomainException("VALIDATION_FAILED", field + " must be an exact integer");
+        }
+        return (int) v;
+    }
+
+    private static long requireExactLong(JsonNode node, String field) {
+        if (node == null || node.isNull() || !node.isNumber() || !node.isIntegralNumber()) {
+            throw new DomainException("VALIDATION_FAILED", field + " must be an exact integer");
+        }
+        try {
+            return new BigDecimal(node.numberValue().toString()).longValueExact();
+        } catch (ArithmeticException | NumberFormatException ex) {
+            throw new DomainException("VALIDATION_FAILED", field + " must be an exact integer");
+        }
     }
 
     private static Map<String, Object> toDesiredResponse(SensorControlState state) {
@@ -188,39 +300,12 @@ public class SensorControlDesiredStateController {
         ));
     }
 
-    private static int requireInt(Object value, String field) {
-        long v = requireLong(value, field);
-        if (v < Integer.MIN_VALUE || v > Integer.MAX_VALUE) {
-            throw new DomainException("VALIDATION_FAILED", field + " must be an exact integer");
-        }
-        return (int) v;
-    }
-
-    private static long requireLong(Object value, String field) {
-        if (!(value instanceof Number number)) {
-            throw new DomainException("VALIDATION_FAILED", field + " must be numeric");
-        }
-        try {
-            return new BigDecimal(number.toString()).longValueExact();
-        } catch (ArithmeticException | NumberFormatException ex) {
-            throw new DomainException("VALIDATION_FAILED", field + " must be an exact integer");
-        }
-    }
-
-    private static String requireString(Object value, String field) {
-        if (!(value instanceof String s) || s.isBlank()) {
-            throw new DomainException("VALIDATION_FAILED", field + " is required");
-        }
-        return s;
-    }
-
-    private static String optionalString(Object value) {
-        if (value == null) {
-            return null;
-        }
-        if (!(value instanceof String s)) {
-            throw new DomainException("VALIDATION_FAILED", "optional string field must be text");
-        }
-        return s.isBlank() ? null : s;
-    }
+    record ParsedAck(
+            int schemaVersion,
+            long generation,
+            String checksum,
+            SensorControlObservationOutcome outcome,
+            String rejectionCode,
+            String rejectionMessage
+    ) {}
 }

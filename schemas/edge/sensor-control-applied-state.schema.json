@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://platform.invalid/schemas/edge/sensor-control-applied-state.schema.json",
   "title": "Sensor→Core Control Applied-State ACK Request v1",
-  "description": "BUILD-004 Slice 2 machine PUT /api/v1/sensor/control/applied-state request. No tenantId/sensorId/actor fields. Identity is mTLS-derived.",
+  "description": "BUILD-004 Slice 2 machine PUT /api/v1/sensor/control/applied-state request. No tenantId/sensorId/actor fields. Identity is mTLS-derived. Unknown properties forbidden.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "generation", "checksum", "outcome"],
@@ -22,5 +22,30 @@
       "minLength": 1,
       "maxLength": 512
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"outcome": {"const": "REJECTED"}},
+        "required": ["outcome"]
+      },
+      "then": {
+        "required": ["rejectionCode"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"outcome": {"const": "APPLIED"}},
+        "required": ["outcome"]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {"required": ["rejectionCode"]},
+            {"required": ["rejectionMessage"]}
+          ]
+        }
+      }
+    }
+  ]
 }

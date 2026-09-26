@@ -30,5 +30,8 @@ public final class SensorControlDesiredLimits {
     public static final int MAX_DESIRED_BY_LEN = 256;
     public static final int MAX_CONFIG_JSON_BYTES = 65_536;
 
+    /** Machine ACK request body ceiling (bytes). Intentionally above legitimate v1 ACK size. */
+    public static final int MAX_ACK_REQUEST_BYTES = 4096;
+
     private SensorControlDesiredLimits() {}
 }

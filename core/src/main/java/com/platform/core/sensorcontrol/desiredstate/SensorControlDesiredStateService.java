@@ -183,6 +183,9 @@ public class SensorControlDesiredStateService {
         if (lockedStatus.isEmpty()) {
             throw new DomainException(ERR_SENSOR_NOT_FOUND, "Sensor not found");
         }
+        if (!"ACTIVE".equals(lockedStatus.get())) {
+            throw new DomainException(ERR_SENSOR_NOT_ACTIVE, "Sensor is not ACTIVE");
+        }
 
         SensorControlState state = repository.findStateForUpdate(tenantId, sensorId)
                 .orElseThrow(() -> new DomainException(ERR_ACK_FUTURE,

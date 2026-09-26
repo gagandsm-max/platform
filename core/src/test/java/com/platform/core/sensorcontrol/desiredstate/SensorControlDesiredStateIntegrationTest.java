@@ -262,6 +262,53 @@ class SensorControlDesiredStateIntegrationTest {
     }
 
     @Test
+    void disabledAndRevokedSensorsRejectAckWithoutMutatingState() {
+        SensorRuntimeDesiredConfig cfg = sampleConfig(2, 8);
+        String checksum = SensorControlDesiredChecksum.compute(cfg);
+
+        sensors.enrollSensor("sensor-ack-dis", tenantA.tenantId(), null, SensorRole.NETWORK, true);
+        SensorControlState desiredDis = service.setDesiredConfiguration(
+                tenantA.tenantId(), "sensor-ack-dis", 0L, cfg);
+        assertEquals(1L, desiredDis.desiredGeneration());
+        assertEquals(0L, desiredDis.appliedGeneration());
+        assertEquals(0L, desiredDis.observedGeneration());
+
+        sensors.disableSensor("sensor-ack-dis");
+        DomainException disabledAck = assertThrows(DomainException.class,
+                () -> service.acknowledgeAppliedState(
+                        tenantA.tenantId(), "sensor-ack-dis", 1, 1L, checksum,
+                        SensorControlObservationOutcome.APPLIED, null, null));
+        assertEquals(SensorControlDesiredStateService.ERR_SENSOR_NOT_ACTIVE, disabledAck.getCode());
+        SensorControlState afterDisable = service.findDesiredState(tenantA.tenantId(), "sensor-ack-dis")
+                .orElseThrow();
+        assertEquals(1L, afterDisable.desiredGeneration());
+        assertEquals(0L, afterDisable.appliedGeneration());
+        assertNull(afterDisable.appliedChecksum());
+        assertEquals(0L, afterDisable.observedGeneration());
+        assertNull(afterDisable.observedOutcome());
+
+        sensors.enrollSensor("sensor-ack-rev", tenantA.tenantId(), null, SensorRole.NETWORK, true);
+        SensorControlState desiredRev = service.setDesiredConfiguration(
+                tenantA.tenantId(), "sensor-ack-rev", 0L, cfg);
+        assertEquals(1L, desiredRev.desiredGeneration());
+
+        sensors.revokeSensor("sensor-ack-rev");
+        DomainException revokedAck = assertThrows(DomainException.class,
+                () -> service.acknowledgeAppliedState(
+                        tenantA.tenantId(), "sensor-ack-rev", 1, 1L, checksum,
+                        SensorControlObservationOutcome.REJECTED, "CONFIG_REJECTED", null));
+        assertEquals(SensorControlDesiredStateService.ERR_SENSOR_NOT_ACTIVE, revokedAck.getCode());
+        SensorControlState afterRevoke = service.findDesiredState(tenantA.tenantId(), "sensor-ack-rev")
+                .orElseThrow();
+        assertEquals(1L, afterRevoke.desiredGeneration());
+        assertEquals(0L, afterRevoke.appliedGeneration());
+        assertNull(afterRevoke.appliedChecksum());
+        assertEquals(0L, afterRevoke.observedGeneration());
+        assertNull(afterRevoke.observedOutcome());
+        assertNull(afterRevoke.rejectionCode());
+    }
+
+    @Test
     void databaseConstraintsRejectInvalidControlRows() {
         sensors.enrollSensor("sensor-db", tenantA.tenantId(), null, SensorRole.NETWORK, true);
         UUID tenantId = tenantA.tenantId();
