@@ -1507,13 +1507,85 @@ Historical utilization facts in ClickHouse feed simple trend/forecast models; re
 
 ---
 
-## 33. Reporting formula LLD
+## 33. Reporting and Service Assurance LLD
 
-Use safe expression engine such as CEL for formulas. Supported aggregate primitives may include SUM, AVG, MIN, MAX, COUNT, percentile, rate, difference, IF/CASE-like expressions and time/group aggregation.
+Use a safe typed expression engine such as CEL for governed formulas. Supported primitives may include arithmetic, ratios/percentages, SUM, AVG, MIN, MAX, COUNT, percentile, rate, difference, duration, IF/CASE-like expressions, threshold-compliance duration, rolling/time-window aggregation and weighted aggregation.
 
-No arbitrary Python/JavaScript execution from report users.
+No arbitrary Python, JavaScript, SQL or executable customer code is permitted from Report/SLA/OLA authoring.
 
----
+Logical objects:
+
+```text
+service_time_profile
+  id, tenant_id, name, timezone
+  business_days, business_hours, holiday_calendar_ref
+  shift_rules, country_site_overrides, effective_from, effective_to
+  version
+
+service_assurance_policy
+  id, tenant_id, type SLA|OLA|PROVIDER_SLA|SLO
+  external_ref?, name, owner_ref
+  scope_expression, measurement_basis
+  target_expected, minimum_threshold?
+  measurement_window, per_ticket
+  service_time_profile_ref
+  formula_ref/version
+  inclusion_rule_ref?, exclusion_rule_ref?
+  degraded_treatment
+  provider_ref?, dependency_policy_refs[]
+  effective_from, effective_to
+  lifecycle_state, version
+
+measurement_period
+  id, policy_id, period_start, period_end
+  state OPEN|PRELIMINARY|REVIEW|FINAL|RESTATED
+  policy_version, formula_version, calendar_version
+  scope_snapshot_ref
+  raw_result, adjusted_result, final_result
+  quality_state, completeness
+  finalized_at?, restates_period_id?
+
+measurement_ledger_entry
+  period_id, interval_or_item_ref
+  source/evidence_refs[]
+  classification
+  raw_contribution
+  excluded_or_adjusted_contribution
+  reason/ref?, quality, provenance
+
+report_obligation
+  id, tenant_id, report_key
+  report_definition_ref
+  owner_ref, recipient_refs[]
+  schedule_due_rule, timezone/calendar_ref
+  allowed_formats [PDF|CSV]
+  approver_refs[], delivery_policy, version
+
+report_run
+  id, obligation_id?, definition_version
+  period/context, started_at, completed_at
+  artifact_refs[], status, error_code?, correlation_id
+
+report_attestation
+  report_run_id, actor_ref, state UNDER_REVIEW|ACCEPTED|REJECTED|DISPUTED
+  comment?, created_at
+```
+
+A finalized measurement period never silently recomputes using a later topology, inventory, holiday calendar, policy or formula version. Corrections create an audited restatement/revision.
+
+Scope snapshots preserve the eligible denominator/population and relevant service/dependency ownership for the measured interval. Dynamic inventory changes may affect future intervals but must not rewrite past finalized periods.
+
+Monitoring/data quality is separate from SLA result. `PARTIAL` or `INSUFFICIENT_EVIDENCE` cannot be rendered as unqualified compliance. A monitoring-path failure is not automatically service downtime.
+
+Multi-vantage measurement rules are policy-driven and deterministic. Contradictory evidence is retained and can yield provisional/inconclusive measurement instead of guessed availability.
+
+For shift/team OLA, ownership intervals and handoffs are timestamped; measurement is segmented by effective interval. Authoritative Team attribution requires the governed tenant-scoped Team identity contract.
+
+Policy Simulator executes read-only against retained evidence and returns impact/delta/explainability; it must not mutate production policy or historical measurements.
+
+Report artifacts are only PDF and/or CSV. PDF carries human/governance presentation and evidence summary; CSV carries bounded detailed machine-readable evidence. APIs are separate integration/query interfaces.
+
+Report execution must be cancellable, resource-bounded, authorization-rechecked and lower priority than live monitoring/ingestion/alert correctness.
 
 ## 34. ITSM connector LLD
 
