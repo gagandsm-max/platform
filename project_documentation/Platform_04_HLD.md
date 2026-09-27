@@ -860,7 +860,7 @@ Discovery may propose changes; it does not silently overwrite authoritative rese
 
 ## 23. Reporting HLD
 
-Report execution is asynchronous for expensive reports. Query Service returns bounded datasets/aggregates; rendering generates PDF/XLSX/CSV/JSON. Report schedule/history and delivery status are persisted. Large exports are background jobs, not synchronous browser queries.
+Report execution is asynchronous for expensive reports. Query Service returns bounded datasets/aggregates; rendering generates PDF and/or CSV report artifacts only. API payloads remain separate integration/query interfaces. Report schedule/history, obligations, review/attestation and delivery status are persisted. Large reports/exports are bounded background jobs, not synchronous browser queries, and yield to live monitoring/alert workloads.
 
 ---
 
