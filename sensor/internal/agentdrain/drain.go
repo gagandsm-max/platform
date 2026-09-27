@@ -131,6 +131,10 @@ type Drain struct {
 	logger    *slog.Logger
 	poisonDir string
 	syncDir   func(string) error
+	// Optional test-only poison publication seams. Nil uses production os.File / os.Rename.
+	poisonWrite  func(f *os.File, p []byte) (int, error)
+	poisonSync   func(f *os.File) error
+	poisonRename func(oldpath, newpath string) error
 
 	mu        sync.Mutex
 	cancel    context.CancelFunc
@@ -446,26 +450,40 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 			_ = os.Remove(tmpName)
 		}
 	}()
-	if _, err := tmp.Write(metaBytes); err != nil {
+
+	writeFn := d.poisonWrite
+	if writeFn == nil {
+		writeFn = func(f *os.File, p []byte) (int, error) { return f.Write(p) }
+	}
+	fileSyncFn := d.poisonSync
+	if fileSyncFn == nil {
+		fileSyncFn = func(f *os.File) error { return f.Sync() }
+	}
+	renameFn := d.poisonRename
+	if renameFn == nil {
+		renameFn = os.Rename
+	}
+
+	if _, err := writeFn(tmp, metaBytes); err != nil {
 		_ = tmp.Close()
 		return codeErr(CodePoison, "failed writing poison metadata", err, true)
 	}
-	if _, err := tmp.Write([]byte("\n")); err != nil {
+	if _, err := writeFn(tmp, []byte("\n")); err != nil {
 		_ = tmp.Close()
 		return codeErr(CodePoison, "failed writing poison separator", err, true)
 	}
-	if _, err := tmp.Write(head.Payload); err != nil {
+	if _, err := writeFn(tmp, head.Payload); err != nil {
 		_ = tmp.Close()
 		return codeErr(CodePoison, "failed writing poison payload", err, true)
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := fileSyncFn(tmp); err != nil {
 		_ = tmp.Close()
 		return codeErr(CodePoison, "failed syncing poison file", err, true)
 	}
 	if err := tmp.Close(); err != nil {
 		return codeErr(CodePoison, "failed closing poison file", err, true)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := renameFn(tmpName, path); err != nil {
 		return codeErr(CodePoison, "failed publishing poison file", err, true)
 	}
 	cleanup = false
@@ -485,7 +503,7 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 		d.metrics.AuthorityPoisonCount.Add(1)
 	}
 	d.logger.Warn("Parked terminal agent-ingress record",
-		"reason", reason, "sequence", head.Sequence, "poison_path", path)
+		"reason", reason, "sequence", head.Sequence)
 	return nil
 }
 

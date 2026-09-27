@@ -913,3 +913,185 @@ func TestMalformedPoisonDoesNotIncrementAuthorityPoisonCount(t *testing.T) {
 		t.Fatalf("AuthorityPoisonCount must stay 0 for malformed poison, got %d", d.Metrics().AuthorityPoisonCount.Load())
 	}
 }
+
+func newAuthorityPoisonDrain(t *testing.T, s *spool.DiskSpool, dir string, logger *slog.Logger) (*Drain, *fakeTransport) {
+	t.Helper()
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{
+		Code: "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION", Message: "revoked", HTTPStatus: 422,
+	}}
+	cfg := Config{
+		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
+		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
+		IdleInterval: time.Millisecond, ShutdownGrace: time.Second, JitterFraction: 0,
+		Logger: logger,
+	}
+	d, err := New(cfg, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d, tr
+}
+
+func assertPoisonFailureRetainsHead(t *testing.T, d *Drain, s *spool.DiskSpool, dir string, logBuf *strings.Builder, payload []byte) {
+	t.Helper()
+	_, err := d.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected poison durability failure")
+	}
+	var drainErr *Error
+	if !errors.As(err, &drainErr) || drainErr.Code != CodePoison {
+		t.Fatalf("expected poison error, got %v", err)
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 1 {
+		t.Fatalf("head must remain in spool, count=%d", st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().AuthorityPoisonCount.Load() != 0 {
+		t.Fatalf("failed poison must not increment counts: poison=%d authority=%d",
+			d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
+	}
+	poisonDir := filepath.Join(dir, poisonDirName)
+	entries, err := os.ReadDir(poisonDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".poison-") && strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("temp poison file must be cleaned up after failure: %s", e.Name())
+		}
+		if strings.HasSuffix(e.Name(), ".json") {
+			t.Fatalf("final poison artifact must not exist after pre-publish failure: %s", e.Name())
+		}
+	}
+	if logBuf != nil && len(payload) > 0 && strings.Contains(logBuf.String(), string(payload)) {
+		t.Fatalf("payload must not appear in logs: %s", logBuf.String())
+	}
+}
+
+func TestAuthorityPoisonWriteFailureRetainsHead(t *testing.T) {
+	s, dir := openSpool(t)
+	rec := appendDurable(t, s, 1)
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	d, tr := newAuthorityPoisonDrain(t, s, dir, logger)
+
+	d.poisonWrite = func(*os.File, []byte) (int, error) {
+		return 0, errors.New("injected poison file write failure")
+	}
+	assertPoisonFailureRetainsHead(t, d, s, dir, &logBuf, rec.Payload)
+
+	// Retry succeeds after seam removed.
+	d.poisonWrite = nil
+	tr.err = &coreclient.CoreAPIError{
+		Code: "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION", Message: "revoked", HTTPStatus: 422,
+	}
+	_, err := d.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected poison completion error after successful park")
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 0 {
+		t.Fatalf("retry must advance past head, count=%d", st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 1 {
+		t.Fatalf("retry counts poison=%d authority=%d", d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
+	}
+}
+
+func TestAuthorityPoisonFileSyncFailureRetainsHead(t *testing.T) {
+	s, dir := openSpool(t)
+	rec := appendDurable(t, s, 1)
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	d, tr := newAuthorityPoisonDrain(t, s, dir, logger)
+
+	d.poisonSync = func(*os.File) error {
+		return errors.New("injected poison file fsync failure")
+	}
+	assertPoisonFailureRetainsHead(t, d, s, dir, &logBuf, rec.Payload)
+
+	d.poisonSync = nil
+	tr.err = &coreclient.CoreAPIError{
+		Code: "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION", Message: "revoked", HTTPStatus: 422,
+	}
+	_, err := d.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected poison completion error after successful park")
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 0 {
+		t.Fatalf("retry must advance past head, count=%d", st.RecordCount)
+	}
+	if d.Metrics().AuthorityPoisonCount.Load() != 1 {
+		t.Fatalf("AuthorityPoisonCount=%d", d.Metrics().AuthorityPoisonCount.Load())
+	}
+}
+
+func TestAuthorityPoisonRenameFailureRetainsHead(t *testing.T) {
+	s, dir := openSpool(t)
+	rec := appendDurable(t, s, 1)
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	d, tr := newAuthorityPoisonDrain(t, s, dir, logger)
+
+	d.poisonRename = func(string, string) error {
+		return errors.New("injected poison rename failure")
+	}
+	assertPoisonFailureRetainsHead(t, d, s, dir, &logBuf, rec.Payload)
+
+	d.poisonRename = nil
+	tr.err = &coreclient.CoreAPIError{
+		Code: "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION", Message: "revoked", HTTPStatus: 422,
+	}
+	_, err := d.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected poison completion error after successful park")
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 0 {
+		t.Fatalf("retry must advance past head, count=%d", st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 1 {
+		t.Fatalf("retry counts poison=%d authority=%d", d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
+	}
+}
+
+func TestAuthorityPoisonSuccessfulLogOmitsPathAndPayload(t *testing.T) {
+	s, dir := openSpool(t)
+	rec := appendDurable(t, s, 1)
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	d, _ := newAuthorityPoisonDrain(t, s, dir, logger)
+
+	_, err := d.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected poison completion error")
+	}
+	if d.Metrics().AuthorityPoisonCount.Load() != 1 {
+		t.Fatalf("AuthorityPoisonCount=%d", d.Metrics().AuthorityPoisonCount.Load())
+	}
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "Parked terminal agent-ingress record") {
+		t.Fatalf("expected parking log, got %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "reason=ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION") {
+		t.Fatalf("log must contain reason: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "sequence=") {
+		t.Fatalf("log must contain sequence: %s", logOutput)
+	}
+	if strings.Contains(logOutput, "poison_path") {
+		t.Fatalf("log must not contain poison_path: %s", logOutput)
+	}
+	if strings.Contains(logOutput, string(rec.Payload)) {
+		t.Fatalf("log must not contain payload: %s", logOutput)
+	}
+	poisonDir := filepath.Join(dir, poisonDirName)
+	entries, _ := os.ReadDir(poisonDir)
+	for _, e := range entries {
+		if strings.Contains(logOutput, e.Name()) {
+			t.Fatalf("log must not contain poison file name %s: %s", e.Name(), logOutput)
+		}
+	}
+}
