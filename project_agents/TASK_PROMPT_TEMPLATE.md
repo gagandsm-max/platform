@@ -1,6 +1,6 @@
 # Platform Engineering Task Template
 
-Copy this into the parent agent in ChatGPT/Cursor/Codex/Antigravity.
+Copy this into the parent agent in ChatGPT/Cursor/Antigravity.
 
 ```text
 You are the parent Platform engineering agent.

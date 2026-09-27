@@ -741,27 +741,48 @@ def validate_agent_pack(repo: Path) -> list[str]:
             errors.append(
                 "tool_authority.json must not list cursor-cloud or github-copilot as authorized writers"
             )
-        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder"):
+        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder", "codex"):
             if never not in set(legal["neverWriterTools"]):
                 errors.append(f"tool_authority.json neverWriterTools must include {never}")
-        for exceptional in ("antigravity", "codex"):
-            if exceptional not in set(legal["exceptionalWriterTools"]):
-                errors.append(
-                    f"tool_authority.json exceptionalWriterTools must include {exceptional}"
-                )
-            if tools.get(exceptional, {}).get("mayWriteProductCode") is not False:
-                errors.append(
-                    f"{exceptional} must keep mayWriteProductCode=false; "
-                    "write is task-scoped via writerElevation only"
-                )
+        if set(legal["exceptionalWriterTools"]) != {"antigravity"}:
+            errors.append(
+                "tool_authority.json exceptionalWriterTools must be exactly {antigravity}"
+            )
+        if tools.get("antigravity", {}).get("mayWriteProductCode") is not False:
+            errors.append(
+                "antigravity must keep mayWriteProductCode=false; "
+                "write is task-scoped via writerElevation only"
+            )
         if tools.get("antigravity", {}).get("defaultGeneratedCapability") != "read-only":
             errors.append("antigravity defaultGeneratedCapability must remain read-only")
+        if tools.get("antigravity", {}).get("mayCertify") is not False:
+            errors.append(
+                "antigravity mayCertify must remain false "
+                "(supplies certification-gate evidence; ChatGPT + GitHub certifies)"
+            )
+        if tools.get("codex", {}).get("status") != "suspended":
+            errors.append("codex status must be suspended under current Founder policy")
+        if "codex" in set(legal["writerTools"]) or "codex" in set(legal["exceptionalWriterTools"]):
+            errors.append("codex must not be an authorized writerTool while suspended")
+        if "codex" in set(legal["verifierTools"]):
+            errors.append("codex must not be an authorized verifierTool while suspended")
+        if "codex" not in set(legal.get("prohibitedWriterTools") or []):
+            errors.append("codex must be listed in prohibitedWriterTools while suspended")
+        if "codex" not in set(legal.get("prohibitedVerifierTools") or []):
+            errors.append("codex must be listed in prohibitedVerifierTools while suspended")
+        if tools.get("codex", {}).get("mayWriteProductCode") is not False:
+            errors.append("codex mayWriteProductCode must remain false while suspended")
+        if tools.get("codex", {}).get("mayCertify") is not False:
+            errors.append("codex mayCertify must remain false while suspended")
         if tools.get("codex", {}).get("defaultSandboxMode") != "read-only":
             errors.append("codex defaultSandboxMode must remain read-only")
+        if tools.get("codex", {}).get("defaultWriter") is not False:
+            errors.append("codex defaultWriter must remain false while suspended")
     except (OSError, json.JSONDecodeError, ControlPlaneError) as exc:
         errors.append(f"tool authority validation failed: {exc}")
 
-    # Generated Antigravity/Codex adapters must remain read-only by default.
+    # Generated Antigravity adapters stay read-only; Codex compatibility adapters
+    # may remain and must stay sandbox_mode=read-only (presence ≠ operational authority).
     for entry in manifest:
         name = entry.get("name")
         if not name:

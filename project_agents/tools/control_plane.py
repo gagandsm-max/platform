@@ -200,6 +200,11 @@ def assert_legal_tool_roles(
         raise ControlPlaneError(f"gatekeeper {gatekeeper!r} is not a declared tool id")
 
     writer_status = tools[writer_tool].get("status")
+    if writer_status == "suspended":
+        raise ControlPlaneError(
+            f"writerTool {writer_tool!r} is suspended by tool_authority.json "
+            "and cannot be selected until Founder reactivation"
+        )
     if (
         writer_tool in never_writers
         or writer_tool in set(legal.get("prohibitedWriterTools") or [])
@@ -231,6 +236,12 @@ def assert_legal_tool_roles(
             f"writerTool {writer_tool!r} is not classified as default or exceptional writer"
         )
 
+    verifier_status = tools[verifier_tool].get("status")
+    if verifier_status == "suspended":
+        raise ControlPlaneError(
+            f"verifierTool {verifier_tool!r} is suspended by tool_authority.json "
+            "and cannot be selected until Founder reactivation"
+        )
     if verifier_tool in set(legal.get("prohibitedVerifierTools") or []):
         raise ControlPlaneError(
             f"verifierTool {verifier_tool!r} is prohibited by tool_authority.json"
@@ -427,11 +438,16 @@ def assert_schema_writer_elevation_conditionals(
             continue
         by_writer[writer] = then
 
-    for writer in ("cursor-cli", "antigravity", "codex"):
+    for writer in ("cursor-cli", "antigravity"):
         if writer not in by_writer:
             raise ControlPlaneError(
                 f"task_manifest.schema.json missing writerElevation conditional for {writer}"
             )
+    if "codex" in by_writer:
+        raise ControlPlaneError(
+            "task_manifest.schema.json must not retain a Codex writerElevation conditional "
+            "while Codex is suspended"
+        )
 
     cursor_then = by_writer["cursor-cli"]
     forbidden = cursor_then.get("not")
@@ -443,7 +459,7 @@ def assert_schema_writer_elevation_conditionals(
             "cursor-cli conditional must forbid writerElevation via not.required"
         )
 
-    for writer in ("antigravity", "codex"):
+    for writer in ("antigravity",):
         then = by_writer[writer]
         if then.get("required") != ["writerElevation"]:
             raise ControlPlaneError(

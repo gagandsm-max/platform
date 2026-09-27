@@ -95,8 +95,8 @@ Add only when the change actually carries that risk:
 
 | Role | Tools |
 |---|---|
-| writerTool | `cursor-cli` (primary bounded writer). `cursor-cloud` is prohibited by default. Antigravity/Codex write elevation is exceptional, task-scoped and isolated |
-| verifierTool | `chatgpt-github`, `antigravity`, `codex` (see `project_agents/tool_authority.json`). GitHub Copilot is auxiliary PR review only and never sole certification evidence |
+| writerTool | `cursor-cli` (primary bounded writer). `cursor-cloud` is prohibited by default. Antigravity write elevation is exceptional, task-scoped and isolated. Codex is Founder-suspended and must not be selected |
+| verifierTool | `chatgpt-github`, `antigravity` (see `project_agents/tool_authority.json`). Codex is suspended. GitHub Copilot is auxiliary PR review only and never sole certification evidence |
 | evidence gate | `exact_head_merge_gate` + `evidence_bundle`; writer cannot close it |
 
 ChatGPT+GitHub does not load Skill bodies unless the selected names require it.
