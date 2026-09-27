@@ -56,5 +56,9 @@ public final class AuditActions {
     public static final AuditAction SENSOR_ENROLLMENT_AUTHORITY_REVOKE =
             new AuditAction("sensor.enrollment_authority.revoke");
 
+    /** Sensor control desired-state mutation (no config body / secrets). */
+    public static final AuditAction SENSOR_CONTROL_DESIRED_SET =
+            new AuditAction("sensor.control.desired.set");
+
     private AuditActions() {}
 }

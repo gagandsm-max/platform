@@ -35,6 +35,8 @@ const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 const CORR_RE = /^[A-Za-z0-9._:-]+$/;
 /** Accepted wire: A-F or a-f. Canonical producer emission: lowercase recommended. */
 const CHECKSUM_RE = /^[A-Fa-f0-9]{64}$/;
+/** BUILD-004 Slice 2 Sensor-control machine contract: lowercase SHA-256 only. */
+const SENSOR_CONTROL_CHECKSUM_RE = /^[a-f0-9]{64}$/;
 const STREAM_RE = /^stream-[0-9a-f]{32}$/;
 const TS_Z_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$/;
 const DRAFT_2020_12 = 'https://json-schema.org/draft/2020-12/schema';
@@ -53,6 +55,8 @@ const SCHEMAS = {
   'sensor-agent-ingress-ack': validateIngressAck,
   'sensor-heartbeat-request': validateHeartbeatRequest,
   'sensor-heartbeat-response': validateHeartbeatResponse,
+  'sensor-control-applied-state': validateSensorControlAppliedState,
+  'sensor-control-desired-state': validateSensorControlDesiredState,
   'standard-error': validateStandardError,
 };
 
@@ -168,6 +172,12 @@ function assertCorr(value, field, codes) {
 
 function assertChecksum(value, field, codes) {
   if (typeof value !== 'string' || !CHECKSUM_RE.test(value)) {
+    fail(codes, 'INVALID_CHECKSUM', field);
+  }
+}
+
+function assertSensorControlChecksum(value, field, codes) {
+  if (typeof value !== 'string' || !SENSOR_CONTROL_CHECKSUM_RE.test(value)) {
     fail(codes, 'INVALID_CHECKSUM', field);
   }
 }
@@ -579,6 +589,141 @@ function validateHeartbeatResponse(doc, codes) {
   assertUtcTs(doc.received_at, 'received_at', codes);
 }
 
+/**
+ * BUILD-004 Slice 2 machine ACK request.
+ * Matches sensor-control-applied-state.schema.json (lowercase checksum + outcome conditionals).
+ */
+function validateSensorControlAppliedState(doc, codes) {
+  const allowed = new Set([
+    'schemaVersion', 'generation', 'checksum', 'outcome', 'rejectionCode', 'rejectionMessage',
+  ]);
+  assertExactKeys(doc, allowed, ['schemaVersion', 'generation', 'checksum', 'outcome'], codes);
+  if (!isPlainObject(doc)) return;
+
+  if (doc.schemaVersion !== 1) {
+    fail(codes, 'UNSUPPORTED_SCHEMA_VERSION', `schemaVersion=${doc.schemaVersion}`);
+  }
+  assertSafeControl(doc.generation, 'generation', codes, { min: 1 });
+  assertSensorControlChecksum(doc.checksum, 'checksum', codes);
+
+  if (doc.outcome !== 'APPLIED' && doc.outcome !== 'REJECTED') {
+    fail(codes, 'INVALID_CONTRACT', 'outcome must be APPLIED or REJECTED');
+  }
+
+  if ('rejectionCode' in doc) {
+    if (typeof doc.rejectionCode !== 'string'
+        || doc.rejectionCode.length < 1
+        || doc.rejectionCode.length > 128
+        || !/^[A-Za-z0-9._:-]+$/.test(doc.rejectionCode)) {
+      fail(codes, 'INVALID_CONTRACT', 'rejectionCode');
+    }
+  }
+  if ('rejectionMessage' in doc) {
+    if (typeof doc.rejectionMessage !== 'string'
+        || doc.rejectionMessage.length < 1
+        || doc.rejectionMessage.length > 512) {
+      fail(codes, 'INVALID_CONTRACT', 'rejectionMessage');
+    }
+  }
+
+  if (doc.outcome === 'REJECTED' && !('rejectionCode' in doc)) {
+    fail(codes, 'MISSING_REQUIRED_FIELD', 'rejectionCode required when outcome=REJECTED');
+  }
+  if (doc.outcome === 'APPLIED') {
+    if ('rejectionCode' in doc) {
+      fail(codes, 'INVALID_CONTRACT', 'rejectionCode forbidden when outcome=APPLIED');
+    }
+    if ('rejectionMessage' in doc) {
+      fail(codes, 'INVALID_CONTRACT', 'rejectionMessage forbidden when outcome=APPLIED');
+    }
+  }
+  assertNoSecrets(doc, codes);
+}
+
+/**
+ * BUILD-004 Slice 2 machine desired-state response.
+ * Matches sensor-control-desired-state.schema.json (lowercase checksums + generation conditionals).
+ */
+function validateSensorControlDesiredState(doc, codes) {
+  const allowed = new Set([
+    'schemaVersion',
+    'desiredGeneration',
+    'desiredChecksum',
+    'configuration',
+    'appliedGeneration',
+    'appliedChecksum',
+    'observedGeneration',
+    'observedChecksum',
+    'observedOutcome',
+    'rejectionCode',
+  ]);
+  assertExactKeys(doc, allowed, [
+    'schemaVersion',
+    'desiredGeneration',
+    'desiredChecksum',
+    'configuration',
+    'appliedGeneration',
+    'appliedChecksum',
+    'observedGeneration',
+    'observedChecksum',
+    'observedOutcome',
+  ], codes);
+  if (!isPlainObject(doc)) return;
+
+  if (doc.schemaVersion !== 1) {
+    fail(codes, 'UNSUPPORTED_SCHEMA_VERSION', `schemaVersion=${doc.schemaVersion}`);
+  }
+  assertSafeControl(doc.desiredGeneration, 'desiredGeneration', codes, { min: 1 });
+  assertSensorControlChecksum(doc.desiredChecksum, 'desiredChecksum', codes);
+  if (!isPlainObject(doc.configuration)) {
+    fail(codes, 'INVALID_CONTRACT', 'configuration must be an object');
+  }
+
+  assertSafeControl(doc.appliedGeneration, 'appliedGeneration', codes, { min: 0 });
+  assertSafeControl(doc.observedGeneration, 'observedGeneration', codes, { min: 0 });
+
+  if (doc.appliedGeneration === 0) {
+    if (doc.appliedChecksum !== null) {
+      fail(codes, 'INVALID_CONTRACT', 'appliedChecksum must be null when appliedGeneration=0');
+    }
+  } else if (typeof doc.appliedGeneration === 'number' && doc.appliedGeneration > 0) {
+    assertSensorControlChecksum(doc.appliedChecksum, 'appliedChecksum', codes);
+  }
+
+  if (doc.observedGeneration === 0) {
+    if (doc.observedChecksum !== null) {
+      fail(codes, 'INVALID_CONTRACT', 'observedChecksum must be null when observedGeneration=0');
+    }
+    if (doc.observedOutcome !== null) {
+      fail(codes, 'INVALID_CONTRACT', 'observedOutcome must be null when observedGeneration=0');
+    }
+    if ('rejectionCode' in doc) {
+      fail(codes, 'INVALID_CONTRACT', 'rejectionCode forbidden when observedGeneration=0');
+    }
+  } else if (typeof doc.observedGeneration === 'number' && doc.observedGeneration > 0) {
+    assertSensorControlChecksum(doc.observedChecksum, 'observedChecksum', codes);
+    if (doc.observedOutcome !== 'APPLIED' && doc.observedOutcome !== 'REJECTED') {
+      fail(codes, 'INVALID_CONTRACT', 'observedOutcome must be APPLIED or REJECTED when observedGeneration>0');
+    }
+  }
+
+  if (doc.observedOutcome === 'REJECTED' && !('rejectionCode' in doc)) {
+    fail(codes, 'MISSING_REQUIRED_FIELD', 'rejectionCode required when observedOutcome=REJECTED');
+  }
+  if (doc.observedOutcome === 'APPLIED' && ('rejectionCode' in doc)) {
+    fail(codes, 'INVALID_CONTRACT', 'rejectionCode forbidden when observedOutcome=APPLIED');
+  }
+  if ('rejectionCode' in doc) {
+    if (typeof doc.rejectionCode !== 'string'
+        || doc.rejectionCode.length < 1
+        || doc.rejectionCode.length > 128
+        || !/^[A-Za-z0-9._:-]+$/.test(doc.rejectionCode)) {
+      fail(codes, 'INVALID_CONTRACT', 'rejectionCode');
+    }
+  }
+  assertNoSecrets(doc, codes);
+}
+
 function validateStandardError(doc, codes) {
   const allowed = new Set(['status', 'code', 'message']);
   assertExactKeys(doc, allowed, ['status', 'code', 'message'], codes);
@@ -727,6 +872,33 @@ function runSchemaSetSelfCheck(loadedSchemas) {
   }
   if (common.$defs?.checksumSha256Hex?.pattern !== CHECKSUM_RE.source) {
     codes.push('CHECKSUM_PATTERN_MISMATCH');
+  }
+  // BUILD-004 Slice 2 Sensor-control schemas must use lowercase-only checksum defs
+  // (must NOT reuse common checksumSha256Hex mixed-case pattern).
+  const appliedControl = loadedSchemas['sensor-control-applied-state.schema.json'];
+  const desiredControl = loadedSchemas['sensor-control-desired-state.schema.json'];
+  if (!appliedControl) {
+    codes.push('MISSING_SENSOR_CONTROL_APPLIED_STATE_SCHEMA');
+  } else {
+    const appliedLower = appliedControl.$defs?.checksumSha256HexLower?.pattern;
+    if (appliedLower !== SENSOR_CONTROL_CHECKSUM_RE.source) {
+      codes.push('SENSOR_CONTROL_APPLIED_CHECKSUM_PATTERN_MISMATCH');
+    }
+    const checksumRef = appliedControl.properties?.checksum?.$ref;
+    if (checksumRef !== '#/$defs/checksumSha256HexLower') {
+      codes.push('SENSOR_CONTROL_APPLIED_CHECKSUM_REF_MISMATCH');
+    }
+  }
+  if (!desiredControl) {
+    codes.push('MISSING_SENSOR_CONTROL_DESIRED_STATE_SCHEMA');
+  } else {
+    const desiredLower = desiredControl.$defs?.checksumSha256HexLower?.pattern;
+    if (desiredLower !== SENSOR_CONTROL_CHECKSUM_RE.source) {
+      codes.push('SENSOR_CONTROL_DESIRED_CHECKSUM_PATTERN_MISMATCH');
+    }
+    if (desiredControl.properties?.desiredChecksum?.$ref !== '#/$defs/checksumSha256HexLower') {
+      codes.push('SENSOR_CONTROL_DESIRED_CHECKSUM_REF_MISMATCH');
+    }
   }
   if (common.$defs?.sensorStreamId?.pattern !== STREAM_RE.source) {
     codes.push('STREAM_PATTERN_MISMATCH');
