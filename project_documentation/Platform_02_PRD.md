@@ -2264,3 +2264,77 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 ## 44. A2.1 migration note
 
 A2.1 absorbed Version 3.0 / v3.1 / v3.2.2 and related reconciliation content into the numbered normative sections above. Chronological appendices and residual “must-not-lose” checklists are not current normative truth. Git history preserves chronology. Formal `PRD-*` identifiers remain indexed in `Platform_08_Requirements_Traceability.md` without net-new or removed IDs under A2.1.
+
+## Service Assurance / SLA / OLA product requirements — Phase 1
+
+### PRD-SA-001 — Policy families
+Platform shall support SLA, OLA and Provider/Underpinning SLA as first-class policy types using the same governed measurement engine.
+
+### PRD-SA-002 — Out-of-box editable templates
+Platform shall ship editable templates for common enterprise service-assurance patterns across banking/financial services, manufacturing, telecom, data-center/colocation, ISP/carrier, cloud and generic enterprise operations. Values such as percentage targets, time limits, exclusions and credits remain customer-configured.
+
+### PRD-SA-003 — Safe custom formula engine
+Customers may construct custom measurements from supported fields and metrics using a typed, resource-bounded formula language. Supported operations shall include arithmetic, ratios, percentages, min/max, average, weighted average, percentiles, durations, counts, success/compliance rates, Boolean/conditional expressions, rolling windows and threshold-compliance duration. Arbitrary customer Python, JavaScript, SQL, shell or equivalent executable code shall not run inside the formula engine.
+
+### PRD-SA-004 — Service Time Profiles
+Reusable Service Time Profiles shall support timezone, holidays, working days, business hours, 24x7, shifts, country/site calendars and customer-defined schedules. SLA/OLA policies may inherit and override Service Time Profiles according to governed scope.
+
+### PRD-SA-005 — Dimensions and scope
+Policies may be scoped by service, site, provider, region, country, business unit, team, shift, environment, criticality, CI/resource type, group and governed attributes/tags.
+
+### PRD-SA-006 — Threshold model
+A policy may define target/expected, minimum, at-risk and breach conditions independently, including effective date and measurement window.
+
+### PRD-SA-007 — Measurement bases
+Supported measurement bases shall include SERVICE_MINUTES, ENTITY_MINUTES, IMPACTED_UNIT_MINUTES, TRANSACTION_COUNT, TICKET_COUNT, EVENT_COUNT, WEIGHTED_SCORE and CUSTOM_FORMULA. Blind averaging of component uptime shall not be the default method for business-service availability.
+
+### PRD-SA-008 — Evidence-first availability
+Where the policy defines monitoring as measurement authority, availability shall be derived from qualified monitoring/service evidence rather than inferred only from ticket timestamps. Missing telemetry, Sensor/Core path failure and conflicting evidence shall remain distinguishable from confirmed service failure.
+
+### PRD-SA-009 — Degraded-condition treatment
+Policies shall support configurable treatment of a service that remains operational in a degraded/redundancy-loss state: informational only, partial penalty, outage after a configured persistence period, or immediate outage.
+
+### PRD-SA-010 — Inclusion/exclusion governance
+Inclusions, approved maintenance, customer-responsibility exclusions and other contractual exclusions shall be explicit, versioned, RBAC-controlled and auditable. Retroactive changes require reason, actor, timestamp and before/after result.
+
+### PRD-SA-011 — Data-quality state
+Each result shall expose measurement completeness/quality independently from the SLA/OLA score. At minimum: VALID, PARTIAL, INSUFFICIENT_EVIDENCE, PROVISIONAL and DISPUTED.
+
+### PRD-SA-012 — Period close and reproducibility
+Measurement periods shall support OPEN, PRELIMINARY, REVIEW, FINAL and RESTATED states. Final results shall retain immutable references to policy/formula/calendar versions, scope snapshot, qualifying events/outages, exclusions and source evidence so historical results are reproducible.
+
+### PRD-SA-013 — Policy simulator
+Authorized users shall be able to simulate a proposed policy/version over retained historical data and compare outcome changes before activation.
+
+### PRD-SA-014 — Multi-vantage measurement
+Policies may require one or more measurement vantage points and configurable quorum/aggregation rules so an isolated monitoring-path fault does not create unsupported contractual downtime.
+
+### PRD-SA-015 — Team, shift and dependency attribution
+The engine shall support incident/outage segmentation across team and shift ownership changes and relate business SLA performance to supporting application, database, network, infrastructure and provider OLAs without inventing causal attribution.
+
+### PRD-SA-016 — Continuous-improvement measurements
+Policies may measure defined improvement over prior periods, such as incident-rate reduction, automation coverage, MTTR improvement or compliance improvement, with explicit baseline/version semantics.
+
+### PRD-SA-017 — Reporting obligations
+A report obligation shall support report key/reference, owner, frequency, business-calendar due rule, recipients, delivery method, required sections, formats, approvers and quality/attestation state.
+
+### PRD-SA-018 — Business-calendar scheduling
+Schedules shall support ordinary recurrence and enterprise due rules such as nth business day after period end, quarter end, incident close, SLA breach and on-demand generation.
+
+### PRD-SA-019 — Attestation workflow
+Governed reports shall support GENERATED -> DELIVERED -> UNDER_REVIEW -> ACCEPTED | REJECTED | DISPUTED with signer/reviewer identity, timestamp, comments and revision history.
+
+### PRD-SA-020 — Report artifacts
+Generated, downloaded and scheduled report artifacts shall be CSV and/or PDF only. PDF is the governed human-readable presentation/evidence artifact; CSV is the detailed machine-readable evidence artifact. APIs are integration surfaces and are not report artifact formats.
+
+### PRD-SA-021 — Report execution isolation
+Large/ad-hoc/scheduled report execution shall use bounded concurrency, query limits, preaggregation/caching where applicable and low-priority execution so reporting cannot starve telemetry ingestion, alert qualification, current-state processing or Sensor/Core control.
+
+### PRD-SA-022 — Evidence drill-down
+SLA/OLA results shall drill to qualifying outage/service intervals and, where data exists, related CI, topology, telemetry, alert, incident, ticket, maintenance, RCA, team/shift, provider and exclusion evidence.
+
+### PRD-SA-023 — Report template families
+Phase 1 shall provide editable templates for executive SLA/OLA summary, service availability, internal OLA, provider/circuit SLA, incident/MTTA/MTTR, capacity/performance, event/alert, RCA, configuration/asset accuracy, software/patch posture, certificate lifecycle, security/vulnerability assurance, report-obligation compliance and detailed SLA evidence.
+
+### PRD-SA-024 — Product boundary
+Platform may ingest finance/procurement/project/stock or other enterprise data when a customer chooses to correlate/report it, but Platform shall not become the authoritative ERP, billing, procurement, project-finance or stock-management system.
