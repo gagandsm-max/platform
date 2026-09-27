@@ -21,11 +21,11 @@ subagent loaders.
 
 | Tool | Authority |
 |---|---|
-| ChatGPT + GitHub | Control plane; architecture/technical authority; sequencing; PR/merge; certification/progress; may authorize exceptional isolated writer elevation |
+| ChatGPT + GitHub | Control plane; architecture/technical authority; sequencing; PR/merge; **final** certification/progress; may authorize exceptional isolated writer elevation |
 | Cursor CLI | **Default** bounded implementation writer; one writer per checkout/worktree; cannot self-certify; no `writerElevation` required |
 | Cursor Cloud | **Never-writer** under current policy; elevation cannot authorize it |
-| Antigravity CLI | Read-only/adversarial default; generated adapters stay read-only; exceptional task-scoped write only with explicit `writerElevation` on an isolated workspace |
-| Codex CLI / GitHub Codex | Read-only exact-SHA adversarial/certification default; generated adapters stay `sandbox_mode=read-only`; exceptional task-scoped write only with explicit `writerElevation` on an isolated workspace |
+| Antigravity CLI | Combined independent verifier / adversarial / exact-SHA auditor / certification-gate **evidence** lane; read-only by default; generated adapters stay read-only; exceptional task-scoped write only with explicit `writerElevation` on an isolated workspace; `mayCertify=false` (evidence only — ChatGPT + GitHub certifies) |
+| Codex CLI / GitHub Codex | **Suspended** from the normal Platform workflow (Founder 2026-09-27; token/cost overhead). Compatibility projection under `.codex/agents/` may remain with `sandbox_mode=read-only` but does **not** authorize Codex as writer, verifier, certification lane or elevated writer. Reactivation requires explicit Founder governance change |
 | GitHub Copilot | Never-writer; limited auxiliary PR/code-review only; elevation cannot authorize writer/verifier/gatekeeper/merge/sole certification |
 
 Exceptional elevation object (task manifest only; outside static projections):
@@ -38,7 +38,7 @@ Exceptional elevation object (task manifest only; outside static projections):
 }
 ```
 
-Rules: `writerTool=cursor-cli` forbids elevation; `antigravity`/`codex` require it; never-writers remain rejected even with elevation; `verifierTool` and `gatekeeper` must differ from `writerTool`.
+Rules: `writerTool=cursor-cli` forbids elevation; `antigravity` requires it; never-writers and suspended Codex remain rejected even with elevation; `verifierTool` and `gatekeeper` must differ from `writerTool`.
 
 ## CURSOR CLOUD
 
@@ -87,6 +87,7 @@ not re-executed here):
 
 - `--agent` is supported.
 - Default Platform posture is read-only / adversarial.
+- Independent exact-SHA auditor, negative/failure/security challenger and certification-gate evidence provider (`mayCertify=false`; ChatGPT + GitHub retains final certification).
 - Write mode requires explicit authority (`--mode accept-edits` plus sandbox /
   model / effort flags already documented in `CHATGPT_AGENT_ROUTER.md`).
 - Previously documented read-only planning flag: `--mode plan`.
@@ -105,14 +106,13 @@ native filesystem subagent loader:
 
 Do **not** invent a native ChatGPT filesystem subagent mechanism.
 
-## CODEX
+## CODEX (suspended — compatibility only)
 
-- Preserve the generated compatibility projection under `.codex/agents/`.
-- Platform uses Codex CLI and GitHub Codex as an **independent exact-SHA adversarial audit/certification lane when explicitly invoked by ChatGPT**.
-- Codex is **not the routine implementation writer**. Normal fixes remain with the assigned Cursor writer unless ChatGPT explicitly creates an isolated Codex implementation branch/worktree.
-- A Codex review is stale immediately if authoritative `main` or the reviewed PR head moves.
-- Codex must not self-certify changes it wrote.
-- Do **not** invent a native Codex Skill loader/path. When a Codex task needs a canonical Skill, the task prompt directs Codex to read the required files under `project_agents/skills/`; `.codex/agents/` remains an agent compatibility projection, not a second Skill authority.
+- Preserve the generated compatibility projection under `.codex/agents/` (adapters must remain `sandbox_mode=read-only`).
+- Codex is **Founder-suspended** from the normal Platform workflow (2026-09-27). Do not select Codex as `writerTool`, `verifierTool`, certification lane or exceptional elevated writer.
+- Antigravity now performs the independent exact-SHA audit / adversarial / certification-gate evidence duties formerly assigned to Codex.
+- Compatibility assets do **not** authorize Codex use. Reactivation requires an explicit future Founder governance decision.
+- Do **not** invent a native Codex Skill loader/path. Historical task prompts that mention Codex are not active routing authority.
 
 ## Native binaries on this Cloud VM (2026-09-12)
 

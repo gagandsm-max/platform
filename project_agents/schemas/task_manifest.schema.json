@@ -54,14 +54,14 @@
     "stopConditions": {"type": "array", "items": {"type": "string"}},
     "writerTool": {
       "type": "string",
-      "enum": ["cursor-cli", "antigravity", "codex"],
-      "description": "Product writer. Default is cursor-cli (no elevation). antigravity/codex require writerElevation on an isolated workspace. never-writers (cursor-cloud, github-copilot, chatgpt-github, founder) cannot be selected. Derived from project_agents/tool_authority.json."
+      "enum": ["cursor-cli", "antigravity"],
+      "description": "Product writer. Default is cursor-cli (no elevation). antigravity requires writerElevation on an isolated workspace. never-writers and suspended tools (cursor-cloud, github-copilot, chatgpt-github, founder, codex) cannot be selected. Derived from project_agents/tool_authority.json."
     },
     "writerElevation": {
       "type": "object",
       "additionalProperties": false,
       "required": ["authorizedBy", "reason", "isolatedWorkspace"],
-      "description": "Required only when writerTool is an exceptional writer (antigravity or codex). Forbidden for cursor-cli. Cannot authorize never-writers.",
+      "description": "Required only when writerTool is the exceptional writer (antigravity). Forbidden for cursor-cli. Cannot authorize never-writers or suspended Codex.",
       "properties": {
         "authorizedBy": {
           "type": "string",
@@ -79,8 +79,8 @@
     },
     "verifierTool": {
       "type": "string",
-      "enum": ["chatgpt-github", "antigravity", "codex"],
-      "description": "Independent verifier/auditor. Must differ from writerTool. Derived from project_agents/tool_authority.json."
+      "enum": ["chatgpt-github", "antigravity"],
+      "description": "Independent verifier/auditor. Must differ from writerTool. Codex is suspended and cannot be selected. Derived from project_agents/tool_authority.json."
     },
     "gatekeeper": {
       "type": "string",
@@ -125,15 +125,6 @@
     {
       "if": {
         "properties": {"writerTool": {"const": "antigravity"}},
-        "required": ["writerTool"]
-      },
-      "then": {
-        "required": ["writerElevation"]
-      }
-    },
-    {
-      "if": {
-        "properties": {"writerTool": {"const": "codex"}},
         "required": ["writerTool"]
       },
       "then": {
