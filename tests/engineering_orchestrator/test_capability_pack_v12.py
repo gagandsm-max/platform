@@ -54,6 +54,55 @@ UPSTREAM_PROVENANCE_SHAS = {
     "mares29/dashboard-design-skill": "bbed535a08f0e1768b40087996fe019370312374",
 }
 
+# Capability-pack / projection / skill trees only. Product-wide constitution
+# (project_documentation/AGENTS.md) is intentionally excluded so legitimate
+# product governance+branding PRs are not misclassified as pack+runtime mixes.
+CAPABILITY_PACK_PATH_PREFIXES = (
+    "project_agents/",
+    ".agents/",
+    ".cursor/agents/",
+    "skills/",
+)
+
+PRODUCT_RUNTIME_PATH_PREFIXES = ("ui/", "core/", "sensor/", "agent/")
+PRODUCT_RUNTIME_FORBIDDEN_FILES = (
+    "ui/package.json",
+    "core/pom.xml",
+    "package-lock.json",
+)
+
+
+def _path_matches_prefix(name: str, prefix: str) -> bool:
+    return name == prefix.rstrip("/") or name.startswith(prefix)
+
+
+def _touches_capability_pack(changed_paths: list[str]) -> bool:
+    return any(
+        _path_matches_prefix(name, prefix)
+        for name in changed_paths
+        for prefix in CAPABILITY_PACK_PATH_PREFIXES
+    )
+
+
+def _product_runtime_hits(changed_paths: list[str]) -> list[str]:
+    return [
+        name
+        for name in changed_paths
+        if name in PRODUCT_RUNTIME_FORBIDDEN_FILES
+        or any(_path_matches_prefix(name, prefix) for prefix in PRODUCT_RUNTIME_PATH_PREFIXES)
+    ]
+
+
+def capability_pack_product_runtime_hits(changed_paths: list[str]) -> list[str]:
+    """Return product-runtime hits only when the changeset also touches capability-pack trees.
+
+    Product-only or product+AGENTS.md changes return an empty list. Mixing real
+    capability-pack paths with product runtime returns the product-runtime hits.
+    """
+    if not _touches_capability_pack(changed_paths):
+        return []
+    return _product_runtime_hits(changed_paths)
+
 
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -746,36 +795,35 @@ class CapabilityPackUiAmendmentTests(unittest.TestCase):
             text=True,
         )
         names = [line for line in named.splitlines() if line]
-        pack_prefixes = (
-            "project_agents/",
-            ".agents/",
-            ".cursor/agents/",
-            "skills/",
-            "project_documentation/AGENTS.md",
-        )
-        forbidden_prefixes = ("ui/", "core/", "sensor/", "agent/")
-        forbidden_files = (
-            "ui/package.json",
-            "core/pom.xml",
-            "package-lock.json",
-        )
-        touches_pack = any(
-            name.startswith(prefix) or name == prefix.rstrip("/")
-            for name in names
-            for prefix in pack_prefixes
-        )
-        product_hits = [
-            name
-            for name in names
-            if name in forbidden_files
-            or any(name == prefix.rstrip("/") or name.startswith(prefix) for prefix in forbidden_prefixes)
-        ]
-        if not touches_pack:
-            # Product runtime PRs (for example Issue #46 Agent) are expected to
-            # touch agent/sensor/core/ui. This invariant only forbids mixing a
-            # capability-pack changeset with product runtime files.
-            return
+        product_hits = capability_pack_product_runtime_hits(names)
         self.assertFalse(product_hits, product_hits)
+
+    def test_agents_md_with_product_brand_assets_not_capability_pack_mix(self) -> None:
+        # CASE A: product-wide constitution + brand assets must not activate pack/runtime mix.
+        paths = [
+            "project_documentation/AGENTS.md",
+            "core/src/main/resources/brand/amrud_blk.png",
+            "ui/public/brand/amrud_whi.png",
+        ]
+        self.assertFalse(capability_pack_product_runtime_hits(paths))
+
+    def test_capability_pack_plus_product_runtime_is_rejected(self) -> None:
+        # CASE B: real capability-pack change mixed with product runtime is prohibited.
+        paths = [
+            "project_agents/manifest.json",
+            "ui/src/App.tsx",
+        ]
+        hits = capability_pack_product_runtime_hits(paths)
+        self.assertEqual(hits, ["ui/src/App.tsx"])
+
+    def test_capability_pack_only_changeset_allowed(self) -> None:
+        paths = [
+            "project_agents/manifest.json",
+            ".agents/agents/demo.md",
+            ".cursor/agents/demo.md",
+            "skills/demo_skill/SKILL.md",
+        ]
+        self.assertFalse(capability_pack_product_runtime_hits(paths))
 
 
 class CapabilityPackSecurityAuthorityDeltaTests(unittest.TestCase):
