@@ -161,7 +161,7 @@ UI/OOB-manifest and recurring-Discovery quality evidence additionally covers, wh
 
 A registry entry or JSON schema alone is not implementation/certification evidence.
 
-Before presentation architecture is considered stable, R1 certification exercises the representative cross-class set defined in Platform_09 §4.10. Evidence must prove the common envelope and applicable class-specific definitions without coercing console/entity/investigation/map/governance workspaces into dashboard grids. The same presentation-foundation gate includes one representative `REPORT_DEFINITION` (SLA Scheduled Report) and one representative `SAVED_VIEW` so QMC/VIS/context contracts are not certified against dashboards alone; tests cover scheduled execution independent of browser runtime, execution-vs-display timezone, allowed output formats, target/filter/sort/group/time-context persistence, URL/context compatibility, authorization re-evaluation and stale/deleted/unauthorized references. TEAM-scoped artifacts remain excluded from production certification until the Identity/Teams/RBAC tranche provides authoritative Team binding/revocation semantics.
+Before presentation architecture is considered stable, R1 certification exercises the representative cross-class set defined in Platform_09 §4.10. Evidence must prove the common envelope and applicable class-specific definitions without coercing console/entity/investigation/map/governance workspaces into dashboard grids. The same presentation-foundation gate includes one representative `REPORT_DEFINITION` (SLA Scheduled Report) and one representative `SAVED_VIEW` so QMC/VIS/context contracts are not certified against dashboards alone; tests cover scheduled execution independent of browser runtime, execution-vs-display timezone, PDF/CSV-only report artifact enforcement, target/filter/sort/group/time-context persistence, URL/context compatibility, authorization re-evaluation and stale/deleted/unauthorized references. TEAM-scoped artifacts remain excluded from production certification until the Identity/Teams/RBAC tranche provides authoritative Team binding/revocation semantics.
 
 ---
 
@@ -271,3 +271,29 @@ Certification must include:
 - resource-efficiency benchmarks measure CPU/RAM/network/storage before increasing certified hardware profiles.
 
 Specified ≠ implemented ≠ tested ≠ benchmarked ≠ certified ≠ deployed.
+
+---
+
+## 10. Service Assurance / SLA-OLA reporting certification supplement — 2026-09-27
+
+Phase-1 service assurance is not release-ready until deterministic fixtures prove:
+
+- target/expected versus minimum threshold semantics and period boundary correctness;
+- reusable service-time calendars including IANA timezone, holidays, business hours, shifts, country/site overrides and DST edge cases;
+- per-ticket/entity/service/site/provider/population/impacted-unit measurement bases;
+- monitoring-evidence availability independent of ticket arithmetic where policy declares monitoring authoritative;
+- inclusion/exclusion, maintenance, responsibility boundary, approved deviation and configurable degraded-condition rules;
+- dependency-aware service availability without blind averaging of component uptime;
+- safe formula validation, type/unit errors, divide-by-zero/empty population handling and rejection of arbitrary SQL/Python/JavaScript/eval;
+- policy simulation/backtest is read-only, reproducible and shows old/new result delta without changing production history;
+- finalized-period immutability, scope-snapshot stability and audited `RESTATED` corrections;
+- `VALID`/`PARTIAL`/`INSUFFICIENT_EVIDENCE`/`DISPUTED`-class measurement quality; monitoring gaps cannot silently become service downtime or perfect compliance;
+- multi-vantage contradiction/quorum handling and deterministic provisional/inconclusive outcomes;
+- shift/team segmentation and handoff history, with fail-closed behavior until authoritative Team binding exists;
+- OLA/provider dependency chains and evidence attribution without fabricated ownership;
+- business-day-aware report due rules, report-obligation lifecycle, delivery audit and attestation/dispute;
+- generated/downloaded/scheduled artifacts limited to PDF and/or CSV; API data remains a separate interface;
+- PDF/CSV evidence can reproduce the governing policy/formula/calendar/scope/evidence versions;
+- report query/worker cancellation, concurrency/query bounds and load tests prove reporting cannot starve live ingestion, alerting or incident correctness.
+
+No customer-specific target percentage, credit amount, contractual liability or financial consequence is certified by these tests unless separately configured and authorized.
