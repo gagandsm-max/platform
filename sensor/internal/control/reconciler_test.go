@@ -243,6 +243,30 @@ func TestReconcileUnsupportedSchema(t *testing.T) {
 	}
 }
 
+func TestReconcileConfigInvalidRejected(t *testing.T) {
+	t.Parallel()
+	cfg := control.GoldenConfiguration()
+	cfg.Scheduler.MaxWorkers = 1
+	cfg.Scheduler.Pools = map[string]control.DesiredPool{
+		"NETWORK_POLL": {Workers: 2, QueueDepth: 1},
+		"SYNTHETIC":    {Workers: 1, QueueDepth: 4},
+	}
+	client := &fakeControlClient{desired: desiredState(t, 1, cfg)}
+	rec, store, _ := newTestReconciler(t, client, control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
+		t.Fatal("applier must not run for invalid candidate")
+		return nil
+	}))
+	res, err := rec.RunOnce(context.Background())
+	if err != nil || res.Action != "CONFIG_INVALID" || len(client.acks) != 1 ||
+		client.acks[0].Outcome != "REJECTED" || client.acks[0].RejectionCode != control.CodeConfigInvalid {
+		t.Fatalf("res=%+v err=%v acks=%+v", res, err, client.acks)
+	}
+	snap, loadErr := store.Load()
+	if loadErr != nil || snap != nil {
+		t.Fatalf("no durable snapshot expected: snap=%#v err=%v", snap, loadErr)
+	}
+}
+
 func TestReconcileApplyFailurePreservesPrior(t *testing.T) {
 	t.Parallel()
 	cfg := control.GoldenConfiguration()
