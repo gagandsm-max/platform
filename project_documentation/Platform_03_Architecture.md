@@ -1446,3 +1446,19 @@ Packaging detail remains `Platform_15`/`Platform_16`. A2.1 only defines architec
 ## 43. A2.1 migration note
 
 A2.1 absorbed Version 3.0 ARCH-* blocks, v3.1 packaging/runtime sections and v3.2.2 timezone/scheduling/EDS/local-intelligence handoffs into the numbered normative architecture above, and corrected out-of-order headings. Chronological appendices and residual “must-not-lose” checklists are not current normative truth. Git history preserves chronology.
+
+## Service Assurance architecture contract
+
+Service Assurance is a Phase-1 logical capability implemented within the existing modular Core; it shall not create a new microservice/database solely for SLA/OLA calculation before scale evidence requires it.
+
+- PostgreSQL owns transactional definitions, policy versions, calendars, scopes, exclusions, period-close state, report obligations, approvals/attestations and immutable result metadata.
+- ClickHouse owns high-volume historical measurement facts, interval aggregates and analytical evidence required for SLA/OLA calculation.
+- Kafka may carry internal measurement/qualification events but is not the source of contractual truth.
+- Valkey may cache current/precomputed views but cache loss must not change governed results.
+- Reporting/SLA execution is asynchronous and resource-bounded; live monitoring, ingestion, qualification and current-state processing have priority.
+- Service availability uses qualified service/topology evidence. Component loss does not automatically equal business-service downtime where redundancy/dependency semantics show the agreed service remains available.
+- Measurement quality is explicit and independent from the computed SLA/OLA score.
+- Finalized measurement periods bind policy, formula, calendar and scope versions plus evidence references so later inventory/topology changes cannot silently rewrite history.
+- Multi-vantage and quorum measurement are supported for customer networks where one observation path may be impaired.
+- Customer formula execution uses a typed bounded expression runtime; arbitrary executable code and arbitrary direct database queries are prohibited.
+- Report artifacts are CSV and/or PDF only.
