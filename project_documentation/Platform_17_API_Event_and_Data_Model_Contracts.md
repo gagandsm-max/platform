@@ -410,10 +410,7 @@ Platform defines a central, tenant-scoped branding configuration contract to sep
   "faviconRef": null,
   "browserTitleTemplate": "{pageTitle} | {effectiveCommercialProductName}",
   "reportBranding": {
-    "effectiveProductDisplayName": "AmrudAi",
     "organizationName": null,
-    "lightLogoRef": "classpath:/brand/amrud_blk.png",
-    "darkLogoRef": "classpath:/brand/amrud_whi.png",
     "footerText": null,
     "confidentialityNotice": null
   },
@@ -432,13 +429,12 @@ Platform defines a central, tenant-scoped branding configuration contract to sep
 - `defaultCommercialProductName`: `"AmrudAi"` (default commercial/customer-facing product name).
 - `defaultLightLogoRef` / `defaultDarkLogoRef`: governed relative asset references pointing to product-owned static assets (`amrud_blk.png` for light background / PDF reports; `amrud_whi.png` for dark background / UI navigation). Absolute developer filesystem paths (e.g. `/home/gagan/nms/logo/...`) must never be exposed or referenced.
 - `faviconRef`: optional / `null` by default. No concrete default favicon asset is shipped in the repository; custom favicon references may only be supplied through optional white-label configuration overrides (`customFaviconRef`).
-- **Effective brand resolution semantics:**
-  - **Default:** `effectiveCommercialName = "AmrudAi"`, `effectiveLightLogo = "/brand/amrud_blk.png"`, `effectiveDarkLogo = "/brand/amrud_whi.png"`.
-  - **White-label override:** Where an authorized, licensed tenant or MSP white-label configuration is enabled (`whiteLabel.enabled == true`), customer-facing UI and customer-facing PDF reports resolve to the tenant/MSP configured commercial name (`overrideCommercialName`) and custom logo references (`customLightLogoRef` / `customDarkLogoRef`).
+- **Single central branding resolver for UI and reports:** PDF rendering does not maintain an independent or duplicate brand authority. Instead, PDF rendering resolves `effectiveCommercialProductName`, `effectiveLightLogo`, and `effectiveDarkLogo` directly from the central branding resolver:
+  - **Default:** `effectiveCommercialProductName = "AmrudAi"`, `effectiveLightLogo = "/brand/amrud_blk.png"`, `effectiveDarkLogo = "/brand/amrud_whi.png"`.
+  - **White-label override:** Where an authorized, licensed tenant or MSP white-label configuration is active (`whiteLabel.enabled == true`), effective values resolve to the tenant/MSP configured commercial name (`overrideCommercialName`) and custom logo references (`customLightLogoRef` / `customDarkLogoRef`).
   - **Technical identity preservation:** Internal technical identity always remains `"platform"`.
-  - **Report rendering:** PDF reports embed the effective commercial logo appropriate to template/page background contrast, preserving aspect ratio without stretching. CSV reports contain tabular data only without embedded imagery.
-- `reportBranding`:
-  - `effectiveProductDisplayName`: resolves to the effective commercial product name (`"AmrudAi"` by default; overridden by tenant/MSP commercial name when white-label is active).
+  - **Report rendering & CSV integrity:** PDF reports embed the effective commercial logo appropriate to template/page background contrast, preserving aspect ratio without stretching. CSV reports contain tabular data only without embedded imagery.
+- `reportBranding`: Contains only report-template metadata not owned by central brand resolution:
   - `organizationName`: optional / `null`. Publisher or legal entity name is distinct from the product commercial name and is never defaulted to `"AmrudAi"`.
   - `footerText`: optional / `null` / template-configurable. Report Studio documents do not force a universal footer string.
   - `confidentialityNotice`: optional / `null` / template-policy-controlled. Legal classification and document sensitivity markings are controlled per template/policy rather than universally imposing `"CONFIDENTIAL"`.
