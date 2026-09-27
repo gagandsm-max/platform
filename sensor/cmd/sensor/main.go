@@ -23,21 +23,65 @@ import (
 	"platform/sensor/internal/uploader"
 )
 
+func coreClientConfigFromRuntime(rt config.RuntimeConfig, logger *slog.Logger) coreclient.Config {
+	return coreclient.Config{
+		BaseURL:          rt.CoreEndpoint,
+		CertificateFile:  rt.TLS.Certificate,
+		PrivateKeyFile:   rt.TLS.PrivateKey,
+		CAFile:           rt.TLS.CA,
+		RequestTimeout:   rt.Transport.RequestTimeout,
+		MaxResponseBytes: rt.Transport.MaxResponseBytes,
+		Logger:           logger,
+	}
+}
+
+func uploaderConfigFromRuntime(rt config.RuntimeConfig, streamID string) uploader.Config {
+	return uploader.Config{
+		SensorID:             rt.SensorID,
+		StreamID:             streamID,
+		MaxBatchRecords:      rt.Transport.UploadBatchRecords,
+		MaxBatchPayloadBytes: rt.Transport.UploadBatchBytes,
+		MaxRequestBytes:      rt.Transport.MaxRequestBytes,
+		MaxAttempts:          5,
+		InitialBackoff:       500 * time.Millisecond,
+		MaxBackoff:           5 * time.Second,
+		JitterFraction:       0.1,
+		IdleInterval:         1 * time.Second,
+	}
+}
+
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})).With(
+	levelVar := new(slog.LevelVar)
+	levelVar.Set(slog.LevelInfo)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: levelVar})).With(
 		"service", "platform-sensor",
 	)
 	slog.SetDefault(logger)
 
-	cfg := config.LoadConfig()
-	logger = logger.With("sensor_id", cfg.SensorID, "sensor_type", cfg.SensorType)
-	logger.Info("Platform Sensor starting up",
-		"version", "0.1.0-dev", "environment", cfg.Environment, "core_url", cfg.CoreURL,
-		"spool_dir", cfg.SpoolDir, "watermark_percent", cfg.StorageWatermarkPercent)
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		logger.Error("Invalid Sensor configuration", "error_code", "SENSOR_CONFIG_INVALID", "error", err.Error())
+		os.Exit(1)
+	}
+	if err := config.ApplyLogLevel(levelVar, cfg.Runtime.LogLevel); err != nil {
+		logger.Error("Invalid Sensor log level", "error_code", "SENSOR_CONFIG_INVALID", "error", err.Error())
+		os.Exit(1)
+	}
 
-	// Preserve current main telemetry pipeline: checked spool → DiskSink → Core client → uploader.
+	rt := cfg.Runtime
+	logger = logger.With("sensor_id", rt.SensorID, "role", string(rt.Role))
+	logger.Info("Platform Sensor starting up",
+		"version", "0.1.0-dev",
+		"environment", cfg.Environment,
+		"core_endpoint", rt.CoreEndpoint,
+		"spool_path", rt.SpoolPath,
+		"health_address", rt.HealthAddress,
+		"log_level", rt.LogLevel,
+		"watermark_percent", rt.StorageWatermarkPercent,
+		"config_version", rt.ConfigurationVersion)
+
 	diskSpool, err := spool.Open(spool.Config{
-		Dir:            cfg.SpoolDir,
+		Dir:            rt.SpoolPath,
 		MaxRecordBytes: 1024 * 1024,
 		Logger:         logger,
 	})
@@ -52,38 +96,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	client, err := coreclient.New(coreclient.Config{
-		BaseURL:          cfg.CoreURL,
-		CertificateFile:  cfg.TLSCertFile,
-		PrivateKeyFile:   cfg.TLSKeyFile,
-		CAFile:           cfg.CACertFile,
-		RequestTimeout:   10 * time.Second,
-		MaxResponseBytes: 1024 * 1024,
-		Logger:           logger,
-	})
+	client, err := coreclient.New(coreClientConfigFromRuntime(rt, logger))
 	if err != nil {
 		logger.Error("Failed to initialize Core client", "error_code", "SENSOR_CORECLIENT_INIT_FAILED")
 		os.Exit(1)
 	}
 
-	up, err := uploader.New(uploader.Config{
-		SensorID:             cfg.SensorID,
-		StreamID:             diskSpool.StreamID(),
-		MaxBatchRecords:      100,
-		MaxBatchPayloadBytes: 1024 * 1024,
-		MaxRequestBytes:      2 * 1024 * 1024,
-		MaxAttempts:          5,
-		InitialBackoff:       500 * time.Millisecond,
-		MaxBackoff:           5 * time.Second,
-		JitterFraction:       0.1,
-		IdleInterval:         1 * time.Second,
-	}, diskSpool, client)
+	up, err := uploader.New(uploaderConfigFromRuntime(rt, diskSpool.StreamID()), diskSpool, client)
 	if err != nil {
 		logger.Error("Failed to initialize uploader", "error", err)
 		os.Exit(1)
 	}
 
-	healthServer := health.NewHealthServer(cfg.HealthPort, diskSpool, logger)
+	healthServer := health.NewHealthServer(rt.HealthAddress, diskSpool, logger)
 	go func() {
 		if err := healthServer.Start(); err != nil {
 			logger.Error("Health server encountered error", "error_code", "SENSOR_HEALTH_SERVER_FAILED")
@@ -96,21 +121,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	engine := collector.NewCollectorEngine(cfg.SensorID, cfg.SensorType, sink, cfg.PollInterval, logger)
+	engine := collector.NewCollectorEngine(rt.SensorID, string(rt.Role), sink, cfg.PollInterval, logger)
 	engine.Start(ctx)
 
-	discoveryExecutor := discovery.NewExecutor(cfg.SensorID, discovery.DefaultMaxConcurrent, logger)
-	discoveryService := discovery.NewService(cfg.SensorID, client, discoveryExecutor, cfg.PollInterval, logger)
+	discoveryExecutor := discovery.NewExecutor(rt.SensorID, discovery.DefaultMaxConcurrent, logger)
+	discoveryService := discovery.NewService(rt.SensorID, client, discoveryExecutor, cfg.PollInterval, logger)
 	discoveryService.Start(ctx)
 
 	var packSyncer *packsync.Syncer
-	packDir, packDirErr := packsync.ResolveCapabilityPackDir(cfg.CapabilityPackDir, cfg.SpoolDir)
+	packDir, packDirErr := packsync.ResolveCapabilityPackDir(cfg.CapabilityPackDir, rt.SpoolPath)
 	if packDirErr != nil {
 		logger.Error("Failed to resolve Capability Pack staging directory",
 			"error_code", "SENSOR_PACK_INVALID_CONFIG", "error", packDirErr)
 		os.Exit(1)
 	}
-	if filepath.Clean(packDir) == filepath.Clean(cfg.SpoolDir) ||
+	if filepath.Clean(packDir) == filepath.Clean(rt.SpoolPath) ||
 		(cfg.AgentSpoolDir != "" && filepath.Clean(packDir) == filepath.Clean(cfg.AgentSpoolDir)) {
 		logger.Error("Capability Pack directory must be distinct from telemetry/agent spool",
 			"error_code", "SENSOR_PACK_INVALID_CONFIG")
@@ -143,7 +168,7 @@ func main() {
 		healthServer.SetAgentSpool(agentSpool)
 
 		agentDrain, err = agentdrain.New(agentdrain.Config{
-			SensorID:             cfg.SensorID,
+			SensorID:             rt.SensorID,
 			StreamID:             agentSpool.StreamID(),
 			AgentSpoolDir:        cfg.AgentSpoolDir,
 			MaxBatchRecords:      cfg.AgentDrainMaxBatchRecords,
@@ -179,7 +204,6 @@ func main() {
 	logger.Info("Received termination signal, starting graceful shutdown", "signal", sig.String())
 
 	cancel()
-	// Shutdown order: stop Agent ingress → stop Agent drain → close Agent spool → continue Sensor shutdown.
 	if agentServer != nil {
 		shutdownAgentCtx, shutdownAgentCancel := context.WithTimeout(context.Background(), cfg.AgentReceiverShutdownGrace)
 		defer shutdownAgentCancel()
@@ -225,10 +249,10 @@ func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *s
 		return nil, nil, err
 	}
 
-	role := agentreceiver.RoleFromSensorType(cfg.SensorType)
+	role := cfg.Runtime.Role
 	if !agentreceiver.IsRoleEligible(role) {
-		return nil, nil, fmt.Errorf("%s: sensor type %q maps to role %q which is not eligible for Agent ingress",
-			agentreceiver.ErrCodeRoleIneligible, cfg.SensorType, role)
+		return nil, nil, fmt.Errorf("%s: sensor role %q is not eligible for Agent ingress",
+			agentreceiver.ErrCodeRoleIneligible, role)
 	}
 
 	agentDir := filepath.Clean(cfg.AgentSpoolDir)
@@ -242,7 +266,7 @@ func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *s
 	}
 
 	ident := agentreceiver.NewFingerprintIdentityVerifier()
-	authorizer, err := agentreceiver.NewCoreBackedAuthorizer(client, cfg.SensorID)
+	authorizer, err := agentreceiver.NewCoreBackedAuthorizer(client, cfg.Runtime.SensorID)
 	if err != nil {
 		_ = agentSpool.Close()
 		return nil, nil, err
@@ -253,7 +277,6 @@ func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *s
 		return nil, nil, err
 	}
 
-	// Fail closed if production adapters were somehow not installed.
 	if _, ok := any(ident).(*agentreceiver.FailClosedIdentityVerifier); ok {
 		_ = agentSpool.Close()
 		return nil, nil, fmt.Errorf("ERR_INVALID_CONFIG: Agent Receiver enabled but FailClosed identity verifier is still installed")
@@ -268,7 +291,7 @@ func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *s
 	}
 
 	rcv, err := agentreceiver.NewReceiver(agentreceiver.Config{
-		SensorID:   cfg.SensorID,
+		SensorID:   cfg.Runtime.SensorID,
 		SensorRole: role,
 	}, ident, authorizer, acceptance, logger)
 	if err != nil {
