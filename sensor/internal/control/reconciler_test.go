@@ -2,13 +2,8 @@ package control_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -529,79 +524,5 @@ func TestReconcileFetchTransportClassifiedAsCoreUnavailable(t *testing.T) {
 	}
 	if metrics.Snapshot().CoreTransportFailures != 1 {
 		t.Fatalf("transport failure metric MUST increment on transport error, got %d", metrics.Snapshot().CoreTransportFailures)
-	}
-}
-
-func TestReconcileUnsupportedSchemaRealWire(t *testing.T) {
-	t.Parallel()
-	checksum := "ec1e58221b8f3bb05ce0ddc4d8104b2e6bfce709e0de4cc07062e80919346f1d"
-	var sawAckReq coreclient.ControlAppliedAckRequest
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sensor/control/desired-state":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"schemaVersion":2,"desiredGeneration":11,"desiredChecksum":"`+checksum+`","futureField":{"version":2},"configuration":{"unknown":true}}`)
-		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/sensor/control/applied-state":
-			var req coreclient.ControlAppliedAckRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				t.Errorf("failed to decode ACK body: %v", err)
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			sawAckReq = req
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"status":"ACCEPTED","schemaVersion":1,"generation":11,"checksum":"`+checksum+`","outcome":"REJECTED"}`)
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-
-	u, err := url.Parse(srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := coreclient.NewControlClientForTest(u, srv.Client(), 1024*1024)
-	store, err := control.NewStore(filepath.Join(t.TempDir(), "applied.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var applies int32
-	metrics := &control.Metrics{}
-	rec, err := control.NewReconciler(client, store, validBaseline(t), control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
-		atomic.AddInt32(&applies, 1)
-		return nil
-	}), slog.Default(), metrics)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	res, err := rec.RunOnce(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected RunOnce error: %v", err)
-	}
-	if res.Action != "UNSUPPORTED_SCHEMA" || res.Outcome != "REJECTED" || res.Code != control.CodeUnsupportedSchema {
-		t.Fatalf("unexpected result: %+v", res)
-	}
-	if res.Generation != 11 || res.Checksum != checksum {
-		t.Fatalf("unexpected generation/checksum: gen=%d ck=%s", res.Generation, res.Checksum)
-	}
-	if applies != 0 {
-		t.Fatalf("applier must NOT be called for unsupported schema, applies=%d", applies)
-	}
-	if sawAckReq.Outcome != "REJECTED" || sawAckReq.RejectionCode != control.CodeUnsupportedSchema {
-		t.Fatalf("ACK request on wire mismatch: %+v", sawAckReq)
-	}
-	if sawAckReq.Generation != 11 || sawAckReq.Checksum != checksum {
-		t.Fatalf("ACK binding mismatch on wire: gen=%d ck=%s", sawAckReq.Generation, sawAckReq.Checksum)
-	}
-	snap, _ := store.Load()
-	if snap != nil {
-		t.Fatal("store must not have any applied state")
-	}
-	if metrics.Snapshot().RejectedCount != 1 {
-		t.Fatalf("expected RejectedCount=1, got %d", metrics.Snapshot().RejectedCount)
 	}
 }

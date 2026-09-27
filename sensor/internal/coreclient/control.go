@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -296,18 +295,6 @@ func validateControlAckBinding(req ControlAppliedAckRequest, resp ControlApplied
 		return newError(CodeControlProtocol, "control ACK response outcome mismatch", nil, false)
 	}
 	return nil
-}
-
-// NewControlClientForTest creates an in-memory client against a test server for internal test suites.
-func NewControlClientForTest(baseURL *url.URL, httpClient *http.Client, maxResponseBytes int) *Client {
-	if maxResponseBytes <= 0 {
-		maxResponseBytes = 1024 * 1024
-	}
-	return &Client{
-		baseURL:          baseURL,
-		httpClient:       httpClient,
-		maxResponseBytes: maxResponseBytes,
-	}
 }
 
 func decodeControlDesiredState(data []byte) (*ControlDesiredState, error) {

@@ -8,41 +8,36 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 const goldenControlChecksum = "ec1e58221b8f3bb05ce0ddc4d8104b2e6bfce709e0de4cc07062e80919346f1d"
 
-func controlTestClient(t *testing.T, srv *httptest.Server, maxBytes int) *Client {
+// controlMTLSClient builds a checked production Client via New() against an mTLS test server.
+func controlMTLSClient(t *testing.T, maxBytes int, handler http.Handler) *Client {
 	t.Helper()
-	u, err := url.Parse(srv.URL)
-	if err != nil {
-		t.Fatal(err)
+	pki := makeTestPKI(t)
+	srv := startMTLSServer(t, pki, handler)
+	if maxBytes <= 0 {
+		maxBytes = 1024 * 1024
 	}
-	return NewControlClientForTest(u, &http.Client{
-		Transport: srv.Client().Transport,
-		Timeout:   5 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return newError(CodeProtocol, "Core redirects are not followed", nil, false)
-		},
-	}, maxBytes)
+	return newTestClient(t, srv.URL, pki, maxBytes)
 }
 
 func TestFetchControlDesiredState204(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := controlMTLSClient(t, 0, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != controlDesiredStatePath || r.Method != http.MethodGet {
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
 		}
+		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+			t.Fatal("missing client certificate")
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	defer srv.Close()
-	out, err := controlTestClient(t, srv, 0).FetchControlDesiredState(context.Background())
+	out, err := client.FetchControlDesiredState(context.Background())
 	if err != nil || out != nil {
 		t.Fatalf("out=%v err=%v", out, err)
 	}
@@ -93,12 +88,12 @@ func TestFetchControlDesiredStateStrictParsing(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			body := tc.body
+			client := controlMTLSClient(t, 0, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, tc.body)
+				_, _ = io.WriteString(w, body)
 			}))
-			defer srv.Close()
-			out, err := controlTestClient(t, srv, 0).FetchControlDesiredState(context.Background())
+			out, err := client.FetchControlDesiredState(context.Background())
 			if tc.ok {
 				if err != nil || out == nil || out.DesiredChecksum != checksum {
 					t.Fatalf("expected ok, out=%v err=%v", out, err)
@@ -113,12 +108,11 @@ func TestFetchControlDesiredStateStrictParsing(t *testing.T) {
 }
 
 func TestFetchControlDesiredStateOversized(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	client := controlMTLSClient(t, 512, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(make([]byte, 2048))
 	}))
-	defer srv.Close()
-	_, err := controlTestClient(t, srv, 512).FetchControlDesiredState(context.Background())
+	_, err := client.FetchControlDesiredState(context.Background())
 	if !IsCode(err, CodeResponseTooLarge) {
 		t.Fatalf("err=%v", err)
 	}
@@ -126,16 +120,17 @@ func TestFetchControlDesiredStateOversized(t *testing.T) {
 
 func TestFetchControlDesiredStateUnsupportedSchemaWire(t *testing.T) {
 	checksum := goldenControlChecksum
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := controlMTLSClient(t, 0, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != controlDesiredStatePath || r.Method != http.MethodGet {
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+			t.Fatal("missing client certificate on unsupported-schema wire path")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"schemaVersion":2,"desiredGeneration":77,"desiredChecksum":"`+checksum+`","futureField":{"cool":true},"configuration":{"unknown":true}}`)
 	}))
-	defer srv.Close()
 
-	client := controlTestClient(t, srv, 0)
 	out, err := client.FetchControlDesiredState(context.Background())
 	if err != nil {
 		t.Fatalf("FetchControlDesiredState failed: %v", err)
@@ -155,22 +150,27 @@ func TestFetchControlDesiredStateUnsupportedSchemaWire(t *testing.T) {
 	if out.Configuration.LogLevel != "" {
 		t.Fatalf("configuration should not be parsed for unsupported schema, got logLevel=%s", out.Configuration.LogLevel)
 	}
+	if out.Configuration.Scheduler.MaxWorkers != 0 || len(out.Configuration.Scheduler.Pools) != 0 {
+		t.Fatalf("unsupported schema must not interpret v1 configuration: %+v", out.Configuration)
+	}
 }
 
 func TestAckControlAppliedStateValidAndBinding(t *testing.T) {
 	checksum := goldenControlChecksum
 	var sawBody []byte
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := controlMTLSClient(t, 0, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || r.URL.Path != controlAppliedStatePath {
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+			t.Fatal("missing client certificate")
 		}
 		body, _ := io.ReadAll(r.Body)
 		sawBody = append([]byte(nil), body...)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"status":"ACCEPTED","schemaVersion":1,"generation":3,"checksum":"`+checksum+`","outcome":"APPLIED"}`)
 	}))
-	defer srv.Close()
-	resp, err := controlTestClient(t, srv, 0).AckControlAppliedState(context.Background(), ControlAppliedAckRequest{
+	resp, err := client.AckControlAppliedState(context.Background(), ControlAppliedAckRequest{
 		SchemaVersion: 1, Generation: 3, Checksum: checksum, Outcome: "APPLIED",
 	})
 	if err != nil || resp.Status != "ACCEPTED" {
@@ -188,9 +188,8 @@ func TestAckControlAppliedStateRejectedAndNegatives(t *testing.T) {
 	checksum := goldenControlChecksum
 
 	t.Run("applied_with_rejection_forbidden", func(t *testing.T) {
-		srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-		defer srv.Close()
-		_, err := controlTestClient(t, srv, 0).AckControlAppliedState(context.Background(), ControlAppliedAckRequest{
+		client := controlMTLSClient(t, 0, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		_, err := client.AckControlAppliedState(context.Background(), ControlAppliedAckRequest{
 			SchemaVersion: 1, Generation: 1, Checksum: checksum, Outcome: "APPLIED", RejectionCode: "X",
 		})
 		if err == nil {
@@ -198,9 +197,8 @@ func TestAckControlAppliedStateRejectedAndNegatives(t *testing.T) {
 		}
 	})
 	t.Run("rejected_without_code_forbidden", func(t *testing.T) {
-		srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-		defer srv.Close()
-		_, err := controlTestClient(t, srv, 0).AckControlAppliedState(context.Background(), ControlAppliedAckRequest{
+		client := controlMTLSClient(t, 0, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		_, err := client.AckControlAppliedState(context.Background(), ControlAppliedAckRequest{
 			SchemaVersion: 1, Generation: 1, Checksum: checksum, Outcome: "REJECTED",
 		})
 		if err == nil {
@@ -221,12 +219,12 @@ func TestAckControlAppliedStateRejectedAndNegatives(t *testing.T) {
 	}
 	for _, tc := range negatives {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			body := tc.body
+			client := controlMTLSClient(t, 0, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, tc.body)
+				_, _ = io.WriteString(w, body)
 			}))
-			defer srv.Close()
-			_, err := controlTestClient(t, srv, 0).AckControlAppliedState(context.Background(), ControlAppliedAckRequest{
+			_, err := client.AckControlAppliedState(context.Background(), ControlAppliedAckRequest{
 				SchemaVersion: 1, Generation: 1, Checksum: checksum, Outcome: "APPLIED",
 			})
 			if err == nil {
@@ -236,12 +234,11 @@ func TestAckControlAppliedStateRejectedAndNegatives(t *testing.T) {
 	}
 
 	t.Run("valid_rejected", func(t *testing.T) {
-		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		client := controlMTLSClient(t, 0, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `{"status":"ACCEPTED","schemaVersion":1,"generation":1,"checksum":"`+checksum+`","outcome":"REJECTED"}`)
 		}))
-		defer srv.Close()
-		_, err := controlTestClient(t, srv, 0).AckControlAppliedState(context.Background(), ControlAppliedAckRequest{
+		_, err := client.AckControlAppliedState(context.Background(), ControlAppliedAckRequest{
 			SchemaVersion: 1, Generation: 1, Checksum: checksum, Outcome: "REJECTED", RejectionCode: "SENSOR_CONTROL_CONFIG_INVALID",
 		})
 		if err != nil {
