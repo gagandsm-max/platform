@@ -1249,7 +1249,7 @@ The following are recommended/approved candidates subject to version-level OSS c
 | Core JSON logging | logstash-logback-encoder | Structured log encoding (OSS-116; Platform owns fields/redaction/taxonomy) |
 | UI approved future primitives | Apache ECharts, TanStack Table/Query, react-grid-layout, Cytoscape.js, MapLibre GL JS, xterm.js | Architecturally approved allow-list primitives; not current `ui/package.json` dependencies (see `Platform_07`) |
 | Expressions | CEL | Safe policy/formula expressions |
-| PDF/XLSX | Apache PDFBox / Apache POI | Reports |
+| PDF/CSV | Apache PDFBox / Apache Commons CSV | Report artifacts; Apache POI is import/provisioning-only where XLSX input is supported |
 | Analytics | Polars, NumPy, scikit-learn | Batch/ML analytics |
 | GNN | TBD | Candidate framework subject to benchmark/licence review |
 | OSS compliance | ORT, Syft, Trivy, ScanCode | SBOM/licence/security pipeline |
