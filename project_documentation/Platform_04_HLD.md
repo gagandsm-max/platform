@@ -1336,3 +1336,28 @@ Core owns:
 - **Capability Pack:** owns monitor cadence/freshness/cost declarations consumed by the scheduler.
 - **Integrations:** own ITSM/webhook delivery queues separately from API Studio monitoring collection.
 - **HA/fencing:** Active/Standby ownership remains P0 uncertified; no third coordination service selected here.
+
+## Service Assurance and Reporting HLD supplement
+
+The existing Reporting/SLA Service additionally owns:
+
+- SLA, OLA and Provider SLA policy definitions and version lifecycle;
+- editable out-of-box service-assurance templates;
+- Service Time Profiles, holidays, shifts and timezone evaluation;
+- policy scope resolution and immutable measurement-period scope snapshots;
+- safe typed formula compilation/evaluation;
+- expected/minimum/at-risk/breach evaluation;
+- degraded-condition persistence/penalty rules;
+- measurement quality/completeness state;
+- multi-vantage/quorum aggregation;
+- team/shift interval attribution;
+- OLA dependency-chain rollups;
+- policy simulation over historical evidence;
+- period close/restatement workflow;
+- inclusion/exclusion and adjustment ledger;
+- report obligations and business-calendar due rules;
+- PDF/CSV rendering;
+- report delivery/attestation state;
+- evidence-pack assembly and drill-down references.
+
+The subsystem shall reuse existing Policy, Graph, Alert Qualification, Incident/RCA, Integration, Audit and Storage Lifecycle services rather than duplicate their responsibilities. External ITSM/CMDB/security data remains owned by its authoritative source and is normalized into evidence inputs through connectors.
