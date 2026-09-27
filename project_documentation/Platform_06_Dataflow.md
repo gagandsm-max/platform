@@ -2125,3 +2125,31 @@ UTC instant (authoritative)
 ```
 
 Underlying stored instant remains UTC. Display flow must not mutate telemetry, alerts, SLA/maintenance schedules or other operational policy timezones.
+---
+
+## 109. Flow DF-SLA-001 — Service Assurance measurement, period close and reporting
+
+```mermaid
+flowchart LR
+  SRC[Monitoring / Synthetics / Incidents / Governed External Evidence] --> Q[Evidence Quality + Qualification]
+  POL[Versioned SLA/OLA/Provider-SLA/SLO Policy] --> CAL[Service Time / Shift / Calendar]
+  Q --> MEAS[Deterministic Measurement Engine]
+  CAL --> MEAS
+  SCOPE[Scope / Dependency Snapshot] --> MEAS
+  MEAS --> LEDGER[Measurement Ledger: raw + exclusions + adjustments + quality]
+  LEDGER --> PERIOD[OPEN -> PRELIMINARY -> REVIEW -> FINAL]
+  PERIOD --> RPT[Report Obligation / Run]
+  RPT --> PDF[PDF]
+  RPT --> CSV[CSV]
+  RPT --> ATT[Review / Attestation / Delivery]
+```
+
+Rules:
+- policy simulation/backtest is read-only and never mutates authoritative periods;
+- finalized periods are immutable; corrections create audited `RESTATED` revisions;
+- stale/missing/conflicting monitoring evidence is explicit and cannot silently become downtime or perfect compliance;
+- direct monitoring/service evidence remains authoritative where the policy declares it so; tickets remain supporting evidence unless the policy explicitly measures tickets;
+- team/shift attribution uses effective ownership intervals and preserves handoffs;
+- report scheduling supports governed business-day/calendar due rules;
+- only PDF/CSV report artifacts are emitted; APIs remain separate interfaces;
+- report queries/workers are bounded and yield to live telemetry, alerting and incident workloads.
