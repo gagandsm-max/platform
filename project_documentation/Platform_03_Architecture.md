@@ -57,6 +57,7 @@ The architecture is governed by the following constraints already decided:
 | ARC-P14 | Security by default | HTTPS/mTLS, least privilege, auditing, secret protection and signed artifacts are baseline. |
 | ARC-P15 | Clean-room + approved OSS | Reuse commodity permissive OSS; own differentiated Platform logic. |
 | ARC-P16 | Operational context to action | Preserve entity/alert/incident context from observation through bounded verification, CLI, investigation and evidence capture; low-risk diagnostics are immediate while privilege-changing/destructive operations retain stronger controls. |
+| ARC-P17 | Evidence-led service assurance | SLA/OLA/Provider-SLA/SLO results are reproducible from versioned policy, calendar, scope and evidence; unknown/partial measurement is explicit. Report artifacts are PDF/CSV only and reporting may not starve live monitoring. |
 
 ---
 
