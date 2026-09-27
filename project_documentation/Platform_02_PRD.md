@@ -1446,8 +1446,8 @@ Report Studio shall support:
 - reusable report templates and industry-oriented out-of-box packs;
 - on-demand and scheduled execution, subscriptions/recipients, business-day-aware due rules and execution history/failures;
 - report-obligation lifecycle, review/attestation and delivery status;
-- **PDF and CSV report artifacts only**; XLSX, JSON and PPTX are not report artifact formats; API responses remain separate integration/query interfaces; generated PDF reports prominently embed the AmrudAi logo (matching light/dark background, preserving aspect ratio) and customer-facing AmrudAi branding; CSV reports contain data only without embedded imagery;
-- central branding configuration contract separating internal 'Platform' technical identity from commercial 'AmrudAi' customer-facing name, with logo asset references and white-label/MSP tenant override support;
+- **PDF and CSV report artifacts only**; XLSX, JSON and PPTX are not report artifact formats; API responses remain separate integration/query interfaces; generated PDF reports prominently embed the effective commercial product logo (defaulting to the governed AmrudAi logo: matching light/dark background, preserving aspect ratio, or licensed tenant/MSP logo where a governed white-label configuration is active) and effective customer-facing commercial branding; CSV reports contain data only without embedded imagery;
+- central branding configuration contract separating internal 'Platform' technical identity from commercial 'AmrudAi' customer-facing name, with logo asset references and white-label/MSP tenant override support (resolving effective commercial product name and logos on customer-facing UI and PDF reports, with data-only CSV);
 - RBAC, tenant/resource scope re-evaluation at execution time, query/resource bounds and cancellation;
 - drill-down from summarized result to governed evidence.
 

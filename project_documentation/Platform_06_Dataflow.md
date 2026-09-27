@@ -2151,5 +2151,5 @@ Rules:
 - direct monitoring/service evidence remains authoritative where the policy declares it so; tickets remain supporting evidence unless the policy explicitly measures tickets;
 - team/shift attribution uses effective ownership intervals and preserves handoffs;
 - report scheduling supports governed business-day/calendar due rules;
-- only PDF/CSV report artifacts are emitted; generated PDF reports prominently display the AmrudAi logo (matching light/dark background, preserving aspect ratio) and customer-facing AmrudAi product branding; CSV reports contain data only without embedded imagery; APIs remain separate interfaces;
+- only PDF/CSV report artifacts are emitted; generated PDF reports prominently display the effective commercial product logo (defaulting to the governed AmrudAi logo: matching light/dark background, preserving aspect ratio, or licensed tenant/MSP logo where a governed white-label configuration is active) and effective customer-facing commercial product branding; CSV reports contain data only without embedded imagery; APIs remain separate interfaces;
 - report queries/workers are bounded and yield to live telemetry, alerting and incident workloads.

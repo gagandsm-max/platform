@@ -257,7 +257,7 @@ A1 makes this contract normative. Completing the field set for every capability 
 ## 9. Fixed product/architecture decisions
 
 - Product name: **Platform** (internal engineering/build identifier) / **AmrudAi** (commercial customer-facing product name).
-- Commercial branding and reports: Customer-facing UI displays AmrudAi branding; report artifacts are **PDF and/or CSV only**; generated PDF reports prominently display the AmrudAi logo.
+- Commercial branding and reports: Customer-facing UI displays effective commercial branding (defaulting to AmrudAi, or licensed tenant/MSP branding where white-label is active); report artifacts are **PDF and/or CSV only**; generated PDF reports prominently display the effective commercial logo (defaulting to the governed AmrudAi logo, or licensed tenant/MSP logo where white-label is active); CSV reports contain tabular data only.
 - Clean-room implementation; no ThoughtData/NetAI proprietary implementation reuse.
 - Core/Sensor: **Ubuntu 24.x LTS family** and **RHEL 9.x family** first (subject to certification matrix); Windows Core/Sensor not initial scope.
 - Standalone: one Core. HA: exactly two full Core nodes, Active/Standby, target <60s Core-service restoration.

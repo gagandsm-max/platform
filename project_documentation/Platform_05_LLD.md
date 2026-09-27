@@ -1519,11 +1519,11 @@ Logical objects:
 tenant_branding_config
   id, tenant_id
   internal_product_id: "platform"
-  commercial_product_name: "AmrudAi"
-  light_background_logo_ref: "/brand/amrud_blk.png"
-  dark_background_logo_ref: "/brand/amrud_whi.png"
-  favicon_ref: "/brand/favicon.ico"
-  browser_title_template: "{page_title} | AmrudAi"
+  default_commercial_product_name: "AmrudAi"
+  default_light_background_logo_ref: "/brand/amrud_blk.png"
+  default_dark_background_logo_ref: "/brand/amrud_whi.png"
+  favicon_ref: null # optional; no default favicon asset is shipped
+  browser_title_template: "{page_title} | {effective_commercial_product_name}"
   report_header_footer_identity
   white_label_override_enabled: boolean
   updated_at, updated_by
@@ -1595,7 +1595,7 @@ For shift/team OLA, ownership intervals and handoffs are timestamped; measuremen
 
 Policy Simulator executes read-only against retained evidence and returns impact/delta/explainability; it must not mutate production policy or historical measurements.
 
-Report artifacts are only PDF and/or CSV. PDF carries human/governance presentation and evidence summary, and prominently displays the AmrudAi logo (selecting light-background `amrud_blk.png` or dark-background `amrud_whi.png` appropriate to template/page contrast, preserving aspect ratio) and customer-facing AmrudAi product branding. CSV carries bounded detailed machine-readable tabular evidence without image embedding. APIs are separate integration/query interfaces.
+Report artifacts are only PDF and/or CSV. PDF carries human/governance presentation and evidence summary, and prominently displays the effective commercial product logo (defaulting to the governed AmrudAi logo: selecting light-background `amrud_blk.png` or dark-background `amrud_whi.png` appropriate to template/page contrast, preserving aspect ratio, or the tenant/MSP logo where a governed white-label configuration is active) and effective customer-facing commercial product branding. CSV carries bounded detailed machine-readable tabular evidence without image embedding. APIs are separate integration/query interfaces.
 
 Report execution must be cancellable, resource-bounded, authorization-rechecked and lower priority than live monitoring/ingestion/alert correctness.
 

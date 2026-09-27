@@ -43,7 +43,7 @@ Navigation entries are shown/hidden/read-only/action-limited according to RBAC, 
 
 ### 2.2 Global top bar
 
-- Brand block: Displays the commercial product name **AmrudAi** and product logo. In the default dark shell header, uses the white logo (`amrud_whi.png`); in light header themes, uses the black logo (`amrud_blk.png`) to ensure visual contrast. Logo rendering must preserve aspect ratio without stretching. In white-label or MSP tenant configurations, displays the tenant-configured brand name and logo while maintaining platform structural integrity.
+- Brand block: Displays the effective commercial product name (**AmrudAi** by default) and product logo. In the default dark shell header, uses the white logo (`amrud_whi.png`); in light header themes, uses the black logo (`amrud_blk.png`) to ensure visual contrast. Logo rendering must preserve aspect ratio without stretching. In white-label or MSP tenant configurations, displays the tenant-configured brand name and logo while maintaining platform structural integrity.
 - Tenant/customer selector only for users authorized for multiple tenants.
 - Global search across device/IP/MAC/serial/site/tag/interface/circuit/incident/alert/ticket/IPAM/NCM/DB/VM/cloud/K8s entities.
 - Time range, timezone, comparison period and auto-refresh.

@@ -1060,17 +1060,23 @@ Platform shall analyze its own monitoring intelligence: alert policy effectivene
 Platform separates internal engineering and build identity from external customer-facing commercial branding:
 
 - **Internal / engineering build identity:** `Platform` remains the internal engineering, repository, package, namespace, schema, service, build, test, and document filename identifier.
-- **Commercial / customer-facing product name:** `AmrudAi` is the final commercial product name displayed on customer-facing UI surfaces, public documentation branding, and customer-facing reports.
+- **Commercial / customer-facing product name:** `AmrudAi` is the default commercial product name displayed on customer-facing UI surfaces, public documentation branding, and customer-facing reports.
 - **Central branding contract:** Branding shall not be hard-coded across disparate UI components or backend services. Core provides a central, tenant-aware branding configuration model defining:
   - `internal_product_id`: `"platform"` (immutable technical identifier)
-  - `commercial_product_name`: `"AmrudAi"` (default commercial brand)
-  - `light_background_logo_ref`: governed relative static asset reference (`amrud_blk.png`) for light-background surfaces and PDF reports
-  - `dark_background_logo_ref`: governed relative static asset reference (`amrud_whi.png`) for dark-background surfaces and top navigation
-  - `browser_title_template`: browser window/tab title format (e.g., `"{page_title} | AmrudAi"`)
-  - `report_header_footer_identity`: report branding headers/footers
+  - `default_commercial_product_name`: `"AmrudAi"` (default commercial brand)
+  - `default_light_background_logo_ref`: governed relative static asset reference (`amrud_blk.png`) for light-background surfaces and PDF reports
+  - `default_dark_background_logo_ref`: governed relative static asset reference (`amrud_whi.png`) for dark-background surfaces and top navigation
+  - `favicon_ref`: optional / `null` by default (no default favicon asset is shipped in the repository; custom favicon references may only be supplied through optional white-label configuration overrides)
+  - `browser_title_template`: browser window/tab title format (e.g., `"{page_title} | {effective_commercial_product_name}"`)
+  - `report_header_footer_identity`: report branding headers/footers (template-configurable, optional/null by default)
   - `white_label_override_enabled`: boolean flag allowing enterprise/MSP tenants to override logos, product name, and theme accents while preserving platform schema and data integrity
+- **Effective brand resolution:**
+  - **Default:** `effectiveCommercialName = "AmrudAi"`, `effectiveLightLogo = "amrud_blk.png"`, `effectiveDarkLogo = "amrud_whi.png"`.
+  - **White-label override:** Where a governed, licensed tenant or MSP white-label configuration is active, customer-facing UI and customer-facing PDF reports resolve to the tenant/MSP configured commercial name and governed logo.
+  - **Technical identity preservation:** Internal technical identity always remains `"Platform"`.
+  - **Data-only CSV:** CSV reports contain tabular data only without embedded imagery.
 - **Governed logo assets:** Logo assets (`amrud_blk.png` for light surfaces / PDF reports, `amrud_whi.png` for dark surfaces / UI headers) are stored in governed relative product asset locations (`ui/public/brand/` for web static assets, `core/src/main/resources/brand/` for report generation resources). Absolute developer paths (such as `/home/gagan/nms/logo/...`) must never be exposed or referenced in production configuration. Logo rendering must preserve aspect ratio without stretching and ensure WCAG contrast compliance.
-- **Report branding:** Generated PDF reports prominently display the AmrudAi logo (matching report background contrast) and commercial branding. CSV reports contain data only and do not require image assets.
+- **Report branding:** Generated PDF reports prominently display the effective commercial product logo (defaulting to the governed AmrudAi logo: `amrud_blk.png` for light background, `amrud_whi.png` for dark background, preserving aspect ratio, or the tenant/MSP logo where a governed white-label configuration is active) and effective commercial branding. CSV reports contain data only and do not require image assets.
 
 ---
 

@@ -374,7 +374,7 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 | REQ-UI-006 | Global search, command palette, breadcrumbs, context side panel, favorites/recent/saved views | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-007 | Inventory with server-side pagination, bulk actions and saved filters | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-008 | Map Studio, Report Studio, MIB Studio, API Studio, Device Pack Studio | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
-| REQ-UI-009 | Report Studio PDF/CSV-only artifacts, AmrudAi logo embedding in PDF, branding, schedules, obligations and attestation | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
+| REQ-UI-009 | Report Studio PDF/CSV-only artifacts, effective commercial logo embedding in PDF, branding, schedules, obligations and attestation | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-010 | SLA/OLA/Provider-SLA service-assurance engine with service-time, shift/team, maintenance, evidence-quality and audit rules | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-011 | Accessibility, keyboard navigation, contrast and no color-only status | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-012 | Mobile incident/dashboard experience; desktop for full admin/studios | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
@@ -907,7 +907,7 @@ Low-level scheduling mechanics intentionally use RTM marker `—` in the BRD col
 | REQ-UI-006 | Global search, command palette, breadcrumbs, context side panel, favorites/recent/saved views | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-007 | Inventory with server-side pagination, bulk actions and saved filters | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-008 | Map Studio, Report Studio, MIB Studio, API Studio, Device Pack Studio | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-UI-009 | Report Studio PDF/CSV-only artifacts, AmrudAi logo embedding in PDF, branding, schedules, obligations and attestation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-009 | Report Studio PDF/CSV-only artifacts, effective commercial logo embedding in PDF, branding, schedules, obligations and attestation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-010 | SLA/OLA/Provider-SLA service-assurance engine with service-time, shift/team, maintenance, evidence-quality and audit rules | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-011 | Accessibility, keyboard navigation, contrast and no color-only status | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-012 | Mobile incident/dashboard experience; desktop for full admin/studios | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |

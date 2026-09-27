@@ -295,7 +295,7 @@ Phase-1 service assurance is not release-ready until deterministic fixtures prov
 - **RESTATED lineage:** versioned restatement and audited revision history for post-final corrections;
 - **Audit, approval, and attestation:** report obligation lifecycle, delivery tracking, review/attestation states (`UNDER_REVIEW`, `ACCEPTED`, `REJECTED`, `DISPUTED`), and audit lineage;
 - **Tenant isolation:** strict tenant boundaries for policies, calendars, evidence ledgers, obligations, reports, and formulas with cross-tenant negative testing;
-- **PDF rendering with AmrudAi logo:** PDF reports embed the governed AmrudAi logo appropriate to background contrast (`amrud_blk.png` for light background, `amrud_whi.png` for dark background) preserving aspect ratio without stretching;
+- **PDF rendering with effective commercial logo:** PDF reports embed the effective commercial logo appropriate to background contrast (defaulting to the governed AmrudAi logo: `amrud_blk.png` for light background, `amrud_whi.png` for dark background, preserving aspect ratio without stretching, or tenant/MSP logo where a governed white-label configuration is active);
 - **CSV report generation:** detailed machine-readable tabular evidence generation without embedded images;
 - **Report resource isolation under monitoring load:** bounded query execution, lower worker priority than live monitoring/ingestion/alerting, query cancellation, and resource caps preventing monitoring degradation;
 - **Strict report artifact format restriction:** generated, downloaded, and scheduled report artifacts are restricted to PDF and CSV only; no XLSX, PPTX, or JSON report artifact generation.
