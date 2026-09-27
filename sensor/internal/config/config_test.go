@@ -23,6 +23,7 @@ func clearSensorEnv(t *testing.T) {
 			strings.HasPrefix(key, "SENSOR_") ||
 			key == "PLATFORM_ENV" ||
 			key == "PLATFORM_LOG_LEVEL" ||
+			key == "PLATFORM_STORAGE_WATERMARK_PERCENT" ||
 			strings.HasPrefix(key, "PLATFORM_TLS_") ||
 			strings.HasPrefix(key, "PLATFORM_CA_") ||
 			key == "CORE_URL" {
@@ -108,7 +109,8 @@ func TestLoadConfigRejectsLegacySharedRuntimeEnv(t *testing.T) {
 	applyValidRuntimeEnv(t)
 	legacy := []string{
 		"SENSOR_ID", "SENSOR_TYPE", "CORE_URL", "SENSOR_SPOOL_DIR", "SENSOR_HEALTH_PORT",
-		"PLATFORM_LOG_LEVEL", "PLATFORM_TLS_CERT_FILE", "SENSOR_TLS_CERT_FILE",
+		"PLATFORM_LOG_LEVEL", "PLATFORM_STORAGE_WATERMARK_PERCENT",
+		"PLATFORM_TLS_CERT_FILE", "SENSOR_TLS_CERT_FILE",
 		"PLATFORM_TLS_KEY_FILE", "SENSOR_TLS_KEY_FILE", "PLATFORM_CA_CERT_FILE", "SENSOR_CA_CERT_FILE",
 	}
 	for _, key := range legacy {
