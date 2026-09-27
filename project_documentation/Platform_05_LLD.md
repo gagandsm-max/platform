@@ -2799,3 +2799,65 @@ Recurring desired-state records carry at minimum: tenant, assignment identity, t
 ## 89. Redundant identifier index — P2 hygiene note
 
 V001 unique constraint `uq_identifier_resolution (tenant_id, namespace, identifier_type, identifier_value)` already creates a unique btree. Secondary index `idx_identifier_lookup` on the same columns is redundant unless current query evidence proves otherwise. Future **P2** forward-only DB hygiene only. **No migration number is reserved** by this baseline; never rewrite V001–V009 in place.
+
+## Service Assurance / SLA / OLA LLD contract
+
+### Core records
+
+`service_assurance_policy`
+- tenant_id, policy_id, policy_type (SLA|OLA|PROVIDER_SLA), name, description
+- scope_selector, owner_ref, service_time_profile_id
+- expected_target?, minimum_target?, at_risk_rule?, breach_rule
+- measurement_basis, measurement_window, measurement_mode
+- degradation_rule, formula_version_id, effective_from, effective_to?
+- state DRAFT|SIMULATED|ACTIVE|RETIRED
+- created_by, created_at, version
+
+`service_time_profile`
+- tenant_id, profile_id, timezone, working_days, intervals
+- holiday_calendar_ref?, shift_ref?, country/site overrides
+- version, effective_from, effective_to?
+
+`assurance_formula_version`
+- tenant_id, formula_id, version, typed_expression
+- allowed_inputs, output_type, validation_state
+- resource_budget, created_by, created_at
+
+`assurance_measurement_period`
+- tenant_id, period_id, policy_id, policy_version
+- period_start, period_end
+- state OPEN|PRELIMINARY|REVIEW|FINAL|RESTATED
+- scope_snapshot_ref, calendar_version, formula_version
+- raw_result, adjusted_result, measurement_quality
+- finalized_by?, finalized_at?, previous_period_version?
+
+`assurance_adjustment`
+- tenant_id, adjustment_id, period_id, interval_or_fact_ref
+- type EXCLUSION|INCLUSION|CORRECTION
+- reason, ticket_or_change_ref?, requested_by, approved_by?, created_at
+- before_value, after_value
+
+`report_obligation`
+- tenant_id, obligation_id, report_key, report_definition_id
+- owner_ref, frequency_or_due_rule, service_time_profile_id?
+- recipient_refs, delivery_method, formats
+- approver_refs?, state, effective_from, effective_to?
+
+`report_run`
+- tenant_id, report_run_id, obligation_id?, report_definition_version
+- period_start, period_end, generated_at
+- artifact_refs, delivery_state
+- attestation_state GENERATED|DELIVERED|UNDER_REVIEW|ACCEPTED|REJECTED|DISPUTED
+- reviewer_ref?, reviewed_at?, comments?, supersedes_run_id?
+
+### Calculation rules
+
+1. Formula execution accepts only typed approved inputs and bounded functions; no arbitrary SQL/script execution.
+2. Availability calculations preserve raw eligible time, qualified downtime, exclusions and adjusted result separately.
+3. Missing/stale/degraded monitoring evidence maps to explicit data-quality state and shall not silently become confirmed service downtime or healthy time.
+4. `IMPACTED_UNIT_MINUTES` may expand qualified parent/component outages to affected downstream units using a time-consistent topology/scope snapshot.
+5. Service dependency semantics may express redundancy/quorum thresholds so component outages do not automatically reduce business-service availability.
+6. Multi-vantage rules may require N-of-M evidence; conflict produces policy-defined degraded/unknown quality rather than guessed state.
+7. Final period calculation stores reproducibility hashes/references for policy, formula, calendar, scope and evidence.
+8. A RESTATED result creates a new period/result version and never mutates away the prior finalized result.
+9. CSV/PDF rendering runs in bounded worker pools separate from live telemetry/alert processing.
