@@ -104,9 +104,9 @@ func (s *Scheduler) executeWithRetry(ctx context.Context, job Job) {
 				s.recordExecutionOutcome(job, code)
 				return
 			}
-			s.metrics.completed.Add(1)
 			s.mu.Lock()
 			s.releaseTrackedJobLocked(job.AssignmentKey, job.JobID)
+			s.metrics.completed.Add(1)
 			s.mu.Unlock()
 			return
 		}
