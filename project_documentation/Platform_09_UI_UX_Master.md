@@ -354,7 +354,7 @@ R1 proves schema/runtime fit across dashboard, wallboard, entity detail, analyti
 
 The presentation-foundation proof is intentionally broader than dashboards. It also includes two schema-level representative artifacts; these are architecture/test fixtures, not new UI IDs or runtime implementation in this reconciliation:
 
-- **REPORT_DEFINITION — SLA Scheduled Report**: proves governed QMC query bindings, filters/variables/calculations, table/visualization reuse, static rendering, explicit execution timezone distinct from display/render timezone, allowed PDF/CSV/XLSX/JSON/API formats where applicable, server authorization and scheduled execution independent of browser runtime.
+- **REPORT_DEFINITION — SLA Scheduled Report**: proves governed QMC query bindings, filters/variables/calculations, table/visualization reuse, static rendering, explicit execution timezone distinct from display/render timezone, allowed PDF/CSV report artifacts only; API access remains a separate interface, server authorization and scheduled execution independent of browser runtime.
 - **SAVED_VIEW — representative dashboard/workspace view**: proves target workspace/dashboard reference, filters, grouping/sort, time-context policy, URL/context compatibility, server authorization re-evaluation and fail-safe behavior for stale, deleted or unauthorized target/reference state.
 
 ### 4.11 UI-001..UI-098 authoritative classification and coverage matrix
@@ -5461,16 +5461,23 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Capacity/SLA  
 **Primary roles:** Management/NOC  
-**Purpose:** SLA by service/region/provider/site, violations, downtime and maintenance exclusions.
+**Purpose:** SLA/OLA/Provider-SLA/SLO service assurance by service/region/provider/site/team/shift, with target/minimum, qualified downtime, evidence quality, violations, exclusions, remaining budget and auditable period close.
+
+**Service-assurance contract:** Provide editable OOB industry templates plus custom policy authoring; reusable service-time/holiday/shift calendars; expected and minimum thresholds; policy simulation/backtest; measurement-quality/completeness; raw versus adjusted result; scope snapshot; degraded-condition rules; dependency-aware service calculation; OLA/provider attribution; period lifecycle (`OPEN`, `PRELIMINARY`, `REVIEW`, `FINAL`, audited `RESTATED`); evidence drill-down; report obligations and attestation. Team-attributed OLA becomes authoritative only when canonical tenant-scoped Team identity/binding is available.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
 **Default tabs/views:**
 - Overview
+- SLAs
+- OLAs
 - Services
 - Sites
 - Providers
+- Policies
 - Violations
+- Evidence
+- Reports
 
 **Default filters:**
 - Time range
@@ -5527,7 +5534,9 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Capacity/SLA  
 **Primary roles:** WAN/vendor mgmt  
-**Purpose:** Provider/circuit availability, latency, loss, jitter, target/actual/breach.
+**Purpose:** Provider/circuit SLA assurance for availability, latency, loss, jitter, target/minimum, actual, breach/at-risk state, exclusions, provider attribution and evidence.
+
+**Provider-SLA contract:** Support circuit/provider/service scope, measurement vantage/path, service-time calendar, degraded-condition treatment, approved exclusions, provider ticket/reference evidence, dispute/attestation and PDF/CSV evidence export. Provider data is evidence and never overrides qualified Platform monitoring truth without explicit policy.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
