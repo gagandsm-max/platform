@@ -320,13 +320,15 @@ func TestValidateAgentReceiverConfigDisabledVsEnabled(t *testing.T) {
 	cfg.AgentServerKeyFile = "/tmp/key.pem"
 	cfg.AgentClientCAFile = "/tmp/ca.pem"
 	cfg.AgentSpoolDir = "/var/lib/platform/sensor/agent-spool"
-	cfg.SpoolDir = "/var/lib/platform/sensor/spool"
+	cfg.Runtime.SpoolPath = "/var/lib/platform/sensor/spool"
+	cfg.Runtime.TLS.Certificate = "/var/lib/platform/sensor/identity/sensor.crt"
+	cfg.Runtime.TLS.PrivateKey = "/var/lib/platform/sensor/identity/sensor.key"
 	cfg.AgentReceiverMaxInFlight = 8
 	cfg.AgentReceiverShutdownGrace = time.Second
 	if err := config.ValidateAgentReceiverConfig(cfg); err != nil {
 		t.Fatalf("complete config must pass: %v", err)
 	}
-	cfg.AgentSpoolDir = cfg.SpoolDir
+	cfg.AgentSpoolDir = cfg.Runtime.SpoolPath
 	if err := config.ValidateAgentReceiverConfig(cfg); err == nil {
 		t.Fatal("identical spool dirs must fail")
 	}

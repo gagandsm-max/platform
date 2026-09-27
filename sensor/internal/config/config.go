@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -8,22 +10,16 @@ import (
 	"time"
 )
 
+// Config is the Sensor process bootstrap container.
+// RuntimeConfig is the sole authority for BUILD-004-controlled shared runtime fields.
+// Remaining fields are local-only process settings not represented by RuntimeConfig.
 type Config struct {
-	SensorID                string
-	SensorType              string
-	Environment             string
-	CoreURL                 string
-	SpoolDir                string
-	StorageWatermarkPercent int
-	HealthPort              int
-	PollInterval            time.Duration
-	LogLevel                string
-	TLSCertFile             string
-	TLSKeyFile              string
-	CACertFile              string
+	Runtime RuntimeConfig
 
-	// Agent Receiver (legacy LoadConfig / main wiring). Disabled by default.
-	// Env prefix SENSOR_AGENT_* is consistent with other LoadConfig SENSOR_* keys.
+	Environment  string
+	PollInterval time.Duration
+
+	// Agent Receiver local listener/server-TLS/spool settings (SENSOR_AGENT_*).
 	AgentReceiverEnabled       bool
 	AgentReceiverListenAddr    string
 	AgentServerCertFile        string
@@ -33,7 +29,7 @@ type Config struct {
 	AgentReceiverMaxInFlight   int
 	AgentReceiverShutdownGrace time.Duration
 
-	// Agent drain (Sensor agent-ingress → Core agent-telemetry).
+	// Agent drain local retry/idle/shutdown settings not represented in RuntimeConfig.
 	AgentDrainMaxBatchRecords      int
 	AgentDrainMaxBatchPayloadBytes int
 	AgentDrainMaxRequestBytes      int
@@ -43,8 +39,25 @@ type Config struct {
 	AgentDrainIdleInterval         time.Duration
 	AgentDrainShutdownGrace        time.Duration
 
-	// Capability Pack durable staging (EMC1.3). Absolute path; distinct from telemetry/agent spool.
+	// Capability Pack durable staging directory (local process setting).
 	CapabilityPackDir string
+}
+
+// legacySharedRuntimeEnvKeys are former shared-runtime authorities that must not
+// compete with PLATFORM_SENSOR_* RuntimeConfig. Presence fails closed.
+var legacySharedRuntimeEnvKeys = []string{
+	"SENSOR_ID",
+	"SENSOR_TYPE",
+	"CORE_URL",
+	"SENSOR_SPOOL_DIR",
+	"SENSOR_HEALTH_PORT",
+	"PLATFORM_LOG_LEVEL",
+	"PLATFORM_TLS_CERT_FILE",
+	"SENSOR_TLS_CERT_FILE",
+	"PLATFORM_TLS_KEY_FILE",
+	"SENSOR_TLS_KEY_FILE",
+	"PLATFORM_CA_CERT_FILE",
+	"SENSOR_CA_CERT_FILE",
 }
 
 func getEnv(key, defaultVal string) string {
@@ -87,22 +100,34 @@ func getEnvDurationSeconds(key string, defaultVal time.Duration) time.Duration {
 	return defaultVal
 }
 
-func LoadConfig() *Config {
-	return &Config{
-		SensorID:                getEnv("SENSOR_ID", "sensor-dev-01"),
-		SensorType:              getEnv("SENSOR_TYPE", "generic"),
-		Environment:             getEnv("PLATFORM_ENV", "development"),
-		CoreURL:                 getEnv("CORE_URL", "https://core:8443"),
-		SpoolDir:                getEnv("SENSOR_SPOOL_DIR", "/var/lib/platform/sensor/spool"),
-		StorageWatermarkPercent: getEnvInt("PLATFORM_STORAGE_WATERMARK_PERCENT", 80),
-		HealthPort:              getEnvInt("SENSOR_HEALTH_PORT", 8088),
-		PollInterval:            time.Duration(getEnvInt("SENSOR_POLL_INTERVAL_SECONDS", 10)) * time.Second,
-		LogLevel:                getEnv("PLATFORM_LOG_LEVEL", "INFO"),
-		TLSCertFile:             getEnv("PLATFORM_TLS_CERT_FILE", getEnv("SENSOR_TLS_CERT_FILE", "")),
-		TLSKeyFile:              getEnv("PLATFORM_TLS_KEY_FILE", getEnv("SENSOR_TLS_KEY_FILE", "")),
-		CACertFile:              getEnv("PLATFORM_CA_CERT_FILE", getEnv("SENSOR_CA_CERT_FILE", "")),
+func rejectLegacySharedRuntimeEnv() error {
+	var present []string
+	for _, key := range legacySharedRuntimeEnvKeys {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			present = append(present, key)
+		}
+	}
+	if len(present) == 0 {
+		return nil
+	}
+	return fmt.Errorf("SENSOR_CONFIG_LEGACY_RUNTIME_ENV: legacy shared runtime keys are rejected (%s); use PLATFORM_SENSOR_*", strings.Join(present, ", "))
+}
 
-		// Agent Receiver — SENSOR_AGENT_* (documented; default disabled).
+// LoadConfig loads strict RuntimeConfig plus local-only process settings.
+// It fails closed before any runtime resources should be created.
+func LoadConfig() (*Config, error) {
+	if err := rejectLegacySharedRuntimeEnv(); err != nil {
+		return nil, err
+	}
+	rt, err := LoadFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	cfg := &Config{
+		Runtime:     rt,
+		Environment: getEnv("PLATFORM_ENV", "development"),
+		PollInterval: time.Duration(getEnvInt("SENSOR_POLL_INTERVAL_SECONDS", 10)) * time.Second,
+
 		AgentReceiverEnabled:       getEnvBool("SENSOR_AGENT_RECEIVER_ENABLED", false),
 		AgentReceiverListenAddr:    getEnv("SENSOR_AGENT_RECEIVER_LISTEN_ADDR", ""),
 		AgentServerCertFile:        getEnv("SENSOR_AGENT_SERVER_CERT_FILE", ""),
@@ -123,6 +148,39 @@ func LoadConfig() *Config {
 
 		CapabilityPackDir: getEnv("SENSOR_CAPABILITY_PACK_DIR", ""),
 	}
+	if cfg.PollInterval <= 0 {
+		return nil, fmt.Errorf("SENSOR_CONFIG_INVALID: SENSOR_POLL_INTERVAL_SECONDS must be greater than zero")
+	}
+	return cfg, nil
+}
+
+// ParseLogLevel maps RuntimeConfig log level strings to slog levels.
+func ParseLogLevel(level string) (slog.Level, error) {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "DEBUG":
+		return slog.LevelDebug, nil
+	case "INFO":
+		return slog.LevelInfo, nil
+	case "WARN":
+		return slog.LevelWarn, nil
+	case "ERROR":
+		return slog.LevelError, nil
+	default:
+		return slog.LevelInfo, fmt.Errorf("SENSOR_CONFIG_LOG_LEVEL_INVALID: supported values are DEBUG, INFO, WARN, ERROR")
+	}
+}
+
+// ApplyLogLevel sets levelVar from a validated RuntimeConfig log level string.
+func ApplyLogLevel(levelVar *slog.LevelVar, level string) error {
+	if levelVar == nil {
+		return fmt.Errorf("SENSOR_CONFIG_INVALID: log level variable is required")
+	}
+	parsed, err := ParseLogLevel(level)
+	if err != nil {
+		return err
+	}
+	levelVar.Set(parsed)
+	return nil
 }
 
 // ValidateAgentReceiverConfig returns a non-nil error when Agent Receiver is
@@ -150,21 +208,20 @@ func ValidateAgentReceiverConfig(cfg *Config) error {
 	if agentSpool == "" || !filepath.IsAbs(agentSpool) {
 		return errAgentCfg("SENSOR_AGENT_SPOOL_DIR must be an absolute path when Agent Receiver is enabled")
 	}
-	obsSpool := filepath.Clean(strings.TrimSpace(cfg.SpoolDir))
+	obsSpool := filepath.Clean(strings.TrimSpace(cfg.Runtime.SpoolPath))
 	if filepath.Clean(agentSpool) == obsSpool {
-		return errAgentCfg("SENSOR_AGENT_SPOOL_DIR must be distinct from SENSOR_SPOOL_DIR")
+		return errAgentCfg("SENSOR_AGENT_SPOOL_DIR must be distinct from PLATFORM_SENSOR_SPOOL_PATH")
 	}
 	// Keep Agent ingress server identity distinct from Sensor→Core client identity.
-	// Agent Client CA may share the Core CA file when the same root signs both.
-	coreCert := filepath.Clean(strings.TrimSpace(cfg.TLSCertFile))
-	coreKey := filepath.Clean(strings.TrimSpace(cfg.TLSKeyFile))
+	coreCert := filepath.Clean(strings.TrimSpace(cfg.Runtime.TLS.Certificate))
+	coreKey := filepath.Clean(strings.TrimSpace(cfg.Runtime.TLS.PrivateKey))
 	agentCert := filepath.Clean(strings.TrimSpace(cfg.AgentServerCertFile))
 	agentKey := filepath.Clean(strings.TrimSpace(cfg.AgentServerKeyFile))
 	if coreCert != "" && agentCert == coreCert {
-		return errAgentCfg("SENSOR_AGENT_SERVER_CERT_FILE must be distinct from SENSOR_TLS_CERT_FILE")
+		return errAgentCfg("SENSOR_AGENT_SERVER_CERT_FILE must be distinct from PLATFORM_SENSOR_TLS_CERT_FILE")
 	}
 	if coreKey != "" && agentKey == coreKey {
-		return errAgentCfg("SENSOR_AGENT_SERVER_KEY_FILE must be distinct from SENSOR_TLS_KEY_FILE")
+		return errAgentCfg("SENSOR_AGENT_SERVER_KEY_FILE must be distinct from PLATFORM_SENSOR_TLS_KEY_FILE")
 	}
 	if cfg.AgentReceiverMaxInFlight <= 0 {
 		return errAgentCfg("SENSOR_AGENT_RECEIVER_MAX_IN_FLIGHT must be greater than zero")

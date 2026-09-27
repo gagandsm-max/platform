@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,11 +27,14 @@ type HealthServer struct {
 	logger     *slog.Logger
 }
 
-func NewHealthServer(port int, diskSpool *spool.DiskSpool, logger *slog.Logger) *HealthServer {
+func NewHealthServer(addr string, diskSpool *spool.DiskSpool, logger *slog.Logger) *HealthServer {
+	if strings.TrimSpace(addr) == "" {
+		addr = ":0"
+	}
 	mux := http.NewServeMux()
 	hs := &HealthServer{
 		server: &http.Server{
-			Addr:         fmt.Sprintf(":%d", port),
+			Addr:         addr,
 			Handler:      mux,
 			ReadTimeout:  5 * time.Second,
 			WriteTimeout: 5 * time.Second,
@@ -45,6 +49,14 @@ func NewHealthServer(port int, diskSpool *spool.DiskSpool, logger *slog.Logger) 
 	mux.HandleFunc("/livez", hs.handleLive)
 
 	return hs
+}
+
+// ListenAddr returns the configured HTTP bind address (host:port or :port).
+func (hs *HealthServer) ListenAddr() string {
+	if hs == nil || hs.server == nil {
+		return ""
+	}
+	return hs.server.Addr
 }
 
 // SetAgentSpool optionally wires the dedicated Agent ingress spool into readiness checks.

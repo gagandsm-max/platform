@@ -26,11 +26,22 @@ func newTestHealth(t *testing.T, syncer packSyncStatusProvider) *HealthServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hs := NewHealthServer(0, disk, slog.Default())
+	hs := NewHealthServer(":0", disk, slog.Default())
 	if syncer != nil {
 		hs.SetPackSync(syncer)
 	}
 	return hs
+}
+
+func TestHealthAddressControlsBind(t *testing.T) {
+	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := NewHealthServer("127.0.0.1:18088", disk, slog.Default())
+	if got := hs.ListenAddr(); got != "127.0.0.1:18088" {
+		t.Fatalf("ListenAddr=%q", got)
+	}
 }
 
 func TestLivezOKWhenPackTrustMissing(t *testing.T) {
