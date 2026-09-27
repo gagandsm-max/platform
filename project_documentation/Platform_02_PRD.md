@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-PRD-001
 **Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Complete Product Capability Authority (**A2.1 NORMALIZED_V1**)
-**Product name:** Platform
+**Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Depends on:** `Platform_01_BRD.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_08_Requirements_Traceability.md`, specialized masters `Platform_19`..`Platform_23`
 **Normalization state:** NORMALIZED_V1
@@ -1446,7 +1446,8 @@ Report Studio shall support:
 - reusable report templates and industry-oriented out-of-box packs;
 - on-demand and scheduled execution, subscriptions/recipients, business-day-aware due rules and execution history/failures;
 - report-obligation lifecycle, review/attestation and delivery status;
-- **PDF and CSV report artifacts only**; XLSX, JSON and PPTX are not report artifact formats; API responses remain separate integration/query interfaces;
+- **PDF and CSV report artifacts only**; XLSX, JSON and PPTX are not report artifact formats; API responses remain separate integration/query interfaces; generated PDF reports prominently embed the AmrudAi logo (matching light/dark background, preserving aspect ratio) and customer-facing AmrudAi branding; CSV reports contain data only without embedded imagery;
+- central branding configuration contract separating internal 'Platform' technical identity from commercial 'AmrudAi' customer-facing name, with logo asset references and white-label/MSP tenant override support;
 - RBAC, tenant/resource scope re-evaluation at execution time, query/resource bounds and cancellation;
 - drill-down from summarized result to governed evidence.
 
@@ -2269,7 +2270,7 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 ## 43. Explicit PRD TBD register
 | ID | Open item |
 |---|---|
-| PRD-TBD-01 | Exact final brand/product name beyond working name Platform |
+| PRD-TBD-01 | Exact final brand/product name beyond working name Platform: Resolved — **AmrudAi** (commercial customer-facing product name; internal engineering remains "Platform") |
 | PRD-TBD-02 | Exact DR RPO/RTO and failover automation policy |
 | PRD-TBD-03 | Final compliance certification schedule |
 | PRD-TBD-04 | Exact GNN framework/model architecture/GPU optional profile |

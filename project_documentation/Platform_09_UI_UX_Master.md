@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-UIUX-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
-**Product:** Platform
+**Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Last reconciliation:** 2026-09-19 — v3.2.2 endpoint diagnostic evidence reconciliation
 
 ## 1. Authority and no-assumption rule
@@ -43,6 +43,7 @@ Navigation entries are shown/hidden/read-only/action-limited according to RBAC, 
 
 ### 2.2 Global top bar
 
+- Brand block: Displays the commercial product name **AmrudAi** and product logo. In the default dark shell header, uses the white logo (`amrud_whi.png`); in light header themes, uses the black logo (`amrud_blk.png`) to ensure visual contrast. Logo rendering must preserve aspect ratio without stretching. In white-label or MSP tenant configurations, displays the tenant-configured brand name and logo while maintaining platform structural integrity.
 - Tenant/customer selector only for users authorized for multiple tenants.
 - Global search across device/IP/MAC/serial/site/tag/interface/circuit/incident/alert/ticket/IPAM/NCM/DB/VM/cloud/K8s entities.
 - Time range, timezone, comparison period and auto-refresh.

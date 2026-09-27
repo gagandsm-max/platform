@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-INDEX-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
-**Product:** Platform
+**Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
 **Last reconciliation:** 2026-09-24 — A2.3 OSS catalogue normalization and formal OSS-008→REQ-OSS-008 migration (Issue #108)
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
@@ -256,7 +256,8 @@ A1 makes this contract normative. Completing the field set for every capability 
 
 ## 9. Fixed product/architecture decisions
 
-- Product name: **Platform**.
+- Product name: **Platform** (internal engineering/build identifier) / **AmrudAi** (commercial customer-facing product name).
+- Commercial branding and reports: Customer-facing UI displays AmrudAi branding; report artifacts are **PDF and/or CSV only**; generated PDF reports prominently display the AmrudAi logo.
 - Clean-room implementation; no ThoughtData/NetAI proprietary implementation reuse.
 - Core/Sensor: **Ubuntu 24.x LTS family** and **RHEL 9.x family** first (subject to certification matrix); Windows Core/Sensor not initial scope.
 - Standalone: one Core. HA: exactly two full Core nodes, Active/Standby, target <60s Core-service restoration.

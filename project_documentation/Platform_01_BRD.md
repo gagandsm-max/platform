@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-BRD-001
 **Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Business Requirements Authority (**A2.1 NORMALIZED_V1**)
-**Product name:** Platform
+**Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Implementation model:** Clean-room implementation; independent project, not part of ThoughtData, Enterprise360 or NetAI
 **Audience:** Founders, product leadership, engineering, architecture, QA, security, sales engineering, support
 **Normalization state:** NORMALIZED_V1
@@ -64,6 +64,7 @@ Business outcome: an authorized operator can discover, monitor, diagnose and gov
 | BR-P10 | No silent failure | Material collection, storage, integration, HA, provisioning, authentication or workflow failures must expose what failed, evidence, impact and remediation guidance. |
 | BR-P11 | Safe by default, flexible by choice | Secure/safe defaults are enabled initially; customers may customize operational behavior through UI where doing so does not violate tenant isolation, integrity or mandatory safety controls. |
 | BR-P12 | No-context-switch operations | An authorized NOC/operator shall verify, diagnose and investigate a monitored entity from its current Platform context using safe on-demand diagnostics, browser CLI and related evidence without requiring routine external tools. Low-risk actions shall be easy; privileged or destructive actions shall retain proportionate controls and audit. |
+| BR-P13 | Commercial product branding | Customer-facing UI surfaces display AmrudAi commercial branding with appropriate light/dark logo contrast and aspect ratio preservation. Generated PDF reports prominently embed the AmrudAi logo; CSV reports are data-only. Internal engineering, architecture, code packages, and schemas retain Platform identity. |
 
 **Industry lessons (business intent, not proprietary copy):**
 
@@ -653,7 +654,7 @@ Out of initial product scope:
 
 | ID | Item | Status |
 |---|---|---|
-| TBD-01 | Final external product/brand name beyond working name “Platform” | TBD |
+| TBD-01 | Final external product/brand name beyond working name “Platform” | Resolved: **AmrudAi** (commercial customer-facing product name; internal engineering remains "Platform") |
 | TBD-02 | Contractual DR RPO/RTO and automated-vs-manual DR failover policy | TBD |
 | TBD-03 | Exact compliance certification roadmap/timeline | TBD |
 | TBD-04 | Final certified Core scale beyond 15,000 devices and exact multi-Core trigger | Benchmark required |

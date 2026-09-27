@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-HLD-001
 **Version:** 3.2.2
 **Status:** Authoritative Mother Reference — High-Level Design Authority (**A2.2 NORMALIZED_V1**)
-**Product name:** Platform
+**Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
@@ -860,7 +860,7 @@ Discovery may propose changes; it does not silently overwrite authoritative rese
 
 ## 23. Reporting HLD
 
-Report execution is asynchronous for expensive reports. Query Service returns bounded datasets/aggregates; rendering generates PDF and/or CSV report artifacts only. API payloads remain separate integration/query interfaces. Report schedule/history, obligations, review/attestation and delivery status are persisted. Large reports/exports are bounded background jobs, not synchronous browser queries, and yield to live monitoring/alert workloads.
+Report execution is asynchronous for expensive reports. Query Service returns bounded datasets/aggregates; rendering generates PDF and/or CSV report artifacts only. All generated PDF reports prominently display the AmrudAi logo (matching light/dark background, preserving aspect ratio) and customer-facing AmrudAi product branding; CSV reports contain data only without embedded imagery. API payloads remain separate integration/query interfaces. Report schedule/history, obligations, review/attestation and delivery status are persisted. Large reports/exports are bounded background jobs, not synchronous browser queries, and yield to live monitoring/alert workloads.
 
 ---
 
@@ -1175,7 +1175,7 @@ Exact detail owned elsewhere must not be re-litigated here:
 | Control state | PostgreSQL | authoritative transactional state |
 | Telemetry | ClickHouse | high-volume analytical state |
 | Cache | Valkey | reconstructable/ephemeral state only |
-| Reports | PDFBox/POI/Commons CSV | report/export worker |
+| Reports / Provisioning Import | PDFBox / Commons CSV (PDF/CSV report artifacts) / Apache POI (provisioning import parsing only) | Core report/export and provisioning workers |
 | Analytics/RCA workers | Python + Polars/NumPy/scikit-learn; GNN candidate PyTorch/PyG | isolated worker boundary with resource quotas and no direct secret access |
 | OSS compliance | ORT/Syft/Trivy/ScanCode | CI/release, not runtime customer workflow |
 

@@ -77,7 +77,8 @@ No implementation may permanently diverge from mother-reference truth. If implem
 
 ## Non-negotiable engineering rules
 
-- Product name is **Platform**.
+- Product name is **Platform** (internal engineering/build identifier); commercial/customer-facing product name is **AmrudAi**.
+- Customer-facing UI displays AmrudAi branding. Generated, downloaded and scheduled report artifacts are **PDF and/or CSV only**. All generated PDF reports must carry the AmrudAi logo; CSV reports contain tabular data only.
 - Clean-room implementation. Do not copy ThoughtData, Enterprise360 or NetAI proprietary code/assets.
 - All routine local development and automated testing run in Docker Compose. Do not install project-specific Java/Go/Python/Node/Kafka/PostgreSQL/ClickHouse/Valkey dependencies directly on the developer laptop.
 - Docker development must be reboot-safe through named volumes, health checks, deterministic startup and documented reset/recovery.

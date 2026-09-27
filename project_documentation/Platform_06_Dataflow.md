@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-DF-001
 **Version:** 3.2.2
 **Status:** Authoritative Mother Reference — End-to-End Dataflow & Sequence Documentation Authority (**A2.2 NORMALIZED_V1**)
-**Product name:** Platform
+**Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_08_Requirements_Traceability.md`
 **Normalization state:** NORMALIZED_V1
@@ -2151,5 +2151,5 @@ Rules:
 - direct monitoring/service evidence remains authoritative where the policy declares it so; tickets remain supporting evidence unless the policy explicitly measures tickets;
 - team/shift attribution uses effective ownership intervals and preserves handoffs;
 - report scheduling supports governed business-day/calendar due rules;
-- only PDF/CSV report artifacts are emitted; APIs remain separate interfaces;
+- only PDF/CSV report artifacts are emitted; generated PDF reports prominently display the AmrudAi logo (matching light/dark background, preserving aspect ratio) and customer-facing AmrudAi product branding; CSV reports contain data only without embedded imagery; APIs remain separate interfaces;
 - report queries/workers are bounded and yield to live telemetry, alerting and incident workloads.

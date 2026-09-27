@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-ARC-001
 **Version:** 3.2.2
 **Status:** Authoritative Mother Reference — System Architecture Authority (**A2.1 NORMALIZED_V1**)
-**Product name:** Platform
+**Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Depends on:** `Platform_01_BRD.md`, `Platform_02_PRD.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
@@ -1054,6 +1054,23 @@ Runbooks/known issues are versioned knowledge artifacts. Incident closure can cr
 ### 31.5 Effectiveness/quality analytics
 
 Platform shall analyze its own monitoring intelligence: alert policy effectiveness, qualification outcomes, RCA accuracy, telemetry quality, Sensor efficiency and pipeline integrity. These analytics are essential for proving the low-noise/meaningful-AI product proposition. UI architecture shall preserve internationalization foundations (locale-aware presentation where applicable) and accessibility constraints; detailed screen contracts remain in `Platform_09_UI_UX_Master.md`.
+
+### 31.6 Central branding and white-label architecture
+
+Platform separates internal engineering and build identity from external customer-facing commercial branding:
+
+- **Internal / engineering build identity:** `Platform` remains the internal engineering, repository, package, namespace, schema, service, build, test, and document filename identifier.
+- **Commercial / customer-facing product name:** `AmrudAi` is the final commercial product name displayed on customer-facing UI surfaces, public documentation branding, and customer-facing reports.
+- **Central branding contract:** Branding shall not be hard-coded across disparate UI components or backend services. Core provides a central, tenant-aware branding configuration model defining:
+  - `internal_product_id`: `"platform"` (immutable technical identifier)
+  - `commercial_product_name`: `"AmrudAi"` (default commercial brand)
+  - `light_background_logo_ref`: governed relative static asset reference (`amrud_blk.png`) for light-background surfaces and PDF reports
+  - `dark_background_logo_ref`: governed relative static asset reference (`amrud_whi.png`) for dark-background surfaces and top navigation
+  - `browser_title_template`: browser window/tab title format (e.g., `"{page_title} | AmrudAi"`)
+  - `report_header_footer_identity`: report branding headers/footers
+  - `white_label_override_enabled`: boolean flag allowing enterprise/MSP tenants to override logos, product name, and theme accents while preserving platform schema and data integrity
+- **Governed logo assets:** Logo assets (`amrud_blk.png` for light surfaces / PDF reports, `amrud_whi.png` for dark surfaces / UI headers) are stored in governed relative product asset locations (`ui/public/brand/` for web static assets, `core/src/main/resources/brand/` for report generation resources). Absolute developer paths (such as `/home/gagan/nms/logo/...`) must never be exposed or referenced in production configuration. Logo rendering must preserve aspect ratio without stretching and ensure WCAG contrast compliance.
+- **Report branding:** Generated PDF reports prominently display the AmrudAi logo (matching report background contrast) and commercial branding. CSV reports contain data only and do not require image assets.
 
 ---
 

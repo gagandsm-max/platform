@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-EGC-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Enterprise Gap Closure**
-**Product:** Platform
+**Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation or readiness claim
 
 ---
@@ -89,7 +89,7 @@ Platform uses one evidence-led Service Assurance model for customer SLA, interna
 
 **Reporting obligations.** A report obligation binds stable report key, definition, owner, frequency/due rule, business-day/calendar semantics, recipients, required content, approvers, delivery policy and audit. Report lifecycle may include `GENERATED -> DELIVERED -> UNDER_REVIEW -> ACCEPTED|REJECTED|DISPUTED`.
 
-**Artifact formats.** All generated/downloaded/scheduled report artifacts are **PDF and/or CSV only**. PDF is the human/governance artifact and CSV the detailed machine-readable evidence artifact. JSON remains an API encoding, not a report artifact; XLSX/PPTX are not report artifacts.
+**Artifact formats.** All generated/downloaded/scheduled report artifacts are **PDF and/or CSV only**. PDF is the human/governance artifact and CSV the detailed machine-readable evidence artifact. Generated PDF reports must prominently display the AmrudAi logo (matching light/dark background, preserving aspect ratio) and customer-facing AmrudAi product branding; CSV reports contain data only without embedded imagery. JSON remains an API encoding, not a report artifact; XLSX/PPTX are not report artifacts.
 
 **Operational safety.** Report/service-assurance computations are bounded/cancellable and lower priority than ingestion/current-state/alert/incident correctness. No new microservice/database is justified solely by this capability before evidence proves existing modular Core/data stores insufficient.
 
@@ -162,7 +162,7 @@ P0/P1 capability implementation is not complete until the relevant requirements 
 |---|---|---|
 | `REQ-EGC-001` | P0 | SD-WAN adapters prove canonical mapping, vendor-extension isolation, tenant scoping and topology/health consumption using supported vendor fixtures/contracts. |
 | `REQ-EGC-002` | P1 | SCIM lifecycle tests cover create/update/disable/delete/reconcile, duplicate/retry behavior, RBAC convergence and explicit unsupported-feature behavior; compliance is not claimed by test existence alone. |
-| `REQ-EGC-003` | P0 | Service-assurance tests prove SLA/OLA/Provider-SLA/SLO formulas, target/minimum semantics, service-time/shift/team rules, scope snapshots, exclusions/maintenance/degraded treatment, quality states, policy simulation, immutable finalization/restatement, error-budget/burn behavior, PDF/CSV-only reporting, obligation/attestation lifecycle and incident/notification integration using deterministic fixtures. |
+| `REQ-EGC-003` | P0 | Service-assurance tests prove SLA/OLA/Provider-SLA/SLO formulas, target/minimum semantics, service-time/shift/team rules, scope snapshots, exclusions/maintenance/degraded treatment, quality states, policy simulation, immutable finalization/restatement, error-budget/burn behavior, PDF/CSV-only reporting with AmrudAi logo on PDF, obligation/attestation lifecycle and incident/notification integration using deterministic fixtures. |
 | `REQ-EGC-004` | P0 | Audit tamper-evidence tests prove alteration/deletion/reordering is detectable within the selected design and that export verification is independently reproducible. |
 | `REQ-EGC-005` | P1 | Middleware/backup Packs prove least privilege, version/error handling, collector-health separation, bounded polling and no bytecode instrumentation unless separately approved. |
 | `REQ-EGC-006` | P0 | Offboarding tests prove authorization, export, active deletion, secret revocation, legal-hold handling, backup/archive pending state, scheduled expiry and final evidence without false immediate-erasure claims. |

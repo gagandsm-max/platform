@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-QUALITY-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
-**Product:** Platform
+**Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Consolidation rule:** This document preserves the normative content of the listed v3.1 source documents (via v3.2/v3.2.1). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement. v3.2.2 adds specialized-master quality supplements in §6 without rewriting the base gates.
 
 ## 1. Purpose
@@ -278,22 +278,26 @@ Specified ≠ implemented ≠ tested ≠ benchmarked ≠ certified ≠ deployed.
 
 Phase-1 service assurance is not release-ready until deterministic fixtures prove:
 
-- target/expected versus minimum threshold semantics and period boundary correctness;
-- reusable service-time calendars including IANA timezone, holidays, business hours, shifts, country/site overrides and DST edge cases;
-- per-ticket/entity/service/site/provider/population/impacted-unit measurement bases;
-- monitoring-evidence availability independent of ticket arithmetic where policy declares monitoring authoritative;
-- inclusion/exclusion, maintenance, responsibility boundary, approved deviation and configurable degraded-condition rules;
-- dependency-aware service availability without blind averaging of component uptime;
-- safe formula validation, type/unit errors, divide-by-zero/empty population handling and rejection of arbitrary SQL/Python/JavaScript/eval;
-- policy simulation/backtest is read-only, reproducible and shows old/new result delta without changing production history;
-- finalized-period immutability, scope-snapshot stability and audited `RESTATED` corrections;
-- `VALID`/`PARTIAL`/`INSUFFICIENT_EVIDENCE`/`DISPUTED`-class measurement quality; monitoring gaps cannot silently become service downtime or perfect compliance;
-- multi-vantage contradiction/quorum handling and deterministic provisional/inconclusive outcomes;
-- shift/team segmentation and handoff history, with fail-closed behavior until authoritative Team binding exists;
-- OLA/provider dependency chains and evidence attribution without fabricated ownership;
-- business-day-aware report due rules, report-obligation lifecycle, delivery audit and attestation/dispute;
-- generated/downloaded/scheduled artifacts limited to PDF and/or CSV; API data remains a separate interface;
-- PDF/CSV evidence can reproduce the governing policy/formula/calendar/scope/evidence versions;
-- report query/worker cancellation, concurrency/query bounds and load tests prove reporting cannot starve live ingestion, alerting or incident correctness.
+- **Formula correctness:** mathematical evaluation across arithmetic, ratios, percentages, counts, sums, min/max, averages, weighted averages, percentiles, durations, and compliance calculations;
+- **Formula injection and security:** safe expression validation, type/unit checking, divide-by-zero handling, and strict prevention of arbitrary code or SQL execution (no Python, JavaScript, shell, or arbitrary SQL eval);
+- **Calendars, timezones, and DST:** reusable service-time profiles with IANA timezone calculations, holiday calendars, working days, and daylight saving time transitions (spring-forward / fall-back);
+- **Country and site calendar overrides:** localized calendar variations and site-specific overrides with audited exception handling;
+- **Cross-midnight shifts and team/shift handoffs:** shifts spanning midnight boundaries, multi-shift coverage, and historical segmented ownership preservation without rewriting past intervals;
+- **Threshold model:** independent target/expected, minimum, at-risk, and breach threshold evaluation;
+- **Service dependency and redundancy rules:** topology-aware and dependency-grounded service availability without blind averaging of component uptime;
+- **Degraded-service treatment and persistence:** informational-only, partial penalty, outage only after configured persistence, or immediate outage;
+- **Measurement bases and impacted-unit calculations:** service minutes, entity minutes, impacted-unit minutes, transaction counts, ticket counts, event counts, and weighted scores;
+- **Maintenance and exclusion handling:** approved maintenance windows, customer-responsibility exclusions, contractual deviations, and retroactive adjustment lineage preserving raw results;
+- **Monitoring quality and UNKNOWN behavior:** separate evidentiary confidence from service state; explicit `VALID`, `PARTIAL`, `INSUFFICIENT_EVIDENCE`, `UNKNOWN`, and `DISPUTED` states; monitoring-path failures or gaps cannot silently become service downtime or perfect compliance;
+- **Multi-vantage and quorum rules:** multi-point measurement, N-of-M quorum rules, and end-to-end synthetic corroboration preserving contradictory evidence;
+- **Policy simulation:** read-only backtesting of draft/updated policies against retained historical evidence showing outcome deltas without mutating production truth;
+- **FINAL period immutability:** immutable period close (`OPEN -> PRELIMINARY -> REVIEW -> FINAL`) binding policy, formula, calendar, and scope snapshots;
+- **RESTATED lineage:** versioned restatement and audited revision history for post-final corrections;
+- **Audit, approval, and attestation:** report obligation lifecycle, delivery tracking, review/attestation states (`UNDER_REVIEW`, `ACCEPTED`, `REJECTED`, `DISPUTED`), and audit lineage;
+- **Tenant isolation:** strict tenant boundaries for policies, calendars, evidence ledgers, obligations, reports, and formulas with cross-tenant negative testing;
+- **PDF rendering with AmrudAi logo:** PDF reports embed the governed AmrudAi logo appropriate to background contrast (`amrud_blk.png` for light background, `amrud_whi.png` for dark background) preserving aspect ratio without stretching;
+- **CSV report generation:** detailed machine-readable tabular evidence generation without embedded images;
+- **Report resource isolation under monitoring load:** bounded query execution, lower worker priority than live monitoring/ingestion/alerting, query cancellation, and resource caps preventing monitoring degradation;
+- **Strict report artifact format restriction:** generated, downloaded, and scheduled report artifacts are restricted to PDF and CSV only; no XLSX, PPTX, or JSON report artifact generation.
 
-No customer-specific target percentage, credit amount, contractual liability or financial consequence is certified by these tests unless separately configured and authorized.
+Do not mark these tests as implemented/passing unless physical test evidence exists. No customer-specific target percentage, credit amount, contractual liability or financial consequence is certified by these tests unless separately configured and authorized.

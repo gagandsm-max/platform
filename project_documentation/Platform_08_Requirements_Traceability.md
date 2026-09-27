@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-RTM-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Global Traceability Index (A2.3 NORMALIZED_V1)**
-**Product:** Platform
+**Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Last reconciliation:** 2026-09-24 — A2.3 OSS catalogue + formal OSS-008→REQ-OSS-008 reconciliation (Issue #108); registry count remains 372/199
 **Normalization state:** NORMALIZED_V1 (global index layer). Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
@@ -374,7 +374,7 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 | REQ-UI-006 | Global search, command palette, breadcrumbs, context side panel, favorites/recent/saved views | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-007 | Inventory with server-side pagination, bulk actions and saved filters | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-008 | Map Studio, Report Studio, MIB Studio, API Studio, Device Pack Studio | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
-| REQ-UI-009 | Report Studio PDF/CSV-only artifacts, formulas, branding, schedules, obligations and attestation | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
+| REQ-UI-009 | Report Studio PDF/CSV-only artifacts, AmrudAi logo embedding in PDF, branding, schedules, obligations and attestation | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-010 | SLA/OLA/Provider-SLA service-assurance engine with service-time, shift/team, maintenance, evidence-quality and audit rules | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-011 | Accessibility, keyboard navigation, contrast and no color-only status | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-UI-012 | Mobile incident/dashboard experience; desktop for full admin/studios | `Platform_08_Requirements_Traceability.md` | UI/UX/Reporting | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
@@ -907,7 +907,7 @@ Low-level scheduling mechanics intentionally use RTM marker `—` in the BRD col
 | REQ-UI-006 | Global search, command palette, breadcrumbs, context side panel, favorites/recent/saved views | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-007 | Inventory with server-side pagination, bulk actions and saved filters | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-008 | Map Studio, Report Studio, MIB Studio, API Studio, Device Pack Studio | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-UI-009 | Report Studio PDF/CSV-only artifacts, formulas, branding, schedules, obligations and attestation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-UI-009 | Report Studio PDF/CSV-only artifacts, AmrudAi logo embedding in PDF, branding, schedules, obligations and attestation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-010 | SLA/OLA/Provider-SLA service-assurance engine with service-time, shift/team, maintenance, evidence-quality and audit rules | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-011 | Accessibility, keyboard navigation, contrast and no color-only status | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-UI-012 | Mobile incident/dashboard experience; desktop for full admin/studios | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
