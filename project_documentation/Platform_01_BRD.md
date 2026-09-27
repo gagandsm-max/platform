@@ -356,13 +356,29 @@ Constraints:
 
 ---
 
-## 23. Reporting and SLA (business)
+## 23. Reporting, SLA/OLA and service assurance (business)
 
-Business outcome: Report Studio and SLA engine support customer-defined targets, windows, business hours, maintenance exclusions, partial/unknown handling and drill-down—with timezone disclosure for rendered local times.
+Business outcome: Platform shall provide an enterprise Service Assurance capability covering customer SLA, internal-team OLA, provider/underpinning SLA and SLI/SLO objectives from one evidence model. It shall combine monitoring telemetry, qualified state, topology/service dependencies, synthetic/API evidence, incidents and governed external ITSM/CMDB/security/provider inputs without making an external system the monitoring truth.
 
-Changing a user’s display timezone must not silently alter SLA measurement semantics.
+Platform shall ship editable out-of-box SLA/OLA/report templates for common large-enterprise operating patterns across generic enterprise, banking/financial services, manufacturing, telecom, data-center/colocation, ISP/carrier and cloud/enterprise-IT environments. Templates are starting points, not contractual promises; customer targets, calendars, formulas, exclusions and ownership remain customer policy.
 
----
+Customers shall be able to create their own SLA/OLA policies from governed available parameters using a safe typed expression/formula engine. Arbitrary Python, JavaScript, SQL or other executable customer code is not part of SLA/report authoring.
+
+Service assurance shall support reusable service-time profiles, IANA timezones, holidays, countries, sites, business hours, shifts, teams, regions, business units, environments, criticality, providers and customer tags. Team/shift attribution must preserve historical handoff evidence; production-authoritative Team scope depends on the governed tenant-scoped Team identity contract.
+
+Contract measurement shall support expected/target and minimum thresholds, measurement windows, per-ticket/per-CI/per-service/per-site/per-provider/population and impacted-unit measurement, versioned inclusion/exclusion rules, maintenance, approved deviations, degraded-but-still-serving treatment, continuous-improvement measures and effective dates. Availability derived from direct monitoring/service evidence must not be replaced by ticket arithmetic where the policy declares monitoring evidence authoritative.
+
+Platform shall preserve raw result, exclusions/adjustments, data-quality/completeness, scope snapshot, policy/formula/calendar version and final result as reproducible evidence. Finalized periods shall not silently change; corrections use an audited restatement workflow. Insufficient monitoring evidence produces explicit provisional/partial/insufficient-evidence state rather than fabricated compliance.
+
+Before activation or material change, authorized users shall be able to simulate/backtest an SLA/OLA policy against retained historical evidence so policy impact is visible before publication.
+
+Reporting shall support scheduled/on-demand obligations, business-day-aware due rules, recipients, approval/attestation, delivery status and drill-down from scorecard to outage/incident/ticket/CI/telemetry evidence. Generated/downloaded/scheduled report artifacts are **CSV and/or PDF only**. APIs remain separate integration/query interfaces and are not report artifact formats.
+
+PDF is the human/governance artifact; CSV is the detailed machine-readable evidence artifact. Report execution must be bounded and lower priority than live telemetry, alerting and incident correctness.
+
+Platform may consume billing, procurement, finance, project or external service-management data for governed formulas/reporting, but does not become an ERP, procurement, billing or ITSM system of record.
+
+Changing a user’s display timezone must not silently alter SLA/OLA measurement semantics.
 
 ## 24. Integrations (business)
 
