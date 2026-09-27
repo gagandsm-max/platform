@@ -668,3 +668,27 @@ Normative companions (not duplicated here):
 ## 42. A2.1 migration note
 
 A2.1 absorbed historical Version 3.0 reconciliation blocks (BRD-OSS, BRD-COMP, BRD-LIC, BRD-STOR), v3.1 development/packaging/continuity sections and v3.2.2 display-timezone outcomes into the numbered normative sections above. Chronological appendices are removed as competing normative truth. Git history retains chronology. Formal identifiers remain in `Platform_08_Requirements_Traceability.md` without net-new or removed IDs under A2.1.
+
+## Service Assurance, SLA/OLA and enterprise reporting — Phase 1 business contract
+
+Platform shall provide customer-facing **Service Assurance** for measuring the customer's own services, internal team obligations and external-provider commitments. This capability is distinct from any availability commitment made for Platform itself.
+
+Business requirements:
+
+- Support **SLA**, **OLA** and **Provider/Underpinning SLA** policies using a common governed measurement engine.
+- Ship editable out-of-box policy templates for common enterprise patterns across banking/financial services, manufacturing, telecom, data-center/colocation, ISP/carrier, cloud and general enterprise operations. Template targets are starting points only; customers own contractual values.
+- Permit customer-defined SLA/OLA policies using supported telemetry, topology, incidents, synthetics, imported ITSM/CMDB/security facts, teams, shifts, service calendars, maintenance and governed customer attributes.
+- Support reusable Service Time Profiles including 24x7, business hours, country/site calendars, holidays, time zones, shifts and customer-defined schedules.
+- Support expected/target and minimum thresholds, at-risk state, measurement windows, policy effective dates, scope, inclusion/exclusion rules, degradation treatment, ownership and reporting obligations.
+- Allow policies by tenant, business unit, region, country, site, environment, criticality, service, provider, team, shift, resource type, group and governed tag/attribute.
+- Availability and service-health measurement shall be evidence-first. Monitoring-path failure, stale telemetry or insufficient evidence shall not be silently converted into service downtime or 100% availability.
+- Preserve raw result, exclusions/adjustments and final governed result separately with immutable audit evidence.
+- Support measurement quality states such as VALID, PARTIAL, INSUFFICIENT_EVIDENCE, DISPUTED and PROVISIONAL.
+- Support policy simulation against retained historical evidence before activation or modification.
+- Support measurement-period governance: OPEN -> PRELIMINARY -> REVIEW -> FINAL, with controlled RESTATED processing for approved corrections. Finalized periods shall not silently change when topology, policy, calendar or inventory later changes.
+- Preserve historical scope snapshots, formula version, policy version, calendar version and source-evidence references sufficient to reproduce a past result.
+- Support team/shift handoff attribution and OLA dependency chains without rewriting historical ownership.
+- Support continuous-improvement measurements in addition to static thresholds, where mathematically defined by the customer.
+- Support SLA evidence packs and customer-defined external contract/reference identifiers without embedding customer-specific contracts in product code.
+- Generated/scheduled/downloaded report artifacts are **CSV and/or PDF only**. APIs remain integration interfaces and are not report artifact formats.
+- Reporting workloads shall be resource-isolated and lower priority than live collection, telemetry ingestion, qualification, alerting and current-state processing.
