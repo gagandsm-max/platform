@@ -2,8 +2,13 @@ package control_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -312,6 +317,47 @@ func TestReconcileDurabilityFailurePreventsAppliedAck(t *testing.T) {
 	}
 }
 
+func TestReconcileLostAckRepairDurabilityFailurePreventsAck(t *testing.T) {
+	t.Parallel()
+	cfg := control.GoldenConfiguration()
+	desired := desiredState(t, 3, cfg)
+	client := &fakeControlClient{desired: desired}
+	store := &lostAckFailingStore{
+		snap: &control.AppliedSnapshot{
+			SchemaVersion: 1,
+			Generation:    3,
+			Checksum:      desired.DesiredChecksum,
+			Configuration: cfg,
+			AppliedAt:     time.Now().UTC(),
+		},
+		err: control.NewDurabilityTestError(),
+	}
+	var applies int32
+	metrics := &control.Metrics{}
+	rec, err := control.NewReconciler(client, store, validBaseline(t), control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
+		atomic.AddInt32(&applies, 1)
+		return nil
+	}), slog.Default(), metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := rec.RunOnce(context.Background())
+	if control.CodeOf(err) != control.CodeStateDurabilityFailed || res.Action != "DURABILITY_FAILED" || len(client.acks) != 0 || applies != 0 {
+		t.Fatalf("res=%+v err=%v acks=%d applies=%d", res, err, len(client.acks), applies)
+	}
+	if metrics.Snapshot().DurableStoreFailures != 1 {
+		t.Fatalf("expected DurableStoreFailures=1, got %d", metrics.Snapshot().DurableStoreFailures)
+	}
+}
+
+type lostAckFailingStore struct {
+	snap *control.AppliedSnapshot
+	err  error
+}
+
+func (f *lostAckFailingStore) Load() (*control.AppliedSnapshot, error) { return f.snap, nil }
+func (f *lostAckFailingStore) Commit(control.AppliedSnapshot) error   { return f.err }
+
 type failingStore struct {
 	err error
 }
@@ -408,5 +454,154 @@ func TestReconcileCancellation(t *testing.T) {
 	_, err := rec.RunOnce(ctx)
 	if control.CodeOf(err) != control.CodeCoreUnavailable {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestReconcileFetchProtocolErrorClassifiedAsInvalidDesired(t *testing.T) {
+	t.Parallel()
+	client := &fakeControlClient{
+		fetchErr: &coreclient.Error{Code: coreclient.CodeControlProtocol, Message: "malformed JSON wire"},
+	}
+	metrics := &control.Metrics{}
+	store, err := control.NewStore(filepath.Join(t.TempDir(), "applied.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := control.NewReconciler(client, store, validBaseline(t), control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
+		return nil
+	}), slog.Default(), metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := rec.RunOnce(context.Background())
+	if control.CodeOf(err) != control.CodeInvalidDesired || res.Action != "INVALID_DESIRED" || res.Code != control.CodeInvalidDesired {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if metrics.Snapshot().CoreTransportFailures != 0 {
+		t.Fatalf("transport failure metric should NOT increment on invalid desired, got %d", metrics.Snapshot().CoreTransportFailures)
+	}
+}
+
+func TestReconcileFetchOversizedClassifiedAsInvalidDesired(t *testing.T) {
+	t.Parallel()
+	client := &fakeControlClient{
+		fetchErr: &coreclient.Error{Code: coreclient.CodeResponseTooLarge, Message: "response exceeds 16MB"},
+	}
+	metrics := &control.Metrics{}
+	store, err := control.NewStore(filepath.Join(t.TempDir(), "applied.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := control.NewReconciler(client, store, validBaseline(t), control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
+		return nil
+	}), slog.Default(), metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := rec.RunOnce(context.Background())
+	if control.CodeOf(err) != control.CodeInvalidDesired || res.Action != "INVALID_DESIRED" || res.Code != control.CodeInvalidDesired {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if metrics.Snapshot().CoreTransportFailures != 0 {
+		t.Fatalf("transport failure metric should NOT increment on oversized response, got %d", metrics.Snapshot().CoreTransportFailures)
+	}
+}
+
+func TestReconcileFetchTransportClassifiedAsCoreUnavailable(t *testing.T) {
+	t.Parallel()
+	client := &fakeControlClient{
+		fetchErr: &coreclient.Error{Code: coreclient.CodeTransport, Message: "connection refused"},
+	}
+	metrics := &control.Metrics{}
+	store, err := control.NewStore(filepath.Join(t.TempDir(), "applied.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := control.NewReconciler(client, store, validBaseline(t), control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
+		return nil
+	}), slog.Default(), metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := rec.RunOnce(context.Background())
+	if control.CodeOf(err) != control.CodeCoreUnavailable || res.Action != "CORE_UNAVAILABLE" || res.Code != control.CodeCoreUnavailable {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if metrics.Snapshot().CoreTransportFailures != 1 {
+		t.Fatalf("transport failure metric MUST increment on transport error, got %d", metrics.Snapshot().CoreTransportFailures)
+	}
+}
+
+func TestReconcileUnsupportedSchemaRealWire(t *testing.T) {
+	t.Parallel()
+	checksum := "ec1e58221b8f3bb05ce0ddc4d8104b2e6bfce709e0de4cc07062e80919346f1d"
+	var sawAckReq coreclient.ControlAppliedAckRequest
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sensor/control/desired-state":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"schemaVersion":2,"desiredGeneration":11,"desiredChecksum":"`+checksum+`","futureField":{"version":2},"configuration":{"unknown":true}}`)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/sensor/control/applied-state":
+			var req coreclient.ControlAppliedAckRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("failed to decode ACK body: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			sawAckReq = req
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"status":"ACCEPTED","schemaVersion":1,"generation":11,"checksum":"`+checksum+`","outcome":"REJECTED"}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := coreclient.NewControlClientForTest(u, srv.Client(), 1024*1024)
+	store, err := control.NewStore(filepath.Join(t.TempDir(), "applied.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var applies int32
+	metrics := &control.Metrics{}
+	rec, err := control.NewReconciler(client, store, validBaseline(t), control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
+		atomic.AddInt32(&applies, 1)
+		return nil
+	}), slog.Default(), metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := rec.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected RunOnce error: %v", err)
+	}
+	if res.Action != "UNSUPPORTED_SCHEMA" || res.Outcome != "REJECTED" || res.Code != control.CodeUnsupportedSchema {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if res.Generation != 11 || res.Checksum != checksum {
+		t.Fatalf("unexpected generation/checksum: gen=%d ck=%s", res.Generation, res.Checksum)
+	}
+	if applies != 0 {
+		t.Fatalf("applier must NOT be called for unsupported schema, applies=%d", applies)
+	}
+	if sawAckReq.Outcome != "REJECTED" || sawAckReq.RejectionCode != control.CodeUnsupportedSchema {
+		t.Fatalf("ACK request on wire mismatch: %+v", sawAckReq)
+	}
+	if sawAckReq.Generation != 11 || sawAckReq.Checksum != checksum {
+		t.Fatalf("ACK binding mismatch on wire: gen=%d ck=%s", sawAckReq.Generation, sawAckReq.Checksum)
+	}
+	snap, _ := store.Load()
+	if snap != nil {
+		t.Fatal("store must not have any applied state")
+	}
+	if metrics.Snapshot().RejectedCount != 1 {
+		t.Fatalf("expected RejectedCount=1, got %d", metrics.Snapshot().RejectedCount)
 	}
 }

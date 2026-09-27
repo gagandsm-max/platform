@@ -25,20 +25,13 @@ func controlTestClient(t *testing.T, srv *httptest.Server, maxBytes int) *Client
 	if err != nil {
 		t.Fatal(err)
 	}
-	if maxBytes <= 0 {
-		maxBytes = 1024 * 1024
-	}
-	return &Client{
-		baseURL: u,
-		httpClient: &http.Client{
-			Transport: srv.Client().Transport,
-			Timeout:   5 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return newError(CodeProtocol, "Core redirects are not followed", nil, false)
-			},
+	return NewControlClientForTest(u, &http.Client{
+		Transport: srv.Client().Transport,
+		Timeout:   5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return newError(CodeProtocol, "Core redirects are not followed", nil, false)
 		},
-		maxResponseBytes: maxBytes,
-	}
+	}, maxBytes)
 }
 
 func TestFetchControlDesiredState204(t *testing.T) {
@@ -66,6 +59,20 @@ func TestFetchControlDesiredStateStrictParsing(t *testing.T) {
 		ok   bool
 	}{
 		{name: "valid", body: valid, ok: true},
+		{name: "schema_v2_safe_binding", body: `{"schemaVersion":2,"desiredGeneration":1,"desiredChecksum":"` + checksum + `"}`, ok: true},
+		{name: "schema_v2_future_fields", body: `{"schemaVersion":2,"desiredGeneration":1,"desiredChecksum":"` + checksum + `","future_field":"ok","nested":{"a":1}}`, ok: true},
+		{name: "schema_v2_missing_gen", body: `{"schemaVersion":2,"desiredChecksum":"` + checksum + `"}`, ok: false},
+		{name: "schema_v2_missing_checksum", body: `{"schemaVersion":2,"desiredGeneration":1}`, ok: false},
+		{name: "schema_v2_invalid_checksum", body: `{"schemaVersion":2,"desiredGeneration":1,"desiredChecksum":"nothex"}`, ok: false},
+		{name: "schema_v2_gen_negative", body: `{"schemaVersion":2,"desiredGeneration":-1,"desiredChecksum":"` + checksum + `"}`, ok: false},
+		{name: "schema_v2_gen_zero", body: `{"schemaVersion":2,"desiredGeneration":0,"desiredChecksum":"` + checksum + `"}`, ok: false},
+		{name: "schema_v2_gen_overflow", body: `{"schemaVersion":2,"desiredGeneration":9007199254740992,"desiredChecksum":"` + checksum + `"}`, ok: false},
+		{name: "schema_zero", body: `{"schemaVersion":0,"desiredGeneration":1,"desiredChecksum":"` + checksum + `"}`, ok: false},
+		{name: "schema_negative", body: `{"schemaVersion":-1,"desiredGeneration":1,"desiredChecksum":"` + checksum + `"}`, ok: false},
+		{name: "schema_decimal", body: `{"schemaVersion":1.5,"desiredGeneration":1,"desiredChecksum":"` + checksum + `"}`, ok: false},
+		{name: "schema_exponent", body: `{"schemaVersion":1e2,"desiredGeneration":1,"desiredChecksum":"` + checksum + `"}`, ok: false},
+		{name: "schema_string", body: `{"schemaVersion":"1","desiredGeneration":1,"desiredChecksum":"` + checksum + `"}`, ok: false},
+		{name: "schema_null", body: `{"schemaVersion":null,"desiredGeneration":1,"desiredChecksum":"` + checksum + `"}`, ok: false},
 		{name: "unknown_top", body: strings.Replace(valid, `"schemaVersion"`, `"evil":true,"schemaVersion"`, 1), ok: false},
 		{name: "trailing", body: valid + `{"x":1}`, ok: false},
 		{name: "non_object", body: `[]`, ok: false},
@@ -114,6 +121,39 @@ func TestFetchControlDesiredStateOversized(t *testing.T) {
 	_, err := controlTestClient(t, srv, 512).FetchControlDesiredState(context.Background())
 	if !IsCode(err, CodeResponseTooLarge) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestFetchControlDesiredStateUnsupportedSchemaWire(t *testing.T) {
+	checksum := goldenControlChecksum
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != controlDesiredStatePath || r.Method != http.MethodGet {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"schemaVersion":2,"desiredGeneration":77,"desiredChecksum":"`+checksum+`","futureField":{"cool":true},"configuration":{"unknown":true}}`)
+	}))
+	defer srv.Close()
+
+	client := controlTestClient(t, srv, 0)
+	out, err := client.FetchControlDesiredState(context.Background())
+	if err != nil {
+		t.Fatalf("FetchControlDesiredState failed: %v", err)
+	}
+	if out == nil {
+		t.Fatal("expected non-nil desired state")
+	}
+	if out.SchemaVersion != 2 {
+		t.Fatalf("expected SchemaVersion 2, got %d", out.SchemaVersion)
+	}
+	if out.DesiredGeneration != 77 {
+		t.Fatalf("expected DesiredGeneration 77, got %d", out.DesiredGeneration)
+	}
+	if out.DesiredChecksum != checksum {
+		t.Fatalf("expected DesiredChecksum %s, got %s", checksum, out.DesiredChecksum)
+	}
+	if out.Configuration.LogLevel != "" {
+		t.Fatalf("configuration should not be parsed for unsupported schema, got logLevel=%s", out.Configuration.LogLevel)
 	}
 }
 

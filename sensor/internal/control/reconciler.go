@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -103,8 +102,12 @@ func (r *Reconciler) RunOnce(ctx context.Context) (Result, error) {
 
 	desired, err := r.client.FetchControlDesiredState(ctx)
 	if err != nil {
-		r.metrics.markTransportFailure()
 		code := mapTransportCode(err)
+		if code == CodeInvalidDesired {
+			r.logEvent("control_reconcile_invalid_desired", 0, "", code)
+			return Result{Action: "INVALID_DESIRED", Code: code}, newCodedError(code, "Core control desired-state is invalid", err)
+		}
+		r.metrics.markTransportFailure()
 		r.logEvent("control_reconcile_core_unavailable", 0, "", code)
 		return Result{Action: "CORE_UNAVAILABLE", Code: code}, newCodedError(code, "Core control desired-state unavailable", err)
 	}
@@ -164,6 +167,19 @@ func (r *Reconciler) RunOnce(ctx context.Context) (Result, error) {
 
 	if local != nil && desired.DesiredGeneration == localGen {
 		if desired.DesiredChecksum == localChecksum {
+			if err := r.store.Commit(*local); err != nil {
+				r.metrics.markDurableFailure()
+				r.logEvent("control_reconcile_durability_failed", desired.DesiredGeneration, checksumPrefix(desired.DesiredChecksum), CodeStateDurabilityFailed)
+				if CodeOf(err) == "" {
+					err = newCodedError(CodeStateDurabilityFailed, "durable store commit failed", err)
+				}
+				return Result{
+					Action:     "DURABILITY_FAILED",
+					Generation: desired.DesiredGeneration,
+					Checksum:   desired.DesiredChecksum,
+					Code:       CodeStateDurabilityFailed,
+				}, err
+			}
 			ackErr := r.sendApplied(ctx, desired.DesiredGeneration, desired.DesiredChecksum)
 			if ackErr != nil {
 				r.metrics.markAckFailure()
@@ -355,16 +371,13 @@ func mapTransportCode(err error) string {
 	if err == nil {
 		return CodeCoreUnavailable
 	}
-	if coreclient.IsCode(err, coreclient.CodeTimeout) ||
-		coreclient.IsCode(err, coreclient.CodeTransport) ||
-		coreclient.IsCode(err, coreclient.CodeServerUnavailable) ||
-		coreclient.IsCode(err, coreclient.CodeDeadlineExceeded) ||
-		coreclient.IsCode(err, coreclient.CodeCancelled) {
-		return CodeCoreUnavailable
+	if CodeOf(err) == CodeInvalidDesired {
+		return CodeInvalidDesired
 	}
-	var coded *coreclient.Error
-	if errors.As(err, &coded) {
-		return CodeCoreUnavailable
+	if coreclient.IsCode(err, coreclient.CodeControlProtocol) ||
+		coreclient.IsCode(err, coreclient.CodeProtocol) ||
+		coreclient.IsCode(err, coreclient.CodeResponseTooLarge) {
+		return CodeInvalidDesired
 	}
 	return CodeCoreUnavailable
 }

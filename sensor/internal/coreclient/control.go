@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -297,11 +298,63 @@ func validateControlAckBinding(req ControlAppliedAckRequest, resp ControlApplied
 	return nil
 }
 
+// NewControlClientForTest creates an in-memory client against a test server for internal test suites.
+func NewControlClientForTest(baseURL *url.URL, httpClient *http.Client, maxResponseBytes int) *Client {
+	if maxResponseBytes <= 0 {
+		maxResponseBytes = 1024 * 1024
+	}
+	return &Client{
+		baseURL:          baseURL,
+		httpClient:       httpClient,
+		maxResponseBytes: maxResponseBytes,
+	}
+}
+
 func decodeControlDesiredState(data []byte) (*ControlDesiredState, error) {
 	raw, err := decodeStrictObject(data)
 	if err != nil {
 		return nil, newError(CodeControlProtocol, "control desired-state JSON is invalid", err, false)
 	}
+
+	// Safely parse the minimum immutable binding needed for rejection / dispatch.
+	schemaRaw, hasSchema := raw["schemaVersion"]
+	if !hasSchema {
+		return nil, newError(CodeControlProtocol, "control desired-state missing schemaVersion", nil, false)
+	}
+	genRaw, hasGen := raw["desiredGeneration"]
+	if !hasGen {
+		return nil, newError(CodeControlProtocol, "control desired-state missing desiredGeneration", nil, false)
+	}
+	ckRaw, hasCk := raw["desiredChecksum"]
+	if !hasCk {
+		return nil, newError(CodeControlProtocol, "control desired-state missing desiredChecksum", nil, false)
+	}
+
+	schemaVersion, err := parseExactUint(schemaRaw, 1, maxSafeControlGeneration)
+	if err != nil {
+		return nil, newError(CodeControlProtocol, "schemaVersion invalid", err, false)
+	}
+	desiredGen, err := parseExactUint(genRaw, 1, maxSafeControlGeneration)
+	if err != nil {
+		return nil, newError(CodeControlProtocol, "desiredGeneration invalid", err, false)
+	}
+	desiredChecksum, err := parseLowerHex64(ckRaw)
+	if err != nil {
+		return nil, newError(CodeControlProtocol, "desiredChecksum invalid", err, false)
+	}
+
+	// For unsupported schemaVersion (!= 1), return the safe binding without validating
+	// v1 fields or applying configuration, so reconciler can send SENSOR_CONTROL_UNSUPPORTED_SCHEMA.
+	// Additional/unknown top-level fields in schemaVersion != 1 must not be rejected here.
+	if schemaVersion != controlSchemaVersionV1 {
+		return &ControlDesiredState{
+			SchemaVersion:     int(schemaVersion),
+			DesiredGeneration: desiredGen,
+			DesiredChecksum:   desiredChecksum,
+		}, nil
+	}
+
+	// For schemaVersion == 1, enforce all strict v1 rules: top-level allowlist, required fields, configuration.
 	allowed := map[string]struct{}{
 		"schemaVersion": {}, "desiredGeneration": {}, "desiredChecksum": {}, "configuration": {},
 		"appliedGeneration": {}, "appliedChecksum": {}, "observedGeneration": {}, "observedChecksum": {},
@@ -319,19 +372,6 @@ func decodeControlDesiredState(data []byte) (*ControlDesiredState, error) {
 		if _, ok := raw[req]; !ok {
 			return nil, newError(CodeControlProtocol, "control desired-state missing required field", nil, false)
 		}
-	}
-
-	schemaVersion, err := parseExactUint(raw["schemaVersion"], 1, 1)
-	if err != nil {
-		return nil, newError(CodeControlProtocol, "schemaVersion invalid", err, false)
-	}
-	desiredGen, err := parseExactUint(raw["desiredGeneration"], 1, maxSafeControlGeneration)
-	if err != nil {
-		return nil, newError(CodeControlProtocol, "desiredGeneration invalid", err, false)
-	}
-	desiredChecksum, err := parseLowerHex64(raw["desiredChecksum"])
-	if err != nil {
-		return nil, newError(CodeControlProtocol, "desiredChecksum invalid", err, false)
 	}
 	cfg, err := parseDesiredConfiguration(raw["configuration"])
 	if err != nil {
