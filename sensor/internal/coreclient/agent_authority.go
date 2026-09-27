@@ -127,10 +127,11 @@ func (c *Client) ResolveAgentAuthority(ctx context.Context, fingerprintSHA256 st
 		}
 	}
 	if strings.TrimSpace(view.AgentID) == "" || strings.TrimSpace(view.TenantID) == "" ||
-		strings.TrimSpace(view.SensorID) == "" || view.AssignmentGeneration < 1 {
+		strings.TrimSpace(view.SensorID) == "" || view.AssignmentGeneration < 1 ||
+		uint64(view.AssignmentGeneration) > MaxSafeSequence {
 		return AgentAuthorityView{}, &AgentAuthorityError{
 			Code:       string(CodeProtocol),
-			Message:    "Core agent authority ACCEPTED body is incomplete",
+			Message:    "Core agent authority ACCEPTED body is incomplete or assignment generation out of range",
 			HTTPStatus: resp.StatusCode,
 			Transient:  false,
 		}

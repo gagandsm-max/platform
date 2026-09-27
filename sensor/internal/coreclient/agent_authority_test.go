@@ -102,3 +102,47 @@ func TestResolveAgentAuthorityDefinitiveVsTransient(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveAgentAuthorityRejectsGenerationAboveMaxSafe(t *testing.T) {
+	pki := makeTestPKI(t)
+	server := startMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":                "ACCEPTED",
+			"agent_id":              "agent-01",
+			"tenant_id":             "11111111-1111-1111-1111-111111111111",
+			"site_id":               "22222222-2222-2222-2222-222222222222",
+			"sensor_id":             "sensor-infra-01",
+			"assignment_generation": MaxSafeSequence + 1,
+			"resolved_at":           time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	}))
+	client := newTestClient(t, server.URL, pki, 4096)
+	_, err := client.ResolveAgentAuthority(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+	var authErr *AgentAuthorityError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("expected AgentAuthorityError, got %v", err)
+	}
+	if authErr.Transient {
+		t.Fatal("out-of-range generation must be definitive")
+	}
+}
+
+func TestResolveAgentAuthorityRejectsGenerationZero(t *testing.T) {
+	pki := makeTestPKI(t)
+	server := startMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":                "ACCEPTED",
+			"agent_id":              "agent-01",
+			"tenant_id":             "11111111-1111-1111-1111-111111111111",
+			"site_id":               "22222222-2222-2222-2222-222222222222",
+			"sensor_id":             "sensor-infra-01",
+			"assignment_generation": 0,
+			"resolved_at":           time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	}))
+	client := newTestClient(t, server.URL, pki, 4096)
+	_, err := client.ResolveAgentAuthority(context.Background(), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+	if err == nil {
+		t.Fatal("expected rejection for generation 0")
+	}
+}

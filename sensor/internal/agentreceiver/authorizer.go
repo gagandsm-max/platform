@@ -126,10 +126,11 @@ func (a *CoreBackedAuthorizer) Authorize(ctx context.Context, authAgent Authenti
 	agentID := strings.TrimSpace(view.AgentID)
 	tenantID := strings.TrimSpace(view.TenantID)
 	assignedSensor := strings.TrimSpace(view.SensorID)
-	if agentID == "" || tenantID == "" || assignedSensor == "" || view.AssignmentGeneration < 1 {
+	if agentID == "" || tenantID == "" || assignedSensor == "" ||
+		view.AssignmentGeneration < 1 || view.AssignmentGeneration > MAX_SAFE_SEQUENCE {
 		return AssignmentContext{}, &AuthorizerError{
 			Code:      ErrCodeAgentNotAssigned,
-			Message:   "Core authority response is incomplete",
+			Message:   "Core authority response is incomplete or assignment generation out of range",
 			Transient: false,
 		}
 	}

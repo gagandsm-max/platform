@@ -10,6 +10,7 @@ type MetricsSnapshot struct {
 	AssignmentDenials          int64  `json:"assignment_denials"`
 	AuthorityDefinitiveDenials int64  `json:"authority_definitive_denials"`
 	AuthorityTransientErrors   int64  `json:"authority_transient_errors"`
+	AssignmentGenerationStale  int64  `json:"assignment_generation_stale"`
 	MalformedBatches           int64  `json:"malformed_batches"`
 	ChecksumFailures           int64  `json:"checksum_failures"`
 	ReplayExactHits            int64  `json:"replay_exact_hits"`
@@ -28,6 +29,7 @@ type ReceiverMetrics struct {
 	AssignmentDenials          atomic.Int64
 	AuthorityDefinitiveDenials atomic.Int64
 	AuthorityTransientErrors   atomic.Int64
+	AssignmentGenerationStale  atomic.Int64
 	MalformedBatches           atomic.Int64
 	ChecksumFailures           atomic.Int64
 	ReplayExactHits            atomic.Int64
@@ -49,6 +51,7 @@ func (m *ReceiverMetrics) Snapshot() MetricsSnapshot {
 		AssignmentDenials:          m.AssignmentDenials.Load(),
 		AuthorityDefinitiveDenials: m.AuthorityDefinitiveDenials.Load(),
 		AuthorityTransientErrors:   m.AuthorityTransientErrors.Load(),
+		AssignmentGenerationStale:  m.AssignmentGenerationStale.Load(),
 		MalformedBatches:           m.MalformedBatches.Load(),
 		ChecksumFailures:           m.ChecksumFailures.Load(),
 		ReplayExactHits:            m.ReplayExactHits.Load(),
@@ -66,6 +69,7 @@ func (m *ReceiverMetrics) Reset() {
 	m.AssignmentDenials.Store(0)
 	m.AuthorityDefinitiveDenials.Store(0)
 	m.AuthorityTransientErrors.Store(0)
+	m.AssignmentGenerationStale.Store(0)
 	m.MalformedBatches.Store(0)
 	m.ChecksumFailures.Store(0)
 	m.ReplayExactHits.Store(0)

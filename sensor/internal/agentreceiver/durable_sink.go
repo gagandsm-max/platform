@@ -67,20 +67,20 @@ type streamStateEntry struct {
 }
 
 type durableBatchPayload struct {
-	Version         int              `json:"version,omitempty"`
-	TenantID        string           `json:"tenantId"`
-	AgentID         string           `json:"agentId"`
-	AgentStreamID   string           `json:"agentStreamId,omitempty"`
-	SensorID        string           `json:"sensorId"`
-	Generation      int64            `json:"assignmentGeneration"`
-	FirstSequence   uint64           `json:"firstSequence"`
-	LastSequence    uint64           `json:"lastSequence"`
-	RecordIDs       []string         `json:"recordIds"`
-	BatchChecksum   string           `json:"batchChecksum"`
-	BatchID         string           `json:"batchId"`
-	CorrelationID   string           `json:"correlationId"`
-	Timestamp       time.Time        `json:"timestamp"`
-	Envelope        DeliveryEnvelope `json:"envelope"`
+	Version       int              `json:"version,omitempty"`
+	TenantID      string           `json:"tenantId"`
+	AgentID       string           `json:"agentId"`
+	AgentStreamID string           `json:"agentStreamId,omitempty"`
+	SensorID      string           `json:"sensorId"`
+	Generation    int64            `json:"assignmentGeneration"`
+	FirstSequence uint64           `json:"firstSequence"`
+	LastSequence  uint64           `json:"lastSequence"`
+	RecordIDs     []string         `json:"recordIds"`
+	BatchChecksum string           `json:"batchChecksum"`
+	BatchID       string           `json:"batchId"`
+	CorrelationID string           `json:"correlationId"`
+	Timestamp     time.Time        `json:"timestamp"`
+	Envelope      DeliveryEnvelope `json:"envelope"`
 }
 
 // SpoolAcceptanceSink durably accepts Agent batches into a dedicated DiskSpool
@@ -228,7 +228,18 @@ func (s *SpoolAcceptanceSink) acceptModernV2Locked(env DeliveryEnvelope) (Accept
 	}
 	env.AgentStreamID = streamID
 
+	if err := validateLiveAssignmentGeneration(env.AssignmentGeneration); err != nil {
+		return AcceptanceResult{}, err
+	}
+
 	owner := s.getOwnerLocked(env.TenantID, env.AgentID)
+	if owner != nil {
+		if err := s.observeAssignmentGenerationLocked(env, owner); err != nil {
+			return AcceptanceResult{}, err
+		}
+		owner = s.getOwnerLocked(env.TenantID, env.AgentID)
+	}
+
 	if owner != nil && owner.ActiveAgentStreamID == streamID {
 		streamKey := modernSourceRangeStreamKey(env.TenantID, env.AgentID, streamID)
 		state := s.getOrCreateStreamStateLocked(env.TenantID, env.AgentID, streamID)
