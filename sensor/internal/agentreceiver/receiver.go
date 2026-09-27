@@ -97,7 +97,7 @@ func NewReceiver(cfg Config, identity AgentIdentityVerifier, authorizer Assignme
 	return &Receiver{cfg: cfg, identity: identity, authorizer: authorizer, sink: sink, replay: NewReplayTracker(5000), metrics: NewReceiverMetrics(), logger: logger.With("component", "agentreceiver", "sensor_id", cfg.SensorID, "role", string(cfg.SensorRole))}, nil
 }
 
-func (rcv *Receiver) Metrics() *ReceiverMetrics { return rcv.metrics }
+func (rcv *Receiver) Metrics() *ReceiverMetrics     { return rcv.metrics }
 func (rcv *Receiver) ReplayTracker() *ReplayTracker { return rcv.replay }
 
 func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -279,6 +279,12 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rcv.writeJSONError(w, http.StatusConflict, ErrCodeStreamStaleOrFenced, "Agent stream is stale or fenced")
 			return
 		}
+		if IsAssignmentGenerationStale(err) {
+			rcv.metrics.AssignmentGenerationStale.Add(1)
+			rcv.logger.Warn("Agent assignment generation stale", append(logAttrs, "reason_class", "assignment_generation_stale", "error", err)...)
+			rcv.writeJSONError(w, http.StatusConflict, ErrCodeAssignmentGenerationStale, "Agent assignment generation is stale relative to durable local fence")
+			return
+		}
 		if IsLegacyStreamClosed(err) {
 			rcv.metrics.ReplayConflicts.Add(1)
 			rcv.logger.Warn("Legacy agent stream closed", append(logAttrs, "reason_class", "legacy_stream_closed", "error", err)...)
@@ -330,8 +336,8 @@ func validateAssignmentContext(assignCtx AssignmentContext, authAgent Authentica
 	if !assignCtx.Assigned {
 		return errors.New("assignment not authorized")
 	}
-	if assignCtx.Generation < 1 {
-		return errors.New("assignment generation must be >= 1")
+	if assignCtx.Generation < 1 || assignCtx.Generation > MAX_SAFE_SEQUENCE {
+		return errors.New("assignment generation must be in 1..MAX_SAFE_SEQUENCE")
 	}
 	if strings.TrimSpace(assignCtx.TenantID) == "" {
 		return errors.New("assignment tenant is empty")

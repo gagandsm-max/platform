@@ -108,6 +108,10 @@ func validateOwnerRecord(owner LineageOwnerRecord) error {
 	if owner.ActivatedAt.IsZero() {
 		return fmt.Errorf("%s: lineage owner activatedAt must be set", ErrCodeStreamOwnerCorrupt)
 	}
+	// generation 0 is transitional/uninitialized (pre-fence durable state). Negative or >MAX_SAFE is corrupt.
+	if owner.ActivatedUnderAssignmentGeneration < 0 || owner.ActivatedUnderAssignmentGeneration > MAX_SAFE_SEQUENCE {
+		return fmt.Errorf("%s: lineage owner activatedUnderAssignmentGeneration out of range", ErrCodeStreamOwnerCorrupt)
+	}
 	if err := validateRetiredAgentStreamIDs(owner.ActiveAgentStreamID, owner.RetiredAgentStreamIDs); err != nil {
 		return err
 	}
@@ -252,4 +256,73 @@ func (s *SpoolAcceptanceSink) ReconcileRequiredForTest() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.reconcileRequired
+}
+
+// OwnerAssignmentGenerationForTest returns durable ActivatedUnderAssignmentGeneration, or -1 if no owner.
+func (s *SpoolAcceptanceSink) OwnerAssignmentGenerationForTest(tenantID, agentID string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	owner := s.getOwnerLocked(tenantID, agentID)
+	if owner == nil {
+		return -1
+	}
+	return owner.ActivatedUnderAssignmentGeneration
+}
+
+// AssignmentGenerationStaleError rejects a delivery whose Core-resolved assignment generation
+// is below the durable local fence. It must not mutate spool/index/watermark/owner state.
+type AssignmentGenerationStaleError struct {
+	TenantID          string
+	AgentID           string
+	CurrentGeneration int64
+	DurableGeneration int64
+}
+
+func (e *AssignmentGenerationStaleError) Error() string {
+	return ErrCodeAssignmentGenerationStale + ": assignment generation is stale relative to durable local fence"
+}
+
+// IsAssignmentGenerationStale reports whether err is a typed local generation-fence rejection.
+func IsAssignmentGenerationStale(err error) bool {
+	var target *AssignmentGenerationStaleError
+	return errors.As(err, &target)
+}
+
+func validateLiveAssignmentGeneration(generation int64) error {
+	if generation < 1 || generation > MAX_SAFE_SEQUENCE {
+		return fmt.Errorf("%s: live assignment generation out of range", ErrCodeInvalidField)
+	}
+	return nil
+}
+
+// observeAssignmentGenerationLocked applies the BUILD-004 modern-v2 monotonic fence.
+// It must run before stream-specific acceptance/rejection so a newer Core generation is
+// remembered even when the particular stream is later rejected as retired/stale.
+func (s *SpoolAcceptanceSink) observeAssignmentGenerationLocked(env DeliveryEnvelope, owner *LineageOwnerRecord) error {
+	if owner == nil {
+		return nil
+	}
+	current := env.AssignmentGeneration
+	ownerGen := owner.ActivatedUnderAssignmentGeneration
+	if ownerGen < 0 || ownerGen > MAX_SAFE_SEQUENCE {
+		s.reconcileRequired = true
+		return fmt.Errorf("%s: durable owner assignment generation corrupt", ErrCodeStreamOwnerCorrupt)
+	}
+	if ownerGen > 0 && current < ownerGen {
+		return &AssignmentGenerationStaleError{
+			TenantID:          env.TenantID,
+			AgentID:           env.AgentID,
+			CurrentGeneration: current,
+			DurableGeneration: ownerGen,
+		}
+	}
+	if current > ownerGen {
+		advanced := *owner
+		advanced.ActivatedUnderAssignmentGeneration = current
+		// Preserve ActiveAgentStreamID, RetiredAgentStreamIDs, ActivatedAt, PreviousAgentStreamID.
+		if err := s.publishOwnerLocked(advanced); err != nil {
+			return err
+		}
+	}
+	return nil
 }

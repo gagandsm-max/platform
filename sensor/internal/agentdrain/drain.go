@@ -101,17 +101,18 @@ type Spool interface {
 }
 
 type Metrics struct {
-	PendingRecords   atomic.Int64
-	PendingBytes     atomic.Int64
-	OldestAgeSeconds atomic.Int64
-	Attempts         atomic.Uint64
-	Successes        atomic.Uint64
-	FailuresTransient atomic.Uint64
-	FailuresPermanent atomic.Uint64
-	DurableAcks      atomic.Uint64
-	PoisonCount      atomic.Uint64
-	Backpressure     atomic.Uint64
-	LastSuccessUnix  atomic.Int64
+	PendingRecords       atomic.Int64
+	PendingBytes         atomic.Int64
+	OldestAgeSeconds     atomic.Int64
+	Attempts             atomic.Uint64
+	Successes            atomic.Uint64
+	FailuresTransient    atomic.Uint64
+	FailuresPermanent    atomic.Uint64
+	DurableAcks          atomic.Uint64
+	PoisonCount          atomic.Uint64
+	AuthorityPoisonCount atomic.Uint64
+	Backpressure         atomic.Uint64
+	LastSuccessUnix      atomic.Int64
 }
 
 func (m *Metrics) LastSuccessAge() time.Duration {
@@ -123,22 +124,22 @@ func (m *Metrics) LastSuccessAge() time.Duration {
 }
 
 type Drain struct {
-	cfg      Config
-	spool    Spool
+	cfg       Config
+	spool     Spool
 	transport Transport
-	metrics  *Metrics
-	logger   *slog.Logger
+	metrics   *Metrics
+	logger    *slog.Logger
 	poisonDir string
 	syncDir   func(string) error
 
-	mu          sync.Mutex
-	cancel      context.CancelFunc
-	started     bool
-	done        chan struct{}
-	startOnce   sync.Once
-	stopOnce    sync.Once
-	wait        func(context.Context, time.Duration) error
-	jitter      func(time.Duration, float64) time.Duration
+	mu        sync.Mutex
+	cancel    context.CancelFunc
+	started   bool
+	done      chan struct{}
+	startOnce sync.Once
+	stopOnce  sync.Once
+	wait      func(context.Context, time.Duration) error
+	jitter    func(time.Duration, float64) time.Duration
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
@@ -346,7 +347,7 @@ func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, 
 		acceptedAt := payload.Timestamp.UTC().Format(time.RFC3339Nano)
 		ingress := coreclient.AgentIngressRecord{
 			SensorIngressSequence: rec.Sequence,
-			SensorIngressRecordID:  fmt.Sprintf("agent-spool-%d", rec.Sequence),
+			SensorIngressRecordID: fmt.Sprintf("agent-spool-%d", rec.Sequence),
 			TenantID:              payload.TenantID,
 			AgentID:               payload.AgentID,
 			AcceptingSensorID:     payload.SensorID,
@@ -426,12 +427,12 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 	name := fmt.Sprintf("%020d-%s.json", head.Sequence, sanitizeReason(reason))
 	path := filepath.Join(d.poisonDir, name)
 	meta := map[string]any{
-		"reason":        reason,
-		"sequence":      head.Sequence,
-		"type":          head.Type,
-		"parkedAt":      time.Now().UTC().Format(time.RFC3339Nano),
-		"cause":         fmt.Sprintf("%v", cause),
-		"payloadBytes":  len(head.Payload),
+		"reason":       reason,
+		"sequence":     head.Sequence,
+		"type":         head.Type,
+		"parkedAt":     time.Now().UTC().Format(time.RFC3339Nano),
+		"cause":        fmt.Sprintf("%v", cause),
+		"payloadBytes": len(head.Payload),
 	}
 	metaBytes, _ := json.Marshal(meta)
 	tmp, err := os.CreateTemp(d.poisonDir, ".poison-*.tmp")
@@ -480,6 +481,9 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 		return codeErr(CodeSpool, "failed removing parked record from spool", err, false)
 	}
 	d.metrics.PoisonCount.Add(1)
+	if isAuthorityPoisonCode(reason) {
+		d.metrics.AuthorityPoisonCount.Add(1)
+	}
 	d.logger.Warn("Parked terminal agent-ingress record",
 		"reason", reason, "sequence", head.Sequence, "poison_path", path)
 	return nil
@@ -524,6 +528,7 @@ func isTerminalCoreError(err error) bool {
 	// intrinsically un-ingestable durable payloads. Default for unknown/application/
 	// authority/assignment/state Core errors is retain spool and fail closed.
 	// HTTP status alone must never authorize AcknowledgeThrough.
+	// BUILD-004 Slice 4: add only the four revoked-temporal authority codes below.
 	return coreclient.IsCoreAPICode(err, "ERR_MALFORMED_JSON") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD_PAYLOAD") ||
@@ -532,7 +537,27 @@ func isTerminalCoreError(err error) bool {
 		coreclient.IsCoreAPICode(err, "ERR_AGENT_HOST_ID_REQUIRED") ||
 		coreclient.IsCoreAPICode(err, "ERR_RECORD_TOO_LARGE") ||
 		coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") ||
-		coreclient.IsCoreAPICode(err, "ERR_REQUEST_TOO_LARGE")
+		coreclient.IsCoreAPICode(err, "ERR_REQUEST_TOO_LARGE") ||
+		isAuthorityPoisonError(err)
+}
+
+func isAuthorityPoisonError(err error) bool {
+	return coreclient.IsCoreAPICode(err, "ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED") ||
+		coreclient.IsCoreAPICode(err, "ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID") ||
+		coreclient.IsCoreAPICode(err, "ERR_REVOKED_ASSIGNMENT_ACCEPTED_BEFORE_ACTIVATION") ||
+		coreclient.IsCoreAPICode(err, "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION")
+}
+
+func isAuthorityPoisonCode(code string) bool {
+	switch code {
+	case "ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED",
+		"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID",
+		"ERR_REVOKED_ASSIGNMENT_ACCEPTED_BEFORE_ACTIVATION",
+		"ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION":
+		return true
+	default:
+		return false
+	}
 }
 
 func terminalCode(err error) string {

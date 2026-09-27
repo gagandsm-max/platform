@@ -58,6 +58,7 @@ const (
 	ErrCodeStreamStaleOrFenced           = "ERR_STREAM_STALE_OR_FENCED"
 	ErrCodeLegacyStreamClosed            = "ERR_LEGACY_STREAM_CLOSED"
 	ErrCodeStreamOwnerCorrupt            = "ERR_STREAM_OWNER_CORRUPT"
+	ErrCodeAssignmentGenerationStale     = "ERR_AGENT_ASSIGNMENT_GENERATION_STALE"
 )
 
 // DeliveryRecord represents an individual spooled record inside an agent delivery batch.
