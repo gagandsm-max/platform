@@ -364,6 +364,38 @@ Reference integrity is fail-closed. Shipped System definitions fail CI validatio
 
 Current `TEAM` scope values in presentation schemas are not sufficient ownership authority. A Team-owned artifact requires an authoritative tenant-scoped Team binding from the future Identity/Teams/RBAC reconciliation; authorization is always re-evaluated server-side.
 
+## 8.2 Service assurance and reporting contract supplement — 2026-09-27
+
+Logical API/data contracts are versioned and tenant scoped:
+
+```text
+ServiceTimeProfile
+ServiceAssurancePolicy
+ServiceAssurancePolicyVersion
+ServiceAssuranceSimulation
+ServiceAssuranceMeasurementPeriod
+ServiceAssuranceLedgerEntry
+ServiceAssuranceEvidenceRef
+ReportDefinition
+ReportObligation
+ReportRun
+ReportArtifact
+ReportAttestation
+```
+
+`ServiceAssurancePolicy.type` supports at least `SLA`, `OLA`, `PROVIDER_SLA`, `SLO`. Policies reference governed scope, measurement basis, target/expected, optional minimum, service-time/calendar, formula version, inclusion/exclusion, degraded treatment, ownership/provider/dependency context and effective version.
+
+A measurement period snapshots policy/formula/calendar/scope versions and preserves raw, adjusted and final result plus measurement quality/completeness. Finalized periods are immutable; restatement creates a new linked revision rather than overwriting prior truth.
+
+Evidence references carry source, time range, quality/provenance and applicable incident/ticket/entity/service references. Monitoring-path degradation is distinguishable from monitored-service degradation.
+
+Simulation endpoints are read-only and return candidate result/delta/explanation against a specified historical evidence window; they cannot activate policy or modify finalized periods.
+
+Report artifacts use an explicit format enum restricted to `PDF` and `CSV`. JSON is an API payload encoding, not a report artifact format. XLSX/PPTX are not report artifact formats.
+
+Report obligation/run/attestation APIs preserve schedule/due rule, timezone/calendar, recipients, authorization context, delivery state, artifact checksum/reference and review/dispute history. Report execution always re-evaluates current tenant/resource authorization.
+
+Formula contracts are typed and bounded; arbitrary SQL/Python/JavaScript/eval text is not accepted as executable report/service-assurance logic.
 ## 9. Region, Sensor Pool and enrollment-control contract supplement — v3.2.2
 
 Logical control resources are additive to the existing tenant/site/Sensor/Agent model:
