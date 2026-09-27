@@ -2125,3 +2125,36 @@ UTC instant (authoritative)
 ```
 
 Underlying stored instant remains UTC. Display flow must not mutate telemetry, alerts, SLA/maintenance schedules or other operational policy timezones.
+
+## Service Assurance and reporting dataflows
+
+### DF-SA-001 — Evidence to SLA/OLA result
+1. Qualified telemetry/service/incident/integration evidence enters the analytical evidence model with tenant, event time, provenance and quality.
+2. Policy resolver selects the effective SLA/OLA/Provider-SLA version, Service Time Profile, scope and formula.
+3. Scope resolver evaluates the time-consistent service/site/team/provider population.
+4. Measurement engine classifies intervals/facts as available, degraded, qualified-down, excluded, unknown or insufficient-evidence according to policy.
+5. Formula engine computes raw result and measurement quality.
+6. Governed exclusions/adjustments produce adjusted result without deleting raw evidence.
+7. Period state advances through OPEN/PRELIMINARY/REVIEW/FINAL; later approved corrections create RESTATED version.
+8. UI/report APIs expose score and measurement quality separately.
+
+### DF-SA-002 — Policy simulation
+1. Authorized user clones/edits a draft policy.
+2. Platform validates syntax, scope, inputs and resource budget.
+3. Historical evidence is replayed against the draft without changing production policy/results.
+4. Platform compares historical current-policy versus proposed-policy results, changed classifications and exclusions.
+5. Activation requires normal RBAC/audit and creates a new policy version/effective date.
+
+### DF-SA-003 — Report obligation
+1. Business-calendar scheduler determines obligation due time.
+2. Reporting worker resolves frozen period/result versions and required evidence.
+3. PDF and/or CSV artifact is generated under bounded query/concurrency controls.
+4. Artifact is delivered/published according to configured channel.
+5. Run advances GENERATED -> DELIVERED -> UNDER_REVIEW -> ACCEPTED|REJECTED|DISPUTED as applicable.
+6. Every transition is audited; rejected/restated runs preserve prior artifacts and lineage.
+
+### DF-SA-004 — Network/path uncertainty
+1. A measurement vantage point loses reachability or telemetry quality degrades.
+2. Qualification evaluates alternate protocol/vantage/topology evidence where configured.
+3. If the service state is unsupported, measurement is UNKNOWN/PARTIAL/INSUFFICIENT_EVIDENCE rather than automatically DOWN.
+4. Once evidence returns, late/out-of-order observations are reconciled according to the immutable period/version rules.
