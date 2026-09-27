@@ -250,9 +250,23 @@ Owns address spaces, prefixes, VRF/VLAN context, address assignments/reservation
 
 Owns ITSM/notification connector definitions, field mappings, outbound queues, retries, idempotency, health and bidirectional state synchronization.
 
-### 4.18 Reporting/SLA Service
+### 4.18 Reporting / Service Assurance Service
 
-Owns report definitions, schedules, execution, formula evaluation, document rendering, SLA policy calculation and long-term aggregates.
+Owns report definitions, obligations, schedules, execution, bounded formula evaluation, document rendering, SLA/OLA/Provider-SLA/SLO policy calculation, measurement-period close/restatement and long-term aggregates.
+
+The service owns logical contracts for:
+- versioned Service Assurance policies and editable out-of-box template catalogue;
+- reusable service-time profiles/calendars, shifts and effective ownership intervals;
+- safe typed formula evaluation; arbitrary customer SQL/Python/JavaScript/eval is prohibited;
+- target/expected plus minimum thresholds, measurement basis/window, inclusion/exclusion and degraded-condition rules;
+- policy simulation/backtest against retained historical evidence before activation;
+- immutable scope snapshots and reproducible measurement ledgers;
+- explicit measurement-quality/completeness and conflict/insufficient-evidence state;
+- OLA dependency chains, provider relationships and multi-vantage measurement;
+- report obligations, business-day-aware due rules, generated runs, review/attestation, delivery and audit;
+- PDF/CSV-only report artifacts. API data access is a separate interface, not a report format.
+
+Heavy report execution uses bounded worker/concurrency/query budgets and yields to ingestion, current-state, alert and incident workloads.
 
 ### 4.19 Audit Service
 
