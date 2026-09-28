@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"platform/sensor/internal/packsync"
+	"platform/sensor/internal/scheduler"
 	"platform/sensor/internal/spool"
 )
 
@@ -18,6 +19,24 @@ type fakePackStatusProvider struct {
 
 func (f *fakePackStatusProvider) Snapshot() packsync.Status {
 	return f.status
+}
+
+type fakeSchedulerStatusProvider struct {
+	snap scheduler.Snapshot
+}
+
+func (f *fakeSchedulerStatusProvider) Snapshot() scheduler.Snapshot {
+	return f.snap
+}
+
+func runningScheduler() *fakeSchedulerStatusProvider {
+	return &fakeSchedulerStatusProvider{
+		snap: scheduler.Snapshot{
+			State:             scheduler.StateRunning,
+			ConfiguredWorkers: 2,
+			QueueCapacity:     8,
+		},
+	}
 }
 
 func newTestHealth(t *testing.T, syncer packSyncStatusProvider) *HealthServer {
@@ -30,6 +49,7 @@ func newTestHealth(t *testing.T, syncer packSyncStatusProvider) *HealthServer {
 	if syncer != nil {
 		hs.SetPackSync(syncer)
 	}
+	hs.SetScheduler(runningScheduler())
 	return hs
 }
 
@@ -47,7 +67,7 @@ func TestHealthAddressControlsBind(t *testing.T) {
 func TestLivezOKWhenPackTrustMissing(t *testing.T) {
 	hs := newTestHealth(t, &fakePackStatusProvider{
 		status: packsync.Status{
-			TrustedApplied:          false,
+			TrustedApplied:           false,
 			CoreAuthorityEstablished: false,
 		},
 	})
@@ -69,7 +89,7 @@ func TestLivezOKWhenPackTrustMissing(t *testing.T) {
 func TestReadyzFailClosedWhenPackTrustMissing(t *testing.T) {
 	hs := newTestHealth(t, &fakePackStatusProvider{
 		status: packsync.Status{
-			TrustedApplied:          false,
+			TrustedApplied:           false,
 			CoreAuthorityEstablished: false,
 		},
 	})
@@ -200,7 +220,7 @@ func TestReadyzAuthDegradedWithTrustedStaysReady(t *testing.T) {
 func TestReadyzRecoversAfterTrustedStateRestored(t *testing.T) {
 	provider := &fakePackStatusProvider{
 		status: packsync.Status{
-			TrustedApplied:          false,
+			TrustedApplied:           false,
 			CoreAuthorityEstablished: false,
 		},
 	}
@@ -238,7 +258,7 @@ func TestReadyzRecoversAfterTrustedStateRestored(t *testing.T) {
 func TestHealthAlsoFailClosedWhenPackTrustMissing(t *testing.T) {
 	hs := newTestHealth(t, &fakePackStatusProvider{
 		status: packsync.Status{
-			TrustedApplied:          false,
+			TrustedApplied:           false,
 			CoreAuthorityEstablished: false,
 		},
 	})
@@ -254,5 +274,133 @@ func TestHealthServerRealSyncerCompatibility(t *testing.T) {
 	hs := newTestHealth(t, syncer)
 	if hs.packSync != nil {
 		t.Fatal("expected nil packSync when passing nil syncer")
+	}
+}
+
+func TestHealthReadyWithRunningScheduler(t *testing.T) {
+	hs := newTestHealth(t, &fakePackStatusProvider{
+		status: packsync.Status{
+			TrustedApplied:           true,
+			CoreAuthorityEstablished: true,
+		},
+	})
+
+	for _, path := range []string{"/health", "/readyz"} {
+		rr := httptest.NewRecorder()
+		hs.handleHealth(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rr.Code, rr.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		sched, ok := body["scheduler"].(map[string]any)
+		if !ok || sched == nil {
+			t.Fatalf("%s missing scheduler payload: %v", path, body)
+		}
+		for _, key := range []string{
+			"state", "configured_workers", "active_workers", "queue_depth", "queue_capacity",
+			"tracked_assignments", "tracked_jobs", "highest_observed_fencing_version",
+			"highest_accepted_fencing_version", "submitted", "accepted", "completed", "failed",
+			"retries", "rejected_queue_full", "rejected_stale_lease", "rejected_tracking_capacity",
+			"expired", "cancelled", "deadline_exceeded",
+		} {
+			if _, present := sched[key]; !present {
+				t.Fatalf("%s missing scheduler field %q: %v", path, key, sched)
+			}
+		}
+		raw := rr.Body.String()
+		for _, forbidden := range []string{"password", "token", "secret", "private_key", "tenant_id", "job_id", "assignment_key", "payload"} {
+			if strings.Contains(strings.ToLower(raw), forbidden) {
+				t.Fatalf("health payload must not expose %q", forbidden)
+			}
+		}
+	}
+}
+
+func TestHealthFailClosedWhenSchedulerProviderAbsent(t *testing.T) {
+	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := NewHealthServer(":0", disk, slog.Default())
+	hs.SetPackSync(&fakePackStatusProvider{
+		status: packsync.Status{TrustedApplied: true, CoreAuthorityEstablished: true},
+	})
+
+	for _, path := range []string{"/health", "/readyz"} {
+		rr := httptest.NewRecorder()
+		hs.handleHealth(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s expected 503, got %d", path, rr.Code)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body["status"] != "SCHEDULER_UNAVAILABLE" {
+			t.Fatalf("%s status=%v", path, body["status"])
+		}
+	}
+
+	rrLive := httptest.NewRecorder()
+	hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
+	if rrLive.Code != http.StatusOK {
+		t.Fatalf("livez must stay 200: %d", rrLive.Code)
+	}
+}
+
+func TestHealthFailClosedWhenSchedulerNotRunning(t *testing.T) {
+	for _, state := range []scheduler.State{scheduler.StateShuttingDown, scheduler.StateStopped} {
+		hs := newTestHealth(t, &fakePackStatusProvider{
+			status: packsync.Status{TrustedApplied: true, CoreAuthorityEstablished: true},
+		})
+		hs.SetScheduler(&fakeSchedulerStatusProvider{snap: scheduler.Snapshot{State: state}})
+
+		for _, path := range []string{"/health", "/readyz"} {
+			rr := httptest.NewRecorder()
+			hs.handleHealth(rr, httptest.NewRequest(http.MethodGet, path, nil))
+			if rr.Code != http.StatusServiceUnavailable {
+				t.Fatalf("%s state=%s expected 503, got %d", path, state, rr.Code)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body["status"] != "SCHEDULER_NOT_RUNNING" {
+				t.Fatalf("%s state=%s status=%v", path, state, body["status"])
+			}
+		}
+
+		rrLive := httptest.NewRecorder()
+		hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
+		if rrLive.Code != http.StatusOK {
+			t.Fatalf("livez must stay 200 for state %s: %d", state, rrLive.Code)
+		}
+	}
+}
+
+func TestSchedulerStatusDoesNotOverwriteHigherPriorityFailures(t *testing.T) {
+	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := NewHealthServer(":0", disk, slog.Default())
+	hs.SetPackSync(&fakePackStatusProvider{
+		status: packsync.Status{TrustedApplied: false, CoreAuthorityEstablished: false},
+	})
+	// Scheduler absent must not replace pack trust failure status.
+	rr := httptest.NewRecorder()
+	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "PACK_TRUST_NOT_ESTABLISHED" {
+		t.Fatalf("expected pack precedence, got %v", body["status"])
 	}
 }
