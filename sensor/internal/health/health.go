@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"platform/sensor/internal/packsync"
+	"platform/sensor/internal/scheduler"
 	"platform/sensor/internal/spool"
 )
 
@@ -18,11 +19,16 @@ type packSyncStatusProvider interface {
 	Snapshot() packsync.Status
 }
 
+type schedulerStatusProvider interface {
+	Snapshot() scheduler.Snapshot
+}
+
 type HealthServer struct {
 	server     *http.Server
 	spool      *spool.DiskSpool
 	agentSpool *spool.DiskSpool
 	packSync   packSyncStatusProvider
+	scheduler  schedulerStatusProvider
 	mu         sync.RWMutex
 	logger     *slog.Logger
 }
@@ -77,6 +83,14 @@ func (hs *HealthServer) SetPackSync(syncer packSyncStatusProvider) {
 	hs.packSync = syncer
 }
 
+// SetScheduler attaches the production scheduler status provider used by
+// /health and /readyz. Nil clears the provider.
+func (hs *HealthServer) SetScheduler(provider schedulerStatusProvider) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	hs.scheduler = provider
+}
+
 func (hs *HealthServer) handleLive(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -107,6 +121,7 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	hs.mu.RLock()
 	agentSpool := hs.agentSpool
 	packSync := hs.packSync
+	schedulerProvider := hs.scheduler
 	hs.mu.RUnlock()
 	agentStorage := 0.0
 	if agentSpool != nil {
@@ -153,6 +168,23 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	schedulerStatus := map[string]any{}
+	if schedulerProvider == nil {
+		httpStatus = http.StatusServiceUnavailable
+		if status == "UP" || status == "DEGRADED" {
+			status = "SCHEDULER_UNAVAILABLE"
+		}
+	} else {
+		snap := schedulerProvider.Snapshot()
+		schedulerStatus = schedulerPayload(snap)
+		if snap.State != scheduler.StateRunning {
+			httpStatus = http.StatusServiceUnavailable
+			if status == "UP" || status == "DEGRADED" {
+				status = "SCHEDULER_NOT_RUNNING"
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -160,8 +192,34 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"storage_percent":       fmt.Sprintf("%.2f%%", storagePercent),
 		"agent_storage_percent": fmt.Sprintf("%.2f%%", agentStorage),
 		"capability_pack_sync":  packStatus,
+		"scheduler":             schedulerStatus,
 		"timestamp":             time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+func schedulerPayload(snap scheduler.Snapshot) map[string]any {
+	return map[string]any{
+		"state":                            snap.State,
+		"configured_workers":               snap.ConfiguredWorkers,
+		"active_workers":                   snap.ActiveWorkers,
+		"queue_depth":                      snap.QueueDepth,
+		"queue_capacity":                   snap.QueueCapacity,
+		"tracked_assignments":              snap.TrackedAssignments,
+		"tracked_jobs":                     snap.TrackedJobs,
+		"highest_observed_fencing_version": snap.HighestObservedFencingVersion,
+		"highest_accepted_fencing_version": snap.HighestAcceptedFencingVersion,
+		"submitted":                        snap.Submitted,
+		"accepted":                         snap.Accepted,
+		"completed":                        snap.Completed,
+		"failed":                           snap.Failed,
+		"retries":                          snap.Retries,
+		"rejected_queue_full":              snap.RejectedQueueFull,
+		"rejected_stale_lease":             snap.RejectedStaleLease,
+		"rejected_tracking_capacity":       snap.RejectedTrackingCapacity,
+		"expired":                          snap.Expired,
+		"cancelled":                        snap.Cancelled,
+		"deadline_exceeded":                snap.DeadlineExceeded,
+	}
 }
 
 func formatTime(t time.Time) string {

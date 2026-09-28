@@ -19,9 +19,23 @@ import (
 	"platform/sensor/internal/health"
 	"platform/sensor/internal/observation"
 	"platform/sensor/internal/packsync"
+	sensorruntime "platform/sensor/internal/runtime"
+	"platform/sensor/internal/scheduler"
 	"platform/sensor/internal/spool"
 	"platform/sensor/internal/uploader"
 )
+
+// newProductionScheduler constructs the single production-owned scheduler.
+// Slice 6 registers zero JobKind routes so the empty ExecutorRegistry remains
+// fail-closed for any accidentally admitted work.
+func newProductionScheduler(rt config.RuntimeConfig, logger *slog.Logger) (*scheduler.Scheduler, error) {
+	schedCfg, err := config.ToSchedulerConfig(rt.Scheduler)
+	if err != nil {
+		return nil, err
+	}
+	registry := sensorruntime.NewExecutorRegistry()
+	return scheduler.New(schedCfg, registry, scheduler.WithLogger(logger))
+}
 
 func coreClientConfigFromRuntime(rt config.RuntimeConfig, logger *slog.Logger) coreclient.Config {
 	return coreclient.Config{
@@ -108,7 +122,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	prodScheduler, err := newProductionScheduler(rt, logger)
+	if err != nil {
+		logger.Error("Failed to initialize production scheduler", "error_code", "SENSOR_SCHEDULER_INIT_FAILED", "error", err.Error())
+		os.Exit(1)
+	}
+
 	healthServer := health.NewHealthServer(rt.HealthAddress, diskSpool, logger)
+	healthServer.SetScheduler(prodScheduler)
 	go func() {
 		if err := healthServer.Start(); err != nil {
 			logger.Error("Health server encountered error", "error_code", "SENSOR_HEALTH_SERVER_FAILED")
@@ -231,6 +252,10 @@ func main() {
 		if err := packSyncer.Shutdown(packCtx); err != nil {
 			logger.Warn("Capability Pack sync shutdown error", "error", err)
 		}
+	}
+
+	if err := prodScheduler.Shutdown(context.Background()); err != nil {
+		logger.Warn("Production scheduler shutdown error", "error_code", "SENSOR_SCHEDULER_SHUTDOWN_FAILED", "error", err.Error())
 	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
