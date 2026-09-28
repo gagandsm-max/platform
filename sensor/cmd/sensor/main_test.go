@@ -183,3 +183,27 @@ func TestEmptyRegistryFailsClosedWithoutRetry(t *testing.T) {
 	t.Fatalf("fail-closed counters not reached: failed=%d completed=%d retries=%d tracked=%d",
 		snap.Failed, snap.Completed, snap.Retries, snap.TrackedJobs)
 }
+
+func TestProductionSchedulerIdleShutdownWithinConfiguredGrace(t *testing.T) {
+	rt := testRuntime()
+	rt.Scheduler.ShutdownGracePeriod = 500 * time.Millisecond
+
+	sched, err := newProductionScheduler(rt, slog.Default())
+	if err != nil {
+		t.Fatalf("newProductionScheduler: %v", err)
+	}
+
+	start := time.Now()
+	if err := sched.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if snap := sched.Snapshot(); snap.State != scheduler.StateStopped {
+		t.Fatalf("state=%s want=%s", snap.State, scheduler.StateStopped)
+	}
+	if elapsed > rt.Scheduler.ShutdownGracePeriod+250*time.Millisecond {
+		t.Fatalf("shutdown elapsed %v exceeded grace+allowance %v",
+			elapsed, rt.Scheduler.ShutdownGracePeriod+250*time.Millisecond)
+	}
+}
