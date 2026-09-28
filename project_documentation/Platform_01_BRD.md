@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-BRD-001
 **Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Business Requirements Authority (**A2.1 NORMALIZED_V1**)
-**Product name:** Platform
+**Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Implementation model:** Clean-room implementation; independent project, not part of ThoughtData, Enterprise360 or NetAI
 **Audience:** Founders, product leadership, engineering, architecture, QA, security, sales engineering, support
 **Normalization state:** NORMALIZED_V1
@@ -64,6 +64,7 @@ Business outcome: an authorized operator can discover, monitor, diagnose and gov
 | BR-P10 | No silent failure | Material collection, storage, integration, HA, provisioning, authentication or workflow failures must expose what failed, evidence, impact and remediation guidance. |
 | BR-P11 | Safe by default, flexible by choice | Secure/safe defaults are enabled initially; customers may customize operational behavior through UI where doing so does not violate tenant isolation, integrity or mandatory safety controls. |
 | BR-P12 | No-context-switch operations | An authorized NOC/operator shall verify, diagnose and investigate a monitored entity from its current Platform context using safe on-demand diagnostics, browser CLI and related evidence without requiring routine external tools. Low-risk actions shall be easy; privileged or destructive actions shall retain proportionate controls and audit. |
+| BR-P13 | Commercial product branding | Customer-facing UI surfaces display effective commercial branding (defaulting to AmrudAi, or licensed tenant/MSP branding where white-label is active) with appropriate light/dark logo contrast and aspect ratio preservation. Generated PDF reports prominently embed the effective commercial logo (defaulting to the governed AmrudAi logo, or licensed tenant/MSP logo where white-label is active); CSV reports are data-only. Internal engineering, architecture, code packages, and schemas retain Platform identity. |
 
 **Industry lessons (business intent, not proprietary copy):**
 
@@ -356,13 +357,29 @@ Constraints:
 
 ---
 
-## 23. Reporting and SLA (business)
+## 23. Reporting, SLA/OLA and service assurance (business)
 
-Business outcome: Report Studio and SLA engine support customer-defined targets, windows, business hours, maintenance exclusions, partial/unknown handling and drill-down—with timezone disclosure for rendered local times.
+Business outcome: Platform shall provide an enterprise Service Assurance capability covering customer SLA, internal-team OLA, provider/underpinning SLA and SLI/SLO objectives from one evidence model. It shall combine monitoring telemetry, qualified state, topology/service dependencies, synthetic/API evidence, incidents and governed external ITSM/CMDB/security/provider inputs without making an external system the monitoring truth.
 
-Changing a user’s display timezone must not silently alter SLA measurement semantics.
+Platform shall ship editable out-of-box SLA/OLA/report templates for common large-enterprise operating patterns across generic enterprise, banking/financial services, manufacturing, telecom, data-center/colocation, ISP/carrier and cloud/enterprise-IT environments. Templates are starting points, not contractual promises; customer targets, calendars, formulas, exclusions and ownership remain customer policy.
 
----
+Customers shall be able to create their own SLA/OLA policies from governed available parameters using a safe typed expression/formula engine. Arbitrary Python, JavaScript, SQL or other executable customer code is not part of SLA/report authoring.
+
+Service assurance shall support reusable service-time profiles, IANA timezones, holidays, countries, sites, business hours, shifts, teams, regions, business units, environments, criticality, providers and customer tags. Team/shift attribution must preserve historical handoff evidence; production-authoritative Team scope depends on the governed tenant-scoped Team identity contract.
+
+Contract measurement shall support expected/target and minimum thresholds, measurement windows, per-ticket/per-CI/per-service/per-site/per-provider/population and impacted-unit measurement, versioned inclusion/exclusion rules, maintenance, approved deviations, degraded-but-still-serving treatment, continuous-improvement measures and effective dates. Availability derived from direct monitoring/service evidence must not be replaced by ticket arithmetic where the policy declares monitoring evidence authoritative.
+
+Platform shall preserve raw result, exclusions/adjustments, data-quality/completeness, scope snapshot, policy/formula/calendar version and final result as reproducible evidence. Finalized periods shall not silently change; corrections use an audited restatement workflow. Insufficient monitoring evidence produces explicit provisional/partial/insufficient-evidence state rather than fabricated compliance.
+
+Before activation or material change, authorized users shall be able to simulate/backtest an SLA/OLA policy against retained historical evidence so policy impact is visible before publication.
+
+Reporting shall support scheduled/on-demand obligations, business-day-aware due rules, recipients, approval/attestation, delivery status and drill-down from scorecard to outage/incident/ticket/CI/telemetry evidence. Generated/downloaded/scheduled report artifacts are **CSV and/or PDF only**. APIs remain separate integration/query interfaces and are not report artifact formats.
+
+PDF is the human/governance artifact; CSV is the detailed machine-readable evidence artifact. Report execution must be bounded and lower priority than live telemetry, alerting and incident correctness.
+
+Platform may consume billing, procurement, finance, project or external service-management data for governed formulas/reporting, but does not become an ERP, procurement, billing or ITSM system of record.
+
+Changing a user’s display timezone must not silently alter SLA/OLA measurement semantics.
 
 ## 24. Integrations (business)
 
@@ -637,7 +654,7 @@ Out of initial product scope:
 
 | ID | Item | Status |
 |---|---|---|
-| TBD-01 | Final external product/brand name beyond working name “Platform” | TBD |
+| TBD-01 | Final external product/brand name beyond working name “Platform” | Resolved: **AmrudAi** (commercial customer-facing product name; internal engineering remains "Platform") |
 | TBD-02 | Contractual DR RPO/RTO and automated-vs-manual DR failover policy | TBD |
 | TBD-03 | Exact compliance certification roadmap/timeline | TBD |
 | TBD-04 | Final certified Core scale beyond 15,000 devices and exact multi-Core trigger | Benchmark required |

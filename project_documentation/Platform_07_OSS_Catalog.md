@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-OSS-001
 **Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Dependency Allow-List Authority (**A2.3 NORMALIZED_V1**)
-**Product name:** Platform
+**Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
@@ -104,7 +104,7 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 | OSS-088 | UI | Styling | Tailwind CSS | MIT | OPTIONAL | APPROVED_NOT_IMPLEMENTED | Browser | Historically catalogued utility CSS option. **Not** part of the current UI implementation. | Current UI uses Platform-owned plain CSS. Do not treat Tailwind as required or currently wired. |
 | OSS-089 | UI | Accessible primitives | Radix UI | MIT | CANDIDATE | CANDIDATE | Browser | Candidate accessible primitive set only if future UI work selects it after review. | Not current. Platform visual language remains custom; plain CSS is the current styling approach. |
 | OSS-100 | Reporting | PDF | Apache PDFBox | Apache-2.0 with external-component notices | USE | APPROVED_NOT_IMPLEMENTED | Core/Report Worker | Generate and manipulate PDF reports. | Platform owns report template/layout/SLA semantics. |
-| OSS-101 | Reporting | XLSX | Apache POI | Apache-2.0 with subcomponent notices | USE | APPROVED_NOT_IMPLEMENTED | Core/Report Worker | Generate Excel reports/exports. | Platform owns report definitions and data/query safety. |
+| OSS-101 | Provisioning/Import | XLSX import parsing | Apache POI | Apache-2.0 with subcomponent notices | USE | APPROVED_NOT_IMPLEMENTED | Core/Provisioning | Parse and validate authorized XLSX provisioning/migration import templates where supported. | XLSX is not a Platform report/export artifact format; reports are PDF/CSV only. |
 | OSS-102 | Reporting | CSV | Apache Commons CSV | Apache-2.0 | USE | APPROVED_NOT_IMPLEMENTED | Core/Report Worker | CSV generation/parsing. | Commodity function; Platform owns export authorization and limits. |
 | OSS-103 | Analytics | DataFrames | Polars | MIT | USE | CURRENT_RUNTIME | Analytics Worker | Efficient batch analytics/transforms when SQL alone is insufficient. | Do not put Polars in hot ingestion path without benchmark. |
 | OSS-104 | Analytics | Numerical arrays | NumPy | BSD-3-Clause | USE | CURRENT_RUNTIME | Analytics/AI | Numerical operations. | Version-level scan required. |
@@ -209,7 +209,8 @@ Dependency proposed
 | Control DB | PostgreSQL | Platform schemas/state ownership |
 | Telemetry | ClickHouse | Platform schemas/TTL/rollups/query planner/storage protection |
 | Cache | Valkey | cache only; authoritative state remains elsewhere |
-| Reports | PDFBox + POI + Commons CSV | Report Studio, SLA semantics, layouts and scheduling |
+| Reports | PDFBox + Commons CSV | Report Studio, SLA/OLA/service-assurance semantics, layouts and scheduling; report artifacts are PDF/CSV only |
+| Provisioning import | Apache POI | Authorized XLSX import parsing only; not report generation |
 | Analytics | Polars + NumPy + scikit-learn | baselines/anomalies/forecast logic and quality controls |
 | GNN | PyTorch + PyTorch Geometric candidate | graph features, labels, training, causal guardrails, evidence fusion |
 | OSS governance | ORT + Syft + Trivy + ScanCode | Platform license policy and release approval process |

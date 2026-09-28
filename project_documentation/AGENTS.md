@@ -23,7 +23,7 @@ For work involving SaaS monitoring, carrier/ISP integration, external changes/de
 
 For work involving network discovery review, Agent onboarding/enrollment identity, dynamic endpoint identity/reconciliation, approval/exclusion workflow, or the in-product Notification Center, **`Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` is mandatory preflight reading**.
 
-For work involving normalized SD-WAN, SCIM lifecycle, SLI/SLO/error budgets, audit tamper evidence, middleware/backup/SASE connectors, tenant offboarding/data portability, licensing safety, declarative configuration/policy-as-code, Incident Command Workspace, privacy-bounded endpoint DEX, browser synthetics, customer-operated outside-in probes or future regional federation, **`Platform_21_Enterprise_Gap_Closure_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
+For work involving normalized SD-WAN, SCIM lifecycle, SLA/OLA/Provider-SLA service assurance, SLI/SLO/error budgets, audit tamper evidence, middleware/backup/SASE connectors, tenant offboarding/data portability, licensing safety, declarative configuration/policy-as-code, Incident Command Workspace, privacy-bounded endpoint DEX, browser synthetics, customer-operated outside-in probes or future regional federation, **`Platform_21_Enterprise_Gap_Closure_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
 For work involving alert qualification/evidence contracts, telemetry-quality trust, semantic monitoring states, alert-policy lifecycle/backtesting/shadowing, false-alert measurement, active evidence acquisition, evidence coverage, RCA confidence/contradictions, AI/ML evaluation, Incident Copilot, AI provider/egress controls, tenant-scoped learning, prompt-injection/tool-use controls, shared-service dependency monitoring, PKI assurance, predictive operations or AI observability, **`Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` is mandatory preflight reading** when that specialized master is present in the governing branch/index.
 
@@ -77,7 +77,8 @@ No implementation may permanently diverge from mother-reference truth. If implem
 
 ## Non-negotiable engineering rules
 
-- Product name is **Platform**.
+- Product name is **Platform** (internal engineering/build identifier); commercial/customer-facing product name is **AmrudAi**.
+- Customer-facing UI displays effective commercial branding (defaulting to AmrudAi, or licensed tenant/MSP branding where white-label is active). Generated, downloaded and scheduled report artifacts are **PDF and/or CSV only**. All generated PDF reports must carry the effective commercial logo (defaulting to the governed AmrudAi logo, or licensed tenant/MSP logo where white-label is active); CSV reports contain tabular data only.
 - Clean-room implementation. Do not copy ThoughtData, Enterprise360 or NetAI proprietary code/assets.
 - All routine local development and automated testing run in Docker Compose. Do not install project-specific Java/Go/Python/Node/Kafka/PostgreSQL/ClickHouse/Valkey dependencies directly on the developer laptop.
 - Docker development must be reboot-safe through named volumes, health checks, deterministic startup and documented reset/recovery.

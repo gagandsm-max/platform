@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-EGC-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Enterprise Gap Closure**
-**Product:** Platform
+**Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation or readiness claim
 
 ---
@@ -37,7 +37,7 @@ Nothing in this document selects a new OSS dependency, database, mandatory micro
 |---|---|---|
 | `PRD-EGC-001` | P0 | Platform shall expose a normalized SD-WAN model spanning controller/fabric, site, edge, underlay, overlay/tunnel, path, SLA/SLO class, application/path policy and health, with vendor adapters mapped into the canonical model. |
 | `PRD-EGC-002` | P1 | Platform shall target SCIM v2-compatible identity lifecycle integration for governed user/group provisioning and deprovisioning, while making no SCIM compliance/certification claim until independently validated. |
-| `PRD-EGC-003` | P0 | Platform shall support service-level objectives using defined SLIs, SLO targets, error budgets and multi-window burn-rate evaluation, with customer-visible evidence and policy-driven notification/incident integration. |
+| `PRD-EGC-003` | P0 | Platform shall provide enterprise Service Assurance covering customer SLA, internal-team OLA, Provider/Underpinning SLA and SLI/SLO/error-budget objectives using versioned service-time/scope/formula/evidence contracts, editable OOB templates, policy simulation, reproducible period close and PDF/CSV-only reporting. |
 | `PRD-EGC-004` | P0 | Security-relevant audit records shall provide independently verifiable tamper evidence, retention and export. The required outcome is tamper evidence; a particular cryptographic construction is not preselected here. |
 | `PRD-EGC-005` | P1 | Platform shall provide middleware monitoring Packs/connectors for common enterprise middleware using supported APIs, metrics, logs, JMX/standard interfaces or bounded synthetic checks; full bytecode-instrumentation APM is not implied. |
 | `PRD-EGC-006` | P0 | Tenant offboarding shall provide governed export/portability, active-data deletion, backup/archive expiry handling, legal-hold exceptions, status visibility and final destruction evidence without falsely claiming immediate physical erasure from immutable backups. |
@@ -63,9 +63,37 @@ The canonical contract shall separate vendor identity from normalized entities a
 
 SCIM integration is an identity-governance target, not a certification claim. Provisioning/deprovisioning must be tenant scoped, idempotent, auditable and reconciled with SSO/LDAP/AD/RBAC authority. Deprovisioning must remove effective access promptly while preserving audit history. Unsupported SCIM features must fail explicitly rather than be silently ignored.
 
-### 4.3 SLI/SLO and error budgets
+### 4.3 SLA/OLA/Provider-SLA, SLI/SLO and service assurance
 
-An SLO definition binds service/resource scope, SLI expression, evaluation window, target, exclusions/maintenance semantics and ownership. Burn-rate evaluation must support more than one time horizon so short severe breaches and sustained degradation can be distinguished. Threshold values remain policy/customer decisions unless an existing requirement fixes them.
+Platform uses one evidence-led Service Assurance model for customer SLA, internal-team OLA, Provider/Underpinning SLA and SLI/SLO/error budgets.
+
+**Template catalogue.** Ship editable out-of-box starting templates for common large-enterprise operating patterns across generic enterprise, banking/financial services, manufacturing, telecom, data-center/colocation, ISP/carrier and cloud/enterprise IT. Templates must not embed customer-specific contractual promises as product guarantees.
+
+**Policy dimensions.** A policy binds versioned service/resource scope, measurement basis, formula, target/expected and optional minimum threshold, evaluation window, reusable service-time/calendar, timezone, holidays, shift/team/region/site/business-unit/environment/criticality/provider/service context, inclusion/exclusion/maintenance rules, degraded-condition treatment, ownership/dependency context, effective dates and evidence sources. Customer-specific country/site/service deviations require explicit reason/alternative/approval and audit.
+
+**Formula safety.** Customers may compose governed calculations from available parameters using typed bounded functions (arithmetic, ratios, aggregates, percentiles, durations, rolling windows, conditional/weighted expressions). Arbitrary SQL, Python, JavaScript or eval is prohibited.
+
+**Measurement semantics.** Supported bases include service minutes, entity or impacted-unit minutes, transaction/ticket/event counts, weighted score and governed custom formulas. Direct monitoring/synthetic/service evidence remains authoritative where declared; ticket arithmetic is not a substitute for service availability. Dependency logic must model actual service function/redundancy rather than blindly average component uptime.
+
+**Degraded conditions.** Policy may treat degraded-but-still-serving state as informational, partial penalty, outage after configured persistence or immediate outage. Monitoring-path degradation remains distinct from service degradation.
+
+**Simulation.** Authorized users can backtest a draft/change against retained evidence and compare old/new result, affected outages and exclusions before activation. Simulation is read-only.
+
+**Period integrity.** Each period snapshots policy/formula/calendar/scope and keeps raw result, exclusions/adjustments, final result, evidence and measurement quality/completeness. Lifecycle supports `OPEN -> PRELIMINARY -> REVIEW -> FINAL`; post-final corrections create audited `RESTATED` revisions. Past finalized results must not drift because current topology, membership, calendar or policy changed.
+
+**Evidence quality.** `VALID`, `PARTIAL`, `INSUFFICIENT_EVIDENCE`, `DISPUTED` or equivalent quality is separate from the SLA percentage/result. No-data/stale/collector-path faults cannot silently become downtime or perfect compliance. Multi-vantage rules may use deterministic quorum and preserve contradiction.
+
+**OLA/provider accountability.** Policies may chain business SLA -> supporting team OLA -> provider SLA. Shift/team ownership is segmented by effective intervals and handoffs without rewriting history. Authoritative Team attribution requires the canonical tenant-scoped Team identity/binding contract.
+
+**Error budgets/SLOs.** SLO definitions continue to support defined SLIs, targets, error budgets and multi-window burn-rate evaluation so short severe breaches and sustained degradation are distinguished. Remaining allowable downtime/budget may be shown where mathematically applicable.
+
+**Reporting obligations.** A report obligation binds stable report key, definition, owner, frequency/due rule, business-day/calendar semantics, recipients, required content, approvers, delivery policy and audit. Report lifecycle may include `GENERATED -> DELIVERED -> UNDER_REVIEW -> ACCEPTED|REJECTED|DISPUTED`.
+
+**Artifact formats.** All generated/downloaded/scheduled report artifacts are **PDF and/or CSV only**. PDF is the human/governance artifact and CSV the detailed machine-readable evidence artifact. Generated PDF reports must prominently display the effective commercial product logo (defaulting to the governed AmrudAi logo matching light/dark background, preserving aspect ratio, or licensed tenant/MSP logo where white-label is active) and effective customer-facing commercial product branding; CSV reports contain data only without embedded imagery. JSON remains an API encoding, not a report artifact; XLSX/PPTX are not report artifacts.
+
+**Operational safety.** Report/service-assurance computations are bounded/cancellable and lower priority than ingestion/current-state/alert/incident correctness. No new microservice/database is justified solely by this capability before evidence proves existing modular Core/data stores insufficient.
+
+**Product boundary.** External ITSM/CMDB/security/provider/financial/procurement systems may feed governed evidence, but Platform does not become their system of record.
 
 ### 4.4 Audit tamper evidence
 
@@ -134,7 +162,7 @@ P0/P1 capability implementation is not complete until the relevant requirements 
 |---|---|---|
 | `REQ-EGC-001` | P0 | SD-WAN adapters prove canonical mapping, vendor-extension isolation, tenant scoping and topology/health consumption using supported vendor fixtures/contracts. |
 | `REQ-EGC-002` | P1 | SCIM lifecycle tests cover create/update/disable/delete/reconcile, duplicate/retry behavior, RBAC convergence and explicit unsupported-feature behavior; compliance is not claimed by test existence alone. |
-| `REQ-EGC-003` | P0 | SLO tests prove SLI calculation, exclusions/maintenance, error-budget consumption, multi-window burn behavior and incident/notification integration using deterministic fixtures. |
+| `REQ-EGC-003` | P0 | Service-assurance tests prove SLA/OLA/Provider-SLA/SLO formulas, target/minimum semantics, service-time/shift/team rules, scope snapshots, exclusions/maintenance/degraded treatment, quality states, policy simulation, immutable finalization/restatement, error-budget/burn behavior, PDF/CSV-only reporting with effective commercial logo on PDF (defaulting to AmrudAi logo), obligation/attestation lifecycle and incident/notification integration using deterministic fixtures. |
 | `REQ-EGC-004` | P0 | Audit tamper-evidence tests prove alteration/deletion/reordering is detectable within the selected design and that export verification is independently reproducible. |
 | `REQ-EGC-005` | P1 | Middleware/backup Packs prove least privilege, version/error handling, collector-health separation, bounded polling and no bytecode instrumentation unless separately approved. |
 | `REQ-EGC-006` | P0 | Offboarding tests prove authorization, export, active deletion, secret revocation, legal-hold handling, backup/archive pending state, scheduled expiry and final evidence without false immediate-erasure claims. |

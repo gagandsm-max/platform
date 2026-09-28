@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-HLD-001
 **Version:** 3.2.2
 **Status:** Authoritative Mother Reference — High-Level Design Authority (**A2.2 NORMALIZED_V1**)
-**Product name:** Platform
+**Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
@@ -250,9 +250,23 @@ Owns address spaces, prefixes, VRF/VLAN context, address assignments/reservation
 
 Owns ITSM/notification connector definitions, field mappings, outbound queues, retries, idempotency, health and bidirectional state synchronization.
 
-### 4.18 Reporting/SLA Service
+### 4.18 Reporting / Service Assurance Service
 
-Owns report definitions, schedules, execution, formula evaluation, document rendering, SLA policy calculation and long-term aggregates.
+Owns report definitions, obligations, schedules, execution, bounded formula evaluation, document rendering, SLA/OLA/Provider-SLA/SLO policy calculation, measurement-period close/restatement and long-term aggregates.
+
+The service owns logical contracts for:
+- versioned Service Assurance policies and editable out-of-box template catalogue;
+- reusable service-time profiles/calendars, shifts and effective ownership intervals;
+- safe typed formula evaluation; arbitrary customer SQL/Python/JavaScript/eval is prohibited;
+- target/expected plus minimum thresholds, measurement basis/window, inclusion/exclusion and degraded-condition rules;
+- policy simulation/backtest against retained historical evidence before activation;
+- immutable scope snapshots and reproducible measurement ledgers;
+- explicit measurement-quality/completeness and conflict/insufficient-evidence state;
+- OLA dependency chains, provider relationships and multi-vantage measurement;
+- report obligations, business-day-aware due rules, generated runs, review/attestation, delivery and audit;
+- PDF/CSV-only report artifacts. API data access is a separate interface, not a report format.
+
+Heavy report execution uses bounded worker/concurrency/query budgets and yields to ingestion, current-state, alert and incident workloads.
 
 ### 4.19 Audit Service
 
@@ -846,7 +860,7 @@ Discovery may propose changes; it does not silently overwrite authoritative rese
 
 ## 23. Reporting HLD
 
-Report execution is asynchronous for expensive reports. Query Service returns bounded datasets/aggregates; rendering generates PDF/XLSX/CSV/JSON. Report schedule/history and delivery status are persisted. Large exports are background jobs, not synchronous browser queries.
+Report execution is asynchronous for expensive reports. Query Service returns bounded datasets/aggregates; rendering generates PDF and/or CSV report artifacts only. All generated PDF reports prominently display the effective commercial product logo (defaulting to the governed AmrudAi logo: matching light/dark background, preserving aspect ratio, or licensed tenant/MSP logo where a governed white-label configuration is active) and effective customer-facing commercial product branding; CSV reports contain data only without embedded imagery. API payloads remain separate integration/query interfaces. Report schedule/history, obligations, review/attestation and delivery status are persisted. Large reports/exports are bounded background jobs, not synchronous browser queries, and yield to live monitoring/alert workloads.
 
 ---
 
@@ -1161,7 +1175,7 @@ Exact detail owned elsewhere must not be re-litigated here:
 | Control state | PostgreSQL | authoritative transactional state |
 | Telemetry | ClickHouse | high-volume analytical state |
 | Cache | Valkey | reconstructable/ephemeral state only |
-| Reports | PDFBox/POI/Commons CSV | report/export worker |
+| Reports / Provisioning Import | PDFBox / Commons CSV (PDF/CSV report artifacts) / Apache POI (provisioning import parsing only) | Core report/export and provisioning workers |
 | Analytics/RCA workers | Python + Polars/NumPy/scikit-learn; GNN candidate PyTorch/PyG | isolated worker boundary with resource quotas and no direct secret access |
 | OSS compliance | ORT/Syft/Trivy/ScanCode | CI/release, not runtime customer workflow |
 

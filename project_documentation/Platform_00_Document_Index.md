@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-INDEX-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
-**Product:** Platform
+**Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
 **Last reconciliation:** 2026-09-24 — A2.3 OSS catalogue normalization and formal OSS-008→REQ-OSS-008 migration (Issue #108)
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
@@ -93,7 +93,7 @@ Where absent, status remains `SPECIFIED` / `NOT IMPLEMENTED` (or equivalent). A1
 | 20 | `Platform_18_Security_Threat_Model.md` | Trust boundaries, threats, abuse cases and mitigations |
 | 21 | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | Authoritative OIV specialized master: SaaS/carrier/change intelligence, Flight Recorder, Similar Incident Memory, triggered packet evidence, controlled remediation, MTTR/value engine, formal `PRD-OIV-*` + `REQ-OIV-*` supplement |
 | 22 | `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` | Authoritative onboarding specialized master: discovery review, Agent enrollment/identity continuity, approval/audit, grouping/policy preview, Notification Center, formal `PRD-ONB-*` + `REQ-ONB-*` supplement |
-| 23 | `Platform_21_Enterprise_Gap_Closure_Master.md` | Authoritative enterprise gap-closure specialized master: normalized SD-WAN, SCIM lifecycle target, SLI/SLO/error budgets, audit tamper evidence, enterprise connector/offboarding/licensing/policy-as-code requirements, formal `PRD-EGC-*` + `REQ-EGC-*` supplement |
+| 23 | `Platform_21_Enterprise_Gap_Closure_Master.md` | Authoritative enterprise gap-closure specialized master: normalized SD-WAN, SCIM lifecycle target, SLA/OLA/Provider-SLA service assurance, SLI/SLO/error budgets, audit tamper evidence, enterprise connector/offboarding/licensing/policy-as-code requirements, formal `PRD-EGC-*` + `REQ-EGC-*` supplement |
 | 24 | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Authoritative monitoring-intelligence specialized master: class-specific Alert Evidence Contracts, telemetry trust, semantic monitoring states, Endpoint Diagnostic Snapshot (EDS), tiered local intelligence, RCA/AI assurance, Incident Copilot, AI safety/provenance, formal `PRD-MIA-*` + `REQ-MIA-*` supplement |
 | 25 | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | Authoritative enterprise-monitoring-coverage specialized master: Capability Pack product contract, L1/L2/L3 dimensional certification, Linux/Windows Agent and agentless infrastructure coverage, technology-family catalogue, Customer Acceptance Profiles, Real Customer Requirements normalization, formal `PRD-EMC-*` + `REQ-EMC-*` supplement |
 
@@ -256,7 +256,8 @@ A1 makes this contract normative. Completing the field set for every capability 
 
 ## 9. Fixed product/architecture decisions
 
-- Product name: **Platform**.
+- Product name: **Platform** (internal engineering/build identifier) / **AmrudAi** (commercial customer-facing product name).
+- Commercial branding and reports: Customer-facing UI displays effective commercial branding (defaulting to AmrudAi, or licensed tenant/MSP branding where white-label is active); report artifacts are **PDF and/or CSV only**; generated PDF reports prominently display the effective commercial logo (defaulting to the governed AmrudAi logo, or licensed tenant/MSP logo where white-label is active); CSV reports contain tabular data only.
 - Clean-room implementation; no ThoughtData/NetAI proprietary implementation reuse.
 - Core/Sensor: **Ubuntu 24.x LTS family** and **RHEL 9.x family** first (subject to certification matrix); Windows Core/Sensor not initial scope.
 - Standalone: one Core. HA: exactly two full Core nodes, Active/Standby, target <60s Core-service restoration.
@@ -389,7 +390,7 @@ Before coding a module, an engineer or coding agent reads `AGENTS.md`, this Inde
 
 For any OIV task, `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` is mandatory preflight reading.
 For discovery review, Agent onboarding/enrollment identity, dynamic endpoint identity/reconciliation or in-product Notification Center work, `Platform_20_Discovery_Onboarding_Identity_and_Notification_Master.md` is mandatory preflight reading.
-For normalized SD-WAN, SCIM lifecycle, SLI/SLO/error budgets, audit tamper evidence, middleware/backup/SASE connectors, tenant offboarding/data portability, licensing safety, declarative configuration/policy-as-code, Incident Command Workspace, privacy-bounded endpoint DEX, browser synthetics, customer-operated probes or future regional federation, `Platform_21_Enterprise_Gap_Closure_Master.md` is mandatory preflight reading.
+For normalized SD-WAN, SCIM lifecycle, SLA/OLA/Provider-SLA service assurance, SLI/SLO/error budgets, audit tamper evidence, middleware/backup/SASE connectors, tenant offboarding/data portability, licensing safety, declarative configuration/policy-as-code, Incident Command Workspace, privacy-bounded endpoint DEX, browser synthetics, customer-operated probes or future regional federation, `Platform_21_Enterprise_Gap_Closure_Master.md` is mandatory preflight reading.
 For alert evidence/qualification, semantic monitoring states, alert-policy lifecycle/quality, active evidence acquisition, RCA confidence/contradictions, AI evaluation/safety, Incident Copilot, AI provider/egress controls, prompt-injection/tool-use protection, tenant-scoped learning, shared-service dependency evidence, PKI assurance or AI observability, `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` is mandatory preflight reading.
 For enterprise monitoring-domain catalogue, Capability Pack contract/lifecycle, dimensional L1/L2/L3 certification, Customer Acceptance Profiles, Real Customer Requirements normalization, operational-graph vs governed-CMDB semantics, or coverage-measurement work, `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` is mandatory preflight reading.
 

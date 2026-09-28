@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract (TRANSITIONAL_LEGACY)**
 **Normalization state:** TRANSITIONAL_LEGACY. BUILD-000 freezes a bounded edge/control contract subsection below; the remainder awaits later normalization.
-**Product:** Platform
+**Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the approved v3.2.2 NOC troubleshooting plus enterprise-SNMP correctness API/event/data contracts. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 **Last reconciliation:** 2026-09-24 — BUILD-000 edge transport contract freeze (Issue #110); document remains TRANSITIONAL_LEGACY.
 
@@ -363,6 +363,82 @@ The common workspace-manifest envelope references a typed class-specific definit
 Reference integrity is fail-closed. Shipped System definitions fail CI validation, and customer-authored definitions fail create/update validation, when a required `queryRef`, `dataSourceClassRef`, visualization/settings/override/value-mapping reference, action/drill-down target, permission reference or entitlement reference cannot be resolved by its authoritative registry. A panel/settings combination not permitted by the VIS capability matrix is invalid. Runtime authorization/entitlement re-evaluation remains mandatory even after definition validation; an unresolved security reference never defaults to allow.
 
 Current `TEAM` scope values in presentation schemas are not sufficient ownership authority. A Team-owned artifact requires an authoritative tenant-scoped Team binding from the future Identity/Teams/RBAC reconciliation; authorization is always re-evaluated server-side.
+
+## 8.2 Service assurance and reporting contract supplement — 2026-09-27
+
+Logical API/data contracts are versioned and tenant scoped:
+
+```text
+ServiceTimeProfile
+ServiceAssurancePolicy
+ServiceAssurancePolicyVersion
+ServiceAssuranceSimulation
+ServiceAssuranceMeasurementPeriod
+ServiceAssuranceLedgerEntry
+ServiceAssuranceEvidenceRef
+ReportDefinition
+ReportObligation
+ReportRun
+ReportArtifact
+ReportAttestation
+```
+
+`ServiceAssurancePolicy.type` supports at least `SLA`, `OLA`, `PROVIDER_SLA`, `SLO`. Policies reference governed scope, measurement basis, target/expected, optional minimum, service-time/calendar, formula version, inclusion/exclusion, degraded treatment, ownership/provider/dependency context and effective version.
+
+A measurement period snapshots policy/formula/calendar/scope versions and preserves raw, adjusted and final result plus measurement quality/completeness. Finalized periods are immutable; restatement creates a new linked revision rather than overwriting prior truth.
+
+Evidence references carry source, time range, quality/provenance and applicable incident/ticket/entity/service references. Monitoring-path degradation is distinguishable from monitored-service degradation.
+
+Simulation endpoints are read-only and return candidate result/delta/explanation against a specified historical evidence window; they cannot activate policy or modify finalized periods.
+
+Report artifacts use an explicit format enum restricted to `PDF` and `CSV`. All generated PDF reports prominently display the effective commercial product logo (defaulting to the governed AmrudAi logo: matching light/dark background contrast, preserving aspect ratio, or the tenant/MSP logo where a governed white-label configuration is active) and effective customer-facing commercial product branding. CSV reports contain data only and do not require image assets. JSON is an API payload encoding, not a report artifact format. XLSX/PPTX are not report artifact formats.
+
+Report obligation/run/attestation APIs preserve schedule/due rule, timezone/calendar, recipients, authorization context, delivery state, artifact checksum/reference and review/dispute history. Report execution always re-evaluates current tenant/resource authorization.
+
+Formula contracts are typed and bounded; arbitrary SQL/Python/JavaScript/eval text is not accepted as executable report/service-assurance logic.
+
+## 8.3 Central branding configuration contract — 2026-09-27
+
+Platform defines a central, tenant-scoped branding configuration contract to separate the internal engineering identity from external customer-facing commercial branding:
+
+```json
+{
+  "internalProductId": "platform",
+  "defaultCommercialProductName": "AmrudAi",
+  "defaultLightLogoRef": "/brand/amrud_blk.png",
+  "defaultDarkLogoRef": "/brand/amrud_whi.png",
+  "faviconRef": null,
+  "browserTitleTemplate": "{pageTitle} | {effectiveCommercialProductName}",
+  "reportBranding": {
+    "organizationName": null,
+    "footerText": null,
+    "confidentialityNotice": null
+  },
+  "whiteLabel": {
+    "enabled": false,
+    "overrideCommercialName": null,
+    "customLightLogoRef": null,
+    "customDarkLogoRef": null,
+    "customFaviconRef": null,
+    "customCssThemeRef": null
+  }
+}
+```
+
+- `internalProductId`: `"platform"` (immutable technical/engineering identifier for packages, schemas, services, builds, and internal architecture).
+- `defaultCommercialProductName`: `"AmrudAi"` (default commercial/customer-facing product name).
+- `defaultLightLogoRef` / `defaultDarkLogoRef`: governed relative asset references pointing to product-owned static assets (`amrud_blk.png` for light background / PDF reports; `amrud_whi.png` for dark background / UI navigation). Absolute developer filesystem paths (e.g. `/home/gagan/nms/logo/...`) must never be exposed or referenced.
+- `faviconRef`: optional / `null` by default. No concrete default favicon asset is shipped in the repository; custom favicon references may only be supplied through optional white-label configuration overrides (`customFaviconRef`).
+- **Single central branding resolver for UI and reports:** PDF rendering does not maintain an independent or duplicate brand authority. Instead, PDF rendering resolves `effectiveCommercialProductName`, `effectiveLightLogo`, and `effectiveDarkLogo` directly from the central branding resolver:
+  - **Default:** `effectiveCommercialProductName = "AmrudAi"`, `effectiveLightLogo = "/brand/amrud_blk.png"`, `effectiveDarkLogo = "/brand/amrud_whi.png"`.
+  - **White-label override:** Where an authorized, licensed tenant or MSP white-label configuration is active (`whiteLabel.enabled == true`), effective values resolve to the tenant/MSP configured commercial name (`overrideCommercialName`) and custom logo references (`customLightLogoRef` / `customDarkLogoRef`).
+  - **Technical identity preservation:** Internal technical identity always remains `"platform"`.
+  - **Report rendering & CSV integrity:** PDF reports embed the effective commercial logo appropriate to template/page background contrast, preserving aspect ratio without stretching. CSV reports contain tabular data only without embedded imagery.
+- `reportBranding`: Contains only report-template metadata not owned by central brand resolution:
+  - `organizationName`: optional / `null`. Publisher or legal entity name is distinct from the product commercial name and is never defaulted to `"AmrudAi"`.
+  - `footerText`: optional / `null` / template-configurable. Report Studio documents do not force a universal footer string.
+  - `confidentialityNotice`: optional / `null` / template-policy-controlled. Legal classification and document sensitivity markings are controlled per template/policy rather than universally imposing `"CONFIDENTIAL"`.
+- White-label/MSP tenants may configure custom brand overrides without altering internal Platform schemas, service names, or API contracts.
 
 ## 9. Region, Sensor Pool and enrollment-control contract supplement — v3.2.2
 

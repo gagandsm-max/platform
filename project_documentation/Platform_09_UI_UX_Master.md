@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-UIUX-001
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
-**Product:** Platform
+**Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Last reconciliation:** 2026-09-19 — v3.2.2 endpoint diagnostic evidence reconciliation
 
 ## 1. Authority and no-assumption rule
@@ -43,6 +43,7 @@ Navigation entries are shown/hidden/read-only/action-limited according to RBAC, 
 
 ### 2.2 Global top bar
 
+- Brand block: Displays the effective commercial product name (**AmrudAi** by default) and product logo. In the default dark shell header, uses the white logo (`amrud_whi.png`); in light header themes, uses the black logo (`amrud_blk.png`) to ensure visual contrast. Logo rendering must preserve aspect ratio without stretching. In white-label or MSP tenant configurations, displays the tenant-configured brand name and logo while maintaining platform structural integrity.
 - Tenant/customer selector only for users authorized for multiple tenants.
 - Global search across device/IP/MAC/serial/site/tag/interface/circuit/incident/alert/ticket/IPAM/NCM/DB/VM/cloud/K8s entities.
 - Time range, timezone, comparison period and auto-refresh.
@@ -354,7 +355,7 @@ R1 proves schema/runtime fit across dashboard, wallboard, entity detail, analyti
 
 The presentation-foundation proof is intentionally broader than dashboards. It also includes two schema-level representative artifacts; these are architecture/test fixtures, not new UI IDs or runtime implementation in this reconciliation:
 
-- **REPORT_DEFINITION — SLA Scheduled Report**: proves governed QMC query bindings, filters/variables/calculations, table/visualization reuse, static rendering, explicit execution timezone distinct from display/render timezone, allowed PDF/CSV/XLSX/JSON/API formats where applicable, server authorization and scheduled execution independent of browser runtime.
+- **REPORT_DEFINITION — SLA Scheduled Report**: proves governed QMC query bindings, filters/variables/calculations, table/visualization reuse, static rendering, explicit execution timezone distinct from display/render timezone, allowed PDF/CSV report artifacts only; API access remains a separate interface, server authorization and scheduled execution independent of browser runtime.
 - **SAVED_VIEW — representative dashboard/workspace view**: proves target workspace/dashboard reference, filters, grouping/sort, time-context policy, URL/context compatibility, server authorization re-evaluation and fail-safe behavior for stale, deleted or unauthorized target/reference state.
 
 ### 4.11 UI-001..UI-098 authoritative classification and coverage matrix
@@ -5461,16 +5462,23 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Capacity/SLA  
 **Primary roles:** Management/NOC  
-**Purpose:** SLA by service/region/provider/site, violations, downtime and maintenance exclusions.
+**Purpose:** SLA/OLA/Provider-SLA/SLO service assurance by service/region/provider/site/team/shift, with target/minimum, qualified downtime, evidence quality, violations, exclusions, remaining budget and auditable period close.
+
+**Service-assurance contract:** Provide editable OOB industry templates plus custom policy authoring; reusable service-time/holiday/shift calendars; expected and minimum thresholds; policy simulation/backtest; measurement-quality/completeness; raw versus adjusted result; scope snapshot; degraded-condition rules; dependency-aware service calculation; OLA/provider attribution; period lifecycle (`OPEN`, `PRELIMINARY`, `REVIEW`, `FINAL`, audited `RESTATED`); evidence drill-down; report obligations and attestation. Team-attributed OLA becomes authoritative only when canonical tenant-scoped Team identity/binding is available.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
 **Default tabs/views:**
 - Overview
+- SLAs
+- OLAs
 - Services
 - Sites
 - Providers
+- Policies
 - Violations
+- Evidence
+- Reports
 
 **Default filters:**
 - Time range
@@ -5527,7 +5535,9 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Capacity/SLA  
 **Primary roles:** WAN/vendor mgmt  
-**Purpose:** Provider/circuit availability, latency, loss, jitter, target/actual/breach.
+**Purpose:** Provider/circuit SLA assurance for availability, latency, loss, jitter, target/minimum, actual, breach/at-risk state, exclusions, provider attribution and evidence.
+
+**Provider-SLA contract:** Support circuit/provider/service scope, measurement vantage/path, service-time calendar, degraded-condition treatment, approved exclusions, provider ticket/reference evidence, dispute/attestation and PDF/CSV evidence export. Provider data is evidence and never overrides qualified Platform monitoring truth without explicit policy.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 

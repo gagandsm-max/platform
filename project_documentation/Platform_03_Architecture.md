@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-ARC-001
 **Version:** 3.2.2
 **Status:** Authoritative Mother Reference — System Architecture Authority (**A2.1 NORMALIZED_V1**)
-**Product name:** Platform
+**Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Depends on:** `Platform_01_BRD.md`, `Platform_02_PRD.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
@@ -57,6 +57,7 @@ The architecture is governed by the following constraints already decided:
 | ARC-P14 | Security by default | HTTPS/mTLS, least privilege, auditing, secret protection and signed artifacts are baseline. |
 | ARC-P15 | Clean-room + approved OSS | Reuse commodity permissive OSS; own differentiated Platform logic. |
 | ARC-P16 | Operational context to action | Preserve entity/alert/incident context from observation through bounded verification, CLI, investigation and evidence capture; low-risk diagnostics are immediate while privilege-changing/destructive operations retain stronger controls. |
+| ARC-P17 | Evidence-led service assurance | SLA/OLA/Provider-SLA/SLO results are reproducible from versioned policy, calendar, scope and evidence; unknown/partial measurement is explicit. Report artifacts are PDF/CSV only and reporting may not starve live monitoring. |
 
 ---
 
@@ -1054,6 +1055,29 @@ Runbooks/known issues are versioned knowledge artifacts. Incident closure can cr
 
 Platform shall analyze its own monitoring intelligence: alert policy effectiveness, qualification outcomes, RCA accuracy, telemetry quality, Sensor efficiency and pipeline integrity. These analytics are essential for proving the low-noise/meaningful-AI product proposition. UI architecture shall preserve internationalization foundations (locale-aware presentation where applicable) and accessibility constraints; detailed screen contracts remain in `Platform_09_UI_UX_Master.md`.
 
+### 31.6 Central branding and white-label architecture
+
+Platform separates internal engineering and build identity from external customer-facing commercial branding:
+
+- **Internal / engineering build identity:** `Platform` remains the internal engineering, repository, package, namespace, schema, service, build, test, and document filename identifier.
+- **Commercial / customer-facing product name:** `AmrudAi` is the default commercial product name displayed on customer-facing UI surfaces, public documentation branding, and customer-facing reports.
+- **Central branding contract:** Branding shall not be hard-coded across disparate UI components or backend services. Core provides a central, tenant-aware branding configuration model defining:
+  - `internal_product_id`: `"platform"` (immutable technical identifier)
+  - `default_commercial_product_name`: `"AmrudAi"` (default commercial brand)
+  - `default_light_background_logo_ref`: governed relative static asset reference (`amrud_blk.png`) for light-background surfaces and PDF reports
+  - `default_dark_background_logo_ref`: governed relative static asset reference (`amrud_whi.png`) for dark-background surfaces and top navigation
+  - `favicon_ref`: optional / `null` by default (no default favicon asset is shipped in the repository; custom favicon references may only be supplied through optional white-label configuration overrides)
+  - `browser_title_template`: browser window/tab title format (e.g., `"{page_title} | {effective_commercial_product_name}"`)
+  - `report_header_footer_identity`: report branding headers/footers (template-configurable, optional/null by default)
+  - `white_label_override_enabled`: boolean flag allowing enterprise/MSP tenants to override logos, product name, and theme accents while preserving platform schema and data integrity
+- **Effective brand resolution:**
+  - **Default:** `effectiveCommercialName = "AmrudAi"`, `effectiveLightLogo = "amrud_blk.png"`, `effectiveDarkLogo = "amrud_whi.png"`.
+  - **White-label override:** Where a governed, licensed tenant or MSP white-label configuration is active, customer-facing UI and customer-facing PDF reports resolve to the tenant/MSP configured commercial name and governed logo.
+  - **Technical identity preservation:** Internal technical identity always remains `"Platform"`.
+  - **Data-only CSV:** CSV reports contain tabular data only without embedded imagery.
+- **Governed logo assets:** Logo assets (`amrud_blk.png` for light surfaces / PDF reports, `amrud_whi.png` for dark surfaces / UI headers) are stored in governed relative product asset locations (`ui/public/brand/` for web static assets, `core/src/main/resources/brand/` for report generation resources). Absolute developer paths (such as `/home/gagan/nms/logo/...`) must never be exposed or referenced in production configuration. Logo rendering must preserve aspect ratio without stretching and ensure WCAG contrast compliance.
+- **Report branding:** Generated PDF reports prominently display the effective commercial product logo (defaulting to the governed AmrudAi logo: `amrud_blk.png` for light background, `amrud_whi.png` for dark background, preserving aspect ratio, or the tenant/MSP logo where a governed white-label configuration is active) and effective commercial branding. CSV reports contain data only and do not require image assets.
+
 ---
 
 ## 32. Development, packaging and service-runtime architecture
@@ -1248,7 +1272,7 @@ The following are recommended/approved candidates subject to version-level OSS c
 | Core JSON logging | logstash-logback-encoder | Structured log encoding (OSS-116; Platform owns fields/redaction/taxonomy) |
 | UI approved future primitives | Apache ECharts, TanStack Table/Query, react-grid-layout, Cytoscape.js, MapLibre GL JS, xterm.js | Architecturally approved allow-list primitives; not current `ui/package.json` dependencies (see `Platform_07`) |
 | Expressions | CEL | Safe policy/formula expressions |
-| PDF/XLSX | Apache PDFBox / Apache POI | Reports |
+| PDF/CSV | Apache PDFBox / Apache Commons CSV | Report artifacts; Apache POI is import/provisioning-only where XLSX input is supported |
 | Analytics | Polars, NumPy, scikit-learn | Batch/ML analytics |
 | GNN | TBD | Candidate framework subject to benchmark/licence review |
 | OSS compliance | ORT, Syft, Trivy, ScanCode | SBOM/licence/security pipeline |
@@ -1316,7 +1340,7 @@ The v1 document listed only names. The v2 architecture freezes how OSS is used a
 | OSS-088 | UI | Styling | Tailwind CSS | MIT | OPTIONAL | Browser | **NOT CURRENT:** Tailwind is not a current or required UI dependency. Current styling is plain CSS. | Design tokens/accessibility and product theming remain Platform-owned. |
 | OSS-089 | UI | Accessible primitives | Radix UI | MIT | CANDIDATE | Browser | **CANDIDATE only; not current.** Do not treat Radix as required. | Platform visual language remains custom; plain CSS is current styling. |
 | OSS-100 | Reporting | PDF | Apache PDFBox | Apache-2.0 with external-component notices | USE | Core/Report Worker | Generate and manipulate PDF reports. | Platform owns report template/layout/SLA semantics. |
-| OSS-101 | Reporting | XLSX | Apache POI | Apache-2.0 with subcomponent notices | USE | Core/Report Worker | Generate Excel reports/exports. | Platform owns report definitions and data/query safety. |
+| OSS-101 | Provisioning/Import | XLSX import parsing | Apache POI | Apache-2.0 with subcomponent notices | USE | Core/Provisioning | Parse and validate authorized XLSX provisioning/migration import templates where supported. | XLSX is not a report/export artifact format; reports are PDF/CSV only. |
 | OSS-102 | Reporting | CSV | Apache Commons CSV | Apache-2.0 | USE | Core/Report Worker | CSV generation/parsing. | Commodity function; Platform owns export authorization and limits. |
 | OSS-103 | Analytics | DataFrames | Polars | MIT | USE | Analytics Worker | Efficient batch analytics/transforms when SQL alone is insufficient. | Do not put Polars in hot ingestion path without benchmark. |
 | OSS-104 | Analytics | Numerical arrays | NumPy | BSD-3-Clause | USE | Analytics/AI | Numerical operations. | Version-level scan required. |

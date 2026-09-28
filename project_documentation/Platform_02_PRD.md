@@ -3,7 +3,7 @@
 **Document ID:** PLATFORM-PRD-001
 **Version:** 3.2.2
 **Status:** Authoritative Mother Reference — Complete Product Capability Authority (**A2.1 NORMALIZED_V1**)
-**Product name:** Platform
+**Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Depends on:** `Platform_01_BRD.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_08_Requirements_Traceability.md`, specialized masters `Platform_19`..`Platform_23`
 **Normalization state:** NORMALIZED_V1
@@ -1436,26 +1436,52 @@ IPAM is integrated into the canonical graph and shall not be a separate competin
 | `PRD-SCHED-009` | Capability Pack contracts carry applicable cadence/freshness/cost semantics. Where valuable, Agents may sample gauges approximately every 30–60 seconds locally and forward governed lower-rate min/max/average/last/count summaries; raw monotonic counters must not be averaged; tiny-sample P95/P99 must not be represented as statistically meaningful. |
 
 
-## 27. Reporting and SLA
+## 27. Reporting, SLA/OLA and Service Assurance
+
+Detailed formal ownership is `Platform_21` `PRD-EGC-003` / `REQ-EGC-003`. The following product behavior is mandatory.
 
 Report Studio shall support:
+- governed data-source/metric/entity/incident/ticket/topology selections through authorized catalogues and connectors;
+- filters, grouping, calculations/formulas, tables/charts/text/images and branding/layout;
+- reusable report templates and industry-oriented out-of-box packs;
+- on-demand and scheduled execution, subscriptions/recipients, business-day-aware due rules and execution history/failures;
+- report-obligation lifecycle, review/attestation and delivery status;
+- **PDF and CSV report artifacts only**; XLSX, JSON and PPTX are not report artifact formats; API responses remain separate integration/query interfaces; generated PDF reports prominently embed the effective commercial product logo (defaulting to the governed AmrudAi logo: matching light/dark background, preserving aspect ratio, or licensed tenant/MSP logo where a governed white-label configuration is active) and effective customer-facing commercial branding; CSV reports contain data only without embedded imagery;
+- central branding configuration contract separating internal 'Platform' technical identity from commercial 'AmrudAi' customer-facing name, with logo asset references and white-label/MSP tenant override support (resolving effective commercial product name and logos on customer-facing UI and PDF reports, with data-only CSV);
+- RBAC, tenant/resource scope re-evaluation at execution time, query/resource bounds and cancellation;
+- drill-down from summarized result to governed evidence.
 
-- data source/metric/entity selection;
-- filters/grouping;
-- calculations/formulas;
-- tables/charts/text/images;
-- branding/layout;
-- schedules/subscriptions;
-- PDF/CSV/XLSX/JSON/API outputs;
-- execution history/failures;
-- RBAC.
+Service Assurance shall support customer SLA, internal-team OLA, provider/underpinning SLA and SLI/SLO objectives from a common evidence model.
 
-SLA engine shall support customer-defined target, measurement window, business hours, maintenance exclusions, grace/qualification, partial/unknown state handling and drill-down to outage contributors. SLA/business-calendar and scheduled-report **execution** timezones are explicit operational policy fields and are never rewritten by a user's display timezone preference. Every report/export that renders local timestamps shall disclose the timezone used; scheduled reports separate execution/schedule timezone from render/display timezone.
+The policy model shall support:
+- service/resource scope and measurement basis (service minutes, entity/impacted-unit minutes, transaction/ticket/event counts, weighted score or governed custom formula);
+- expected/target and minimum thresholds;
+- reusable service-time profiles with IANA timezone, holiday calendar, business hours, country/site offsets, shifts and effective dates;
+- region, site, business unit, environment, criticality, provider, service, shift, team and governed customer attributes;
+- monthly/quarterly/yearly/rolling/custom measurement windows and per-ticket measurement where applicable;
+- versioned inclusion/exclusion rules, approved maintenance, responsibility boundaries and governed country/site/service deviations;
+- configurable degraded-condition treatment including informational-only, partial penalty, delayed outage after configured persistence, or immediate outage;
+- direct monitoring/synthetic/service evidence as authoritative measurement where policy requires it, with ITSM tickets as supporting evidence rather than a mandatory availability source;
+- dependency/service-topology semantics so service availability is not calculated by blindly averaging component uptime;
+- safe typed formulas and aggregates without arbitrary SQL/Python/JavaScript/eval;
+- continuous-improvement measures such as incident reduction, automation increase, MTTR improvement or compliance improvement;
+- OLA dependency chains and provider relationships.
 
-Long-term SLA/report retention may differ from raw telemetry retention.
+Before activation/change, authorized users shall be able to simulate/backtest the policy against retained historical evidence and compare old/new results without mutating historical truth.
 
----
+Each measurement period shall preserve immutable/reproducible policy version, formula version, calendar version, scope snapshot, evidence references, raw result, exclusions, adjustments, data-quality/completeness and final result. Period lifecycle shall support `OPEN -> PRELIMINARY -> REVIEW -> FINAL`, with audited `RESTATED` revision for post-final correction rather than silent recalculation.
 
+Service-assurance result quality shall be explicit (`VALID`, `PARTIAL`, `INSUFFICIENT_EVIDENCE`, `DISPUTED` or equivalent). Missing/stale/monitoring-path evidence must not be silently converted into service downtime or perfect compliance.
+
+Multi-vantage policies may use governed quorum/consensus rules. Conflicting evidence is preserved and can yield partial/inconclusive measurement.
+
+Shift/team attribution shall segment incidents/outages across effective ownership intervals and handoffs. Historical ownership must not be rewritten by later team changes. Team-authoritative operation remains gated by the canonical tenant-scoped Team identity/binding contract.
+
+Report obligations shall support a stable report key/reference, owner, frequency, service-time/calendar, due rule, recipients, format (`PDF`, `CSV`), required sections/data, approvers, delivery channel/status and audit.
+
+SLA/OLA reports shall be able to expose target/expected, minimum, actual, trend, remaining allowable downtime/error budget where applicable, breach/at-risk state, qualified downtime, approved exclusions, monitoring completeness, contributing incidents/outages, ownership/provider attribution and policy/evidence versions.
+
+Financial/service-credit formulas may be represented as customer-defined metadata/calculation only when configured; Platform shall not invent contractual credits, pricing, liability or commercial terms.
 
 ## 28. ITSM and notification integrations
 Supported adapters shall include architecture for:
@@ -2244,7 +2270,7 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 ## 43. Explicit PRD TBD register
 | ID | Open item |
 |---|---|
-| PRD-TBD-01 | Exact final brand/product name beyond working name Platform |
+| PRD-TBD-01 | Exact final brand/product name beyond working name Platform: Resolved — **AmrudAi** (commercial customer-facing product name; internal engineering remains "Platform") |
 | PRD-TBD-02 | Exact DR RPO/RTO and failover automation policy |
 | PRD-TBD-03 | Final compliance certification schedule |
 | PRD-TBD-04 | Exact GNN framework/model architecture/GPU optional profile |
