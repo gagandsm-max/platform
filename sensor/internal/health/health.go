@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"platform/sensor/internal/control"
 	"platform/sensor/internal/packsync"
 	"platform/sensor/internal/scheduler"
 	"platform/sensor/internal/spool"
@@ -23,12 +24,17 @@ type schedulerStatusProvider interface {
 	Snapshot() scheduler.Snapshot
 }
 
+type controlStatusProvider interface {
+	Snapshot() control.Status
+}
+
 type HealthServer struct {
 	server     *http.Server
 	spool      *spool.DiskSpool
 	agentSpool *spool.DiskSpool
 	packSync   packSyncStatusProvider
 	scheduler  schedulerStatusProvider
+	control    controlStatusProvider
 	mu         sync.RWMutex
 	logger     *slog.Logger
 }
@@ -91,6 +97,13 @@ func (hs *HealthServer) SetScheduler(provider schedulerStatusProvider) {
 	hs.scheduler = provider
 }
 
+// SetControl attaches the production control reconciler status provider.
+func (hs *HealthServer) SetControl(provider controlStatusProvider) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	hs.control = provider
+}
+
 func (hs *HealthServer) handleLive(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -122,6 +135,7 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	agentSpool := hs.agentSpool
 	packSync := hs.packSync
 	schedulerProvider := hs.scheduler
+	controlProvider := hs.control
 	hs.mu.RUnlock()
 	agentStorage := 0.0
 	if agentSpool != nil {
@@ -151,19 +165,16 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"core_authority_established": snap.CoreAuthorityEstablished,
 		}
 		if !snap.TrustedApplied {
-			// Fail closed: trusted pack state could not be established (e.g. corrupt recovery).
 			httpStatus = http.StatusServiceUnavailable
 			if status == "UP" || status == "DEGRADED" {
 				status = "PACK_TRUST_NOT_ESTABLISHED"
 			}
 		} else if !snap.CoreAuthorityEstablished {
-			// Local empty/structurally clean state is not Core-confirmed authority.
 			httpStatus = http.StatusServiceUnavailable
 			if status == "UP" || status == "DEGRADED" {
 				status = "PACK_CORE_AUTHORITY_NOT_ESTABLISHED"
 			}
 		} else if snap.Degraded && status == "UP" {
-			// Auth/degraded with retained trusted applied + Core authority stays ready (HTTP 200).
 			status = "DEGRADED"
 		}
 	}
@@ -185,6 +196,28 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	controlStatus := map[string]any{}
+	if controlProvider == nil {
+		httpStatus = http.StatusServiceUnavailable
+		if status == "UP" || status == "DEGRADED" {
+			status = "CONTROL_UNAVAILABLE"
+		}
+	} else {
+		snap := controlProvider.Snapshot()
+		controlStatus = controlPayload(snap)
+		switch snap.State {
+		case control.StateUntrusted:
+			httpStatus = http.StatusServiceUnavailable
+			if status == "UP" || status == "DEGRADED" {
+				status = "CONTROL_STATE_UNTRUSTED"
+			}
+		case control.StateSyncPending, control.StateDegraded:
+			if status == "UP" {
+				status = "DEGRADED"
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -193,6 +226,7 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"agent_storage_percent": fmt.Sprintf("%.2f%%", agentStorage),
 		"capability_pack_sync":  packStatus,
 		"scheduler":             schedulerStatus,
+		"control":               controlStatus,
 		"timestamp":             time.Now().UTC().Format(time.RFC3339),
 	})
 }
@@ -219,6 +253,28 @@ func schedulerPayload(snap scheduler.Snapshot) map[string]any {
 		"expired":                          snap.Expired,
 		"cancelled":                        snap.Cancelled,
 		"deadline_exceeded":                snap.DeadlineExceeded,
+	}
+}
+
+func controlPayload(snap control.Status) map[string]any {
+	return map[string]any{
+		"state":                     snap.State,
+		"last_action":               snap.LastAction,
+		"last_code":                 snap.LastCode,
+		"last_generation":           snap.LastGeneration,
+		"last_successful_reconcile": formatTime(snap.LastSuccessfulReconcile),
+		"reconcile_attempts":        snap.ReconcileAttempts,
+		"no_desired_count":          snap.NoDesiredCount,
+		"applied_count":             snap.AppliedCount,
+		"rejected_count":            snap.RejectedCount,
+		"lost_ack_repair_count":     snap.LostAckRepairCount,
+		"core_regression_count":     snap.CoreRegressionCount,
+		"generation_conflict_count": snap.GenerationConflictCount,
+		"checksum_mismatch_count":   snap.ChecksumMismatchCount,
+		"core_transport_failures":   snap.CoreTransportFailures,
+		"durable_store_failures":    snap.DurableStoreFailures,
+		"ack_failures":              snap.AckFailures,
+		"last_applied_generation":   snap.LastAppliedGeneration,
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"platform/sensor/internal/control"
 	"platform/sensor/internal/packsync"
 	"platform/sensor/internal/scheduler"
 	"platform/sensor/internal/spool"
@@ -27,6 +28,18 @@ type fakeSchedulerStatusProvider struct {
 
 func (f *fakeSchedulerStatusProvider) Snapshot() scheduler.Snapshot {
 	return f.snap
+}
+
+type fakeControlStatusProvider struct {
+	status control.Status
+}
+
+func (f *fakeControlStatusProvider) Snapshot() control.Status {
+	return f.status
+}
+
+func inSyncControl() *fakeControlStatusProvider {
+	return &fakeControlStatusProvider{status: control.Status{State: control.StateInSync}}
 }
 
 func runningScheduler() *fakeSchedulerStatusProvider {
@@ -50,6 +63,7 @@ func newTestHealth(t *testing.T, syncer packSyncStatusProvider) *HealthServer {
 		hs.SetPackSync(syncer)
 	}
 	hs.SetScheduler(runningScheduler())
+	hs.SetControl(inSyncControl())
 	return hs
 }
 
@@ -402,5 +416,143 @@ func TestSchedulerStatusDoesNotOverwriteHigherPriorityFailures(t *testing.T) {
 	}
 	if body["status"] != "PACK_TRUST_NOT_ESTABLISHED" {
 		t.Fatalf("expected pack precedence, got %v", body["status"])
+	}
+}
+
+func TestControlHealthStates(t *testing.T) {
+	trusted := &fakePackStatusProvider{
+		status: packsync.Status{TrustedApplied: true, CoreAuthorityEstablished: true},
+	}
+	cases := []struct {
+		name       string
+		control    control.Status
+		wantCode   int
+		wantStatus string
+	}{
+		{"sync_pending", control.Status{State: control.StateSyncPending}, http.StatusOK, "DEGRADED"},
+		{"in_sync", control.Status{State: control.StateInSync}, http.StatusOK, "UP"},
+		{"degraded_restart", control.Status{State: control.StateDegraded, LastCode: control.CodeRestartRequired, LastAction: "APPLY_FAILED"}, http.StatusOK, "DEGRADED"},
+		{"degraded_core", control.Status{State: control.StateDegraded, LastCode: control.CodeCoreUnavailable, LastAction: "CORE_UNAVAILABLE"}, http.StatusOK, "DEGRADED"},
+		{"degraded_ack", control.Status{State: control.StateDegraded, LastCode: control.CodeAckFailed, LastAction: "ACK_FAILED"}, http.StatusOK, "DEGRADED"},
+		{"degraded_invalid", control.Status{State: control.StateDegraded, LastCode: control.CodeInvalidDesired, LastAction: "INVALID_DESIRED"}, http.StatusOK, "DEGRADED"},
+		{"untrusted", control.Status{State: control.StateUntrusted, LastCode: control.CodeStateCorrupt}, http.StatusServiceUnavailable, "CONTROL_STATE_UNTRUSTED"},
+		{"durability", control.Status{State: control.StateUntrusted, LastCode: control.CodeStateDurabilityFailed, LastAction: "DURABILITY_FAILED"}, http.StatusServiceUnavailable, "CONTROL_STATE_UNTRUSTED"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hs := newTestHealth(t, trusted)
+			hs.SetControl(&fakeControlStatusProvider{status: tc.control})
+			rr := httptest.NewRecorder()
+			hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+			if rr.Code != tc.wantCode {
+				t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
+			}
+			var body map[string]any
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body["status"] != tc.wantStatus {
+				t.Fatalf("status=%v want=%s", body["status"], tc.wantStatus)
+			}
+			ctrl, ok := body["control"].(map[string]any)
+			if !ok {
+				t.Fatalf("missing control payload: %v", body)
+			}
+			for _, key := range []string{
+				"state", "last_action", "last_code", "last_generation", "last_successful_reconcile",
+				"reconcile_attempts", "no_desired_count", "applied_count", "rejected_count",
+				"lost_ack_repair_count", "core_regression_count", "generation_conflict_count",
+				"checksum_mismatch_count", "core_transport_failures", "durable_store_failures",
+				"ack_failures", "last_applied_generation",
+			} {
+				if _, present := ctrl[key]; !present {
+					t.Fatalf("missing control field %q", key)
+				}
+			}
+			raw := strings.ToLower(rr.Body.String())
+			for _, forbidden := range []string{"password", "token", "secret", "private_key", "bootstrap"} {
+				if strings.Contains(raw, forbidden) {
+					t.Fatalf("exposed %q", forbidden)
+				}
+			}
+			rrLive := httptest.NewRecorder()
+			hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
+			if rrLive.Code != http.StatusOK {
+				t.Fatalf("livez=%d", rrLive.Code)
+			}
+		})
+	}
+}
+
+func TestControlDegradedDoesNotOverwriteStrongerFailures(t *testing.T) {
+	hs := newTestHealth(t, &fakePackStatusProvider{
+		status: packsync.Status{TrustedApplied: false, CoreAuthorityEstablished: false},
+	})
+	hs.SetControl(&fakeControlStatusProvider{status: control.Status{State: control.StateDegraded}})
+	rr := httptest.NewRecorder()
+	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code=%d", rr.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	if body["status"] != "PACK_TRUST_NOT_ESTABLISHED" {
+		t.Fatalf("status=%v", body["status"])
+	}
+}
+
+func TestMissingControlProviderFailsReady(t *testing.T) {
+	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := NewHealthServer(":0", disk, slog.Default())
+	hs.SetPackSync(&fakePackStatusProvider{
+		status: packsync.Status{TrustedApplied: true, CoreAuthorityEstablished: true},
+	})
+	hs.SetScheduler(runningScheduler())
+	// control provider intentionally unset
+
+	rr := httptest.NewRecorder()
+	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "CONTROL_UNAVAILABLE" {
+		t.Fatalf("status=%v", body["status"])
+	}
+
+	rrLive := httptest.NewRecorder()
+	hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
+	if rrLive.Code != http.StatusOK {
+		t.Fatalf("livez=%d", rrLive.Code)
+	}
+}
+
+func TestMissingControlDoesNotOverwriteStrongerFailures(t *testing.T) {
+	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := NewHealthServer(":0", disk, slog.Default())
+	hs.SetPackSync(&fakePackStatusProvider{
+		status: packsync.Status{TrustedApplied: false, CoreAuthorityEstablished: false},
+	})
+	hs.SetScheduler(runningScheduler())
+	// control nil must not replace pack trust failure
+
+	rr := httptest.NewRecorder()
+	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code=%d", rr.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	if body["status"] != "PACK_TRUST_NOT_ESTABLISHED" {
+		t.Fatalf("expected pack precedence over missing control, got %v", body["status"])
 	}
 }

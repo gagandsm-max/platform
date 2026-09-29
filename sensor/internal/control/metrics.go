@@ -103,12 +103,13 @@ func (m *Metrics) markRejected() {
 	m.mu.Unlock()
 }
 
-func (m *Metrics) markLostAck() {
+func (m *Metrics) markLostAck(generation uint64) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
 	m.LostAckRepairCount++
+	m.LastAppliedGeneration = generation
 	m.LastSuccessUnixNano = time.Now().UTC().UnixNano()
 	m.mu.Unlock()
 }

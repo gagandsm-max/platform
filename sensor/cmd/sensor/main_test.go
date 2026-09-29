@@ -207,3 +207,26 @@ func TestProductionSchedulerIdleShutdownWithinConfiguredGrace(t *testing.T) {
 			elapsed, rt.Scheduler.ShutdownGracePeriod+250*time.Millisecond)
 	}
 }
+
+func TestControlShutdownWaitBounds(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		timeout time.Duration
+		want    time.Duration
+	}{
+		{"normal_10s", 10 * time.Second, 12 * time.Second},
+		{"cap_at_30s", 30 * time.Second, 15 * time.Second},
+		{"cap_at_1h", time.Hour, 15 * time.Second},
+		{"exact_cap_boundary", 13 * time.Second, 15 * time.Second},
+		{"under_cap", 5 * time.Second, 7 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := controlShutdownWait(tc.timeout)
+			if got != tc.want {
+				t.Fatalf("controlShutdownWait(%v)=%v want %v", tc.timeout, got, tc.want)
+			}
+		})
+	}
+}

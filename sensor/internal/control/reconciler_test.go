@@ -171,11 +171,18 @@ func TestReconcileLostAckRepair(t *testing.T) {
 	}
 	client.acks = nil
 	res, err := rec.RunOnce(context.Background())
-	if err != nil || res.Action != "LOST_ACK_REPAIR" || applies != 1 || len(client.acks) != 1 {
+	if err != nil || res.Action != "LOST_ACK_REPAIR" || applies != 2 || len(client.acks) != 1 {
 		t.Fatalf("lost-ack res=%+v err=%v applies=%d acks=%d", res, err, applies, len(client.acks))
 	}
-	if metrics.Snapshot().LostAckRepairCount != 1 {
-		t.Fatalf("metrics=%+v", metrics.Snapshot())
+	snap := metrics.Snapshot()
+	if snap.LostAckRepairCount != 1 {
+		t.Fatalf("metrics=%+v", snap)
+	}
+	if snap.LastAppliedGeneration != 3 {
+		t.Fatalf("lost-ack must set LastAppliedGeneration=3, got %d", snap.LastAppliedGeneration)
+	}
+	if snap.AppliedCount != 1 {
+		t.Fatalf("lost-ack must not increment AppliedCount, got %d", snap.AppliedCount)
 	}
 }
 
@@ -337,7 +344,7 @@ func TestReconcileLostAckRepairDurabilityFailurePreventsAck(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := rec.RunOnce(context.Background())
-	if control.CodeOf(err) != control.CodeStateDurabilityFailed || res.Action != "DURABILITY_FAILED" || len(client.acks) != 0 || applies != 0 {
+	if control.CodeOf(err) != control.CodeStateDurabilityFailed || res.Action != "DURABILITY_FAILED" || len(client.acks) != 0 || applies != 1 {
 		t.Fatalf("res=%+v err=%v acks=%d applies=%d", res, err, len(client.acks), applies)
 	}
 	if metrics.Snapshot().DurableStoreFailures != 1 {
@@ -377,7 +384,7 @@ func TestReconcileAckFailureRetriesWithoutReapply(t *testing.T) {
 	client.ackErr = nil
 	client.acks = nil
 	res, err = rec.RunOnce(context.Background())
-	if err != nil || res.Action != "LOST_ACK_REPAIR" || applies != 1 || len(client.acks) != 1 {
+	if err != nil || res.Action != "LOST_ACK_REPAIR" || applies != 2 || len(client.acks) != 1 {
 		t.Fatalf("retry res=%+v err=%v applies=%d acks=%d", res, err, applies, len(client.acks))
 	}
 }
@@ -524,5 +531,77 @@ func TestReconcileFetchTransportClassifiedAsCoreUnavailable(t *testing.T) {
 	}
 	if metrics.Snapshot().CoreTransportFailures != 1 {
 		t.Fatalf("transport failure metric MUST increment on transport error, got %d", metrics.Snapshot().CoreTransportFailures)
+	}
+}
+
+func TestReconcileLostAckRestartRequiredNoAppliedAck(t *testing.T) {
+	t.Parallel()
+	cfg := control.GoldenConfiguration()
+	desired := desiredState(t, 7, cfg)
+	client := &fakeControlClient{desired: desired}
+	rec, store, _ := newTestReconciler(t, client, control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
+		return nil
+	}))
+	if _, err := rec.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	prior, err := store.Load()
+	if err != nil || prior == nil || prior.Generation != 7 {
+		t.Fatalf("prior=%#v err=%v", prior, err)
+	}
+
+	client2 := &fakeControlClient{desired: desired}
+	rec2, err := control.NewReconciler(client2, store, validBaseline(t), control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
+		return control.NewRestartRequiredError("scheduler drift")
+	}), slog.Default(), &control.Metrics{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := rec2.RunOnce(context.Background())
+	if err != nil || res.Action != "APPLY_FAILED" || res.Code != control.CodeRestartRequired {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if len(client2.acks) != 1 || client2.acks[0].Outcome != "REJECTED" || client2.acks[0].RejectionCode != control.CodeRestartRequired {
+		t.Fatalf("acks=%+v", client2.acks)
+	}
+	if client2.acks[0].Generation != 7 || client2.acks[0].Checksum != desired.DesiredChecksum {
+		t.Fatalf("ack identity=%+v", client2.acks[0])
+	}
+	after, _ := store.Load()
+	if after == nil || after.Generation != 7 || after.Checksum != prior.Checksum {
+		t.Fatalf("durable snapshot mutated: %#v", after)
+	}
+}
+
+func TestReconcileNewGenerationRestartRequiredAckCode(t *testing.T) {
+	t.Parallel()
+	cfg := control.GoldenConfiguration()
+	client := &fakeControlClient{desired: desiredState(t, 2, cfg)}
+	rec, store, _ := newTestReconciler(t, client, control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
+		return control.NewRestartRequiredError("transport drift")
+	}))
+	res, err := rec.RunOnce(context.Background())
+	if err != nil || res.Code != control.CodeRestartRequired || client.acks[0].RejectionCode != control.CodeRestartRequired {
+		t.Fatalf("res=%+v err=%v acks=%+v", res, err, client.acks)
+	}
+	snap, _ := store.Load()
+	if snap != nil {
+		t.Fatalf("must not durable-commit on restart-required: %#v", snap)
+	}
+}
+
+func TestReconcileUnknownApplyErrorMapsToApplyFailed(t *testing.T) {
+	t.Parallel()
+	cfg := control.GoldenConfiguration()
+	client := &fakeControlClient{desired: desiredState(t, 2, cfg)}
+	rec, _, _ := newTestReconciler(t, client, control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
+		return errors.New("weird-internal-XYZ")
+	}))
+	res, err := rec.RunOnce(context.Background())
+	if err != nil || res.Code != control.CodeApplyFailed || client.acks[0].RejectionCode != control.CodeApplyFailed {
+		t.Fatalf("res=%+v err=%v acks=%+v", res, err, client.acks)
+	}
+	if client.acks[0].RejectionCode == "weird-internal-XYZ" {
+		t.Fatal("internal error leaked to ACK")
 	}
 }

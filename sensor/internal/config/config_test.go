@@ -93,6 +93,55 @@ func TestLoadConfigRuntimeIsSoleSharedAuthority(t *testing.T) {
 	if cfg.CapabilityPackDir != "/var/lib/platform/sensor/packs" {
 		t.Fatalf("CapabilityPackDir=%q", cfg.CapabilityPackDir)
 	}
+	if cfg.ControlReconcileInterval != 30*time.Second {
+		t.Fatalf("ControlReconcileInterval default=%v", cfg.ControlReconcileInterval)
+	}
+}
+
+func TestControlReconcileIntervalStrictBounds(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"unset", "", 30 * time.Second, false},
+		{"min", "5", 5 * time.Second, false},
+		{"max", "300", 300 * time.Second, false},
+		{"below", "4", 0, true},
+		{"above", "301", 0, true},
+		{"zero", "0", 0, true},
+		{"negative", "-1", 0, true},
+		{"non_int", "abc", 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearSensorEnv(t)
+			applyValidRuntimeEnv(t)
+			if tc.value == "" {
+				_ = os.Unsetenv("SENSOR_CONTROL_RECONCILE_INTERVAL_SECONDS")
+			} else {
+				t.Setenv("SENSOR_CONTROL_RECONCILE_INTERVAL_SECONDS", tc.value)
+			}
+			cfg, err := LoadConfig()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !strings.Contains(err.Error(), "SENSOR_CONTROL_RECONCILE_INTERVAL_SECONDS") &&
+					!strings.Contains(err.Error(), "SENSOR_CONFIG_INVALID") {
+					t.Fatalf("error=%v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			if cfg.ControlReconcileInterval != tc.want {
+				t.Fatalf("got=%v want=%v", cfg.ControlReconcileInterval, tc.want)
+			}
+		})
+	}
 }
 
 func TestLoadConfigRejectsInvalidRuntime(t *testing.T) {

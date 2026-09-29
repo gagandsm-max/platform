@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"platform/sensor/internal/agentreceiver"
 	"platform/sensor/internal/collector"
 	"platform/sensor/internal/config"
+	"platform/sensor/internal/control"
 	"platform/sensor/internal/coreclient"
 	"platform/sensor/internal/discovery"
 	"platform/sensor/internal/health"
@@ -104,6 +106,26 @@ func main() {
 		os.Exit(1)
 	}
 
+	controlStorePath, err := prepareControlStorePath(rt.SpoolPath)
+	if err != nil {
+		logger.Error("Failed to prepare control store path", "error_code", "SENSOR_CONTROL_STORE_INIT_FAILED", "error", err.Error())
+		os.Exit(1)
+	}
+	controlStore, err := control.NewStore(controlStorePath)
+	if err != nil {
+		logger.Error("Failed to initialize control store", "error_code", "SENSOR_CONTROL_STORE_INIT_FAILED", "error", err.Error())
+		os.Exit(1)
+	}
+	controlMetrics := &control.Metrics{}
+	controlStatus := control.NewStatusTracker(controlMetrics)
+	if _, loadErr := controlStore.Load(); loadErr != nil {
+		logger.Error("Control applied-state snapshot is untrusted",
+			"error_code", "SENSOR_CONTROL_STATE_CORRUPT", "error", loadErr.Error())
+		controlStatus.MarkUntrusted(control.CodeStateCorrupt)
+	}
+
+	runtimeState := newRuntimeConfigState(rt, levelVar)
+
 	sink, err := observation.NewDiskSink(diskSpool, 1024*1024)
 	if err != nil {
 		logger.Error("Failed to initialize observation sink", "error", err)
@@ -128,8 +150,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	controlReconciler, err := control.NewReconciler(client, controlStore, rt, runtimeState, logger, controlMetrics)
+	if err != nil {
+		logger.Error("Failed to initialize control reconciler", "error_code", "SENSOR_CONTROL_INIT_FAILED", "error", err.Error())
+		os.Exit(1)
+	}
+
 	healthServer := health.NewHealthServer(rt.HealthAddress, diskSpool, logger)
 	healthServer.SetScheduler(prodScheduler)
+	healthServer.SetControl(controlStatus)
 	go func() {
 		if err := healthServer.Start(); err != nil {
 			logger.Error("Health server encountered error", "error_code", "SENSOR_HEALTH_SERVER_FAILED")
@@ -219,12 +248,20 @@ func main() {
 		}()
 	}
 
+	controlLoopDone := make(chan struct{})
+	go runControlReconcileLoop(ctx, controlReconciler, controlStatus, cfg.ControlReconcileInterval, logger, controlLoopDone)
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigCh
 	logger.Info("Received termination signal, starting graceful shutdown", "signal", sig.String())
 
 	cancel()
+	select {
+	case <-controlLoopDone:
+	case <-time.After(controlShutdownWait(rt.Transport.RequestTimeout)):
+		logger.Warn("Control reconcile loop shutdown timed out", "error_code", "SENSOR_CONTROL_SHUTDOWN_TIMEOUT")
+	}
 	if agentServer != nil {
 		shutdownAgentCtx, shutdownAgentCancel := context.WithTimeout(context.Background(), cfg.AgentReceiverShutdownGrace)
 		defer shutdownAgentCancel()
@@ -267,6 +304,69 @@ func main() {
 		logger.Warn("Health server shutdown error", "error_code", "SENSOR_HEALTH_SHUTDOWN_FAILED")
 	}
 	logger.Info("Platform Sensor shutdown complete")
+}
+
+func prepareControlStorePath(spoolPath string) (string, error) {
+	clean := filepath.Clean(strings.TrimSpace(spoolPath))
+	if clean == "" || !filepath.IsAbs(clean) {
+		return "", fmt.Errorf("spool path must be absolute")
+	}
+	dir := filepath.Join(clean, "control")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "applied-state.json"), nil
+}
+
+const maxControlShutdownWait = 15 * time.Second
+
+// controlShutdownWait bounds how long process termination waits for the control loop.
+// It does not change HTTP request-timeout authority.
+func controlShutdownWait(requestTimeout time.Duration) time.Duration {
+	wait := requestTimeout + 2*time.Second
+	if wait > maxControlShutdownWait {
+		return maxControlShutdownWait
+	}
+	if wait < 0 {
+		return maxControlShutdownWait
+	}
+	return wait
+}
+
+func runControlReconcileLoop(
+	ctx context.Context,
+	rec *control.Reconciler,
+	status *control.StatusTracker,
+	interval time.Duration,
+	logger *slog.Logger,
+	done chan struct{},
+) {
+	defer close(done)
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	runOnce := func() {
+		if ctx.Err() != nil {
+			return
+		}
+		res, err := rec.RunOnce(ctx)
+		status.Observe(res, err)
+		if err != nil {
+			logger.Warn("control reconcile iteration finished with error",
+				"action", res.Action, "code", res.Code, "error", err.Error())
+		}
+	}
+	runOnce()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			runOnce()
+		}
+	}
 }
 
 func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *slog.Logger) (*agentreceiver.Server, *spool.DiskSpool, error) {
