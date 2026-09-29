@@ -7,6 +7,7 @@ import (
 
 	"platform/sensor/internal/config"
 	"platform/sensor/internal/control"
+	sensorruntime "platform/sensor/internal/runtime"
 )
 
 // runtimeConfigState owns the Sensor's currently accepted RuntimeConfig.
@@ -19,16 +20,16 @@ type runtimeConfigState struct {
 
 func newRuntimeConfigState(initial config.RuntimeConfig, levelVar *slog.LevelVar) *runtimeConfigState {
 	return &runtimeConfigState{
-		current:  initial,
+		current:  cloneRuntimeConfig(initial),
 		levelVar: levelVar,
 	}
 }
 
-// Snapshot returns a copy of the currently accepted RuntimeConfig.
+// Snapshot returns a deep copy of the currently accepted RuntimeConfig.
 func (s *runtimeConfigState) Snapshot() config.RuntimeConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.current
+	return cloneRuntimeConfig(s.current)
 }
 
 // Apply implements control.Applier with atomic Diff-before-mutate semantics.
@@ -71,6 +72,26 @@ func (s *runtimeConfigState) Apply(_ context.Context, _ uint64, _ string, candid
 	if err := config.ApplyLogLevel(s.levelVar, candidate.LogLevel); err != nil {
 		return control.NewApplyFailedError("failed to apply log level", err)
 	}
-	s.current = candidate
+	s.current = cloneRuntimeConfig(candidate)
 	return nil
+}
+
+func cloneRuntimeConfig(in config.RuntimeConfig) config.RuntimeConfig {
+	out := in
+	if in.EnabledCapabilities != nil {
+		out.EnabledCapabilities = append([]sensorruntime.Capability(nil), in.EnabledCapabilities...)
+	}
+	out.Scheduler = cloneSchedulerConfig(in.Scheduler)
+	return out
+}
+
+func cloneSchedulerConfig(in config.SchedulerConfig) config.SchedulerConfig {
+	out := in
+	if in.Pools != nil {
+		out.Pools = make(map[string]config.PoolConfig, len(in.Pools))
+		for k, v := range in.Pools {
+			out.Pools[k] = v
+		}
+	}
+	return out
 }

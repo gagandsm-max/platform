@@ -197,7 +197,12 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	controlStatus := map[string]any{}
-	if controlProvider != nil {
+	if controlProvider == nil {
+		httpStatus = http.StatusServiceUnavailable
+		if status == "UP" || status == "DEGRADED" {
+			status = "CONTROL_UNAVAILABLE"
+		}
+	} else {
 		snap := controlProvider.Snapshot()
 		controlStatus = controlPayload(snap)
 		switch snap.State {

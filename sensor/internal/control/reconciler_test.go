@@ -174,8 +174,15 @@ func TestReconcileLostAckRepair(t *testing.T) {
 	if err != nil || res.Action != "LOST_ACK_REPAIR" || applies != 2 || len(client.acks) != 1 {
 		t.Fatalf("lost-ack res=%+v err=%v applies=%d acks=%d", res, err, applies, len(client.acks))
 	}
-	if metrics.Snapshot().LostAckRepairCount != 1 {
-		t.Fatalf("metrics=%+v", metrics.Snapshot())
+	snap := metrics.Snapshot()
+	if snap.LostAckRepairCount != 1 {
+		t.Fatalf("metrics=%+v", snap)
+	}
+	if snap.LastAppliedGeneration != 3 {
+		t.Fatalf("lost-ack must set LastAppliedGeneration=3, got %d", snap.LastAppliedGeneration)
+	}
+	if snap.AppliedCount != 1 {
+		t.Fatalf("lost-ack must not increment AppliedCount, got %d", snap.AppliedCount)
 	}
 }
 

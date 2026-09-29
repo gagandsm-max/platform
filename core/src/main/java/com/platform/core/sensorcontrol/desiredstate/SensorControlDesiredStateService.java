@@ -254,11 +254,6 @@ public class SensorControlDesiredStateService {
             String rejectionMessage,
             Instant now
     ) {
-        if (state.appliedGeneration() == generation && checksum.equals(state.appliedChecksum())) {
-            // APPLIED -> REJECTED regression for same generation/checksum
-            throw new DomainException(ERR_OUTCOME_CONFLICT,
-                    "Cannot regress APPLIED observation to REJECTED for the same generation");
-        }
         if (state.observedGeneration() == generation
                 && checksum.equals(state.observedChecksum())
                 && state.observedOutcome() == SensorControlObservationOutcome.REJECTED) {
@@ -273,6 +268,9 @@ public class SensorControlDesiredStateService {
             throw new DomainException(ERR_OUTCOME_CONFLICT, "Observation regression is prohibited");
         }
 
+        // APPLIED -> REJECTED for the same desired generation/checksum is permitted:
+        // applied* remains historical last-successfully-applied evidence; observed*
+        // records the latest Sensor truth (e.g. SENSOR_CONTROL_RESTART_REQUIRED).
         SensorControlState next = new SensorControlState(
                 state.tenantId(), state.sensorId(),
                 state.desiredSchemaVersion(), state.desiredGeneration(), state.desiredChecksum(),

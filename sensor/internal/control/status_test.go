@@ -43,11 +43,51 @@ func TestStatusTrackerDegradedAndUntrusted(t *testing.T) {
 	if tr.Snapshot().State != control.StateUntrusted {
 		t.Fatalf("state=%s", tr.Snapshot().State)
 	}
+}
+
+func TestStatusTrackerUntrustedStickyAcrossNoDesired(t *testing.T) {
+	t.Parallel()
+	tr := control.NewStatusTracker(&control.Metrics{})
+	tr.MarkUntrusted(control.CodeStateCorrupt)
 	tr.Observe(control.Result{Action: "NO_DESIRED"}, nil)
-	if tr.Snapshot().State != control.StateInSync {
-		t.Fatalf("expected recovery to in-sync, got %s", tr.Snapshot().State)
+	if tr.Snapshot().State != control.StateUntrusted {
+		t.Fatalf("MarkUntrusted + NO_DESIRED must stay STATE_UNTRUSTED, got %s", tr.Snapshot().State)
 	}
-	if tr.Snapshot().LastSuccessfulReconcile.IsZero() || time.Since(tr.Snapshot().LastSuccessfulReconcile) > time.Second {
-		t.Fatalf("last success=%v", tr.Snapshot().LastSuccessfulReconcile)
+}
+
+func TestStatusTrackerDurabilityFailedStickyAcrossNoDesired(t *testing.T) {
+	t.Parallel()
+	tr := control.NewStatusTracker(&control.Metrics{})
+	tr.Observe(control.Result{Action: "DURABILITY_FAILED", Code: control.CodeStateDurabilityFailed}, nil)
+	if tr.Snapshot().State != control.StateUntrusted {
+		t.Fatalf("state=%s", tr.Snapshot().State)
+	}
+	tr.Observe(control.Result{Action: "NO_DESIRED"}, nil)
+	if tr.Snapshot().State != control.StateUntrusted {
+		t.Fatalf("DURABILITY_FAILED + NO_DESIRED must stay STATE_UNTRUSTED, got %s", tr.Snapshot().State)
+	}
+}
+
+func TestStatusTrackerAppliedClearsUntrusted(t *testing.T) {
+	t.Parallel()
+	tr := control.NewStatusTracker(&control.Metrics{})
+	tr.MarkUntrusted(control.CodeStateCorrupt)
+	tr.Observe(control.Result{Action: "APPLIED", Generation: 5, Outcome: control.OutcomeApplied}, nil)
+	snap := tr.Snapshot()
+	if snap.State != control.StateInSync {
+		t.Fatalf("successful APPLIED must clear untrusted, got %s", snap.State)
+	}
+	if snap.LastSuccessfulReconcile.IsZero() || time.Since(snap.LastSuccessfulReconcile) > time.Second {
+		t.Fatalf("last success=%v", snap.LastSuccessfulReconcile)
+	}
+}
+
+func TestStatusTrackerLostAckRepairClearsUntrusted(t *testing.T) {
+	t.Parallel()
+	tr := control.NewStatusTracker(&control.Metrics{})
+	tr.Observe(control.Result{Action: "DURABILITY_FAILED", Code: control.CodeStateDurabilityFailed}, nil)
+	tr.Observe(control.Result{Action: "LOST_ACK_REPAIR", Generation: 7, Outcome: control.OutcomeApplied}, nil)
+	if tr.Snapshot().State != control.StateInSync {
+		t.Fatalf("successful LOST_ACK_REPAIR must clear untrusted, got %s", tr.Snapshot().State)
 	}
 }

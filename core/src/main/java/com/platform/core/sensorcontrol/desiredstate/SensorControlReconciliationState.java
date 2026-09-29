@@ -12,14 +12,18 @@ public enum SensorControlReconciliationState {
         if (state == null) {
             return PENDING;
         }
+        // Latest observed REJECTED for the exact desired generation/checksum wins over
+        // historical applied success (restart-runtime re-proof may reject while applied*).
+        if (state.observedGeneration() == state.desiredGeneration()
+                && state.observedOutcome() == SensorControlObservationOutcome.REJECTED
+                && state.desiredChecksum() != null
+                && state.desiredChecksum().equals(state.observedChecksum())) {
+            return REJECTED;
+        }
         if (state.appliedGeneration() == state.desiredGeneration()
                 && state.desiredChecksum() != null
                 && state.desiredChecksum().equals(state.appliedChecksum())) {
             return CURRENT;
-        }
-        if (state.observedGeneration() == state.desiredGeneration()
-                && state.observedOutcome() == SensorControlObservationOutcome.REJECTED) {
-            return REJECTED;
         }
         return PENDING;
     }

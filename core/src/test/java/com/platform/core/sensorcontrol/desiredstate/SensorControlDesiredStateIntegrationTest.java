@@ -161,17 +161,45 @@ class SensorControlDesiredStateIntegrationTest {
         assertEquals(checksum, applied.appliedChecksum());
         assertEquals(SensorControlObservationOutcome.APPLIED, applied.observedOutcome());
         assertNull(applied.rejectionCode());
+        assertEquals(SensorControlReconciliationState.CURRENT, applied.reconciliationState());
 
         SensorControlState dupApplied = service.acknowledgeAppliedState(
                 tenantA.tenantId(), "sensor-a", 1, 2L, checksum,
                 SensorControlObservationOutcome.APPLIED, null, null);
         assertEquals(2L, dupApplied.appliedGeneration());
+        assertEquals(SensorControlReconciliationState.CURRENT, dupApplied.reconciliationState());
 
-        DomainException regress = assertThrows(DomainException.class,
+        SensorControlState restartRejected = service.acknowledgeAppliedState(
+                tenantA.tenantId(), "sensor-a", 1, 2L, checksum,
+                SensorControlObservationOutcome.REJECTED, "SENSOR_CONTROL_RESTART_REQUIRED",
+                "scheduler drift");
+        assertEquals(2L, restartRejected.appliedGeneration());
+        assertEquals(checksum, restartRejected.appliedChecksum());
+        assertEquals(2L, restartRejected.observedGeneration());
+        assertEquals(checksum, restartRejected.observedChecksum());
+        assertEquals(SensorControlObservationOutcome.REJECTED, restartRejected.observedOutcome());
+        assertEquals("SENSOR_CONTROL_RESTART_REQUIRED", restartRejected.rejectionCode());
+        assertEquals(SensorControlReconciliationState.REJECTED, restartRejected.reconciliationState());
+
+        SensorControlState dupRestartRejected = service.acknowledgeAppliedState(
+                tenantA.tenantId(), "sensor-a", 1, 2L, checksum,
+                SensorControlObservationOutcome.REJECTED, "SENSOR_CONTROL_RESTART_REQUIRED",
+                "scheduler drift");
+        assertEquals(SensorControlObservationOutcome.REJECTED, dupRestartRejected.observedOutcome());
+        assertEquals(SensorControlReconciliationState.REJECTED, dupRestartRejected.reconciliationState());
+
+        DomainException conflictAfterRestart = assertThrows(DomainException.class,
                 () -> service.acknowledgeAppliedState(
                         tenantA.tenantId(), "sensor-a", 1, 2L, checksum,
-                        SensorControlObservationOutcome.REJECTED, "REGRESS", null));
-        assertEquals(SensorControlDesiredStateService.ERR_OUTCOME_CONFLICT, regress.getCode());
+                        SensorControlObservationOutcome.REJECTED, "OTHER_CODE", null));
+        assertEquals(SensorControlDesiredStateService.ERR_OUTCOME_CONFLICT, conflictAfterRestart.getCode());
+
+        SensorControlState recovered = service.acknowledgeAppliedState(
+                tenantA.tenantId(), "sensor-a", 1, 2L, checksum,
+                SensorControlObservationOutcome.APPLIED, null, null);
+        assertEquals(2L, recovered.appliedGeneration());
+        assertEquals(SensorControlObservationOutcome.APPLIED, recovered.observedOutcome());
+        assertEquals(SensorControlReconciliationState.CURRENT, recovered.reconciliationState());
 
         DomainException staleAck = assertThrows(DomainException.class,
                 () -> service.acknowledgeAppliedState(
@@ -378,6 +406,53 @@ class SensorControlDesiredStateIntegrationTest {
                   desired_config_json, desired_by, desired_at, applied_generation, observed_generation, updated_at)
                 VALUES (?, 'sensor-db', 1, 1, ?, CAST(? AS jsonb), 'x', NOW(), 0, 0, NOW())
                 """, tenantB.tenantId(), checksum, goodJson));
+    }
+
+    @Test
+    void appliedThenRestartRequiredRejectedThenAppliedRecovery() {
+        sensors.enrollSensor("sensor-restart", tenantA.tenantId(), null, SensorRole.NETWORK, true);
+        SensorRuntimeDesiredConfig cfg = sampleConfig(2, 8);
+        SensorControlState desired = service.setDesiredConfiguration(
+                tenantA.tenantId(), "sensor-restart", 0L, cfg);
+        long generation = desired.desiredGeneration();
+        String checksum = desired.desiredChecksum();
+
+        SensorControlState applied = service.acknowledgeAppliedState(
+                tenantA.tenantId(), "sensor-restart", 1, generation, checksum,
+                SensorControlObservationOutcome.APPLIED, null, null);
+        assertEquals(SensorControlReconciliationState.CURRENT, applied.reconciliationState());
+        assertEquals(generation, applied.appliedGeneration());
+
+        SensorControlState rejected = service.acknowledgeAppliedState(
+                tenantA.tenantId(), "sensor-restart", 1, generation, checksum,
+                SensorControlObservationOutcome.REJECTED, "SENSOR_CONTROL_RESTART_REQUIRED",
+                "runtime scheduler drift");
+        assertEquals(generation, rejected.appliedGeneration());
+        assertEquals(checksum, rejected.appliedChecksum());
+        assertEquals(generation, rejected.observedGeneration());
+        assertEquals(checksum, rejected.observedChecksum());
+        assertEquals(SensorControlObservationOutcome.REJECTED, rejected.observedOutcome());
+        assertEquals("SENSOR_CONTROL_RESTART_REQUIRED", rejected.rejectionCode());
+        assertEquals(SensorControlReconciliationState.REJECTED, rejected.reconciliationState());
+
+        SensorControlState dup = service.acknowledgeAppliedState(
+                tenantA.tenantId(), "sensor-restart", 1, generation, checksum,
+                SensorControlObservationOutcome.REJECTED, "SENSOR_CONTROL_RESTART_REQUIRED",
+                "runtime scheduler drift");
+        assertEquals(SensorControlReconciliationState.REJECTED, dup.reconciliationState());
+
+        DomainException conflict = assertThrows(DomainException.class,
+                () -> service.acknowledgeAppliedState(
+                        tenantA.tenantId(), "sensor-restart", 1, generation, checksum,
+                        SensorControlObservationOutcome.REJECTED, "OTHER", "different"));
+        assertEquals(SensorControlDesiredStateService.ERR_OUTCOME_CONFLICT, conflict.getCode());
+
+        SensorControlState recovered = service.acknowledgeAppliedState(
+                tenantA.tenantId(), "sensor-restart", 1, generation, checksum,
+                SensorControlObservationOutcome.APPLIED, null, null);
+        assertEquals(SensorControlObservationOutcome.APPLIED, recovered.observedOutcome());
+        assertEquals(SensorControlReconciliationState.CURRENT, recovered.reconciliationState());
+        assertEquals(generation, recovered.appliedGeneration());
     }
 
     private static SensorRuntimeDesiredConfig sampleConfig(int workers, int queueDepth) {

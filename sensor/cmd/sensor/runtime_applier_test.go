@@ -161,6 +161,35 @@ func TestRuntimeApplierConcurrentSnapshotApply(t *testing.T) {
 	wg.Wait()
 }
 
+func TestRuntimeConfigStateDeepCopiesMutableMembers(t *testing.T) {
+	t.Parallel()
+	initial := applierBaseline()
+	state := newRuntimeConfigState(initial, nil)
+
+	initial.Scheduler.Pools["NETWORK_POLL"] = config.PoolConfig{Workers: 99, QueueDepth: 99}
+	initial.EnabledCapabilities[0] = sensorruntime.CapabilityICMP
+	snapAfterMutateInitial := state.Snapshot()
+	if snapAfterMutateInitial.Scheduler.Pools["NETWORK_POLL"].Workers != 2 {
+		t.Fatalf("mutating initial after construct altered internal pools: %+v",
+			snapAfterMutateInitial.Scheduler.Pools)
+	}
+	if snapAfterMutateInitial.EnabledCapabilities[0] != sensorruntime.CapabilitySNMP {
+		t.Fatalf("mutating initial after construct altered capabilities: %v",
+			snapAfterMutateInitial.EnabledCapabilities)
+	}
+
+	snap := state.Snapshot()
+	snap.Scheduler.Pools["NETWORK_POLL"] = config.PoolConfig{Workers: 77, QueueDepth: 77}
+	snap.EnabledCapabilities[0] = sensorruntime.CapabilitySyslog
+	snap2 := state.Snapshot()
+	if snap2.Scheduler.Pools["NETWORK_POLL"].Workers != 2 {
+		t.Fatalf("mutating Snapshot pools altered internal state: %+v", snap2.Scheduler.Pools)
+	}
+	if snap2.EnabledCapabilities[0] != sensorruntime.CapabilitySNMP {
+		t.Fatalf("mutating Snapshot capabilities altered internal state: %v", snap2.EnabledCapabilities)
+	}
+}
+
 type loopFakeClient struct {
 	mu       sync.Mutex
 	fetchErr error

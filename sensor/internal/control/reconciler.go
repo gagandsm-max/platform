@@ -224,7 +224,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (Result, error) {
 					Checksum: desired.DesiredChecksum, Outcome: OutcomeApplied, Code: CodeAckFailed,
 				}, newCodedError(CodeAckFailed, "lost-ACK repair failed", ackErr)
 			}
-			r.metrics.markLostAck()
+			r.metrics.markLostAck(desired.DesiredGeneration)
 			r.logEvent("control_reconcile_lost_ack_repaired", desired.DesiredGeneration, checksumPrefix(desired.DesiredChecksum), "")
 			return Result{
 				Action: "LOST_ACK_REPAIR", Generation: desired.DesiredGeneration,

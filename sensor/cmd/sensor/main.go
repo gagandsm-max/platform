@@ -257,10 +257,9 @@ func main() {
 	logger.Info("Received termination signal, starting graceful shutdown", "signal", sig.String())
 
 	cancel()
-	shutdownControlWait := rt.Transport.RequestTimeout + 2*time.Second
 	select {
 	case <-controlLoopDone:
-	case <-time.After(shutdownControlWait):
+	case <-time.After(controlShutdownWait(rt.Transport.RequestTimeout)):
 		logger.Warn("Control reconcile loop shutdown timed out", "error_code", "SENSOR_CONTROL_SHUTDOWN_TIMEOUT")
 	}
 	if agentServer != nil {
@@ -317,6 +316,21 @@ func prepareControlStorePath(spoolPath string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "applied-state.json"), nil
+}
+
+const maxControlShutdownWait = 15 * time.Second
+
+// controlShutdownWait bounds how long process termination waits for the control loop.
+// It does not change HTTP request-timeout authority.
+func controlShutdownWait(requestTimeout time.Duration) time.Duration {
+	wait := requestTimeout + 2*time.Second
+	if wait > maxControlShutdownWait {
+		return maxControlShutdownWait
+	}
+	if wait < 0 {
+		return maxControlShutdownWait
+	}
+	return wait
 }
 
 func runControlReconcileLoop(

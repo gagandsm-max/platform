@@ -500,3 +500,59 @@ func TestControlDegradedDoesNotOverwriteStrongerFailures(t *testing.T) {
 		t.Fatalf("status=%v", body["status"])
 	}
 }
+
+func TestMissingControlProviderFailsReady(t *testing.T) {
+	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := NewHealthServer(":0", disk, slog.Default())
+	hs.SetPackSync(&fakePackStatusProvider{
+		status: packsync.Status{TrustedApplied: true, CoreAuthorityEstablished: true},
+	})
+	hs.SetScheduler(runningScheduler())
+	// control provider intentionally unset
+
+	rr := httptest.NewRecorder()
+	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "CONTROL_UNAVAILABLE" {
+		t.Fatalf("status=%v", body["status"])
+	}
+
+	rrLive := httptest.NewRecorder()
+	hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
+	if rrLive.Code != http.StatusOK {
+		t.Fatalf("livez=%d", rrLive.Code)
+	}
+}
+
+func TestMissingControlDoesNotOverwriteStrongerFailures(t *testing.T) {
+	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := NewHealthServer(":0", disk, slog.Default())
+	hs.SetPackSync(&fakePackStatusProvider{
+		status: packsync.Status{TrustedApplied: false, CoreAuthorityEstablished: false},
+	})
+	hs.SetScheduler(runningScheduler())
+	// control nil must not replace pack trust failure
+
+	rr := httptest.NewRecorder()
+	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code=%d", rr.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	if body["status"] != "PACK_TRUST_NOT_ESTABLISHED" {
+		t.Fatalf("expected pack precedence over missing control, got %v", body["status"])
+	}
+}

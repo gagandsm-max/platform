@@ -106,9 +106,20 @@ func (t *StatusTracker) Observe(res Result, err error) {
 		return
 	}
 
-	// Successful reconciliation clears prior untrusted only when store proved usable.
-	if err == nil && (res.Action == "NO_DESIRED" || res.Action == "APPLIED" || res.Action == "LOST_ACK_REPAIR") {
+	// Successful durable re-proof may clear untrusted. NO_DESIRED cannot —
+	// Core 204 returns before store.Load() and does not prove durable trust.
+	if err == nil && (res.Action == "APPLIED" || res.Action == "LOST_ACK_REPAIR") {
 		t.untrusted = false
+		t.state = StateInSync
+		t.lastSuccess = time.Now().UTC()
+		t.lastCode = ""
+		return
+	}
+	if err == nil && res.Action == "NO_DESIRED" {
+		if t.untrusted {
+			t.state = StateUntrusted
+			return
+		}
 		t.state = StateInSync
 		t.lastSuccess = time.Now().UTC()
 		t.lastCode = ""
