@@ -167,6 +167,41 @@ func (r *Reconciler) RunOnce(ctx context.Context) (Result, error) {
 
 	if local != nil && desired.DesiredGeneration == localGen {
 		if desired.DesiredChecksum == localChecksum {
+			candidate, overlayErr := OverlayDesired(r.baseline, local.Configuration)
+			if overlayErr != nil {
+				r.metrics.markRejected()
+				rejectCode := CodeConfigInvalid
+				ackErr := r.sendRejected(ctx, desired.DesiredGeneration, desired.DesiredChecksum, rejectCode, "lost-ACK candidate configuration invalid")
+				r.logEvent("control_reconcile_lost_ack_apply_failed", desired.DesiredGeneration, checksumPrefix(desired.DesiredChecksum), rejectCode)
+				if ackErr != nil {
+					r.metrics.markAckFailure()
+					return Result{
+						Action: "APPLY_FAILED", Generation: desired.DesiredGeneration,
+						Checksum: desired.DesiredChecksum, Outcome: OutcomeRejected, Code: rejectCode,
+					}, newCodedError(CodeAckFailed, "REJECTED ACK failed after lost-ACK overlay failure", ackErr)
+				}
+				return Result{
+					Action: "APPLY_FAILED", Generation: desired.DesiredGeneration,
+					Checksum: desired.DesiredChecksum, Outcome: OutcomeRejected, Code: rejectCode,
+				}, nil
+			}
+			if err := r.applier.Apply(ctx, desired.DesiredGeneration, desired.DesiredChecksum, candidate); err != nil {
+				r.metrics.markRejected()
+				rejectCode := RejectCodeForApply(err)
+				ackErr := r.sendRejected(ctx, desired.DesiredGeneration, desired.DesiredChecksum, rejectCode, "lost-ACK runtime re-proof failed")
+				r.logEvent("control_reconcile_lost_ack_apply_failed", desired.DesiredGeneration, checksumPrefix(desired.DesiredChecksum), rejectCode)
+				if ackErr != nil {
+					r.metrics.markAckFailure()
+					return Result{
+						Action: "APPLY_FAILED", Generation: desired.DesiredGeneration,
+						Checksum: desired.DesiredChecksum, Outcome: OutcomeRejected, Code: rejectCode,
+					}, newCodedError(CodeAckFailed, "REJECTED ACK failed after lost-ACK apply failure", ackErr)
+				}
+				return Result{
+					Action: "APPLY_FAILED", Generation: desired.DesiredGeneration,
+					Checksum: desired.DesiredChecksum, Outcome: OutcomeRejected, Code: rejectCode,
+				}, nil
+			}
 			if err := r.store.Commit(*local); err != nil {
 				r.metrics.markDurableFailure()
 				r.logEvent("control_reconcile_durability_failed", desired.DesiredGeneration, checksumPrefix(desired.DesiredChecksum), CodeStateDurabilityFailed)
@@ -225,18 +260,19 @@ func (r *Reconciler) RunOnce(ctx context.Context) (Result, error) {
 
 	if err := r.applier.Apply(ctx, desired.DesiredGeneration, desired.DesiredChecksum, candidate); err != nil {
 		r.metrics.markRejected()
-		ackErr := r.sendRejected(ctx, desired.DesiredGeneration, desired.DesiredChecksum, CodeApplyFailed, "runtime apply failed")
-		r.logEvent("control_reconcile_apply_failed", desired.DesiredGeneration, checksumPrefix(desired.DesiredChecksum), CodeApplyFailed)
+		rejectCode := RejectCodeForApply(err)
+		ackErr := r.sendRejected(ctx, desired.DesiredGeneration, desired.DesiredChecksum, rejectCode, "runtime apply failed")
+		r.logEvent("control_reconcile_apply_failed", desired.DesiredGeneration, checksumPrefix(desired.DesiredChecksum), rejectCode)
 		if ackErr != nil {
 			r.metrics.markAckFailure()
 			return Result{
 				Action: "APPLY_FAILED", Generation: desired.DesiredGeneration,
-				Checksum: desired.DesiredChecksum, Outcome: OutcomeRejected, Code: CodeApplyFailed,
+				Checksum: desired.DesiredChecksum, Outcome: OutcomeRejected, Code: rejectCode,
 			}, newCodedError(CodeAckFailed, "REJECTED ACK failed after apply failure", ackErr)
 		}
 		return Result{
 			Action: "APPLY_FAILED", Generation: desired.DesiredGeneration,
-			Checksum: desired.DesiredChecksum, Outcome: OutcomeRejected, Code: CodeApplyFailed,
+			Checksum: desired.DesiredChecksum, Outcome: OutcomeRejected, Code: rejectCode,
 		}, nil
 	}
 

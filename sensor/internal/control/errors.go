@@ -9,6 +9,7 @@ const (
 	CodeGenerationConflict      = "SENSOR_CONTROL_GENERATION_CONFLICT"
 	CodeConfigInvalid           = "SENSOR_CONTROL_CONFIG_INVALID"
 	CodeApplyFailed             = "SENSOR_CONTROL_APPLY_FAILED"
+	CodeRestartRequired         = "SENSOR_CONTROL_RESTART_REQUIRED"
 	CodeStateDurabilityFailed   = "SENSOR_CONTROL_STATE_DURABILITY_FAILED"
 	CodeStateCorrupt            = "SENSOR_CONTROL_STATE_CORRUPT"
 	CodeAckFailed               = "SENSOR_CONTROL_ACK_FAILED"
@@ -80,6 +81,30 @@ func newCodedError(code, message string, cause error) *Error {
 // NewDurabilityTestError returns a CodeStateDurabilityFailed error for tests.
 func NewDurabilityTestError() error {
 	return newCodedError(CodeStateDurabilityFailed, "injected durable commit failure", nil)
+}
+
+// NewRestartRequiredError returns a typed restart-required apply rejection.
+func NewRestartRequiredError(message string) error {
+	if message == "" {
+		message = "desired configuration requires process restart"
+	}
+	return newCodedError(CodeRestartRequired, message, nil)
+}
+
+// NewApplyFailedError returns a typed apply failure without leaking arbitrary codes.
+func NewApplyFailedError(message string, cause error) error {
+	if message == "" {
+		message = "runtime apply failed"
+	}
+	return newCodedError(CodeApplyFailed, message, cause)
+}
+
+// RejectCodeForApply maps an Applier error to the only ACK-safe rejection codes.
+func RejectCodeForApply(err error) string {
+	if CodeOf(err) == CodeRestartRequired {
+		return CodeRestartRequired
+	}
+	return CodeApplyFailed
 }
 
 // CodeOf returns the stable control code when err is a control Error.

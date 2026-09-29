@@ -41,6 +41,10 @@ type Config struct {
 
 	// Capability Pack durable staging directory (local process setting).
 	CapabilityPackDir string
+
+	// ControlReconcileInterval is the local control-plane reconciliation cadence.
+	// It is distinct from SENSOR_POLL_INTERVAL_SECONDS monitoring cadence.
+	ControlReconcileInterval time.Duration
 }
 
 // legacySharedRuntimeEnvKeys are former shared-runtime authorities that must not
@@ -149,10 +153,30 @@ func LoadConfig() (*Config, error) {
 
 		CapabilityPackDir: getEnv("SENSOR_CAPABILITY_PACK_DIR", ""),
 	}
+	interval, err := parseControlReconcileIntervalSeconds()
+	if err != nil {
+		return nil, err
+	}
+	cfg.ControlReconcileInterval = interval
 	if cfg.PollInterval <= 0 {
 		return nil, fmt.Errorf("SENSOR_CONFIG_INVALID: SENSOR_POLL_INTERVAL_SECONDS must be greater than zero")
 	}
 	return cfg, nil
+}
+
+func parseControlReconcileIntervalSeconds() (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv("SENSOR_CONTROL_RECONCILE_INTERVAL_SECONDS"))
+	if raw == "" {
+		return 30 * time.Second, nil
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("SENSOR_CONFIG_INVALID: SENSOR_CONTROL_RECONCILE_INTERVAL_SECONDS must be an integer")
+	}
+	if seconds < 5 || seconds > 300 {
+		return 0, fmt.Errorf("SENSOR_CONFIG_INVALID: SENSOR_CONTROL_RECONCILE_INTERVAL_SECONDS must be between 5 and 300")
+	}
+	return time.Duration(seconds) * time.Second, nil
 }
 
 // ParseLogLevel maps RuntimeConfig log level strings to slog levels.

@@ -5,9 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"platform/sensor/internal/control"
 )
 
 func openTest(t *testing.T, max int) *DiskSpool {
@@ -285,5 +288,74 @@ func TestSpaceInspectionErrorDegrades(t *testing.T) {
 	s.space = func(int64) (spaceStatus, error) { return spaceStatus{}, errors.New("statfs") }
 	if _, e := s.Append(AppendRequest{Class: ClassMetric, Type: "m", Payload: []byte("x")}); CodeOf(e) != CodeIO {
 		t.Fatalf("want io got %v", e)
+	}
+}
+
+func TestControlDirectoryCoexistsWithSpoolRecovery(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Dir: dir, MaxRecordBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.space = func(extra int64) (spaceStatus, error) {
+		return spaceStatus{totalBytes: 1000000, usedBytes: 1000, usedPct: .1}, nil
+	}
+	add(t, s, "keep-me")
+	controlDir := filepath.Join(dir, "control")
+	if err := os.MkdirAll(controlDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	snapPath := filepath.Join(controlDir, "applied-state.json")
+	store, err := control.NewStore(snapPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := control.GoldenConfiguration()
+	checksum, err := control.ComputeDesiredChecksum(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Commit(control.AppliedSnapshot{
+		SchemaVersion: 1,
+		Generation:    9,
+		Checksum:      checksum,
+		Configuration: cfg,
+		AppliedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := Open(Config{Dir: dir, MaxRecordBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2.space = func(extra int64) (spaceStatus, error) {
+		return spaceStatus{totalBytes: 1000000, usedBytes: 1000, usedPct: .1}, nil
+	}
+	defer s2.Close()
+
+	if _, err := os.Stat(controlDir); err != nil {
+		t.Fatalf("control dir removed: %v", err)
+	}
+	loaded, err := store.Load()
+	if err != nil || loaded == nil || loaded.Generation != 9 {
+		t.Fatalf("snapshot lost: %#v err=%v", loaded, err)
+	}
+	st, err := s2.Stats()
+	if err != nil || st.RecordCount != 1 {
+		t.Fatalf("spool records broken: %#v err=%v", st, err)
+	}
+	add(t, s2, "after-recovery")
+	entries, err := os.ReadDir(filepath.Join(dir, quarantineDirName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "applied-state") || strings.Contains(e.Name(), "control") {
+			t.Fatalf("control artifact quarantined: %s", e.Name())
+		}
 	}
 }
