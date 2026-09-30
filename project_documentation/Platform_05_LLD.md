@@ -2929,16 +2929,22 @@ The Linux Agent integrates eBPF collection within its existing Go runtime:
 
 To prevent telemetry floods, the Linux Agent does NOT stream individual socket events over the network:
 1. **Time Bucketing:** Events are aggregated locally in memory into bounded, configurable time intervals around `process/service + remote endpoint + protocol/port`.
-2. **Aggregation Key:**
-   ```text
-   ProcessNetworkKey {
-       process_name:      string
-       service_name:      string (resolved from systemd cgroup or container metadata)
-       remote_ip:         net.IP (IPv4 or IPv6)
-       remote_port:       uint16
-       protocol:          uint8 (TCP/UDP)
-   }
-   ```
+2. **Workload Aggregation Identity & Key:**
+   - Instead of naively collapsing distinct workloads or arbitrarily attaching single-valued metadata, local aggregation evaluates a bounded **workload aggregation identity**.
+   - **Workload Aggregation Invariant:** Every single-valued workload/local identity attribute emitted on an aggregated `ProcessNetworkEvidence` record must be common to every event represented by that record.
+   - If multiple processes or workloads are deliberately merged (e.g. across worker PIDs under a common service or container scope):
+     - Workload-specific fields (such as `pid` or specific local socket ports) must not pretend to identify one member; such fields must be omitted, null, or represented through explicitly aggregated dimensions.
+     - The record must expose aggregate scope and quality indicators appropriately.
+   - Applicable identity dimensions for workload aggregation keys may include, depending on workload type and execution context:
+     - Executable / process identity (e.g. `process_name`, `executable_path`);
+     - Service identity (e.g. `service_name`);
+     - Container identity (e.g. `container_id`);
+     - Cgroup identity (e.g. `cgroup_path`);
+     - Network namespace (`network_namespace`);
+     - Local endpoint scope / port binding;
+     - Remote endpoint (`remote_ip`, `remote_port`) and `protocol`.
+   - `pid` remains an ephemeral runtime observation only and must NEVER become durable entity authority.
+   - The exact implementation key structure and cardinality balance are owned by **BUILD-011** and certified by **BUILD-019 / BUILD-130** benchmarks without freezing premature cardinality constants.
 3. **Cardinality Budget & Heavy-Hitter Overflow:**
    - Enforces bounded active-key/cardinality ceilings per aggregation interval.
    - When distinct remote endpoint keys exceed the configured ceiling, excess keys are shed into an aggregate summary key (e.g., `__overflow_other__`).
@@ -2958,8 +2964,8 @@ To prevent telemetry floods, the Linux Agent does NOT stream individual socket e
 
 Ingestion and streaming pipelines transport typed logical evidence:
 - **`ProcessNetworkEvidence`:** Carries tenant ID, agent ID, host ID, entity ID, process and service attribution, remote endpoint (IP/port/entity), protocol, connection counters (active, new, closed, failures; applicable to stateful protocols), traffic metrics (bytes TX/RX, mean RTT, retransmissions when technically available and certified; protocol-dependent fields nullable/optional without fabricated zero values), quality/capability state, and drop/shed counters.
-- **`ActivePathObservation`:** Carries tenant ID, path ID, source vantage / sensor ID, target entity ID / IP, protocol/port, opaque versioned path fingerprint, hop sequence (bounded hop index, nullable hop IP, explicit hop state `RESPONSIVE | UNRESPONSIVE | HIDDEN | UNKNOWN`, hostname, ASN, optional/nullable RTT min/mean/max, loss percentage, jitter, and MPLS labels when observable from supported protocol extensions), and quality status.
-- **`PathChangeEvidence`:** Carries tenant ID, path ID, previous fingerprint, new fingerprint, optional divergence hop index (nullable when not applicable), timestamp, and corroborating telemetry links.
+- **`ActivePathObservation`:** Carries tenant ID, path ID, source vantage / canonical sensor ID (bounded string), target entity ID / IP, protocol/port, opaque versioned path fingerprint, hop sequence (bounded hop index, nullable hop IP, explicit hop state `RESPONSIVE | UNRESPONSIVE | HIDDEN | UNKNOWN`, hostname, ASN, optional/nullable RTT min/mean/max, loss percentage, jitter, and MPLS labels when observable from supported protocol extensions), and quality status.
+- **`PathChangeEvidence`:** Carries tenant ID, path ID, source sensor ID (bounded canonical string), previous fingerprint, new fingerprint, optional divergence hop index (nullable when not applicable), timestamp, and corroborating telemetry links.
 
 ### 92.2 Physical storage responsibilities
 

@@ -582,6 +582,7 @@ Process-network facts are produced by the Linux Agent eBPF collector, aggregated
 - **Agent Identity:** `agent_id` is a bounded canonical Agent identifier string (e.g. `"agent-01"`), validated against tenant + authenticated Sensor + `assignment_generation` before downstream canonicalization. It is not redefined as UUID-only and remains compatible with existing Agent identifier naming.
 - **Host Identifier & Entity Resolution:** `host_id` is a bounded Agent-observed host identifier string (e.g. `"host-1"`). It represents corroborating identity evidence only, not canonical entity authority (`Agent hostId != canonical entityId`). Core resolves `tenant + namespace="platform.agent" + identifier_type="HOST_ID" + host_id` into canonical `entity_id`. If resolution fails, the platform follows the existing governed unresolved-entity behavior rather than fabricating an entity. Agent-supplied `entityId` is never accepted as authoritative.
 - **Transport Inheritance:** Authority, assignment, replay and delivery provenance are inherited from and validated by the enclosing Agent/Sensor transport envelope (including authenticated sensor scope, `sensor_id`, `accepting_sensor_id`, `agent_id`, `assignment_generation`, agent stream identity, sensor ingress sequence, agent sequence, batch/idempotency identity, and correlation identity) before process-network evidence is canonicalized or persisted.
+- **Workload Aggregation Identity Invariant:** Every single-valued workload/local identity attribute emitted on an aggregated `ProcessNetworkEvidence` record must be common to every event represented by that record. If multiple processes or workloads are deliberately merged (e.g. across worker processes under a service or container scope), workload-specific attributes (such as `pid` or specific local socket ports) must not pretend to identify one member; such fields must be omitted or null, or represented through explicitly aggregated dimensions, and the record must expose aggregate scope/quality appropriately. Applicable identity dimensions may include executable/process identity, service identity, container identity, cgroup identity, network namespace, and local endpoint scope. PID remains an ephemeral runtime observation only and must NEVER become durable entity authority. Exact implementation and cardinality balance are owned by BUILD-011 and certified by BUILD-019 / BUILD-130 without freezing premature cardinality constants.
 
 Future extension and versioning of the physical envelope belongs to BUILD-016 / BUILD-062 and must preserve authority, idempotency, ACK, and durability contracts. Ingestion validation and envelope acceptance are owned by BUILD-062, physical Kafka streaming (topic naming, partitions, serialization) is owned by BUILD-063, and physical ClickHouse storage (table DDL, engine selection, TTL) is owned by BUILD-064.
 
@@ -599,7 +600,7 @@ ProcessNetworkEvidence:
     process_name:           string (bounded string, e.g. "nginx", "envoy", "mysqld")
     executable_path:        string (bounded string, e.g. "/usr/sbin/nginx"; truncated display paths must not alter canonical identity)
     service_name:           string (bounded string, systemd service or container service name)
-    pid:                    uint32 (runtime observation only, non-authoritative ephemeral identifier)
+    pid:                    uint32 (nullable/optional runtime observation only, non-authoritative ephemeral identifier; null if aggregated across multiple worker PIDs)
     container_id:           string (nullable bounded string, e.g. Docker/containerd container ID)
     cgroup_path:            string (nullable bounded string, e.g. "/system.slice/nginx.service")
     network_namespace:      uint64 (nullable netns inode number)
@@ -655,7 +656,7 @@ ActivePathObservation:
   schema_version:           "1.0"
   path_id:                  UUID (canonical path test configuration identity)
   tenant_id:                UUID
-  source_sensor_id:         UUID (Sensor executing the probe)
+  source_sensor_id:         string (bounded opaque canonical Sensor identifier; same identity contract as schemas/edge/common-definitions.schema.json sensorId, e.g. "sensor-1")
   source_vantage_id:        string (vantage location tag, e.g. "aws-eu-west-1", "dc-onprem-tor")
   target_entity_id:         UUID (canonical target entity identity)
   target_ip:                string (IPv4 or IPv6 canonical string)
@@ -700,7 +701,7 @@ PathChangeEvidence:
   event_id:                 UUID
   tenant_id:                UUID
   path_id:                  UUID
-  source_sensor_id:         UUID
+  source_sensor_id:         string (bounded opaque canonical Sensor identifier; same identity contract as schemas/edge/common-definitions.schema.json sensorId, e.g. "sensor-1")
   target_entity_id:         UUID
   detected_at:              RFC3339UTC instant
   previous_fingerprint:     string
