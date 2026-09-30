@@ -1,5 +1,6 @@
 package com.platform.core.ingestion;
 
+import com.platform.core.logging.CoreSupportabilityEventCodes;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
@@ -18,9 +19,13 @@ public class TelemetryConsumerHealthIndicator implements HealthIndicator {
     @Override
     public Health health() {
         if (metrics.isConsumerDegraded()) {
+            String reasonCode = metrics.getConsumerDegradedReason();
+            if (reasonCode == null || reasonCode.isBlank()) {
+                reasonCode = CoreSupportabilityEventCodes.TELEMETRY_CONSUMER_DEGRADED;
+            }
             return Health.down()
                     .withDetail("status", "DEGRADED")
-                    .withDetail("reason", metrics.getConsumerDegradedReason())
+                    .withDetail("reasonCode", reasonCode)
                     .withDetail("poisonEvents", metrics.getConsumerPoisonEvents())
                     .withDetail("clickHouseFailures", metrics.getClickHouseFailures())
                     .build();

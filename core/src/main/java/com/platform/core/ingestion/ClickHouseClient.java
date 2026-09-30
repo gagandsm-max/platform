@@ -136,8 +136,7 @@ public class ClickHouseClient {
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
-            String failureCode = "CLICKHOUSE_HTTP_" + response.statusCode();
-            metrics.recordClickHouseFailure(failureCode);
+            metrics.recordClickHouseFailure(com.platform.core.logging.CoreSupportabilityEventCodes.CLICKHOUSE_INSERT_FAILED);
             throw new RuntimeException("ClickHouse insert failed with status " + response.statusCode());
         }
 

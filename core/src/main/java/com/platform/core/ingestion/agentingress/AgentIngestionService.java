@@ -11,6 +11,8 @@ import com.platform.core.ingestion.dto.CanonicalObservation;
 import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.ingestion.replay.PublisherClaimResult;
 import com.platform.core.ingestion.replay.ReplayReservation;
+import com.platform.core.logging.CoreSupportabilityEventCodes;
+import com.platform.core.logging.SupportabilityMdc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -176,14 +178,18 @@ public class AgentIngestionService {
                         epoch
                 );
             } catch (RuntimeException releaseFailure) {
-                log.warn("Failed to release agent-ingress publisher lease after failure: {}",
-                        releaseFailure.getMessage());
+                SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.PUBLISHER_LEASE_RELEASE_FAILED, () ->
+                        log.warn(
+                                "Failed to release agent-ingress publisher lease after failure failureClass={}",
+                                releaseFailure.getClass().getSimpleName()
+                        )
+                );
             }
             if (publishOrFinalizeFailure instanceof IngestionException ingestionException
                     && "ERR_KAFKA_PUBLICATION_FAILED".equals(ingestionException.getCode())) {
-                metrics.recordKafkaFailure(ingestionException.getMessage());
+                metrics.recordKafkaFailure(CoreSupportabilityEventCodes.KAFKA_PUBLICATION_FAILED);
             } else {
-                metrics.recordFinalizeFailure(publishOrFinalizeFailure.getMessage());
+                metrics.recordFinalizeFailure(CoreSupportabilityEventCodes.PUBLISHER_FINALIZE_FAILED);
             }
             throw publishOrFinalizeFailure;
         }

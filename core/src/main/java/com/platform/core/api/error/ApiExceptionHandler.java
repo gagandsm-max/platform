@@ -1,7 +1,9 @@
 package com.platform.core.api.error;
 
 import com.platform.core.domain.DomainException;
+import com.platform.core.logging.CoreSupportabilityEventCodes;
 import com.platform.core.logging.CorrelationIdFilter;
+import com.platform.core.logging.SupportabilityMdc;
 import com.platform.core.migration.MigrationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -80,7 +82,10 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(DataAccessException.class)
     public ResponseEntity<Map<String, Object>> handleDataAccess(DataAccessException ex) {
-        log.error("Database access failure", ex);
+        final String failureClass = ex.getClass().getSimpleName();
+        SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.DATABASE_ACCESS_FAILED, () ->
+                log.error("Database access failure failureClass={}", failureClass)
+        );
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(errorBody("DATABASE_UNAVAILABLE", "Database temporarily unavailable", Map.of()));
     }
@@ -101,7 +106,10 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
-        log.error("Unhandled API failure", ex);
+        final String failureClass = ex.getClass().getSimpleName();
+        SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.UNHANDLED_API_FAILURE, () ->
+                log.error("Unhandled API failure failureClass={}", failureClass)
+        );
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(errorBody("INTERNAL_ERROR", "Unexpected internal error", Map.of()));
     }

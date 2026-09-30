@@ -1,7 +1,10 @@
 package com.platform.core.health;
 
+import com.platform.core.logging.CoreSupportabilityEventCodes;
+import com.platform.core.logging.SupportabilityMdcKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
@@ -29,6 +32,12 @@ public class ClickHouseHealthIndicator implements HealthIndicator {
                 .build();
     }
 
+    // Package-visible for tests.
+    ClickHouseHealthIndicator(HttpClient httpClient, String clickhouseHttpUrl) {
+        this.httpClient = httpClient;
+        this.clickhouseHttpUrl = clickhouseHttpUrl;
+    }
+
     @Override
     public Health health() {
         try {
@@ -41,24 +50,27 @@ public class ClickHouseHealthIndicator implements HealthIndicator {
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() == 200 && response.body().trim().equals("Ok.")) {
+            if (response.statusCode() == 200 && "Ok.".equals(response.body().trim())) {
                 return Health.up()
-                        .withDetail("endpoint", clickhouseHttpUrl)
-                        .withDetail("response", "Ok.")
-                        .build();
-            } else {
-                return Health.down()
-                        .withDetail("endpoint", clickhouseHttpUrl)
-                        .withDetail("statusCode", response.statusCode())
-                        .withDetail("response", response.body())
+                        .withDetail("dependency", "clickHouse")
                         .build();
             }
+            return down();
         } catch (Exception e) {
-            log.warn("ClickHouse health probe failed against {}: {}", clickhouseHttpUrl, e.getMessage());
-            return Health.down()
-                    .withDetail("endpoint", clickhouseHttpUrl)
-                    .withDetail("error", e.getClass().getSimpleName() + ": " + e.getMessage())
-                    .build();
+            return down();
         }
+    }
+
+    private Health down() {
+        MDC.put(SupportabilityMdcKeys.EVENT_CODE, CoreSupportabilityEventCodes.CLICKHOUSE_HEALTH_PROBE_FAILED);
+        try {
+            log.warn("ClickHouse health probe failed");
+        } finally {
+            MDC.remove(SupportabilityMdcKeys.EVENT_CODE);
+        }
+        return Health.down()
+                .withDetail("dependency", "clickHouse")
+                .withDetail("reasonCode", CoreSupportabilityEventCodes.CLICKHOUSE_HEALTH_PROBE_FAILED)
+                .build();
     }
 }
