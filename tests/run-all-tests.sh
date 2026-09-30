@@ -403,10 +403,43 @@ CORE_LOG=$(docker logs --tail 20 platform-core 2>/dev/null | awk '/^\{/{print; e
 SENSOR_LOG=$(docker logs --tail 20 platform-sensor-net 2>/dev/null | awk '/^\{/{print; exit}' || true)
 ANALYTICS_LOG=$(docker logs --tail 20 platform-analytics 2>/dev/null | awk '/^\{/{print; exit}' || true)
 
-LOGS_OK=true
-if ! echo "${CORE_LOG}" | grep -q '"service"'; then LOGS_OK=false; fi
-if ! echo "${SENSOR_LOG}" | grep -q '"service"'; then LOGS_OK=false; fi
-if ! echo "${ANALYTICS_LOG}" | grep -q '"service"'; then LOGS_OK=false; fi
+# Core uses BUILD-005 certified envelope (component, not legacy service).
+# Sensor/Analytics retain their existing "service" expectation until their slices.
+CORE_LOG_VALID=false
+if [ -n "${CORE_LOG}" ] && echo "${CORE_LOG}" | python3 -c '
+import json, sys
+required = ("ts", "level", "component", "version", "node_id", "service_instance_id", "message")
+legacy = ("timestamp", "service", "environment", "thread", "logger", "error_code", "stack_trace", "stackTrace")
+try:
+    obj = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(obj, dict):
+    sys.exit(1)
+for key in required:
+    value = obj.get(key)
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        sys.exit(1)
+if obj.get("component") != "platform-core":
+    sys.exit(1)
+for key in legacy:
+    if key in obj:
+        sys.exit(1)
+sys.exit(0)
+'; then
+    CORE_LOG_VALID=true
+fi
+
+SENSOR_LOG_VALID=false
+if echo "${SENSOR_LOG}" | grep -q '"service"'; then SENSOR_LOG_VALID=true; fi
+
+ANALYTICS_LOG_VALID=false
+if echo "${ANALYTICS_LOG}" | grep -q '"service"'; then ANALYTICS_LOG_VALID=true; fi
+
+LOGS_OK=false
+if [ "${CORE_LOG_VALID}" = "true" ] && [ "${SENSOR_LOG_VALID}" = "true" ] && [ "${ANALYTICS_LOG_VALID}" = "true" ]; then
+    LOGS_OK=true
+fi
 
 # Isolation
 FOREIGN_ALL=$(docker ps -a --format '{{.Names}}' | grep -v '^platform' || true)

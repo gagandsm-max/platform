@@ -18,6 +18,9 @@ public final class CoreSupportabilityEventCodes {
     public static final String PUBLISHER_LEASE_RELEASE_FAILED = "CORE_PUBLISHER_LEASE_RELEASE_FAILED";
     public static final String PUBLISHER_FINALIZE_FAILED = "CORE_PUBLISHER_FINALIZE_FAILED";
 
+    public static final String DATABASE_ACCESS_FAILED = "CORE_DATABASE_ACCESS_FAILED";
+    public static final String UNHANDLED_API_FAILURE = "CORE_UNHANDLED_API_FAILURE";
+
     private CoreSupportabilityEventCodes() {
     }
 }
