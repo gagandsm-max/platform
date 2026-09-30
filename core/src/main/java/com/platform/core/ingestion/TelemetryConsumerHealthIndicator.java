@@ -1,5 +1,6 @@
 package com.platform.core.ingestion;
 
+import com.platform.core.logging.CoreSupportabilityEventCodes;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
@@ -20,7 +21,7 @@ public class TelemetryConsumerHealthIndicator implements HealthIndicator {
         if (metrics.isConsumerDegraded()) {
             return Health.down()
                     .withDetail("status", "DEGRADED")
-                    .withDetail("reason", metrics.getConsumerDegradedReason())
+                    .withDetail("reasonCode", stableReasonCode(metrics.getConsumerDegradedReason()))
                     .withDetail("poisonEvents", metrics.getConsumerPoisonEvents())
                     .withDetail("clickHouseFailures", metrics.getClickHouseFailures())
                     .build();
@@ -37,5 +38,19 @@ public class TelemetryConsumerHealthIndicator implements HealthIndicator {
         }
 
         return builder.build();
+    }
+
+    static String stableReasonCode(String rawReason) {
+        if (rawReason == null || rawReason.isBlank()) {
+            return CoreSupportabilityEventCodes.TELEMETRY_CONSUMER_DEGRADED;
+        }
+        String lower = rawReason.toLowerCase();
+        if (lower.startsWith("poison event")) {
+            return CoreSupportabilityEventCodes.TELEMETRY_POISON_EVENT;
+        }
+        if (lower.contains("clickhouse unavailable") || lower.contains("clickhouse")) {
+            return CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE;
+        }
+        return CoreSupportabilityEventCodes.TELEMETRY_CONSUMER_DEGRADED;
     }
 }

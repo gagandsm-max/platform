@@ -1,10 +1,13 @@
 package com.platform.core.health;
 
+import com.platform.core.logging.CoreSupportabilityEventCodes;
+import com.platform.core.logging.SupportabilityMdcKeys;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.DescribeClusterResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
@@ -30,19 +33,24 @@ public class KafkaHealthIndicator implements HealthIndicator {
 
         try (AdminClient adminClient = AdminClient.create(props)) {
             DescribeClusterResult cluster = adminClient.describeCluster();
-            String clusterId = cluster.clusterId().get(3, TimeUnit.SECONDS);
             int nodeCount = cluster.nodes().get(3, TimeUnit.SECONDS).size();
+            // clusterId fetched to prove connectivity without exposing it in health details.
+            cluster.clusterId().get(3, TimeUnit.SECONDS);
 
             return Health.up()
-                    .withDetail("clusterId", clusterId != null ? clusterId : "unknown")
+                    .withDetail("dependency", "kafka")
                     .withDetail("nodeCount", nodeCount)
-                    .withDetail("bootstrapServers", bootstrapServers)
                     .build();
         } catch (Exception e) {
-            log.warn("Kafka health probe failed against {}: {}", bootstrapServers, e.getMessage());
+            MDC.put(SupportabilityMdcKeys.EVENT_CODE, CoreSupportabilityEventCodes.KAFKA_HEALTH_PROBE_FAILED);
+            try {
+                log.warn("Kafka health probe failed");
+            } finally {
+                MDC.remove(SupportabilityMdcKeys.EVENT_CODE);
+            }
             return Health.down()
-                    .withDetail("bootstrapServers", bootstrapServers)
-                    .withDetail("error", e.getClass().getSimpleName() + ": " + e.getMessage())
+                    .withDetail("dependency", "kafka")
+                    .withDetail("reasonCode", CoreSupportabilityEventCodes.KAFKA_HEALTH_PROBE_FAILED)
                     .build();
         }
     }

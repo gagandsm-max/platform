@@ -443,7 +443,10 @@ public class TelemetryPipelineIntegrationTest {
             assertTrue(ex.getMessage().contains("ClickHouse persistence unavailable"));
             verify(ack, never()).acknowledge();
             assertEquals(Status.DOWN, healthIndicator.health().getStatus());
-            assertTrue(healthIndicator.health().getDetails().get("reason").toString().contains("ClickHouse unavailable"));
+            assertEquals(
+                    "CORE_TELEMETRY_CLICKHOUSE_UNAVAILABLE",
+                    healthIndicator.health().getDetails().get("reasonCode").toString()
+            );
         }
     }
 }
