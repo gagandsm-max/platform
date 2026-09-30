@@ -286,6 +286,52 @@ class ClickHouseTelemetryConsumerTest {
         verify(clickHouseClient, times(3)).insertNumericBatch(anyList());
         verify(ack, never()).acknowledge();
         assertTrue(metrics.isConsumerDegraded());
+        assertEquals(
+                com.platform.core.logging.CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE,
+                metrics.getConsumerDegradedReason()
+        );
+    }
+
+    @Test
+    void retryExhaustionLogOmitsRawExceptionSentinels() throws Exception {
+        CanonicalObservation obs = new CanonicalObservation(
+                "tenant-1", "entity-1", ".1.3.6.1.2.1.1.3.0", "sensor-net-01",
+                Instant.now(), 99.5, 1, 0, "100", "snmp"
+        );
+        String json = objectMapper.writeValueAsString(obs);
+        ConsumerRecord<String, String> record = new ConsumerRecord<>(
+                "telemetry.numeric.v1", 0, 100L, "sensor-net-01:100", json
+        );
+        Acknowledgment ack = mock(Acknowledgment.class);
+
+        String bearer = "Bearer FAKESECRET_abc123";
+        String password = "password=FAKEPASSWORD";
+        String url = "https://user:FAKEPASS@clickhouse.invalid";
+        doThrow(new RuntimeException(bearer + " " + password + " " + url))
+                .when(clickHouseClient).insertNumericBatch(anyList());
+
+        Logger logger = (Logger) LoggerFactory.getLogger(ClickHouseTelemetryConsumer.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        Level previous = logger.getLevel();
+        logger.setLevel(Level.TRACE);
+        try {
+            assertThrows(RuntimeException.class, () -> consumer.consume(record, ack));
+            String logs = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .collect(Collectors.joining("\n"));
+            assertFalse(logs.contains(bearer), logs);
+            assertFalse(logs.contains(password), logs);
+            assertFalse(logs.contains(url), logs);
+            assertFalse(logs.contains("FAKESECRET_abc123"), logs);
+            assertFalse(logs.contains("FAKEPASSWORD"), logs);
+            assertTrue(logs.contains("failureClass=RuntimeException"), logs);
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previous);
+            appender.stop();
+        }
     }
 
     @Test

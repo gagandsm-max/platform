@@ -19,17 +19,7 @@
                     <fieldName>level</fieldName>
                 </logLevel>
                 <provider class="com.platform.core.logging.BoundedMessageJsonProvider"/>
-                <mdc>
-                    <includeMdcKeyName>correlation_id</includeMdcKeyName>
-                    <includeMdcKeyName>tenant_id</includeMdcKeyName>
-                    <includeMdcKeyName>event_code</includeMdcKeyName>
-                    <includeMdcKeyName>request_id</includeMdcKeyName>
-                    <includeMdcKeyName>job_id</includeMdcKeyName>
-                    <includeMdcKeyName>entity_id</includeMdcKeyName>
-                    <includeMdcKeyName>protocol</includeMdcKeyName>
-                    <includeMdcKeyName>result</includeMdcKeyName>
-                    <includeMdcKeyName>retry_count</includeMdcKeyName>
-                </mdc>
+                <provider class="com.platform.core.logging.SupportabilityMdcJsonProvider"/>
                 <globalCustomFields>
                     <customFields>{"component":"platform-core","version":"${platformVersion}","node_id":"${platformNodeId}","service_instance_id":"${serviceInstanceId}"}</customFields>
                 </globalCustomFields>

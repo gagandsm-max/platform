@@ -12,6 +12,12 @@ public final class CoreSupportabilityEventCodes {
     public static final String TELEMETRY_POISON_EVENT = "CORE_TELEMETRY_POISON_EVENT";
     public static final String TELEMETRY_CLICKHOUSE_UNAVAILABLE = "CORE_TELEMETRY_CLICKHOUSE_UNAVAILABLE";
 
+    public static final String KAFKA_PUBLICATION_FAILED = "CORE_KAFKA_PUBLICATION_FAILED";
+    public static final String CLICKHOUSE_INSERT_FAILED = "CORE_CLICKHOUSE_INSERT_FAILED";
+    public static final String TELEMETRY_RETRIES_EXHAUSTED = "CORE_TELEMETRY_RETRIES_EXHAUSTED";
+    public static final String PUBLISHER_LEASE_RELEASE_FAILED = "CORE_PUBLISHER_LEASE_RELEASE_FAILED";
+    public static final String PUBLISHER_FINALIZE_FAILED = "CORE_PUBLISHER_FINALIZE_FAILED";
+
     private CoreSupportabilityEventCodes() {
     }
 }

@@ -113,6 +113,57 @@ class KafkaTelemetryProducerTest {
         assertEquals("ERR_KAFKA_PUBLICATION_FAILED", ex.getCode());
         assertEquals("Failed to atomically publish telemetry batch to Kafka cluster", ex.getMessage());
         assertEquals(1, metrics.getKafkaFailures());
+        assertEquals(
+                com.platform.core.logging.CoreSupportabilityEventCodes.KAFKA_PUBLICATION_FAILED,
+                metrics.getLastError()
+        );
+    }
+
+    @Test
+    void publicationFailureLogOmitsRawExceptionSentinels() {
+        when(kafkaTemplate.isTransactional()).thenReturn(true);
+        String bearer = "Bearer FAKESECRET_abc123";
+        String password = "password=FAKEPASSWORD";
+        String url = "https://user:FAKEPASS@clickhouse.invalid";
+
+        when(kafkaTemplate.executeInTransaction(any())).thenAnswer(invocation -> {
+            throw new RuntimeException(bearer + " " + password + " " + url);
+        });
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(KafkaTelemetryProducer.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        ch.qos.logback.classic.Level previous = logger.getLevel();
+        logger.setLevel(ch.qos.logback.classic.Level.TRACE);
+
+        try {
+            CanonicalObservation obs = new CanonicalObservation(
+                    "tenant-1", "entity-1", ".1.3.6.1.2.1.1.3.0", "sensor-net-01",
+                    Instant.now(), 50.0, 1, 0, "100", "snmp"
+            );
+            assertThrows(IngestionException.class, () ->
+                    producer.publishBatchTransactionally(TelemetryObservationBatch.ofNumeric(List.of(obs))));
+
+            String logs = appender.list.stream()
+                    .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            assertFalse(logs.contains(bearer), logs);
+            assertFalse(logs.contains(password), logs);
+            assertFalse(logs.contains(url), logs);
+            assertFalse(logs.contains("FAKESECRET_abc123"), logs);
+            assertFalse(logs.contains("FAKEPASSWORD"), logs);
+            assertEquals(
+                    com.platform.core.logging.CoreSupportabilityEventCodes.KAFKA_PUBLICATION_FAILED,
+                    metrics.getLastError()
+            );
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previous);
+            appender.stop();
+        }
     }
 
     @Test
