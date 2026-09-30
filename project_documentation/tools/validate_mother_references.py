@@ -1049,7 +1049,7 @@ class MotherReferenceValidator:
                     f"Platform_07 catalogue and Platform_08 primary REQ registry"
                 )
 
-    # Local historical / non-normative markers (per-occurrence window only).
+    # Same-statement historical / non-normative markers.
     # "supersed" matches supersedes / superseded / superseding.
     _LICENCE_HISTORICAL_MARKERS: tuple[str, ...] = (
         "historical",
@@ -1068,13 +1068,15 @@ class MotherReferenceValidator:
     )
 
     # Bounded semantic forms of seven-day POST-expiry grace (not T-7 pre-expiry).
+    # Deliberately excludes pre-expiry / T-7 banner wording.
     _SEVEN_DAY_POST_EXPIRY_RE = re.compile(
         r"(?:"
-        r"post[-\s]?expiry\s+grace\s+is\s+(?:7|seven)\s+days?"
+        r"post[-\s]?expiry\s+grace(?:\s+(?:duration|period))?"
+        r"(?:\s*(?::|=)\s*|\s+is\s+)(?:7|seven)\s+days?"
         r"|"
-        r"(?:7|seven)[-\s]?days?\s+grace\s+after\s+expiry"
+        r"(?:7|seven)[-\s]?days?\s+post[-\s]?expiry\s+grace"
         r"|"
-        r"(?:7|seven)[-\s]?day\s+(?:default\s+)?grace\s+after\s+expiry"
+        r"(?:7|seven)[-\s]?days?\s+(?:default\s+)?grace\s+after\s+expiry"
         r"|"
         r"grace\s+(?:period\s+)?after\s+expiry\s+is\s+(?:7|seven)\s+days?"
         r"|"
@@ -1093,11 +1095,8 @@ class MotherReferenceValidator:
         re.IGNORECASE,
     )
 
-    _LICENCE_PRE_EXPIRY_CONTEXT_RE = re.compile(
-        r"(?:pre[-\s]?expiry|before\s+expiry|\bt-7\b|expiry\s+warning|"
-        r"expiry-warning)",
-        re.IGNORECASE,
-    )
+    _LIST_ITEM_RE = re.compile(r"^(?:[-*+]|\d+\.)\s+")
+    _SENTENCE_BOUND_RE = re.compile(r"(?<=[.!?])\s+")
 
     def validate_normalized_rtm_licence_grace(
         self, paths: dict[str, Path]
@@ -1108,8 +1107,9 @@ class MotherReferenceValidator:
         reintroduction of FOUNDER-LIC-GRACE UNRESOLVED or seven-day post-expiry
         grace. Preserves T-7 PRE-EXPIRY banner semantics. Historical/superseded
         provenance mentioning seven-day/unresolved may remain when that
-        individual occurrence is unambiguously labelled historical/superseded/
-        non-normative/provenance-only in local context (not whole-document).
+        individual occurrence's own Markdown line / table row / sentence (or
+        list-clause) unambiguously labels it historical/superseded/
+        non-normative/provenance-only — not via a nearby unrelated statement.
         """
         rel = "Platform_08_Requirements_Traceability.md"
         if CANONICAL_NORMALIZATION.get(rel) != "NORMALIZED_V1":
@@ -1217,7 +1217,7 @@ class MotherReferenceValidator:
     def _reject_normative_founder_lic_grace_unresolved(
         self, doc_rel: str, text: str
     ) -> None:
-        """Fail when any FOUNDER-LIC-GRACE UNRESOLVED occurrence lacks local labels."""
+        """Fail when any FOUNDER-LIC-GRACE UNRESOLVED occurrence lacks same-statement labels."""
         for m in self._FOUNDER_LIC_GRACE_UNRESOLVED_RE.finditer(text):
             if not self._licence_local_is_historical(text, m.start(), m.end()):
                 self.fail(
@@ -1228,11 +1228,13 @@ class MotherReferenceValidator:
     def _reject_normative_seven_day_post_expiry(
         self, doc_rel: str, text: str
     ) -> None:
-        """Fail normative seven-day POST-expiry grace; allow historical / T-7."""
+        """Fail normative seven-day POST-expiry grace; allow same-statement historical only.
+
+        Explicit `_SEVEN_DAY_POST_EXPIRY_RE` matches are never excused by nearby
+        T-7 / pre-expiry wording. T-7 banner text must not match the regex.
+        """
         for m in self._SEVEN_DAY_POST_EXPIRY_RE.finditer(text):
             if self._licence_local_is_historical(text, m.start(), m.end()):
-                continue
-            if self._licence_local_is_pre_expiry(text, m.start(), m.end()):
                 continue
             self.fail(
                 f"{doc_rel}: stale fixed post-expiry licence-grace wording "
@@ -1240,40 +1242,76 @@ class MotherReferenceValidator:
             )
 
     @classmethod
-    def _licence_local_is_historical(
-        cls, text: str, start: int, end: int, *, radius: int = 160
-    ) -> bool:
-        """True when the span's local window is unambiguously non-normative."""
-        window = text.lower()[max(0, start - radius) : end + radius]
-        return any(marker in window for marker in cls._LICENCE_HISTORICAL_MARKERS)
+    def _licence_statement_text(cls, text: str, start: int, end: int) -> str:
+        """Return the logical statement containing [start:end] (line/row/sentence/list)."""
+        if start < 0:
+            start = 0
+        if end > len(text):
+            end = len(text)
+        line_start = text.rfind("\n", 0, start) + 1
+        line_end = text.find("\n", end)
+        if line_end < 0:
+            line_end = len(text)
+        line = text[line_start:line_end]
+        stripped = line.lstrip()
+
+        # Table row: entire row is the statement.
+        if stripped.startswith("|"):
+            return line
+
+        # List item: include contiguous prior list items plus one intro line above.
+        if cls._LIST_ITEM_RE.match(stripped):
+            block_start = line_start
+            while block_start > 0:
+                prev_end = block_start - 1  # index of preceding '\n'
+                prev_start = text.rfind("\n", 0, prev_end) + 1
+                prev_line = text[prev_start:prev_end]
+                prev_s = prev_line.strip()
+                if not prev_s or prev_s.startswith("#") or prev_s.startswith("|"):
+                    break
+                if cls._LIST_ITEM_RE.match(prev_s):
+                    block_start = prev_start
+                    continue
+                # Immediate non-list intro line for this list block.
+                block_start = prev_start
+                break
+            return text[block_start:line_end]
+
+        # Prose line: prefer the sentence containing the match.
+        rel_start = start - line_start
+        rel_end = end - line_start
+        cursor = 0
+        for m in cls._SENTENCE_BOUND_RE.finditer(line):
+            if cursor <= rel_start and rel_end <= m.start():
+                return line[cursor : m.start()]
+            cursor = m.end()
+        if cursor <= rel_start:
+            return line[cursor:]
+        return line
 
     @classmethod
-    def _licence_local_is_pre_expiry(
-        cls, text: str, start: int, end: int, *, radius: int = 120
+    def _licence_local_is_historical(
+        cls, text: str, start: int, end: int
     ) -> bool:
-        """True when the span's local window is T-7 / pre-expiry warning context."""
-        window = text[max(0, start - radius) : end + radius]
-        return cls._LICENCE_PRE_EXPIRY_CONTEXT_RE.search(window) is not None
+        """True when the occurrence's own statement labels it non-normative."""
+        statement = cls._licence_statement_text(text, start, end).lower()
+        return any(marker in statement for marker in cls._LICENCE_HISTORICAL_MARKERS)
 
     @classmethod
     def _licence_stale_is_historical(cls, text: str, stale: str) -> bool:
-        """True when every stale-phrase occurrence is locally historical."""
+        """True when every stale-phrase occurrence is same-statement historical."""
         lower = text.lower()
         needle = stale.lower()
         idx = 0
-        found = False
         while True:
             pos = lower.find(needle, idx)
             if pos < 0:
                 return True
-            found = True
             if not cls._licence_local_is_historical(
                 text, pos, pos + len(needle)
             ):
                 return False
             idx = pos + len(needle)
-        # pragma: no cover
-        return not found
 
     def validate(self) -> list[str]:
         self.errors = []

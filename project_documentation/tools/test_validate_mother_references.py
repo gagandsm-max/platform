@@ -1622,7 +1622,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
 
     def test_56b_mixed_historical_and_normative_unresolved_fails(self) -> None:
-        """P1-GOV-01: whole-doc historical markers must not mask a normative occurrence."""
+        """P1-GOV-01/04: nearby historical statement must not mask normative occurrence."""
         root = self._write_minimal(
             req_rows=[
                 (
@@ -1633,12 +1633,9 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             ],
             prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
             p08_extra=(
-                "\n### Licence grace provenance\n\n"
-                "Historical/superseded provenance only: FOUNDER-LIC-GRACE UNRESOLVED "
-                "(7-day vs 15-day) is closed.\n\n"
-                + ("Padding to isolate local context windows. " * 12)
-                + "\n\n### Active licence note\n\n"
-                "Operations continue under FOUNDER-LIC-GRACE UNRESOLVED until revised.\n"
+                "\n### Licence grace notes\n\n"
+                "Historical note: the old entitlement implementation was superseded.\n\n"
+                "FOUNDER-LIC-GRACE UNRESOLVED remains the active licence rule.\n"
             ),
         )
         errors = validate_docs_root(root)
@@ -1653,6 +1650,67 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             ),
             errors,
         )
+
+    def test_56b2_nearby_historical_under_160_chars_still_fails(self) -> None:
+        """P1-GOV-04-A: separate nearby statements fail even with <160 char gap."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+            p08_extra=(
+                "\n### Licence grace notes\n\n"
+                "Historical note: the old entitlement implementation was superseded.\n"
+                "FOUNDER-LIC-GRACE UNRESOLVED remains the active licence rule.\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("FOUNDER-LIC-GRACE UNRESOLVED" in e for e in errors),
+            errors,
+        )
+
+    def test_56b3_same_statement_historical_unresolved_passes(self) -> None:
+        """P1-GOV-04-B: same-statement historical unresolved provenance passes."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+            p08_extra=(
+                "\n### Licence grace provenance\n\n"
+                "Historical: FOUNDER-LIC-GRACE UNRESOLVED was previously recorded.\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_56b4_same_statement_is_superseded_passes(self) -> None:
+        """P1-GOV-04-C: same-statement '... is superseded' provenance passes."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+            p08_extra=(
+                "\n### Licence grace provenance\n\n"
+                "The former FOUNDER-LIC-GRACE UNRESOLVED posture is superseded.\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
 
     def test_56c_semantic_post_expiry_grace_is_7_days_fails(self) -> None:
         root = self._write_minimal(
@@ -1714,10 +1772,33 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             p08_extra=(
                 "\n### Pre-expiry notifications\n\n"
                 "T-7: 7-day dashboard banner before expiry remains required.\n"
+                "7-day pre-expiry warning remains governed.\n"
             ),
         )
         errors = validate_docs_root(root)
         self.assertEqual(errors, [], errors)
+
+    def test_56e2_nearby_t7_does_not_excuse_post_expiry_seven_day(self) -> None:
+        """P1-GOV-05: nearby T-7 wording must not suppress explicit post-expiry match."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+            p08_extra=(
+                "\n### Licence enforcement\n\n"
+                "T-7 dashboard banner remains required. Post-expiry grace is 7 days.\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("stale fixed post-expiry licence-grace" in e for e in errors),
+            errors,
+        )
 
     def test_56f_historical_seven_day_post_expiry_provenance_passes(self) -> None:
         root = self._write_minimal(
@@ -1733,6 +1814,8 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 "\n### Licence grace provenance\n\n"
                 "Historical/superseded provenance only: seven-day grace after expiry "
                 "was replaced by EXPIRED_GRACE_15D.\n"
+                "Historical: seven-day grace after expiry was previously used.\n"
+                "The former seven-day grace after expiry is superseded.\n"
             ),
         )
         errors = validate_docs_root(root)
@@ -1773,6 +1856,38 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             ),
             errors,
         )
+
+    def test_56h_broad_semantic_seven_day_variants_fail(self) -> None:
+        """P1-GOV-06: bounded semantic post-expiry variants must fail."""
+        variants = (
+            "post-expiry grace: 7 days",
+            "post-expiry grace = 7 days",
+            "post-expiry grace is seven days",
+            "post-expiry grace duration is 7 days",
+            "post expiry grace period is seven days",
+            "7-day post-expiry grace",
+            "seven-day post expiry grace",
+            "7 days grace after expiry",
+            "seven days grace after expiry",
+        )
+        for variant in variants:
+            with self.subTest(variant=variant):
+                root = self._write_minimal(
+                    req_rows=[
+                        (
+                            "REQ-LIC-004",
+                            "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                            "Platform_08_Requirements_Traceability.md",
+                        ),
+                    ],
+                    prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+                    p08_extra=f"\n### Licence enforcement\n\nNormative: {variant}.\n",
+                )
+                errors = validate_docs_root(root)
+                self.assertTrue(
+                    any("stale fixed post-expiry licence-grace" in e for e in errors),
+                    errors,
+                )
 
     # --- A2.3 OSS catalogue + REQ-OSS-008 migration (Issue #108) ---
 
