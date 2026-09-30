@@ -1384,15 +1384,15 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
-    # --- A2.2 normalized RTM licence-grace guard (Issue #102 / PR #103) ---
+    # --- A2.2 normalized RTM licence-grace guard (15-day Founder decision 2026-09-30) ---
 
-    def test_48_req_lic_004_founder_grace_unresolved_passes(self) -> None:
+    def test_48_req_lic_004_fifteen_day_grace_passes(self) -> None:
         root = self._write_minimal(
             req_rows=[
                 (
                     "REQ-LIC-004",
-                    "Post-expiry grace uses FOUNDER-LIC-GRACE UNRESOLVED; "
-                    "7-day vs 15-day; neither normative",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D); "
+                    "T-7 banner distinct; supersedes historical FOUNDER-LIC-GRACE UNRESOLVED",
                     "Platform_08_Requirements_Traceability.md",
                 ),
             ],
@@ -1400,11 +1400,11 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         errors = validate_docs_root(root)
         self.assertFalse(
-            any("licence-grace" in e or "FOUNDER-LIC-GRACE" in e for e in errors),
+            any("licence-grace" in e or "FOUNDER-LIC-GRACE" in e or "15-day" in e for e in errors),
             errors,
         )
 
-    def test_49_req_egc_007_founder_grace_unresolved_passes(self) -> None:
+    def test_49_req_egc_007_fifteen_day_grace_passes(self) -> None:
         root = self._write_minimal(
             req_rows=[
                 (
@@ -1414,7 +1414,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 ),
                 (
                     "REQ-EGC-007",
-                    "Licensing tests preserve FOUNDER-LIC-GRACE UNRESOLVED behavior",
+                    "Licensing tests preserve Founder-approved 15-day post-expiry grace",
                     "Platform_21_Enterprise_Gap_Closure_Master.md",
                 ),
             ],
@@ -1422,7 +1422,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         errors = validate_docs_root(root)
         self.assertFalse(
-            any("REQ-EGC-007" in e and "FOUNDER-LIC-GRACE" in e for e in errors),
+            any("REQ-EGC-007" in e for e in errors),
             errors,
         )
         self.assertFalse(
@@ -1430,7 +1430,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
-    def test_50_prd_egc_007_founder_grace_unresolved_passes(self) -> None:
+    def test_50_prd_egc_007_fifteen_day_grace_passes(self) -> None:
         root = self._write_minimal(
             req_rows=[
                 ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
@@ -1439,19 +1439,15 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 ("PRD-HA-001", "HA pair", "Platform_02_PRD.md"),
                 (
                     "PRD-EGC-007",
-                    "Fail-safe licence enforcement; FOUNDER-LIC-GRACE UNRESOLVED "
-                    "between historical/source 7-day and 15-day; neither normative",
+                    "Fail-safe licence enforcement; post-expiry grace is 15 days "
+                    "(EXPIRED_GRACE_15D); T-7 banner distinct",
                     "Platform_21_Enterprise_Gap_Closure_Master.md",
                 ),
             ],
         )
         errors = validate_docs_root(root)
         self.assertFalse(
-            any("PRD-EGC-007" in e and "FOUNDER-LIC-GRACE" in e for e in errors),
-            errors,
-        )
-        self.assertFalse(
-            any("stale fixed post-expiry" in e for e in errors),
+            any("PRD-EGC-007" in e for e in errors),
             errors,
         )
 
@@ -1472,7 +1468,8 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 "stale fixed post-expiry licence-grace" in e
                 and "7-day default grace after expiry" in e
                 for e in errors
-            ),
+            )
+            or any("15-day post-expiry grace" in e for e in errors),
             errors,
         )
 
@@ -1490,11 +1487,8 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         errors = validate_docs_root(root)
         self.assertTrue(
-            any(
-                "stale fixed post-expiry licence-grace" in e
-                and "governed seven-day grace" in e
-                for e in errors
-            ),
+            any("stale fixed post-expiry licence-grace" in e for e in errors)
+            or any("15-day post-expiry grace" in e and "REQ-EGC-007" in e for e in errors),
             errors,
         )
 
@@ -1514,11 +1508,8 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         errors = validate_docs_root(root)
         self.assertTrue(
-            any(
-                "stale fixed post-expiry licence-grace" in e
-                and "existing seven-day grace requirement" in e
-                for e in errors
-            ),
+            any("stale fixed post-expiry licence-grace" in e for e in errors)
+            or any("15-day post-expiry grace" in e and "PRD-EGC-007" in e for e in errors),
             errors,
         )
 
@@ -1532,7 +1523,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 ),
                 (
                     "REQ-LIC-004",
-                    "Post-expiry grace FOUNDER-LIC-GRACE UNRESOLVED",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
                     "Platform_08_Requirements_Traceability.md",
                 ),
             ],
@@ -1541,14 +1532,14 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         errors = validate_docs_root(root)
         self.assertEqual(errors, [], errors)
 
-    def test_55_historical_7_vs_15_provenance_allowed_with_founder_unresolved(
-        self,
-    ) -> None:
+    def test_55_historical_unresolved_provenance_allowed_when_labelled(self) -> None:
         root = self._write_minimal(
             req_rows=[
                 (
                     "REQ-LIC-004",
-                    "FOUNDER-LIC-GRACE UNRESOLVED; 7-day vs 15-day; neither normative",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D). "
+                    "Historical/superseded provenance only: FOUNDER-LIC-GRACE UNRESOLVED "
+                    "and 7-day vs 15-day conflict are closed.",
                     "Platform_08_Requirements_Traceability.md",
                 ),
             ],
@@ -1557,46 +1548,25 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         errors = validate_docs_root(root)
         self.assertEqual(errors, [], errors)
 
-    def test_56_platform_21_transitional_seven_day_not_blocked_by_rtm_guard(
-        self,
-    ) -> None:
+    def test_56_normative_founder_lic_grace_unresolved_fails(self) -> None:
         root = self._write_minimal(
             req_rows=[
-                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
                 (
-                    "REQ-EGC-007",
-                    "Licensing tests preserve FOUNDER-LIC-GRACE UNRESOLVED behavior",
-                    "Platform_21_Enterprise_Gap_Closure_Master.md",
+                    "REQ-LIC-004",
+                    "Post-expiry grace uses FOUNDER-LIC-GRACE UNRESOLVED; "
+                    "7-day vs 15-day; neither normative",
+                    "Platform_08_Requirements_Traceability.md",
                 ),
             ],
-            prd_rows=[
-                ("PRD-HA-001", "HA pair", "Platform_02_PRD.md"),
-                (
-                    "PRD-EGC-007",
-                    "Fail-safe licence; FOUNDER-LIC-GRACE UNRESOLVED",
-                    "Platform_21_Enterprise_Gap_Closure_Master.md",
-                ),
-            ],
-            extra_files={
-                "Platform_21_Enterprise_Gap_Closure_Master.md": (
-                    "# Doc\n"
-                    "**Document ID:** PLATFORM-EGC-001\n"
-                    "**Version:** 3.2.2\n\n"
-                    "## 1. Section\n\n"
-                    "Historical transitional prose retains the governed seven-day grace "
-                    "and the existing seven-day grace requirement until A5.\n"
-                    "| `REQ-EGC-007` | transitional |\n"
-                    "| `PRD-EGC-007` | transitional |\n"
-                ),
-            },
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
         )
         errors = validate_docs_root(root)
-        self.assertFalse(
-            any("Platform_21" in e and "stale fixed post-expiry" in e for e in errors),
-            errors,
-        )
-        self.assertFalse(
-            any("stale fixed post-expiry licence-grace" in e for e in errors),
+        self.assertTrue(
+            any(
+                "must not state normative FOUNDER-LIC-GRACE UNRESOLVED" in e
+                or "15-day post-expiry grace" in e
+                for e in errors
+            ),
             errors,
         )
 

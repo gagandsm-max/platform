@@ -1052,12 +1052,13 @@ class MotherReferenceValidator:
     def validate_normalized_rtm_licence_grace(
         self, paths: dict[str, Path]
     ) -> None:
-        """NORMALIZED Platform_08 must not reintroduce fixed post-expiry grace.
+        """Enforce Founder-approved 15-day post-expiry licence grace.
 
-        Guards REQ-LIC-004 / REQ-EGC-007 / PRD-EGC-007 primary-registry rows.
-        Does not apply to TRANSITIONAL_LEGACY Platform_21. Does not reject
-        REQ-LIC-003 (T-7 PRE-EXPIRY banner) or historical 7-vs-15 provenance
-        when coupled to FOUNDER-LIC-GRACE UNRESOLVED.
+        Guards REQ-LIC-004 / REQ-EGC-007 / PRD-EGC-007 and rejects normative
+        reintroduction of FOUNDER-LIC-GRACE UNRESOLVED or seven-day post-expiry
+        grace. Preserves T-7 PRE-EXPIRY banner semantics. Historical/superseded
+        provenance mentioning seven-day/unresolved may remain when unambiguously
+        labelled historical/superseded/non-normative.
         """
         rel = "Platform_08_Requirements_Traceability.md"
         if CANONICAL_NORMALIZATION.get(rel) != "NORMALIZED_V1":
@@ -1071,14 +1072,18 @@ class MotherReferenceValidator:
             "7-day default grace after expiry",
             "governed seven-day grace",
             "existing seven-day grace requirement",
+            "seven-day default post-expiry grace",
+            "seven-day licence grace remains governed",
+            "existing seven-day licence grace",
         )
         lowered = text.lower()
         for stale in stale_forms:
             if stale.lower() in lowered:
-                self.fail(
-                    f"{rel}: stale fixed post-expiry licence-grace wording "
-                    f"must not appear in NORMALIZED_V1 RTM: {stale!r}"
-                )
+                if not self._licence_stale_is_historical(text, stale):
+                    self.fail(
+                        f"{rel}: stale fixed post-expiry licence-grace wording "
+                        f"must not appear as normative truth: {stale!r}"
+                    )
 
         req_rows = {
             r["id"]: r
@@ -1100,8 +1105,6 @@ class MotherReferenceValidator:
         ]
         for rid, row, kind in required:
             if row is None:
-                # Absence is covered by other registry completeness rules when
-                # the ID exists in the live set; skip here if fixture omits it.
                 continue
             if kind == "REQ":
                 blob = " ".join(
@@ -1113,12 +1116,105 @@ class MotherReferenceValidator:
                 )
             else:
                 blob = row.get("summary", "")
-            if "FOUNDER-LIC-GRACE" not in blob or "UNRESOLVED" not in blob:
+            blob_l = blob.lower()
+            if "unresolved" in blob_l and "founder-lic-grace" in blob_l:
+                if "supersed" not in blob_l and "historical" not in blob_l:
+                    self.fail(
+                        f"{rel}: {rid} must not state normative "
+                        f"FOUNDER-LIC-GRACE UNRESOLVED "
+                        f"(controlling truth: 15-day post-expiry grace)"
+                    )
+            has_15 = (
+                "15-day" in blob_l
+                or "15 day" in blob_l
+                or "expired_grace_15d" in blob_l
+                or "15 days" in blob_l
+            )
+            if not has_15:
                 self.fail(
-                    f"{rel}: {rid} primary registry row must state "
-                    f"FOUNDER-LIC-GRACE and UNRESOLVED "
-                    f"(controlling truth: Platform_02 §33)"
+                    f"{rel}: {rid} primary registry row must state Founder-approved "
+                    f"15-day post-expiry grace / EXPIRED_GRACE_15D"
                 )
+
+        lic003 = req_rows.get("REQ-LIC-003")
+        if lic003 is not None:
+            banner_blob = " ".join(
+                [
+                    lic003.get("summary", ""),
+                    lic003.get("evidence", ""),
+                    lic003.get("locator", ""),
+                ]
+            ).lower()
+            if not any(
+                token in banner_blob
+                for token in (
+                    "7-day",
+                    "7 day",
+                    "t-7",
+                    "banner",
+                    "before expiry",
+                    "pre-expiry",
+                )
+            ):
+                self.fail(
+                    f"{rel}: REQ-LIC-003 must retain T-7 / 7-day pre-expiry banner semantics"
+                )
+
+        for doc_rel, doc_path in paths.items():
+            if CANONICAL_NORMALIZATION.get(doc_rel) != "NORMALIZED_V1":
+                continue
+            if doc_rel == rel:
+                continue
+            if not doc_path.is_file():
+                continue
+            doc_text = doc_path.read_text(encoding="utf-8")
+            doc_l = doc_text.lower()
+            if (
+                "founder-lic-grace" in doc_l
+                and "unresolved" in doc_l
+                and "supersed" not in doc_l
+                and "historical" not in doc_l
+                and "resolved 2026-09-30" not in doc_l
+            ):
+                self.fail(
+                    f"{doc_rel}: normative FOUNDER-LIC-GRACE UNRESOLVED is obsolete; "
+                    f"label as historical/superseded or state 15-day RESOLVED truth"
+                )
+            for stale in (
+                "existing seven-day licence grace remains governed",
+                "seven-day default post-expiry grace",
+                "7-day default grace after expiry",
+            ):
+                if stale in doc_l and not self._licence_stale_is_historical(doc_text, stale):
+                    self.fail(
+                        f"{doc_rel}: stale normative post-expiry seven-day grace wording: {stale!r}"
+                    )
+
+    @staticmethod
+    def _licence_stale_is_historical(text: str, stale: str) -> bool:
+        """True when stale phrase appears only in historical/superseded context."""
+        lower = text.lower()
+        needle = stale.lower()
+        idx = 0
+        found = False
+        while True:
+            pos = lower.find(needle, idx)
+            if pos < 0:
+                return True if found or needle not in lower else True
+            found = True
+            window = lower[max(0, pos - 160) : pos + len(needle) + 160]
+            if not any(
+                marker in window
+                for marker in (
+                    "historical",
+                    "superseded",
+                    "non-normative",
+                    "provenance only",
+                    "record only",
+                )
+            ):
+                return False
+            idx = pos + len(needle)
 
     def validate(self) -> list[str]:
         self.errors = []

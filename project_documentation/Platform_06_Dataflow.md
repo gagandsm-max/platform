@@ -1119,10 +1119,10 @@ sequenceDiagram
   participant H as Historical Query
 
   L->>UI: 30-day warning notification
-  L->>UI: 7-day global expiry banner
-  L->>L: Licence expires; enter FOUNDER-LIC-GRACE (duration UNRESOLVED)
-  L->>S: Keep polling enabled during grace
-  L->>L: Grace expires
+  L->>UI: 7-day global pre-expiry banner (T-7)
+  L->>L: Licence expires; enter EXPIRED_GRACE_15D (Founder-approved 15-day post-expiry grace)
+  L->>S: Keep polling enabled during 15-day grace
+  L->>L: 15-day grace expires
   L->>S: Disable new polling assignments / signed polling-stop state
   L->>H: Historical queries remain enabled
   Note over L,H: Licence admin remains accessible for extension/renewal
@@ -1939,7 +1939,7 @@ Sensor local volume reaches protection watermark -> clean disposable logs/cache/
 
 ## 90. Flow DF-081 — License expiry
 
-T-30 warning event -> T-7 persistent dashboard banner -> expiry enters FOUNDER-LIC-GRACE (duration UNRESOLVED; historical/source 7-day vs 15-day only) while Scheduler continues -> grace expiry transitions deployment to `POLLING_SUSPENDED` -> Scheduler stops new/renewed poll jobs -> Sensors receive suspension desired state -> historical query/UI/admin/license import remain available -> renewal returns state to VALID and polling resumes.
+T-30 warning event -> T-7 persistent dashboard banner (pre-expiry) -> expiry enters `EXPIRED_GRACE_15D` (Founder-approved 15-day post-expiry grace; supersedes historical seven-day post-expiry / `FOUNDER-LIC-GRACE UNRESOLVED`) while Scheduler continues -> grace expiry transitions deployment to `POLLING_SUSPENDED` -> Scheduler stops new/renewed poll jobs -> Sensors receive suspension desired state -> historical query/UI/admin/license import remain available -> renewal returns state to VALID and polling resumes.
 
 ## 91. Flow DF-082 — GNN evidence scoring and RCA fusion
 

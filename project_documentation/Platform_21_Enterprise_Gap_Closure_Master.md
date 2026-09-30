@@ -41,7 +41,7 @@ Nothing in this document selects a new OSS dependency, database, mandatory micro
 | `PRD-EGC-004` | P0 | Security-relevant audit records shall provide independently verifiable tamper evidence, retention and export. The required outcome is tamper evidence; a particular cryptographic construction is not preselected here. |
 | `PRD-EGC-005` | P1 | Platform shall provide middleware monitoring Packs/connectors for common enterprise middleware using supported APIs, metrics, logs, JMX/standard interfaces or bounded synthetic checks; full bytecode-instrumentation APM is not implied. |
 | `PRD-EGC-006` | P0 | Tenant offboarding shall provide governed export/portability, active-data deletion, backup/archive expiry handling, legal-hold exceptions, status visibility and final destruction evidence without falsely claiming immediate physical erasure from immutable backups. |
-| `PRD-EGC-007` | P0 | Licence/entitlement enforcement shall fail safely, preserve the existing seven-day grace requirement where already governed, expose expiry/capacity state, and never invent commercial quantities or pricing without Founder decision. |
+| `PRD-EGC-007` | P0 | Licence/entitlement enforcement shall fail safely, preserve Founder-approved **15-day post-expiry grace** (`EXPIRED_GRACE_15D`) and the distinct T-7 pre-expiry banner, expose expiry/capacity state, and never invent commercial quantities or pricing without Founder decision. |
 | `PRD-EGC-008` | P1 | Platform shall support declarative configuration/policy-as-code workflows with versioned desired state, validation, diff, approval and audit. External repositories may supply desired declarations but cannot bypass Platform runtime authority or safety controls. |
 | `PRD-EGC-009` | P1 | Enterprise backup products shall be monitorable through the Pack/API connector architecture for job outcome, SLA, capacity, repository/media health and recoverability evidence where exposed by the product API; Platform does not become a backup engine. |
 | `PRD-EGC-010` | P1 | SASE/SSE/ZTNA integrations shall normalize service/connector/tunnel/session/policy/experience evidence into Platform inventory, topology, health and incident context without claiming to replace the security control plane. |
@@ -109,7 +109,7 @@ Offboarding is an explicit state machine: `REQUESTED → EXPORT_PREPARED/EXPORT_
 
 ### 4.7 Licensing safety
 
-Entitlement evaluation must be deterministic and observable. Existing seven-day grace behavior remains unchanged unless Founder-approved change control says otherwise. Grace expiry must not corrupt data or silently disable security controls; customer/admin state and remediation path must be visible. Commercial quantities, packaging and prices remain Founder-reserved.
+Entitlement evaluation must be deterministic and observable. Founder-approved post-expiry grace is **15 days** (`EXPIRED_GRACE_15D`; Founder decision 2026-09-30). This supersedes historical seven-day post-expiry wording and `FOUNDER-LIC-GRACE UNRESOLVED`. The T-7 pre-expiry banner remains distinct and governed. Grace expiry must not corrupt data or silently disable security controls; customer/admin state and remediation path must be visible. Commercial quantities, packaging and prices remain Founder-reserved.
 
 ### 4.8 Declarative configuration/policy-as-code
 
@@ -166,7 +166,7 @@ P0/P1 capability implementation is not complete until the relevant requirements 
 | `REQ-EGC-004` | P0 | Audit tamper-evidence tests prove alteration/deletion/reordering is detectable within the selected design and that export verification is independently reproducible. |
 | `REQ-EGC-005` | P1 | Middleware/backup Packs prove least privilege, version/error handling, collector-health separation, bounded polling and no bytecode instrumentation unless separately approved. |
 | `REQ-EGC-006` | P0 | Offboarding tests prove authorization, export, active deletion, secret revocation, legal-hold handling, backup/archive pending state, scheduled expiry and final evidence without false immediate-erasure claims. |
-| `REQ-EGC-007` | P0 | Licensing tests preserve the governed seven-day grace, expose deterministic state transitions, avoid data corruption/security bypass and leave commercial quantities unspecified unless Founder-approved. |
+| `REQ-EGC-007` | P0 | Licensing tests preserve Founder-approved **15-day post-expiry grace** (`EXPIRED_GRACE_15D`), the T-7 pre-expiry banner, deterministic state transitions, avoid data corruption/security bypass and leave commercial quantities unspecified unless Founder-approved. |
 | `REQ-EGC-008` | P1 | Declarative policy tests prove schema/semantic validation, RBAC, diff, approval, conflict handling, bounded apply, audit and post-apply verification; external Git cannot bypass Platform authority. |
 | `REQ-EGC-009` | P1 | SASE/SSE/ZTNA tests prove normalized identity/relationship mapping, secret handling, API rate/failure behavior and separation of observation from enforcement. |
 | `REQ-EGC-010` | P1 | Incident Command Workspace tests prove authoritative-object linkage, role/tenant scoping, external-integration degradation behavior and absence of an independent chat authority. |

@@ -1814,7 +1814,7 @@ Discovery absence does not automatically transition to DECOMMISSIONED. Reconcili
 - `VALID`;
 - `EXPIRING_30D`;
 - `EXPIRING_7D`;
-- `EXPIRED_GRACE` (duration = **FOUNDER-LIC-GRACE**, UNRESOLVED; historical/source values 7-day and 15-day only; neither normative);
+- `EXPIRED_GRACE` / `EXPIRED_GRACE_15D` (duration = **15 days** per Founder decision 2026-09-30; supersedes historical seven-day post-expiry and `FOUNDER-LIC-GRACE UNRESOLVED`);
 - `EXPIRED_POLLING_STOPPED`;
 - `MANUAL_EXTENSION`;
 - `INVALID`.
@@ -1822,8 +1822,8 @@ Discovery absence does not automatically transition to DECOMMISSIONED. Reconcili
 ### 40.2 Behavior
 
 - 30d notification job.
-- 7d dashboard banner globally.
-- post-expiry: polling remains enabled for the Founder-approved grace duration (**FOUNDER-LIC-GRACE** UNRESOLVED; do not hard-code 7 or 15 days).
+- 7d dashboard banner globally (T-7 **pre-expiry** warning; distinct from post-expiry grace).
+- post-expiry: polling remains enabled for **15 days** (`EXPIRED_GRACE_15D`).
 - grace elapsed: scheduler stops new polling jobs; Sensors receive signed polling-disabled policy while remaining manageable.
 - historical queries remain available.
 - licence admin endpoint remains available.
@@ -2677,7 +2677,7 @@ The exact internal replication technology is P0 spike, but code must satisfy the
 
 ## 83. License timer implementation
 
-Use absolute signed license expiry timestamp, deployment timezone-independent UTC evaluation and auditable state transitions. Dashboard banner derives remaining days from Core UTC and user display timezone. A manually signed extension/renewal must be accepted without Core/Sensor reinstall. Post-expiry grace duration is **FOUNDER-LIC-GRACE** (UNRESOLVED; historical/source 7-day vs 15-day only). At post-grace suspension, Scheduler stops issuing/renewing monitoring jobs; historical query, admin, license import and audit remain available.
+Use absolute signed license expiry timestamp, deployment timezone-independent UTC evaluation and auditable state transitions. Dashboard banner derives remaining days from Core UTC and user display timezone. A manually signed extension/renewal must be accepted without Core/Sensor reinstall. Post-expiry grace duration is **15 days** (`EXPIRED_GRACE_15D`; Founder decision 2026-09-30; supersedes historical seven-day post-expiry and `FOUNDER-LIC-GRACE UNRESOLVED`). T-7 pre-expiry banner remains distinct. At post-grace suspension, Scheduler stops issuing/renewing monitoring jobs; historical query, admin, license import and audit remain available.
 
 ## 84. Query safety
 
