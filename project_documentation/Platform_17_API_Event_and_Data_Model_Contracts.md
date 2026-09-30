@@ -573,14 +573,24 @@ This section supplements `Platform_17` with authoritative wire schemas, event fa
 
 #### 11.2.1 Transport envelope and identity
 
-Process-network facts are produced by the Linux Agent eBPF collector, aggregated locally, and delivered over the existing versioned Agent→Sensor HTTPS/gRPC mTLS transport. The assigned Sensor buffers records in its durable spool and forwards batches to the Core via the canonical route `POST /api/v1/sensor/agent-telemetry` (handled by `SensorAgentIngestionController`). Future extension and versioning of the physical envelope belongs to BUILD-016 / BUILD-062 and must preserve authority, idempotency, ACK, and durability contracts. Ingestion validation and envelope acceptance are owned by BUILD-062, physical Kafka streaming (topic naming, partitions, serialization) is owned by BUILD-063, and physical ClickHouse storage (table DDL, engine selection, TTL) is owned by BUILD-064.
+Process-network facts are produced by the Linux Agent eBPF collector, aggregated locally, and delivered over the existing versioned Agent→Sensor HTTPS/gRPC mTLS transport. The assigned Sensor buffers records in its durable spool and forwards batches to the Core via the canonical route `POST /api/v1/sensor/agent-telemetry` (handled by `SensorAgentIngestionController`).
+
+**Authority and Identity Model:**
+- **Sensor Certificate Authority:** Core authenticates the Sensor mTLS certificate. `AgentIngestionValidator.resolveAuthority(clientCert)` derives authoritative `SensorScope` (tenant and sensor). Core then validates incoming Agent records against that authority.
+- **Tenant Authority:** The Agent-origin tenant claim is not independently authoritative at Core. Core tenant authority derives from authenticated `SensorScope`. The Agent-origin claim/envelope tenant MUST equal the authenticated Sensor tenant. Downstream canonical evidence receives `tenant_id` only after this validation succeeds.
+- **Sensor & Assignment Provenance:** The accepting Sensor identifier (`acceptingSensorId`) must equal the authenticated Sensor. The tuple `agentId + assignmentGeneration` must resolve to an authoritative `AgentSensorAssignment`, and the assignment Sensor must match the authenticated Sensor.
+- **Agent Identity:** `agent_id` is a bounded canonical Agent identifier string (e.g. `"agent-01"`), validated against tenant + authenticated Sensor + `assignment_generation` before downstream canonicalization. It is not redefined as UUID-only and remains compatible with existing Agent identifier naming.
+- **Host Identifier & Entity Resolution:** `host_id` is a bounded Agent-observed host identifier string (e.g. `"host-1"`). It represents corroborating identity evidence only, not canonical entity authority (`Agent hostId != canonical entityId`). Core resolves `tenant + namespace="platform.agent" + identifier_type="HOST_ID" + host_id` into canonical `entity_id`. If resolution fails, the platform follows the existing governed unresolved-entity behavior rather than fabricating an entity. Agent-supplied `entityId` is never accepted as authoritative.
+- **Transport Inheritance:** Authority, assignment, replay and delivery provenance are inherited from and validated by the enclosing Agent/Sensor transport envelope (including authenticated sensor scope, `sensor_id`, `accepting_sensor_id`, `agent_id`, `assignment_generation`, agent stream identity, sensor ingress sequence, agent sequence, batch/idempotency identity, and correlation identity) before process-network evidence is canonicalized or persisted.
+
+Future extension and versioning of the physical envelope belongs to BUILD-016 / BUILD-062 and must preserve authority, idempotency, ACK, and durability contracts. Ingestion validation and envelope acceptance are owned by BUILD-062, physical Kafka streaming (topic naming, partitions, serialization) is owned by BUILD-063, and physical ClickHouse storage (table DDL, engine selection, TTL) is owned by BUILD-064.
 
 ```text
 ProcessNetworkEvidence:
   schema_version:           "1.0"
-  tenant_id:                UUID (authoritative from Agent mTLS certificate)
-  agent_id:                 UUID (authoritative Agent identity)
-  host_id:                  UUID (Agent-observed host ID, corroborating evidence)
+  tenant_id:                UUID (canonicalized at Core from authenticated SensorScope after Agent-origin tenant claim and assignment provenance validate)
+  agent_id:                 string (bounded canonical Agent identifier string; validated against tenant + authenticated Sensor + assignment_generation before downstream canonicalization)
+  host_id:                  string (bounded Agent-observed host identifier string; corroborating identity evidence only, not canonical entity authority)
   entity_id:                UUID (nullable, Core-resolved canonical entity identity; Agent hostId is not authoritative entityId)
   bucket_start_at:          RFC3339UTC instant
   bucket_end_at:            RFC3339UTC instant
