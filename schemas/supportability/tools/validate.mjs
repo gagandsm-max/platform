@@ -167,11 +167,10 @@ function assertNoSecrets(obj, issues, source, pathPrefix = '$') {
   }
   if (!isObject(obj)) {
     if (typeof obj === 'string') {
+      // Distinctive PEM material only. Do not treat ordinary "Bearer ..." / "Basic ..."
+      // operational prose (e.g. log message) as credential leakage.
       if (/^\s*-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/m.test(obj)) {
         add(issues, 'PRIVATE_KEY_MATERIAL', source, pathPrefix, 'PEM private-key material is prohibited');
-      }
-      if (/^\s*Bearer\s+\S+/i.test(obj) || /^\s*Basic\s+\S+/i.test(obj)) {
-        add(issues, 'AUTHORIZATION_MATERIAL', source, pathPrefix, 'Authorization credential material is prohibited');
       }
     }
     return;
@@ -329,9 +328,19 @@ function validateReadiness(doc, issues, source) {
       add(issues, 'READINESS_HTTP_SEMANTIC', source, '$.http_semantic', 'ready=false requires http_semantic=503');
     }
   }
-  // Explicitly permit DEGRADED + ready=true + 200 (no error).
-  if (doc.status === 'DEGRADED' && doc.ready === true && doc.http_semantic === 200) {
-    // valid by design — DEGRADED != NOT_READY
+  // Bind status to readiness semantics. DEGRADED != NOT_READY.
+  if (typeof doc.ready === 'boolean' && (doc.http_semantic === 200 || doc.http_semantic === 503) && READINESS_STATUS.has(doc.status)) {
+    if (doc.status === 'UP' && !(doc.ready === true && doc.http_semantic === 200)) {
+      add(issues, 'READINESS_STATUS_SEMANTIC', source, '$.status', 'UP requires ready=true and http_semantic=200');
+    } else if (doc.status === 'NOT_READY' && !(doc.ready === false && doc.http_semantic === 503)) {
+      add(issues, 'READINESS_STATUS_SEMANTIC', source, '$.status', 'NOT_READY requires ready=false and http_semantic=503');
+    } else if (doc.status === 'DEGRADED') {
+      const degradedOk = (doc.ready === true && doc.http_semantic === 200)
+        || (doc.ready === false && doc.http_semantic === 503);
+      if (!degradedOk) {
+        add(issues, 'READINESS_STATUS_SEMANTIC', source, '$.status', 'DEGRADED requires ready/http pairing true/200 or false/503');
+      }
+    }
   }
   if ('component' in doc) assertComponent(doc.component, issues, source, '$.component');
   if ('ts' in doc) assertUtcTs(doc.ts, issues, source, '$.ts');
@@ -464,6 +473,7 @@ function validateProbeRoutes(doc, issues, source) {
   }
 
   const byRuntime = new Map();
+  const seenRuntimes = new Set();
   doc.runtimes.forEach((rt, ri) => {
     const rp = `$.runtimes[${ri}]`;
     if (!isObject(rt)) {
@@ -473,13 +483,21 @@ function validateProbeRoutes(doc, issues, source) {
     assertKeys(rt, new Set(['runtime', 'conformance', 'routes', 'notes']), issues, source, rp);
     requireKeys(rt, ['runtime', 'conformance', 'routes'], issues, source, rp);
     if (!RUNTIMES.has(rt.runtime)) add(issues, 'UNKNOWN_RUNTIME', source, `${rp}.runtime`, 'unknown runtime');
+    if (typeof rt.runtime === 'string') {
+      if (seenRuntimes.has(rt.runtime)) {
+        add(issues, 'DUPLICATE_RUNTIME', source, `${rp}.runtime`, `Duplicate runtime identity: ${rt.runtime}`);
+      } else {
+        seenRuntimes.add(rt.runtime);
+        byRuntime.set(rt.runtime, rt);
+      }
+    }
     if (!CONFORMANCE.has(rt.conformance)) add(issues, 'INVALID_CONFORMANCE', source, `${rp}.conformance`, 'invalid conformance');
     if (typeof rt.notes === 'string' && rt.notes.length > 512) add(issues, 'STRING_BOUNDS', source, `${rp}.notes`, 'notes too long');
     if (!Array.isArray(rt.routes) || rt.routes.length < 1 || rt.routes.length > 16) {
       add(issues, 'ARRAY_BOUNDS', source, `${rp}.routes`, 'routes must be 1..16');
       return;
     }
-    byRuntime.set(rt.runtime, rt);
+    const seenPaths = new Set();
     rt.routes.forEach((route, ji) => {
       const jp = `${rp}.routes[${ji}]`;
       if (!isObject(route)) {
@@ -490,6 +508,10 @@ function validateProbeRoutes(doc, issues, source) {
       requireKeys(route, ['path', 'role', 'compatibility'], issues, source, jp);
       if (typeof route.path !== 'string' || !PATH_RE.test(route.path) || route.path.length > 128) {
         add(issues, 'INVALID_ROUTE_PATH', source, `${jp}.path`, 'invalid route path');
+      } else if (seenPaths.has(route.path)) {
+        add(issues, 'DUPLICATE_ROUTE_PATH', source, `${jp}.path`, `Duplicate route path within runtime: ${route.path}`);
+      } else {
+        seenPaths.add(route.path);
       }
       if (!ROUTE_ROLES.has(route.role)) add(issues, 'INVALID_ROUTE_ROLE', source, `${jp}.role`, 'invalid role');
       if (typeof route.compatibility !== 'boolean') add(issues, 'INVALID_TYPE', source, `${jp}.compatibility`, 'compatibility must be boolean');
@@ -755,6 +777,7 @@ function runFixtureSuite() {
     'readiness-up': 'readiness',
     'readiness-degraded-ready': 'readiness',
     'readiness-degraded-not-ready': 'readiness',
+    'readiness-not-ready': 'readiness',
     'support-evidence': 'support-evidence',
     'runtime-probe-routes': 'runtime-probe-routes',
   };

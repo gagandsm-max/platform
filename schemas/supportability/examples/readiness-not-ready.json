@@ -1,0 +1,9 @@
+{
+  "status": "NOT_READY",
+  "ready": false,
+  "http_semantic": 503,
+  "component": "platform-agent",
+  "ts": "2026-09-30T05:00:23.000Z",
+  "service_instance_id": "agent-instance-01",
+  "reason_code": "ASSIGNED_EXECUTION_UNSAFE"
+}

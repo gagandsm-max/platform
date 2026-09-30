@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://platform.invalid/schemas/supportability/runtime-probe-routes.schema.json",
   "title": "Platform Runtime Probe Route Roles (BUILD-005 Slice 1)",
-  "description": "Semantic compatibility contract for probe route roles. Does not force identical URL strings across runtimes. Sensor /healthz is compatibility detailed. Agent /healthz is compatibility readiness. Core has no new detailed health API in BUILD-005. Analytics is a later bounded baseline conformance target, not certified by this fixture alone.",
+  "description": "Semantic compatibility contract for probe route roles. Does not force identical URL strings across runtimes. Each runtime identity in runtimes[] must be unique. Each route path within one runtime must be unique. Same path string across different runtimes is allowed (Sensor/Agent /healthz). Sensor /healthz is compatibility detailed. Agent /healthz is compatibility readiness. Core has no new detailed health API in BUILD-005. Analytics is a later bounded baseline conformance target, not certified by this fixture alone.",
   "type": "object",
   "additionalProperties": false,
   "required": ["document_type", "schema_version", "runtimes"],
