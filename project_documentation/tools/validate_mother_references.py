@@ -1110,6 +1110,13 @@ class MotherReferenceValidator:
         individual occurrence's own Markdown line / table row / sentence (or
         list-clause) unambiguously labels it historical/superseded/
         non-normative/provenance-only — not via a nearby unrelated statement.
+
+        The Platform_08 registry 15-day / T-7 row checks remain NORMALIZED_V1-
+        gated with Platform_08. The constitutional stale-regression scan
+        (FOUNDER-LIC-GRACE UNRESOLVED and seven-day post-expiry forms) applies
+        to every constitutional Mother Reference path supplied in ``paths``,
+        including TRANSITIONAL_LEGACY documents — normalization state does not
+        waive this invariant.
         """
         rel = "Platform_08_Requirements_Traceability.md"
         if CANONICAL_NORMALIZATION.get(rel) != "NORMALIZED_V1":
@@ -1203,10 +1210,12 @@ class MotherReferenceValidator:
                     f"{rel}: REQ-LIC-003 must retain T-7 / 7-day pre-expiry banner semantics"
                 )
 
+        # Constitutional licence-grace regression: scan ALL mother-reference paths
+        # regardless of NORMALIZED_V1 vs TRANSITIONAL_LEGACY.
         for doc_rel, doc_path in paths.items():
-            if CANONICAL_NORMALIZATION.get(doc_rel) != "NORMALIZED_V1":
-                continue
             if doc_rel == rel:
+                continue
+            if doc_rel not in CANONICAL_NORMALIZATION:
                 continue
             if not doc_path.is_file():
                 continue
