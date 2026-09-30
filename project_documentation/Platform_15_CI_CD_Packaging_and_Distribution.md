@@ -87,3 +87,13 @@ Air-gapped release bundle contains packages, dependencies/repository metadata as
 ## 6. Uninstall semantics
 
 Normal uninstall removes binaries/service but preserves customer state/config unless explicit purge is requested. Purge is separately confirmed/audited.
+
+## 7. Linux Agent eBPF packaging and compatibility (conditional)
+
+If and when `github.com/cilium/ebpf` (or another formally approved eBPF loader dependency) is selected and implemented for the Linux Agent:
+
+- **Packaging format:** Pre-compiled eBPF object assets (CO-RE / BTF compliant) are packaged directly inside the Linux Agent `.deb` and `.rpm` packages (e.g. `/usr/lib/platform/agent/ebpf/`).
+- **Separation of Base Agent Support vs Certified eBPF Matrix:** Base Linux Agent package installation and base infrastructure telemetry continue across the broader governed distribution matrix (including Ubuntu 22.04 LTS and RHEL 8.x). However, Phase-1 eBPF activation is certified only on **Ubuntu 24.x** and **RHEL 9.x** kernels. Being installable does NOT imply eBPF certification, and BTF availability alone does not imply certification.
+- **Graceful degradation on uncertified / incompatible platforms:** On a base-Agent-supported OS outside the certified eBPF matrix (or where the host kernel lacks required eBPF/BTF features or privileges), eBPF instrumentation remains strictly disabled and reports capability state as `UNSUPPORTED` or `KERNEL_INCOMPATIBLE`. Base host metric, systemd, and disk monitoring continue unaffected without crash, panic, or install failure. Expansion of the certified eBPF OS matrix is owned by **BUILD-019** benchmark and test evidence.
+- **Signing and provenance:** eBPF probe objects and Go loader binaries are built reproducibly in CI, signed with the release signing key, and catalogued in the release SBOM (SPDX/CycloneDX). No compilation from C sources is required or performed on the target customer host during installation.
+- **Air-gapped offline distribution:** The offline release bundle includes all necessary kernel compatibility assets; no external internet repository access is attempted or required at runtime.

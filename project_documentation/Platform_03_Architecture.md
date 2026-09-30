@@ -7,16 +7,16 @@
 **Depends on:** `Platform_01_BRD.md`, `Platform_02_PRD.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-23 — A2.1 BRD/PRD/Architecture normalization (Issue #96); 2026-09-24 A2.3 UI dependency truth correction (Issue #108)
+**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
 
 ---
 
 ## 1. Architecture mandate
-Platform is a clean-room enterprise network and infrastructure operations product. The architecture must support high monitoring breadth while remaining lightweight, low-latency, simple to deploy, safe under failure and operationally explainable.
+Platform is a clean-room enterprise product delivering **Unified Network & Infrastructure Observability** (commercial name: AmrudAi). The architecture defines the target Phase-1 capability set for network and infrastructure monitoring, temporal operational topology, telemetry quality/trust, cross-signal investigation, active path observability, Flow/log/event correlation, bounded Linux process-to-network evidence via eBPF, Service Assurance / SLI / SLO / Error Budget, cloud and Kubernetes monitoring, deterministic RCA, and change intelligence (subject to applicable implementation, benchmark and certification gates), while remaining lightweight, low-latency, simple to deploy, safe under failure and operationally explainable.
 
 The architecture is governed by the following constraints already decided:
 
-- Working product name is **Platform**.
+- Working product name is **Platform** (commercial product name: **AmrudAi**).
 - Core and Sensor run on Ubuntu/RHEL; no Windows Core/Sensor initially.
 - Core, Sensor and Agent are separate builds.
 - One Core for standalone; exactly two full Core nodes for HA.
@@ -24,12 +24,15 @@ The architecture is governed by the following constraints already decided:
 - All Core components run on Core nodes; no mandatory third Core/governance node.
 - Sensors continue polling during Core failover.
 - Sensor → Core uses secure HTTPS/gRPC over mTLS to a Platform ingestion endpoint; Kafka is internal to Core.
-- Kafka, ClickHouse, PostgreSQL and Valkey are baseline Core technologies.
-- Go for Sensor runtime, Java 21 for Core control plane, React/TypeScript UI, Python where appropriate for AI/analytics/NCM.
+- Kafka, ClickHouse, PostgreSQL and Valkey are baseline Core technologies; no separate eBPF database, graph database, or trace backend is introduced.
+- Go for Sensor/Agent runtime, Java 21 for Core control plane, React/TypeScript UI, Python where appropriate for AI/analytics/NCM.
 - UI is HTTPS only and does not expose an application endpoint on TCP/80.
 - Core and Sensor managed storage have a mandatory 80% storage-protection watermark.
 - DR capability is required in v1.0.
-- Full DPI and full APM are excluded initially.
+- **Hard Phase-1 product boundaries:**
+  - Full APM, bytecode instrumentation, method-level timing, continuous profiling, flame graphs, and RUM are excluded.
+  - Full DPI, always-on packet capture, TLS decryption, and packet payload reconstruction are excluded. (Existing bounded incident-triggered packet evidence remains active and is preserved).
+  - Mandatory GPU/NPU, third Core node, dedicated trace database, dedicated graph database, and separate eBPF backend are excluded.
 - Gemini is accessed through an AI Gateway; causal RCA is not LLM-only.
 - Platform is independent from ThoughtData and NetAI and must not reuse their proprietary implementation assets.
 
@@ -1470,3 +1473,58 @@ Packaging detail remains `Platform_15`/`Platform_16`. A2.1 only defines architec
 ## 43. A2.1 migration note
 
 A2.1 absorbed Version 3.0 ARCH-* blocks, v3.1 packaging/runtime sections and v3.2.2 timezone/scheduling/EDS/local-intelligence handoffs into the numbered normative architecture above, and corrected out-of-order headings. Chronological appendices and residual “must-not-lose” checklists are not current normative truth. Git history preserves chronology.
+
+---
+
+## 44. Unified Network & Infrastructure Observability architecture and eBPF integration — v3.2.2
+
+> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), `REQ-INF-008` (cloud network depth closure), and `REQ-INF-010` (OTLP phase boundary).
+
+### 44.1 Product positioning and required Phase-1 capability set
+
+AmrudAi Phase 1 is **Unified Network & Infrastructure Observability**. It defines the required Phase-1 capability set (subject to applicable implementation, benchmark and certification gates) unifying network monitoring, infrastructure monitoring, temporal operational topology, telemetry quality and trust, cross-signal investigation, active path observability, Flow/log/event correlation, bounded Linux process-to-network evidence via eBPF, Service Assurance / SLI / SLO / Error Budget, cloud and Kubernetes monitoring, deterministic evidence-led RCA, and change intelligence into a cohesive, low-footprint platform.
+
+### 44.2 Hard product boundaries
+
+Phase 1 explicitly enforces strict architectural boundaries:
+- **No full APM:** No code-level transaction tracing, no Java/.NET bytecode instrumentation, no method-level timing, no continuous profiling, no flame graphs, and no Real User Monitoring (RUM).
+- **No full DPI:** No always-on bulk packet capture, no TLS decryption, and no continuous packet payload reconstruction. (Existing bounded, incident-triggered packet evidence under `PRD-OIV-002` remains active and is preserved).
+- **No dedicated new backends:** No mandatory GPU/NPU hardware, no third Core node for quorum, no separate eBPF database or service, no standalone trace database (Jaeger/Tempo), and no dedicated graph database. PostgreSQL, ClickHouse, Kafka, and Valkey remain the sole authoritative data stores.
+
+### 44.3 eBPF process-to-network telemetry architecture
+
+The eBPF integration follows a strictly bounded, non-flooding edge pipeline:
+```text
+Linux Kernel (eBPF Probes)
+  → Linux Agent Collector (BPF ring buffer reader, LRU maps)
+  → Bounded Local Aggregator (bounded configurable buckets: process/service + remote IP/port + protocol)
+  → Durable Agent Disk Spool
+  → Assigned Sensor (mTLS HTTPS/gRPC)
+  → Sensor Durable Spool
+  → Core Ingestion Service
+  → Internal Kafka
+  → ClickHouse / Temporal Graph / RCA Engine
+```
+- **Outcome:** Resolves which process, service, or container is communicating with which remote endpoint, along with connection performance (active/new/closed sockets, bytes TX/RX, RTT, retransmissions, failures).
+- **Data Minimization:** Strictly zero payload capture, zero TLS decryption, zero HTTP/SQL inspection, zero continuous profiling/stack traces, and no environment variable reading.
+- **Resource Priority:** Core monitoring and telemetry durability strictly take precedence. If map capacity or bounded Agent memory budgets derived from BUILD-019 / BUILD-130 benchmark certification are approached, the collector transitions to `RESOURCE_GUARDED`, sheds records to an aggregate bucket, and marks records with `shed_records_count > 0`.
+
+### 44.4 Active path observability architecture
+
+Active path probing is executed by Network Sensors toward monitored infrastructure, WAN circuits, and cloud targets:
+- **Flow-Preserving Active Path Tracing:** Active path probing evaluates flow-stable techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040 across ICMP, TCP where appropriate, and UDP where certified) to maintain constant flow identifiers across probes and prevent ECMP route fluttering where supported.
+- **Hop & Change Telemetry:** Measures hop and destination latency, loss, and jitter where reliable, and MPLS label stacks when observable from supported protocol extensions; computes opaque, versioned, deterministic path fingerprints; detects route divergence and emits `PathChangeEvidence` records.
+- **Causal Integrity:** Intermediate packet drops or hidden hops record unresponsive/hidden states without asserting target DOWN. Multi-vantage contradictions are preserved as evidence.
+
+### 44.5 OpenTelemetry phase boundary
+
+- **Phase 1:** Ingestion and storage of OpenTelemetry metrics and structured logs. Extraction of W3C `trace_id` and `span_id` as correlation reference fields on logs, events, and alerts.
+- **Phase 1.5:** May add bounded customer-provided trace and dependency evidence (such as trace_id, span_id, service identity, dependency edges, latency/error summaries, or selected exemplars) subject to separate implementation and certification; it does not automatically imply a full distributed trace backend, storage of all spans, unlimited trace retention, APM, bytecode agents, or a trace database. Full distributed trace storage/analysis requires future explicit architecture change control.
+
+### 44.6 Cloud network depth closure
+
+Cloud monitoring under `REQ-INF-008` is clarified to include first-class Phase-1 cloud network entities and relationships where provider APIs permit: account/subscription/project, region, VPC/VNet/network, subnet, route table, route, NIC, security policy, NAT, load balancer, transit/interconnect/private endpoint where applicable, workload, Kubernetes relation, and material control-plane change evidence. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED (subject to provider capability, customer policy, privacy, cost, API/rate limits, cardinality, storage, and certification) and are not a mandatory universal Phase-1 dependency.
+
+### 44.7 Sizing overlay OBS-P1 over SNWP-2500-v1
+
+Observability Phase 1 capabilities are governed by the versioned `OBS-P1 enrichment overlay` defined in `Platform_11` §8.1. OBS-P1 benchmarks must prove whether eBPF local aggregation, active path probing, and cloud-network enrichment fit within existing planned hardware baselines (Network Sensor current planning baseline: 4 vCPU / 16 GB RAM / 150 GB SSD for ~800 normal network devices, with 8 vCPU / 16 GB RAM as an engineering benchmark objective for 2,000–2,500 devices) under low-compute non-interference gates; they may not be pre-declared certified.

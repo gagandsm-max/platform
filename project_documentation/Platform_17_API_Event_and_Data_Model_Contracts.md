@@ -6,7 +6,7 @@
 **Normalization state:** TRANSITIONAL_LEGACY. BUILD-000 freezes a bounded edge/control contract subsection below; the remainder awaits later normalization.
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the approved v3.2.2 NOC troubleshooting plus enterprise-SNMP correctness API/event/data contracts. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
-**Last reconciliation:** 2026-09-24 — BUILD-000 edge transport contract freeze (Issue #110); document remains TRANSITIONAL_LEGACY.
+**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142); document remains TRANSITIONAL_LEGACY.
 
 ## 1. Purpose
 
@@ -557,3 +557,181 @@ Wire `{status, code, message}` remains. Semantic classes: `INVALID_CONTRACT`, `A
 | §7 telemetry ACK pipeline | CURRENT_IMPLEMENTED_V1 for main telemetry; agent-ingress weaker (BUILD_003_TARGET) |
 | Uniform identifier casing assumptions | STALE vs frozen dual naming |
 | Illustrative `boot_epoch` naming | Alias of wire `bootEpoch` stream id |
+
+## 11. Network & Infrastructure Observability data model and event contracts supplement — v3.2.2
+
+> **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), `REQ-INF-008` (cloud network entities/relationships/change evidence), and `REQ-INF-010` (OTLP phase boundary: metrics/logs in Phase 1, bounded trace/dependency summaries in Phase 1.5). Target Phase-1 capabilities are subject to applicable implementation, benchmark, and certification gates.
+
+### 11.1 Purpose and architectural constraints
+
+This section supplements `Platform_17` with authoritative wire schemas, event families, and logical data model contracts for:
+1. **Linux Agent eBPF process-to-network telemetry**: local aggregation around `process/service + remote endpoint + protocol/port + time bucket`, transported via existing durable Agent queue → Sensor spool → Core ingestion → ClickHouse, with zero separate eBPF datastore or service.
+2. **Active path hop-by-hop telemetry and change events**: Sensor-executed multi-vantage path probing, hop metrics, path fingerprinting, and divergence events.
+3. **Distributed trace reference contract**: `trace_id` / `span_id` as future-compatible reference attributes across logs, events, alerts, and investigations, without Phase-1 trace storage or APM backend.
+
+### 11.2 Typed Linux Agent process-to-network evidence contract
+
+#### 11.2.1 Transport envelope and identity
+
+Process-network facts are produced by the Linux Agent eBPF collector, aggregated locally, and delivered over the existing versioned Agent→Sensor HTTPS/gRPC mTLS transport. The assigned Sensor buffers records in its durable spool and forwards batches to the Core via the canonical route `POST /api/v1/sensor/agent-telemetry` (handled by `SensorAgentIngestionController`).
+
+**Authority and Identity Model:**
+- **Sensor Certificate Authority:** Core authenticates the Sensor mTLS certificate. `AgentIngestionValidator.resolveAuthority(clientCert)` derives authoritative `SensorScope` (tenant and sensor). Core then validates incoming Agent records against that authority.
+- **Tenant Authority:** The Agent-origin tenant claim is not independently authoritative at Core. Core tenant authority derives from authenticated `SensorScope`. The Agent-origin claim/envelope tenant MUST equal the authenticated Sensor tenant. Downstream canonical evidence receives `tenant_id` only after this validation succeeds.
+- **Sensor & Assignment Provenance:** The accepting Sensor identifier (`acceptingSensorId`) must equal the authenticated Sensor. The tuple `agentId + assignmentGeneration` must resolve to an authoritative `AgentSensorAssignment`, and the assignment Sensor must match the authenticated Sensor.
+- **Agent Identity:** `agent_id` is a bounded canonical Agent identifier string (e.g. `"agent-01"`), validated against tenant + authenticated Sensor + `assignment_generation` before downstream canonicalization. It is not redefined as UUID-only and remains compatible with existing Agent identifier naming.
+- **Host Identifier & Entity Resolution:** `host_id` is a bounded Agent-observed host identifier string (e.g. `"host-1"`). It represents corroborating identity evidence only, not canonical entity authority (`Agent hostId != canonical entityId`). Core resolves `tenant + namespace="platform.agent" + identifier_type="HOST_ID" + host_id` into canonical `entity_id`. If resolution fails, the platform follows the existing governed unresolved-entity behavior rather than fabricating an entity. Agent-supplied `entityId` is never accepted as authoritative.
+- **Transport Inheritance:** Authority, assignment, replay and delivery provenance are inherited from and validated by the enclosing Agent/Sensor transport envelope (including authenticated sensor scope, `sensor_id`, `accepting_sensor_id`, `agent_id`, `assignment_generation`, agent stream identity, sensor ingress sequence, agent sequence, batch/idempotency identity, and correlation identity) before process-network evidence is canonicalized or persisted.
+- **Workload Aggregation Identity Invariant:** Every single-valued workload/local identity attribute emitted on an aggregated `ProcessNetworkEvidence` record must be common to every event represented by that record. If multiple processes or workloads are deliberately merged (e.g. across worker processes under a service or container scope), workload-specific attributes (such as `pid` or specific local socket ports) must not pretend to identify one member; such fields must be omitted or null, or represented through explicitly aggregated dimensions, and the record must expose aggregate scope/quality appropriately. Applicable identity dimensions may include executable/process identity, service identity, container identity, cgroup identity, network namespace, and local endpoint scope. PID remains an ephemeral runtime observation only and must NEVER become durable entity authority. Exact implementation and cardinality balance are owned by BUILD-011 and certified by BUILD-019 / BUILD-130 without freezing premature cardinality constants.
+
+Future extension and versioning of the physical envelope belongs to BUILD-016 / BUILD-062 and must preserve authority, idempotency, ACK, and durability contracts. Ingestion validation and envelope acceptance are owned by BUILD-062, physical Kafka streaming (topic naming, partitions, serialization) is owned by BUILD-063, and physical ClickHouse storage (table DDL, engine selection, TTL) is owned by BUILD-064.
+
+```text
+ProcessNetworkEvidence:
+  schema_version:           "1.0"
+  tenant_id:                UUID (canonicalized at Core from authenticated SensorScope after Agent-origin tenant claim and assignment provenance validate)
+  agent_id:                 string (bounded canonical Agent identifier string; validated against tenant + authenticated Sensor + assignment_generation before downstream canonicalization)
+  host_id:                  string (bounded Agent-observed host identifier string; corroborating identity evidence only, not canonical entity authority)
+  entity_id:                UUID (nullable, Core-resolved canonical entity identity; Agent hostId is not authoritative entityId)
+  bucket_start_at:          RFC3339UTC instant
+  bucket_end_at:            RFC3339UTC instant
+  bucket_duration_sec:      uint32 (bounded configurable aggregation interval)
+  process_metadata:
+    process_name:           string (bounded string, e.g. "nginx", "envoy", "mysqld")
+    executable_path:        string (bounded string, e.g. "/usr/sbin/nginx"; truncated display paths must not alter canonical identity)
+    service_name:           string (bounded string, systemd service or container service name)
+    pid:                    uint32 (nullable/optional runtime observation only, non-authoritative ephemeral identifier; null if aggregated across multiple worker PIDs)
+    container_id:           string (nullable bounded string, e.g. Docker/containerd container ID)
+    cgroup_path:            string (nullable bounded string, e.g. "/system.slice/nginx.service")
+    network_namespace:      uint64 (nullable netns inode number)
+  endpoint_pair:
+    local_ip:               string (IPv4 or IPv6 canonical string)
+    local_port:             uint16
+    remote_ip:              string (IPv4 or IPv6 canonical string)
+    remote_port:            uint16
+    remote_entity_id:       UUID (nullable, Core-resolved canonical target entity)
+    protocol:               string ("TCP" | "UDP")
+    ip_version:             string ("IPv4" | "IPv6")
+  traffic_metrics:
+    bytes_tx:               uint64 (raw bytes sent, where observable)
+    bytes_rx:               uint64 (raw bytes received, where observable)
+    active_connections:     uint32 (nullable/optional gauge at bucket end, applicable to stateful protocols like TCP)
+    new_connections:        uint32 (nullable/optional counter within bucket)
+    closed_connections:     uint32 (nullable/optional counter within bucket)
+    duration_total_ms:      uint64 (nullable/optional aggregate duration of closed connections)
+    mean_rtt_us:            uint32 (nullable/optional microsecond RTT from TCP info/SRTT when technically available and certified)
+    retransmit_count:       uint32 (nullable/optional TCP segment retransmissions when technically available and certified)
+    connection_failures:    uint32 (nullable/optional TCP RST, connection timeouts, SYN retries exceeded when technically available and certified)
+  quality_and_shedding:
+    quality_state:          "VALID" | "PARTIAL" | "SAMPLED" | "RESOURCE_GUARDED" | "UNSUPPORTED"
+    dropped_records_count:  uint32 (records dropped due to queue or buffer saturation)
+    shed_records_count:     uint32 (records shed due to memory/CPU guard thresholds)
+    sampled_flag:           boolean
+    partial_flag:           boolean
+    resource_guarded_flag:  boolean
+```
+
+Protocol-dependent evidence rules: TCP-specific metrics (such as `mean_rtt_us`, `retransmit_count`, `connection_failures`, `active_connections`, `new_connections`, `closed_connections`, `duration_total_ms`) are applicable only when the selected implementation and protocol can measure them reliably. For non-stateful or unsupported protocols (such as UDP), or on platforms where specific kernel metrics are unavailable, these fields must be omitted or null rather than emitting fabricated zero values. The record distinguishes measured zero from unavailable, unsupported, partial, or resource-guarded status.
+
+#### 11.2.2 Hard data-minimization boundaries
+
+In accordance with Platform security threat models (`Platform_18`), the following data categories are **STRICTLY PROHIBITED** from process-network payloads:
+- Application payload / packet data;
+- TLS / SSL plaintext or decrypted payloads;
+- HTTP request/response headers or bodies;
+- SQL query text, parameters, or database statements;
+- Command-line arguments or environment variables (eBPF process-network evidence excludes command-line text and correlates strictly using safe identity attributes: process name, executable identity, service identity, container/cgroup, network namespace, and ephemeral PID);
+- Arbitrary kernel syscall argument streams;
+- Kernel or user-space stack traces;
+- Continuous profiler / flame-graph sample streams.
+
+### 11.3 Active-path telemetry and change event contracts
+
+#### 11.3.1 Active path hop-by-hop observation contract
+
+Sensor-executed active path probes emit structured hop sequences and path-level performance facts:
+
+```text
+ActivePathObservation:
+  schema_version:           "1.0"
+  path_id:                  UUID (canonical path test configuration identity)
+  tenant_id:                UUID
+  source_sensor_id:         string (bounded opaque canonical Sensor identifier; same identity contract as schemas/edge/common-definitions.schema.json sensorId, e.g. "sensor-1")
+  source_vantage_id:        string (vantage location tag, e.g. "aws-eu-west-1", "dc-onprem-tor")
+  target_entity_id:         UUID (canonical target entity identity)
+  target_ip:                string (IPv4 or IPv6 canonical string)
+  target_port:              uint16 (nullable for ICMP)
+  protocol:                 "ICMP" | "TCP" | "UDP"
+  probed_at:                RFC3339UTC instant
+  path_summary:
+    total_hops:             uint8
+    responsive_hops:        uint8
+    end_to_end_rtt_min_ms:  float32 (nullable, null if target unreachable or unmeasured)
+    end_to_end_rtt_mean_ms: float32 (nullable, null if target unreachable or unmeasured)
+    end_to_end_rtt_max_ms:  float32 (nullable, null if target unreachable or unmeasured)
+    end_to_end_loss_pct:    float32 (nullable, null if unmeasured)
+    jitter_ms:              float32 (nullable, null if insufficient samples)
+    path_fingerprint:       string (opaque, versioned, deterministic path fingerprint; algorithm selected and implemented by BUILD-040)
+    fingerprint_version:    string (e.g. "1")
+    status:                 "COMPLETE" | "PARTIAL" | "TARGET_UNREACHABLE" | "FAILED"
+  hops:
+    - hop_index:            uint8 (bounded hop index; max/probe limits governed by BUILD-040 policy and certification)
+      hop_ip:               string (nullable IPv4 or IPv6 canonical string; null if unresponsive or hidden)
+      hop_state:            "RESPONSIVE" | "UNRESPONSIVE" | "HIDDEN" | "UNKNOWN"
+      hop_hostname:         string (nullable, reverse DNS PTR)
+      canonical_entity_id:  UUID (nullable, Core-resolved entity ID if internal infrastructure)
+      asn:                  uint32 (nullable, BGP autonomous system number when resolvable)
+      rtt_min_ms:           float32 (nullable, null if unresponsive/hidden/unmeasured)
+      rtt_mean_ms:          float32 (nullable, null if unresponsive/hidden/unmeasured)
+      rtt_max_ms:           float32 (nullable, null if unresponsive/hidden/unmeasured)
+      loss_pct:             float32 (nullable, null if unmeasured)
+      jitter_ms:            float32 (nullable, null if insufficient samples)
+      mpls_labels:          uint32[] (nullable, when observable from supported protocol extensions)
+      is_unresponsive:      boolean (true if unresponsive or timeout)
+      is_hidden:            boolean (true if router suppresses TTL expiry)
+```
+
+#### 11.3.2 Path change event contract
+
+When the path fingerprint changes between consecutive probing intervals or deviates from the established baseline, the Sensor or Core generates a versioned internal change event (physical Kafka topic naming, partitioning, and serialization owned by BUILD-063):
+
+```text
+PathChangeEvidence:
+  schema_version:           "1.0"
+  event_id:                 UUID
+  tenant_id:                UUID
+  path_id:                  UUID
+  source_sensor_id:         string (bounded opaque canonical Sensor identifier; same identity contract as schemas/edge/common-definitions.schema.json sensorId, e.g. "sensor-1")
+  target_entity_id:         UUID
+  detected_at:              RFC3339UTC instant
+  previous_fingerprint:     string
+  current_fingerprint:      string
+  fingerprint_version:      string
+  change_type:              "PATH_DIVERGENCE" | "HOP_ADDED" | "HOP_REMOVED" | "RTT_SHIFT" | "LOSS_ANOMALY"
+  divergence_hop_index:     uint8 (nullable, first hop index where topology divergence was observed; null for RTT_SHIFT or LOSS_ANOMALY without topology change)
+  previous_hop_ip:          string (nullable)
+  current_hop_ip:           string (nullable)
+  delta_rtt_ms:             float32 (nullable)
+  delta_loss_pct:           float32 (nullable)
+  correlation_id:           string
+```
+
+#### 11.3.3 Operational and causal integrity rules
+
+- **Incomplete Path != Target Down:** An unresponsive intermediate hop or incomplete traceroute (e.g. intermediate ICMP suppression or timeouts) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP polling indicates reachability.
+- **Multi-Vantage Contradiction Preservation:** Divergence between probes from different Sensors (e.g. Sensor-A sees 100% loss at transit hop 4, Sensor-B reaches target normally) represents an upstream routing or peering anomaly, not target failure. Contradictions must be preserved and surfaced to RCA as evidence.
+
+### 11.4 Distributed trace reference contract
+
+To support cross-signal correlation with application observability without storing high-volume trace spans, Platform defines a trace reference contract across all event and log schemas:
+
+```text
+TraceContextReference:
+  trace_id:                 string (32-hex character W3C Trace Context ID, or null)
+  span_id:                  string (16-hex character W3C Trace Context Span ID, or null)
+  sampled_flag:             boolean (trace sampling bit)
+```
+
+- **Scope:** Carried as optional reference metadata in syslog, flow records, diagnostic captures, alert evidence bundles, and Investigation Session items.
+- **Phase-1 Architectural Boundary:** AmrudAi Phase 1 supports OTLP metrics and logs with trace-ready contracts and data models (`trace_id`, `span_id` reference fields). AmrudAi Phase 1 does NOT store trace spans, does NOT operate a trace datastore (such as Jaeger or Tempo), and does NOT construct distributed trace waterfall graphs.
+- **Phase 1.5 Scope:** Phase 1.5 may add bounded customer-provided trace and dependency evidence (such as `trace_id`, `span_id`, service identity, dependency edges, latency/error summaries, selected exemplars) under separate implementation and certification. Full distributed trace storage, APM bytecode instrumentation, and dedicated trace backends remain excluded and require future explicit architecture change control.

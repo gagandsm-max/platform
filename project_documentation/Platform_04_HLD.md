@@ -7,7 +7,7 @@
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102)
+**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
 
 **Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
@@ -82,6 +82,7 @@ Separate Windows and Linux builds install:
 - Agent identity/enrollment.
 - Host metrics collector.
 - Process/service collector.
+- Bounded eBPF process-to-network collector (Linux Agent on supported kernels).
 - selected log/event adapters;
 - Edge Test engine;
 - local queue;
@@ -1350,3 +1351,35 @@ Core owns:
 - **Capability Pack:** owns monitor cadence/freshness/cost declarations consumed by the scheduler.
 - **Integrations:** own ITSM/webhook delivery queues separately from API Studio monitoring collection.
 - **HA/fencing:** Active/Standby ownership remains P0 uncertified; no third coordination service selected here.
+
+---
+
+## 47. Unified Network & Infrastructure Observability subsystem decomposition — v3.2.2
+
+> **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), and decisions `DEC-ARCH-036` through `DEC-ARCH-044`. Target Phase-1 capabilities are subject to applicable implementation, benchmark, and certification gates.
+
+### 47.1 Linux Agent eBPF collector subsystem
+
+The Linux Agent integrates eBPF collection within its existing Go runtime:
+- **Kernel Probe Layer:** Captures socket lifecycle, connection state, and retransmission events using BTF/CO-RE where selected implementation requires/supports it across certified Ubuntu 24.x and RHEL 9.x kernels. Emits connection events to local ring/perf buffers.
+- **Local Aggregation Layer:** Aggregates connection metrics locally into bounded configurable intervals around `process/service + remote endpoint + protocol/port`. Enforces bounded active-key/cardinality ceilings with heavy-hitter overflow shedding and explicit drop/shed/resource-guard counters.
+- **Resource Governor:** Enforces bounded eBPF memory and CPU resource budgets derived from BUILD-019 / BUILD-130 benchmark certification. If thresholds are exceeded, switches to `RESOURCE_GUARDED` capability state, sheds records to an aggregate bucket, and emits `PARTIAL` quality status.
+- **Local Spool & Uploader:** Enqueues aggregated records into the existing Agent disk spool and delivers to the assigned Sensor via existing mTLS HTTPS/gRPC transport.
+- **Zero Standalone Daemon:** No separate eBPF agent or daemon is introduced.
+
+### 47.2 Network Sensor active path probing subsystem
+
+The Network Sensor integrates active path probing within its existing runtime:
+- **Active Path Probing Engine:** Probes configured targets using flow-stable, multipath/ECMP-aware probing techniques (evaluating flow-stable techniques such as Paris-traceroute-style methods in BUILD-040) to discover intermediate hops, latencies, and loss while preventing false path fluttering.
+- **Hop & Path Analysis:** Computes hop and destination latency/loss/jitter where reliable; parses ICMP extensions/MPLS labels where present; tracks stable path fingerprints and divergence; records incomplete hop uncertainty; and emits `PathChangeEvidence` records.
+- **Durable Delivery:** Spools records into existing Sensor durable queue; delivers batches to Core Ingestion via existing transport.
+- **Zero Standalone Daemon:** No separate probing service is deployed.
+
+### 47.3 Core Ingestion and cross-domain consumption
+
+Core processes ingest and correlate observability telemetry without introducing new databases or microservices:
+- **Ingestion Gateway (BUILD-062):** Validates batches, resolves remote canonical entities, executes reservation/finalization/ACK, and hands off logical typed telemetry (`ProcessNetworkEvidence`, `ActivePathObservation`, `PathChangeEvidence`) to the Kafka streaming backbone (physical topic naming, serialization, and partition keys owned by BUILD-063).
+- **ClickHouse Storage (BUILD-064):** Analytics workers persist typed records into ClickHouse analytics tables (physical schema, table layout, engine selection, ordering keys, codecs, and TTL owned by BUILD-064).
+- **Temporal Operational Graph:** Dynamically updates communication edges between process entities and remote services with observed latency and throughput.
+- **Deterministic RCA Engine:** Correlates socket timeouts, retransmission bursts, and path divergence events with alert symptoms, while preserving `INCONCLUSIVE` outcomes.
+- **Architectural Boundary:** No separate eBPF database, no dedicated traceroute store, no APM backend, and no full distributed trace span store without explicit change control (Phase 1 supports OTLP metrics/logs; Phase 1.5 supports bounded customer-provided trace/dependency summaries only). PostgreSQL, ClickHouse, Kafka, and Valkey remain the sole authoritative datastores.

@@ -301,3 +301,42 @@ Phase-1 service assurance is not release-ready until deterministic fixtures prov
 - **Strict report artifact format restriction:** generated, downloaded, and scheduled report artifacts are restricted to PDF and CSV only; no XLSX, PPTX, or JSON report artifact generation.
 
 Do not mark these tests as implemented/passing unless physical test evidence exists. No customer-specific target percentage, credit amount, contractual liability or financial consequence is certified by these tests unless separately configured and authorized.
+
+---
+
+## 11. Network & Infrastructure Observability Certification Profile (NIOCP-P1-v1)
+
+> **Status:** NOT YET CERTIFIED. NIOCP-P1-v1 is a future certification profile. Documenting this certification profile does **not** claim that NIOCP-P1-v1 has passed or that Phase-1 capabilities are certified. Capability claims require reproducible execution evidence for all applicable scenarios.
+
+Phase-1 Unified Network & Infrastructure Observability capability claims are governed by the **Network & Infrastructure Observability Certification Profile (NIOCP-P1-v1)**. NIOCP is a named release-quality profile and gate inside existing Platform_14 governance; it is **not** a new runtime service or certification daemon.
+
+1. **Real device/service outage:** Ground-truth hard and soft failure scenarios prove that authoritative outages are detected, qualified, and correlated to correct root-cause candidates within SLA budgets.
+2. **Monitoring/credential/Sensor failure without false DOWN:** Injected SNMP timeout, invalid v3 credentials, Sensor reachability loss, or probe failure must produce `MONITORING_DEGRADED` or `UNKNOWN` with actionable diagnostic evidence; it must **never** assert monitored object `DOWN` when corroborating path/service evidence indicates the device is reachable.
+3. **WAN congestion and packet loss:** Injected WAN queueing delay and synthetic loss demonstrate telemetry spool buffering, adaptive backoff, and loss visibility without dropping monitoring continuity.
+4. **Routing and configuration change:** Live BGP/OSPF route flap or device configuration change correlates into Change Intelligence and the Unified Operations Timeline without masking independent concurrent operational failures.
+5. **Interface identity continuity:** Monitored interface `ifIndex` renumbering across device reboot or line-card reseat preserves historical continuity without creating duplicate or phantom interfaces.
+6. **Temporal replay and incident-time reconstruction:** Temporal operational graph faithfully reproduces estate topology and relationship state at exact incident timestamps during post-incident review and Investigation Sessions.
+7. **Cross-domain incident correlation:** Multi-signal incident spanning infrastructure host CPU, network interface drop, database session exhaustion, and synthetic endpoint degradation fuses into a unified incident context with explicit causal roles.
+8. **Insufficient evidence handling:** When required corroborating signals are missing or telemetry quality is low, RCA engines must truthfully emit `INCONCLUSIVE` or `UNKNOWN` rather than hallucinating certainty.
+9. **Active path observability profile:** Bounded multi-vantage path probes (ICMP, TCP, UDP where certified) demonstrate:
+   - path fingerprinting and change detection;
+   - hop-by-hop and destination latency, loss, and jitter measurement;
+   - graceful handling of incomplete traceroutes without declaring path failure;
+   - preservation of hidden-hop uncertainty and ECMP path variance;
+   - multi-vantage contradiction preservation;
+   - IPv4/IPv6 dual-stack and NAT traversal correctness;
+   - strict enforcement of non-O(N²) probe budgets and rate bounds.
+10. **Linux Agent eBPF functional and failure profile:**
+    - verified mapping of process, service, executable, and container/cgroup to remote network endpoints;
+    - local bounded aggregation into defined time buckets without uploading raw kernel events;
+    - resource limits and bounded memory budgets derived from BUILD-019 / BUILD-130 benchmark certification across certified Ubuntu 24.x and RHEL 9.x kernels;
+    - explicit capability states: `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`;
+    - graceful degradation under verifier rejection, BTF/CO-RE incompatibility, or unsupported older kernels;
+    - loss-accounting verification: explicit increments of `dropped`, `shed`, `sampled`, and `resource_guarded` counters under event-rate or map pressure without crashing the Agent;
+    - security and least privilege: verification that unprivileged execution fails closed, no packet payloads/TLS secrets/SQL texts/environment variables are captured, and process metadata adheres to data minimization.
+11. **Host infrastructure, virtualization, and storage:** Validated telemetry and health representation across physical servers, VMware/hypervisors, and storage arrays without converting Platform into a DCIM/BMS suite.
+12. **Cloud and Kubernetes depth:** Validated normalization of cloud-network entities (VPCs, subnets, route tables, security policies, load balancers, NAT gateways) and Kubernetes workloads into canonical Platform graph models with connector self-health separation. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED subject to provider capability, cost, and rate limits; they are not a mandatory Phase-1 dependency.
+13. **SLO and error budget evidence:** Where BUILD-095 applies, error budget burn rates and compliance scorecards calculate deterministically from qualified evidence ledgers.
+14. **Telemetry overload and load-shedding:** Extreme metric, flow, and syslog surges exercise Sensor spool watermarks, Kafka consumer backpressure, and ClickHouse micro-batching without dropping high-priority control or liveness signals.
+15. **Core and Sensor interruption and replay:** Active Core crash or Sensor disconnection verifies zero duplicate authority, stateful failover within the <60s target, and idempotent replay of buffered Sensor spools upon reconnection.
+16. **Low-compute and non-interference guarantee:** Bounded Linux eBPF telemetry and active path probing must measurably operate within declared CPU, RAM, and network envelopes; if resource contention occurs, optional enrichment must yield, throttle, or suspend before primary monitoring, collection, durable transport, ingestion, alert qualification, incident processing, or deterministic RCA are degraded.

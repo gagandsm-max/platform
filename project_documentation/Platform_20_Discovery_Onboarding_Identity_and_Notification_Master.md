@@ -300,6 +300,22 @@ Default state is `PENDING_APPROVAL`. The provisional Sensor association does **n
 
 `UNMANAGED` may retain bounded management identity/inventory visibility without full monitoring. `REJECTED` unauthorized enrollment revokes/invalidates identity as policy requires. `EXCLUDED` is a persistent/permanent automatic-onboarding exclusion and remains effective across rediscovery, Agent reconnect, later scans and passage of time until an explicit authorized audited administrative action removes/reopens it.
 
+### 5.4.1 Agent capability inventory and eBPF state reporting — v3.2.2 reconciliation
+
+> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-INF-013` and `DEC-ARCH-036`.
+
+The Linux Agent capability inventory reported during bootstrap, heartbeat, or onboarding review may include the current eBPF process-network capability state:
+
+```text
+ebpf_capability_state: UNSUPPORTED | UNAVAILABLE | PRIVILEGE_DENIED | KERNEL_INCOMPATIBLE | RESOURCE_GUARDED | ACTIVE
+```
+
+**Architectural boundaries and non-goals:**
+- **Capability state only:** This field reflects local kernel support, privilege, and runtime resource health. It is an operational capability indicator and does **NOT** represent an endpoint identity, entity ID, or network address.
+- **No new onboarding lifecycle:** eBPF capability state does not alter the governed candidate lifecycle (`DISCOVERED|ENROLLED -> PENDING_APPROVAL -> ACTIVE`).
+- **No auto-enablement or approval bypass:** Reporting an active eBPF capability does not automatically approve the agent, license the entity, or bypass the human-in-the-loop review process.
+- **Graceful degradation:** If eBPF state is `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, or `RESOURCE_GUARDED`, the Agent continues all routine base OS/host metrics collection (`CPU`, `memory`, `disk`, `network interface stats`). Base agent monitoring is never disabled due to eBPF limitations.
+
 ### 5.5 Sensor Control / Placement ownership
 
 Sensor Control owns Region/Site/Pool-aware eligibility, membership state, placement generations, drain/maintenance state, Sensor reassignment and Agent→Sensor assignment. Provisioning/Onboarding requests placement and receives an authoritative result; it does not maintain a second placement registry.

@@ -7,7 +7,7 @@
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102)
+**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
 
 **Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
@@ -2883,3 +2883,94 @@ Recurring desired-state records carry at minimum: tenant, assignment identity, t
 ## 89. Redundant identifier index — P2 hygiene note
 
 V001 unique constraint `uq_identifier_resolution (tenant_id, namespace, identifier_type, identifier_value)` already creates a unique btree. Secondary index `idx_identifier_lookup` on the same columns is redundant unless current query evidence proves otherwise. Future **P2** forward-only DB hygiene only. **No migration number is reserved** by this baseline; never rewrite V001–V009 in place.
+
+---
+
+## 90. Active path probing Low-Level Design (REQ-NET-016)
+
+> **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Governed by `REQ-NET-016` and `DEC-ARCH-037`. Target Phase-1 capabilities are subject to applicable implementation, benchmark, and certification gates.
+
+### 90.1 Subsystem placement and execution
+
+Active path probing is implemented within the Network Sensor runtime. It executes scheduled or on-demand hop-by-hop path discovery and latency/loss measurement toward monitored network targets, SD-WAN gateways, and cloud endpoints. Bounded dynamic targets, rate limits, and scheduling prevent $O(N^2)$ probing floods.
+
+### 90.2 Flow-stable probing technique and path preservation
+
+Traditional traceroute (varying UDP ports or ICMP sequence numbers across successive hops) causes transit Equal-Cost Multi-Path (ECMP) hashes to assign probes to different physical paths, causing artificial route fluttering and false divergence.
+1. **Flow-Preserving Technique:** Sensor active path probing must maintain flow stability across probe hops to track consistent paths across ECMP and load-balanced links. BUILD-040 is responsible for evaluating and selecting an ECMP-aware flow-stable probing technique (such as Paris-traceroute-style techniques with pinned flow identifiers). Exact packet crafting, protocol modes (ICMP/TCP/UDP), probe counts, timing intervals, and TTL limits belong to BUILD-040 design and certification.
+2. **Path Discovery & Metrics Requirements:**
+   - Source/vantage identity, target endpoint, and protocol/port where applicable.
+   - Hop sequence acquisition discovering intermediate hops, latencies (min/mean/max where reliable), packet loss, and jitter.
+   - Intermediate state classification: explicit recording of unresponsive hops, hidden hops (routers suppressing TTL expiry), and incomplete hop uncertainty.
+   - Extension parsing: parsing of ICMP extensions / MPLS labels where present.
+   - Protocol support: dual-stack IPv4 and IPv6 support, NAT traversal awareness.
+
+### 90.3 Path Fingerprinting and Change Detection
+
+1. **Fingerprint Hash:** An opaque, versioned, deterministic path fingerprint (carrying `fingerprint_version` with algorithm selected and implemented by BUILD-040) is computed over the ordered sequence of responsive hop IP addresses and resolved ASNs to identify path geometry. Unresponsive or fluctuating hops must not trigger spurious divergence.
+2. **Divergence Evaluation:** Path changes generate internal `PathChangeEvidence` records capturing the previous fingerprint, new fingerprint, and optional divergence hop index (where topological divergence occurred; null for RTT_SHIFT or LOSS_ANOMALY without topology change).
+3. **Causal Boundary:** Intermediate packet loss or incomplete traceroutes (e.g. intermediate ICMP suppression or timeouts) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP liveness proves reachability. Multi-vantage contradictions must be preserved.
+
+---
+
+## 91. Linux Agent eBPF process-to-network telemetry Low-Level Design (REQ-INF-013)
+
+> **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Governed by `REQ-INF-013` and `DEC-ARCH-036`. Target Phase-1 capabilities are subject to applicable implementation, benchmark, and certification gates.
+
+### 91.1 Kernel probe architecture
+
+The Linux Agent integrates eBPF collection within its existing Go runtime:
+1. **Compatibility Matrix & Attach Points:**
+   - Relies on BTF/CO-RE where the selected implementation requires/supports it across certified Ubuntu 24.x and RHEL 9.x kernels.
+   - Observes socket lifecycle, connection establishment/failures, and TCP retransmissions through bounded, low-overhead kernel attach points. Specific probe attachments and map structures are determined and benchmarked under BUILD-011 and BUILD-019.
+2. **Kernel-to-Userspace Transfer:** Streams connection events or aggregated summary deltas to userspace via bounded ring/perf buffers without lock contention.
+
+### 91.2 Userspace local aggregation engine
+
+To prevent telemetry floods, the Linux Agent does NOT stream individual socket events over the network:
+1. **Time Bucketing:** Events are aggregated locally in memory into bounded, configurable time intervals around `process/service + remote endpoint + protocol/port`.
+2. **Workload Aggregation Identity & Key:**
+   - Instead of naively collapsing distinct workloads or arbitrarily attaching single-valued metadata, local aggregation evaluates a bounded **workload aggregation identity**.
+   - **Workload Aggregation Invariant:** Every single-valued workload/local identity attribute emitted on an aggregated `ProcessNetworkEvidence` record must be common to every event represented by that record.
+   - If multiple processes or workloads are deliberately merged (e.g. across worker PIDs under a common service or container scope):
+     - Workload-specific fields (such as `pid` or specific local socket ports) must not pretend to identify one member; such fields must be omitted, null, or represented through explicitly aggregated dimensions.
+     - The record must expose aggregate scope and quality indicators appropriately.
+   - Applicable identity dimensions for workload aggregation keys may include, depending on workload type and execution context:
+     - Executable / process identity (e.g. `process_name`, `executable_path`);
+     - Service identity (e.g. `service_name`);
+     - Container identity (e.g. `container_id`);
+     - Cgroup identity (e.g. `cgroup_path`);
+     - Network namespace (`network_namespace`);
+     - Local endpoint scope / port binding;
+     - Remote endpoint (`remote_ip`, `remote_port`) and `protocol`.
+   - `pid` remains an ephemeral runtime observation only and must NEVER become durable entity authority.
+   - The exact implementation key structure and cardinality balance are owned by **BUILD-011** and certified by **BUILD-019 / BUILD-130** benchmarks without freezing premature cardinality constants.
+3. **Cardinality Budget & Heavy-Hitter Overflow:**
+   - Enforces bounded active-key/cardinality ceilings per aggregation interval.
+   - When distinct remote endpoint keys exceed the configured ceiling, excess keys are shed into an aggregate summary key (e.g., `__overflow_other__`).
+   - Telemetry carries explicit drop and shed counters (`dropped_records_count`, `shed_records_count`).
+4. **Resource Governance & Capability States:**
+   - Enforces bounded Agent memory and CPU resource budgets derived from BUILD-019 / BUILD-130 benchmark certification.
+   - If resource thresholds are approached or kernel buffers drop events, the collector transitions to `RESOURCE_GUARDED` capability state, increases sampling or sheds records, and emits `PARTIAL` quality status.
+   - Complete capability state vocabulary: `ACTIVE | UNSUPPORTED | UNAVAILABLE | PRIVILEGE_DENIED | KERNEL_INCOMPATIBLE | RESOURCE_GUARDED`.
+
+---
+
+## 92. Logical ingestion and storage contracts for Observability Phase 1
+
+> **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Logical contracts define required fields, types, and semantics. Physical Kafka topic naming, partition keys, serialization (JSON vs Avro), ClickHouse table DDL, ordering keys, and TTL policies are owned, implemented, and certified by BUILD-062, BUILD-063, and BUILD-064.
+
+### 92.1 Logical message contracts
+
+Ingestion and streaming pipelines transport typed logical evidence:
+- **`ProcessNetworkEvidence`:** Carries tenant ID, agent ID, host ID, entity ID, process and service attribution, remote endpoint (IP/port/entity), protocol, connection counters (active, new, closed, failures; applicable to stateful protocols), traffic metrics (bytes TX/RX, mean RTT, retransmissions when technically available and certified; protocol-dependent fields nullable/optional without fabricated zero values), quality/capability state, and drop/shed counters.
+- **`ActivePathObservation`:** Carries tenant ID, path ID, source vantage / canonical sensor ID (bounded string), target entity ID / IP, protocol/port, opaque versioned path fingerprint, hop sequence (bounded hop index, nullable hop IP, explicit hop state `RESPONSIVE | UNRESPONSIVE | HIDDEN | UNKNOWN`, hostname, ASN, optional/nullable RTT min/mean/max, loss percentage, jitter, and MPLS labels when observable from supported protocol extensions), and quality status.
+- **`PathChangeEvidence`:** Carries tenant ID, path ID, source sensor ID (bounded canonical string), previous fingerprint, new fingerprint, optional divergence hop index (nullable when not applicable), timestamp, and corroborating telemetry links.
+
+### 92.2 Physical storage responsibilities
+
+Physical storage and streaming schemas are decoupled from logical contracts:
+1. **Ingestion Gateway (BUILD-062):** Owns ingestion authority, batch validation, accepted logical envelope verification, reserve/finalize/ACK transaction semantics, and handoff to the streaming backbone.
+2. **Kafka Streaming Backbone (BUILD-063):** Owns physical topic naming, partition strategies, schema serialization formats (JSON / Avro / Protobuf), retry/rebalance behavior, and retention configurations for process-network and active-path event streams.
+3. **ClickHouse Fact Storage (BUILD-064):** Owns physical ClickHouse table DDL, storage layout, engine choice (selected and certified according to idempotency, retention, rollups, and query performance without preselection at documentation stage), partitioning schemes, primary sorting keys (`ORDER BY`), codec compression, and lifecycle TTL policies for historical process-network and path-hop facts.
+4. **No Standalone Datastores:** Telemetry is stored strictly within authoritative Platform datastores (PostgreSQL, ClickHouse, Kafka, Valkey). No separate eBPF or path probing database is introduced.

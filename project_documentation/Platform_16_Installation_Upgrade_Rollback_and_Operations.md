@@ -101,3 +101,25 @@ Support bundles include sanitized SNMP component health, poll-plan/profile/versi
 - Scheduler recovery does not mass-catch-up missed history or fabricate samples.
 - Two-Core HA remains uncertified until Platform_14 gates pass; operators must not treat documentation as production HA certification.
 - No new infrastructure service is introduced by this baseline.
+
+## 5. Linux Agent eBPF and active-path operational runbook supplement — v3.2.2
+
+> **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Target Phase-1 capabilities are subject to applicable implementation, benchmark, and certification gates.
+
+### 5.1 Linux Agent eBPF operational states and runbooks
+
+The Linux Agent exposes discrete operational capability states for eBPF:
+
+- `UNSUPPORTED`: Host kernel version or configuration falls outside the certified Ubuntu 24.x/RHEL 9.x compatibility matrix or lacks required eBPF/BTF features (e.g. `CONFIG_DEBUG_INFO_BTF` disabled). The Agent continues normal metric/inventory collection; eBPF is disabled without operator intervention.
+- `UNAVAILABLE`: Kernel supports eBPF but runtime probe attachment or ELF loading failed. Runbook: inspect `/var/log/platform/agent/agent.log` for verifier errors, check kernel lock-down / security modules (SELinux/AppArmor), and verify agent package integrity.
+- `PRIVILEGE_DENIED`: Agent service lacks required Linux capabilities (`CAP_BPF`, `CAP_PERFMON`, or `CAP_SYS_ADMIN`). Runbook: verify `systemd` unit capability settings (`AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_NET_RAW`); do not grant full root privileges when capabilities suffice.
+- `KERNEL_INCOMPATIBLE`: Kernel BTF layout differs from packaged CO-RE expectations or verifier rejects program on host kernel patchlevel. Runbook: update agent package or submit kernel profile; base monitoring continues unaffected.
+- `RESOURCE_GUARDED`: Agent runtime detects host memory pressure, CPU threshold breach, or kernel map saturation. eBPF collection drops or throttles aggressively; `shed_count` and `resource_guarded` counters increment. Base telemetry and transport are protected. Runbook: inspect high-cardinality workloads, short-lived socket storms, or tune aggregation window settings.
+
+Support bundles collect eBPF operational status, map usage, dropped/shed counters, and kernel version metadata without capturing packet payloads or environment secrets.
+
+### 5.2 Active path degradation runbook
+
+- **Incomplete traceroutes:** Intermediate hops returning `*` (ICMP time-exceeded suppressed) must not be treated as path failure if destination is reachable. Operators should verify destination probe results and edge status.
+- **Hidden hops and ECMP variance:** Alternating path fingerprints across probes indicate multi-path routing (ECMP/flow-hashing), not path flapping. The UI and alerts group ECMP path variants under the canonical path identifier.
+- **Multi-vantage contradiction:** Different Sensors reporting conflicting reachability to the same target indicates localized network partition, WAN path failure, or upstream routing issues. The incident console correlates multi-vantage evidence to identify the fault domain.

@@ -179,3 +179,36 @@ Agent/Sensor credentials, reusable secrets and unrestricted device-control capab
 - Log forwarding: secret/PII minimization/redaction; per-destination queue isolation; SIEM outage must not block base monitoring.
 - Webhooks: signature/auth, replay protection, tenant/source binding, SSRF/egress allowlists, secrets, schema validation, rate limits, idempotency, audit; no arbitrary scripts.
 - ITSM callbacks: signed/authenticated inbound; remote ticket state cannot override Platform health authority.
+
+---
+
+## 10. Linux Agent eBPF kernel instrumentation and active path probe mechanics — v3.2.2
+
+> **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), and decisions `DEC-ARCH-036`, `DEC-ARCH-037`, `DEC-ARCH-038`. Target Phase-1 capabilities are subject to applicable implementation, benchmark, and certification gates.
+
+### 10.1 Linux Agent eBPF kernel instrumentation mechanics
+
+1. **Least-Privilege Execution:** The Linux Agent eBPF collector operates under least privilege across certified Ubuntu 24.x and RHEL 9.x kernels. The Agent requests granular Linux capabilities (such as `CAP_BPF` and `CAP_PERFMON` where available) rather than blanket `CAP_SYS_ADMIN`. On legacy enterprise kernels, the Agent uses bounded privilege separation with strict audit logging.
+2. **CO-RE (Compile Once – Run Everywhere) and BTF:** eBPF probe objects leverage BPF Type Format (BTF) and CO-RE where the selected implementation requires/supports it. Pre-flight checks verify BTF availability. If BTF is missing, outdated, or incompatible with the compiled object, the Agent safely aborts eBPF initialization and sets capability state to `KERNEL_INCOMPATIBLE`.
+3. **Deterministic Capability State Machine:**
+   - `ACTIVE`: eBPF bytecode verified and attached; BPF ring-buffer healthy; local aggregation active.
+   - `UNSUPPORTED`: Host architecture or OS kernel is non-Linux or below minimum supported eBPF baseline.
+   - `UNAVAILABLE`: Host eBPF subsystem disabled by sysctl or security policy (e.g. `kernel.unprivileged_bpf_disabled=2`).
+   - `PRIVILEGE_DENIED`: Agent process lacks required Linux capabilities (`CAP_BPF`, `CAP_PERFMON`).
+   - `KERNEL_INCOMPATIBLE`: Kernel verifier rejected bytecode, or BTF definitions do not match running kernel.
+   - `RESOURCE_GUARDED`: Local Agent memory or kernel map capacity exceeded; shedding/sampling enabled to protect host stability.
+4. **Data Minimization by Architecture:** Attach points are strictly limited to socket state lifecycle and connection performance metrics. The eBPF collector is architecturally barred from:
+   - Reading socket payload buffers (no application data capture);
+   - Reading TLS/SSL memory or plaintext streams (no TLS decryption);
+   - Reading HTTP request/response bodies or headers;
+   - Reading database SQL statements or query parameters;
+   - Inspecting environment variables or process memory;
+   - Tracing arbitrary system calls or user-space functions.
+5. **Cardinality and Resource Protection:** Kernel maps are bounded with eviction protection. Local aggregation in the Agent process enforces bounded active-key/cardinality ceilings per configurable aggregation interval. Memory and CPU budgets are derived from BUILD-019 / BUILD-130 benchmark certification. If limits are approached, the Agent sheds records to an aggregate overflow bucket and reports `shed_records_count` and `dropped_records_count`.
+
+### 10.2 Active path probing mechanics
+
+1. **Flow-Stable Probing:** Active path probing implemented by Network Sensors uses flow-stable, multipath/ECMP-aware probing techniques (evaluating flow-stable techniques such as Paris-traceroute-style methods in BUILD-040). Probes maintain flow stability across varying TTLs so that transit Equal-Cost Multi-Path (ECMP) load balancers route probes along consistent physical paths, preventing artificial hop flapping and route illusion.
+2. **Probe Rate and Concurrency Limits:** Probing operations enforce bounded rate limits, bounded intervals, bounded TTL ceilings, and per-hop timeouts to prevent network flooding and avoid self-induced congestion. Exact defaults and tunable ranges are determined and certified in BUILD-040.
+3. **Non-O(N²) Target Bounds:** Probing is restricted to explicitly configured infrastructure paths, inter-site links, cloud interconnects, and licensed outside-in probe targets. Automated all-to-all (full mesh) probing across arbitrary endpoints is strictly prohibited to prevent combinatorial probe explosions.
+4. **Middlebox and Hidden-Hop Handling:** Intermediate routers or firewalls that rate-limit or silently drop ICMP Time Exceeded packets produce unresponsive hops. Such hops are explicitly recorded with `hop_state = UNRESPONSIVE` or `HIDDEN`, preserving the hop index in the ordered path record without asserting target unreachable or path failure.

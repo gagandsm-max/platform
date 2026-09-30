@@ -39,7 +39,7 @@ The purpose is not to add decorative AI. The purpose is to reduce operational no
 
 1. **Evidence before AI.** Protocol, topology, telemetry, change, path and operator-confirmed evidence remain authoritative for causal conclusions.
 2. **`INCONCLUSIVE` remains valid.** GNN/ML/LLM must not invent a root cause when evidence is insufficient.
-3. **No silent DPI scope expansion.** Triggered packet evidence is bounded diagnostic capture; full always-on DPI remains outside initial product scope.
+3. **No silent DPI scope expansion.** Triggered packet evidence is bounded diagnostic capture; full always-on DPI remains outside initial product scope. Governed triggered packet evidence under `PRD-OIV-002` remains an active Phase-1 capability and is not demoted.
 4. **No direct LLM privileged execution.** Controlled remediation requires deterministic action definitions, authorization, guardrails, approval/policy, validation and rollback/fail-safe handling.
 5. **Customer value must be auditable.** Platform shall distinguish measured, derived, estimated and customer-supplied values.
 6. **No false causality in value reporting.** `Capability participated` is not the same as `capability caused the improvement`.
@@ -364,3 +364,29 @@ This master supplements legacy `Platform_01`, `02`, `03`, `04`, `05`, `06`, `08`
 This document is specification evidence only. Completion requires implementation, tests, security, tenant isolation, data integrity, observability, resource bounds, upgrade/migration behavior, runbooks, UI, traceability and applicable performance evidence.
 
 No MTTR-reduction or financial-value percentage becomes a product claim merely because the Value Engine can calculate a number.
+
+---
+
+## 17. Observability Phase-1 cross-signal evidence consumption supplement — v3.2.2
+
+> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), and decisions `DEC-ARCH-039`, `DEC-ARCH-040`, `DEC-ARCH-041`.
+
+### 17.1 Cross-signal evidence consumption in Incident Flight Recorder
+
+The Incident Flight Recorder (`PRD-OIV-006` / `REQ-OIV-006`) consumes typed process-network and active-path observations into its bounded pre/post incident evidence window:
+- **Process-to-network evidence:** Socket lifecycle facts, TCP RTT spikes, retransmission storms, and process connection failures reported under `REQ-INF-013` are captured as structured evidence items in the Flight Recorder manifest. When socket tables indicate dropped/shed records, the evidence item explicitly carries the `PARTIAL` or `RESOURCE_GUARDED` quality status.
+- **Active-path evidence:** Hop-by-hop latency increases, packet loss bursts, and path change events (`path.change.detected`) reported under `REQ-NET-016` are pinned to the Flight Recorder window, establishing whether transit network routing changes preceded or coincided with application-tier degradation.
+- **Unified authority:** Flight Recorder captures reference canonical facts stored in ClickHouse and PostgreSQL via `incident_evidence_ref`. No separate or duplicate storage layer is created.
+
+### 17.2 Similar Incident Memory integration
+
+Similar Incident Memory (`PRD-OIV-007` / `REQ-OIV-007`) incorporates active path divergence patterns and process-socket degradation signatures as optional deterministic matching features:
+- Historical incident signatures may match on path divergence hop patterns (e.g. transit provider peering dropouts) and process network failure codes (e.g. backend database connection timeout surges).
+- Similarity remains advisory: historical similarity never automatically asserts current root cause.
+
+### 17.3 Preservation of triggered packet evidence
+
+Incident-triggered packet evidence (`PRD-OIV-002` / `REQ-OIV-002`) is a core, approved Phase-1 capability and remains active under this reconciliation:
+- Triggered packet capture is privileged, bounded, resource-guarded, and tenant-scoped.
+- It is NOT demoted to Phase 1.5 or Phase 2.
+- Full always-on DPI, bulk PCAP storage, and continuous payload reconstruction remain hard exclusions outside Phase 1.

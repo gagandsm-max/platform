@@ -7,7 +7,7 @@
 **Depends on:** `Platform_01_BRD.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_08_Requirements_Traceability.md`, specialized masters `Platform_19`..`Platform_23`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-23 — A2.1 BRD/PRD/Architecture normalization (Issue #96)
+**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
 
 ---
 
@@ -33,21 +33,21 @@ Platform is a clean-room product. Industry products such as SolarWinds, ManageEn
 **Cross-document contract:** `Platform_07` (OSS), `Platform_08` (global IDs), `Platform_09` (UI detail), `Platform_10` (protocols), `Platform_11` (sizing), `Platform_12` (decisions). Specialized `PRD-OIV-*`/`PRD-ONB-*`/`PRD-EGC-*`/`PRD-MIA-*`/`PRD-EMC-*` remain authoritative supplements in their masters.
 
 ## 2. Product scope summary
-Platform shall provide a unified enterprise operations experience covering:
+Platform shall provide a **Unified Network & Infrastructure Observability** experience (commercial product name: **AmrudAi**) covering:
 
-1. Network monitoring and traffic analytics.
-2. Infrastructure/server/hardware monitoring.
+1. Network monitoring, active path observability and traffic analytics.
+2. Infrastructure/server/hardware monitoring and bounded Linux process-to-network eBPF evidence.
 3. Virtualization and storage.
 4. Database monitoring.
-5. Cloud and Kubernetes.
-6. OpenTelemetry metrics/logs.
-7. Synthetic/service tests.
+5. Cloud and Kubernetes infrastructure and network depth.
+6. OpenTelemetry metrics/logs (Phase 1) and future trace correlation reference.
+7. Synthetic/service tests and Service Assurance (SLI/SLO/Error Budget).
 8. NCM and privileged CLI.
 9. IPAM.
 10. Discovery, provisioning and inventory.
-11. Topology, maps and business-service relationships.
-12. Events, alerts, incidents and qualification.
-13. Graph-aware RCA, anomaly detection and explainable AI.
+11. Topology, maps and temporal operational graph relationships.
+12. Events, alerts, incidents and evidence qualification.
+13. Graph-aware deterministic RCA, anomaly detection and explainable AI assistance.
 14. Reporting and SLA.
 15. ITSM/notification integrations.
 16. Multi-tenancy, RBAC, security and audit.
@@ -55,7 +55,7 @@ Platform shall provide a unified enterprise operations experience covering:
 18. Data retention, rollups, archive, capacity forecasting and storage protection.
 19. Extensibility through MIB Studio, API Studio and Device Pack Studio.
 
-DPI and full APM are excluded for the initial product scope.
+**Hard product boundaries:** Full APM, bytecode instrumentation, method-level timing, continuous profiling, flame graphs, full DPI, always-on bulk PCAP, TLS decryption, and packet payload reconstruction are excluded from Phase 1. (Existing bounded incident-triggered packet evidence under `PRD-OIV-002` remains active and is preserved).
 
 ---
 
@@ -646,8 +646,9 @@ Platform shall support:
 - ICMP reachability/RTT/loss.
 - Configurable device-down validation.
 - Traceroute/path history and changes.
+- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Flow-stable active-path techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040) may be used to preserve flow identifiers across intermediate hops and avoid ECMP route fluttering where supported. Intermediate unresponsive hops or hidden hops must not assert destination DOWN.
 - TCP/DNS/TLS/HTTP validation where relevant.
-- Multi-vantage validation from secondary Sensors where policy allows.
+- Multi-vantage validation from secondary Sensors where policy allows, preserving independent source results and contradictory evidence.
 
 ### 11.3 Layer and protocol depth
 
@@ -746,6 +747,17 @@ Linux Agent and Windows Agent are the richer local collection modes. Linux agent
 
 Collection, credential, privilege or path failure is **monitoring-health evidence**. It shall not automatically become host/service DOWN when the monitored state cannot be established.
 
+### 12.5 Linux Agent eBPF process-to-network telemetry (REQ-INF-013)
+
+On supported Linux distributions and kernels under the certified Ubuntu 24.x / RHEL 9.x compatibility matrix (using BTF/CO-RE where the selected implementation requires/supports it), the Linux Agent shall collect bounded process-to-network evidence via eBPF probes:
+- Correlate active host processes, systemd services, and container workloads with local/remote socket communication endpoints (local IP/port, remote IP/port, protocol).
+- Measure connection performance: active/new/closed sockets, bytes TX/RX, mean TCP RTT, retransmissions, and connection failures.
+- Aggregate locally into bounded configurable aggregation intervals with bounded active-key cardinality ceilings and heavy-hitter overflow shedding; do not stream individual socket events over the network.
+- Enforce strict data minimization: zero payload capture, zero TLS decryption, zero HTTP/SQL inspection, zero continuous profiling/stack traces, and no environment variable reading.
+- Implement resource governance: bounded eBPF memory and resource budgets derived from BUILD-019 / BUILD-130 benchmark certification; transitions to `RESOURCE_GUARDED` capability state with explicit drop/shed/resource-guard counters (`dropped_records_count`, `shed_records_count`) when thresholds are approached.
+- Base Agent host metrics collection shall continue unaffected if eBPF is `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, or `RESOURCE_GUARDED`.
+
+
 
 ## 13. Database monitoring requirements
 Platform shall provide database packs/connectors for major databases including PostgreSQL, MySQL/MariaDB, Microsoft SQL Server, Oracle, SAP HANA, MongoDB, ClickHouse and Elasticsearch/OpenSearch where interfaces/licensing permit.
@@ -773,7 +785,7 @@ Database credentials shall be scoped and protected. Arbitrary dangerous SQL shal
 
 Cloud provider roots include AWS, Azure, GCP and OCI. Vendor identifiers never override Platform tenant/entity authority. Required concepts: cloud hierarchy discovery; ephemeral-child lifecycle/reconciliation; provider API quota/rate-budget governance; throttling; freshness/staleness; provider service-health; audit/change evidence; cloud-network evidence; quota/autoscaling evidence; canonical normalized entity/state; connector self-health. New cloud SDK dependencies remain Platform_07 governed and are not auto-approved.
 
-AWS, Azure and GCP integrations shall use supported provider APIs/SDKs and normalize accounts/subscriptions/projects, regions, networks, compute, storage, database and load-balancer entities.
+AWS, Azure and GCP integrations shall use supported provider APIs/SDKs and normalize accounts/subscriptions/projects, regions, networks (VPCs/VNets, subnets, route tables, routes, NICs, security policies, NAT gateways, transit/interconnect/private endpoints where applicable, and cloud load balancers), compute workloads, storage, database entities, and Kubernetes relations (`REQ-INF-008`), along with material control-plane change evidence. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED (subject to provider capability, customer policy, privacy, cost, API/rate limits, cardinality, storage, and certification) and are not a mandatory universal Phase-1 dependency.
 
 ### 14.2 Kubernetes
 
@@ -785,9 +797,9 @@ Monitor node/pod/container health, CPU/memory, restarts, pending/failed state, e
 
 ### 14.3 OpenTelemetry
 
-OpenTelemetry contract may include metrics, logs and traces without committing Platform to a mandatory proprietary/full-bytecode APM product. Full always-on APM remains excluded initially.
-
-Platform shall accept OTLP metrics and logs initially. Architecture shall be trace-ready, but full APM shall not be marketed until trace storage, analysis and UX are explicitly implemented and accepted.
+OpenTelemetry integration adheres to a two-phase contract boundary (`REQ-INF-010`):
+- **Phase 1:** Ingestion and storage of OpenTelemetry metrics and structured logs into ClickHouse. W3C `trace_id` and `span_id` are extracted as correlation reference fields on logs, events, alerts, and investigations without requiring distributed trace storage.
+- **Phase 1.5:** May add bounded customer-provided trace and dependency evidence (such as trace_id, span_id, service identity, dependency edges, latency/error summaries, or selected exemplars) subject to separate implementation and certification; it does not automatically imply a full distributed trace backend, storage of all spans, unlimited trace retention, APM, bytecode agents, or a trace database. Full distributed trace storage/analysis requires future explicit architecture change control.
 
 ---
 
@@ -2262,7 +2274,8 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 - DR architecture/runbook and backup/restore verification;
 - HTTPS-only UI;
 - SBOM/licence/security scans;
-- certified resource/performance tests.
+- certified resource/performance tests under SNWP-2500-v1 and OBS-P1 enrichment overlay;
+- Unified Network & Infrastructure Observability certification profile (NIOCP-P1-v1 defined in Platform_14 §11; future certification profile, NOT YET CERTIFIED until applicable evidence exists).
 
 ---
 
