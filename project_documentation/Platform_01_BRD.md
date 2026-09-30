@@ -46,14 +46,14 @@ Platform competes in a crowded market. Feature presence alone is insufficient. P
 
 ### 2.1 Product positioning: Unified Network & Infrastructure Observability (Phase 1)
 
-Platform’s commercial positioning for Phase 1 is **Unified Network & Infrastructure Observability**, unifying network infrastructure, systems, virtualization, cloud networks, operational topology, and endpoint process interactions into a coherent, high-trust operational model. This position is supported by certified operational capabilities including:
+Platform’s commercial positioning for Phase 1 is **Unified Network & Infrastructure Observability**, unifying network infrastructure, systems, virtualization, cloud networks, operational topology, and endpoint process interactions into a coherent, high-trust operational model. This position is supported by the target Phase-1 capability set (subject to applicable implementation, benchmark and certification gates), including:
 
 1. **Network monitoring:** Deep protocol coverage (SNMP v1/v2c/v3, traps/informs, gNMI, NETCONF, streaming telemetry) with authoritative telemetry trust.
 2. **Infrastructure monitoring:** Physical servers, virtualization (VMware, Hyper-V, Proxmox, Nutanix), storage fabrics, and OS-level telemetry.
 3. **Temporal operational topology:** Time-aware L2/L3 topology and dependency graphs reflecting historical truth during incident windows.
 4. **Telemetry quality and trust:** Explicit scoring of freshness, reachability, timestamp jitter, and evidence completeness before operational failure is asserted.
 5. **Cross-signal investigation:** Zero-context-switch investigation across metrics, logs, flows, topology, process telemetry, and active paths.
-6. **Active path observability (`REQ-NET-016`):** Multi-vantage, path-tracing and hop-by-hop latency/loss measurement via Paris traceroute (preserving UDP/TCP flow identity to eliminate false multipath anomalies).
+6. **Active path observability (`REQ-NET-016`):** Multi-vantage, active path tracing and hop-by-hop latency/loss measurement with flow-stable multipath awareness (such as Paris-traceroute-style techniques evaluated by BUILD-040) to eliminate false multipath anomalies where supported.
 7. **Flow, log, and event correlation:** Unified correlation of NetFlow/IPFIX/sFlow and syslog without drowning polling capacity.
 8. **Bounded Linux process-to-network evidence (`REQ-INF-013`):** In-kernel eBPF socket-level telemetry capturing process, container, remote endpoint, bytes, duration, and TCP health without modifying application code or deploying heavyweight APM.
 9. **Service Assurance / SLI / SLO / Error Budgets:** Service-level objectives, error-budget burn rates, and SLA/OLA assurance derived from authoritative operational evidence.
@@ -211,7 +211,7 @@ Platform shall cover, directly or through approved extensibility:
 
 - Network discovery and inventory
 - SNMP v1/v2c/v3 monitoring and traps/informs
-- ICMP, standard traceroute, and multi-vantage active path tracing (Paris traceroute / multipath hop attribution under `REQ-NET-016`)
+- ICMP, standard traceroute, and multi-vantage active path tracing (flow-stable active path tracing and multipath hop attribution under `REQ-NET-016`)
 - NetFlow, IPFIX, sFlow and vendor-compatible flow ingestion
 - Syslog/event ingestion
 - NETCONF, RESTCONF, gNMI/gRPC and streaming telemetry
@@ -663,7 +663,7 @@ The product may not be considered enterprise-ready unless all applicable gates a
 11. Upgrade, backup/restore and DR procedures are tested
 12. Security, dependency and licence scans are part of release engineering
 13. UI is HTTPS-only and common workflows meet certified responsiveness targets
-14. Network & Infrastructure Observability Certification Profile (`NIOCP-P1-v1`) and `OBS-P1` capacity overlay demonstrate that eBPF socket telemetry and active path tracing operate within resource limits without degrading primary monitoring, transport, or RCA
+14. Network & Infrastructure Observability Certification Profile (`NIOCP-P1-v1`; future certification profile, NOT YET CERTIFIED until applicable evidence exists) and `OBS-P1` capacity overlay demonstrate that eBPF socket telemetry and active path tracing operate within resource limits without degrading primary monitoring, transport, or RCA
 
 Additional measurable success metrics Platform should expose or internally track include: provisioning success rate; time to onboard a standard device; Sensor utilization and polling completion; telemetry freshness/completeness; false-alert/qualification metrics; alert compression ratio; MTTD/MTTQ/time-to-root-cause; RCA accepted/partial/rejected/inconclusive rate; blast-radius accuracy where ground truth exists; incident reopen/flapping rate; dashboard/query latency; Core/Sensor footprint; storage compression/growth; ITSM sync success; upgrade/failover success; data-pipeline rejection/duplicate/late-data rates.
 

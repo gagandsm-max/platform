@@ -560,11 +560,11 @@ Wire `{status, code, message}` remains. Semantic classes: `INVALID_CONTRACT`, `A
 
 ## 11. Network & Infrastructure Observability data model and event contracts supplement — v3.2.2
 
-> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), `REQ-INF-008` (cloud network entities/relationships/change evidence), and `REQ-INF-010` (OTLP phase boundary: metrics/logs in Phase 1, traces deferred to Phase 1.5).
+> **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), `REQ-INF-008` (cloud network entities/relationships/change evidence), and `REQ-INF-010` (OTLP phase boundary: metrics/logs in Phase 1, bounded trace/dependency summaries in Phase 1.5). Target Phase-1 capabilities are subject to applicable implementation, benchmark, and certification gates.
 
 ### 11.1 Purpose and architectural constraints
 
-This section supplements `Platform_17` with authoritative wire schemas, event families, and data model contracts for:
+This section supplements `Platform_17` with authoritative wire schemas, event families, and logical data model contracts for:
 1. **Linux Agent eBPF process-to-network telemetry**: local aggregation around `process/service + remote endpoint + protocol/port + time bucket`, transported via existing durable Agent queue → Sensor spool → Core ingestion → ClickHouse, with zero separate eBPF datastore or service.
 2. **Active path hop-by-hop telemetry and change events**: Sensor-executed multi-vantage path probing, hop metrics, path fingerprinting, and divergence events.
 3. **Distributed trace reference contract**: `trace_id` / `span_id` as future-compatible reference attributes across logs, events, alerts, and investigations, without Phase-1 trace storage or APM backend.
@@ -573,10 +573,10 @@ This section supplements `Platform_17` with authoritative wire schemas, event fa
 
 #### 11.2.1 Transport envelope and identity
 
-Process-network facts are produced by the Linux Agent eBPF collector, aggregated locally, and delivered over the existing versioned Agent→Sensor HTTPS/gRPC mTLS transport (`/api/v1/agent/telemetry`). The wire record adheres to the following contract:
+Process-network facts are produced by the Linux Agent eBPF collector, aggregated locally, and delivered over the existing versioned Agent→Sensor HTTPS/gRPC mTLS transport (`/api/v1/agent/telemetry`). The logical wire record adheres to the following contract (physical topic naming, serialization, and ClickHouse tables are owned by BUILD-062/064):
 
 ```text
-ProcessNetworkRecord:
+ProcessNetworkEvidence:
   schema_version:           "1.0"
   tenant_id:                UUID (authoritative from Agent mTLS certificate)
   agent_id:                 UUID (authoritative Agent identity)
@@ -584,7 +584,7 @@ ProcessNetworkRecord:
   entity_id:                UUID (nullable, Core-resolved canonical entity identity; Agent hostId is not authoritative entityId)
   bucket_start_at:          RFC3339UTC instant
   bucket_end_at:            RFC3339UTC instant
-  bucket_duration_sec:      uint32 (default 60s)
+  bucket_duration_sec:      uint32 (bounded configurable aggregation interval)
   process_metadata:
     process_name:           string (max 64 chars, e.g. "nginx", "envoy", "mysqld")
     executable_path:        string (max 255 chars, e.g. "/usr/sbin/nginx")
@@ -640,7 +640,7 @@ In accordance with Platform security threat models (`Platform_18`), the followin
 Sensor-executed active path probes emit structured hop sequences and path-level performance facts:
 
 ```text
-PathObservationRecord:
+ActivePathObservation:
   schema_version:           "1.0"
   path_id:                  UUID (canonical path test configuration identity)
   tenant_id:                UUID
@@ -649,7 +649,7 @@ PathObservationRecord:
   target_entity_id:         UUID (canonical target entity identity)
   target_ip:                string (IPv4 or IPv6)
   target_port:              uint16 (nullable for ICMP)
-  protocol:                 "ICMP_PARIS" | "TCP_SYN" | "UDP_PARIS"
+  protocol:                 "ICMP" | "TCP" | "UDP"
   probed_at:                RFC3339UTC instant
   path_summary:
     total_hops:             uint8
@@ -679,10 +679,10 @@ PathObservationRecord:
 
 #### 11.3.2 Path change event contract
 
-When the path fingerprint changes between consecutive probing intervals or deviates from the established baseline, the Sensor or Core generates a versioned internal Kafka event on `network.path.events.v1`:
+When the path fingerprint changes between consecutive probing intervals or deviates from the established baseline, the Sensor or Core generates a versioned internal change event (physical Kafka topic and serialization owned by BUILD-062):
 
 ```text
-PathChangeEvent:
+PathChangeEvidence:
   schema_version:           "1.0"
   event_id:                 UUID
   tenant_id:                UUID
@@ -718,4 +718,5 @@ TraceContextReference:
 ```
 
 - **Scope:** Carried as optional reference metadata in syslog, flow records, diagnostic captures, alert evidence bundles, and Investigation Session items.
-- **Phase-1 Architectural Boundary:** AmrudAi Phase 1 does NOT store trace spans, does NOT operate a trace datastore (such as Jaeger or Tempo), and does NOT construct distributed trace waterfall graphs. Full OTLP trace ingestion and span dependency DAG construction remain explicitly deferred to Phase 1.5.
+- **Phase-1 Architectural Boundary:** AmrudAi Phase 1 supports OTLP metrics and logs with trace-ready contracts and data models (`trace_id`, `span_id` reference fields). AmrudAi Phase 1 does NOT store trace spans, does NOT operate a trace datastore (such as Jaeger or Tempo), and does NOT construct distributed trace waterfall graphs.
+- **Phase 1.5 Scope:** Phase 1.5 may add bounded customer-provided trace and dependency evidence (such as `trace_id`, `span_id`, service identity, dependency edges, latency/error summaries, selected exemplars) under separate implementation and certification. Full distributed trace storage, APM bytecode instrumentation, and dedicated trace backends remain excluded and require future explicit architecture change control.

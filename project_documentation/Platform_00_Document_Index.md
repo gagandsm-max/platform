@@ -538,13 +538,13 @@ The reconciliation adopts the Master gap classifications without inventing compe
 - **GAP 1 (Cross-signal investigation):** `ALREADY_SPECIFIED_NOT_IMPLEMENTED / UX_INTEGRATION_GAP` — integrated into existing Investigation Session, Live Evidence, Unified Timeline, and Incident Command Workspace.
 - **GAP 2 (Temporal topology):** `ALREADY_SPECIFIED_NOT_IMPLEMENTED` — temporal operational graph and edge history remain authoritative.
 - **GAP 3 (Telemetry trust):** `ALREADY_SPECIFIED_NOT_IMPLEMENTED` — Alert Evidence Contracts and telemetry trust scoring remain authoritative.
-- **GAP 4 (Active path):** `PARTIALLY_SPECIFIED_NEEDS_CLOSURE` — closed under `REQ-NET-016` (multi-vantage, path-tracing, Paris traceroute with flow-identifier preservation).
+- **GAP 4 (Active path):** `PARTIALLY_SPECIFIED_NEEDS_CLOSURE` — closed under `REQ-NET-016` (multi-vantage, flow-stable active path tracing with flow-identifier preservation where supported).
 - **GAP 5 (Linux eBPF process/network):** `TRUE_ARCHITECTURE_GAP / PHASE_1` — closed under `REQ-INF-013` (bounded in-kernel socket telemetry in Linux Agent collector with strict local aggregation, existing Agent→Sensor→Core durable transport, and zero separate eBPF services or datastores).
-- **GAP 6 (Trace ingestion):** `DEFERRED_CORRECTLY / PHASE_1_5` — trace context references accepted at ingest boundary (`REQ-INF-010`), trace database storage deferred to Phase 1.5.
+- **GAP 6 (Trace ingestion):** `DEFERRED_CORRECTLY / PHASE_1_5` — trace context references accepted at ingest boundary (`REQ-INF-010`); Phase 1.5 may add bounded customer trace and dependency evidence without committing to a full distributed trace backend.
 - **GAP 7 (SLI/SLO/Error Budget):** `ALREADY_SPECIFIED_NOT_IMPLEMENTED` — governed under `Platform_21`.
-- **GAP 8 (Cloud-network depth):** `PARTIALLY_SPECIFIED_NEEDS_CLOSURE` — closed under `REQ-INF-008` (cross-zone/VPC topologies, VPC Flow Logs, gateway drops, and cloud-to-onprem egress visibility).
+- **GAP 8 (Cloud-network depth):** `PARTIALLY_SPECIFIED_NEEDS_CLOSURE` — closed under `REQ-INF-008` (cross-zone/VPC topologies, cloud network entities/relationships, cloud flow logs supported when enabled/certified, gateway drops, and cloud-to-onprem egress visibility).
 - **GAP 9 (Packet observability):** `INTENTIONAL_PRODUCT_BOUNDARY` — hard product boundary preserved; bounded triggered packet evidence under `Platform_19` is explicitly retained and NOT demoted.
-- **GAP 10 (Observability certification):** `CERTIFICATION_GAP` — closed via Network & Infrastructure Observability Certification Profile (`NIOCP-P1-v1`) in `Platform_14` and `OBS-P1` capacity overlay in `Platform_11`.
+- **GAP 10 (Observability certification):** `CERTIFICATION_GAP` — closed via Network & Infrastructure Observability Certification Profile (`NIOCP-P1-v1`; future profile NOT YET CERTIFIED until applicable evidence exists) in `Platform_14` and `OBS-P1` capacity overlay in `Platform_11`.
 
 Hard product boundaries are maintained: no full APM, continuous profiling, flame graphs, bytecode instrumentation, method-level timing, full DPI, always-on PCAP, TLS decryption, packet reconstruction, mandatory GPU/NPU, third Core, dedicated trace DB, dedicated graph DB, or separate eBPF backend.
 

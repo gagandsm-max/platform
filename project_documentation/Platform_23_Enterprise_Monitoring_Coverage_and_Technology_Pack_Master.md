@@ -516,7 +516,7 @@ Certification evidence requirements (family-specific gates; generic test strateg
 
 **eBPF process-network evidence where declared:** socket lifecycle monitoring, local aggregation around `process/service + remote endpoint + protocol/port + time bucket`, connection metrics (active, new, closed, bytes TX/RX, duration, RTT, retransmissions), explicit drop/shed accounting, least-privilege capability execution (`CAP_BPF`/`CAP_PERFMON`), verified BTF/CO-RE compatibility, and explicit capability states (`ACTIVE`, `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`).
 
-**Active path observability where declared:** Paris traceroute flow-preservation, hop sequence metrics (RTT min/mean/max, packet loss, jitter), path fingerprint stability, divergence detection, middlebox/hidden-hop tolerance, and multi-vantage contradiction preservation.
+**Active path observability where declared:** flow-stable active path tracing, hop sequence metrics (RTT min/mean/max, packet loss, jitter), path fingerprint stability, divergence detection, middlebox/hidden-hop tolerance, and multi-vantage contradiction preservation.
 
 **Failure:** timeout; malformed response; API rate limit; partial response; stale telemetry; expired/invalid credentials.
 

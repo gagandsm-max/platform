@@ -12,7 +12,7 @@
 ---
 
 ## 1. Architecture mandate
-Platform is a clean-room enterprise product delivering **Unified Network & Infrastructure Observability** (commercial name: AmrudAi). The architecture supports certified network and infrastructure monitoring, temporal operational topology, telemetry quality/trust, cross-signal investigation, active path observability, Flow/log/event correlation, bounded Linux process-to-network evidence via eBPF, Service Assurance / SLI / SLO / Error Budget, cloud and Kubernetes monitoring, deterministic RCA, and change intelligence, while remaining lightweight, low-latency, simple to deploy, safe under failure and operationally explainable.
+Platform is a clean-room enterprise product delivering **Unified Network & Infrastructure Observability** (commercial name: AmrudAi). The architecture defines the target Phase-1 capability set for network and infrastructure monitoring, temporal operational topology, telemetry quality/trust, cross-signal investigation, active path observability, Flow/log/event correlation, bounded Linux process-to-network evidence via eBPF, Service Assurance / SLI / SLO / Error Budget, cloud and Kubernetes monitoring, deterministic RCA, and change intelligence (subject to applicable implementation, benchmark and certification gates), while remaining lightweight, low-latency, simple to deploy, safe under failure and operationally explainable.
 
 The architecture is governed by the following constraints already decided:
 
@@ -1480,9 +1480,9 @@ A2.1 absorbed Version 3.0 ARCH-* blocks, v3.1 packaging/runtime sections and v3.
 
 > **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), `REQ-INF-008` (cloud network depth closure), and `REQ-INF-010` (OTLP phase boundary).
 
-### 44.1 Product positioning and certified capabilities
+### 44.1 Product positioning and required Phase-1 capability set
 
-AmrudAi Phase 1 is **Unified Network & Infrastructure Observability**. It unifies network monitoring, infrastructure monitoring, temporal operational topology, telemetry quality and trust, cross-signal investigation, active path observability, Flow/log/event correlation, bounded Linux process-to-network evidence via eBPF, Service Assurance / SLI / SLO / Error Budget, cloud and Kubernetes monitoring, deterministic evidence-led RCA, and change intelligence into a cohesive, low-footprint platform.
+AmrudAi Phase 1 is **Unified Network & Infrastructure Observability**. It defines the required Phase-1 capability set (subject to applicable implementation, benchmark and certification gates) unifying network monitoring, infrastructure monitoring, temporal operational topology, telemetry quality and trust, cross-signal investigation, active path observability, Flow/log/event correlation, bounded Linux process-to-network evidence via eBPF, Service Assurance / SLI / SLO / Error Budget, cloud and Kubernetes monitoring, deterministic evidence-led RCA, and change intelligence into a cohesive, low-footprint platform.
 
 ### 44.2 Hard product boundaries
 
@@ -1497,34 +1497,34 @@ The eBPF integration follows a strictly bounded, non-flooding edge pipeline:
 ```text
 Linux Kernel (eBPF Probes)
   → Linux Agent Collector (BPF ring buffer reader, LRU maps)
-  → Bounded Local Aggregator (60s buckets: process/service + remote IP/port + protocol)
+  → Bounded Local Aggregator (bounded configurable buckets: process/service + remote IP/port + protocol)
   → Durable Agent Disk Spool
   → Assigned Sensor (mTLS HTTPS/gRPC)
   → Sensor Durable Spool
   → Core Ingestion Service
-  → Internal Kafka (telemetry.agent.process_network.v1)
-  → ClickHouse (agent_process_network_facts) / Temporal Graph / RCA Engine
+  → Internal Kafka
+  → ClickHouse / Temporal Graph / RCA Engine
 ```
 - **Outcome:** Resolves which process, service, or container is communicating with which remote endpoint, along with connection performance (active/new/closed sockets, bytes TX/RX, RTT, retransmissions, failures).
-- **Data Minimization:** Strictly zero payload capture, zero TLS decryption, zero HTTP/SQL inspection, and no environment variable reading.
-- **Resource Priority:** Core monitoring and telemetry durability strictly take precedence. If map capacity or memory limits (256MB) are approached, the collector transitions to `RESOURCE_GUARDED`, sheds records to an aggregate bucket, and marks records with `shed_records_count > 0`.
+- **Data Minimization:** Strictly zero payload capture, zero TLS decryption, zero HTTP/SQL inspection, zero continuous profiling/stack traces, and no environment variable reading.
+- **Resource Priority:** Core monitoring and telemetry durability strictly take precedence. If map capacity or bounded Agent memory budgets derived from BUILD-019 / BUILD-130 benchmark certification are approached, the collector transitions to `RESOURCE_GUARDED`, sheds records to an aggregate bucket, and marks records with `shed_records_count > 0`.
 
 ### 44.4 Active path observability architecture
 
 Active path probing is executed by Network Sensors toward monitored infrastructure, WAN circuits, and cloud targets:
-- **Paris Traceroute:** Preserves constant flow identifiers across probes to prevent ECMP route fluttering.
-- **Hop & Change Telemetry:** Measures hop RTT min/mean/max, packet loss, jitter, and MPLS label stacks; computes stable 64-char SHA-256 path fingerprints; detects route divergence and emits `PathChangeEvent` records.
+- **Flow-Preserving Active Path Tracing:** Active path probing evaluates flow-stable techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040 across ICMP, TCP where appropriate, and UDP where certified) to maintain constant flow identifiers across probes and prevent ECMP route fluttering where supported.
+- **Hop & Change Telemetry:** Measures hop RTT min/mean/max, packet loss, jitter, and MPLS label stacks; computes stable 64-char SHA-256 path fingerprints; detects route divergence and emits `PathChangeEvidence` records.
 - **Causal Integrity:** Intermediate packet drops (`* * *`) or hidden hops flag `is_unresponsive` without asserting target DOWN. Multi-vantage contradictions are preserved as evidence.
 
 ### 44.5 OpenTelemetry phase boundary
 
 - **Phase 1:** Ingestion and storage of OpenTelemetry metrics and structured logs. Extraction of W3C `trace_id` and `span_id` as correlation reference fields on logs, events, and alerts.
-- **Phase 1.5:** Ingestion, storage, and dependency-graph reconstruction of full distributed trace spans. No trace storage backend is deployed in Phase 1.
+- **Phase 1.5:** May add bounded customer-provided trace and dependency evidence (such as trace_id, span_id, service identity, dependency edges, latency/error summaries, or selected exemplars) subject to separate implementation and certification; it does not automatically imply a full distributed trace backend, storage of all spans, unlimited trace retention, APM, bytecode agents, or a trace database. Full distributed trace storage/analysis requires future explicit architecture change control.
 
 ### 44.6 Cloud network depth closure
 
-Cloud monitoring under `REQ-INF-008` is clarified to include first-class cloud network entities and relationships: VPCs/VNets, subnets, route tables, security groups, NAT gateways, transit gateways, interconnects, and cloud load balancers, with correlation of cloud flow logs and control-plane change events into the temporal operational graph.
+Cloud monitoring under `REQ-INF-008` is clarified to include first-class Phase-1 cloud network entities and relationships where provider APIs permit: account/subscription/project, region, VPC/VNet/network, subnet, route table, route, NIC, security policy, NAT, load balancer, transit/interconnect/private endpoint where applicable, workload, Kubernetes relation, and material control-plane change evidence. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED (subject to provider capability, customer policy, privacy, cost, API/rate limits, cardinality, storage, and certification) and are not a mandatory universal Phase-1 dependency.
 
 ### 44.7 Sizing overlay OBS-P1 over SNWP-2500-v1
 
-Observability Phase 1 capabilities are governed by the versioned `OBS-P1 enrichment overlay` defined in `Platform_11` §8.1. All eBPF local aggregation, active path probing, and cloud-network ingestion execute within the certified Core (8 vCPU / 16 GB RAM) and Sensor (4 vCPU / 8 GB RAM) footprints under low-compute non-interference gates.
+Observability Phase 1 capabilities are governed by the versioned `OBS-P1 enrichment overlay` defined in `Platform_11` §8.1. OBS-P1 benchmarks must prove whether eBPF local aggregation, active path probing, and cloud-network enrichment fit within existing planned hardware baselines (Network Sensor current planning baseline: 4 vCPU / 16 GB RAM / 150 GB SSD for ~800 normal network devices, with 8 vCPU / 16 GB RAM as an engineering benchmark objective for 2,000–2,500 devices) under low-compute non-interference gates; they may not be pre-declared certified.

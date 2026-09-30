@@ -646,7 +646,7 @@ Platform shall support:
 - ICMP reachability/RTT/loss.
 - Configurable device-down validation.
 - Traceroute/path history and changes.
-- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Paris traceroute techniques shall be used to preserve flow identifiers across intermediate hops and avoid ECMP route fluttering. Intermediate unresponsive hops (`* * *`) or hidden hops must not assert destination DOWN.
+- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Flow-stable active-path techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040) may be used to preserve flow identifiers across intermediate hops and avoid ECMP route fluttering where supported. Intermediate unresponsive hops (`* * *`) or hidden hops must not assert destination DOWN.
 - TCP/DNS/TLS/HTTP validation where relevant.
 - Multi-vantage validation from secondary Sensors where policy allows, preserving independent source results and contradictory evidence.
 
@@ -749,12 +749,12 @@ Collection, credential, privilege or path failure is **monitoring-health evidenc
 
 ### 12.5 Linux Agent eBPF process-to-network telemetry (REQ-INF-013)
 
-On supported Linux kernels (5.8+ with BTF), the Linux Agent shall collect bounded process-to-network evidence via eBPF probes:
+On supported Linux distributions and kernels under the certified Ubuntu 24.x / RHEL 9.x compatibility matrix (using BTF/CO-RE where the selected implementation requires/supports it), the Linux Agent shall collect bounded process-to-network evidence via eBPF probes:
 - Correlate active host processes, systemd services, and container workloads with local/remote socket communication endpoints (local IP/port, remote IP/port, protocol).
 - Measure connection performance: active/new/closed sockets, bytes TX/RX, mean TCP RTT, retransmissions, and connection failures.
-- Aggregate locally into 60-second time buckets with a cardinality ceiling of 10,000 active keys and Top-N overflow shedding; do not stream individual socket events over the network.
-- Enforce strict data minimization: zero payload capture, zero TLS decryption, zero HTTP/SQL inspection, and no environment variable reading.
-- Implement resource governance: process RAM capped at 256MB; transitions to `RESOURCE_GUARDED` capability state with explicit `shed_records_count` when thresholds are approached.
+- Aggregate locally into bounded configurable aggregation intervals with bounded active-key cardinality ceilings and heavy-hitter overflow shedding; do not stream individual socket events over the network.
+- Enforce strict data minimization: zero payload capture, zero TLS decryption, zero HTTP/SQL inspection, zero continuous profiling/stack traces, and no environment variable reading.
+- Implement resource governance: bounded eBPF memory and resource budgets derived from BUILD-019 / BUILD-130 benchmark certification; transitions to `RESOURCE_GUARDED` capability state with explicit drop/shed/resource-guard counters (`dropped_records_count`, `shed_records_count`) when thresholds are approached.
 - Base Agent host metrics collection shall continue unaffected if eBPF is `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, or `RESOURCE_GUARDED`.
 
 
@@ -785,7 +785,7 @@ Database credentials shall be scoped and protected. Arbitrary dangerous SQL shal
 
 Cloud provider roots include AWS, Azure, GCP and OCI. Vendor identifiers never override Platform tenant/entity authority. Required concepts: cloud hierarchy discovery; ephemeral-child lifecycle/reconciliation; provider API quota/rate-budget governance; throttling; freshness/staleness; provider service-health; audit/change evidence; cloud-network evidence; quota/autoscaling evidence; canonical normalized entity/state; connector self-health. New cloud SDK dependencies remain Platform_07 governed and are not auto-approved.
 
-AWS, Azure and GCP integrations shall use supported provider APIs/SDKs and normalize accounts/subscriptions/projects, regions, networks (VPCs/VNets, subnets, route tables, security groups, NAT gateways, transit gateways, interconnects, and cloud load balancers), compute, storage, and database entities (`REQ-INF-008`). Cloud flow logs and control-plane change telemetry shall be correlated into the temporal operational graph.
+AWS, Azure and GCP integrations shall use supported provider APIs/SDKs and normalize accounts/subscriptions/projects, regions, networks (VPCs/VNets, subnets, route tables, routes, NICs, security policies, NAT gateways, transit/interconnect/private endpoints where applicable, and cloud load balancers), compute workloads, storage, database entities, and Kubernetes relations (`REQ-INF-008`), along with material control-plane change evidence. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED (subject to provider capability, customer policy, privacy, cost, API/rate limits, cardinality, storage, and certification) and are not a mandatory universal Phase-1 dependency.
 
 ### 14.2 Kubernetes
 
@@ -799,7 +799,7 @@ Monitor node/pod/container health, CPU/memory, restarts, pending/failed state, e
 
 OpenTelemetry integration adheres to a two-phase contract boundary (`REQ-INF-010`):
 - **Phase 1:** Ingestion and storage of OpenTelemetry metrics and structured logs into ClickHouse. W3C `trace_id` and `span_id` are extracted as correlation reference fields on logs, events, alerts, and investigations without requiring distributed trace storage.
-- **Phase 1.5:** Ingestion, storage, and dependency-graph reconstruction of full distributed trace spans. No dedicated trace database (e.g. Jaeger or Tempo) is operated in Phase 1, and full bytecode APM remains excluded.
+- **Phase 1.5:** May add bounded customer-provided trace and dependency evidence (such as trace_id, span_id, service identity, dependency edges, latency/error summaries, or selected exemplars) subject to separate implementation and certification; it does not automatically imply a full distributed trace backend, storage of all spans, unlimited trace retention, APM, bytecode agents, or a trace database. Full distributed trace storage/analysis requires future explicit architecture change control.
 
 ---
 
@@ -2275,7 +2275,7 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 - HTTPS-only UI;
 - SBOM/licence/security scans;
 - certified resource/performance tests under SNWP-2500-v1 and OBS-P1 enrichment overlay;
-- Unified Network & Infrastructure Observability certification passing all gates of NIOCP-P1-v1 defined in Platform_14 §11.
+- Unified Network & Infrastructure Observability certification profile (NIOCP-P1-v1 defined in Platform_14 §11; future certification profile, NOT YET CERTIFIED until applicable evidence exists).
 
 ---
 

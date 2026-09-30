@@ -306,9 +306,9 @@ Do not mark these tests as implemented/passing unless physical test evidence exi
 
 ## 11. Network & Infrastructure Observability Certification Profile (NIOCP-P1-v1)
 
-Phase-1 Unified Network & Infrastructure Observability capability claims are governed by the **Network & Infrastructure Observability Certification Profile (NIOCP-P1-v1)**. NIOCP is a named release-quality profile and gate inside existing Platform_14 governance; it is **not** a new runtime service or certification daemon.
+> **Status:** NOT YET CERTIFIED. NIOCP-P1-v1 is a future certification profile. Documenting this certification profile does **not** claim that NIOCP-P1-v1 has passed or that Phase-1 capabilities are certified. Capability claims require reproducible execution evidence for all applicable scenarios.
 
-Documenting this certification profile does **not** claim that NIOCP-P1-v1 has passed or that Phase-1 capabilities are certified. Capability claims require reproducible execution evidence for all applicable scenarios:
+Phase-1 Unified Network & Infrastructure Observability capability claims are governed by the **Network & Infrastructure Observability Certification Profile (NIOCP-P1-v1)**. NIOCP is a named release-quality profile and gate inside existing Platform_14 governance; it is **not** a new runtime service or certification daemon.
 
 1. **Real device/service outage:** Ground-truth hard and soft failure scenarios prove that authoritative outages are detected, qualified, and correlated to correct root-cause candidates within SLA budgets.
 2. **Monitoring/credential/Sensor failure without false DOWN:** Injected SNMP timeout, invalid v3 credentials, Sensor reachability loss, or probe failure must produce `MONITORING_DEGRADED` or `UNKNOWN` with actionable diagnostic evidence; it must **never** assert monitored object `DOWN` when corroborating path/service evidence indicates the device is reachable.
@@ -329,12 +329,13 @@ Documenting this certification profile does **not** claim that NIOCP-P1-v1 has p
 10. **Linux Agent eBPF functional and failure profile:**
     - verified mapping of process, service, executable, and container/cgroup to remote network endpoints;
     - local bounded aggregation into defined time buckets without uploading raw kernel events;
+    - resource limits and bounded memory budgets derived from BUILD-019 / BUILD-130 benchmark certification across certified Ubuntu 24.x and RHEL 9.x kernels;
     - explicit capability states: `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`;
     - graceful degradation under verifier rejection, BTF/CO-RE incompatibility, or unsupported older kernels;
     - loss-accounting verification: explicit increments of `dropped`, `shed`, `sampled`, and `resource_guarded` counters under event-rate or map pressure without crashing the Agent;
     - security and least privilege: verification that unprivileged execution fails closed, no packet payloads/TLS secrets/SQL texts/environment variables are captured, and process metadata adheres to data minimization.
 11. **Host infrastructure, virtualization, and storage:** Validated telemetry and health representation across physical servers, VMware/hypervisors, and storage arrays without converting Platform into a DCIM/BMS suite.
-12. **Cloud and Kubernetes depth:** Validated normalization of cloud-network entities (VPCs, subnets, route tables, security policies, load balancers, NAT gateways) and Kubernetes workloads into canonical Platform graph models with connector self-health separation.
+12. **Cloud and Kubernetes depth:** Validated normalization of cloud-network entities (VPCs, subnets, route tables, security policies, load balancers, NAT gateways) and Kubernetes workloads into canonical Platform graph models with connector self-health separation. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED subject to provider capability, cost, and rate limits; they are not a mandatory Phase-1 dependency.
 13. **SLO and error budget evidence:** Where BUILD-095 applies, error budget burn rates and compliance scorecards calculate deterministically from qualified evidence ledgers.
 14. **Telemetry overload and load-shedding:** Extreme metric, flow, and syslog surges exercise Sensor spool watermarks, Kafka consumer backpressure, and ClickHouse micro-batching without dropping high-priority control or liveness signals.
 15. **Core and Sensor interruption and replay:** Active Core crash or Sensor disconnection verifies zero duplicate authority, stateful failover within the <60s target, and idempotent replay of buffered Sensor spools upon reconnection.

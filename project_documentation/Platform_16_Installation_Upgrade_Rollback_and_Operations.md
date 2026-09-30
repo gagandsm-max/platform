@@ -104,11 +104,13 @@ Support bundles include sanitized SNMP component health, poll-plan/profile/versi
 
 ## 5. Linux Agent eBPF and active-path operational runbook supplement — v3.2.2
 
+> **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Target Phase-1 capabilities are subject to applicable implementation, benchmark, and certification gates.
+
 ### 5.1 Linux Agent eBPF operational states and runbooks
 
 The Linux Agent exposes discrete operational capability states for eBPF:
 
-- `UNSUPPORTED`: Host kernel version or configuration lacks required eBPF/BTF features (e.g. kernel < 5.8 or `CONFIG_DEBUG_INFO_BTF` disabled). The Agent continues normal metric/inventory collection; eBPF is disabled without operator intervention.
+- `UNSUPPORTED`: Host kernel version or configuration falls outside the certified Ubuntu 24.x/RHEL 9.x compatibility matrix or lacks required eBPF/BTF features (e.g. `CONFIG_DEBUG_INFO_BTF` disabled). The Agent continues normal metric/inventory collection; eBPF is disabled without operator intervention.
 - `UNAVAILABLE`: Kernel supports eBPF but runtime probe attachment or ELF loading failed. Runbook: inspect `/var/log/platform/agent/agent.log` for verifier errors, check kernel lock-down / security modules (SELinux/AppArmor), and verify agent package integrity.
 - `PRIVILEGE_DENIED`: Agent service lacks required Linux capabilities (`CAP_BPF`, `CAP_PERFMON`, or `CAP_SYS_ADMIN`). Runbook: verify `systemd` unit capability settings (`AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_NET_RAW`); do not grant full root privileges when capabilities suffice.
 - `KERNEL_INCOMPATIBLE`: Kernel BTF layout differs from packaged CO-RE expectations or verifier rejects program on host kernel patchlevel. Runbook: update agent package or submit kernel profile; base monitoring continues unaffected.
