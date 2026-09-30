@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/supportability/structured-log-entry.schema.json",
+  "title": "Platform Structured Log Entry (BUILD-005 Slice 1)",
+  "description": "Canonical machine-testable structured log entry. Strict top-level fields. Legacy keys time/timestamp/msg/service/error_code are non-canonical and rejected. Extension only via safe_context. Does not rename runtime domain error_code constants.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ts", "level", "component", "version", "service_instance_id", "message"],
+  "properties": {
+    "ts": { "$ref": "common-definitions.schema.json#/$defs/utcTimestamp" },
+    "level": { "$ref": "common-definitions.schema.json#/$defs/logLevel" },
+    "component": { "$ref": "common-definitions.schema.json#/$defs/componentName" },
+    "version": { "$ref": "common-definitions.schema.json#/$defs/versionString" },
+    "service_instance_id": { "$ref": "common-definitions.schema.json#/$defs/serviceInstanceId" },
+    "message": { "$ref": "common-definitions.schema.json#/$defs/message" },
+    "node_id": { "$ref": "common-definitions.schema.json#/$defs/nodeId" },
+    "sensor_id": { "$ref": "common-definitions.schema.json#/$defs/sensorId" },
+    "agent_id": { "$ref": "common-definitions.schema.json#/$defs/agentId" },
+    "tenant_id": { "$ref": "common-definitions.schema.json#/$defs/tenantId" },
+    "event_code": { "$ref": "common-definitions.schema.json#/$defs/eventCode" },
+    "correlation_id": { "$ref": "common-definitions.schema.json#/$defs/correlationId" },
+    "request_id": { "$ref": "common-definitions.schema.json#/$defs/boundedId" },
+    "job_id": { "$ref": "common-definitions.schema.json#/$defs/boundedId" },
+    "entity_id": { "$ref": "common-definitions.schema.json#/$defs/boundedId" },
+    "protocol": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "result": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "retry_count": { "$ref": "common-definitions.schema.json#/$defs/retryCount" },
+    "safe_context": { "$ref": "common-definitions.schema.json#/$defs/safeContext" }
+  },
+  "$comment": "Non-canonical rejected keys include: time, timestamp, msg, service, error_code."
+}

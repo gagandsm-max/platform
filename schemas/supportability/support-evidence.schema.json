@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/supportability/support-evidence.schema.json",
+  "title": "Platform Support Evidence / Internal Status (BUILD-005 Slice 1)",
+  "description": "Internal machine-testable supportability primitive for later runtime conformance/aggregation. NOT a new HTTP API. NOT the Support Bundle workflow. NOT the Platform Health UI. Bounded counters/gauges/status only. No arbitrary customer payloads, packet payloads, telemetry batches, credentials, private keys, Authorization material, unbounded strings/arrays/nesting, or tenant/entity inventory dumps.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["document_type", "component", "version", "service_instance_id", "ts"],
+  "properties": {
+    "document_type": {
+      "type": "string",
+      "const": "SUPPORT_EVIDENCE",
+      "description": "Internal supportability primitive identifier."
+    },
+    "component": { "$ref": "common-definitions.schema.json#/$defs/componentName" },
+    "version": { "$ref": "common-definitions.schema.json#/$defs/versionString" },
+    "service_instance_id": { "$ref": "common-definitions.schema.json#/$defs/serviceInstanceId" },
+    "ts": { "$ref": "common-definitions.schema.json#/$defs/utcTimestamp" },
+    "uptime_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "component_state": {
+      "type": "string",
+      "enum": ["UP", "DEGRADED", "NOT_READY", "SHUTTING_DOWN", "UNKNOWN"]
+    },
+    "storage_pressure_percent": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "spool_pressure_percent": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "queue_depth": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "queue_capacity": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "scheduler_status": {
+      "type": "string",
+      "enum": ["RUNNING", "IDLE", "DEGRADED", "STOPPED", "UNKNOWN"]
+    },
+    "control_reconciliation_status": {
+      "type": "string",
+      "enum": ["IN_SYNC", "SYNC_PENDING", "DEGRADED", "REJECTED", "UNKNOWN"]
+    },
+    "delivery_status": {
+      "type": "string",
+      "enum": ["OK", "BACKLOG", "BLOCKED", "FAILED", "UNKNOWN"]
+    },
+    "dependency_status": {
+      "type": "object",
+      "description": "Bounded map of dependency name -> compact status string. Max 16 entries. No nested objects.",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z][A-Za-z0-9._:-]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["UP", "DEGRADED", "DOWN", "UNKNOWN"]
+      },
+      "maxProperties": 16
+    },
+    "counters": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "maxProperties": 32
+    },
+    "gauges": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "number"
+      },
+      "maxProperties": 32
+    },
+    "reason_codes": {
+      "type": "array",
+      "maxItems": 16,
+      "items": { "$ref": "common-definitions.schema.json#/$defs/eventCode" }
+    },
+    "state_timestamps": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": { "$ref": "common-definitions.schema.json#/$defs/utcTimestamp" },
+      "maxProperties": 16
+    }
+  }
+}

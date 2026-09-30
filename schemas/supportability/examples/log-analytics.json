@@ -1,0 +1,10 @@
+{
+  "ts": "2026-09-30T05:00:03.000Z",
+  "level": "INFO",
+  "component": "platform-analytics",
+  "version": "0.0.0-dev",
+  "service_instance_id": "analytics-instance-01",
+  "message": "Analytics baseline health listener started",
+  "event_code": "ANALYTICS_HEALTH_LISTEN",
+  "correlation_id": "corr-analytics-001"
+}

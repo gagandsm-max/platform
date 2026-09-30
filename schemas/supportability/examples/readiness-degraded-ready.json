@@ -1,0 +1,9 @@
+{
+  "status": "DEGRADED",
+  "ready": true,
+  "http_semantic": 200,
+  "component": "platform-sensor",
+  "ts": "2026-09-30T05:00:21.000Z",
+  "service_instance_id": "sensor-instance-01",
+  "reason_code": "CONTROL_SYNC_PENDING"
+}

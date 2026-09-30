@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/supportability/readiness.schema.json",
+  "title": "Platform Readiness Probe Envelope (BUILD-005 Slice 1)",
+  "description": "Readiness means whether the component can safely perform its currently assigned production responsibility. DEGRADED != NOT_READY. DEGRADED with ready=true and HTTP 200 is permitted when last trusted operating state remains safe. ready=false requires HTTP 503. Compact payload only; no queue dumps, scheduler inventories, or full diagnostics.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "ready", "http_semantic", "component", "ts"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["UP", "DEGRADED", "NOT_READY"],
+      "description": "Operational status. DEGRADED may still be ready=true."
+    },
+    "ready": {
+      "type": "boolean",
+      "description": "true when assigned production responsibility remains safe."
+    },
+    "http_semantic": { "$ref": "common-definitions.schema.json#/$defs/httpSemantic" },
+    "component": { "$ref": "common-definitions.schema.json#/$defs/componentName" },
+    "ts": { "$ref": "common-definitions.schema.json#/$defs/utcTimestamp" },
+    "service_instance_id": { "$ref": "common-definitions.schema.json#/$defs/serviceInstanceId" },
+    "reason_code": { "$ref": "common-definitions.schema.json#/$defs/eventCode" }
+  }
+}

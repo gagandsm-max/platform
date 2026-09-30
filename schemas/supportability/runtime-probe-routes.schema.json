@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/supportability/runtime-probe-routes.schema.json",
+  "title": "Platform Runtime Probe Route Roles (BUILD-005 Slice 1)",
+  "description": "Semantic compatibility contract for probe route roles. Does not force identical URL strings across runtimes. Sensor /healthz is compatibility detailed. Agent /healthz is compatibility readiness. Core has no new detailed health API in BUILD-005. Analytics is a later bounded baseline conformance target, not certified by this fixture alone.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["document_type", "schema_version", "runtimes"],
+  "properties": {
+    "document_type": {
+      "type": "string",
+      "const": "RUNTIME_PROBE_ROUTES"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "runtimes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["runtime", "conformance", "routes"],
+        "properties": {
+          "runtime": {
+            "type": "string",
+            "enum": ["core", "sensor", "agent", "analytics"]
+          },
+          "conformance": {
+            "type": "string",
+            "enum": ["FOUNDATIONAL", "BASELINE_LATER", "PROSPECTIVE"],
+            "description": "FOUNDATIONAL = Core/Sensor/Agent current targets. BASELINE_LATER = Analytics bounded baseline later. PROSPECTIVE = UI/etc."
+          },
+          "routes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "role", "compatibility"],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^/[A-Za-z0-9._/-]+$"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": ["LIVENESS", "READINESS", "DETAILED", "PUBLIC_OVERALL"],
+                  "description": "Semantic probe role. DETAILED is support-evidence style, not a new Core API claim."
+                },
+                "compatibility": {
+                  "type": "boolean",
+                  "description": "true when the path is a compatibility alias rather than the primary role path."
+                },
+                "notes": {
+                  "type": "string",
+                  "maxLength": 256
+                }
+              }
+            }
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      }
+    },
+    "non_goals": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "maxLength": 256
+      },
+      "description": "Explicit infrastructure and false-uniformity non-goals."
+    }
+  }
+}
