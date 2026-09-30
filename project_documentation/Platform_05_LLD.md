@@ -2907,9 +2907,9 @@ Traditional traceroute (varying UDP ports or ICMP sequence numbers across succes
 
 ### 90.3 Path Fingerprinting and Change Detection
 
-1. **Fingerprint Hash:** A stable hash or fingerprint is computed over the ordered sequence of responsive hop IP addresses and resolved ASNs to identify path geometry. Unresponsive or fluctuating hops must not trigger spurious divergence.
-2. **Divergence Evaluation:** Path changes generate internal `PathChangeEvidence` records capturing the previous fingerprint, new fingerprint, and divergence hop index.
-3. **Causal Boundary:** Intermediate packet loss or incomplete traceroutes (`* * *`) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP liveness proves reachability. Multi-vantage contradictions must be preserved.
+1. **Fingerprint Hash:** An opaque, versioned, deterministic path fingerprint (carrying `fingerprint_version` with algorithm selected and implemented by BUILD-040) is computed over the ordered sequence of responsive hop IP addresses and resolved ASNs to identify path geometry. Unresponsive or fluctuating hops must not trigger spurious divergence.
+2. **Divergence Evaluation:** Path changes generate internal `PathChangeEvidence` records capturing the previous fingerprint, new fingerprint, and optional divergence hop index (where topological divergence occurred; null for RTT_SHIFT or LOSS_ANOMALY without topology change).
+3. **Causal Boundary:** Intermediate packet loss or incomplete traceroutes (e.g. intermediate ICMP suppression or timeouts) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP liveness proves reachability. Multi-vantage contradictions must be preserved.
 
 ---
 
@@ -2957,13 +2957,14 @@ To prevent telemetry floods, the Linux Agent does NOT stream individual socket e
 ### 92.1 Logical message contracts
 
 Ingestion and streaming pipelines transport typed logical evidence:
-- **`ProcessNetworkEvidence`:** Carries tenant ID, agent ID, host ID, entity ID, process and service attribution, remote endpoint (IP/port/entity), protocol, connection counters (active, new, closed, failures), traffic metrics (bytes TX/RX, mean RTT, retransmissions), quality/capability state, and drop/shed counters.
-- **`ActivePathObservation`:** Carries tenant ID, path ID, source vantage / sensor ID, target entity ID / IP, protocol/port, path fingerprint, hop sequence (hop index, hop IP, hostname, ASN, RTT min/mean/max, loss percentage, jitter, unresponsive/hidden flags, MPLS labels), and quality status.
-- **`PathChangeEvidence`:** Carries tenant ID, path ID, previous fingerprint, new fingerprint, divergence hop index, timestamp, and corroborating telemetry links.
+- **`ProcessNetworkEvidence`:** Carries tenant ID, agent ID, host ID, entity ID, process and service attribution, remote endpoint (IP/port/entity), protocol, connection counters (active, new, closed, failures; applicable to stateful protocols), traffic metrics (bytes TX/RX, mean RTT, retransmissions when technically available and certified; protocol-dependent fields nullable/optional without fabricated zero values), quality/capability state, and drop/shed counters.
+- **`ActivePathObservation`:** Carries tenant ID, path ID, source vantage / sensor ID, target entity ID / IP, protocol/port, opaque versioned path fingerprint, hop sequence (bounded hop index, nullable hop IP, explicit hop state `RESPONSIVE | UNRESPONSIVE | HIDDEN | UNKNOWN`, hostname, ASN, optional/nullable RTT min/mean/max, loss percentage, jitter, and MPLS labels when observable from supported protocol extensions), and quality status.
+- **`PathChangeEvidence`:** Carries tenant ID, path ID, previous fingerprint, new fingerprint, optional divergence hop index (nullable when not applicable), timestamp, and corroborating telemetry links.
 
 ### 92.2 Physical storage responsibilities
 
 Physical storage and streaming schemas are decoupled from logical contracts:
-1. **Kafka Streaming (BUILD-062):** Owns topic naming, partition keys, schema serialization formats (JSON / Avro / Protobuf), and retention configurations for process-network and active-path event streams.
-2. **ClickHouse Fact Tables (BUILD-064):** Owns physical ClickHouse table DDL, engine selection (`ReplacingMergeTree`), partitioning schemes (e.g. monthly), primary sorting keys (`ORDER BY`), codec compression, and lifecycle TTL policies for historical process-network and path-hop facts.
-3. **No Standalone Datastores:** Telemetry is stored strictly within authoritative Platform datastores (PostgreSQL, ClickHouse, Kafka, Valkey). No separate eBPF or path probing database is introduced.
+1. **Ingestion Gateway (BUILD-062):** Owns ingestion authority, batch validation, accepted logical envelope verification, reserve/finalize/ACK transaction semantics, and handoff to the streaming backbone.
+2. **Kafka Streaming Backbone (BUILD-063):** Owns physical topic naming, partition strategies, schema serialization formats (JSON / Avro / Protobuf), retry/rebalance behavior, and retention configurations for process-network and active-path event streams.
+3. **ClickHouse Fact Storage (BUILD-064):** Owns physical ClickHouse table DDL, storage layout, engine choice (selected and certified according to idempotency, retention, rollups, and query performance without preselection at documentation stage), partitioning schemes, primary sorting keys (`ORDER BY`), codec compression, and lifecycle TTL policies for historical process-network and path-hop facts.
+4. **No Standalone Datastores:** Telemetry is stored strictly within authoritative Platform datastores (PostgreSQL, ClickHouse, Kafka, Valkey). No separate eBPF or path probing database is introduced.

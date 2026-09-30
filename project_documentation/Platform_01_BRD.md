@@ -663,7 +663,7 @@ The product may not be considered enterprise-ready unless all applicable gates a
 11. Upgrade, backup/restore and DR procedures are tested
 12. Security, dependency and licence scans are part of release engineering
 13. UI is HTTPS-only and common workflows meet certified responsiveness targets
-14. Network & Infrastructure Observability Certification Profile (`NIOCP-P1-v1`; future certification profile, NOT YET CERTIFIED until applicable evidence exists) and `OBS-P1` capacity overlay demonstrate that eBPF socket telemetry and active path tracing operate within resource limits without degrading primary monitoring, transport, or RCA
+14. Network & Infrastructure Observability Certification Profile (`NIOCP-P1-v1`; future certification profile, NOT YET CERTIFIED until applicable evidence exists) and `OBS-P1` capacity overlay shall demonstrate before applicable capability certification that eBPF socket telemetry and active path tracing operate within resource limits without degrading primary monitoring, transport, or RCA
 
 Additional measurable success metrics Platform should expose or internally track include: provisioning success rate; time to onboard a standard device; Sensor utilization and polling completion; telemetry freshness/completeness; false-alert/qualification metrics; alert compression ratio; MTTD/MTTQ/time-to-root-cause; RCA accepted/partial/rejected/inconclusive rate; blast-radius accuracy where ground truth exists; incident reopen/flapping rate; dashboard/query latency; Core/Sensor footprint; storage compression/growth; ITSM sync success; upgrade/failover success; data-pipeline rejection/duplicate/late-data rates.
 

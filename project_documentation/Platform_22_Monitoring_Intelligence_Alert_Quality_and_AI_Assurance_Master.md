@@ -117,7 +117,7 @@ The following classes require explicit contracts before production activation:
 - **Event storms:** detect volume/cardinality/duplicate bursts, preserve root evidence, suppress fan-out safely and expose storm state rather than silently dropping incidents.
 - **TLS/certificate:** distinguish certificate expiry, invalid chain, hostname/SAN mismatch, trust-store drift, revocation/validation failure and underlying service unreachability.
 - **eBPF process-network anomalies:** distinguish application process socket failures/resets from local Agent queue saturation, ring-buffer drops, eBPF map exhaustion, or `RESOURCE_GUARDED` shedding; do not assert host failure or database failure based on socket table shedding or drop counters.
-- **Active path degradation:** distinguish intermediate hop loss/unresponsiveness (`* * *`), middlebox ICMP suppression, and transient path divergence from destination entity down; require end-to-end synthetic/reachability confirmation before asserting target unreachable.
+- **Active path degradation:** distinguish intermediate hop loss/unresponsiveness, middlebox ICMP suppression, and transient path divergence from destination entity down; require end-to-end synthetic/reachability confirmation before asserting target unreachable.
 
 No contract may encode a universal “two signals always required” rule. Required evidence depends on alert class and available authoritative signals.
 
@@ -131,7 +131,7 @@ Before operational assertion, the evaluation path shall score whether expected e
 
 Semantic states are additive to existing alert/incident lifecycle. They describe operational meaning, not merely workflow status. `REDUNDANCY_LOST` means service may still be available but resilience is reduced. `SLA_DEGRADED` means service/path remains up but violates a governed objective. `EXPECTED_STATE` records a known/authorized condition. `UNKNOWN` means insufficient trustworthy evidence. `STALE` means state depends on evidence outside freshness policy.
 
-For eBPF process-network and active-path domains, telemetry trust evaluation must inspect Agent collector status (`dropped_records_count`, `shed_records_count`, `quality_state == RESOURCE_GUARDED`), BPF ring-buffer loss, and active-path incomplete hops before scoring telemetry confidence. Incomplete path (`is_unresponsive`, `is_hidden`) or Agent eBPF shedding degrades telemetry trust score to `MONITORING_DEGRADED` or `PARTIAL`, never asserting host/link DOWN.
+For eBPF process-network and active-path domains, telemetry trust evaluation must inspect Agent collector status (`dropped_records_count`, `shed_records_count`, `quality_state == RESOURCE_GUARDED`), BPF ring-buffer loss, and active-path incomplete hops before scoring telemetry confidence. Incomplete path (`hop_state` in `{"UNRESPONSIVE", "HIDDEN"}`) or Agent eBPF shedding degrades telemetry trust score to `MONITORING_DEGRADED` or `PARTIAL`, never asserting host/link DOWN.
 
 ---
 

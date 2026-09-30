@@ -573,7 +573,7 @@ This section supplements `Platform_17` with authoritative wire schemas, event fa
 
 #### 11.2.1 Transport envelope and identity
 
-Process-network facts are produced by the Linux Agent eBPF collector, aggregated locally, and delivered over the existing versioned Agent→Sensor HTTPS/gRPC mTLS transport (`/api/v1/agent/telemetry`). The logical wire record adheres to the following contract (physical topic naming, serialization, and ClickHouse tables are owned by BUILD-062/064):
+Process-network facts are produced by the Linux Agent eBPF collector, aggregated locally, and delivered over the existing versioned Agent→Sensor HTTPS/gRPC mTLS transport. The assigned Sensor buffers records in its durable spool and forwards batches to the Core via the canonical route `POST /api/v1/sensor/agent-telemetry` (handled by `SensorAgentIngestionController`). Future extension and versioning of the physical envelope belongs to BUILD-016 / BUILD-062 and must preserve authority, idempotency, ACK, and durability contracts. Ingestion validation and envelope acceptance are owned by BUILD-062, physical Kafka streaming (topic naming, partitions, serialization) is owned by BUILD-063, and physical ClickHouse storage (table DDL, engine selection, TTL) is owned by BUILD-064.
 
 ```text
 ProcessNetworkEvidence:
@@ -586,14 +586,13 @@ ProcessNetworkEvidence:
   bucket_end_at:            RFC3339UTC instant
   bucket_duration_sec:      uint32 (bounded configurable aggregation interval)
   process_metadata:
-    process_name:           string (max 64 chars, e.g. "nginx", "envoy", "mysqld")
-    executable_path:        string (max 255 chars, e.g. "/usr/sbin/nginx")
-    service_name:           string (max 128 chars, systemd service or container service name)
-    cmdline_sanitized:      string (max 255 chars, sanitized argv without secrets/tokens/env vars)
+    process_name:           string (bounded string, e.g. "nginx", "envoy", "mysqld")
+    executable_path:        string (bounded string, e.g. "/usr/sbin/nginx"; truncated display paths must not alter canonical identity)
+    service_name:           string (bounded string, systemd service or container service name)
     pid:                    uint32 (runtime observation only, non-authoritative ephemeral identifier)
-    container_id:           string (nullable, max 64 chars, e.g. Docker/containerd container ID)
-    cgroup_path:            string (max 255 chars, e.g. "/system.slice/nginx.service")
-    network_namespace:      uint64 (netns inode number)
+    container_id:           string (nullable bounded string, e.g. Docker/containerd container ID)
+    cgroup_path:            string (nullable bounded string, e.g. "/system.slice/nginx.service")
+    network_namespace:      uint64 (nullable netns inode number)
   endpoint_pair:
     local_ip:               string (IPv4 or IPv6 canonical string)
     local_port:             uint16
@@ -603,23 +602,25 @@ ProcessNetworkEvidence:
     protocol:               string ("TCP" | "UDP")
     ip_version:             string ("IPv4" | "IPv6")
   traffic_metrics:
-    active_connections:     uint32 (gauge at bucket end)
-    new_connections:        uint32 (counter within bucket)
-    closed_connections:     uint32 (counter within bucket)
-    bytes_tx:               uint64 (raw bytes sent)
-    bytes_rx:               uint64 (raw bytes received)
-    duration_total_ms:      uint64 (aggregate duration of closed sockets)
-    mean_rtt_us:            uint32 (microsecond RTT from TCP info/SRTT)
-    retransmit_count:       uint32 (TCP segment retransmissions)
-    connection_failures:    uint32 (TCP RST, connection timeouts, SYN retries exceeded)
+    bytes_tx:               uint64 (raw bytes sent, where observable)
+    bytes_rx:               uint64 (raw bytes received, where observable)
+    active_connections:     uint32 (nullable/optional gauge at bucket end, applicable to stateful protocols like TCP)
+    new_connections:        uint32 (nullable/optional counter within bucket)
+    closed_connections:     uint32 (nullable/optional counter within bucket)
+    duration_total_ms:      uint64 (nullable/optional aggregate duration of closed connections)
+    mean_rtt_us:            uint32 (nullable/optional microsecond RTT from TCP info/SRTT when technically available and certified)
+    retransmit_count:       uint32 (nullable/optional TCP segment retransmissions when technically available and certified)
+    connection_failures:    uint32 (nullable/optional TCP RST, connection timeouts, SYN retries exceeded when technically available and certified)
   quality_and_shedding:
-    quality_state:          "VALID" | "PARTIAL" | "SAMPLED" | "RESOURCE_GUARDED"
+    quality_state:          "VALID" | "PARTIAL" | "SAMPLED" | "RESOURCE_GUARDED" | "UNSUPPORTED"
     dropped_records_count:  uint32 (records dropped due to queue or buffer saturation)
     shed_records_count:     uint32 (records shed due to memory/CPU guard thresholds)
     sampled_flag:           boolean
     partial_flag:           boolean
     resource_guarded_flag:  boolean
 ```
+
+Protocol-dependent evidence rules: TCP-specific metrics (such as `mean_rtt_us`, `retransmit_count`, `connection_failures`, `active_connections`, `new_connections`, `closed_connections`, `duration_total_ms`) are applicable only when the selected implementation and protocol can measure them reliably. For non-stateful or unsupported protocols (such as UDP), or on platforms where specific kernel metrics are unavailable, these fields must be omitted or null rather than emitting fabricated zero values. The record distinguishes measured zero from unavailable, unsupported, partial, or resource-guarded status.
 
 #### 11.2.2 Hard data-minimization boundaries
 
@@ -628,7 +629,7 @@ In accordance with Platform security threat models (`Platform_18`), the followin
 - TLS / SSL plaintext or decrypted payloads;
 - HTTP request/response headers or bodies;
 - SQL query text, parameters, or database statements;
-- Environment variables or full unscrubbed command-line strings;
+- Command-line arguments or environment variables (eBPF process-network evidence excludes command-line text and correlates strictly using safe identity attributes: process name, executable identity, service identity, container/cgroup, network namespace, and ephemeral PID);
 - Arbitrary kernel syscall argument streams;
 - Kernel or user-space stack traces;
 - Continuous profiler / flame-graph sample streams.
@@ -647,39 +648,41 @@ ActivePathObservation:
   source_sensor_id:         UUID (Sensor executing the probe)
   source_vantage_id:        string (vantage location tag, e.g. "aws-eu-west-1", "dc-onprem-tor")
   target_entity_id:         UUID (canonical target entity identity)
-  target_ip:                string (IPv4 or IPv6)
+  target_ip:                string (IPv4 or IPv6 canonical string)
   target_port:              uint16 (nullable for ICMP)
   protocol:                 "ICMP" | "TCP" | "UDP"
   probed_at:                RFC3339UTC instant
   path_summary:
     total_hops:             uint8
     responsive_hops:        uint8
-    end_to_end_rtt_min_ms:  float32
-    end_to_end_rtt_mean_ms: float32
-    end_to_end_rtt_max_ms:  float32
-    end_to_end_loss_pct:    float32
-    jitter_ms:              float32
-    path_fingerprint:       string (SHA-256 hash of ordered responsive hop IPs + ASNs)
+    end_to_end_rtt_min_ms:  float32 (nullable, null if target unreachable or unmeasured)
+    end_to_end_rtt_mean_ms: float32 (nullable, null if target unreachable or unmeasured)
+    end_to_end_rtt_max_ms:  float32 (nullable, null if target unreachable or unmeasured)
+    end_to_end_loss_pct:    float32 (nullable, null if unmeasured)
+    jitter_ms:              float32 (nullable, null if insufficient samples)
+    path_fingerprint:       string (opaque, versioned, deterministic path fingerprint; algorithm selected and implemented by BUILD-040)
+    fingerprint_version:    string (e.g. "1")
     status:                 "COMPLETE" | "PARTIAL" | "TARGET_UNREACHABLE" | "FAILED"
   hops:
-    - hop_index:            uint8 (1..64)
-      hop_ip:               string (IPv4 or IPv6, or "*" if unresponsive)
+    - hop_index:            uint8 (bounded hop index; max/probe limits governed by BUILD-040 policy and certification)
+      hop_ip:               string (nullable IPv4 or IPv6 canonical string; null if unresponsive or hidden)
+      hop_state:            "RESPONSIVE" | "UNRESPONSIVE" | "HIDDEN" | "UNKNOWN"
       hop_hostname:         string (nullable, reverse DNS PTR)
       canonical_entity_id:  UUID (nullable, Core-resolved entity ID if internal infrastructure)
-      asn:                  uint32 (nullable, BGP autonomous system number)
-      rtt_min_ms:           float32
-      rtt_mean_ms:          float32
-      rtt_max_ms:           float32
-      loss_pct:             float32
-      jitter_ms:            float32
-      mpls_labels:          uint32[] (nullable, extracted from ICMP time-exceeded extensions)
-      is_unresponsive:      boolean (true if ICMP time exceeded not received)
-      is_hidden:            boolean (true if middlebox/router suppresses TTL expiry)
+      asn:                  uint32 (nullable, BGP autonomous system number when resolvable)
+      rtt_min_ms:           float32 (nullable, null if unresponsive/hidden/unmeasured)
+      rtt_mean_ms:          float32 (nullable, null if unresponsive/hidden/unmeasured)
+      rtt_max_ms:           float32 (nullable, null if unresponsive/hidden/unmeasured)
+      loss_pct:             float32 (nullable, null if unmeasured)
+      jitter_ms:            float32 (nullable, null if insufficient samples)
+      mpls_labels:          uint32[] (nullable, when observable from supported protocol extensions)
+      is_unresponsive:      boolean (true if unresponsive or timeout)
+      is_hidden:            boolean (true if router suppresses TTL expiry)
 ```
 
 #### 11.3.2 Path change event contract
 
-When the path fingerprint changes between consecutive probing intervals or deviates from the established baseline, the Sensor or Core generates a versioned internal change event (physical Kafka topic and serialization owned by BUILD-062):
+When the path fingerprint changes between consecutive probing intervals or deviates from the established baseline, the Sensor or Core generates a versioned internal change event (physical Kafka topic naming, partitioning, and serialization owned by BUILD-063):
 
 ```text
 PathChangeEvidence:
@@ -692,8 +695,9 @@ PathChangeEvidence:
   detected_at:              RFC3339UTC instant
   previous_fingerprint:     string
   current_fingerprint:      string
+  fingerprint_version:      string
   change_type:              "PATH_DIVERGENCE" | "HOP_ADDED" | "HOP_REMOVED" | "RTT_SHIFT" | "LOSS_ANOMALY"
-  divergence_hop_index:     uint8 (first hop index where divergence was observed)
+  divergence_hop_index:     uint8 (nullable, first hop index where topology divergence was observed; null for RTT_SHIFT or LOSS_ANOMALY without topology change)
   previous_hop_ip:          string (nullable)
   current_hop_ip:           string (nullable)
   delta_rtt_ms:             float32 (nullable)
@@ -703,7 +707,7 @@ PathChangeEvidence:
 
 #### 11.3.3 Operational and causal integrity rules
 
-- **Incomplete Path != Target Down:** An unresponsive intermediate hop (`* * *`) or incomplete traceroute MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP polling indicates reachability.
+- **Incomplete Path != Target Down:** An unresponsive intermediate hop or incomplete traceroute (e.g. intermediate ICMP suppression or timeouts) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP polling indicates reachability.
 - **Multi-Vantage Contradiction Preservation:** Divergence between probes from different Sensors (e.g. Sensor-A sees 100% loss at transit hop 4, Sensor-B reaches target normally) represents an upstream routing or peering anomaly, not target failure. Contradictions must be preserved and surfaced to RCA as evidence.
 
 ### 11.4 Distributed trace reference contract

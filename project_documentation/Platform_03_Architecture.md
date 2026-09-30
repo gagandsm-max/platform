@@ -1513,8 +1513,8 @@ Linux Kernel (eBPF Probes)
 
 Active path probing is executed by Network Sensors toward monitored infrastructure, WAN circuits, and cloud targets:
 - **Flow-Preserving Active Path Tracing:** Active path probing evaluates flow-stable techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040 across ICMP, TCP where appropriate, and UDP where certified) to maintain constant flow identifiers across probes and prevent ECMP route fluttering where supported.
-- **Hop & Change Telemetry:** Measures hop RTT min/mean/max, packet loss, jitter, and MPLS label stacks; computes stable 64-char SHA-256 path fingerprints; detects route divergence and emits `PathChangeEvidence` records.
-- **Causal Integrity:** Intermediate packet drops (`* * *`) or hidden hops flag `is_unresponsive` without asserting target DOWN. Multi-vantage contradictions are preserved as evidence.
+- **Hop & Change Telemetry:** Measures hop and destination latency, loss, and jitter where reliable, and MPLS label stacks when observable from supported protocol extensions; computes opaque, versioned, deterministic path fingerprints; detects route divergence and emits `PathChangeEvidence` records.
+- **Causal Integrity:** Intermediate packet drops or hidden hops record unresponsive/hidden states without asserting target DOWN. Multi-vantage contradictions are preserved as evidence.
 
 ### 44.5 OpenTelemetry phase boundary
 

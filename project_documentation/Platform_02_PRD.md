@@ -646,7 +646,7 @@ Platform shall support:
 - ICMP reachability/RTT/loss.
 - Configurable device-down validation.
 - Traceroute/path history and changes.
-- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Flow-stable active-path techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040) may be used to preserve flow identifiers across intermediate hops and avoid ECMP route fluttering where supported. Intermediate unresponsive hops (`* * *`) or hidden hops must not assert destination DOWN.
+- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Flow-stable active-path techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040) may be used to preserve flow identifiers across intermediate hops and avoid ECMP route fluttering where supported. Intermediate unresponsive hops or hidden hops must not assert destination DOWN.
 - TCP/DNS/TLS/HTTP validation where relevant.
 - Multi-vantage validation from secondary Sensors where policy allows, preserving independent source results and contradictory evidence.
 

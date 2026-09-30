@@ -2178,9 +2178,9 @@ sequenceDiagram
   A->>A: Aggregate locally: process/service + remote IP/port + bounded time bucket
   A->>A: Track active/new/closed sockets, bytes TX/RX, RTT, drops/sheds
   A->>AQ: Enqueue bounded ProcessNetworkEvidence (drop/shed flags if overloaded)
-  AQ->>S: Deliver over mTLS HTTPS/gRPC (/api/v1/agent/telemetry)
+  AQ->>S: Deliver over versioned Agent->Sensor mTLS HTTPS/gRPC transport
   S->>SQ: Spool to Sensor durable queue
-  SQ->>C: Push batch to Core Ingestion Service
+  SQ->>C: Push batch to Core Ingestion Service (POST /api/v1/sensor/agent-telemetry)
   C->>C: Core reservation & entity resolution (resolve remote canonical entity)
   C->>KF: Transactional produce to Kafka
   C-->>S: Ingestion ACK
@@ -2193,6 +2193,7 @@ sequenceDiagram
 
 Rules:
 - Strictly no separate eBPF backend or datastore; all data flows through standard Agent queue → Sensor spool → Core ingestion → ClickHouse.
+- Agent delivers aggregated process-network telemetry to its assigned Sensor over versioned mTLS HTTPS/gRPC transport; Sensor buffers in durable spool and delivers batches to Core via canonical route `POST /api/v1/sensor/agent-telemetry` (handled by `SensorAgentIngestionController`). Future extension and versioning of the physical envelope belongs to BUILD-016 / BUILD-062 and must preserve authority, idempotency, ACK, and durability contracts.
 - Zero payload capture, zero TLS decryption, zero packet inspection; telemetry is strictly socket-level connection performance and process metadata.
 - If kernel buffer capacity or Agent memory budget (derived from BUILD-019 / BUILD-130 benchmark certification) is exceeded, collector enters `RESOURCE_GUARDED`, sheds records to aggregate bucket, and marks records with `shed_records_count > 0`.
 
@@ -2219,7 +2220,7 @@ sequenceDiagram
   SCH->>S2: Trigger multi-vantage verification probe (same target)
   par Sensor 1 probing
     S1->>NET: Send flow-stable traceroute probes
-    NET-->>S1: ICMP Time Exceeded per hop (or unresponsive * * *)
+    NET-->>S1: ICMP Time Exceeded per hop (or unresponsive / timeout)
     S1->>T: Final probe packet
     T-->>S1: Port unreachable / TCP SYN-ACK / Echo reply
     S1->>S1: Compute hop RTT min/mean/max, packet loss, jitter
@@ -2242,7 +2243,7 @@ sequenceDiagram
 
 Rules:
 - Flow-stable probing techniques (evaluated in BUILD-040) maintain constant flow identifiers across probes, avoiding ECMP routing artifacts.
-- Unresponsive intermediate hops (`* * *`) or middlebox ICMP suppressions set `is_unresponsive = true` and do NOT assert target DOWN.
+- Unresponsive intermediate hops or middlebox ICMP suppressions set `hop_state = UNRESPONSIVE` and do NOT assert target DOWN.
 - Multi-vantage divergence (e.g. Vantage 1 degraded, Vantage 2 normal) preserves independent results and contradiction evidence.
 
 ---

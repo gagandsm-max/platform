@@ -1378,8 +1378,8 @@ The Network Sensor integrates active path probing within its existing runtime:
 ### 47.3 Core Ingestion and cross-domain consumption
 
 Core processes ingest and correlate observability telemetry without introducing new databases or microservices:
-- **Ingestion Gateway:** Validates batches, resolves remote canonical entities, and publishes logical typed telemetry (`ProcessNetworkEvidence`, `ActivePathObservation`, `PathChangeEvidence`) to Kafka (physical topic naming, serialization, and partition keys owned by BUILD-062/064).
-- **ClickHouse Storage:** High-volume analytics workers persist typed records into ClickHouse analytics tables (concrete schema, table names, ordering, and TTL owned by BUILD-062/063/064).
+- **Ingestion Gateway (BUILD-062):** Validates batches, resolves remote canonical entities, executes reservation/finalization/ACK, and hands off logical typed telemetry (`ProcessNetworkEvidence`, `ActivePathObservation`, `PathChangeEvidence`) to the Kafka streaming backbone (physical topic naming, serialization, and partition keys owned by BUILD-063).
+- **ClickHouse Storage (BUILD-064):** Analytics workers persist typed records into ClickHouse analytics tables (physical schema, table layout, engine selection, ordering keys, codecs, and TTL owned by BUILD-064).
 - **Temporal Operational Graph:** Dynamically updates communication edges between process entities and remote services with observed latency and throughput.
 - **Deterministic RCA Engine:** Correlates socket timeouts, retransmission bursts, and path divergence events with alert symptoms, while preserving `INCONCLUSIVE` outcomes.
 - **Architectural Boundary:** No separate eBPF database, no dedicated traceroute store, no APM backend, and no full distributed trace span store without explicit change control (Phase 1 supports OTLP metrics/logs; Phase 1.5 supports bounded customer-provided trace/dependency summaries only). PostgreSQL, ClickHouse, Kafka, and Valkey remain the sole authoritative datastores.
