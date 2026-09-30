@@ -116,6 +116,8 @@ The following classes require explicit contracts before production activation:
 - **Sensor failure:** distinguish Sensor process/node failure, Core reachability loss, queue/backpressure, credential/cert failure and partial collector degradation; monitored targets are not automatically DOWN when their Sensor is unavailable.
 - **Event storms:** detect volume/cardinality/duplicate bursts, preserve root evidence, suppress fan-out safely and expose storm state rather than silently dropping incidents.
 - **TLS/certificate:** distinguish certificate expiry, invalid chain, hostname/SAN mismatch, trust-store drift, revocation/validation failure and underlying service unreachability.
+- **eBPF process-network anomalies:** distinguish application process socket failures/resets from local Agent queue saturation, ring-buffer drops, eBPF map exhaustion, or `RESOURCE_GUARDED` shedding; do not assert host failure or database failure based on socket table shedding or drop counters.
+- **Active path degradation:** distinguish intermediate hop loss/unresponsiveness (`* * *`), middlebox ICMP suppression, and transient path divergence from destination entity down; require end-to-end synthetic/reachability confirmation before asserting target unreachable.
 
 No contract may encode a universal “two signals always required” rule. Required evidence depends on alert class and available authoritative signals.
 
@@ -128,6 +130,8 @@ Before operational assertion, the evaluation path shall score whether expected e
 **Evidence Coverage** shall expose enough machine-readable information to answer: what evidence was expected; what arrived; what is missing/stale/degraded; whether active validation ran; which contradictions exist; and how the evidence affected confidence.
 
 Semantic states are additive to existing alert/incident lifecycle. They describe operational meaning, not merely workflow status. `REDUNDANCY_LOST` means service may still be available but resilience is reduced. `SLA_DEGRADED` means service/path remains up but violates a governed objective. `EXPECTED_STATE` records a known/authorized condition. `UNKNOWN` means insufficient trustworthy evidence. `STALE` means state depends on evidence outside freshness policy.
+
+For eBPF process-network and active-path domains, telemetry trust evaluation must inspect Agent collector status (`dropped_records_count`, `shed_records_count`, `quality_state == RESOURCE_GUARDED`), BPF ring-buffer loss, and Paris traceroute incomplete hops before scoring telemetry confidence. Incomplete path (`is_unresponsive`, `is_hidden`) or Agent eBPF shedding degrades telemetry trust score to `MONITORING_DEGRADED` or `PARTIAL`, never asserting host/link DOWN.
 
 ---
 
@@ -163,6 +167,8 @@ Correlation orders evidence; it does not itself prove causation. Change intellig
 Every non-trivial RCA hypothesis shall retain: supporting evidence IDs; contradictory evidence; missing expected evidence; dependency/path rationale; confidence; time window; candidate alternatives; and validation actions. Confidence may increase or decrease as evidence changes.
 
 Causal contradiction testing should ask whether expected downstream/upstream effects are present. If predicted effects are absent or another dependency better explains the observation set, confidence must fall or the hypothesis must be rejected.
+
+Process-to-network facts (TCP RTT spikes, retransmission storms, connection resets) and active-path facts (hop latency shifts, path divergence events) feed deterministic RCA as corroborating evidence alongside temporal topology, change telemetry, and contradiction testing. If eBPF reports backend connection failures while the target database reports a healthy listener and low CPU, contradiction testing identifies transit/firewall drops rather than database service failure. If evidence is contradictory or incomplete, RCA emits `INCONCLUSIVE`.
 
 ---
 

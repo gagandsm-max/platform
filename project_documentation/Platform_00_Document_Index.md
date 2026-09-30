@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-09-24 — A2.3 OSS catalogue normalization and formal OSS-008→REQ-OSS-008 migration (Issue #108)
+**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Authority
@@ -529,3 +529,25 @@ The resource-efficiency principle is accepted as an engineering constraint: opti
 Implementation truth is also reconciled to verified current `main`: PR #84 established the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path as **IMPLEMENTED+TESTED**. Derived counter delta/rate/reset/wrap/discontinuity behavior remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**.
 
 This reconciliation updates existing Mother References and keeps the authoritative set at **25 files**, version **v3.2.2**, highest specialized master **Platform_23**. No `Platform_24` is introduced.
+
+### 4.9 2026-09-30 Network & Infrastructure Observability Phase-1 closure and eBPF integration
+
+This v3.2.2 reconciliation executes the Master architecture freeze and task-scoped writer elevation recorded in Issue #142 (comment `5909076167`), establishing unambiguous product positioning and architectural closure for Phase 1: **Unified Network & Infrastructure Observability**.
+
+The reconciliation adopts the Master gap classifications without inventing competing subsystems or duplicate frameworks:
+- **GAP 1 (Cross-signal investigation):** `ALREADY_SPECIFIED_NOT_IMPLEMENTED / UX_INTEGRATION_GAP` — integrated into existing Investigation Session, Live Evidence, Unified Timeline, and Incident Command Workspace.
+- **GAP 2 (Temporal topology):** `ALREADY_SPECIFIED_NOT_IMPLEMENTED` — temporal operational graph and edge history remain authoritative.
+- **GAP 3 (Telemetry trust):** `ALREADY_SPECIFIED_NOT_IMPLEMENTED` — Alert Evidence Contracts and telemetry trust scoring remain authoritative.
+- **GAP 4 (Active path):** `PARTIALLY_SPECIFIED_NEEDS_CLOSURE` — closed under `REQ-NET-016` (multi-vantage, path-tracing, Paris traceroute with flow-identifier preservation).
+- **GAP 5 (Linux eBPF process/network):** `TRUE_ARCHITECTURE_GAP / PHASE_1` — closed under `REQ-INF-013` (bounded in-kernel socket telemetry in Linux Agent collector with strict local aggregation, existing Agent→Sensor→Core durable transport, and zero separate eBPF services or datastores).
+- **GAP 6 (Trace ingestion):** `DEFERRED_CORRECTLY / PHASE_1_5` — trace context references accepted at ingest boundary (`REQ-INF-010`), trace database storage deferred to Phase 1.5.
+- **GAP 7 (SLI/SLO/Error Budget):** `ALREADY_SPECIFIED_NOT_IMPLEMENTED` — governed under `Platform_21`.
+- **GAP 8 (Cloud-network depth):** `PARTIALLY_SPECIFIED_NEEDS_CLOSURE` — closed under `REQ-INF-008` (cross-zone/VPC topologies, VPC Flow Logs, gateway drops, and cloud-to-onprem egress visibility).
+- **GAP 9 (Packet observability):** `INTENTIONAL_PRODUCT_BOUNDARY` — hard product boundary preserved; bounded triggered packet evidence under `Platform_19` is explicitly retained and NOT demoted.
+- **GAP 10 (Observability certification):** `CERTIFICATION_GAP` — closed via Network & Infrastructure Observability Certification Profile (`NIOCP-P1-v1`) in `Platform_14` and `OBS-P1` capacity overlay in `Platform_11`.
+
+Hard product boundaries are maintained: no full APM, continuous profiling, flame graphs, bytecode instrumentation, method-level timing, full DPI, always-on PCAP, TLS decryption, packet reconstruction, mandatory GPU/NPU, third Core, dedicated trace DB, dedicated graph DB, or separate eBPF backend.
+
+Candidate library `OSS-124` (`github.com/cilium/ebpf`, MIT, `CANDIDATE / NOT_SELECTED / NOT_IMPLEMENTED`) is registered in `Platform_07`. All 15 decision areas are formally recorded in `Platform_12` (`DEC-ARCH-036` to `DEC-ARCH-050`).
+
+This reconciliation updates the existing base and specialized masters and keeps the authoritative set at exactly **25 files**, version **v3.2.2**, and highest specialized master **Platform_23**. No `Platform_24` is introduced.

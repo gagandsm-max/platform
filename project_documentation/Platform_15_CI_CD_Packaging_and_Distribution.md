@@ -87,3 +87,13 @@ Air-gapped release bundle contains packages, dependencies/repository metadata as
 ## 6. Uninstall semantics
 
 Normal uninstall removes binaries/service but preserves customer state/config unless explicit purge is requested. Purge is separately confirmed/audited.
+
+## 7. Linux Agent eBPF packaging and compatibility (conditional)
+
+If and when `github.com/cilium/ebpf` (or another formally approved eBPF loader dependency) is selected and implemented for the Linux Agent:
+
+- **Packaging format:** Pre-compiled eBPF object assets (CO-RE / BTF compliant) are packaged directly inside the Linux Agent `.deb` and `.rpm` packages (e.g. `/usr/lib/platform/agent/ebpf/`).
+- **Kernel compatibility matrix:** Target environments include Ubuntu 22.04 LTS, Ubuntu 24.04 LTS, RHEL 8.x, and RHEL 9.x kernels supporting BTF (`CONFIG_DEBUG_INFO_BTF=y`).
+- **Graceful degradation:** Installation must never fail solely because a target host's kernel lacks eBPF/BTF support or required capabilities. In such environments, the Linux Agent package installs and functions normally for all base infrastructure collection, reporting eBPF capability state as `UNSUPPORTED` or `KERNEL_INCOMPATIBLE`.
+- **Signing and provenance:** eBPF probe objects and Go loader binaries are built reproducibly in CI, signed with the release signing key, and catalogued in the release SBOM (SPDX/CycloneDX). No compilation from C sources is required or performed on the target customer host during installation.
+- **Air-gapped offline distribution:** The offline release bundle includes all necessary kernel compatibility assets; no external internet repository access is attempted or required at runtime.

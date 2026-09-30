@@ -121,6 +121,8 @@ Certification is **dimensional**. Required dimensions at minimum:
 - Topology
 - NCM where relevant
 - Diagnostics where relevant
+- eBPF process-network evidence where declared (Linux server technology packs)
+- Active path observability where declared (network and cloud technology packs)
 - Security
 - Version compatibility
 - Certification profile
@@ -512,6 +514,10 @@ Certification evidence requirements (family-specific gates; generic test strateg
 
 **SNMP where declared:** v1/v2c/v3 security compatibility; selected-Sensor credential/preflight; exact Counter64; Counter32 wrap; reboot/reset/discontinuity; irregular sample interval; scalar/table/index mapping; noSuch/partial-object behavior; GETBULK tooBig/fallback; ifIndex/interface reconciliation; trap/inform source/security/storm behavior; Inform durable local acceptance before ACK; diagnostics; and read-only monitoring versus privileged SET separation.
 
+**eBPF process-network evidence where declared:** socket lifecycle monitoring, local aggregation around `process/service + remote endpoint + protocol/port + time bucket`, connection metrics (active, new, closed, bytes TX/RX, duration, RTT, retransmissions), explicit drop/shed accounting, least-privilege capability execution (`CAP_BPF`/`CAP_PERFMON`), verified BTF/CO-RE compatibility, and explicit capability states (`ACTIVE`, `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`).
+
+**Active path observability where declared:** Paris traceroute flow-preservation, hop sequence metrics (RTT min/mean/max, packet loss, jitter), path fingerprint stability, divergence detection, middlebox/hidden-hop tolerance, and multi-vantage contradiction preservation.
+
 **Failure:** timeout; malformed response; API rate limit; partial response; stale telemetry; expired/invalid credentials.
 
 **Upgrade:** supported versions; API schema change; migration; rollback/deprecation handling.
@@ -574,6 +580,8 @@ This PR performs **EMC-0** only.
 | Always-on full DPI | Deferred |
 | Unrestricted SIEM replacement | Excluded |
 | Full bytecode APM | Excluded; integrate instead |
+| Continuous profiling / flame graphs | Excluded |
+| Method-level code instrumentation | Excluded |
 | Broad BMS/DCIM | Deferred |
 | Broad FinOps | Deferred |
 | EUC/VDI | Optional / lower priority |
@@ -599,6 +607,6 @@ The v1 exactly-two-Core Active/Standby topology remains a current fixed Mother R
 
 At creation, this document is EMC-0 requirements/architecture authority only. It does not assert that any `PRD-EMC-*` or `REQ-EMC-*` capability has been implemented, benchmarked, pack-certified, customer-certified or released. Implementation status must be established from exact source, executable tests, CI/runtime evidence, pack certification evidence and release records.
 
-## Final handoff baseline note — 2026-09-21
+## Final handoff baseline note — 2026-09-21 (Reconciled 2026-09-30)
 
-`Platform_23` remains the highest specialized Mother Reference. The 2026-09-21 architecture review determined **SPECIALIZED MASTER NOT REQUIRED AT THIS BASELINE** for Flow, Logs, Cloud, Extensibility or ITSM; those domains strengthen existing owners. Capability Pack remains the single extension architecture. Dimensional certification and `SPECIFIED != IMPLEMENTED != CERTIFIED` classification remain mandatory.
+`Platform_23` remains the highest specialized Mother Reference. The 2026-09-21 architecture review determined **SPECIALIZED MASTER NOT REQUIRED AT THIS BASELINE** for Flow, Logs, Cloud, Extensibility or ITSM; those domains strengthen existing owners. The 2026-09-30 reconciliation (Issue #142) reaffirmed this boundary for Unified Network & Infrastructure Observability Phase 1: eBPF process-network telemetry and active path observability integrate into existing Agent/Sensor/Core and Capability Pack architecture without creating a new specialized master or competing framework. Capability Pack remains the single extension architecture. Dimensional certification and `SPECIFIED != IMPLEMENTED != CERTIFIED` classification remain mandatory.

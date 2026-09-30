@@ -7,7 +7,7 @@
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102)
+**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
 
 **Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
@@ -82,6 +82,7 @@ Separate Windows and Linux builds install:
 - Agent identity/enrollment.
 - Host metrics collector.
 - Process/service collector.
+- Bounded eBPF process-to-network collector (Linux Agent on supported kernels).
 - selected log/event adapters;
 - Edge Test engine;
 - local queue;
@@ -1350,3 +1351,35 @@ Core owns:
 - **Capability Pack:** owns monitor cadence/freshness/cost declarations consumed by the scheduler.
 - **Integrations:** own ITSM/webhook delivery queues separately from API Studio monitoring collection.
 - **HA/fencing:** Active/Standby ownership remains P0 uncertified; no third coordination service selected here.
+
+---
+
+## 47. Unified Network & Infrastructure Observability subsystem decomposition — v3.2.2
+
+> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), and decisions `DEC-ARCH-036` through `DEC-ARCH-044`.
+
+### 47.1 Linux Agent eBPF collector subsystem
+
+The Linux Agent process integrates the eBPF collector within its existing Go runtime (`agent/linux/ebpf`):
+- **Kernel Probe Layer:** Attaches to socket lifecycle tracepoints (`sock:inet_sock_set_state`, `fexit/tcp_v4_connect`, `kprobe/tcp_retransmit_skb`) using BPF CO-RE bytecode. Tracks active sockets in an LRU hash map (`max_entries = 65536`) and emits connection events via BPF ring buffer.
+- **Local Aggregation Layer:** Aggregates connection metrics locally into 60-second buckets around `process/service + remote endpoint + protocol/port`. Limits cardinality to 10,000 active keys with heavy-hitter overflow shedding and explicit drop counters.
+- **Resource Governor:** Restricts Agent memory to 256MB. If thresholds are exceeded, switches to `RESOURCE_GUARDED` capability state, sheds records to an aggregate bucket, and emits `PARTIAL` quality status.
+- **Local Spool & Uploader:** Enqueues aggregated records into the existing Agent disk spool (`agent/common/spool`) and delivers to the assigned Sensor via existing mTLS HTTPS/gRPC transport.
+- **Zero Standalone Daemon:** No separate eBPF agent or daemon is introduced.
+
+### 47.2 Network Sensor active path probing subsystem
+
+The Network Sensor integrates active path probing within its existing runtime (`sensor/protocol-icmp` and `sensor/active-path`):
+- **Paris Traceroute Engine:** Probes configured targets using Paris traceroute techniques (`ICMP_PARIS`, `TCP_SYN`, `UDP_PARIS`) with constant flow identifiers to prevent ECMP hash fluttering.
+- **Hop & Path Analysis:** Computes min/mean/max RTT, loss percentage, and jitter per hop; parses MPLS labels from ICMP extensions; evaluates stable path fingerprints; detects route divergence and emits `PathChangeEvent` records.
+- **Durable Delivery:** Spools records into existing Sensor durable queue; delivers batches to Core Ingestion via existing transport.
+- **Zero Standalone Daemon:** No separate probing service is deployed.
+
+### 47.3 Core Ingestion and cross-domain consumption
+
+Core processes ingest and correlate observability telemetry without introducing new databases or microservices:
+- **Ingestion Gateway:** Validates batches, resolves remote canonical entities, and publishes to Kafka (`telemetry.agent.process_network.v1`, `telemetry.path_hops.v1`, `network.path.events.v1`).
+- **ClickHouse Storage:** High-volume analytics workers persist records into existing ClickHouse cluster tables (`agent_process_network_facts`, `path_hop_facts`).
+- **Temporal Operational Graph:** Dynamically updates communication edges between process entities and remote services with observed latency and throughput.
+- **Deterministic RCA Engine:** Correlates socket timeouts, retransmission bursts, and path divergence events with alert symptoms, while preserving `INCONCLUSIVE` outcomes.
+- **Architectural Boundary:** No separate eBPF database, no dedicated traceroute store, no APM backend. PostgreSQL, ClickHouse, Kafka, and Valkey remain the sole authoritative datastores.

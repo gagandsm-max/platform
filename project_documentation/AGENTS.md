@@ -31,6 +31,8 @@ For work involving enterprise monitoring-domain catalogue, Capability Pack contr
 
 For work involving NOC no-context-switch troubleshooting, contextual action bars/drawers, embedded CLI, on-demand or multi-vantage diagnostics, `Verify Now`, Live Evidence, Investigation Sessions, or diagnostic workflow definitions, mandatory preflight reading includes **`Platform_09_UI_UX_Master.md`, `Platform_10_Protocol_Security_Connector_Master.md`, `Platform_11_Sizing_Capacity_Storage_Master.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`, `Platform_18_Security_Threat_Model.md` and `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md`**. Read `Platform_23` as well when technology/Capability Pack diagnostics are involved.
 
+For work involving Unified Network & Infrastructure Observability Phase 1, active path observability (Paris traceroute / multi-vantage path tracing), bounded Linux Agent eBPF socket telemetry, cloud network depth, or OTLP trace context boundaries, mandatory reading includes **`Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`, `Platform_05_LLD.md`, `Platform_10_Protocol_Security_Connector_Master.md`, `Platform_11_Sizing_Capacity_Storage_Master.md`, `Platform_14_Test_Performance_and_Release_Quality.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`, `Platform_18_Security_Threat_Model.md`, `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` and `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`**.
+
 If documents conflict, stop and resolve through the precedence defined in `Platform_00_Document_Index.md`. Do not invent a convenient interpretation.
 
 ## Canonical GitHub governance (USER-FIXED)
@@ -105,6 +107,10 @@ No implementation may permanently diverge from mother-reference truth. If implem
 - Platform Value/MTTR metrics must expose data quality, cohort/sample methodology and assumptions. Do not fabricate generic customer savings or causal percentages.
 - NOC troubleshooting is a first-class UI workflow: preserve device/interface/alert/incident context while authorized users launch bounded on-demand diagnostics, multi-vantage verification, browser CLI and investigation evidence capture. Low-risk diagnostics must be fast; privileged/configuration actions require proportionate RBAC/JIT/MFA/reason/approval controls.
 - On-demand diagnostics must run through Platform-controlled Core/Sensor/Agent paths, not direct browser-to-device networking; arbitrary cross-tenant targets, unbounded continuous tests and browser exposure of reusable credentials are prohibited.
+- Product positioning for Phase 1 is **Unified Network & Infrastructure Observability**; it does not authorize full APM (code-level transaction tracing, Java/.NET bytecode manipulation/instrumentation, method-level timing), continuous profiling, flame graphs, RUM, full DPI, always-on PCAP, TLS decryption, packet reconstruction, mandatory GPU/NPU, third Core, dedicated trace DB, dedicated graph DB, or separate eBPF backend. Triggered packet evidence remains bounded, privileged, tenant-scoped, and preserved under `Platform_19`.
+- Bounded Linux Agent eBPF process-network evidence (`REQ-INF-013`) executes in-kernel socket telemetry with strict local aggregation (`process/service + canonical target + port + 60s bucket`), using existing Agent→Sensor→Core durable paths and zero separate eBPF services or datastores. Protected workloads (authority, polling, transport, ingestion, alert qualification, deterministic RCA) strictly take precedence over eBPF enrichment; eBPF must drop/shed/suspend before primary monitoring is harmed.
+- Active path observability (`REQ-NET-016`) runs bounded multi-vantage Paris traceroute preserving flow identity to eliminate false multipath anomalies. Incomplete path evidence must never be collapsed into generic device down.
+- OpenTelemetry ingestion accepts metric and log telemetry and preserves trace context references (`REQ-INF-010`), but distributed trace storage is deferred to Phase 1.5.
 
 ## Definition of done
 
@@ -117,6 +123,8 @@ For enterprise-gap capabilities governed by `Platform_21`, Definition of Done al
 For monitoring-intelligence/AI-assurance capabilities governed by `Platform_22`, Definition of Done also includes the applicable Alert Evidence Contract, telemetry-quality negative cases, semantic-state behavior, false-alert/backtest/shadow evidence, confidence/evidence coverage, contradiction handling, tenant-isolation and data-egress tests, prompt-injection/tool-firewall tests, graceful AI degradation, model/data-drift observability and the formal `REQ-MIA-*` acceptance evidence.
 
 For enterprise-monitoring-coverage / Capability Pack capabilities governed by `Platform_23`, Definition of Done also includes dimensional certification evidence, pack compatibility/version evidence, tenant isolation, least-privilege credential handling, collector-health separation, failure-mode behavior and the formal `REQ-EMC-*` acceptance evidence. Specification of a technology family is not certification.
+
+For Unified Network & Infrastructure Observability capabilities governed by Phase 1 closure, Definition of Done also includes the 16 certification scenario gates defined in `Platform_14` Section 11 (`NIOCP-P1-v1`) and adherence to the `OBS-P1` capacity overlay defined in `Platform_11` Section 8.1.
 
 ## v3.2.2 discovery, onboarding, identity and notification safeguards
 
@@ -162,6 +170,14 @@ For enterprise-monitoring-coverage / Capability Pack capabilities governed by `P
 - Coverage metrics remain distinct (architecture/specification/implementation/pack/certification/integration). Specified is not implemented; tested is not certified; certified is not deployed.
 - OEM/customer extensions use supported pack/SDK mechanisms. Core forks are prohibited.
 - Always-on full DPI, unrestricted SIEM replacement, full bytecode APM, broad BMS/DCIM and uncontrolled automated NCM remain excluded or deferred as recorded in `Platform_23`.
+
+## v3.2.2 network and infrastructure observability safeguards
+
+- In-kernel eBPF instrumentation operates under least-privilege (`CAP_BPF`/`CAP_PERFMON` or target-kernel equivalent) with BTF/CO-RE compatibility, kernel map entry limits, ring-buffer drop accounting, and strict data minimization (zero payload, TLS, HTTP body, SQL text, env vars).
+- Monitored Linux endpoints report explicit capability states (`UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`) without crashing or stopping host metrics collection.
+- Protected workloads (authority, polling, transport, ingestion, alert qualification, deterministic RCA) always take precedence over eBPF socket enrichment; eBPF rate/volume is bounded and must shed/sample before primary monitoring is harmed.
+- Active path diagnostics enforce strict probe rate limits (default 1 pps, max 10 pps) and target count caps (max 50 concurrent targets per Sensor) with non-O(N²) fan-out controls. Intermediate hop packet drops or multipath changes must not override positive health corroborated by ICMP or SNMP.
+- Cloud network monitoring normalizes VPC/VNet topology, gateway metrics, and VPC Flow Logs into canonical entity models; connector health is separated from cloud target operational status.
 
 ## Cursor Cloud policy (never-writer)
 

@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
-**Last reconciliation:** 2026-09-19 — v3.2.2 endpoint diagnostic evidence reconciliation
+**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
 
 ## 1. Authority and no-assumption rule
 
@@ -115,6 +115,20 @@ Platform shall optimize NOC workflow around **observe → verify → diagnose �
 **CLI interaction.** CLI opens inside Platform without losing dashboard context. Launch options may include an authorized stored Credential Profile, a policy-permitted personal credential, or one-time session credentials. One-time credentials are ephemeral. Privileged/configuration modes may require step-up MFA, reason/ticket, approval and stronger command policy.
 
 **Safety and capacity.** Every on-demand action is tenant/resource scoped, audited and bounded by timeout/rate/concurrency/cancellation. Browser clients do not directly open device sockets. Interactive worker budgets cannot starve routine polling.
+
+### 3.4.1 Observability Phase-1 cross-signal UI projection — v3.2.2 reconciliation
+
+> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), and decisions `DEC-ARCH-039`, `DEC-ARCH-040`, `DEC-ARCH-041`.
+
+Linux Agent eBPF process-to-network evidence and Sensor active-path telemetry project directly into existing UI/UX workflows without creating an independent or competing troubleshooting surface:
+
+1. **Investigation Session:** Process-network records (process identity, socket counts, bytes, TCP RTT, retransmission bursts, and shed/drop counters) and active-path hop-by-hop records attach as typed evidence items to the ordered investigation manifest. Operators can compare socket behavior and transit path hops alongside logs, metrics, alerts, and NCM configuration changes without leaving the session.
+2. **Live Evidence Bar:** On monitored Linux hosts, the Live Evidence Bar displays continuous eBPF process socket health alongside latest verified on-demand snapshots. On network entities and circuit endpoints, it renders current active-path status (`COMPLETE | PARTIAL | TARGET_UNREACHABLE`), hop count, and end-to-end RTT/loss.
+3. **Incident Command Workspace:** Qualifying incidents pin correlated socket surges (e.g. backend connection timeout spikes) and path divergence events (`path.change.detected`) directly to the incident evidence pane. Operators can inspect whether path latency shifted prior to service degradation.
+4. **Unified Timeline:** Interleaves process-level connection resets, TCP retransmission spikes, and transit path hop anomalies into the temporal timeline alongside infrastructure alerts, deployments, CI/CD changes, and configuration revisions.
+5. **Entity Detail:** Linux host entity views provide a **Process Network & Sockets** tab displaying top communicating processes/services, remote endpoints, active sockets, throughput, and RTT, with explicit indicators for `RESOURCE_GUARDED` or shed states. Network entity and service views provide an **Active Path & Hops** tab showing hop-by-hop latency sparklines, packet loss rates, and historical path fingerprints.
+6. **Topology / Path Analysis:** Overlays active-path hop metrics onto logical and physical topology maps. Intermediate unresponsive hops (`* * *`) or hidden MPLS hops are rendered with distinct visual status (grey dashed node/edge) and do NOT mark the overall path or target entity as down.
+7. **No Competing Workspaces:** AmrudAi Phase 1 does NOT create a separate "eBPF Dashboard" or "Path Explorer" silo. All observability signals converge into the unified contextual troubleshooting drawer, entity details, and incident workspaces.
 
 ### 3.5 SNMP operational experience
 

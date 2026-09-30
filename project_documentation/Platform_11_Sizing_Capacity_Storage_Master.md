@@ -163,6 +163,34 @@ SNMP benchmark evidence shall additionally publish poll operations/sec, OIDs/sec
 
 Adaptive polling is capacity-accounted separately. Its configured maximum targets/interval/duration must preserve normal polling freshness and HA reserve. High-rate trap/event load may require Streaming/Event Sensor separation rather than consuming Network Poll workers.
 
+### 8.1 Observability Phase-1 Enrichment Overlay (OBS-P1)
+
+Do **not** create a duplicate `NOWP-2500` base workload profile. Base capacity planning continues to reuse `SNWP-2500-v1` as the baseline. Observability enrichment is measured and certified through a versioned **OBS-P1 enrichment overlay** evaluated incrementally across:
+
+1. **BASE:** standard `SNWP-2500-v1` reference workload.
+2. **BASE + temporal topology:** temporal operational graph relationship snapshots and incident-window reconstruction.
+3. **BASE + active path:** bounded multi-vantage active path probes (ICMP/TCP/UDP), path fingerprinting, and change tracking.
+4. **BASE + representative eBPF subset:** Linux Agent eBPF process-to-network telemetry across representative Linux workloads with bounded local aggregation.
+5. **BASE + investigation/RCA:** concurrent Investigation Sessions, Live Evidence streaming, and deterministic causal RCA evaluations.
+6. **Representative combined Phase-1 observability profile:** all above capabilities active concurrently under representative enterprise operational mix.
+
+For each overlay profile, benchmarks must measure incremental:
+- Core CPU and RAM utilization;
+- Sensor CPU and RAM utilization;
+- Agent CPU and RAM utilization;
+- Linux kernel-map memory on monitored hosts;
+- local and centralized disk I/O and storage growth;
+- network bandwidth consumption between Agent↔Sensor and Sensor↔Core;
+- ingestion gateway, Kafka throughput/backlog, and ClickHouse write/merge impact;
+- large-estate query and dashboard latency;
+- base monitoring polling freshness and completion percentage;
+- scheduler queue age and admission delays;
+- alert qualification and incident creation latency;
+- investigation and deterministic RCA response latency.
+
+**Inviolable non-interference gate:** Certification fails if optional observability enrichment causes base monitoring objectives (scheduled polling, durability, liveness, alert qualification, deterministic RCA, or HA failover targets) to be violated or degraded. Engineering is strictly prohibited from "fixing" an overlay benchmark failure by silently raising minimum Core, Sensor, or Agent hardware tiers. If resource budgets are exceeded, eBPF aggregation, active path probing cadences, and analytical enrichment must load-shed, sample, or suspend to protect primary monitoring correctness.
+
+
 ## 9. Core storage sizing model
 
 A fixed “TB per device” number is prohibited because storage depends on data volume and customer retention. The sizing calculator computes:

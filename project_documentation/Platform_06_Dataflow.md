@@ -7,7 +7,7 @@
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_08_Requirements_Traceability.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102)
+**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
 
 **Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
@@ -2151,5 +2151,116 @@ Rules:
 - direct monitoring/service evidence remains authoritative where the policy declares it so; tickets remain supporting evidence unless the policy explicitly measures tickets;
 - team/shift attribution uses effective ownership intervals and preserves handoffs;
 - report scheduling supports governed business-day/calendar due rules;
-- only PDF/CSV report artifacts are emitted; generated PDF reports prominently display the effective commercial product logo (defaulting to the governed AmrudAi logo: matching light/dark background, preserving aspect ratio, or licensed tenant/MSP logo where a governed white-label configuration is active) and effective customer-facing commercial product branding; CSV reports contain data only without embedded imagery; APIs remain separate interfaces;
 - report queries/workers are bounded and yield to live telemetry, alerting and incident workloads.
+
+---
+
+## 110. Flow DF-INF-003 — Linux Agent eBPF process-to-network telemetry collection and ingestion
+
+> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-INF-013` and `DEC-ARCH-036`.
+
+```mermaid
+sequenceDiagram
+  participant K as Linux Kernel (eBPF Probes / Ring Buffer)
+  participant A as Linux Agent Collector & Aggregator
+  participant AQ as Agent Durable Queue (Disk Spool)
+  participant S as Assigned Sensor Ingestion
+  participant SQ as Sensor Durable Spool
+  participant C as Core Ingestion Service
+  participant KF as Kafka (telemetry.agent.process_network.v1)
+  participant CH as ClickHouse (agent_process_network_facts)
+  participant G as Temporal Operational Graph
+  participant RCA as Deterministic RCA Engine
+
+  Note over K,A: Socket lifecycle events (connect, close, retransmit, RTT)
+  K->>A: Stream socket event records via BPF ring buffer
+  A->>A: Aggregate locally: process/service + remote IP/port + time bucket (60s)
+  A->>A: Track active/new/closed sockets, bytes TX/RX, RTT, drops/sheds
+  A->>AQ: Enqueue bounded ProcessNetworkRecord (drop/shed flags if overloaded)
+  AQ->>S: Deliver over mTLS HTTPS/gRPC (/api/v1/agent/telemetry)
+  S->>SQ: Spool to Sensor durable queue
+  SQ->>C: Push batch to Core Ingestion Service
+  C->>C: Core reservation & entity resolution (resolve remote canonical entity)
+  C->>KF: Transactional produce to Kafka
+  C-->>S: Ingestion ACK
+  S-->>AQ: Spool ACK & watermark advance
+  AQ-->>A: Free queue capacity
+  KF->>CH: Async batch insert to ClickHouse
+  KF->>G: Update process-to-service communication edges
+  KF->>RCA: Corroborate connection failure / timeout evidence
+```
+
+Rules:
+- Strictly no separate eBPF backend or datastore; all data flows through standard Agent queue → Sensor spool → Core ingestion → ClickHouse.
+- Zero payload capture, zero TLS decryption, zero packet inspection; telemetry is strictly socket-level connection performance and process metadata.
+- If kernel map capacity (>90%) or Agent memory ceiling (256MB) is exceeded, collector enters `RESOURCE_GUARDED`, sheds records to aggregate bucket, and marks records with `shed_records_count > 0`.
+
+---
+
+## 111. Flow DF-NET-007 — Active path hop-by-hop probing, change detection and multi-vantage verification
+
+> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-NET-016` and `DEC-ARCH-037`.
+
+```mermaid
+sequenceDiagram
+  participant SCH as Core Scheduler / Operator / Verify Now
+  participant S1 as Network Sensor 1 (Primary Vantage)
+  participant S2 as Network Sensor 2 (Secondary Vantage)
+  participant NET as Intermediate Network Hops (Routers / Middleboxes)
+  participant T as Target Monitored Entity
+  participant C as Core Telemetry Ingestion
+  participant KF as Kafka (network.path.events.v1)
+  participant CH as ClickHouse (path_hop_facts)
+  participant G as Operational Graph / Topology
+  participant RCA as Deterministic RCA Engine
+
+  SCH->>S1: Trigger active path probe (target IP, Paris ICMP/TCP/UDP, max TTL 32)
+  SCH->>S2: Trigger multi-vantage verification probe (same target)
+  par Sensor 1 probing
+    S1->>NET: Send Paris traceroute probes with constant flow identifier
+    NET-->>S1: ICMP Time Exceeded per hop (or unresponsive * * *)
+    S1->>T: Final probe packet
+    T-->>S1: Port unreachable / TCP SYN-ACK / Echo reply
+    S1->>S1: Compute hop RTT min/mean/max, packet loss, jitter
+    S1->>S1: Calculate path fingerprint (hash of responsive hops)
+    S1->>S1: Detect fingerprint change -> emit PathChangeEvent
+  and Sensor 2 probing
+    S2->>NET: Send Paris traceroute probes from Vantage 2
+    NET-->>S2: Hop responses
+    S2->>T: Final probe packet
+    T-->>S2: Target response
+    S2->>S2: Compute Vantage 2 path metrics
+  end
+  S1->>C: Deliver PathObservationRecord & PathChangeEvent
+  S2->>C: Deliver Vantage 2 PathObservationRecord
+  C->>KF: Publish path telemetry & change events
+  KF->>CH: Persist hop metrics to ClickHouse
+  KF->>G: Update physical/logical path hops on graph
+  KF->>RCA: Corroborate path divergence & latency shifts with alert symptoms
+```
+
+Rules:
+- Paris traceroute techniques maintain constant flow identifiers across probes, avoiding ECMP routing artifacts.
+- Unresponsive intermediate hops (`* * *`) or middlebox ICMP suppressions set `is_unresponsive = true` and do NOT assert target DOWN.
+- Multi-vantage divergence (e.g. Vantage 1 degraded, Vantage 2 normal) preserves independent results and contradiction evidence.
+
+---
+
+## 112. Flow DF-OTEL-002 — OpenTelemetry trace reference boundary and Phase-1.5 deferral flow
+
+> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-INF-010` and `DEC-ARCH-044`.
+
+```mermaid
+flowchart LR
+  APP[Application Workloads] -->|OTLP gRPC/HTTP| OIC[Core OTLP Ingestion Collector]
+  OIC -->|Metrics / Gauges / Counters| MET[Kafka: telemetry.metrics.v1 -> ClickHouse]
+  OIC -->|Structured Logs| LOG[Kafka: telemetry.logs.v1 -> ClickHouse]
+  OIC -->|Extract W3C trace_id / span_id| REF[Correlate Reference Attributes on Logs & Events]
+  REF -->|Reference Context| INV[Investigation Sessions & RCA Evidence]
+  OIC -.->|Phase 1.5 Deferral: Raw Trace Spans| DEF[Trace Span Storage / Jaeger / Tempo Backend: DEFERRED]
+```
+
+Rules:
+- OpenTelemetry metrics and structured logs are fully ingested and stored in ClickHouse in Phase 1.
+- Trace context (`trace_id`, `span_id`) is extracted as reference metadata and attached to corresponding logs, events, and investigation evidence.
+- Raw trace span payloads, span storage backends, and distributed waterfall reconstructions remain explicitly deferred to Phase 1.5. No trace database is operated in Phase 1.

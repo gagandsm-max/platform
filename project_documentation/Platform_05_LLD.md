@@ -7,7 +7,7 @@
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-23 — A2.2 HLD/LLD/Dataflow normalization (Issue #102)
+**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
 
 **Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
@@ -2883,3 +2883,158 @@ Recurring desired-state records carry at minimum: tenant, assignment identity, t
 ## 89. Redundant identifier index — P2 hygiene note
 
 V001 unique constraint `uq_identifier_resolution (tenant_id, namespace, identifier_type, identifier_value)` already creates a unique btree. Secondary index `idx_identifier_lookup` on the same columns is redundant unless current query evidence proves otherwise. Future **P2** forward-only DB hygiene only. **No migration number is reserved** by this baseline; never rewrite V001–V009 in place.
+
+---
+
+## 90. Active path probing Low-Level Design (REQ-NET-016)
+
+> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-NET-016` and `DEC-ARCH-037`.
+
+### 90.1 Subsystem placement and execution
+
+Active path probing is implemented within the Sensor runtime (`sensor/protocol-icmp` and `sensor/active-path`). It executes scheduled or on-demand hop-by-hop discovery and latency/loss measurement toward monitored network targets, SD-WAN gateways, and cloud endpoints.
+
+### 90.2 Paris Traceroute algorithm and flow preservation
+
+Traditional traceroute (varying TTL with varying UDP ports or ICMP sequence numbers) causes transit Equal-Cost Multi-Path (ECMP) hashes to assign successive probes to different physical paths, causing artificial route fluttering and false divergence. The Sensor active-path engine implements Paris traceroute:
+1. **Flow Identifier Pinning:** For a given probe run, all probe packets across all TTLs (1..max_ttl) maintain a constant 5-tuple hash signature:
+   - `ICMP_PARIS`: Constant IP Identifier + constant ICMP checksum offset matching the base probe payload.
+   - `TCP_SYN`: Constant source IP/port and destination IP/port; sequence number offset adjusted to preserve checksum.
+   - `UDP_PARIS`: Constant source port and destination port; data checksum offset kept invariant.
+2. **Hop Sequence Acquisition:** Probes increment TTL from 1 up to configured `max_ttl` (default 32, max 64). For each TTL, 3 probe packets are transmitted at 100ms intervals.
+3. **Hop Metrics Computation:**
+   - `rtt_min_ms`, `rtt_mean_ms`, `rtt_max_ms`: Computed from successful ICMP Time Exceeded (type 11, code 0) replies.
+   - `loss_pct`: Percentage of unanswered probes at that hop (0%, 33%, 66%, or 100%).
+   - `jitter_ms`: Mean absolute deviation between successive hop RTT samples.
+4. **Intermediate State Classification:**
+   - If no reply is received within 2000ms: Hop is recorded with IP `*` and `is_unresponsive = 1`.
+   - If router suppresses TTL expiry but forwards traffic: Hop is recorded as `is_hidden = 1`.
+   - MPLS Extension Parsing: If the ICMP reply includes RFC 4950 ICMP extensions, the 32-bit MPLS label stack is decoded and stored in `mpls_labels[]`.
+
+### 90.3 Path Fingerprinting and Change Detection
+
+1. **Fingerprint Hash:** A stable 64-character SHA-256 hash is computed over the ordered sequence of responsive hop IP addresses and resolved ASNs: `SHA256(hop1_ip + ":" + hop1_asn + "->" + hop2_ip + ... + target_ip)`. Unresponsive hops (`*`) are omitted from the hash input to prevent transient dropped packets from triggering false route divergence alerts.
+2. **Divergence Evaluation:** If `current_fingerprint != previous_fingerprint`:
+   - Identify `divergence_hop_index` (the first hop where IP changed).
+   - Generate internal Kafka event `PathChangeEvent` on topic `network.path.events.v1`.
+3. **Causal Boundary:** Intermediate packet loss or incomplete traceroutes (`* * *`) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP liveness proves reachability.
+
+---
+
+## 91. Linux Agent eBPF process-to-network telemetry Low-Level Design (REQ-INF-013)
+
+> **Reconciliation reference:** Issue #142 (Master Chat comment `5909076167`). Governed by `REQ-INF-013` and `DEC-ARCH-036`.
+
+### 91.1 Kernel probe architecture
+
+The Linux Agent includes an eBPF collector module (`agent/linux/ebpf`) leveraging BPF CO-RE:
+1. **Tracepoint / Probe Hooks:**
+   - `sock:inet_sock_set_state`: Hooked on TCP state changes (`TCP_SYN_SENT`, `TCP_ESTABLISHED`, `TCP_CLOSE`, `TCP_CLOSE_WAIT`, `TCP_RESET`).
+   - `fexit/tcp_v4_connect` & `fexit/tcp_v6_connect`: Hooked to capture connect latency and failed outbound connection attempts.
+   - `kprobe/tcp_retransmit_skb`: Hooked to increment retransmission counts per connection.
+2. **Kernel Maps:**
+   - `sock_track_map` (`BPF_MAP_TYPE_LRU_HASH`, `max_entries = 65536`): Keys: `struct sock *`. Values: `struct conn_info` (PID, cgroup ID, local IP/port, remote IP/port, start timestamp, bytes TX/RX counter offsets).
+   - `events_ringbuf` (`BPF_MAP_TYPE_RINGBUF`, size = 8MB): Streams completed connection records and periodic summary deltas to userspace without lock contention.
+
+### 91.2 Userspace local aggregation engine
+
+To prevent telemetry floods, the Linux Agent does NOT stream individual socket events over the network:
+1. **Time Bucketing:** Events are aggregated locally in memory into 60-second time buckets (`bucket_start_at` to `bucket_end_at`).
+2. **Aggregation Key:**
+   ```text
+   ProcessNetworkKey {
+       process_name:      string (max 64 bytes)
+       service_name:      string (max 128 bytes, resolved from systemd cgroup or container metadata)
+       remote_ip:         net.IP (IPv4 or IPv6)
+       remote_port:       uint16
+       protocol:          uint8 (TCP/UDP)
+   }
+   ```
+3. **Cardinality Budget & Heavy-Hitter Overflow:**
+   - Maximum active keys per 60s bucket: 10,000.
+   - If distinct remote endpoint keys exceed 10,000 within a bucket, excess keys are shed into a pre-allocated summary key `__overflow_other__`.
+   - Records carry explicit counters: `dropped_records_count` and `shed_records_count`.
+4. **Resource Governance & Capability States:**
+   - Process RAM limit: 256MB.
+   - If Agent RAM approaches ceiling (>80%) or kernel map drops events, the collector transitions to `RESOURCE_GUARDED` capability state, increases sampling, and sets `resource_guarded_flag = true`.
+   - Complete capability state vocabulary: `ACTIVE | UNSUPPORTED | UNAVAILABLE | PRIVILEGE_DENIED | KERNEL_INCOMPATIBLE | RESOURCE_GUARDED`.
+
+---
+
+## 92. ClickHouse schemas and Kafka topic contracts for Observability Phase 1
+
+### 92.1 Kafka topic contracts
+
+| Topic name | Key | Serialization | Ownership / Retention |
+|---|---|---|---|
+| `telemetry.agent.process_network.v1` | `tenant_id:agent_id` | JSON/Avro (ProcessNetworkRecord) | Agent Ingest -> ClickHouse / Graph / RCA |
+| `telemetry.path_hops.v1` | `tenant_id:path_id` | JSON/Avro (PathObservationRecord) | Sensor Ingest -> ClickHouse |
+| `network.path.events.v1` | `tenant_id:path_id` | JSON/Avro (PathChangeEvent) | Sensor Ingest -> Alert Engine / RCA / Timeline |
+
+### 92.2 ClickHouse table DDL
+
+#### 92.2.1 Agent process-network facts table
+
+```sql
+CREATE TABLE IF NOT EXISTS platform.agent_process_network_facts (
+    tenant_id UUID,
+    bucket_time DateTime64(3, 'UTC'),
+    agent_id UUID,
+    host_id UUID,
+    entity_id Nullable(UUID),
+    process_name LowCardinality(String),
+    executable_path String,
+    service_name LowCardinality(String),
+    pid UInt32,
+    container_id Nullable(String),
+    local_ip String,
+    local_port UInt16,
+    remote_ip String,
+    remote_port UInt16,
+    remote_entity_id Nullable(UUID),
+    protocol LowCardinality(String),
+    active_connections UInt32,
+    new_connections UInt32,
+    closed_connections UInt32,
+    bytes_tx UInt64,
+    bytes_rx UInt64,
+    mean_rtt_us UInt32,
+    retransmit_count UInt32,
+    connection_failures UInt32,
+    quality_state LowCardinality(String),
+    dropped_records_count UInt32,
+    shed_records_count UInt32,
+    created_at DateTime64(3, 'UTC') DEFAULT now()
+) ENGINE = ReplacingMergeTree(created_at)
+PARTITION BY toYYYYMM(bucket_time)
+ORDER BY (tenant_id, bucket_time, service_name, process_name, remote_ip, remote_port);
+```
+
+#### 92.2.2 Active path hop facts table
+
+```sql
+CREATE TABLE IF NOT EXISTS platform.path_hop_facts (
+    tenant_id UUID,
+    probed_at DateTime64(3, 'UTC'),
+    path_id UUID,
+    source_sensor_id UUID,
+    target_entity_id UUID,
+    target_ip String,
+    protocol LowCardinality(String),
+    path_fingerprint String,
+    hop_index UInt8,
+    hop_ip String,
+    hop_hostname Nullable(String),
+    asn Nullable(UInt32),
+    rtt_min_ms Float32,
+    rtt_mean_ms Float32,
+    rtt_max_ms Float32,
+    loss_pct Float32,
+    jitter_ms Float32,
+    is_unresponsive UInt8,
+    is_hidden UInt8,
+    created_at DateTime64(3, 'UTC') DEFAULT now()
+) ENGINE = ReplacingMergeTree(created_at)
+PARTITION BY toYYYYMM(probed_at)
+ORDER BY (tenant_id, path_id, probed_at, hop_index);
+```
