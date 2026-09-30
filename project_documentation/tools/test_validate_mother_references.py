@@ -1532,6 +1532,56 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         errors = validate_docs_root(root)
         self.assertEqual(errors, [], errors)
 
+    def test_54b_req_lic_003_dashboard_banner_alone_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-003",
+                    "dashboard banner",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-LIC-003" in e and "T-7 / 7-day pre-expiry banner" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_54c_req_lic_003_expiry_warning_banner_without_t7_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-003",
+                    "expiry warning banner",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-LIC-003" in e and "T-7 / 7-day pre-expiry banner" in e
+                for e in errors
+            ),
+            errors,
+        )
+
     def test_55_historical_unresolved_provenance_allowed_when_labelled(self) -> None:
         root = self._write_minimal(
             req_rows=[
@@ -1564,6 +1614,160 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "must not state normative FOUNDER-LIC-GRACE UNRESOLVED" in e
+                or "normative FOUNDER-LIC-GRACE UNRESOLVED is obsolete" in e
+                or "15-day post-expiry grace" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_56b_mixed_historical_and_normative_unresolved_fails(self) -> None:
+        """P1-GOV-01: whole-doc historical markers must not mask a normative occurrence."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+            p08_extra=(
+                "\n### Licence grace provenance\n\n"
+                "Historical/superseded provenance only: FOUNDER-LIC-GRACE UNRESOLVED "
+                "(7-day vs 15-day) is closed.\n\n"
+                + ("Padding to isolate local context windows. " * 12)
+                + "\n\n### Active licence note\n\n"
+                "Operations continue under FOUNDER-LIC-GRACE UNRESOLVED until revised.\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "FOUNDER-LIC-GRACE UNRESOLVED" in e
+                and (
+                    "normative" in e.lower()
+                    or "obsolete" in e.lower()
+                )
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_56c_semantic_post_expiry_grace_is_7_days_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+            p08_extra=(
+                "\n### Licence enforcement\n\n"
+                "Normative policy: post-expiry grace is 7 days.\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("stale fixed post-expiry licence-grace" in e for e in errors),
+            errors,
+        )
+
+    def test_56d_semantic_seven_day_grace_after_expiry_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+            p08_extra=(
+                "\n### Licence enforcement\n\n"
+                "Normative policy: seven-day grace after expiry applies.\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("stale fixed post-expiry licence-grace" in e for e in errors),
+            errors,
+        )
+
+    def test_56e_t7_pre_expiry_banner_not_flagged_as_post_expiry(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-003",
+                    "7-day dashboard banner before expiry",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+            p08_extra=(
+                "\n### Pre-expiry notifications\n\n"
+                "T-7: 7-day dashboard banner before expiry remains required.\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_56f_historical_seven_day_post_expiry_provenance_passes(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D)",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+            ],
+            prd_rows=[("PRD-HA-001", "HA pair", "Platform_02_PRD.md")],
+            p08_extra=(
+                "\n### Licence grace provenance\n\n"
+                "Historical/superseded provenance only: seven-day grace after expiry "
+                "was replaced by EXPIRED_GRACE_15D.\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_56g_canonical_fifteen_day_post_expiry_rows_pass(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-LIC-004",
+                    "Post-expiry grace is 15 days (EXPIRED_GRACE_15D); "
+                    "T-7 banner distinct",
+                    "Platform_08_Requirements_Traceability.md",
+                ),
+                (
+                    "REQ-EGC-007",
+                    "Licensing tests preserve Founder-approved 15-day post-expiry grace",
+                    "Platform_21_Enterprise_Gap_Closure_Master.md",
+                ),
+            ],
+            prd_rows=[
+                ("PRD-HA-001", "HA pair", "Platform_02_PRD.md"),
+                (
+                    "PRD-EGC-007",
+                    "Fail-safe licence enforcement; post-expiry grace is 15 days "
+                    "(EXPIRED_GRACE_15D); T-7 banner distinct",
+                    "Platform_21_Enterprise_Gap_Closure_Master.md",
+                ),
+            ],
+        )
+        errors = validate_docs_root(root)
+        self.assertFalse(
+            any(
+                "licence-grace" in e
+                or "FOUNDER-LIC-GRACE" in e
                 or "15-day post-expiry grace" in e
                 for e in errors
             ),

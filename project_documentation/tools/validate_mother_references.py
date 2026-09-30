@@ -1049,6 +1049,56 @@ class MotherReferenceValidator:
                     f"Platform_07 catalogue and Platform_08 primary REQ registry"
                 )
 
+    # Local historical / non-normative markers (per-occurrence window only).
+    # "supersed" matches supersedes / superseded / superseding.
+    _LICENCE_HISTORICAL_MARKERS: tuple[str, ...] = (
+        "historical",
+        "supersed",
+        "non-normative",
+        "provenance only",
+        "provenance-only",
+        "record only",
+        "record-only",
+    )
+
+    # Normative unresolved licence-grace token (and flexible whitespace).
+    _FOUNDER_LIC_GRACE_UNRESOLVED_RE = re.compile(
+        r"founder-lic-grace\s+unresolved",
+        re.IGNORECASE,
+    )
+
+    # Bounded semantic forms of seven-day POST-expiry grace (not T-7 pre-expiry).
+    _SEVEN_DAY_POST_EXPIRY_RE = re.compile(
+        r"(?:"
+        r"post[-\s]?expiry\s+grace\s+is\s+(?:7|seven)\s+days?"
+        r"|"
+        r"(?:7|seven)[-\s]?days?\s+grace\s+after\s+expiry"
+        r"|"
+        r"(?:7|seven)[-\s]?day\s+(?:default\s+)?grace\s+after\s+expiry"
+        r"|"
+        r"grace\s+(?:period\s+)?after\s+expiry\s+is\s+(?:7|seven)\s+days?"
+        r"|"
+        r"7-day\s+default\s+grace\s+after\s+expiry"
+        r"|"
+        r"governed\s+seven-day\s+grace"
+        r"|"
+        r"existing\s+seven-day\s+grace\s+requirement"
+        r"|"
+        r"seven-day\s+default\s+post-expiry\s+grace"
+        r"|"
+        r"seven-day\s+licence\s+grace\s+remains\s+governed"
+        r"|"
+        r"existing\s+seven-day\s+licence\s+grace"
+        r")",
+        re.IGNORECASE,
+    )
+
+    _LICENCE_PRE_EXPIRY_CONTEXT_RE = re.compile(
+        r"(?:pre[-\s]?expiry|before\s+expiry|\bt-7\b|expiry\s+warning|"
+        r"expiry-warning)",
+        re.IGNORECASE,
+    )
+
     def validate_normalized_rtm_licence_grace(
         self, paths: dict[str, Path]
     ) -> None:
@@ -1057,8 +1107,9 @@ class MotherReferenceValidator:
         Guards REQ-LIC-004 / REQ-EGC-007 / PRD-EGC-007 and rejects normative
         reintroduction of FOUNDER-LIC-GRACE UNRESOLVED or seven-day post-expiry
         grace. Preserves T-7 PRE-EXPIRY banner semantics. Historical/superseded
-        provenance mentioning seven-day/unresolved may remain when unambiguously
-        labelled historical/superseded/non-normative.
+        provenance mentioning seven-day/unresolved may remain when that
+        individual occurrence is unambiguously labelled historical/superseded/
+        non-normative/provenance-only in local context (not whole-document).
         """
         rel = "Platform_08_Requirements_Traceability.md"
         if CANONICAL_NORMALIZATION.get(rel) != "NORMALIZED_V1":
@@ -1068,22 +1119,8 @@ class MotherReferenceValidator:
             return
         text = path.read_text(encoding="utf-8")
 
-        stale_forms = (
-            "7-day default grace after expiry",
-            "governed seven-day grace",
-            "existing seven-day grace requirement",
-            "seven-day default post-expiry grace",
-            "seven-day licence grace remains governed",
-            "existing seven-day licence grace",
-        )
-        lowered = text.lower()
-        for stale in stale_forms:
-            if stale.lower() in lowered:
-                if not self._licence_stale_is_historical(text, stale):
-                    self.fail(
-                        f"{rel}: stale fixed post-expiry licence-grace wording "
-                        f"must not appear as normative truth: {stale!r}"
-                    )
+        self._reject_normative_seven_day_post_expiry(rel, text)
+        self._reject_normative_founder_lic_grace_unresolved(rel, text)
 
         req_rows = {
             r["id"]: r
@@ -1117,8 +1154,9 @@ class MotherReferenceValidator:
             else:
                 blob = row.get("summary", "")
             blob_l = blob.lower()
-            if "unresolved" in blob_l and "founder-lic-grace" in blob_l:
-                if "supersed" not in blob_l and "historical" not in blob_l:
+            # Row-level UNRESOLVED: each match must be locally historical.
+            for m in self._FOUNDER_LIC_GRACE_UNRESOLVED_RE.finditer(blob):
+                if not self._licence_local_is_historical(blob, m.start(), m.end()):
                     self.fail(
                         f"{rel}: {rid} must not state normative "
                         f"FOUNDER-LIC-GRACE UNRESOLVED "
@@ -1145,17 +1183,22 @@ class MotherReferenceValidator:
                     lic003.get("locator", ""),
                 ]
             ).lower()
-            if not any(
-                token in banner_blob
-                for token in (
-                    "7-day",
-                    "7 day",
-                    "t-7",
-                    "banner",
-                    "before expiry",
-                    "pre-expiry",
+            has_temporal = bool(
+                re.search(
+                    r"(?:\bt-7\b|7-day|7\s+day|seven-day|"
+                    r"seven\s+days?\s+before\s+expir)",
+                    banner_blob,
                 )
-            ):
+            )
+            has_pre_expiry = (
+                "pre-expiry" in banner_blob
+                or "before expiry" in banner_blob
+                or (
+                    "expiry" in banner_blob
+                    and ("warning" in banner_blob or "banner" in banner_blob)
+                )
+            )
+            if not (has_temporal and has_pre_expiry):
                 self.fail(
                     f"{rel}: REQ-LIC-003 must retain T-7 / 7-day pre-expiry banner semantics"
                 )
@@ -1168,31 +1211,53 @@ class MotherReferenceValidator:
             if not doc_path.is_file():
                 continue
             doc_text = doc_path.read_text(encoding="utf-8")
-            doc_l = doc_text.lower()
-            if (
-                "founder-lic-grace" in doc_l
-                and "unresolved" in doc_l
-                and "supersed" not in doc_l
-                and "historical" not in doc_l
-                and "resolved 2026-09-30" not in doc_l
-            ):
+            self._reject_normative_founder_lic_grace_unresolved(doc_rel, doc_text)
+            self._reject_normative_seven_day_post_expiry(doc_rel, doc_text)
+
+    def _reject_normative_founder_lic_grace_unresolved(
+        self, doc_rel: str, text: str
+    ) -> None:
+        """Fail when any FOUNDER-LIC-GRACE UNRESOLVED occurrence lacks local labels."""
+        for m in self._FOUNDER_LIC_GRACE_UNRESOLVED_RE.finditer(text):
+            if not self._licence_local_is_historical(text, m.start(), m.end()):
                 self.fail(
                     f"{doc_rel}: normative FOUNDER-LIC-GRACE UNRESOLVED is obsolete; "
                     f"label as historical/superseded or state 15-day RESOLVED truth"
                 )
-            for stale in (
-                "existing seven-day licence grace remains governed",
-                "seven-day default post-expiry grace",
-                "7-day default grace after expiry",
-            ):
-                if stale in doc_l and not self._licence_stale_is_historical(doc_text, stale):
-                    self.fail(
-                        f"{doc_rel}: stale normative post-expiry seven-day grace wording: {stale!r}"
-                    )
 
-    @staticmethod
-    def _licence_stale_is_historical(text: str, stale: str) -> bool:
-        """True when stale phrase appears only in historical/superseded context."""
+    def _reject_normative_seven_day_post_expiry(
+        self, doc_rel: str, text: str
+    ) -> None:
+        """Fail normative seven-day POST-expiry grace; allow historical / T-7."""
+        for m in self._SEVEN_DAY_POST_EXPIRY_RE.finditer(text):
+            if self._licence_local_is_historical(text, m.start(), m.end()):
+                continue
+            if self._licence_local_is_pre_expiry(text, m.start(), m.end()):
+                continue
+            self.fail(
+                f"{doc_rel}: stale fixed post-expiry licence-grace wording "
+                f"must not appear as normative truth: {m.group(0)!r}"
+            )
+
+    @classmethod
+    def _licence_local_is_historical(
+        cls, text: str, start: int, end: int, *, radius: int = 160
+    ) -> bool:
+        """True when the span's local window is unambiguously non-normative."""
+        window = text.lower()[max(0, start - radius) : end + radius]
+        return any(marker in window for marker in cls._LICENCE_HISTORICAL_MARKERS)
+
+    @classmethod
+    def _licence_local_is_pre_expiry(
+        cls, text: str, start: int, end: int, *, radius: int = 120
+    ) -> bool:
+        """True when the span's local window is T-7 / pre-expiry warning context."""
+        window = text[max(0, start - radius) : end + radius]
+        return cls._LICENCE_PRE_EXPIRY_CONTEXT_RE.search(window) is not None
+
+    @classmethod
+    def _licence_stale_is_historical(cls, text: str, stale: str) -> bool:
+        """True when every stale-phrase occurrence is locally historical."""
         lower = text.lower()
         needle = stale.lower()
         idx = 0
@@ -1200,21 +1265,15 @@ class MotherReferenceValidator:
         while True:
             pos = lower.find(needle, idx)
             if pos < 0:
-                return True if found or needle not in lower else True
+                return True
             found = True
-            window = lower[max(0, pos - 160) : pos + len(needle) + 160]
-            if not any(
-                marker in window
-                for marker in (
-                    "historical",
-                    "superseded",
-                    "non-normative",
-                    "provenance only",
-                    "record only",
-                )
+            if not cls._licence_local_is_historical(
+                text, pos, pos + len(needle)
             ):
                 return False
             idx = pos + len(needle)
+        # pragma: no cover
+        return not found
 
     def validate(self) -> list[str]:
         self.errors = []
