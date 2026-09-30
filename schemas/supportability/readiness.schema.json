@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/supportability/readiness.schema.json",
+  "title": "Platform Readiness Probe Envelope (BUILD-005 Slice 1)",
+  "description": "Readiness means whether the component can safely perform its currently assigned production responsibility. DEGRADED != NOT_READY. Compact payload only; no queue dumps, scheduler inventories, or full diagnostics.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "ready", "http_semantic", "component", "ts"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["UP", "DEGRADED", "NOT_READY"],
+      "description": "Operational status bound to ready/http_semantic. UP=>ready=true/200; NOT_READY=>ready=false/503; DEGRADED may be ready=true/200 or ready=false/503."
+    },
+    "ready": {
+      "type": "boolean",
+      "description": "true when assigned production responsibility remains safe."
+    },
+    "http_semantic": { "$ref": "common-definitions.schema.json#/$defs/httpSemantic" },
+    "component": { "$ref": "common-definitions.schema.json#/$defs/componentName" },
+    "ts": { "$ref": "common-definitions.schema.json#/$defs/utcTimestamp" },
+    "service_instance_id": { "$ref": "common-definitions.schema.json#/$defs/serviceInstanceId" },
+    "reason_code": { "$ref": "common-definitions.schema.json#/$defs/eventCode" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "UP" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "ready": { "const": true },
+          "http_semantic": { "const": 200 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "NOT_READY" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "ready": { "const": false },
+          "http_semantic": { "const": 503 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "status": { "const": "DEGRADED" }, "ready": { "const": true } },
+        "required": ["status", "ready"]
+      },
+      "then": {
+        "properties": { "http_semantic": { "const": 200 } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "status": { "const": "DEGRADED" }, "ready": { "const": false } },
+        "required": ["status", "ready"]
+      },
+      "then": {
+        "properties": { "http_semantic": { "const": 503 } }
+      }
+    }
+  ],
+  "$comment": "Authoritative matrix: UP/true/200; NOT_READY/false/503; DEGRADED/true/200; DEGRADED/false/503. Semantic validator enforces READINESS_STATUS_SEMANTIC / READINESS_HTTP_SEMANTIC."
+}

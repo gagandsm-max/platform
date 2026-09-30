@@ -1,0 +1,16 @@
+{
+  "ts": "2026-09-30T05:00:01.000Z",
+  "level": "WARN",
+  "component": "platform-sensor",
+  "version": "0.0.0-dev",
+  "service_instance_id": "sensor-instance-01",
+  "sensor_id": "sensor-net-01",
+  "message": "Control sync pending; last trusted configuration remains usable",
+  "event_code": "CONTROL_SYNC_PENDING",
+  "correlation_id": "corr-sensor-001",
+  "retry_count": 0,
+  "safe_context": {
+    "generation": 12,
+    "mode": "trusted_continue"
+  }
+}

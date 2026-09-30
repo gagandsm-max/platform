@@ -1,0 +1,12 @@
+{
+  "ts": "2026-09-30T05:00:00.000Z",
+  "level": "INFO",
+  "component": "platform-core",
+  "version": "0.0.0-dev",
+  "service_instance_id": "core-instance-01",
+  "node_id": "core-node-a",
+  "message": "Desired-state reconciliation cycle completed",
+  "event_code": "CONTROL_RECONCILE_OK",
+  "correlation_id": "corr-core-001",
+  "result": "OK"
+}

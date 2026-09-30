@@ -1,0 +1,8 @@
+{
+  "status": "UP",
+  "ready": true,
+  "http_semantic": 200,
+  "component": "platform-core",
+  "ts": "2026-09-30T05:00:20.000Z",
+  "service_instance_id": "core-instance-01"
+}

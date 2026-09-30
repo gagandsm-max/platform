@@ -1,0 +1,9 @@
+{
+  "status": "DEGRADED",
+  "ready": false,
+  "http_semantic": 503,
+  "component": "platform-sensor",
+  "ts": "2026-09-30T05:00:22.000Z",
+  "service_instance_id": "sensor-instance-01",
+  "reason_code": "STORAGE_PROTECTION_ACTIVE"
+}

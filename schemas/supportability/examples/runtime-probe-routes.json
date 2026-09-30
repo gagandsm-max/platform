@@ -1,0 +1,108 @@
+{
+  "document_type": "RUNTIME_PROBE_ROUTES",
+  "schema_version": "1.0.0",
+  "runtimes": [
+    {
+      "runtime": "core",
+      "conformance": "FOUNDATIONAL",
+      "routes": [
+        {
+          "path": "/actuator/health/liveness",
+          "role": "LIVENESS",
+          "compatibility": false
+        },
+        {
+          "path": "/actuator/health/readiness",
+          "role": "READINESS",
+          "compatibility": false
+        },
+        {
+          "path": "/actuator/health",
+          "role": "PUBLIC_OVERALL",
+          "compatibility": false,
+          "notes": "Public overall status only. No new Core detailed health API in BUILD-005."
+        }
+      ],
+      "notes": "Core detailed health API /api/v1/health/detailed is explicitly out of BUILD-005 scope."
+    },
+    {
+      "runtime": "sensor",
+      "conformance": "FOUNDATIONAL",
+      "routes": [
+        {
+          "path": "/livez",
+          "role": "LIVENESS",
+          "compatibility": false
+        },
+        {
+          "path": "/readyz",
+          "role": "READINESS",
+          "compatibility": false
+        },
+        {
+          "path": "/health",
+          "role": "DETAILED",
+          "compatibility": false
+        },
+        {
+          "path": "/healthz",
+          "role": "DETAILED",
+          "compatibility": true,
+          "notes": "Compatibility alias of detailed health. Must NOT be redefined as readiness."
+        }
+      ]
+    },
+    {
+      "runtime": "agent",
+      "conformance": "FOUNDATIONAL",
+      "routes": [
+        {
+          "path": "/live",
+          "role": "LIVENESS",
+          "compatibility": false
+        },
+        {
+          "path": "/ready",
+          "role": "READINESS",
+          "compatibility": false
+        },
+        {
+          "path": "/healthz",
+          "role": "READINESS",
+          "compatibility": true,
+          "notes": "Compatibility alias of readiness. Distinct from Sensor /healthz detailed semantics."
+        },
+        {
+          "path": "/health",
+          "role": "DETAILED",
+          "compatibility": false,
+          "notes": "Detailed health remains loopback-bound by current Agent implementation."
+        }
+      ]
+    },
+    {
+      "runtime": "analytics",
+      "conformance": "BASELINE_LATER",
+      "routes": [
+        {
+          "path": "/health",
+          "role": "PUBLIC_OVERALL",
+          "compatibility": false
+        },
+        {
+          "path": "/healthz",
+          "role": "PUBLIC_OVERALL",
+          "compatibility": true
+        }
+      ],
+      "notes": "Analytics is a later bounded baseline conformance target. This fixture does not certify analytics algorithms or AI behavior."
+    }
+  ],
+  "non_goals": [
+    "Do not force Sensor /live or /ready aliases without a concrete consumer.",
+    "Do not force Agent /livez or /readyz aliases without a concrete consumer.",
+    "Do not require identical probe URL strings across runtimes.",
+    "Do not add Prometheus, OpenTelemetry Collector, metrics database, sidecar, or external monitoring service.",
+    "Do not claim Core exposes a new detailed health API in BUILD-005."
+  ]
+}

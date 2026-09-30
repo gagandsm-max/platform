@@ -1,0 +1,15 @@
+{
+  "ts": "2026-09-30T05:00:02.000Z",
+  "level": "INFO",
+  "component": "platform-agent",
+  "version": "0.0.0-dev",
+  "service_instance_id": "agent-instance-01",
+  "agent_id": "agent-host-01",
+  "message": "Endpoint telemetry batch accepted by Sensor",
+  "event_code": "AGENT_DELIVERY_OK",
+  "correlation_id": "corr-agent-001",
+  "result": "ACCEPTED",
+  "safe_context": {
+    "records": 8
+  }
+}

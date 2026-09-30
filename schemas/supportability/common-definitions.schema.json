@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platform.invalid/schemas/supportability/common-definitions.schema.json",
+  "title": "Platform Supportability Common Definitions (BUILD-005 Slice 1)",
+  "description": "Reusable bounded supportability definitions. Machine-testable contract only. SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED. No Prometheus/OTel Collector/metrics DB. No runtime conformance in Slice 1.",
+  "$defs": {
+    "utcTimestamp": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 40,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
+      "description": "Canonical UTC timestamp field name is ts."
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "description": "Opaque correlation identifier. Not tenant/auth authority. Not telemetry batch/stream/sequence/assignment/fencing identity."
+    },
+    "eventCode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "description": "Canonical operational event/error code field. Legacy JSON key error_code is non-canonical."
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "Canonical tenant UUID when present. Do not invent a tenant ID."
+    },
+    "serviceInstanceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "description": "Unique to one process/runtime instance; changes after restart; non-secret; immutable during one process; not persistent node/sensor/agent authority; not tenant authorization."
+    },
+    "componentName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "description": "Canonical component identity field. Legacy JSON key service is non-canonical."
+    },
+    "versionString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "boundedId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "nodeId": {
+      "$ref": "#/$defs/boundedId"
+    },
+    "sensorId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "agentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "logLevel": {
+      "type": "string",
+      "enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "description": "Human-readable message. Canonical field is message; msg is non-canonical."
+    },
+    "retryCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "safeContextValue": {
+      "oneOf": [
+        { "type": "string", "maxLength": 256 },
+        { "type": "number" },
+        { "type": "boolean" },
+        { "type": "null" }
+      ]
+    },
+    "safeContext": {
+      "type": "object",
+      "description": "Bounded extension object for non-secret contextual fields. Max 16 properties. Keys bounded. Primitive values only. No nested objects/arrays.",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": { "$ref": "#/$defs/safeContextValue" },
+      "maxProperties": 16
+    },
+    "httpSemantic": {
+      "type": "integer",
+      "enum": [200, 503],
+      "description": "Probe HTTP semantic for readiness. DEGRADED with ready=true uses 200."
+    },
+    "nonGoals": {
+      "description": "BUILD-005 Slice 1 explicitly does not introduce Prometheus, OpenTelemetry Collector, sidecars, metrics databases, queues/topics, or external monitoring services."
+    }
+  }
+}

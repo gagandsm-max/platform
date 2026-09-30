@@ -1,0 +1,32 @@
+{
+  "document_type": "SUPPORT_EVIDENCE",
+  "component": "platform-sensor",
+  "version": "0.0.0-dev",
+  "service_instance_id": "sensor-instance-01",
+  "ts": "2026-09-30T05:00:30.000Z",
+  "uptime_seconds": 3600,
+  "component_state": "DEGRADED",
+  "storage_pressure_percent": 42,
+  "spool_pressure_percent": 35,
+  "queue_depth": 12,
+  "queue_capacity": 1000,
+  "scheduler_status": "RUNNING",
+  "control_reconciliation_status": "SYNC_PENDING",
+  "delivery_status": "OK",
+  "dependency_status": {
+    "core_control": "UP",
+    "local_spool": "UP"
+  },
+  "counters": {
+    "retries": 3,
+    "rejections": 0,
+    "failures": 1
+  },
+  "gauges": {
+    "spool_bytes": 1048576
+  },
+  "reason_codes": ["CONTROL_SYNC_PENDING"],
+  "state_timestamps": {
+    "last_applied": "2026-09-30T04:59:00.000Z"
+  }
+}
