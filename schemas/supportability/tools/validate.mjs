@@ -124,10 +124,50 @@ function requireKeys(obj, required, issues, source, p) {
   }
 }
 
+function isLeapYear(year) {
+  return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+}
+
 function assertUtcTs(value, issues, source, p) {
   if (typeof value !== 'string' || value.length < 20 || value.length > 40 || !TS_Z_RE.test(value)) {
     add(issues, 'INVALID_UTC_TIMESTAMP', source, p, 'ts must be UTC RFC3339 with Z');
+    return;
   }
+  const match = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]+)?Z$/.exec(value);
+  if (!match) {
+    add(issues, 'INVALID_UTC_TIMESTAMP', source, p, 'ts must be UTC RFC3339 with Z');
+    return;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) {
+    add(issues, 'INVALID_UTC_TIMESTAMP', source, p, 'ts calendar/time fields out of range');
+    return;
+  }
+  const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (day < 1 || day > daysInMonth[month - 1]) {
+    add(issues, 'INVALID_UTC_TIMESTAMP', source, p, 'ts day is invalid for month/year');
+  }
+}
+
+/**
+ * Targeted Authorization credential-value detector for bounded context fields.
+ * Matches credential-like Bearer/Basic values only — not ordinary prose with spaces.
+ * Must NOT be applied to the normal structured-log message field.
+ */
+function looksLikeAuthorizationCredential(value) {
+  if (typeof value !== 'string') return false;
+  // Bearer <single-token> — no descriptive spaces after Bearer.
+  if (/^\s*Bearer\s+[A-Za-z0-9._~+/=-]{1,}\s*$/i.test(value)) return true;
+  // Basic <base64-like credential blob>
+  if (/^\s*Basic\s+[A-Za-z0-9+/]+=*\s*$/i.test(value) && value.replace(/^\s*Basic\s+/i, '').trim().length >= 4) {
+    return true;
+  }
+  return false;
 }
 
 function assertComponent(value, issues, source, p) {
@@ -211,6 +251,9 @@ function assertSafeContext(value, issues, source, p) {
     }
     if (!(v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
       add(issues, 'INVALID_TYPE', source, `${p}.${k}`, 'safe_context value type unsupported');
+    }
+    if (typeof v === 'string' && looksLikeAuthorizationCredential(v)) {
+      add(issues, 'AUTHORIZATION_MATERIAL', source, `${p}.${k}`, 'safe_context value contains Authorization credential material');
     }
   }
   assertNoSecrets(value, issues, source, p);
@@ -548,9 +591,27 @@ function validateProbeRoutes(doc, issues, source) {
 
   const core = byRuntime.get('core');
   if (core) {
-    const paths = new Set(core.routes.map((r) => r.path));
-    for (const required of ['/actuator/health/liveness', '/actuator/health/readiness', '/actuator/health']) {
-      if (!paths.has(required)) add(issues, 'ROUTE_ROLE_INVARIANT', source, '$.runtimes[core]', `Core missing required probe path ${required}`);
+    const byPath = new Map(core.routes.map((r) => [r.path, r]));
+    const requiredCore = [
+      { path: '/actuator/health/liveness', role: 'LIVENESS', compatibility: false },
+      { path: '/actuator/health/readiness', role: 'READINESS', compatibility: false },
+      { path: '/actuator/health', role: 'PUBLIC_OVERALL', compatibility: false },
+    ];
+    for (const expected of requiredCore) {
+      const route = byPath.get(expected.path);
+      if (!route) {
+        add(issues, 'ROUTE_ROLE_INVARIANT', source, '$.runtimes[core]', `Core missing required probe path ${expected.path}`);
+        continue;
+      }
+      if (route.role !== expected.role || route.compatibility !== expected.compatibility) {
+        add(
+          issues,
+          'ROUTE_ROLE_INVARIANT',
+          source,
+          `$.runtimes[core].${expected.path}`,
+          `Core ${expected.path} must be role=${expected.role} compatibility=${expected.compatibility}`,
+        );
+      }
     }
   }
 
