@@ -143,7 +143,7 @@ For Unified Network & Infrastructure Observability capabilities governed by Phas
 - SLI/SLO/error-budget calculations expose scope, windows, exclusions and evidence; contractual commitments remain Founder-reserved unless formally approved.
 - Audit integrity must provide independently verifiable tamper evidence without assuming a cryptographic construction before architecture/security review.
 - Tenant offboarding distinguishes active-data deletion, backup/archive retention or expiry, legal hold and final destruction evidence; never promise immediate physical erasure from immutable backups.
-- Existing seven-day licence grace remains governed behavior; do not invent prices, quantities or SKUs.
+- Founder-approved post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`); the T-7 pre-expiry dashboard banner remains governed and is distinct from post-expiry grace. Do not invent prices, quantities or SKUs.
 - Policy-as-code/Git inputs are declarations only and cannot bypass Platform RBAC, validation, approval, audit or runtime safety.
 - Endpoint DEX is operational-experience monitoring, not employee surveillance; prohibited content/surveillance collection remains out of scope.
 - Browser synthetics, outside-in probes and regional federation do not select a runtime/vendor/dependency or reopen v1 exactly-two-Core Active/Standby by implication.

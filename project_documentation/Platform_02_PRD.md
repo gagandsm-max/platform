@@ -1810,22 +1810,29 @@ Support customer CA, CSR/import/renewal, trust stores and certificate rotation. 
 
 ## 33. Licensing and usage forecast
 
-### Licensing grace — Founder-reserved conflict (UNRESOLVED)
+### Licensing grace — Founder-approved 15-day post-expiry grace
 
-**Founder-reserved conflict — neither 7-day nor 15-day post-expiry grace is current final normative commercial truth.**
+**Authority:** Founder decision **2026-09-30** — post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`).
 
-Conflicting historical/source values (record only; do not select):
+Supersedes prior seven-day post-expiry authority, normative `FOUNDER-LIC-GRACE UNRESOLVED`, and any normative 7-vs-15 unresolved conflict.
 
-- Current Mother Reference material: **7-day** post-expiry grace.
-- Prior Founder-approved material: **15-day** post-expiry grace.
+Canonical state machine:
 
-Until Founder change control resolves **FOUNDER-LIC-GRACE**:
+`VALID → EXPIRING_30D → EXPIRING_7D_BANNER → EXPIRED_GRACE_15D → POLLING_SUSPENDED`
 
-- post-expiry grace is a Founder-reserved, decision-required / configurable duration;
-- polling continues during whichever post-expiry grace duration is formally approved;
-- after the approved grace duration ends, polling stops unless the licence is manually extended/renewed;
+Distinguish:
+
+- **T-7 pre-expiry banner** (7 days before expiry) — remains governed;
+- **15-day post-expiry grace** — polling continues for 15 days after expiry.
+
+Normative behavior:
+
+- polling continues during the 15-day post-expiry grace;
+- after the 15-day grace ends, polling stops unless the licence is manually extended/renewed;
 - historical data remains accessible; no licence-expiry data deletion;
-- engineering must not invent a compromise day-count and must not treat either historical value as settled commercial truth.
+- engineering must not reintroduce seven-day post-expiry grace as normative truth.
+
+Historical/superseded provenance only: earlier Mother Reference / source material recorded a seven-day post-expiry grace and temporarily treated 7-day vs 15-day as unresolved. That conflict is **closed**.
 
 Normative non-grace continuity (unchanged):
 
@@ -1838,8 +1845,8 @@ Normative non-grace continuity (unchanged):
 
 - T-30 days: warning begins.
 - T-7 days: persistent dashboard banner with exact days remaining.
-- Post-expiry: grace of Founder-approved duration (**FOUNDER-LIC-GRACE** unresolved; historical/source values 7-day vs 15-day only); polling continues during that approved grace.
-- After the approved grace ends: polling stops unless manually extended/renewed; historical data remains available.
+- Post-expiry: **15-day** grace (`EXPIRED_GRACE_15D`); polling continues during grace.
+- After the 15-day grace ends: polling stops unless manually extended/renewed; historical data remains available.
 - License/entitlement events are audited and visible in Usage & Licensing dashboard.
 
 
@@ -2298,7 +2305,7 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 ---
 
 
-| FOUNDER-LIC-GRACE | Post-expiry licence grace: conflicting historical/source values 7-day vs 15-day; neither is final normative commercial truth until Founder decision | UNRESOLVED |
+| FOUNDER-LIC-GRACE | Post-expiry licence grace | **RESOLVED 2026-09-30 (Founder):** **15 days** (`EXPIRED_GRACE_15D`). Supersedes prior seven-day post-expiry authority and historical UNRESOLVED 7-vs-15 conflict. T-7 pre-expiry banner remains distinct. |
 
 ## 44. A2.1 migration note
 

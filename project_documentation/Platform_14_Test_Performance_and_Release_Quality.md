@@ -55,6 +55,20 @@ UI E2E/integration suites shall verify: device/alert/incident context is preserv
 
 Qualification tests must prove that SNMP failure alone does not automatically declare device-down where secondary evidence shows device reachability. Flapping/storm/dependency correlation and recovery qualification require regression suites.
 
+### 4.1 Availability Qualification Deadline
+
+Architecture must **not** permit `No Data → wait indefinitely`, and must **not** encode `timeout → DEVICE_DOWN`.
+
+By the applicable bounded **Availability Qualification Deadline**, Platform reaches the most truthful governed semantic state supported by evidence (for example `DOWN`, `MONITORING_DEGRADED`, `UNKNOWN`, `NO_DATA`, `STALE`, Sensor/path/site/platform reachability fault, or other monitor-specific governed state).
+
+Deadline depends on applicable monitor class, configured cadence, criticality, topology, Sensor health, evidence diversity, active validation and policy.
+
+Certification ownership: BUILD-080 / BUILD-082 (with supporting Sensor/path evidence from network/infrastructure builds). Minimum certification scenarios: actual powered-off device; SNMP-only failure; credential failure; Sensor failure; Core connectivity failure; site WAN isolation; upstream router failure; partial multi-vantage failure.
+
+Measure at least: time-to-evidence-loss; time-to-qualified-semantic-state; time-to-incident where applicable; false-DOWN result/rate.
+
+Preserve: `No Data != Device Down`; monitoring-path failure != monitored-object Down.
+
 ## 5. Packaging/reboot tests
 
 Every `.deb`/`.rpm` package is installed on clean certified OS images, rebooted, upgraded, rolled back where supported and uninstalled. Services must auto-start and retain configuration. Windows Agent MSI/BAT install and reboot behavior is tested on Windows runners.

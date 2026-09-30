@@ -281,6 +281,8 @@ validate complete source batch
 
 Semantics are **at-least-once**, not exactly-once. Duplicate Kafka publication of the same stable logical observation identity is tolerated; canonical ClickHouse reads must not expose duplicate logical numeric observations. Concurrent exact HTTP retries while a reservation is `RETRY_PENDING` may amplify republish volume; that is a recorded **P1** hardening concern under the normal serialized Sensor uploader path. No distributed publisher lease/service is introduced by this documentation baseline.
 
+**Deletion-authorizing ACK HA durability invariant:** If Core issues an ACK that authorizes the Sensor to delete acknowledged telemetry from its durable spool, that telemetry must survive every failure in the certified single-Core HA failure matrix (`ACKED-FOR-DELETION TELEMETRY RPO = 0` for those scenarios; not site/DR RPO). Conceptual lifecycle: Sensor durable spool → Core acceptance → certified HA durability barrier → deletion-authorizing ACK → Sensor may delete acknowledged segment. Physical HA mechanisms remain unselected; closure belongs to `HA_DURABILITY_DESIGN_GATE` / BUILD-120–124.
+
 ## 8. Unified correlation / RCA contract supplement — v3.2.2
 
 The existing Incident/Graph/RCA authority remains singular. Domain-specific rules normalize into the same contracts; they do not create separate network/storage/infrastructure RCA truth stores.

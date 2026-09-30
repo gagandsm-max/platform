@@ -291,7 +291,7 @@ A1 makes this contract normative. Completing the field set for every capability 
 - Agent-backed endpoint identity is anchored to canonical `entity_id` plus unique `agent_id`/mTLS identity; system/host name is human-readable technical identity and dynamic IP/MAC values are mutable observations.
 - Platform exposes one global per-user Notification Center/bell with server-side tenant/RBAC/resource scoping; operational Alerts/Incidents remain distinct from platform/workflow notifications.
 - Enterprise integrations normalize vendor-specific evidence into Platform-owned canonical contracts; vendor identifiers do not override tenant/entity authority.
-- Existing seven-day licence grace remains governed behavior. Commercial quantities, packaging and pricing remain Founder-reserved.
+- Founder-approved post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`). The T-7 pre-expiry dashboard banner remains governed and is distinct from post-expiry grace. Commercial quantities, packaging and pricing remain Founder-reserved.
 - Declarative policy/configuration inputs cannot bypass Platform RBAC, validation, approvals, audit or runtime safety.
 - Endpoint DEX is bounded operational-experience monitoring, not employee surveillance.
 - Future regional federation does not reopen the v1 exactly-two-Core Active/Standby topology by implication.

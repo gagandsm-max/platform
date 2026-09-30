@@ -1235,14 +1235,14 @@ Sensor local-spool protection uses the same principle but prioritizes unshipped 
 
 ## 40. Licensing expiry state machine
 
-`VALID -> EXPIRING_30D -> EXPIRING_7D_BANNER -> EXPIRED_GRACE (FOUNDER-LIC-GRACE duration UNRESOLVED) -> POLLING_SUSPENDED`.
+`VALID -> EXPIRING_30D -> EXPIRING_7D_BANNER -> EXPIRED_GRACE_15D -> POLLING_SUSPENDED`.
 
-**FOUNDER-LIC-GRACE (UNRESOLVED):** post-expiry grace duration is Founder-reserved. Historical/source values are 7 days and 15 days; neither is normative commercial truth. Engineering must not choose a compromise day-count. Polling continues during the Founder-approved grace duration; polling stops when that approved grace expires unless the licence is renewed/extended.
+**FOUNDER-LIC-GRACE (RESOLVED 2026-09-30):** Founder-approved post-expiry grace is **15 days**. This supersedes prior seven-day post-expiry authority and historical `FOUNDER-LIC-GRACE UNRESOLVED` / 7-vs-15 conflict. Polling continues during the 15-day grace; polling stops when that grace expires unless the licence is renewed/extended.
 
 Normative non-grace continuity (unchanged):
 
 - T-30 licence-expiry warning remains.
-- T-7 pre-expiry persistent dashboard banner remains (`Licence expires in X days`).
+- T-7 pre-expiry persistent dashboard banner remains (`Licence expires in X days`) and is **not** the same as post-expiry grace.
 - Historical query/UI/admin/licence-management/audit remain available in `POLLING_SUSPENDED`.
 - Manual administrative license extension can move the deployment back to `VALID` without reinstalling Core/Sensors.
 

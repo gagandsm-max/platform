@@ -571,25 +571,34 @@ Normative licensing continuity that is **not** in commercial conflict:
 - Licence administration remains available so authorized users can apply an extension/new licence
 - Slight over-entitlement should generate clear commercial warnings rather than randomly dropping devices; exact overage policy is TBD
 
-### 34.2 Post-expiry grace — Founder-reserved conflict (UNRESOLVED)
+### 34.2 Post-expiry grace — Founder-approved 15 days (2026-09-30)
 
-**Founder-reserved conflict — do not resolve in A2.1. Neither value is current final normative commercial truth.**
+**Authority:** Founder decision **2026-09-30** — post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`).
 
-Conflicting historical/source values:
+This decision **supersedes**:
+- prior seven-day post-expiry authority;
+- normative `FOUNDER-LIC-GRACE UNRESOLVED`;
+- any normative **7 vs 15** unresolved conflict.
 
-- Current Mother Reference material has recorded a **7-day** post-expiry grace.
-- Prior Founder-approved material has recorded a **15-day** post-expiry grace.
+Canonical continuity state machine (product):
 
-Until Founder change control selects one value:
+`VALID → EXPIRING_30D → EXPIRING_7D_BANNER → EXPIRED_GRACE_15D → POLLING_SUSPENDED`
 
-- post-expiry grace is a **Founder-reserved, decision-required duration** (not a chosen constant in this document);
-- polling continues during whichever post-expiry grace duration is formally approved;
-- after the approved grace duration ends, polling stops unless the licence is manually extended/renewed;
-- engineering must not silently treat 7 days or 15 days as final commercial truth, must not invent a compromise value, and must not change commercial terms under this tranche.
+Important distinction (must not be collapsed):
 
-**FOUNDER-LIC-GRACE:** licence grace period 7 days (Mother References) vs 15 days (prior Founder-approved material) — **UNRESOLVED**.
+- **T-7 pre-expiry warning/banner** = 7 days **before** expiry (unchanged, governed);
+- **15-day post-expiry grace** = polling may continue for 15 days **after** expiry.
 
-Authorized administrators shall see licensed vs used entities/elements/modules and forecast approaching entitlement thresholds/expiry. Usage foresight does not replace expiry/grace behavior once the Founder resolves the conflict.
+Normative behavior:
+
+- polling continues during the 15-day post-expiry grace;
+- after the 15-day grace ends, polling stops unless the licence is manually extended/renewed;
+- historical data remains accessible; no licence-expiry data deletion;
+- commercial quantities, packaging, pricing and SKUs remain Founder-reserved.
+
+Historical/superseded provenance only (non-normative): earlier Mother Reference material recorded a seven-day post-expiry grace and temporarily left `FOUNDER-LIC-GRACE` unresolved between 7-day and 15-day historical/source values. Those statements are **superseded** and must not be treated as current commercial truth.
+
+Authorized administrators shall see licensed vs used entities/elements/modules and forecast approaching entitlement thresholds/expiry. Usage foresight does not replace expiry/grace behavior.
 
 ---
 
@@ -702,7 +711,7 @@ Out of initial product scope:
 | TBD-08 | Exact default retention durations/rollup periods | Product defaults TBD; UI remains configurable |
 | TBD-09 | Exact numeric UI/API SLOs after performance baseline | Benchmark required |
 | TBD-10 | Future Master Core/Regional Core release scope | Future architecture only |
-| **FOUNDER-LIC-GRACE** | Post-expiry licence grace duration: conflicting historical/source values **7 days** (Mother References) vs **15 days** (prior Founder-approved material); neither is final normative commercial truth until Founder decision | **Founder-reserved conflict — UNRESOLVED** |
+| **FOUNDER-LIC-GRACE** | Post-expiry licence grace duration | **RESOLVED 2026-09-30 (Founder):** **15 days** (`EXPIRED_GRACE_15D`). Supersedes prior seven-day post-expiry authority and historical `FOUNDER-LIC-GRACE UNRESOLVED` / 7-vs-15 conflict. T-7 pre-expiry banner remains distinct and governed. |
 
 ---
 

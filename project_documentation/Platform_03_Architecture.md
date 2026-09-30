@@ -926,6 +926,24 @@ durable spool stream identity
 
 At-least-once. Concurrent pending-reservation HTTP retries may amplify Kafka republish (P1 hardening). PR #59 insert-token/dedupe-window correctness is superseded; bounded Kafka→ClickHouse micro-batching remains future P1 performance work after benchmark.
 
+**Deletion-authorizing ACK / HA durability invariant (FROZEN governance; physical mechanism NOT selected):**
+
+If Core issues an ACK that authorizes the Sensor to delete acknowledged telemetry from its durable spool, that telemetry must survive every failure in the certified single-Core HA failure matrix.
+
+Equivalent technical target: `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified single-Core HA failure scenarios (distinct from site/DR RPO).
+
+Conceptual lifecycle:
+
+```text
+Sensor durable spool
+→ Core acceptance
+→ certified HA durability barrier
+→ deletion-authorizing ACK
+→ Sensor may delete acknowledged segment
+```
+
+Closure of physical mechanisms (dual watermark, Kafka ISR/topology, synchronous PostgreSQL design, ClickHouse replication, Patroni/repmgr/Keeper, witness, etcd/Consul/Raft, Sensor quorum, new coordinator) remains an output of `HA_DURABILITY_DESIGN_GATE` / BUILD-120–124 engineering — not selected here.
+
 1. Exact two-Core Kafka failover implementation and acceptance model.
 2. Exact two-Core ClickHouse synchronization/failover implementation.
 3. Exact HA fencing mechanism for ambiguous node/network failures.
@@ -1445,7 +1463,7 @@ The following remain explicitly unresolved / TBD. No TBD may be converted into a
 6. Exact certified Sensor density beyond planning baseline (**benchmark required**)
 7. Future regional/Master Core release design (**future**)
 8. Final compliance certification roadmap (**TBD**)
-9. Licence grace 7 vs 15 day Founder-reserved conflict (**Founder-reserved — see BRD/PRD**)
+9. Licence post-expiry grace duration (**RESOLVED 2026-09-30 — Founder:** 15 days / `EXPIRED_GRACE_15D`; T-7 pre-expiry banner remains distinct)
 
 Additional open HA mechanism bullets in §7 remain in force.
 

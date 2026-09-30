@@ -32,6 +32,7 @@ Nothing in this document selects a commercial model/provider, vector database, m
 10. **AI claims require provenance.** Every causal or recommended-action claim must trace to authoritative evidence and disclose uncertainty/contradictions.
 11. **Local intelligence is lightweight by design.** Local AI/ML/LLM may run on Core only inside a certified non-interference envelope or may use an approved dedicated local/private inference provider through AI Gateway; neither mode creates a mandatory GPU requirement, and AI work shall yield or fail independently before live monitoring is degraded.
 12. **Small model, strong tools.** Platform shall reduce/query/correlate evidence deterministically before LLM inference; the local LLM is an explanation/copilot layer, not the hot-path monitoring or causal engine.
+13. **First GA cut line.** First GA is **Network & Infrastructure Observability core**. Deterministic RCA remains first-GA scope. BUILD-102 GNN / learned correlation and BUILD-103 local LLM / advanced AI (and advanced/candidate AI generally) are **roadmap capabilities and not first-GA blockers** unless later promoted through change control. They are not cancelled and are not falsely marked implemented by this statement. Issue #145 remains separate FUTURE Phase-2 architecture / change-control authority and is not reconciled here.
 
 ---
 

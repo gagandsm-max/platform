@@ -740,7 +740,17 @@ Required runbooks/additions:
 
 Support evidence includes candidate/Agent/entity IDs, correlation IDs, lifecycle/revision, decision/audit references, notification IDs/dedupe keys and sanitized identity facts. Credentials/private keys are never exposed.
 
-**Current implementation truth:** `sensor/internal/identity/http_enrollment.go` still models a legacy enrollment response containing `privateKeyPem` from Core. That runtime path is **NON-CONFORMANT with PRD-ONB-017/018 and REQ-ONB-016/017** and remains an implementation gap. It must be replaced by endpoint-local key generation plus CSR/proof-of-possession before Sensor/Agent bootstrap can be classified IMPLEMENTED/TESTED against this architecture. This documentation change does not claim that migration is complete.
+**Current Sensor enrollment implementation truth** (`sensor/internal/identity`, bounded; does **not** claim full PKI lifecycle, rotation, revocation, BUILD-017, or BUILD-025 certified):
+
+| Fact | Maturity |
+|---|---|
+| Sensor local private-key generation | **IMPLEMENTED + TESTED** |
+| CSR locally generated and sent to Core | **IMPLEMENTED + TESTED** |
+| `privateKeyPem` transmitted from Sensor | **NO** |
+| `privateKeyPem` returned as accepted Core enrollment contract | **NO** |
+| Legacy Core response containing private-key material | **REJECTED** |
+
+Public production Core enrollment issuer/API and full Sensor/Agent bootstrap certification remain separately owned.
 
 Operational self-monitoring includes candidate queue depth/age, review backlog, identity-conflict count, notification generation/delivery lag, dedupe/rate-limit drops, recipient expansion failures and storage/query health for current notification state.
 
