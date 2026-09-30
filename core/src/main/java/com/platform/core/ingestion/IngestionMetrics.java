@@ -62,9 +62,9 @@ public class IngestionMetrics {
         lastPersistenceTimestamp.set(Instant.now());
     }
 
-    public void recordKafkaFailure(String error) {
+    public void recordKafkaFailure(String errorCode) {
         kafkaFailures.incrementAndGet();
-        lastError.set(error);
+        lastError.set(stableOrEmpty(errorCode));
     }
 
     public void recordClickHouseInsert(long count, long durationMs) {
@@ -73,21 +73,21 @@ public class IngestionMetrics {
         lastPersistenceTimestamp.set(Instant.now());
     }
 
-    public void recordClickHouseFailure(String error) {
+    public void recordClickHouseFailure(String errorCode) {
         clickHouseFailures.incrementAndGet();
-        lastError.set(error);
+        lastError.set(stableOrEmpty(errorCode));
     }
 
     public void recordConsumerPoisonEvent(String topic, long offset, String error) {
         consumerPoisonEvents.incrementAndGet();
         consumerDegraded.set(true);
-        consumerDegradedReason.set("Poison event on " + topic + " offset " + offset + ": " + error);
-        lastError.set("ERR_KAFKA_POISON_EVENT");
+        consumerDegradedReason.set(com.platform.core.logging.CoreSupportabilityEventCodes.TELEMETRY_POISON_EVENT);
+        lastError.set(com.platform.core.logging.CoreSupportabilityEventCodes.TELEMETRY_POISON_EVENT);
     }
 
-    public void recordConsumerDegraded(String reason) {
+    public void recordConsumerDegraded(String reasonCode) {
         consumerDegraded.set(true);
-        consumerDegradedReason.set(reason);
+        consumerDegradedReason.set(stableOrEmpty(reasonCode));
     }
 
     public void recordConsumerHealthy() {
@@ -101,9 +101,9 @@ public class IngestionMetrics {
     public void recordSequenceRegression() { sequenceRegressions.incrementAndGet(); }
     public void recordStreamMismatch() { streamMismatches.incrementAndGet(); }
     public void recordPublisherLeaseContention() { publisherLeaseContentions.incrementAndGet(); }
-    public void recordFinalizeFailure(String error) {
+    public void recordFinalizeFailure(String errorCode) {
         finalizeFailures.incrementAndGet();
-        lastError.set(error);
+        lastError.set(stableOrEmpty(errorCode));
     }
     public void recordPendingReservationObserved() { pendingReservationsObserved.incrementAndGet(); }
 
@@ -135,4 +135,8 @@ public class IngestionMetrics {
 
     public Instant getLastPersistenceTimestamp() { return lastPersistenceTimestamp.get(); }
     public String getLastError() { return lastError.get(); }
+
+    private static String stableOrEmpty(String code) {
+        return code == null ? "" : code;
+    }
 }

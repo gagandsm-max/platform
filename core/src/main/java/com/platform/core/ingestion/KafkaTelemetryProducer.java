@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.dto.CanonicalCounterObservation;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import com.platform.core.ingestion.dto.TelemetryObservationBatch;
+import com.platform.core.logging.CoreSupportabilityEventCodes;
+import com.platform.core.logging.SupportabilityMdc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,7 +69,7 @@ public class KafkaTelemetryProducer {
         }
 
         if (!isTransactionCapable()) {
-            metrics.recordKafkaFailure("Kafka producer is not transaction-capable");
+            metrics.recordKafkaFailure(CoreSupportabilityEventCodes.KAFKA_PUBLICATION_FAILED);
             throw new IngestionException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "ERR_KAFKA_TRANSACTIONS_UNAVAILABLE",
@@ -94,9 +96,16 @@ public class KafkaTelemetryProducer {
             metrics.recordKafkaPublish(batch.size(), System.currentTimeMillis() - startTime);
         } catch (Exception e) {
             long duration = System.currentTimeMillis() - startTime;
-            log.error("Kafka atomic batch publication failed after {}ms for topic={} count={}: {}",
-                    duration, topic, batch.size(), e.getMessage());
-            metrics.recordKafkaFailure(e.getMessage());
+            SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.KAFKA_PUBLICATION_FAILED, () ->
+                    log.error(
+                            "Kafka atomic batch publication failed after {}ms for topic={} count={} failureClass={}",
+                            duration,
+                            topic,
+                            batch.size(),
+                            e.getClass().getSimpleName()
+                    )
+            );
+            metrics.recordKafkaFailure(CoreSupportabilityEventCodes.KAFKA_PUBLICATION_FAILED);
             throw new IngestionException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "ERR_KAFKA_PUBLICATION_FAILED",
@@ -122,7 +131,9 @@ public class KafkaTelemetryProducer {
             future.get(remainingNanos, TimeUnit.NANOSECONDS);
         } catch (Exception e) {
             throw new RuntimeException(
-                    "Failed to send observation to Kafka topic=" + topic + " key=" + key + ": " + e.getMessage(),
+                    "Failed to send observation to Kafka topic=" + topic
+                            + " key=" + key
+                            + " failureClass=" + e.getClass().getSimpleName(),
                     e
             );
         }

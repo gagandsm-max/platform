@@ -294,31 +294,46 @@ class CoreHttpSecurityWebTest {
                 "anonymous health must not expose component details: " + body
         );
         org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"db\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"kafka\""));
         org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"clickHouse\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"telemetryConsumer\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.toLowerCase().contains("password"));
+        org.junit.jupiter.api.Assertions.assertFalse(body.toLowerCase().contains("token"));
+        org.junit.jupiter.api.Assertions.assertFalse(body.toLowerCase().contains("authorization"));
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("bootstrapServers"));
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("endpoint"));
+        org.junit.jupiter.api.Assertions.assertFalse(body.toLowerCase().contains("stacktrace"));
     }
 
     @Test
     void anonymousActuatorLivenessIsAllowed() throws Exception {
-        int status = mockMvc.perform(get("/actuator/health/liveness"))
-                .andReturn()
-                .getResponse()
-                .getStatus();
+        var result = mockMvc.perform(get("/actuator/health/liveness")).andReturn().getResponse();
+        int status = result.getStatus();
         org.junit.jupiter.api.Assertions.assertTrue(
                 status == 200 || status == 503,
                 "anonymous /actuator/health/liveness must be reachable, got HTTP " + status
         );
+        String body = result.getContentAsString();
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"components\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"db\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"kafka\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.toLowerCase().contains("password"));
     }
 
     @Test
     void anonymousActuatorReadinessIsAllowed() throws Exception {
-        int status = mockMvc.perform(get("/actuator/health/readiness"))
-                .andReturn()
-                .getResponse()
-                .getStatus();
+        var result = mockMvc.perform(get("/actuator/health/readiness")).andReturn().getResponse();
+        int status = result.getStatus();
         org.junit.jupiter.api.Assertions.assertTrue(
                 status == 200 || status == 503,
                 "anonymous /actuator/health/readiness must be reachable, got HTTP " + status
         );
+        String body = result.getContentAsString();
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"components\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"db\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"kafka\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.contains("\"telemetryConsumer\""));
+        org.junit.jupiter.api.Assertions.assertFalse(body.toLowerCase().contains("password"));
     }
 
     @Test

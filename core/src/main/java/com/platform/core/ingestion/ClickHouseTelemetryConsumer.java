@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.dto.CanonicalCounterObservation;
 import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.logging.CoreSupportabilityEventCodes;
+import com.platform.core.logging.SupportabilityMdc;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,14 +67,16 @@ public class ClickHouseTelemetryConsumer {
             int payloadBytes = record.value() == null
                     ? 0
                     : record.value().getBytes(StandardCharsets.UTF_8).length;
-            log.error(
-                    "Poison/malformed telemetry message from Kafka topic={} partition={} offset={} failureClass={} payloadBytes={} code={}",
-                    record.topic(),
-                    record.partition(),
-                    record.offset(),
-                    failureClass,
-                    payloadBytes,
-                    ERR_KAFKA_POISON_EVENT
+            SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.TELEMETRY_POISON_EVENT, () ->
+                    log.error(
+                            "Poison/malformed telemetry message from Kafka topic={} partition={} offset={} failureClass={} payloadBytes={} code={}",
+                            record.topic(),
+                            record.partition(),
+                            record.offset(),
+                            failureClass,
+                            payloadBytes,
+                            ERR_KAFKA_POISON_EVENT
+                    )
             );
             metrics.recordConsumerPoisonEvent(record.topic(), record.offset(), failureClass);
             throw new IngestionException(
@@ -93,8 +97,19 @@ public class ClickHouseTelemetryConsumer {
                 return;
             } catch (Exception e) {
                 lastException = e;
-                log.warn("ClickHouse insert attempt {}/{} failed for topic={} partition={} offset={}: {}",
-                        attempt, maxRetries, record.topic(), record.partition(), record.offset(), e.getMessage());
+                final int attemptNumber = attempt;
+                final String failureClass = e.getClass().getSimpleName();
+                SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.CLICKHOUSE_INSERT_FAILED, () ->
+                        log.warn(
+                                "ClickHouse insert attempt {}/{} failed for topic={} partition={} offset={} failureClass={}",
+                                attemptNumber,
+                                maxRetries,
+                                record.topic(),
+                                record.partition(),
+                                record.offset(),
+                                failureClass
+                        )
+                );
                 if (attempt < maxRetries) {
                     try {
                         Thread.sleep(backoffMs * (1L << (attempt - 1)));
@@ -106,11 +121,24 @@ public class ClickHouseTelemetryConsumer {
             }
         }
 
-        String failureReason = "ClickHouse unavailable after " + maxRetries + " attempts: " + lastException.getMessage();
-        metrics.recordConsumerDegraded(failureReason);
-        log.error("ClickHouse retries exhausted for topic={} partition={} offset={}. Offset will NOT progress.",
-                record.topic(), record.partition(), record.offset(), lastException);
-        throw new RuntimeException("ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset(), lastException);
+        metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
+        final String exhaustedFailureClass = lastException == null
+                ? "unknown"
+                : lastException.getClass().getSimpleName();
+        SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.TELEMETRY_RETRIES_EXHAUSTED, () ->
+                log.error(
+                        "ClickHouse retries exhausted for topic={} partition={} offset={} attempts={} failureClass={}. Offset will NOT progress.",
+                        record.topic(),
+                        record.partition(),
+                        record.offset(),
+                        maxRetries,
+                        exhaustedFailureClass
+                )
+        );
+        throw new RuntimeException(
+                "ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset(),
+                lastException
+        );
     }
 
     private Runnable resolveInsert(String payload) throws Exception {

@@ -1,17 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+    <!-- Spring-bound identity for certified structured-log fields. -->
+    <springProperty scope="context" name="platformNodeId" source="platform.node-id" defaultValue="core-node-01"/>
+    <springProperty scope="context" name="platformVersion" source="platform.version" defaultValue="0.1.0-dev"/>
+
+    <!-- One process-instance id per JVM; not node authority and not persisted. -->
+    <define name="serviceInstanceId" class="com.platform.core.logging.ServiceInstanceIdPropertyDefiner"/>
+
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-            <includeContext>true</includeContext>
-            <includeMdcKeyName>correlation_id</includeMdcKeyName>
-            <customFields>{"service":"platform-core","environment":"${PLATFORM_ENV:-development}"}</customFields>
-            <fieldNames>
-                <timestamp>timestamp</timestamp>
-                <level>level</level>
-                <thread>thread</thread>
-                <logger>logger</logger>
-                <message>message</message>
-            </fieldNames>
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp>
+                    <fieldName>ts</fieldName>
+                    <pattern>yyyy-MM-dd'T'HH:mm:ss.SSS'Z'</pattern>
+                    <timeZone>UTC</timeZone>
+                </timestamp>
+                <logLevel>
+                    <fieldName>level</fieldName>
+                </logLevel>
+                <provider class="com.platform.core.logging.BoundedMessageJsonProvider"/>
+                <provider class="com.platform.core.logging.SupportabilityMdcJsonProvider"/>
+                <globalCustomFields>
+                    <customFields>{"component":"platform-core","version":"${platformVersion}","node_id":"${platformNodeId}","service_instance_id":"${serviceInstanceId}"}</customFields>
+                </globalCustomFields>
+            </providers>
         </encoder>
     </appender>
 
