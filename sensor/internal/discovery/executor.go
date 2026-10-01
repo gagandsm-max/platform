@@ -143,8 +143,13 @@ feed:
 		failureReason = "Discovery execution cancelled or deadline exceeded"
 	}
 	e.logger.Info("Discovery task completed",
-		"task_id", task.TaskID, "request_id", task.RequestID, "evidence_count", len(evidence),
-		"duration_ms", completedAt.Sub(startedAt).Milliseconds(), "status", status)
+		"request_id", task.RequestID,
+		"result", status,
+		"safe_context", map[string]any{
+			"task_id":        task.TaskID,
+			"evidence_count": len(evidence),
+			"duration_ms":    completedAt.Sub(startedAt).Milliseconds(),
+		})
 
 	return Result{
 		RequestID: task.RequestID, TenantID: task.TenantID, CorrelationID: task.CorrelationID,
