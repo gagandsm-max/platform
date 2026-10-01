@@ -86,7 +86,10 @@ func replaceAttr(groups []string, attr slog.Attr) slog.Attr {
 	case "error_code":
 		return validatedStringAttr("event_code", attr.Value, 64, boundedIDRE)
 	case "component":
-		return validatedStringAttr("component", attr.Value, 64, boundedIDRE)
+		if attr.Value.Kind() != slog.KindString || attr.Value.String() != componentName {
+			return slog.Attr{}
+		}
+		return slog.String("component", componentName)
 	case "version":
 		return validatedPlainStringAttr("version", attr.Value, 64)
 	case "service_instance_id":
@@ -258,7 +261,7 @@ func secretKey(key string) bool {
 	token := normalizeKey(key)
 	for _, forbidden := range []string{
 		"password", "passwd", "community", "token", "secret", "privatekey",
-		"apikey", "clientsecret", "authorization", "cookie", "credential",
+		"apikey", "clientsecret", "authorization", "cookie", "credential", "passphrase",
 	} {
 		if strings.Contains(token, forbidden) {
 			return true
