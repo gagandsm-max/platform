@@ -108,10 +108,14 @@ func (c *Collector) Collect(ctx context.Context, req Request) (CollectionResult,
 			c.stats.observations.Add(uint64(len(result.Observations)))
 			if c.logger != nil {
 				c.logger.Debug("sensor snmp collection completed",
-					"operation", req.Operation,
-					"snmp_version", req.Version,
-					"duration_ms", c.now().Sub(started).Milliseconds(),
-					"result_count", len(result.Observations),
+					"protocol", "SNMP",
+					"result", "SUCCESS",
+					"safe_context", map[string]any{
+						"operation":    string(req.Operation),
+						"snmp_version": string(req.Version),
+						"duration_ms":  c.now().Sub(started).Milliseconds(),
+						"result_count": len(result.Observations),
+					},
 				)
 			}
 			return result, nil
@@ -137,10 +141,14 @@ func (c *Collector) Collect(ctx context.Context, req Request) (CollectionResult,
 	c.stats.failures.Add(1)
 	if c.logger != nil {
 		c.logger.Warn("sensor snmp collection failed",
-			"operation", req.Operation,
-			"snmp_version", req.Version,
-			"duration_ms", c.now().Sub(started).Milliseconds(),
+			"protocol", "SNMP",
+			"result", "FAILED",
 			"error_code", ErrorCodeOf(lastErr),
+			"safe_context", map[string]any{
+				"operation":    string(req.Operation),
+				"snmp_version": string(req.Version),
+				"duration_ms":  c.now().Sub(started).Milliseconds(),
+			},
 		)
 	}
 	return CollectionResult{}, lastErr
