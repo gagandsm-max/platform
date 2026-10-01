@@ -1078,8 +1078,8 @@ func TestAuthorityPoisonSuccessfulLogOmitsPathAndPayload(t *testing.T) {
 	if !strings.Contains(logOutput, "event_code=ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION") {
 		t.Fatalf("log must contain canonical event_code: %s", logOutput)
 	}
-	if !strings.Contains(logOutput, "sequence=") {
-		t.Fatalf("log must contain sequence: %s", logOutput)
+	if !strings.Contains(logOutput, "safe_context=map[sequence:1]") {
+		t.Fatalf("log must contain canonical safe_context sequence: %s", logOutput)
 	}
 	if strings.Contains(logOutput, "poison_path") {
 		t.Fatalf("log must not contain poison_path: %s", logOutput)
