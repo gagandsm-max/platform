@@ -89,7 +89,6 @@ func main() {
 	rt := cfg.Runtime
 	logger = logger.With("sensor_id", rt.SensorID)
 	logger.Info("Platform Sensor starting up",
-		"version", sensorVersion,
 		"environment", cfg.Environment,
 		"core_endpoint", rt.CoreEndpoint,
 		"spool_path", rt.SpoolPath,
