@@ -253,6 +253,28 @@ func TestReadyzQueueSaturationIsDegradedNotReady(t *testing.T) {
 	}
 }
 
+func TestReadyzPerPoolSaturationIsDegradedNotReady(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	hs.SetScheduler(&fakeSchedulerStatusProvider{snap: scheduler.Snapshot{
+		State:         scheduler.StateRunning,
+		QueueDepth:    8,
+		QueueCapacity: 12,
+		Pools: map[scheduler.ExecutionClass]scheduler.PoolSnapshot{
+			scheduler.ClassNetworkPoll: {QueueDepth: 8, QueueCapacity: 8},
+			scheduler.ClassStreaming:   {QueueDepth: 0, QueueCapacity: 4},
+		},
+	}})
+
+	rr, body := request(t, hs, "/readyz")
+	if rr.Code != http.StatusServiceUnavailable ||
+		body["status"] != "DEGRADED" ||
+		body["ready"] != false ||
+		body["http_semantic"] != float64(503) ||
+		body["reason_code"] != reasonSchedulerQueue {
+		t.Fatalf("per-pool saturation readiness=%d body=%v", rr.Code, body)
+	}
+}
+
 func TestReadyzControlStateMatrix(t *testing.T) {
 	cases := []struct {
 		name       string
