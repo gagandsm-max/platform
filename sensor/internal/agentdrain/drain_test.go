@@ -1075,8 +1075,8 @@ func TestAuthorityPoisonSuccessfulLogOmitsPathAndPayload(t *testing.T) {
 	if !strings.Contains(logOutput, "Parked terminal agent-ingress record") {
 		t.Fatalf("expected parking log, got %s", logOutput)
 	}
-	if !strings.Contains(logOutput, "reason=ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION") {
-		t.Fatalf("log must contain reason: %s", logOutput)
+	if !strings.Contains(logOutput, "event_code=ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION") {
+		t.Fatalf("log must contain canonical event_code: %s", logOutput)
 	}
 	if !strings.Contains(logOutput, "sequence=") {
 		t.Fatalf("log must contain sequence: %s", logOutput)
