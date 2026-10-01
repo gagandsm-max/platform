@@ -233,11 +233,42 @@ TEST_NUM=14
 TEST_DESC="Sensor Instances Startup, Health & Named Spool Volumes"
 NET_HEALTH=$(docker exec platform-sensor-net curl -s http://127.0.0.1:8088/health 2>/dev/null || echo "")
 INFRA_HEALTH=$(docker exec platform-sensor-infra curl -s http://127.0.0.1:8088/health 2>/dev/null || echo "")
+NET_READY=$(docker exec platform-sensor-net curl -s http://127.0.0.1:8088/readyz 2>/dev/null || echo "")
+INFRA_READY=$(docker exec platform-sensor-infra curl -s http://127.0.0.1:8088/readyz 2>/dev/null || echo "")
 
-if echo "${NET_HEALTH}" | grep -q '"status":"UP"' && echo "${INFRA_HEALTH}" | grep -q '"status":"UP"'; then
+validate_sensor_supportability() {
+    SENSOR_HEALTH_JSON="$1" SENSOR_READY_JSON="$2" python3 - <<'PY'
+import json, os, sys
+try:
+    health = json.loads(os.environ["SENSOR_HEALTH_JSON"])
+    ready = json.loads(os.environ["SENSOR_READY_JSON"])
+except Exception:
+    sys.exit(1)
+if health.get("document_type") != "SUPPORT_EVIDENCE":
+    sys.exit(1)
+if health.get("component") != "platform-sensor":
+    sys.exit(1)
+if not health.get("service_instance_id") or not health.get("ts"):
+    sys.exit(1)
+if health.get("component_state") not in ("UP", "DEGRADED"):
+    sys.exit(1)
+if ready.get("component") != "platform-sensor":
+    sys.exit(1)
+if ready.get("status") not in ("UP", "DEGRADED"):
+    sys.exit(1)
+if ready.get("ready") is not True or ready.get("http_semantic") != 200:
+    sys.exit(1)
+if "capability_pack_sync" in ready or "scheduler" in ready or "control" in ready:
+    sys.exit(1)
+sys.exit(0)
+PY
+}
+
+if validate_sensor_supportability "${NET_HEALTH}" "${NET_READY}" && \
+   validate_sensor_supportability "${INFRA_HEALTH}" "${INFRA_READY}"; then
     pass ${TEST_NUM} "${TEST_DESC}"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "sensor-net: ${NET_HEALTH}, sensor-infra: ${INFRA_HEALTH}"
+    fail ${TEST_NUM} "${TEST_DESC}" "sensor-net health=${NET_HEALTH} ready=${NET_READY}; sensor-infra health=${INFRA_HEALTH} ready=${INFRA_READY}"
 fi
 
 # ------------------------------------------------------------------------------
@@ -404,7 +435,8 @@ SENSOR_LOG=$(docker logs --tail 20 platform-sensor-net 2>/dev/null | awk '/^\{/{
 ANALYTICS_LOG=$(docker logs --tail 20 platform-analytics 2>/dev/null | awk '/^\{/{print; exit}' || true)
 
 # Core uses BUILD-005 certified envelope (component, not legacy service).
-# Sensor/Analytics retain their existing "service" expectation until their slices.
+# Sensor now uses the BUILD-005 Slice-3 certified envelope; Analytics retains
+# its existing "service" expectation until its later bounded conformance slice.
 CORE_LOG_VALID=false
 if [ -n "${CORE_LOG}" ] && echo "${CORE_LOG}" | python3 -c '
 import json, sys
@@ -431,7 +463,29 @@ sys.exit(0)
 fi
 
 SENSOR_LOG_VALID=false
-if echo "${SENSOR_LOG}" | grep -q '"service"'; then SENSOR_LOG_VALID=true; fi
+if [ -n "${SENSOR_LOG}" ] && echo "${SENSOR_LOG}" | python3 -c '
+import json, sys
+required = ("ts", "level", "component", "version", "sensor_id", "service_instance_id", "message")
+legacy = ("timestamp", "time", "msg", "service", "environment", "thread", "logger", "error_code", "error", "stack_trace", "stackTrace")
+try:
+    obj = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(obj, dict):
+    sys.exit(1)
+for key in required:
+    value = obj.get(key)
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        sys.exit(1)
+if obj.get("component") != "platform-sensor":
+    sys.exit(1)
+for key in legacy:
+    if key in obj:
+        sys.exit(1)
+sys.exit(0)
+'; then
+    SENSOR_LOG_VALID=true
+fi
 
 ANALYTICS_LOG_VALID=false
 if echo "${ANALYTICS_LOG}" | grep -q '"service"'; then ANALYTICS_LOG_VALID=true; fi
