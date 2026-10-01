@@ -33,6 +33,7 @@ const (
 	reasonPackDegraded    = "SENSOR_PACK_DEGRADED"
 	reasonSchedulerAbsent = "SENSOR_SCHEDULER_UNAVAILABLE"
 	reasonSchedulerState  = "SENSOR_SCHEDULER_NOT_RUNNING"
+	reasonSchedulerQueue  = "SENSOR_SCHEDULER_QUEUE_SATURATED"
 	reasonControlAbsent   = "SENSOR_CONTROL_UNAVAILABLE"
 	reasonControlUntrust  = "SENSOR_CONTROL_STATE_UNTRUSTED"
 	reasonControlDegraded = "SENSOR_CONTROL_DEGRADED"
@@ -216,6 +217,16 @@ func (e *evaluation) notReady(reason string) {
 	}
 }
 
+func (e *evaluation) degradedNotReady(reason string) {
+	if e.status == "NOT_READY" {
+		return
+	}
+	e.status = "DEGRADED"
+	e.ready = false
+	e.httpStatus = http.StatusServiceUnavailable
+	e.reason = reason
+}
+
 func (hs *HealthServer) evaluate() evaluation {
 	ev := evaluation{status: "UP", ready: true, httpStatus: http.StatusOK}
 	if hs.shuttingDown.Load() {
@@ -283,6 +294,8 @@ func (hs *HealthServer) evaluate() evaluation {
 		ev.scheduler = schedulerProvider.Snapshot()
 		if ev.scheduler.State != scheduler.StateRunning {
 			ev.notReady(reasonSchedulerState)
+		} else if ev.scheduler.QueueCapacity > 0 && ev.scheduler.QueueDepth >= ev.scheduler.QueueCapacity {
+			ev.degradedNotReady(reasonSchedulerQueue)
 		}
 	}
 
