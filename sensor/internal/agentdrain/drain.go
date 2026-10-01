@@ -197,7 +197,7 @@ func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
 		spool:     sp,
 		transport: tr,
 		metrics:   &Metrics{},
-		logger:    logger.With("component", "agentdrain"),
+		logger:    logger,
 		poisonDir: poisonDir,
 		syncDir:   defaultSyncDir,
 		done:      make(chan struct{}),
@@ -503,7 +503,8 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 		d.metrics.AuthorityPoisonCount.Add(1)
 	}
 	d.logger.Warn("Parked terminal agent-ingress record",
-		"reason", reason, "sequence", head.Sequence)
+		"event_code", string(reason),
+		"safe_context", map[string]any{"sequence": head.Sequence})
 	return nil
 }
 
