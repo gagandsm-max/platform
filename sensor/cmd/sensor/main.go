@@ -24,6 +24,7 @@ import (
 	sensorruntime "platform/sensor/internal/runtime"
 	"platform/sensor/internal/scheduler"
 	"platform/sensor/internal/spool"
+	"platform/sensor/internal/supportability"
 	"platform/sensor/internal/uploader"
 )
 
@@ -66,12 +67,13 @@ func uploaderConfigFromRuntime(rt config.RuntimeConfig, streamID string) uploade
 	}
 }
 
+const sensorVersion = "0.1.0-dev"
+
 func main() {
 	levelVar := new(slog.LevelVar)
 	levelVar.Set(slog.LevelInfo)
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: levelVar})).With(
-		"service", "platform-sensor",
-	)
+	serviceInstanceID := supportability.NewServiceInstanceID()
+	logger := supportability.NewJSONLogger(os.Stdout, levelVar, sensorVersion, serviceInstanceID)
 	slog.SetDefault(logger)
 
 	cfg, err := config.LoadConfig()
@@ -85,9 +87,9 @@ func main() {
 	}
 
 	rt := cfg.Runtime
-	logger = logger.With("sensor_id", rt.SensorID, "role", string(rt.Role))
+	logger = logger.With("sensor_id", rt.SensorID)
 	logger.Info("Platform Sensor starting up",
-		"version", "0.1.0-dev",
+		"version", sensorVersion,
 		"environment", cfg.Environment,
 		"core_endpoint", rt.CoreEndpoint,
 		"spool_path", rt.SpoolPath,
@@ -156,7 +158,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	healthServer := health.NewHealthServer(rt.HealthAddress, diskSpool, logger)
+	healthServer := health.NewHealthServer(rt.HealthAddress, diskSpool, logger,
+		health.WithIdentity(sensorVersion, serviceInstanceID))
 	healthServer.SetScheduler(prodScheduler)
 	healthServer.SetControl(controlStatus)
 	go func() {
@@ -254,7 +257,9 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigCh
-	logger.Info("Received termination signal, starting graceful shutdown", "signal", sig.String())
+	healthServer.MarkShuttingDown()
+	logger.Info("Received termination signal, starting graceful shutdown",
+		"safe_context", map[string]any{"signal": sig.String()})
 
 	cancel()
 	select {
