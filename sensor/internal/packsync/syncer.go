@@ -222,7 +222,8 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 			if err := s.ackApplied(ctx, desired.Generation, desired.Checksum); err != nil {
 				s.setError(errorCode(err), true)
 				s.cfg.Logger.Warn("capability pack applied-state ACK retry failed",
-					"error_code", errorCode(err), "generation", desired.Generation, "error", err)
+					"error_code", errorCode(err),
+					"safe_context", map[string]any{"generation": desired.Generation})
 				return
 			}
 		}
@@ -241,7 +242,10 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 		s.setError(ErrCodeStateRegression, true)
 		s.cfg.Logger.Error("capability pack desired generation regression",
 			"error_code", ErrCodeStateRegression,
-			"desired", desired.Generation, "applied", applied.Generation)
+			"safe_context", map[string]any{
+				"desired_generation": desired.Generation,
+				"applied_generation": applied.Generation,
+			})
 		return
 	}
 	if desired.Generation == applied.Generation && desired.Checksum != applied.Checksum {
