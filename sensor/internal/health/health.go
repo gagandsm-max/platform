@@ -426,11 +426,11 @@ func dependencyStatus(ev evaluation) map[string]string {
 func supportCounters(ev evaluation) map[string]uint64 {
 	out := map[string]uint64{}
 	if ev.schedulerPresent {
-		out["scheduler_submitted"] = uint64(maxZeroInt(ev.scheduler.Submitted))
-		out["scheduler_completed"] = uint64(maxZeroInt(ev.scheduler.Completed))
-		out["scheduler_failed"] = uint64(maxZeroInt(ev.scheduler.Failed))
-		out["scheduler_retries"] = uint64(maxZeroInt(ev.scheduler.Retries))
-		out["scheduler_rejected_queue_full"] = uint64(maxZeroInt(ev.scheduler.RejectedQueueFull))
+		out["scheduler_submitted"] = ev.scheduler.Submitted
+		out["scheduler_completed"] = ev.scheduler.Completed
+		out["scheduler_failed"] = ev.scheduler.Failed
+		out["scheduler_retries"] = ev.scheduler.Retries
+		out["scheduler_rejected_queue_full"] = ev.scheduler.RejectedQueueFull
 	}
 	if ev.controlPresent {
 		out["control_reconcile_attempts"] = ev.control.ReconcileAttempts
