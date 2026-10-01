@@ -143,8 +143,13 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 		}
 	}
 	raw := strings.ToLower(buf.String())
-	for _, forbidden := range []string{"fictional-secret", "bearer abc123", "z m9v"} {
-		if strings.Contains(raw, strings.ReplaceAll(forbidden, " ", "")) {
+	for _, forbidden := range []string{
+		"fictional-secret",
+		"bearer abc123",
+		"basic zm9vomjhcg==",
+		"begin private key",
+	} {
+		if strings.Contains(raw, forbidden) {
 			t.Fatalf("credential material leaked: %s", buf.String())
 		}
 	}
