@@ -426,21 +426,29 @@ func dependencyStatus(ev evaluation) map[string]string {
 func supportCounters(ev evaluation) map[string]uint64 {
 	out := map[string]uint64{}
 	if ev.schedulerPresent {
-		out["scheduler_submitted"] = ev.scheduler.Submitted
-		out["scheduler_completed"] = ev.scheduler.Completed
-		out["scheduler_failed"] = ev.scheduler.Failed
-		out["scheduler_retries"] = ev.scheduler.Retries
-		out["scheduler_rejected_queue_full"] = ev.scheduler.RejectedQueueFull
+		out["scheduler_submitted"] = safeCounter(ev.scheduler.Submitted)
+		out["scheduler_completed"] = safeCounter(ev.scheduler.Completed)
+		out["scheduler_failed"] = safeCounter(ev.scheduler.Failed)
+		out["scheduler_retries"] = safeCounter(ev.scheduler.Retries)
+		out["scheduler_rejected_queue_full"] = safeCounter(ev.scheduler.RejectedQueueFull)
 	}
 	if ev.controlPresent {
-		out["control_reconcile_attempts"] = ev.control.ReconcileAttempts
-		out["control_applied"] = ev.control.AppliedCount
-		out["control_rejected"] = ev.control.RejectedCount
-		out["control_core_transport_failures"] = ev.control.CoreTransportFailures
-		out["control_durable_store_failures"] = ev.control.DurableStoreFailures
-		out["control_ack_failures"] = ev.control.AckFailures
+		out["control_reconcile_attempts"] = safeCounter(ev.control.ReconcileAttempts)
+		out["control_applied"] = safeCounter(ev.control.AppliedCount)
+		out["control_rejected"] = safeCounter(ev.control.RejectedCount)
+		out["control_core_transport_failures"] = safeCounter(ev.control.CoreTransportFailures)
+		out["control_durable_store_failures"] = safeCounter(ev.control.DurableStoreFailures)
+		out["control_ack_failures"] = safeCounter(ev.control.AckFailures)
 	}
 	return out
+}
+
+func safeCounter(v uint64) uint64 {
+	const max = uint64(9007199254740991)
+	if v > max {
+		return max
+	}
+	return v
 }
 
 func supportTimestamps(ev evaluation) map[string]string {
