@@ -289,7 +289,12 @@ func (s *DiskSpool) quarantineLocked(path, reason string) error {
 	s.quarantined++
 	s.degraded = true
 	if s.logger != nil {
-		s.logger.Warn("sensor spool entry quarantined", "error_code", CodeCorruption, "reason", sanitizeReason(reason), "entry", base)
+		s.logger.Warn("sensor spool entry quarantined",
+			"error_code", CodeCorruption,
+			"safe_context", map[string]any{
+				"reason": sanitizeReason(reason),
+				"entry":  base,
+			})
 	}
 	return syncDir(s.dir)
 }
