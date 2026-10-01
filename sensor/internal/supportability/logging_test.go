@@ -222,3 +222,36 @@ func TestSafeContextRejectsPassphraseKeys(t *testing.T) {
 		t.Fatalf("passphrase material leaked: %s", buf.String())
 	}
 }
+
+
+type namedEventCode string
+
+func TestNamedStringEventCodeIsPreserved(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	logger.Warn("test", "error_code", namedEventCode("SENSOR_NAMED_CODE"))
+	got := decodeOne(t, &buf)
+	if got["event_code"] != "SENSOR_NAMED_CODE" {
+		t.Fatalf("named event code lost: %v", got)
+	}
+}
+
+func TestSafeContextRejectsPwdAlias(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	logger.Info("test", "safe_context", map[string]any{
+		"mode": "trusted_continue",
+		"pwd":  "hunter2",
+	})
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok || safe["mode"] != "trusted_continue" {
+		t.Fatalf("safe context missing: %v", got)
+	}
+	if _, exists := safe["pwd"]; exists {
+		t.Fatalf("pwd alias retained: %v", safe)
+	}
+	if strings.Contains(strings.ToLower(buf.String()), "hunter2") {
+		t.Fatalf("pwd material leaked: %s", buf.String())
+	}
+}
