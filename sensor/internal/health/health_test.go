@@ -1,41 +1,55 @@
 package health
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"platform/sensor/internal/control"
 	"platform/sensor/internal/packsync"
 	"platform/sensor/internal/scheduler"
 	"platform/sensor/internal/spool"
+	"platform/sensor/internal/supportability"
 )
 
 type fakePackStatusProvider struct {
 	status packsync.Status
 }
 
-func (f *fakePackStatusProvider) Snapshot() packsync.Status {
-	return f.status
-}
+func (f *fakePackStatusProvider) Snapshot() packsync.Status { return f.status }
 
 type fakeSchedulerStatusProvider struct {
 	snap scheduler.Snapshot
 }
 
-func (f *fakeSchedulerStatusProvider) Snapshot() scheduler.Snapshot {
-	return f.snap
-}
+func (f *fakeSchedulerStatusProvider) Snapshot() scheduler.Snapshot { return f.snap }
 
 type fakeControlStatusProvider struct {
 	status control.Status
 }
 
-func (f *fakeControlStatusProvider) Snapshot() control.Status {
-	return f.status
+func (f *fakeControlStatusProvider) Snapshot() control.Status { return f.status }
+
+type fakeStorageStatusProvider struct {
+	pct float64
+	err error
+}
+
+func (f *fakeStorageStatusProvider) CheckStorageUsage() (float64, error) {
+	return f.pct, f.err
+}
+
+func trustedPack() *fakePackStatusProvider {
+	return &fakePackStatusProvider{status: packsync.Status{
+		TrustedApplied:           true,
+		CoreAuthorityEstablished: true,
+	}}
 }
 
 func inSyncControl() *fakeControlStatusProvider {
@@ -43,28 +57,60 @@ func inSyncControl() *fakeControlStatusProvider {
 }
 
 func runningScheduler() *fakeSchedulerStatusProvider {
-	return &fakeSchedulerStatusProvider{
-		snap: scheduler.Snapshot{
-			State:             scheduler.StateRunning,
-			ConfiguredWorkers: 2,
-			QueueCapacity:     8,
-		},
-	}
+	return &fakeSchedulerStatusProvider{snap: scheduler.Snapshot{
+		State:             scheduler.StateRunning,
+		ConfiguredWorkers: 2,
+		QueueCapacity:     8,
+	}}
 }
 
-func newTestHealth(t *testing.T, syncer packSyncStatusProvider) *HealthServer {
+func newTestHealth(t *testing.T, pack packSyncStatusProvider) *HealthServer {
 	t.Helper()
 	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
-	hs := NewHealthServer(":0", disk, slog.Default())
-	if syncer != nil {
-		hs.SetPackSync(syncer)
+	hs := NewHealthServer(":0", disk, slog.Default(),
+		WithIdentity("0.1.0-test", "sensor-instance-test"))
+	if pack != nil {
+		hs.SetPackSync(pack)
 	}
 	hs.SetScheduler(runningScheduler())
 	hs.SetControl(inSyncControl())
 	return hs
+}
+
+func request(t *testing.T, hs *HealthServer, path string) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	hs.server.Handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("%s decode: %v body=%s", path, err, rr.Body.String())
+	}
+	return rr, body
+}
+
+func requireKeys(t *testing.T, body map[string]any, keys ...string) {
+	t.Helper()
+	for _, key := range keys {
+		if _, ok := body[key]; !ok {
+			t.Fatalf("missing %q in %v", key, body)
+		}
+	}
+}
+
+func requireOnlyKeys(t *testing.T, body map[string]any, allowed ...string) {
+	t.Helper()
+	set := map[string]bool{}
+	for _, key := range allowed {
+		set[key] = true
+	}
+	for key := range body {
+		if !set[key] {
+			t.Fatalf("unexpected key %q in %v", key, body)
+		}
+	}
 }
 
 func TestHealthAddressControlsBind(t *testing.T) {
@@ -78,481 +124,280 @@ func TestHealthAddressControlsBind(t *testing.T) {
 	}
 }
 
-func TestLivezOKWhenPackTrustMissing(t *testing.T) {
-	hs := newTestHealth(t, &fakePackStatusProvider{
-		status: packsync.Status{
-			TrustedApplied:           false,
-			CoreAuthorityEstablished: false,
-		},
-	})
+func TestLivezContractAndShutdownState(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
 
-	rr := httptest.NewRecorder()
-	hs.handleLive(rr, httptest.NewRequest(http.MethodGet, "/livez", nil))
+	rr, body := request(t, hs, "/livez")
+	if rr.Code != http.StatusOK || body["status"] != "UP" {
+		t.Fatalf("livez=%d body=%v", rr.Code, body)
+	}
+	requireOnlyKeys(t, body, "status", "component", "ts", "service_instance_id")
+	if body["component"] != componentName || body["service_instance_id"] != "sensor-instance-test" {
+		t.Fatalf("identity=%v", body)
+	}
+	if ts, _ := body["ts"].(string); !strings.HasSuffix(ts, "Z") {
+		t.Fatalf("non-UTC ts=%q", ts)
+	}
+
+	hs.MarkShuttingDown()
+	rr, body = request(t, hs, "/livez")
+	if rr.Code != http.StatusOK || body["status"] != "SHUTTING_DOWN" {
+		t.Fatalf("shutdown livez=%d body=%v", rr.Code, body)
+	}
+}
+
+func TestReadyzIsCompactCanonicalEnvelope(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	rr, body := request(t, hs, "/readyz")
 	if rr.Code != http.StatusOK {
-		t.Fatalf("livez status=%d", rr.Code)
+		t.Fatalf("readyz=%d body=%v", rr.Code, body)
 	}
-	var body map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
+	if body["status"] != "UP" || body["ready"] != true || body["http_semantic"] != float64(200) {
+		t.Fatalf("ready matrix=%v", body)
 	}
-	if body["status"] != "UP" {
-		t.Fatalf("livez body=%v", body)
-	}
+	requireOnlyKeys(t, body, "status", "ready", "http_semantic", "component", "ts", "service_instance_id")
 }
 
-func TestReadyzFailClosedWhenPackTrustMissing(t *testing.T) {
-	hs := newTestHealth(t, &fakePackStatusProvider{
-		status: packsync.Status{
-			TrustedApplied:           false,
-			CoreAuthorityEstablished: false,
-		},
-	})
-
-	rr := httptest.NewRecorder()
-	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("readyz status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["status"] != "PACK_TRUST_NOT_ESTABLISHED" {
-		t.Fatalf("expected PACK_TRUST_NOT_ESTABLISHED, got %v", body["status"])
-	}
-	pack, _ := body["capability_pack_sync"].(map[string]any)
-	if pack == nil {
-		t.Fatal("missing capability_pack_sync")
-	}
-	if pack["trusted_applied"] != false {
-		t.Fatalf("trusted_applied=%v", pack["trusted_applied"])
-	}
-	raw := rr.Body.String()
-	for _, forbidden := range []string{"password", "token", "secret", "private_key"} {
-		if strings.Contains(strings.ToLower(raw), forbidden) {
-			t.Fatalf("health payload must not expose %q", forbidden)
-		}
-	}
-	if _, ok := pack["checksum"]; ok {
-		t.Fatal("must not expose checksum in health payload")
-	}
-}
-
-func TestReadyzRemainsReadyOnTransientWithTrustedApplied(t *testing.T) {
-	hs := newTestHealth(t, &fakePackStatusProvider{
-		status: packsync.Status{
-			AppliedGeneration:        0,
-			DesiredGeneration:        0,
-			TrustedApplied:           true,
-			CoreAuthorityEstablished: true,
-			LastErrorCode:            packsync.ErrCodeSyncTransient,
-			Degraded:                 false,
-		},
-	})
-
-	rr := httptest.NewRecorder()
-	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("transient with trusted applied must stay ready: %d %s", rr.Code, rr.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	pack := body["capability_pack_sync"].(map[string]any)
-	if pack["trusted_applied"] != true {
-		t.Fatalf("expected trusted_applied true: %v", pack)
-	}
-	if pack["core_authority_established"] != true {
-		t.Fatalf("expected core_authority_established true: %v", pack)
-	}
-	if pack["last_error_code"] != packsync.ErrCodeSyncTransient {
-		t.Fatalf("expected transient error code retained: %v", pack)
-	}
-}
-
-func TestReadyzNotReadyFreshInstallBeforeCoreAuthority(t *testing.T) {
-	hs := newTestHealth(t, &fakePackStatusProvider{
-		status: packsync.Status{
-			AppliedGeneration:        0,
-			DesiredGeneration:        0,
-			TrustedApplied:           true,
-			CoreAuthorityEstablished: false,
-		},
-	})
-
-	rrLive := httptest.NewRecorder()
-	hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
-	if rrLive.Code != http.StatusOK {
-		t.Fatalf("livez must stay UP: %d", rrLive.Code)
-	}
-
-	rr := httptest.NewRecorder()
-	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("readyz must be non-2xx before Core authority: %d %s", rr.Code, rr.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["status"] != "PACK_CORE_AUTHORITY_NOT_ESTABLISHED" {
-		t.Fatalf("expected PACK_CORE_AUTHORITY_NOT_ESTABLISHED, got %v", body["status"])
-	}
-	pack := body["capability_pack_sync"].(map[string]any)
-	if pack["trusted_applied"] != true || pack["core_authority_established"] != false {
-		t.Fatalf("expected local trust without Core authority: %v", pack)
-	}
-}
-
-func TestReadyzAuthDegradedWithTrustedStaysReady(t *testing.T) {
-	hs := newTestHealth(t, &fakePackStatusProvider{
-		status: packsync.Status{
-			AppliedGeneration:        0,
-			DesiredGeneration:        0,
-			TrustedApplied:           true,
-			CoreAuthorityEstablished: true,
-			LastErrorCode:            packsync.ErrCodeAuthFailed,
-			Degraded:                 true,
-		},
-	})
-
-	rr := httptest.NewRecorder()
-	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("auth degraded with trusted applied must stay ready: %d", rr.Code)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["status"] != "DEGRADED" {
-		t.Fatalf("expected DEGRADED status text, got %v", body["status"])
-	}
-}
-
-func TestReadyzRecoversAfterTrustedStateRestored(t *testing.T) {
-	provider := &fakePackStatusProvider{
-		status: packsync.Status{
-			TrustedApplied:           false,
-			CoreAuthorityEstablished: false,
-		},
-	}
-	hs := newTestHealth(t, provider)
-
-	rr := httptest.NewRecorder()
-	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected fail-closed before restore: %d", rr.Code)
-	}
-
-	provider.status = packsync.Status{
-		AppliedGeneration:        1,
-		DesiredGeneration:        1,
-		PackCount:                1,
-		TrustedApplied:           true,
-		CoreAuthorityEstablished: true,
-	}
-
-	rr2 := httptest.NewRecorder()
-	hs.handleReady(rr2, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("expected ready after trust restored: %d %s", rr2.Code, rr2.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rr2.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	pack := body["capability_pack_sync"].(map[string]any)
-	if pack["trusted_applied"] != true {
-		t.Fatalf("trusted_applied not restored: %v", pack)
-	}
-}
-
-func TestHealthAlsoFailClosedWhenPackTrustMissing(t *testing.T) {
-	hs := newTestHealth(t, &fakePackStatusProvider{
-		status: packsync.Status{
-			TrustedApplied:           false,
-			CoreAuthorityEstablished: false,
-		},
-	})
-	rr := httptest.NewRecorder()
-	hs.handleHealth(rr, httptest.NewRequest(http.MethodGet, "/health", nil))
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("/health must fail closed on missing pack trust: %d", rr.Code)
-	}
-}
-
-func TestHealthServerRealSyncerCompatibility(t *testing.T) {
-	var syncer *packsync.Syncer
-	hs := newTestHealth(t, syncer)
-	if hs.packSync != nil {
-		t.Fatal("expected nil packSync when passing nil syncer")
-	}
-}
-
-func TestHealthReadyWithRunningScheduler(t *testing.T) {
-	hs := newTestHealth(t, &fakePackStatusProvider{
-		status: packsync.Status{
-			TrustedApplied:           true,
-			CoreAuthorityEstablished: true,
-		},
-	})
-
-	for _, path := range []string{"/health", "/readyz"} {
-		rr := httptest.NewRecorder()
-		hs.handleHealth(rr, httptest.NewRequest(http.MethodGet, path, nil))
-		if rr.Code != http.StatusOK {
-			t.Fatalf("%s status=%d body=%s", path, rr.Code, rr.Body.String())
-		}
-		var body map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
-		}
-		sched, ok := body["scheduler"].(map[string]any)
-		if !ok || sched == nil {
-			t.Fatalf("%s missing scheduler payload: %v", path, body)
-		}
-		for _, key := range []string{
-			"state", "configured_workers", "active_workers", "queue_depth", "queue_capacity",
-			"tracked_assignments", "tracked_jobs", "highest_observed_fencing_version",
-			"highest_accepted_fencing_version", "submitted", "accepted", "completed", "failed",
-			"retries", "rejected_queue_full", "rejected_stale_lease", "rejected_tracking_capacity",
-			"expired", "cancelled", "deadline_exceeded",
-		} {
-			if _, present := sched[key]; !present {
-				t.Fatalf("%s missing scheduler field %q: %v", path, key, sched)
-			}
-		}
-		raw := rr.Body.String()
-		for _, forbidden := range []string{"password", "token", "secret", "private_key", "tenant_id", "job_id", "assignment_key", "payload"} {
-			if strings.Contains(strings.ToLower(raw), forbidden) {
-				t.Fatalf("health payload must not expose %q", forbidden)
-			}
-		}
-	}
-}
-
-func TestHealthFailClosedWhenSchedulerProviderAbsent(t *testing.T) {
-	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	hs := NewHealthServer(":0", disk, slog.Default())
-	hs.SetPackSync(&fakePackStatusProvider{
-		status: packsync.Status{TrustedApplied: true, CoreAuthorityEstablished: true},
-	})
-
-	for _, path := range []string{"/health", "/readyz"} {
-		rr := httptest.NewRecorder()
-		hs.handleHealth(rr, httptest.NewRequest(http.MethodGet, path, nil))
-		if rr.Code != http.StatusServiceUnavailable {
-			t.Fatalf("%s expected 503, got %d", path, rr.Code)
-		}
-		var body map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
-		}
-		if body["status"] != "SCHEDULER_UNAVAILABLE" {
-			t.Fatalf("%s status=%v", path, body["status"])
-		}
-	}
-
-	rrLive := httptest.NewRecorder()
-	hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
-	if rrLive.Code != http.StatusOK {
-		t.Fatalf("livez must stay 200: %d", rrLive.Code)
-	}
-}
-
-func TestHealthFailClosedWhenSchedulerNotRunning(t *testing.T) {
-	for _, state := range []scheduler.State{scheduler.StateShuttingDown, scheduler.StateStopped} {
-		hs := newTestHealth(t, &fakePackStatusProvider{
-			status: packsync.Status{TrustedApplied: true, CoreAuthorityEstablished: true},
-		})
-		hs.SetScheduler(&fakeSchedulerStatusProvider{snap: scheduler.Snapshot{State: state}})
-
-		for _, path := range []string{"/health", "/readyz"} {
-			rr := httptest.NewRecorder()
-			hs.handleHealth(rr, httptest.NewRequest(http.MethodGet, path, nil))
-			if rr.Code != http.StatusServiceUnavailable {
-				t.Fatalf("%s state=%s expected 503, got %d", path, state, rr.Code)
-			}
-			var body map[string]any
-			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-				t.Fatal(err)
-			}
-			if body["status"] != "SCHEDULER_NOT_RUNNING" {
-				t.Fatalf("%s state=%s status=%v", path, state, body["status"])
-			}
-		}
-
-		rrLive := httptest.NewRecorder()
-		hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
-		if rrLive.Code != http.StatusOK {
-			t.Fatalf("livez must stay 200 for state %s: %d", state, rrLive.Code)
-		}
-	}
-}
-
-func TestSchedulerStatusDoesNotOverwriteHigherPriorityFailures(t *testing.T) {
-	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	hs := NewHealthServer(":0", disk, slog.Default())
-	hs.SetPackSync(&fakePackStatusProvider{
-		status: packsync.Status{TrustedApplied: false, CoreAuthorityEstablished: false},
-	})
-	// Scheduler absent must not replace pack trust failure status.
-	rr := httptest.NewRecorder()
-	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status=%d", rr.Code)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["status"] != "PACK_TRUST_NOT_ESTABLISHED" {
-		t.Fatalf("expected pack precedence, got %v", body["status"])
-	}
-}
-
-func TestControlHealthStates(t *testing.T) {
-	trusted := &fakePackStatusProvider{
-		status: packsync.Status{TrustedApplied: true, CoreAuthorityEstablished: true},
-	}
+func TestReadyzPackTrustAndCoreAuthorityFailClosed(t *testing.T) {
 	cases := []struct {
-		name       string
-		control    control.Status
-		wantCode   int
-		wantStatus string
+		name   string
+		status packsync.Status
+		reason string
 	}{
-		{"sync_pending", control.Status{State: control.StateSyncPending}, http.StatusOK, "DEGRADED"},
-		{"in_sync", control.Status{State: control.StateInSync}, http.StatusOK, "UP"},
-		{"degraded_restart", control.Status{State: control.StateDegraded, LastCode: control.CodeRestartRequired, LastAction: "APPLY_FAILED"}, http.StatusOK, "DEGRADED"},
-		{"degraded_core", control.Status{State: control.StateDegraded, LastCode: control.CodeCoreUnavailable, LastAction: "CORE_UNAVAILABLE"}, http.StatusOK, "DEGRADED"},
-		{"degraded_ack", control.Status{State: control.StateDegraded, LastCode: control.CodeAckFailed, LastAction: "ACK_FAILED"}, http.StatusOK, "DEGRADED"},
-		{"degraded_invalid", control.Status{State: control.StateDegraded, LastCode: control.CodeInvalidDesired, LastAction: "INVALID_DESIRED"}, http.StatusOK, "DEGRADED"},
-		{"untrusted", control.Status{State: control.StateUntrusted, LastCode: control.CodeStateCorrupt}, http.StatusServiceUnavailable, "CONTROL_STATE_UNTRUSTED"},
-		{"durability", control.Status{State: control.StateUntrusted, LastCode: control.CodeStateDurabilityFailed, LastAction: "DURABILITY_FAILED"}, http.StatusServiceUnavailable, "CONTROL_STATE_UNTRUSTED"},
+		{"trust", packsync.Status{TrustedApplied: false}, reasonPackTrust},
+		{"authority", packsync.Status{TrustedApplied: true, CoreAuthorityEstablished: false}, reasonPackAuthority},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			hs := newTestHealth(t, trusted)
+			hs := newTestHealth(t, &fakePackStatusProvider{status: tc.status})
+			rr, body := request(t, hs, "/readyz")
+			if rr.Code != http.StatusServiceUnavailable {
+				t.Fatalf("code=%d body=%v", rr.Code, body)
+			}
+			if body["status"] != "NOT_READY" || body["ready"] != false ||
+				body["http_semantic"] != float64(503) || body["reason_code"] != tc.reason {
+				t.Fatalf("body=%v", body)
+			}
+			requireOnlyKeys(t, body, "status", "ready", "http_semantic", "component", "ts", "service_instance_id", "reason_code")
+		})
+	}
+}
+
+func TestReadyzMissingPackProviderFailsClosed(t *testing.T) {
+	hs := newTestHealth(t, nil)
+	rr, body := request(t, hs, "/readyz")
+	if rr.Code != http.StatusServiceUnavailable || body["reason_code"] != reasonPackUnavailable {
+		t.Fatalf("code=%d body=%v", rr.Code, body)
+	}
+}
+
+func TestReadyzTrustedPackDegradedRemainsReady(t *testing.T) {
+	hs := newTestHealth(t, &fakePackStatusProvider{status: packsync.Status{
+		TrustedApplied:           true,
+		CoreAuthorityEstablished: true,
+		Degraded:                 true,
+	}})
+	rr, body := request(t, hs, "/readyz")
+	if rr.Code != http.StatusOK || body["status"] != "DEGRADED" ||
+		body["ready"] != true || body["reason_code"] != reasonPackDegraded {
+		t.Fatalf("code=%d body=%v", rr.Code, body)
+	}
+}
+
+func TestReadyzPackFailurePrecedesSchedulerAndControlFailures(t *testing.T) {
+	hs := newTestHealth(t, &fakePackStatusProvider{status: packsync.Status{
+		TrustedApplied: false,
+	}})
+	hs.SetScheduler(nil)
+	hs.SetControl(nil)
+	rr, body := request(t, hs, "/readyz")
+	if rr.Code != http.StatusServiceUnavailable || body["reason_code"] != reasonPackTrust {
+		t.Fatalf("precedence code=%d body=%v", rr.Code, body)
+	}
+}
+
+func TestReadyzSchedulerFailureDoesNotKillLiveness(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	hs.SetScheduler(&fakeSchedulerStatusProvider{snap: scheduler.Snapshot{State: scheduler.StateStopped}})
+	rr, body := request(t, hs, "/readyz")
+	if rr.Code != http.StatusServiceUnavailable || body["status"] != "NOT_READY" ||
+		body["reason_code"] != reasonSchedulerState {
+		t.Fatalf("readyz=%d body=%v", rr.Code, body)
+	}
+	rr, body = request(t, hs, "/livez")
+	if rr.Code != http.StatusOK || body["status"] != "UP" {
+		t.Fatalf("livez=%d body=%v", rr.Code, body)
+	}
+}
+
+func TestReadyzControlStateMatrix(t *testing.T) {
+	cases := []struct {
+		name       string
+		control    control.Status
+		code       int
+		status     string
+		ready      bool
+		reasonCode string
+	}{
+		{"in_sync", control.Status{State: control.StateInSync}, 200, "UP", true, ""},
+		{"sync_pending", control.Status{State: control.StateSyncPending}, 200, "DEGRADED", true, reasonControlDegraded},
+		{"degraded_core", control.Status{State: control.StateDegraded, LastCode: control.CodeCoreUnavailable}, 200, "DEGRADED", true, reasonControlDegraded},
+		{"untrusted", control.Status{State: control.StateUntrusted, LastCode: control.CodeStateCorrupt}, 503, "NOT_READY", false, reasonControlUntrust},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hs := newTestHealth(t, trustedPack())
 			hs.SetControl(&fakeControlStatusProvider{status: tc.control})
-			rr := httptest.NewRecorder()
-			hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-			if rr.Code != tc.wantCode {
-				t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
+			rr, body := request(t, hs, "/readyz")
+			if rr.Code != tc.code || body["status"] != tc.status || body["ready"] != tc.ready {
+				t.Fatalf("code=%d body=%v", rr.Code, body)
 			}
-			var body map[string]any
-			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-				t.Fatal(err)
-			}
-			if body["status"] != tc.wantStatus {
-				t.Fatalf("status=%v want=%s", body["status"], tc.wantStatus)
-			}
-			ctrl, ok := body["control"].(map[string]any)
-			if !ok {
-				t.Fatalf("missing control payload: %v", body)
-			}
-			for _, key := range []string{
-				"state", "last_action", "last_code", "last_generation", "last_successful_reconcile",
-				"reconcile_attempts", "no_desired_count", "applied_count", "rejected_count",
-				"lost_ack_repair_count", "core_regression_count", "generation_conflict_count",
-				"checksum_mismatch_count", "core_transport_failures", "durable_store_failures",
-				"ack_failures", "last_applied_generation",
-			} {
-				if _, present := ctrl[key]; !present {
-					t.Fatalf("missing control field %q", key)
+			if tc.reasonCode == "" {
+				if _, ok := body["reason_code"]; ok {
+					t.Fatalf("unexpected reason=%v", body["reason_code"])
 				}
-			}
-			raw := strings.ToLower(rr.Body.String())
-			for _, forbidden := range []string{"password", "token", "secret", "private_key", "bootstrap"} {
-				if strings.Contains(raw, forbidden) {
-					t.Fatalf("exposed %q", forbidden)
-				}
-			}
-			rrLive := httptest.NewRecorder()
-			hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
-			if rrLive.Code != http.StatusOK {
-				t.Fatalf("livez=%d", rrLive.Code)
+			} else if body["reason_code"] != tc.reasonCode {
+				t.Fatalf("reason=%v want=%s", body["reason_code"], tc.reasonCode)
 			}
 		})
 	}
 }
 
-func TestControlDegradedDoesNotOverwriteStrongerFailures(t *testing.T) {
-	hs := newTestHealth(t, &fakePackStatusProvider{
-		status: packsync.Status{TrustedApplied: false, CoreAuthorityEstablished: false},
-	})
-	hs.SetControl(&fakeControlStatusProvider{status: control.Status{State: control.StateDegraded}})
-	rr := httptest.NewRecorder()
-	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("code=%d", rr.Code)
+func TestReadyzStorageProtectionAndAgentSpoolProtection(t *testing.T) {
+	cases := []struct {
+		name   string
+		wire   func(*HealthServer)
+		reason string
+	}{
+		{"sensor_spool_pressure", func(hs *HealthServer) {
+			hs.spool = &fakeStorageStatusProvider{pct: 96}
+		}, reasonSpoolPressure},
+		{"sensor_spool_unwritable", func(hs *HealthServer) {
+			hs.spool = &fakeStorageStatusProvider{err: errors.New("disk unavailable")}
+		}, reasonSpoolCheck},
+		{"agent_spool_pressure", func(hs *HealthServer) {
+			hs.agentSpool = &fakeStorageStatusProvider{pct: 96}
+		}, reasonAgentSpoolHard},
 	}
-	var body map[string]any
-	_ = json.Unmarshal(rr.Body.Bytes(), &body)
-	if body["status"] != "PACK_TRUST_NOT_ESTABLISHED" {
-		t.Fatalf("status=%v", body["status"])
-	}
-}
-
-func TestMissingControlProviderFailsReady(t *testing.T) {
-	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	hs := NewHealthServer(":0", disk, slog.Default())
-	hs.SetPackSync(&fakePackStatusProvider{
-		status: packsync.Status{TrustedApplied: true, CoreAuthorityEstablished: true},
-	})
-	hs.SetScheduler(runningScheduler())
-	// control provider intentionally unset
-
-	rr := httptest.NewRecorder()
-	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["status"] != "CONTROL_UNAVAILABLE" {
-		t.Fatalf("status=%v", body["status"])
-	}
-
-	rrLive := httptest.NewRecorder()
-	hs.handleLive(rrLive, httptest.NewRequest(http.MethodGet, "/livez", nil))
-	if rrLive.Code != http.StatusOK {
-		t.Fatalf("livez=%d", rrLive.Code)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hs := newTestHealth(t, trustedPack())
+			tc.wire(hs)
+			rr, body := request(t, hs, "/readyz")
+			if rr.Code != http.StatusServiceUnavailable || body["status"] != "NOT_READY" ||
+				body["reason_code"] != tc.reason {
+				t.Fatalf("code=%d body=%v", rr.Code, body)
+			}
+			rr, body = request(t, hs, "/livez")
+			if rr.Code != http.StatusOK || body["status"] != "UP" {
+				t.Fatalf("livez=%d body=%v", rr.Code, body)
+			}
+		})
 	}
 }
 
-func TestMissingControlDoesNotOverwriteStrongerFailures(t *testing.T) {
-	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
-	if err != nil {
-		t.Fatal(err)
+func TestHealthAndHealthzAreBoundedSupportEvidence(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	for _, path := range []string{"/health", "/healthz"} {
+		rr, body := request(t, hs, path)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s=%d body=%v", path, rr.Code, body)
+		}
+		requireKeys(t, body,
+			"document_type", "component", "version", "service_instance_id", "ts",
+			"uptime_seconds", "component_state", "dependency_status", "storage_pressure_percent",
+			"spool_pressure_percent", "queue_depth", "queue_capacity", "scheduler_status",
+			"control_reconciliation_status", "counters",
+		)
+		if body["document_type"] != "SUPPORT_EVIDENCE" || body["component"] != componentName ||
+			body["component_state"] != "UP" {
+			t.Fatalf("%s body=%v", path, body)
+		}
+		raw := strings.ToLower(rr.Body.String())
+		for _, forbidden := range []string{
+			"desired_generation", "applied_generation", "assignment_key", "job_id", "tenant_id",
+			"payload", "password", "token", "secret", "private_key", "authorization",
+		} {
+			if strings.Contains(raw, forbidden) {
+				t.Fatalf("%s leaked %q: %s", path, forbidden, rr.Body.String())
+			}
+		}
 	}
-	hs := NewHealthServer(":0", disk, slog.Default())
-	hs.SetPackSync(&fakePackStatusProvider{
-		status: packsync.Status{TrustedApplied: false, CoreAuthorityEstablished: false},
-	})
-	hs.SetScheduler(runningScheduler())
-	// control nil must not replace pack trust failure
+}
 
-	rr := httptest.NewRecorder()
-	hs.handleReady(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("code=%d", rr.Code)
+func TestDetailedHealthFailClosedUsesSupportEvidenceNotReadinessBody(t *testing.T) {
+	hs := newTestHealth(t, &fakePackStatusProvider{status: packsync.Status{TrustedApplied: false}})
+	rr, body := request(t, hs, "/health")
+	if rr.Code != http.StatusServiceUnavailable || body["document_type"] != "SUPPORT_EVIDENCE" ||
+		body["component_state"] != "NOT_READY" {
+		t.Fatalf("code=%d body=%v", rr.Code, body)
 	}
-	var body map[string]any
-	_ = json.Unmarshal(rr.Body.Bytes(), &body)
-	if body["status"] != "PACK_TRUST_NOT_ESTABLISHED" {
-		t.Fatalf("expected pack precedence over missing control, got %v", body["status"])
+	if _, exists := body["ready"]; exists {
+		t.Fatalf("detailed support evidence must not duplicate readiness envelope: %v", body)
+	}
+	reasons, ok := body["reason_codes"].([]any)
+	if !ok || len(reasons) != 1 || reasons[0] != reasonPackTrust {
+		t.Fatalf("reason_codes=%v", body["reason_codes"])
+	}
+}
+
+func TestRawDependencyErrorDoesNotLeakThroughHealthLogging(t *testing.T) {
+	var logs bytes.Buffer
+	level := new(slog.LevelVar)
+	level.Set(slog.LevelDebug)
+	logger := supportability.NewJSONLogger(&logs, level, "0.1.0-test", "sensor-instance-test").
+		With("sensor_id", "sensor-net-01")
+
+	hs := newTestHealth(t, trustedPack())
+	hs.logger = logger
+	hs.spool = &fakeStorageStatusProvider{err: errors.New("Bearer fictional-credential")}
+	_, _ = request(t, hs, "/readyz")
+
+	raw := strings.ToLower(logs.String())
+	if strings.Contains(raw, "fictional-credential") || strings.Contains(raw, "\"error\"") {
+		t.Fatalf("raw dependency error leaked: %s", logs.String())
+	}
+	if !strings.Contains(raw, "sensor_spool_storage_check_failed") {
+		t.Fatalf("stable event code missing: %s", logs.String())
+	}
+}
+
+func TestSupportEvidenceCarriesBoundedCountersAndTimestamps(t *testing.T) {
+	packTime := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	controlTime := time.Now().UTC().Add(-30 * time.Second).Truncate(time.Second)
+	hs := newTestHealth(t, &fakePackStatusProvider{status: packsync.Status{
+		TrustedApplied:           true,
+		CoreAuthorityEstablished: true,
+		LastSuccessfulSync:       packTime,
+	}})
+	hs.SetScheduler(&fakeSchedulerStatusProvider{snap: scheduler.Snapshot{
+		State:             scheduler.StateRunning,
+		QueueDepth:        3,
+		QueueCapacity:     8,
+		Submitted:         10,
+		Completed:         7,
+		Failed:            1,
+		Retries:           2,
+		RejectedQueueFull: 1,
+	}})
+	hs.SetControl(&fakeControlStatusProvider{status: control.Status{
+		State:                   control.StateInSync,
+		LastSuccessfulReconcile: controlTime,
+		ReconcileAttempts:       9,
+		AppliedCount:            7,
+		RejectedCount:           1,
+		CoreTransportFailures:   1,
+	}})
+
+	_, body := request(t, hs, "/health")
+	counters, ok := body["counters"].(map[string]any)
+	if !ok || counters["scheduler_submitted"] != float64(10) ||
+		counters["control_reconcile_attempts"] != float64(9) {
+		t.Fatalf("counters=%v", body["counters"])
+	}
+	stamps, ok := body["state_timestamps"].(map[string]any)
+	if !ok || stamps["pack_last_successful_sync"] == "" ||
+		stamps["control_last_successful_reconcile"] == "" {
+		t.Fatalf("state_timestamps=%v", body["state_timestamps"])
 	}
 }
