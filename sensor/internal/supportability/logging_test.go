@@ -255,3 +255,28 @@ func TestSafeContextRejectsPwdAlias(t *testing.T) {
 		t.Fatalf("pwd material leaked: %s", buf.String())
 	}
 }
+
+
+func TestAgentIDUsesBoundedStringContract(t *testing.T) {
+	for _, agentID := range []string{"agent/site 01", "Agent With Spaces"} {
+		t.Run(agentID, func(t *testing.T) {
+			var buf bytes.Buffer
+			logger := newTestLogger(&buf)
+			logger.Warn("test", "agent_id", agentID)
+			got := decodeOne(t, &buf)
+			if got["agent_id"] != agentID {
+				t.Fatalf("contract-valid agent_id lost: %q log=%v", agentID, got)
+			}
+		})
+	}
+}
+
+func TestAgentIDRejectsControlCharacters(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	logger.Warn("test", "agent_id", "agent\r\nid")
+	got := decodeOne(t, &buf)
+	if _, ok := got["agent_id"]; ok {
+		t.Fatalf("control-bearing agent_id emitted: %v", got)
+	}
+}
