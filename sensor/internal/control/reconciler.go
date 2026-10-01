@@ -352,15 +352,16 @@ func (r *Reconciler) sendRejected(ctx context.Context, generation uint64, checks
 }
 
 func (r *Reconciler) logEvent(event string, generation uint64, checksumPrefixValue, code string) {
-	attrs := []any{
-		"event", event,
-		"generation", generation,
+	ctx := map[string]any{
+		"event":      event,
+		"generation": generation,
 	}
 	if checksumPrefixValue != "" {
-		attrs = append(attrs, "checksum_prefix", checksumPrefixValue)
+		ctx["checksum_prefix"] = checksumPrefixValue
 	}
+	attrs := []any{"safe_context", ctx}
 	if code != "" {
-		attrs = append(attrs, "code", code)
+		attrs = append(attrs, "event_code", code)
 	}
 	r.logger.Info("sensor_control_reconcile", attrs...)
 }
