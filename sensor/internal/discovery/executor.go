@@ -89,8 +89,13 @@ func (e *Executor) Run(ctx context.Context, task Task) Result {
 	if timeout <= 0 { timeout = DefaultSNMPTimeout }
 
 	e.logger.Info("Starting discovery task execution",
-		"task_id", task.TaskID, "request_id", task.RequestID, "tenant_id", task.TenantID,
-		"target_count", len(task.Targets), "methods", task.RequestedMethods)
+		"request_id", task.RequestID,
+		"tenant_id", task.TenantID,
+		"safe_context", map[string]any{
+			"task_id":      task.TaskID,
+			"target_count": len(task.Targets),
+			"method_count": len(task.RequestedMethods),
+		})
 
 	type job struct{ index int }
 	jobs := make(chan job)
