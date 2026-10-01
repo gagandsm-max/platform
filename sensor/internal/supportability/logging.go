@@ -97,7 +97,9 @@ func replaceAttr(groups []string, attr slog.Attr) slog.Attr {
 		return validatedStringAttr("service_instance_id", attr.Value, 128, boundedIDRE)
 	case "sensor_id":
 		return validatedPlainStringAttr("sensor_id", attr.Value, 255)
-	case "agent_id", "node_id", "correlation_id", "request_id", "job_id", "entity_id":
+	case "agent_id":
+		return validatedPlainStringAttr("agent_id", attr.Value, 128)
+	case "node_id", "correlation_id", "request_id", "job_id", "entity_id":
 		return validatedStringAttr(attr.Key, attr.Value, 128, boundedIDRE)
 	case "tenant_id":
 		return validatedStringAttr("tenant_id", attr.Value, 36, uuidRE)
