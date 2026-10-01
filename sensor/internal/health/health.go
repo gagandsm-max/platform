@@ -294,7 +294,7 @@ func (hs *HealthServer) evaluate() evaluation {
 		ev.scheduler = schedulerProvider.Snapshot()
 		if ev.scheduler.State != scheduler.StateRunning {
 			ev.notReady(reasonSchedulerState)
-		} else if ev.scheduler.QueueCapacity > 0 && ev.scheduler.QueueDepth >= ev.scheduler.QueueCapacity {
+		} else if schedulerQueueSaturated(ev.scheduler) {
 			ev.degradedNotReady(reasonSchedulerQueue)
 		}
 	}
@@ -473,6 +473,15 @@ func supportTimestamps(ev evaluation) map[string]string {
 		out["control_last_successful_reconcile"] = ev.control.LastSuccessfulReconcile.UTC().Format(time.RFC3339Nano)
 	}
 	return out
+}
+
+func schedulerQueueSaturated(snap scheduler.Snapshot) bool {
+	for _, pool := range snap.Pools {
+		if pool.QueueCapacity > 0 && pool.QueueDepth >= pool.QueueCapacity {
+			return true
+		}
+	}
+	return snap.QueueCapacity > 0 && snap.QueueDepth >= snap.QueueCapacity
 }
 
 func schedulerSupportStatus(state scheduler.State) string {
