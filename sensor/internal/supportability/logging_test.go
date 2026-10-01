@@ -183,3 +183,42 @@ func TestServiceInstanceIDIsStableFormatAndChangesAcrossGeneration(t *testing.T)
 		}
 	}
 }
+
+
+func TestComponentIdentityCannotBeOverridden(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf).With("component", "agentreceiver")
+	logger.Info("test")
+	got := decodeOne(t, &buf)
+	if got["component"] != componentName {
+		t.Fatalf("component identity overridden: %v", got)
+	}
+	raw := buf.String()
+	if strings.Count(raw, "\"component\"") != 1 {
+		t.Fatalf("component key must be unique: %s", raw)
+	}
+}
+
+func TestSafeContextRejectsPassphraseKeys(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	logger.Info("test", "safe_context", map[string]any{
+		"mode":           "trusted_continue",
+		"key_passphrase": "hunter2",
+		"passphrase":     "fictional",
+	})
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok || safe["mode"] != "trusted_continue" {
+		t.Fatalf("safe context missing: %v", got)
+	}
+	for _, key := range []string{"key_passphrase", "passphrase"} {
+		if _, exists := safe[key]; exists {
+			t.Fatalf("passphrase field retained: %v", safe)
+		}
+	}
+	if strings.Contains(strings.ToLower(buf.String()), "hunter2") ||
+		strings.Contains(strings.ToLower(buf.String()), "fictional") {
+		t.Fatalf("passphrase material leaked: %s", buf.String())
+	}
+}
