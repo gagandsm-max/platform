@@ -94,7 +94,7 @@ func NewReceiver(cfg Config, identity AgentIdentityVerifier, authorizer Assignme
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Receiver{cfg: cfg, identity: identity, authorizer: authorizer, sink: sink, replay: NewReplayTracker(5000), metrics: NewReceiverMetrics(), logger: logger.With("component", "agentreceiver", "sensor_id", cfg.SensorID, "role", string(cfg.SensorRole))}, nil
+	return &Receiver{cfg: cfg, identity: identity, authorizer: authorizer, sink: sink, replay: NewReplayTracker(5000), metrics: NewReceiverMetrics(), logger: logger.With("sensor_id", cfg.SensorID)}, nil
 }
 
 func (rcv *Receiver) Metrics() *ReceiverMetrics     { return rcv.metrics }
@@ -135,7 +135,8 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	authAgent, err := rcv.identity.VerifyPeerIdentity(verifiedChain)
 	if err != nil || strings.TrimSpace(authAgent.FingerprintSHA256) == "" {
 		rcv.metrics.AuthFailures.Add(1)
-		rcv.logger.Warn("Peer identity verification failed", "remote_addr", r.RemoteAddr)
+		rcv.logger.Warn("Peer identity verification failed",
+			"safe_context", map[string]any{"remote_addr": r.RemoteAddr})
 		code := ErrCodeAuthInvalid
 		if err != nil && strings.Contains(err.Error(), ErrCodeAuthRequired) {
 			code = ErrCodeAuthRequired
@@ -183,7 +184,9 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if authErr, ok := AsAuthorizerError(err); ok && authErr.IsTransient() {
 			rcv.metrics.AuthorityTransientErrors.Add(1)
-			rcv.logger.Warn("Agent authority temporarily unavailable", "sensor_id", rcv.cfg.SensorID, "reason_class", "authority_transient")
+			rcv.logger.Warn("Agent authority temporarily unavailable",
+				"sensor_id", rcv.cfg.SensorID,
+				"safe_context", map[string]any{"reason_class": "authority_transient"})
 			rcv.writeJSONError(w, http.StatusServiceUnavailable, ErrCodeAgentAuthorityUnavailable, "Agent authority temporarily unavailable")
 			return
 		}
@@ -192,14 +195,20 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if authErr, ok := AsAuthorizerError(err); ok && strings.TrimSpace(authErr.Code) != "" {
 			code = authErr.Code
 		}
-		rcv.logger.Warn("Agent delivery denied by assignment authorizer", "sensor_id", rcv.cfg.SensorID, "reason_class", "authority_definitive", "code", code)
+		rcv.logger.Warn("Agent delivery denied by assignment authorizer",
+			"sensor_id", rcv.cfg.SensorID,
+			"event_code", code,
+			"safe_context", map[string]any{"reason_class": "authority_definitive"})
 		rcv.writeJSONError(w, http.StatusForbidden, code, "Agent is not assigned to this Infrastructure Sensor")
 		return
 	}
 	if !assignCtx.Assigned {
 		rcv.metrics.AuthorityDefinitiveDenials.Add(1)
 		rcv.metrics.AssignmentDenials.Add(1)
-		rcv.logger.Warn("Agent delivery denied by assignment authorizer", "agent_id", authAgent.AgentID, "sensor_id", rcv.cfg.SensorID, "reason_class", "authority_definitive")
+		rcv.logger.Warn("Agent delivery denied by assignment authorizer",
+			"agent_id", authAgent.AgentID,
+			"sensor_id", rcv.cfg.SensorID,
+			"safe_context", map[string]any{"reason_class": "authority_definitive"})
 		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAgentNotAssigned, "Agent is not assigned to this Infrastructure Sensor")
 		return
 	}
@@ -214,7 +223,14 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Agent IDs are case-sensitive canonical resource identifiers (V005).
 	if strings.TrimSpace(env.AgentID) != assignCtx.AgentID {
 		rcv.metrics.AuthFailures.Add(1)
-		rcv.logger.Warn("Agent identity spoofing attempt detected", "assigned_agent_id", assignCtx.AgentID, "claimed_agent_id", env.AgentID, "remote_addr", r.RemoteAddr, "reason_class", "claim_mismatch")
+		rcv.logger.Warn("Agent identity spoofing attempt detected",
+			"event_code", ErrCodeAuthIdentityMismatch,
+			"safe_context", map[string]any{
+				"assigned_agent_id": assignCtx.AgentID,
+				"claimed_agent_id":  env.AgentID,
+				"remote_addr":       r.RemoteAddr,
+				"reason_class":      "claim_mismatch",
+			})
 		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAuthIdentityMismatch, "Claimed agentId does not match authenticated assignment")
 		return
 	}
