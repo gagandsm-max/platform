@@ -230,6 +230,29 @@ func TestReadyzSchedulerFailureDoesNotKillLiveness(t *testing.T) {
 	}
 }
 
+func TestReadyzQueueSaturationIsDegradedNotReady(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	hs.SetScheduler(&fakeSchedulerStatusProvider{snap: scheduler.Snapshot{
+		State:         scheduler.StateRunning,
+		QueueDepth:    8,
+		QueueCapacity: 8,
+	}})
+
+	rr, body := request(t, hs, "/readyz")
+	if rr.Code != http.StatusServiceUnavailable ||
+		body["status"] != "DEGRADED" ||
+		body["ready"] != false ||
+		body["http_semantic"] != float64(503) ||
+		body["reason_code"] != reasonSchedulerQueue {
+		t.Fatalf("queue saturation readiness=%d body=%v", rr.Code, body)
+	}
+
+	rr, body = request(t, hs, "/livez")
+	if rr.Code != http.StatusOK || body["status"] != "UP" {
+		t.Fatalf("queue saturation must not kill liveness: %d body=%v", rr.Code, body)
+	}
+}
+
 func TestReadyzControlStateMatrix(t *testing.T) {
 	cases := []struct {
 		name       string
