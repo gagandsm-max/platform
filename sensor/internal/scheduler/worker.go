@@ -125,7 +125,13 @@ func (s *Scheduler) executeWithRetry(ctx context.Context, job Job) {
 
 		s.recordExecutionOutcome(job, code)
 		if s.logger != nil && code != CodeCancelled && code != CodeShuttingDown && code != CodeStaleFence {
-			s.logger.Debug("sensor scheduler job finished with error", "error_code", code, "execution_class", job.Class, "job_kind", job.Kind, "attempt", attempt)
+			s.logger.Debug("sensor scheduler job finished with error",
+				"error_code", string(code),
+				"retry_count", attempt,
+				"safe_context", map[string]any{
+					"execution_class": string(job.Class),
+					"job_kind":        string(job.Kind),
+				})
 		}
 		return
 	}
