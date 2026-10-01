@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -142,23 +143,32 @@ func boundedMessage(message string) string {
 	return string(runes[:1024])
 }
 
-func validatedStringAttr(key string, value slog.Value, maxLen int, pattern *regexp.Regexp) slog.Attr {
-	if value.Kind() != slog.KindString {
-		return slog.Attr{}
+func canonicalStringValue(value slog.Value) (string, bool) {
+	value = value.Resolve()
+	if value.Kind() == slog.KindString {
+		return value.String(), true
 	}
-	s := value.String()
-	if len(s) == 0 || len(s) > maxLen || !pattern.MatchString(s) {
+	if value.Kind() != slog.KindAny {
+		return "", false
+	}
+	rv := reflect.ValueOf(value.Any())
+	if !rv.IsValid() || rv.Kind() != reflect.String {
+		return "", false
+	}
+	return rv.String(), true
+}
+
+func validatedStringAttr(key string, value slog.Value, maxLen int, pattern *regexp.Regexp) slog.Attr {
+	s, ok := canonicalStringValue(value)
+	if !ok || len(s) == 0 || len(s) > maxLen || !pattern.MatchString(s) {
 		return slog.Attr{}
 	}
 	return slog.String(key, s)
 }
 
 func validatedPlainStringAttr(key string, value slog.Value, maxLen int) slog.Attr {
-	if value.Kind() != slog.KindString {
-		return slog.Attr{}
-	}
-	s := value.String()
-	if len(s) == 0 || len(s) > maxLen || containsControl(s) {
+	s, ok := canonicalStringValue(value)
+	if !ok || len(s) == 0 || len(s) > maxLen || containsControl(s) {
 		return slog.Attr{}
 	}
 	return slog.String(key, s)
@@ -261,7 +271,7 @@ func secretKey(key string) bool {
 	token := normalizeKey(key)
 	for _, forbidden := range []string{
 		"password", "passwd", "community", "token", "secret", "privatekey",
-		"apikey", "clientsecret", "authorization", "cookie", "credential", "passphrase",
+		"apikey", "clientsecret", "authorization", "cookie", "credential", "passphrase", "pwd",
 	} {
 		if strings.Contains(token, forbidden) {
 			return true
