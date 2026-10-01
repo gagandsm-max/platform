@@ -90,13 +90,13 @@ func main() {
 	logger = logger.With("sensor_id", rt.SensorID)
 	slog.SetDefault(logger)
 	logger.Info("Platform Sensor starting up",
-		"environment", cfg.Environment,
-		"core_endpoint", rt.CoreEndpoint,
-		"spool_path", rt.SpoolPath,
-		"health_address", rt.HealthAddress,
-		"log_level", rt.LogLevel,
-		"watermark_percent", rt.StorageWatermarkPercent,
-		"config_version", rt.ConfigurationVersion)
+		"safe_context", map[string]any{
+			"environment":               cfg.Environment,
+			"sensor_role":               string(rt.Role),
+			"log_level":                 rt.LogLevel,
+			"storage_watermark_percent": rt.StorageWatermarkPercent,
+			"config_version":            rt.ConfigurationVersion,
+		})
 
 	diskSpool, err := spool.Open(spool.Config{
 		Dir:            rt.SpoolPath,
