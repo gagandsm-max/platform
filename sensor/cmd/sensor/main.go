@@ -130,7 +130,9 @@ func main() {
 
 	sink, err := observation.NewDiskSink(diskSpool, 1024*1024)
 	if err != nil {
-		logger.Error("Failed to initialize observation sink", "error", err)
+		logger.Error("Failed to initialize observation sink",
+			"error_code", "SENSOR_OBSERVATION_SINK_INIT_FAILED",
+			"safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(1)
 	}
 
@@ -142,7 +144,9 @@ func main() {
 
 	up, err := uploader.New(uploaderConfigFromRuntime(rt, diskSpool.StreamID()), diskSpool, client)
 	if err != nil {
-		logger.Error("Failed to initialize uploader", "error", err)
+		logger.Error("Failed to initialize uploader",
+			"error_code", "SENSOR_UPLOADER_INIT_FAILED",
+			"safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(1)
 	}
 
@@ -170,7 +174,9 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := up.Start(ctx); err != nil {
-		logger.Error("Failed to start uploader", "error", err)
+		logger.Error("Failed to start uploader",
+			"error_code", "SENSOR_UPLOADER_START_FAILED",
+			"safe_context", map[string]any{"reason_class": "startup_failed"})
 		os.Exit(1)
 	}
 
@@ -240,7 +246,9 @@ func main() {
 			os.Exit(1)
 		}
 		if err := agentDrain.Start(ctx); err != nil {
-			logger.Error("Failed to start Agent drain", "error", err)
+			logger.Error("Failed to start Agent drain",
+				"error_code", "SENSOR_AGENT_DRAIN_START_FAILED",
+				"safe_context", map[string]any{"reason_class": "startup_failed"})
 			os.Exit(1)
 		}
 
@@ -271,19 +279,25 @@ func main() {
 		shutdownAgentCtx, shutdownAgentCancel := context.WithTimeout(context.Background(), cfg.AgentReceiverShutdownGrace)
 		defer shutdownAgentCancel()
 		if err := agentServer.Shutdown(shutdownAgentCtx); err != nil {
-			logger.Warn("Agent Receiver shutdown error", "error", err)
+			logger.Warn("Agent Receiver shutdown error",
+				"error_code", "SENSOR_AGENT_RECEIVER_SHUTDOWN_FAILED",
+				"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 		}
 	}
 	if agentDrain != nil {
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), cfg.AgentDrainShutdownGrace)
 		defer drainCancel()
 		if err := agentDrain.Shutdown(drainCtx); err != nil {
-			logger.Warn("Agent drain shutdown error", "error", err)
+			logger.Warn("Agent drain shutdown error",
+				"error_code", "SENSOR_AGENT_DRAIN_SHUTDOWN_FAILED",
+				"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 		}
 	}
 	if agentSpool != nil {
 		if err := agentSpool.Close(); err != nil {
-			logger.Warn("Agent spool close error", "error", err)
+			logger.Warn("Agent spool close error",
+				"error_code", "SENSOR_AGENT_SPOOL_CLOSE_FAILED",
+				"safe_context", map[string]any{"reason_class": "close_failed"})
 		}
 	}
 	discoveryService.Stop()
@@ -292,7 +306,9 @@ func main() {
 		packCtx, packCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer packCancel()
 		if err := packSyncer.Shutdown(packCtx); err != nil {
-			logger.Warn("Capability Pack sync shutdown error", "error", err)
+			logger.Warn("Capability Pack sync shutdown error",
+				"error_code", "SENSOR_PACK_SHUTDOWN_FAILED",
+				"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 		}
 	}
 
@@ -303,7 +319,9 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	if err := up.Shutdown(shutdownCtx); err != nil {
-		logger.Warn("Uploader shutdown error", "error", err)
+		logger.Warn("Uploader shutdown error",
+			"error_code", "SENSOR_UPLOADER_SHUTDOWN_FAILED",
+			"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 	}
 	if err := healthServer.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("Health server shutdown error", "error_code", "SENSOR_HEALTH_SHUTDOWN_FAILED")
@@ -357,8 +375,16 @@ func runControlReconcileLoop(
 		res, err := rec.RunOnce(ctx)
 		status.Observe(res, err)
 		if err != nil {
+			eventCode := strings.TrimSpace(res.Code)
+			if eventCode == "" {
+				eventCode = "SENSOR_CONTROL_RECONCILE_FAILED"
+			}
 			logger.Warn("control reconcile iteration finished with error",
-				"action", res.Action, "code", res.Code, "error", err.Error())
+				"event_code", eventCode,
+				"safe_context", map[string]any{
+					"action":       res.Action,
+					"reason_class": "reconcile_failed",
+				})
 		}
 	}
 	runOnce()
