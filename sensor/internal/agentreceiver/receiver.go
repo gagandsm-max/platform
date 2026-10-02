@@ -136,9 +136,6 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil || strings.TrimSpace(authAgent.FingerprintSHA256) == "" {
 		rcv.metrics.AuthFailures.Add(1)
 		code := ErrCodeAuthInvalid
-		if err != nil && strings.Contains(err.Error(), ErrCodeAuthRequired) {
-			code = ErrCodeAuthRequired
-		}
 		rcv.logger.Warn("Peer identity verification failed",
 			"event_code", code,
 			"safe_context", map[string]any{
@@ -323,6 +320,15 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"event_code", ErrCodeLegacyStreamClosed,
 				"safe_context", logContext)
 			rcv.writeJSONError(w, http.StatusConflict, ErrCodeLegacyStreamClosed, "Legacy v1 agent stream is closed")
+			return
+		}
+		if strings.Contains(err.Error(), ErrCodeStreamOwnerCorrupt) {
+			logContext["reason_class"] = "lineage_integrity_corrupt"
+			rcv.logger.Error("Agent stream lineage owner state is corrupt",
+				"agent_id", assignCtx.AgentID,
+				"event_code", ErrCodeStreamOwnerCorrupt,
+				"safe_context", logContext)
+			rcv.writeJSONError(w, http.StatusConflict, ErrCodeStreamOwnerCorrupt, "Agent stream lineage state is corrupt")
 			return
 		}
 		rcv.metrics.SinkFailures.Add(1)

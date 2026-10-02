@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"platform/sensor/internal/runtime"
+	"platform/sensor/internal/supportability"
 )
 
 func newTestReceiver(t *testing.T, role runtime.Role, identity AgentIdentityVerifier, authorizer AssignmentAuthorizer, sink AcceptanceSink) *Receiver {
@@ -210,20 +211,13 @@ func TestFailClosedIdentityVerifier(t *testing.T) {
 }
 
 func TestPeerIdentityVerificationLogsClassifiedEventCode(t *testing.T) {
-	cases := []struct {
-		name string
-		code string
-	}{
-		{name: "invalid", code: ErrCodeAuthInvalid},
-		{name: "required", code: ErrCodeAuthRequired},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, injectedCode := range []string{ErrCodeAuthInvalid, ErrCodeAuthRequired} {
+		t.Run(injectedCode, func(t *testing.T) {
 			var logBuf bytes.Buffer
-			logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+			logger := supportability.NewJSONLogger(&logBuf, slog.LevelDebug, "0.1.0-test", "sensor-instance-test").
+				With("sensor_id", "sensor-infra-01")
 			verifier := identityVerifierFunc(func([]*x509.Certificate) (AuthenticatedAgentIdentity, error) {
-				return AuthenticatedAgentIdentity{}, errors.New(tc.code + ": injected identity verification failure")
+				return AuthenticatedAgentIdentity{}, errors.New(injectedCode + ": injected identity verification failure")
 			})
 			rcv, err := NewReceiver(Config{
 				SensorID:   "sensor-infra-01",
@@ -242,20 +236,33 @@ func TestPeerIdentityVerificationLogsClassifiedEventCode(t *testing.T) {
 			if resp.StatusCode != http.StatusUnauthorized {
 				t.Fatalf("expected 401, got %d", resp.StatusCode)
 			}
+			var errResp ErrorResponse
+			if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if errResp.Code != ErrCodeAuthInvalid {
+				t.Fatalf("response code=%s want=%s", errResp.Code, ErrCodeAuthInvalid)
+			}
 
 			var entry map[string]any
 			if err := json.Unmarshal(bytes.TrimSpace(logBuf.Bytes()), &entry); err != nil {
 				t.Fatalf("decode log: %v\n%s", err, logBuf.String())
 			}
-			if entry["event_code"] != tc.code {
-				t.Fatalf("event_code=%v want=%s log=%v", entry["event_code"], tc.code, entry)
+			if entry["event_code"] != ErrCodeAuthInvalid {
+				t.Fatalf("event_code=%v want=%s log=%v", entry["event_code"], ErrCodeAuthInvalid, entry)
 			}
 			if _, exists := entry["error"]; exists {
 				t.Fatalf("raw error field must not be emitted: %v", entry)
 			}
+			if _, exists := entry["error_code"]; exists {
+				t.Fatalf("legacy error_code must not be emitted: %v", entry)
+			}
 			safe, ok := entry["safe_context"].(map[string]any)
 			if !ok || safe["reason_class"] != "peer_identity_verification_failed" {
 				t.Fatalf("safe_context=%v", entry["safe_context"])
+			}
+			if strings.Contains(logBuf.String(), "injected identity verification failure") {
+				t.Fatalf("raw verifier error leaked: %s", logBuf.String())
 			}
 		})
 	}
@@ -620,6 +627,58 @@ func TestDownstreamSinkFailure(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected 503 Service Unavailable, got %d", resp.StatusCode)
+	}
+}
+
+func TestStreamOwnerCorruptIsDefinitiveConflict(t *testing.T) {
+	ident := NewStaticTestIdentityVerifier()
+	ident.AllowCommonName("agent-1", "agent-1")
+	auth := NewInMemoryAssignmentAuthorizer()
+	auth.Allow("agent-1", "sensor-infra-01", "tenant-1", "site-primary")
+	sink := NewInMemoryAcceptanceSink()
+	sink.SetInjectedError(errors.New(ErrCodeStreamOwnerCorrupt + ": injected owner corruption"))
+
+	var logBuf bytes.Buffer
+	logger := supportability.NewJSONLogger(&logBuf, slog.LevelDebug, "0.1.0-test", "sensor-instance-test").
+		With("sensor_id", "sensor-infra-01")
+	rcv, err := NewReceiver(Config{
+		SensorID:   "sensor-infra-01",
+		SensorRole: runtime.RoleInfrastructure,
+	}, ident, auth, sink, logger)
+	if err != nil {
+		t.Fatalf("NewReceiver: %v", err)
+	}
+
+	srv, client := mockTLSServer(rcv, "agent-1")
+	defer srv.Close()
+	body, _ := json.Marshal(sampleEnvelope("agent-1", "tenant-1", sampleRecord(1, "r-1", []byte(`{"val":1}`))))
+	resp := postJSON(t, client, srv.URL+EndpointPath, body)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict, got %d", resp.StatusCode)
+	}
+	var errResp ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if errResp.Code != ErrCodeStreamOwnerCorrupt {
+		t.Fatalf("response code=%s want=%s", errResp.Code, ErrCodeStreamOwnerCorrupt)
+	}
+
+	var entry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(logBuf.Bytes()), &entry); err != nil {
+		t.Fatalf("decode log: %v\n%s", err, logBuf.String())
+	}
+	if entry["event_code"] != ErrCodeStreamOwnerCorrupt {
+		t.Fatalf("event_code=%v log=%v", entry["event_code"], entry)
+	}
+	safe, ok := entry["safe_context"].(map[string]any)
+	if !ok || safe["reason_class"] != "lineage_integrity_corrupt" {
+		t.Fatalf("safe_context=%v", entry["safe_context"])
+	}
+	if strings.Contains(logBuf.String(), "injected owner corruption") {
+		t.Fatalf("raw corruption detail leaked: %s", logBuf.String())
 	}
 }
 

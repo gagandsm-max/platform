@@ -392,13 +392,24 @@ func controlShutdownWait(requestTimeout time.Duration) time.Duration {
 }
 
 func controlReconcileEventCode(res control.Result, err error) string {
-	if code := strings.TrimSpace(control.CodeOf(err)); code != "" {
-		return code
-	}
 	if code := strings.TrimSpace(res.Code); code != "" {
 		return code
 	}
+	if code := strings.TrimSpace(control.CodeOf(err)); code != "" {
+		return code
+	}
 	return "SENSOR_CONTROL_RECONCILE_FAILED"
+}
+
+func controlReconcileLogContext(res control.Result, err error) map[string]any {
+	ctx := map[string]any{
+		"action":       res.Action,
+		"reason_class": "reconcile_failed",
+	}
+	if code := strings.TrimSpace(control.CodeOf(err)); code != "" && code != controlReconcileEventCode(res, err) {
+		ctx["ack_result_code"] = code
+	}
+	return ctx
 }
 
 func runControlReconcileLoop(
@@ -423,10 +434,7 @@ func runControlReconcileLoop(
 			eventCode := controlReconcileEventCode(res, err)
 			logger.Warn("control reconcile iteration finished with error",
 				"event_code", eventCode,
-				"safe_context", map[string]any{
-					"action":       res.Action,
-					"reason_class": "reconcile_failed",
-				})
+				"safe_context", controlReconcileLogContext(res, err))
 		}
 	}
 	runOnce()
