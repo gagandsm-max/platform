@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,6 +33,16 @@ func TestHealthDeliveryBlockedDegraded(t *testing.T) {
 	if !strings.Contains(body, "QUEUE_QUARANTINE_PRESENT") {
 		t.Fatalf("expected QUEUE_QUARANTINE_PRESENT reason, got %s", body)
 	}
+	var hMap map[string]any
+	if err := json.Unmarshal(wHealth.Body.Bytes(), &hMap); err != nil {
+		t.Fatal(err)
+	}
+	if hMap["document_type"] != "SUPPORT_EVIDENCE" || hMap["component"] != "platform-agent" {
+		t.Fatalf("support evidence identity=%v", hMap)
+	}
+	if hMap["component_state"] != "DEGRADED" {
+		t.Fatalf("expected DEGRADED component_state, got %v", hMap["component_state"])
+	}
 }
 
 func TestHealthAckRecoveryConflictDegraded(t *testing.T) {
@@ -49,15 +60,12 @@ func TestHealthAckRecoveryConflictDegraded(t *testing.T) {
 	if !strings.Contains(body, "QUEUE_ACK_RECOVERY_CONFLICT") {
 		t.Fatalf("expected QUEUE_ACK_RECOVERY_CONFLICT, got %s", body)
 	}
-	if !strings.Contains(body, `"status":"DEGRADED"`) && !strings.Contains(body, `"status": "DEGRADED"`) {
-		// compact JSON encoder may omit spaces
-		var hMap map[string]any
-		if err := json.Unmarshal(wHealth.Body.Bytes(), &hMap); err != nil {
-			t.Fatal(err)
-		}
-		if hMap["status"] != "DEGRADED" {
-			t.Fatalf("expected DEGRADED status, got %v body=%s", hMap["status"], body)
-		}
+	var hMap map[string]any
+	if err := json.Unmarshal(wHealth.Body.Bytes(), &hMap); err != nil {
+		t.Fatal(err)
+	}
+	if hMap["component_state"] != "DEGRADED" {
+		t.Fatalf("expected DEGRADED component_state, got %v body=%s", hMap["component_state"], body)
 	}
 	if strings.Contains(body, "payload") || strings.Contains(body, "replacement") || strings.Contains(body, "secret") {
 		t.Fatalf("health must not include payload material: %s", body)
@@ -174,8 +182,11 @@ func TestHealthEndpoints(t *testing.T) {
 	if err := json.Unmarshal(wHealth.Body.Bytes(), &hMap); err != nil {
 		t.Fatal(err)
 	}
-	if hMap["status"] != "DEGRADED" {
-		t.Fatalf("expected DEGRADED status, got %v", hMap["status"])
+	if hMap["document_type"] != "SUPPORT_EVIDENCE" {
+		t.Fatalf("expected SUPPORT_EVIDENCE, got %v", hMap["document_type"])
+	}
+	if hMap["component_state"] != "DEGRADED" {
+		t.Fatalf("expected DEGRADED component_state, got %v", hMap["component_state"])
 	}
 
 	// 2. Wired HTTPS transport is not readiness: last failure class must degrade /ready.
@@ -193,8 +204,15 @@ func TestHealthEndpoints(t *testing.T) {
 	if wReadyFailed.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected /ready 503 after last delivery failure, got %d", wReadyFailed.Code)
 	}
-	if !strings.Contains(wReadyFailed.Body.String(), "DELIVERY_NETWORK_ERROR") {
-		t.Fatalf("expected last error code in ready body, got %s", wReadyFailed.Body.String())
+	var readyMap map[string]any
+	if err := json.Unmarshal(wReadyFailed.Body.Bytes(), &readyMap); err != nil {
+		t.Fatal(err)
+	}
+	if readyMap["reason_code"] != "DELIVERY_NETWORK_ERROR" || readyMap["ready"] != false || readyMap["http_semantic"] != float64(503) {
+		t.Fatalf("unexpected ready body=%v", readyMap)
+	}
+	if readyMap["status"] != "NOT_READY" || readyMap["component"] != "platform-agent" {
+		t.Fatalf("unexpected ready identity=%v", readyMap)
 	}
 
 	wHealthFailed := httptest.NewRecorder()
@@ -211,6 +229,54 @@ func TestHealthEndpoints(t *testing.T) {
 	s2.handleReady(wReady2, reqReady)
 	if wReady2.Code != http.StatusOK {
 		t.Fatalf("expected /ready 200 when receiver available, got %d", wReady2.Code)
+	}
+}
+
+func TestLiveAndReadyCanonicalEnvelopes(t *testing.T) {
+	s, err := NewServer("127.0.0.1:0", &mockStatsProvider{receiverAvailable: true}, nil,
+		WithIdentity("0.1.0-test", "agent-instance-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wLive := httptest.NewRecorder()
+	s.handleLive(wLive, httptest.NewRequest(http.MethodGet, "/live", nil))
+	if wLive.Code != http.StatusOK {
+		t.Fatalf("live=%d", wLive.Code)
+	}
+	var live map[string]any
+	if err := json.Unmarshal(wLive.Body.Bytes(), &live); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"status", "component", "ts", "service_instance_id"} {
+		if _, ok := live[key]; !ok {
+			t.Fatalf("live missing %s: %v", key, live)
+		}
+	}
+	if live["status"] != "UP" || live["component"] != "platform-agent" {
+		t.Fatalf("live body=%v", live)
+	}
+	if _, exists := live["runtime"]; exists {
+		t.Fatalf("live must not emit legacy runtime field: %v", live)
+	}
+
+	wReady := httptest.NewRecorder()
+	s.handleReady(wReady, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if wReady.Code != http.StatusOK {
+		t.Fatalf("ready=%d body=%s", wReady.Code, wReady.Body.String())
+	}
+	var ready map[string]any
+	if err := json.Unmarshal(wReady.Body.Bytes(), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if ready["status"] != "UP" || ready["ready"] != true || ready["http_semantic"] != float64(200) {
+		t.Fatalf("ready body=%v", ready)
+	}
+
+	wAlias := httptest.NewRecorder()
+	s.handleReady(wAlias, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if wAlias.Code != http.StatusOK {
+		t.Fatalf("healthz alias=%d", wAlias.Code)
 	}
 }
 
@@ -252,5 +318,127 @@ func TestHealthServerLifecycle(t *testing.T) {
 	defer cancel()
 	if err := s.Stop(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHealthzMuxAliasIsReadiness(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	s, err := NewServer(addr, &mockStatsProvider{receiverAvailable: true}, nil,
+		WithIdentity("0.1.0-test", "agent-mux-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = s.Stop(ctx)
+	}()
+
+	var resp *http.Response
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resp, err = http.Get("http://" + addr + "/healthz")
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("healthz mux probe failed: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("healthz status=%d", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["ready"] != true || body["http_semantic"] != float64(200) {
+		t.Fatalf("healthz readiness body=%v", body)
+	}
+	if _, ok := body["document_type"]; ok {
+		t.Fatalf("healthz must not be SUPPORT_EVIDENCE: %v", body)
+	}
+}
+
+func TestReadyNotReadyWhileShuttingDown(t *testing.T) {
+	s, err := NewServer("127.0.0.1:0", &mockStatsProvider{receiverAvailable: true}, nil,
+		WithIdentity("0.1.0-test", "agent-shutdown-ready"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.shuttingDown.Store(true)
+
+	wReady := httptest.NewRecorder()
+	s.handleReady(wReady, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if wReady.Code != http.StatusServiceUnavailable {
+		t.Fatalf("ready during shutdown=%d body=%s", wReady.Code, wReady.Body.String())
+	}
+	var ready map[string]any
+	if err := json.Unmarshal(wReady.Body.Bytes(), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if ready["ready"] != false || ready["status"] != "NOT_READY" || ready["reason_code"] != "AGENT_SHUTTING_DOWN" {
+		t.Fatalf("ready shutdown body=%v", ready)
+	}
+
+	wAlias := httptest.NewRecorder()
+	s.handleReady(wAlias, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if wAlias.Code != http.StatusServiceUnavailable {
+		t.Fatalf("healthz during shutdown=%d", wAlias.Code)
+	}
+
+	wLive := httptest.NewRecorder()
+	s.handleLive(wLive, httptest.NewRequest(http.MethodGet, "/live", nil))
+	if wLive.Code != http.StatusOK {
+		t.Fatalf("live during shutdown must remain 200, got %d", wLive.Code)
+	}
+	var live map[string]any
+	if err := json.Unmarshal(wLive.Body.Bytes(), &live); err != nil {
+		t.Fatal(err)
+	}
+	if live["status"] != "SHUTTING_DOWN" {
+		t.Fatalf("live shutdown body=%v", live)
+	}
+}
+
+func TestSupportEvidenceLocalQueueFailureKeepsTransportUp(t *testing.T) {
+	// Mimic delivery.recordQueueFailure: ReceiverAvailable stays true while
+	// LastFailureClass/LastErrorCode capture a local spool fault after a valid ACK.
+	prov := &mockStatsProvider{
+		receiverAvailable: true,
+		lastFailureClass:  client.FailureBlocked,
+		lastErrorCode:     "QUEUE_ACK_COMMIT_FAILED",
+	}
+	s, err := NewServer("127.0.0.1:0", prov, nil, WithIdentity("0.1.0-test", "agent-local-queue"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wHealth := httptest.NewRecorder()
+	s.handleHealth(wHealth, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if wHealth.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected /health 503 for local queue failure, got %d", wHealth.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(wHealth.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	deps, _ := body["dependency_status"].(map[string]any)
+	if deps["sensor_transport"] != "UP" {
+		t.Fatalf("local queue failure must not mark sensor_transport DOWN: %v", body)
+	}
+	if body["delivery_status"] != "FAILED" {
+		t.Fatalf("expected delivery_status FAILED for local queue failure, got %v", body["delivery_status"])
 	}
 }

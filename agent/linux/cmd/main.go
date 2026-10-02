@@ -11,9 +11,12 @@ import (
 	"platform/agent/common"
 	"platform/agent/common/config"
 	"platform/agent/common/identity"
+	"platform/agent/common/supportability"
 )
 
 const (
+	agentVersion = "0.1.0-dev"
+
 	exitConfig   = 1
 	exitIdentity = 2
 	exitService  = 3
@@ -21,47 +24,59 @@ const (
 )
 
 func main() {
-	bootstrap := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})).With("service", "platform-agent-linux")
+	levelVar := new(slog.LevelVar)
+	levelVar.Set(slog.LevelInfo)
+	serviceInstanceID := supportability.NewServiceInstanceID()
+	bootstrap := supportability.NewJSONLogger(os.Stdout, levelVar, agentVersion, serviceInstanceID)
 	slog.SetDefault(bootstrap)
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		bootstrap.Error("Failed to load agent configuration", "error", err)
+		bootstrap.Error("Failed to load agent configuration",
+			"event_code", "AGENT_CONFIG_INVALID",
+			"safe_context", map[string]any{"reason_class": "config_load_failed"})
 		os.Exit(exitConfig)
 	}
-
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: logLevel(cfg.LogLevel),
-	})).With("service", "platform-agent-linux")
-	slog.SetDefault(logger)
+	levelVar.Set(logLevel(cfg.LogLevel))
 
 	ident, err := identity.LoadOrGenerate(cfg.StateDir, cfg.AgentID, cfg.TenantID)
 	if err != nil {
-		logger.Error("Failed to initialize agent identity", "error", err)
+		bootstrap.Error("Failed to initialize agent identity",
+			"event_code", "AGENT_IDENTITY_INIT_FAILED",
+			"safe_context", map[string]any{"reason_class": "identity_init_failed"})
 		os.Exit(exitIdentity)
 	}
 
+	logger := bootstrap.With("agent_id", ident.AgentID)
+	if strings.TrimSpace(ident.TenantID) != "" {
+		logger = logger.With("tenant_id", ident.TenantID)
+	}
+	slog.SetDefault(logger)
+
 	logger.Info("Platform Linux Agent starting",
-		"version", "0.1.0-dev",
-		"agent_id", ident.AgentID,
-		"tenant_id", ident.TenantID,
-		"host_id", ident.HostID,
-		"sensor_url", cfg.SensorURL,
-	)
+		"safe_context", map[string]any{
+			"host_id":    ident.HostID,
+			"log_level":  cfg.LogLevel,
+			"state_dir":  "configured",
+			"sensor_url": "configured",
+		})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc, err := common.NewAgentService(cfg, ident, nil, logger)
+	svc, err := common.NewAgentService(cfg, ident, nil, logger,
+		common.WithSupportabilityIdentity(agentVersion, serviceInstanceID))
 	if err != nil {
-		logger.Error("Failed to initialize agent service", "error", err)
+		logger.Error("Failed to initialize agent service",
+			"event_code", "AGENT_SERVICE_INIT_FAILED",
+			"safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(exitService)
 	}
 
 	if err := svc.Start(ctx); err != nil {
-		logger.Error("Failed to start agent service", "error", err)
+		logger.Error("Failed to start agent service",
+			"event_code", "AGENT_SERVICE_START_FAILED",
+			"safe_context", map[string]any{"reason_class": "startup_failed"})
 		os.Exit(exitStart)
 	}
 
@@ -69,7 +84,8 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	sig := <-sigCh
-	logger.Info("Platform Linux Agent received signal, shutting down", "signal", sig.String())
+	logger.Info("Platform Linux Agent received signal, shutting down",
+		"safe_context", map[string]any{"signal": sig.String()})
 	cancel()
 	_ = svc.Stop()
 	logger.Info("Platform Linux Agent exited cleanly")

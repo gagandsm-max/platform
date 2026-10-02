@@ -114,7 +114,22 @@ func TestSchedulerLifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	sched.Start(ctx)
 
-	time.Sleep(120 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		enq.mu.Lock()
+		n := len(enq.records)
+		enq.mu.Unlock()
+		if n >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			sched.Stop()
+			t.Fatalf("expected at least 2 collections, got %d", n)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	cancel()
 	sched.Stop()
 

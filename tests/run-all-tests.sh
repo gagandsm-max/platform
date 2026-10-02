@@ -490,10 +490,13 @@ docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valke
 CORE_LOG=$(docker logs --tail 20 platform-core 2>/dev/null | awk '/^\{/{print; exit}' || true)
 SENSOR_LOG=$(docker logs --tail 100 platform-sensor-net 2>/dev/null | awk '/^\{/{print}' || true)
 ANALYTICS_LOG=$(docker logs --tail 20 platform-analytics 2>/dev/null | awk '/^\{/{print; exit}' || true)
+ANALYTICS_HEALTH=$(docker exec platform-analytics curl -s http://127.0.0.1:8090/health 2>/dev/null || echo "")
+ANALYTICS_HEALTHZ=$(docker exec platform-analytics curl -s http://127.0.0.1:8090/healthz 2>/dev/null || echo "")
+ANALYTICS_HEALTH_CODE=$(docker exec platform-analytics curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/health 2>/dev/null || echo "000")
+ANALYTICS_HEALTHZ_CODE=$(docker exec platform-analytics curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/healthz 2>/dev/null || echo "000")
 
-# Core uses BUILD-005 certified envelope (component, not legacy service).
-# Sensor now uses the BUILD-005 Slice-3 certified envelope; Analytics retains
-# its existing "service" expectation until its later bounded conformance slice.
+# Core/Sensor/Analytics use BUILD-005 common envelopes (component, not legacy service).
+# Slice certification is Master-owned; this gate only validates runtime envelope shape.
 CORE_LOG_VALID=false
 if [ -n "${CORE_LOG}" ] && echo "${CORE_LOG}" | python3 -c '
 import json, sys
@@ -578,10 +581,104 @@ sys.exit(0)
     SENSOR_LOG_VALID=true
 fi
 ANALYTICS_LOG_VALID=false
-if echo "${ANALYTICS_LOG}" | grep -q '"service"'; then ANALYTICS_LOG_VALID=true; fi
+if [ -n "${ANALYTICS_LOG}" ] && echo "${ANALYTICS_LOG}" | python3 -c '
+import json, sys
+required = ("ts", "level", "component", "version", "service_instance_id", "message")
+allowed = {
+    "ts", "level", "component", "version", "service_instance_id", "message",
+    "node_id", "sensor_id", "agent_id", "tenant_id", "event_code", "correlation_id",
+    "request_id", "job_id", "entity_id", "protocol", "result", "retry_count", "safe_context",
+}
+legacy = ("timestamp", "time", "msg", "service", "environment", "thread", "logger", "error_code", "error", "stack_trace", "stackTrace")
+
+def no_duplicate_keys(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate JSON key: {key}")
+        obj[key] = value
+    return obj
+
+def valid_log(obj):
+    if not isinstance(obj, dict):
+        return False
+    if set(obj) - allowed:
+        return False
+    for key in required:
+        value = obj.get(key)
+        if value is None or (isinstance(value, str) and value.strip() == ""):
+            return False
+    if obj.get("component") != "platform-analytics":
+        return False
+    if any(key in obj for key in legacy):
+        return False
+    return True
+
+try:
+    obj = json.loads(sys.stdin.read(), object_pairs_hook=no_duplicate_keys)
+except Exception:
+    sys.exit(1)
+if not valid_log(obj):
+    sys.exit(1)
+probe = dict(obj)
+probe["_unknown"] = True
+if valid_log(probe):
+    sys.exit(1)
+sys.exit(0)
+'; then
+    ANALYTICS_LOG_VALID=true
+fi
+
+ANALYTICS_HEALTH_VALID=false
+if [ "${ANALYTICS_HEALTH_CODE}" = "200" ] && [ "${ANALYTICS_HEALTHZ_CODE}" = "200" ] && \
+   echo "${ANALYTICS_HEALTH}" | python3 -c '
+import json, sys
+required = ("status", "component", "version", "ts", "service_instance_id")
+legacy = ("service", "document_type")
+try:
+    obj = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(obj, dict):
+    sys.exit(1)
+for key in required:
+    value = obj.get(key)
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        sys.exit(1)
+if obj.get("component") != "platform-analytics":
+    sys.exit(1)
+if obj.get("status") not in ("UP", "SHUTTING_DOWN"):
+    sys.exit(1)
+for key in legacy:
+    if key in obj:
+        sys.exit(1)
+sys.exit(0)
+' && echo "${ANALYTICS_HEALTHZ}" | python3 -c '
+import json, sys
+required = ("status", "component", "version", "ts", "service_instance_id")
+legacy = ("service", "document_type")
+try:
+    obj = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(obj, dict):
+    sys.exit(1)
+for key in required:
+    value = obj.get(key)
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        sys.exit(1)
+if obj.get("component") != "platform-analytics":
+    sys.exit(1)
+if "document_type" in obj or "service" in obj:
+    sys.exit(1)
+sys.exit(0)
+'; then
+    ANALYTICS_HEALTH_VALID=true
+fi
 
 LOGS_OK=false
-if [ "${CORE_LOG_VALID}" = "true" ] && [ "${SENSOR_LOG_VALID}" = "true" ] && [ "${ANALYTICS_LOG_VALID}" = "true" ]; then
+if [ "${CORE_LOG_VALID}" = "true" ] && [ "${SENSOR_LOG_VALID}" = "true" ] && \
+   [ "${ANALYTICS_LOG_VALID}" = "true" ] && [ "${ANALYTICS_HEALTH_VALID}" = "true" ]; then
     LOGS_OK=true
 fi
 
