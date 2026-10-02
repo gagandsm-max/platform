@@ -424,10 +424,12 @@ func dependencyStatus(ev evaluation) map[string]string {
 	switch {
 	case !ev.schedulerPresent:
 		out["scheduler"] = "DOWN"
-	case ev.scheduler.State == scheduler.StateRunning:
-		out["scheduler"] = "UP"
-	default:
+	case ev.scheduler.State != scheduler.StateRunning:
 		out["scheduler"] = "DOWN"
+	case schedulerQueueSaturated(ev.scheduler):
+		out["scheduler"] = "DEGRADED"
+	default:
+		out["scheduler"] = "UP"
 	}
 	switch {
 	case !ev.controlPresent:

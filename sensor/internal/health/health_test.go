@@ -251,6 +251,13 @@ func TestReadyzQueueSaturationIsDegradedNotReady(t *testing.T) {
 	if rr.Code != http.StatusOK || body["status"] != "UP" {
 		t.Fatalf("queue saturation must not kill liveness: %d body=%v", rr.Code, body)
 	}
+
+	rr, body = request(t, hs, "/health")
+	deps, ok := body["dependency_status"].(map[string]any)
+	if rr.Code != http.StatusServiceUnavailable || body["component_state"] != "DEGRADED" ||
+		!ok || deps["scheduler"] != "DEGRADED" {
+		t.Fatalf("queue saturation support evidence=%d body=%v", rr.Code, body)
+	}
 }
 
 func TestReadyzPerPoolSaturationIsDegradedNotReady(t *testing.T) {
@@ -272,6 +279,13 @@ func TestReadyzPerPoolSaturationIsDegradedNotReady(t *testing.T) {
 		body["http_semantic"] != float64(503) ||
 		body["reason_code"] != reasonSchedulerQueue {
 		t.Fatalf("per-pool saturation readiness=%d body=%v", rr.Code, body)
+	}
+
+	rr, body = request(t, hs, "/health")
+	deps, ok := body["dependency_status"].(map[string]any)
+	if rr.Code != http.StatusServiceUnavailable || body["component_state"] != "DEGRADED" ||
+		!ok || deps["scheduler"] != "DEGRADED" {
+		t.Fatalf("per-pool saturation support evidence=%d body=%v", rr.Code, body)
 	}
 }
 
