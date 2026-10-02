@@ -457,7 +457,8 @@ func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *s
 	agentSpool, err := spool.Open(spool.Config{
 		Dir:            agentDir,
 		MaxRecordBytes: 2 * 1024 * 1024,
-		Logger:         logger.With("spool", "agent-ingress"),
+		Kind:           spool.KindAgentIngress,
+		Logger:         logger,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open Agent spool: %w", err)

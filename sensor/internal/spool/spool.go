@@ -22,6 +22,13 @@ func Open(cfg Config) (*DiskSpool, error) {
 	if cfg.MaxRecordBytes <= 0 {
 		return nil, newError(CodeInvalidConfig, "maximum record bytes must be greater than zero", nil)
 	}
+	kind := cfg.Kind
+	if kind == "" {
+		kind = KindTelemetry
+	}
+	if kind != KindTelemetry && kind != KindAgentIngress {
+		return nil, newError(CodeInvalidConfig, "spool kind is unsupported", nil)
+	}
 	clean := filepath.Clean(cfg.Dir)
 	if err := ensureDirSecure(clean, 0750); err != nil {
 		return nil, err
@@ -30,7 +37,7 @@ func Open(cfg Config) (*DiskSpool, error) {
 	if err := ensureDirSecure(quarantine, 0750); err != nil {
 		return nil, err
 	}
-	s := &DiskSpool{dir: clean, quarantineDir: quarantine, maxRecordBytes: cfg.MaxRecordBytes, logger: cfg.Logger}
+	s := &DiskSpool{dir: clean, quarantineDir: quarantine, maxRecordBytes: cfg.MaxRecordBytes, kind: kind, logger: cfg.Logger}
 	s.space = s.filesystemStatus
 	if err := s.loadOrCreateStreamID(); err != nil {
 		return nil, err

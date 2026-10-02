@@ -1,8 +1,10 @@
 package spool
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,6 +154,40 @@ func TestPartialAndCorruptQuarantine(t *testing.T) {
 		t.Fatal("degradation not exposed")
 	}
 }
+func TestQuarantineLogIncludesSpoolKind(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	dir := t.TempDir()
+	s, err := Open(Config{Dir: dir, MaxRecordBytes: 1024, Kind: KindAgentIngress, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.space = func(int64) (spaceStatus, error) {
+		return spaceStatus{totalBytes: 1000000, usedBytes: 1000, usedPct: .1}, nil
+	}
+	r := add(t, s, "payload")
+	p := filepath.Join(s.dir, recordFileName(r.Sequence))
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec Record
+	if err = json.Unmarshal(data, &rec); err != nil {
+		t.Fatal(err)
+	}
+	rec.Payload = []byte("evil")
+	bad, _ := json.Marshal(rec)
+	if err = os.WriteFile(p, bad, 0640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ReadBatch(10, 100); CodeOf(err) != CodeCorruption {
+		t.Fatalf("want corruption got %v", err)
+	}
+	if !strings.Contains(logs.String(), "\"spool_type\":\"agent_ingress\"") {
+		t.Fatalf("quarantine log must identify Agent ingress spool: %s", logs.String())
+	}
+}
+
 func TestRecoveryQuarantinesPartial(t *testing.T) {
 	dir := t.TempDir()
 	if e := os.WriteFile(filepath.Join(dir, "record-00000000000000000001.json.tmp"), []byte("partial"), 0640); e != nil {
