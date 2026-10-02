@@ -200,6 +200,54 @@ func TestSafeContextRejectsEmbeddedAuthorizationAndMixedCasePEM(t *testing.T) {
 	}
 }
 
+func TestSafeContextRejectsEqualsFormAuthorizationCredentials(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	ctx := map[string]any{
+		"status":       "ok",
+		"eq_bearer":    "request failed; Authorization=Bearer SECRET-BEARER-SENTINEL",
+		"eq_sp_bearer": "request failed; Authorization = Bearer SECRET-BEARER-SENTINEL",
+		"eq_lc_bearer": "request failed; authorization=bearer SECRET-BEARER-SENTINEL",
+		"eq_basic":     "upstream Authorization=Basic U0VDUkVULUJBQ0lD",
+		"eq_sp_basic":  "upstream Authorization = Basic U0VDUkVULUJBQ0lD",
+		"eq_lc_basic":  "upstream authorization=basic U0VDUkVULUJBQ0lD",
+		"prose_bearer": "Bearer authentication failed",
+		"prose_basic":  "Basic authentication rejected",
+		"outcome":      "token validation failed",
+		"prose_authz":  "Authorization validation failed",
+		"prose_scheme": "authentication scheme Bearer rejected",
+	}
+	logger.Info("test", "safe_context", ctx)
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected retained safe context: %v", got)
+	}
+	for _, key := range []string{"status", "prose_bearer", "prose_basic", "outcome", "prose_authz", "prose_scheme"} {
+		if _, present := safe[key]; !present {
+			t.Fatalf("benign prose/key %q omitted: %v", key, safe)
+		}
+	}
+	for _, key := range []string{"eq_bearer", "eq_sp_bearer", "eq_lc_bearer", "eq_basic", "eq_sp_basic", "eq_lc_basic"} {
+		if _, present := safe[key]; present {
+			t.Fatalf("equals-form credential key %q retained: %v", key, safe)
+		}
+	}
+	raw := strings.ToLower(buf.String())
+	for _, sentinel := range []string{
+		"secret-bearer-sentinel",
+		"u0vdukvulujbq0ld",
+		"authorization=bearer",
+		"authorization = bearer",
+		"authorization=basic",
+		"authorization = basic",
+	} {
+		if strings.Contains(raw, sentinel) {
+			t.Fatalf("equals-form credential sentinel %q leaked: %s", sentinel, buf.String())
+		}
+	}
+}
+
 func TestSafeContextOmitsNonFiniteFloats(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newTestLogger(&buf)
@@ -269,6 +317,72 @@ func TestComponentIdentityCannotBeOverridden(t *testing.T) {
 	raw := buf.String()
 	if strings.Count(raw, "\"component\"") != 1 {
 		t.Fatalf("component key must be unique: %s", raw)
+	}
+}
+
+func assertNoDuplicateTopLevelKeys(t *testing.T, raw string) {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(strings.TrimSpace(raw)))
+	tok, err := dec.Token()
+	if err != nil {
+		t.Fatalf("decode start: %v", err)
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		t.Fatalf("expected object start, got %#v", tok)
+	}
+	seen := map[string]struct{}{}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			t.Fatalf("key token: %v", err)
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			t.Fatalf("expected string key, got %#v", keyTok)
+		}
+		if _, exists := seen[key]; exists {
+			t.Fatalf("duplicate top-level key %q in %s", key, raw)
+		}
+		seen[key] = struct{}{}
+		var skip any
+		if err := dec.Decode(&skip); err != nil {
+			t.Fatalf("skip value for %q: %v", key, err)
+		}
+	}
+}
+
+func TestSlice5EmittedJSONHasNoDuplicateTopLevelKeys(t *testing.T) {
+	var buf bytes.Buffer
+	// Attempt valid rebinds of bound runtime identity. First accepted value must
+	// win; duplicate top-level keys must still be absent.
+	logger := newTestLogger(&buf).
+		With("component", "spoofed-component").
+		With("version", "9.9.9-rebind").
+		With("service_instance_id", "agent-instance-rebind").
+		With("agent_id", "agent-linux-02")
+	logger.Warn("dup-key-cert",
+		"error_code", "CONTROL_SYNC_PENDING",
+		"correlation_id", "corr-slice5",
+		"component", componentName,
+		"version", "8.8.8-rebind",
+		"service_instance_id", "agent-instance-rebind-2",
+		"agent_id", "agent-linux-03",
+		"safe_context", map[string]any{"mode": "ok"},
+	)
+	raw := strings.TrimSpace(buf.String())
+	assertNoDuplicateTopLevelKeys(t, raw)
+	got := decodeOne(t, &buf)
+	if got["component"] != componentName {
+		t.Fatalf("component identity not immutable: %v", got)
+	}
+	if got["version"] != "0.1.0-test" {
+		t.Fatalf("version identity not immutable: %v", got)
+	}
+	if got["service_instance_id"] != "agent-instance-test" {
+		t.Fatalf("service_instance_id identity not immutable: %v", got)
+	}
+	if got["agent_id"] != "agent-linux-01" {
+		t.Fatalf("agent_id identity not immutable: %v", got)
 	}
 }
 
@@ -387,7 +501,11 @@ func TestAgentIDUsesBoundedStringContract(t *testing.T) {
 	for _, agentID := range []string{"agent/site 01", "Agent With Spaces"} {
 		t.Run(agentID, func(t *testing.T) {
 			var buf bytes.Buffer
-			logger := newTestLogger(&buf)
+			level := new(slog.LevelVar)
+			level.Set(slog.LevelDebug)
+			// Bind agent_id once at the call site under test — not via newTestLogger,
+			// which already establishes immutable agent-linux-01 identity.
+			logger := NewJSONLogger(&buf, level, "0.1.0-test", "agent-instance-test")
 			logger.Warn("test", "agent_id", agentID)
 			got := decodeOne(t, &buf)
 			if got["agent_id"] != agentID {

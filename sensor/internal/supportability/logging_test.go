@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"strings"
 	"testing"
 )
@@ -119,14 +120,14 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newTestLogger(&buf)
 	ctx := map[string]any{
-		"mode":          "trusted_continue",
-		"password":      "fictional-secret",
-		"community":     "private",
-		"api_token":     "abc",
-		"Authorization": "Bearer abc123",
-		"header":        "Basic Zm9vOmJhcg==",
+		"mode":             "trusted_continue",
+		"password":         "fictional-secret",
+		"community":        "private",
+		"api_token":        "abc",
+		"Authorization":    "Bearer abc123",
+		"header":           "Basic Zm9vOmJhcg==",
 		"private_material": "-----BEGIN PRIVATE KEY-----abc",
-		"nested":        map[string]any{"x": 1},
+		"nested":           map[string]any{"x": 1},
 	}
 	logger.Info("test", "safe_context", ctx)
 	got := decodeOne(t, &buf)
@@ -171,6 +172,187 @@ func TestUnknownTopLevelAttributesAreDropped(t *testing.T) {
 	}
 }
 
+// BUILD-005 Slice 5: fail-first Sensor safe_context credential/prose/PEM/non-finite bar.
+func TestSlice5SafeContextCredentialProsePEMAndNonFinite(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	ctx := map[string]any{
+		"status":       "ok",
+		"bearer_full":  "Bearer abc123-token",
+		"basic_full":   "Basic Zm9vOmJhcg==",
+		"embed_bearer": "request failed; Authorization: Bearer abc123-token",
+		"embed_basic":  "upstream Authorization: Basic Zm9vOmJhcg==",
+		"pem_lower":    "-----begin private key-----\nSECRET-SENTINEL\n-----end private key-----",
+		"pem_mixed":    "-----Begin Private Key-----\nSECRET-SENTINEL\n-----End Private Key-----",
+		"prose_bearer": "Bearer authentication failed",
+		"prose_basic":  "Basic authentication rejected",
+		"outcome":      "token validation failed",
+		"bad_nan":      math.NaN(),
+		"bad_pos_inf":  math.Inf(1),
+		"bad_neg_inf":  math.Inf(-1),
+		"ok_float":     1.5,
+		"ok_int":       7,
+	}
+	logger.Info("slice5", "safe_context", ctx)
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected retained safe context: %v", got)
+	}
+	want := map[string]any{
+		"status":       "ok",
+		"prose_bearer": "Bearer authentication failed",
+		"prose_basic":  "Basic authentication rejected",
+		"outcome":      "token validation failed",
+		"ok_float":     1.5,
+		"ok_int":       float64(7),
+	}
+	for key, value := range want {
+		if safe[key] != value {
+			t.Fatalf("S5 retained key %q missing/wrong: got=%v want=%v full=%v", key, safe[key], value, safe)
+		}
+	}
+	for _, key := range []string{
+		"bearer_full", "basic_full", "embed_bearer", "embed_basic",
+		"pem_lower", "pem_mixed", "bad_nan", "bad_pos_inf", "bad_neg_inf",
+	} {
+		if _, present := safe[key]; present {
+			t.Fatalf("S5 unsafe key %q retained: %v", key, safe)
+		}
+	}
+	raw := strings.ToLower(buf.String())
+	for _, sentinel := range []string{
+		"abc123-token",
+		"zm9vomjhcg==",
+		"secret-sentinel",
+		"authorization: bearer",
+		"authorization: basic",
+	} {
+		if strings.Contains(raw, sentinel) {
+			t.Fatalf("S5 credential sentinel %q leaked: %s", sentinel, buf.String())
+		}
+	}
+}
+
+func TestSafeContextRejectsEqualsFormAuthorizationCredentials(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	ctx := map[string]any{
+		"status":       "ok",
+		"eq_bearer":    "request failed; Authorization=Bearer SECRET-BEARER-SENTINEL",
+		"eq_sp_bearer": "request failed; Authorization = Bearer SECRET-BEARER-SENTINEL",
+		"eq_lc_bearer": "request failed; authorization=bearer SECRET-BEARER-SENTINEL",
+		"eq_basic":     "upstream Authorization=Basic U0VDUkVULUJBQ0lD",
+		"eq_sp_basic":  "upstream Authorization = Basic U0VDUkVULUJBQ0lD",
+		"eq_lc_basic":  "upstream authorization=basic U0VDUkVULUJBQ0lD",
+		"prose_bearer": "Bearer authentication failed",
+		"prose_basic":  "Basic authentication rejected",
+		"outcome":      "token validation failed",
+		"prose_authz":  "Authorization validation failed",
+		"prose_scheme": "authentication scheme Bearer rejected",
+	}
+	logger.Info("test", "safe_context", ctx)
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected retained safe context: %v", got)
+	}
+	for _, key := range []string{"status", "prose_bearer", "prose_basic", "outcome", "prose_authz", "prose_scheme"} {
+		if _, present := safe[key]; !present {
+			t.Fatalf("benign prose/key %q omitted: %v", key, safe)
+		}
+	}
+	for _, key := range []string{"eq_bearer", "eq_sp_bearer", "eq_lc_bearer", "eq_basic", "eq_sp_basic", "eq_lc_basic"} {
+		if _, present := safe[key]; present {
+			t.Fatalf("equals-form credential key %q retained: %v", key, safe)
+		}
+	}
+	raw := strings.ToLower(buf.String())
+	for _, sentinel := range []string{
+		"secret-bearer-sentinel",
+		"u0vdukvulujbq0ld",
+		"authorization=bearer",
+		"authorization = bearer",
+		"authorization=basic",
+		"authorization = basic",
+	} {
+		if strings.Contains(raw, sentinel) {
+			t.Fatalf("equals-form credential sentinel %q leaked: %s", sentinel, buf.String())
+		}
+	}
+}
+
+func assertNoDuplicateTopLevelKeys(t *testing.T, raw string) {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(strings.TrimSpace(raw)))
+	tok, err := dec.Token()
+	if err != nil {
+		t.Fatalf("decode start: %v", err)
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		t.Fatalf("expected object start, got %#v", tok)
+	}
+	seen := map[string]struct{}{}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			t.Fatalf("key token: %v", err)
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			t.Fatalf("expected string key, got %#v", keyTok)
+		}
+		if _, exists := seen[key]; exists {
+			t.Fatalf("duplicate top-level key %q in %s", key, raw)
+		}
+		seen[key] = struct{}{}
+		var skip any
+		if err := dec.Decode(&skip); err != nil {
+			t.Fatalf("skip value for %q: %v", key, err)
+		}
+	}
+}
+
+func TestSlice5EmittedJSONHasNoDuplicateTopLevelKeys(t *testing.T) {
+	var buf bytes.Buffer
+	// Attempt valid rebinds of bound runtime identity. First accepted value must
+	// win; duplicate top-level keys must still be absent.
+	logger := newTestLogger(&buf).
+		With("component", "spoofed-component").
+		With("version", "9.9.9-rebind").
+		With("service_instance_id", "sensor-instance-rebind").
+		With("sensor_id", "sensor-net-02").
+		With("agent_id", "agent-rebind-01")
+	logger.Warn("dup-key-cert",
+		"error_code", "CONTROL_SYNC_PENDING",
+		"correlation_id", "corr-slice5",
+		"component", componentName,
+		"version", "8.8.8-rebind",
+		"service_instance_id", "sensor-instance-rebind-2",
+		"sensor_id", "sensor-net-03",
+		"agent_id", "agent-rebind-02",
+		"safe_context", map[string]any{"mode": "ok"},
+	)
+	raw := strings.TrimSpace(buf.String())
+	assertNoDuplicateTopLevelKeys(t, raw)
+	got := decodeOne(t, &buf)
+	if got["component"] != componentName {
+		t.Fatalf("component identity not immutable: %v", got)
+	}
+	if got["version"] != "0.1.0-test" {
+		t.Fatalf("version identity not immutable: %v", got)
+	}
+	if got["service_instance_id"] != "sensor-instance-test" {
+		t.Fatalf("service_instance_id identity not immutable: %v", got)
+	}
+	if got["sensor_id"] != "sensor-net-01" {
+		t.Fatalf("sensor_id identity not immutable: %v", got)
+	}
+	if got["agent_id"] != "agent-rebind-01" {
+		t.Fatalf("agent_id identity not immutable once bound: %v", got)
+	}
+}
+
 func TestServiceInstanceIDIsStableFormatAndChangesAcrossGeneration(t *testing.T) {
 	a := NewServiceInstanceID()
 	b := NewServiceInstanceID()
@@ -183,7 +365,6 @@ func TestServiceInstanceIDIsStableFormatAndChangesAcrossGeneration(t *testing.T)
 		}
 	}
 }
-
 
 func TestComponentIdentityCannotBeOverridden(t *testing.T) {
 	var buf bytes.Buffer
@@ -223,7 +404,6 @@ func TestSafeContextRejectsPassphraseKeys(t *testing.T) {
 	}
 }
 
-
 type namedEventCode string
 
 func TestNamedStringEventCodeIsPreserved(t *testing.T) {
@@ -255,7 +435,6 @@ func TestSafeContextRejectsPwdAlias(t *testing.T) {
 		t.Fatalf("pwd material leaked: %s", buf.String())
 	}
 }
-
 
 func TestSafeContextRejectsSNMPPassAliases(t *testing.T) {
 	var buf bytes.Buffer
@@ -316,7 +495,11 @@ func TestAgentIDUsesBoundedStringContract(t *testing.T) {
 	for _, agentID := range []string{"agent/site 01", "Agent With Spaces"} {
 		t.Run(agentID, func(t *testing.T) {
 			var buf bytes.Buffer
-			logger := newTestLogger(&buf)
+			level := new(slog.LevelVar)
+			level.Set(slog.LevelDebug)
+			// Bind agent_id once at the call site under test — not after a prior
+			// accepted agent_id on the same logger chain.
+			logger := NewJSONLogger(&buf, level, "0.1.0-test", "sensor-instance-test")
 			logger.Warn("test", "agent_id", agentID)
 			got := decodeOne(t, &buf)
 			if got["agent_id"] != agentID {

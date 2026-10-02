@@ -1,11 +1,13 @@
 package supportability
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"reflect"
 	"regexp"
@@ -22,10 +24,14 @@ const (
 )
 
 var (
-	boundedIDRE      = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
-	uuidRE           = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-	protocolResultRE = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
-	safeKeyRE        = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+	boundedIDRE          = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+	uuidRE               = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	protocolResultRE     = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+	safeKeyRE            = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+	bearerCredentialRE   = regexp.MustCompile(`(?i)^\s*Bearer\s+[A-Za-z0-9._~+/=-]+\s*$`)
+	basicCredentialRE    = regexp.MustCompile(`(?i)^\s*Basic\s+([A-Za-z0-9+/]+=*)\s*$`)
+	embeddedAuthBearerRE = regexp.MustCompile(`(?i)Authorization\s*[:=]\s*Bearer\s+[A-Za-z0-9._~+/=-]+`)
+	embeddedAuthBasicRE  = regexp.MustCompile(`(?i)Authorization\s*[:=]\s*Basic\s+[A-Za-z0-9+/]+=*`)
 )
 
 // NewServiceInstanceID returns a non-authoritative identity unique to this
@@ -50,15 +56,87 @@ func NewJSONLogger(w io.Writer, level slog.Leveler, version, serviceInstanceID s
 	if strings.TrimSpace(serviceInstanceID) == "" {
 		serviceInstanceID = NewServiceInstanceID()
 	}
-	handler := slog.NewJSONHandler(w, &slog.HandlerOptions{
+	base := slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level:       level,
 		ReplaceAttr: replaceAttr,
 	})
-	return slog.New(handler).With(
+	// Dedupe top-level keys so With()/record rebinds cannot emit duplicate JSON
+	// object keys. Bound runtime identity is first-wins; contextual fields may
+	// still last-wins. ReplaceAttr remains authoritative for shape.
+	return slog.New(&uniqueKeyHandler{inner: base}).With(
 		"component", componentName,
 		"version", version,
 		"service_instance_id", serviceInstanceID,
 	)
+}
+
+// uniqueKeyHandler folds Handler.WithAttrs and Record attrs into a single
+// top-level key set before delegating to the JSON handler.
+type uniqueKeyHandler struct {
+	inner slog.Handler
+	attrs []slog.Attr
+}
+
+func (h *uniqueKeyHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.inner.Enabled(ctx, level)
+}
+
+func immutableRuntimeIdentityKey(key string) bool {
+	switch key {
+	case "component", "version", "service_instance_id", "sensor_id", "agent_id":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *uniqueKeyHandler) Handle(ctx context.Context, r slog.Record) error {
+	merged := make(map[string]slog.Attr, len(h.attrs)+r.NumAttrs())
+	order := make([]string, 0, len(h.attrs)+r.NumAttrs())
+	put := func(a slog.Attr) {
+		a.Value = a.Value.Resolve()
+		// Apply ReplaceAttr before dedupe so rejected overrides cannot erase an
+		// earlier accepted identity attr (e.g. spoofed component).
+		a = replaceAttr(nil, a)
+		if a.Key == "" {
+			return
+		}
+		if _, exists := merged[a.Key]; exists {
+			// Bound runtime identity is immutable for this logger chain.
+			// Contextual fields retain last-accepted-wins for duplicates.
+			if immutableRuntimeIdentityKey(a.Key) {
+				return
+			}
+			merged[a.Key] = a
+			return
+		}
+		order = append(order, a.Key)
+		merged[a.Key] = a
+	}
+	for _, a := range h.attrs {
+		put(a)
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		put(a)
+		return true
+	})
+	nr := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
+	for _, key := range order {
+		nr.AddAttrs(merged[key])
+	}
+	return h.inner.Handle(ctx, nr)
+}
+
+func (h *uniqueKeyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	joined := make([]slog.Attr, 0, len(h.attrs)+len(attrs))
+	joined = append(joined, h.attrs...)
+	joined = append(joined, attrs...)
+	return &uniqueKeyHandler{inner: h.inner, attrs: joined}
+}
+
+func (h *uniqueKeyHandler) WithGroup(name string) slog.Handler {
+	// Groups are rejected by replaceAttr; keep chain intact for slog contract.
+	return &uniqueKeyHandler{inner: h.inner.WithGroup(name), attrs: h.attrs}
 }
 
 func replaceAttr(groups []string, attr slog.Attr) slog.Attr {
@@ -261,8 +339,15 @@ func safePrimitive(value any) (any, bool) {
 		}
 		return v, true
 	case float32:
+		f := float64(v)
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil, false
+		}
 		return v, true
 	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil, false
+		}
 		return v, true
 	default:
 		return nil, false
@@ -299,12 +384,25 @@ func normalizeKey(key string) string {
 }
 
 func looksCredentialLike(value string) bool {
+	// Targeted safe_context sanitization only: full credential blobs, embedded
+	// Authorization header credentials, and PEM private-key markers
+	// (case-insensitive). Operational prose such as "Bearer authentication
+	// failed" remains permitted. This is not universal message scrubbing.
 	trimmed := strings.TrimSpace(value)
-	lower := strings.ToLower(trimmed)
-	if strings.HasPrefix(lower, "bearer ") || strings.HasPrefix(lower, "basic ") {
+	if bearerCredentialRE.MatchString(trimmed) {
 		return true
 	}
-	return strings.Contains(trimmed, "-----BEGIN") && strings.Contains(strings.ToUpper(trimmed), "PRIVATE KEY")
+	if m := basicCredentialRE.FindStringSubmatch(trimmed); len(m) == 2 && len(m[1]) >= 4 {
+		return true
+	}
+	if embeddedAuthBearerRE.MatchString(trimmed) {
+		return true
+	}
+	if embeddedAuthBasicRE.MatchString(trimmed) {
+		return true
+	}
+	upper := strings.ToUpper(trimmed)
+	return strings.Contains(upper, "-----BEGIN") && strings.Contains(upper, "PRIVATE KEY")
 }
 
 func containsControl(value string) bool {

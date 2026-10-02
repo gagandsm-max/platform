@@ -502,8 +502,17 @@ if [ -n "${CORE_LOG}" ] && echo "${CORE_LOG}" | python3 -c '
 import json, sys
 required = ("ts", "level", "component", "version", "node_id", "service_instance_id", "message")
 legacy = ("timestamp", "service", "environment", "thread", "logger", "error_code", "stack_trace", "stackTrace")
+
+def no_duplicate_keys(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate JSON key: {key}")
+        obj[key] = value
+    return obj
+
 try:
-    obj = json.load(sys.stdin)
+    obj = json.load(sys.stdin, object_pairs_hook=no_duplicate_keys)
 except Exception:
     sys.exit(1)
 if not isinstance(obj, dict):

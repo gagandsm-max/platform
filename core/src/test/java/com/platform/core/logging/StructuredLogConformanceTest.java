@@ -4,6 +4,8 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.LoggingEvent;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.logstash.logback.composite.GlobalCustomFieldsJsonProvider;
@@ -30,7 +32,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StructuredLogConformanceTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper(
+            JsonFactory.builder()
+                    .configure(StreamReadFeature.STRICT_DUPLICATE_DETECTION, true)
+                    .build()
+    );
     private static final Pattern TS_Z = Pattern.compile(
             "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
     );
@@ -202,7 +208,38 @@ class StructuredLogConformanceTest {
         assertEquals("token validation failed", json.get("message").asText());
     }
 
+    @Test
+    void emittedJsonHasNoDuplicateTopLevelKeysUnderStrictDecode() throws Exception {
+        MDC.put(SupportabilityMdcKeys.EVENT_CODE, CoreSupportabilityEventCodes.KAFKA_PUBLICATION_FAILED);
+        MDC.put(SupportabilityMdcKeys.CORRELATION_ID, "corr-slice5-core");
+        String raw = encodeRaw("duplicate-key certification");
+        // STRICT_DUPLICATE_DETECTION on MAPPER fails closed if any top-level key repeats.
+        JsonNode json = MAPPER.readTree(raw);
+        assertRequired(json);
+        assertOnlyAllowedTopLevel(json);
+        assertEquals(1, raw.split("\"component\"", -1).length - 1);
+        assertEquals(1, raw.split("\"service_instance_id\"", -1).length - 1);
+        assertEquals(1, raw.split("\"node_id\"", -1).length - 1);
+    }
+
+    @Test
+    void controlCharactersInMessageRemainStructurallyValidJson() throws Exception {
+        // BUILD-005 Slice 5: JSON encoder structural escaping is the Core bar.
+        // Do not require a universal message scrubber; prove emitted bytes remain
+        // parseable as a single JSON object under strict duplicate detection.
+        String raw = encodeRaw("line1\r\nline2\twith\u0000null");
+        JsonNode json = MAPPER.readTree(raw);
+        assertTrue(json.isObject());
+        assertTrue(json.hasNonNull("message"));
+        assertRequired(json);
+        assertOnlyAllowedTopLevel(json);
+    }
+
     private JsonNode encode(String message) throws Exception {
+        return MAPPER.readTree(encodeRaw(message));
+    }
+
+    private String encodeRaw(String message) {
         ch.qos.logback.classic.Logger logger =
                 context.getLogger("com.platform.core.logging.StructuredLogConformanceTest");
         LoggingEvent event = new LoggingEvent(
@@ -217,7 +254,7 @@ class StructuredLogConformanceTest {
         Map<String, String> mdcCopy = MDC.getCopyOfContextMap();
         event.setMDCPropertyMap(mdcCopy == null ? Map.of() : new HashMap<>(mdcCopy));
         byte[] bytes = encoder.encode(event);
-        return MAPPER.readTree(new String(bytes, StandardCharsets.UTF_8));
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     private static void assertRequired(JsonNode json) {
