@@ -409,14 +409,13 @@ docker exec platform-postgres psql -U platform_app -d platform -c "INSERT INTO p
 docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}" set restart_persist_key "preserved_across_down" > /dev/null 2>&1
 
 # Snapshot unrelated container state immediately before the destructive
-# Platform Compose restart. The invariant is preservation, not "all foreign
-# containers must be running": a pre-existing stopped container is valid and
-# must remain stopped rather than causing a false isolation failure.
+# Platform Compose restart. Preservation means a pre-existing stopped container
+# remains stopped and a running container remains running; neither may disappear.
 snapshot_foreign_container_states() {
     docker ps -a --format '{{.Names}}' | grep -v '^platform-' | sort | while IFS= read -r name; do
         [ -n "${name}" ] || continue
         running=$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || printf 'MISSING')
-        printf '%s\t%s\n' "${name}" "${running}"
+        printf '%s|%s\n' "${name}" "${running}"
     done
 }
 FOREIGN_BEFORE=$(snapshot_foreign_container_states)
@@ -523,62 +522,14 @@ if [ "${CORE_LOG_VALID}" = "true" ] && [ "${SENSOR_LOG_VALID}" = "true" ] && [ "
     LOGS_OK=true
 fi
 
-# Isolation: every unrelated container that existed before the Platform
-# restart must still exist with the same running/stopped state afterwards.
+# Isolation: verify every unrelated container present before the Platform
+# restart still exists with the same running/stopped state afterwards.
 FOREIGN_OK=true
 FOREIGN_COUNT=0
 FOREIGN_DETAIL=""
 if [ -n "${FOREIGN_BEFORE}" ]; then
     FOREIGN_COUNT=$(printf '%s\n' "${FOREIGN_BEFORE}" | wc -l)
-    while IFS=
-# Host runtime isolation is a developer-workstation policy. GitHub-hosted CI
-# runners intentionally ship Java/Go/Node and other language runtimes. Platform
-# project execution remains containerized in CI, so an ephemeral runner's PATH
-# is not evidence of developer-host policy violation. The detector itself still
-# must prove that prohibited runtimes would be caught via its synthetic test.
-HOST_POLLUTION=""
-SYNTHETIC_TEST_OK=false
-if bash "${ROOT_DIR}/scripts/check-host-runtime-isolation.sh" --synthetic-test > /dev/null 2>&1; then
-    SYNTHETIC_TEST_OK=true
-fi
-
-HOST_ISOLATION_OK=false
-ISOLATION_DETAIL="developer host runtime isolation & synthetic detector verified"
-if [ "${PLATFORM_CI:-0}" = "1" ]; then
-    ISOLATION_DETAIL="CI hosted-runner PATH exempt; synthetic detector verified"
-    HOST_POLLUTION="CI_HOSTED_RUNNER_PATH_EXEMPT"
-    if [ "${SYNTHETIC_TEST_OK}" = "true" ]; then
-        HOST_ISOLATION_OK=true
-    fi
-else
-    HOST_POLLUTION=$(bash "${ROOT_DIR}/scripts/check-host-runtime-isolation.sh" 2>&1 || true)
-    if [ -z "${HOST_POLLUTION}" ] && [ "${SYNTHETIC_TEST_OK}" = "true" ]; then
-        HOST_ISOLATION_OK=true
-    fi
-fi
-
-PERSIST_OK=false
-if [ "${PG_RESTART_VAL}" = "1" ] && [ "${VALKEY_RESTART_VAL}" = "preserved_across_down" ]; then
-    PERSIST_OK=true
-fi
-
-if [ "${PERSIST_OK}" = "true" ] && [ "${LOGS_OK}" = "true" ] && [ "${FOREIGN_OK}" = "true" ] && [ "${HOST_ISOLATION_OK}" = "true" ]; then
-    pass ${TEST_NUM} "${TEST_DESC} (Persistence verified, JSON logs valid, ${FOREIGN_COUNT} foreign container(s) intact, ${ISOLATION_DETAIL})"
-else
-    fail ${TEST_NUM} "${TEST_DESC}" "Persistence: ${PERSIST_OK}, Logs: ${LOGS_OK}, Foreign: ${FOREIGN_OK}, ForeignDetail: ${FOREIGN_DETAIL:-none}, Isolation: ${HOST_ISOLATION_OK} (Pollution: ${HOST_POLLUTION}, SyntheticOK: ${SYNTHETIC_TEST_OK})"
-fi
-
-echo "========================================================================"
-echo "Platform Verification Suite Completed"
-echo "Results: ${PASS_COUNT} / ${TOTAL_TESTS} Passed, ${FAIL_COUNT} Failed"
-echo "========================================================================"
-
-if [ "${FAIL_COUNT}" -eq 0 ]; then
-    exit 0
-else
-    exit 1
-fi
-\t' read -r name was_running; do
+    while IFS='|' read -r name was_running; do
         [ -n "${name}" ] || continue
         now_running=$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || printf 'MISSING')
         if [ "${now_running}" != "${was_running}" ]; then
@@ -622,7 +573,7 @@ fi
 if [ "${PERSIST_OK}" = "true" ] && [ "${LOGS_OK}" = "true" ] && [ "${FOREIGN_OK}" = "true" ] && [ "${HOST_ISOLATION_OK}" = "true" ]; then
     pass ${TEST_NUM} "${TEST_DESC} (Persistence verified, JSON logs valid, ${FOREIGN_COUNT} foreign container(s) intact, ${ISOLATION_DETAIL})"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "Persistence: ${PERSIST_OK}, Logs: ${LOGS_OK}, Foreign: ${FOREIGN_OK}, Isolation: ${HOST_ISOLATION_OK} (Pollution: ${HOST_POLLUTION}, SyntheticOK: ${SYNTHETIC_TEST_OK})"
+    fail ${TEST_NUM} "${TEST_DESC}" "Persistence: ${PERSIST_OK}, Logs: ${LOGS_OK}, Foreign: ${FOREIGN_OK}, ForeignDetail: ${FOREIGN_DETAIL:-none}, Isolation: ${HOST_ISOLATION_OK} (Pollution: ${HOST_POLLUTION}, SyntheticOK: ${SYNTHETIC_TEST_OK})"
 fi
 
 echo "========================================================================"
