@@ -271,6 +271,9 @@ func safePrimitive(value any) (any, bool) {
 
 func secretKey(key string) bool {
 	token := normalizeKey(key)
+	if strings.HasSuffix(token, "authpass") || strings.HasSuffix(token, "privpass") {
+		return true
+	}
 	for _, forbidden := range []string{
 		"password", "passwd", "community", "token", "secret", "privatekey",
 		"apikey", "clientsecret", "authorization", "cookie", "credential", "passphrase", "pwd",
