@@ -164,16 +164,23 @@ try_race() {
 
 run_analytics_stress() {
   log "Running Analytics supportability stress..."
-  local out
-  out=$(python3 "${ROOT_DIR}/analytics/tests/stress_supportability.py" 2>&1) || {
-    echo "${out}"
-    fail_hard "Analytics stress failed"
-    return 0
-  }
+  local out rc=0
+  set +e
+  out=$(python3 "${ROOT_DIR}/analytics/tests/stress_supportability.py" 2>&1)
+  rc=$?
+  set -e
   echo "${out}"
   ANALYTICS_CASES=$(echo "${out}" | sed -n 's/.*cases=\([0-9]*\).*/\1/p' | tail -n1)
-  local leaks
+  local leaks malformed_a nonfinite_a
   leaks=$(echo "${out}" | sed -n 's/.*leaks=\([0-9]*\).*/\1/p' | tail -n1)
+  malformed_a=$(echo "${out}" | sed -n 's/.*malformed=\([0-9]*\).*/\1/p' | tail -n1)
+  nonfinite_a=$(echo "${out}" | sed -n 's/.*nonfinite=\([0-9]*\).*/\1/p' | tail -n1)
+  MALFORMED=$((MALFORMED + ${malformed_a:-0}))
+  NONFINITE=$((NONFINITE + ${nonfinite_a:-0}))
+  if [ "${rc}" -ne 0 ]; then
+    fail_hard "Analytics stress failed"
+    return 0
+  fi
   if [ "${leaks:-1}" != "0" ]; then
     LEAKS=$((LEAKS + leaks))
     fail_hard "Analytics credential leaks=${leaks}"
@@ -182,38 +189,63 @@ run_analytics_stress() {
 
 ensure_compose() {
   log "Ensuring Compose runtime for probe soak..."
-  # Self-hosted Platform CI uses the same host; refuse soak while CI runtime is active.
+  local live_port file_port env_name core_up=0
+  live_port="$(docker port platform-core 8443 2>/dev/null | head -n1 | awk -F: '{print $NF}' | tr -d '\r' || true)"
+  file_port="$(grep -E '^PLATFORM_CORE_HOST_PORT=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' || true)"
+  env_name="$(grep -E '^PLATFORM_ENV=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' || true)"
+  if docker compose ps --status running --format '{{.Name}}' 2>/dev/null | grep -q 'platform-core'; then
+    core_up=1
+  fi
+
+  # Self-hosted Platform CI uses platform-* names on port 21443 with PLATFORM_ENV=ci.
   if docker ps --format '{{.Names}}' 2>/dev/null | grep -Eq '^ci_|^platform-day0'; then
     fail_hard "CI/isolation containers detected on host — refuse probe soak to avoid collision"
     return 1
   fi
-  # Also refuse when Core is published on the CI-only host port while .env expects dev defaults.
-  local live_port file_port
-  live_port="$(docker port platform-core 8443 2>/dev/null | head -n1 | awk -F: '{print $NF}' | tr -d '\r' || true)"
-  file_port="$(grep -E '^PLATFORM_CORE_HOST_PORT=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' || true)"
-  if [ "${live_port}" = "21443" ] && [ "${file_port:-28443}" = "28443" ]; then
-    fail_hard "Core published on CI port 21443 while .env expects 28443 — refuse probe soak (runner collision)"
-    return 1
-  fi
-  if ! docker compose ps --status running --format '{{.Name}}' 2>/dev/null | grep -q 'platform-core'; then
+  if [ "${core_up}" -eq 1 ]; then
+    if [ "${env_name}" = "ci" ] || [ "${live_port}" = "21443" ] || [ "${file_port}" = "21443" ]; then
+      fail_hard "CI runtime markers present (PLATFORM_ENV=${env_name:-?} live_port=${live_port:-?} file_port=${file_port:-?}) — refuse probe soak"
+      return 1
+    fi
+  else
+    # If a prior CI run left .env in CI shape, restore only non-secret port/env keys before local bring-up.
+    if [ "${env_name}" = "ci" ] || [ "${file_port}" = "21443" ]; then
+      log "Resetting non-secret compose port/env keys from .env.example for local stress"
+      local k v
+      for k in PLATFORM_CORE_HOST_PORT PLATFORM_UI_HOST_PORT PLATFORM_POSTGRES_HOST_PORT \
+               PLATFORM_CLICKHOUSE_HTTP_HOST_PORT PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT \
+               PLATFORM_VALKEY_HOST_PORT PLATFORM_ENV; do
+        v="$(grep -E "^${k}=" .env.example 2>/dev/null | head -n1 | cut -d= -f2- || true)"
+        [ -n "${v}" ] || continue
+        if grep -qE "^${k}=" .env 2>/dev/null; then
+          sed -i "s|^${k}=.*|${k}=${v}|" .env
+        else
+          echo "${k}=${v}" >> .env
+        fi
+      done
+    fi
     log "Bringing up Compose (make dev-up)..."
     make dev-up
   fi
   CORE_PORT="$(resolve_core_host_port)"
   export CORE_PORT
   log "Probe soak using CORE_PORT=${CORE_PORT}"
+  if [ "${CORE_PORT}" = "21443" ]; then
+    fail_hard "CORE_PORT resolved to CI port 21443 — refuse probe soak"
+    return 1
+  fi
   local i
   for i in $(seq 1 60); do
     CORE_PORT="$(resolve_core_host_port)"
     export CORE_PORT
-    if curl -k -sf "https://127.0.0.1:${CORE_PORT}/actuator/health/liveness" >/dev/null 2>&1 \
-      && docker exec platform-sensor-net curl -sf http://127.0.0.1:8088/livez >/dev/null 2>&1 \
-      && docker exec platform-analytics curl -sf http://127.0.0.1:8090/health >/dev/null 2>&1; then
+    if curl -k -sf --max-time 5 "https://127.0.0.1:${CORE_PORT}/actuator/health/liveness" >/dev/null 2>&1 \
+      && docker exec platform-sensor-net curl -sf --max-time 5 http://127.0.0.1:8088/livez >/dev/null 2>&1 \
+      && docker exec platform-analytics curl -sf --max-time 5 http://127.0.0.1:8090/health >/dev/null 2>&1; then
       # Require two consecutive healthy polls so mid-start CI collision is less likely.
       sleep 2
-      if curl -k -sf "https://127.0.0.1:${CORE_PORT}/actuator/health/liveness" >/dev/null 2>&1 \
-        && docker exec platform-sensor-net curl -sf http://127.0.0.1:8088/livez >/dev/null 2>&1 \
-        && docker exec platform-analytics curl -sf http://127.0.0.1:8090/health >/dev/null 2>&1; then
+      if curl -k -sf --max-time 5 "https://127.0.0.1:${CORE_PORT}/actuator/health/liveness" >/dev/null 2>&1 \
+        && docker exec platform-sensor-net curl -sf --max-time 5 http://127.0.0.1:8088/livez >/dev/null 2>&1 \
+        && docker exec platform-analytics curl -sf --max-time 5 http://127.0.0.1:8090/health >/dev/null 2>&1; then
         return 0
       fi
     fi
@@ -221,35 +253,6 @@ ensure_compose() {
   done
   fail_hard "Compose services not healthy for probe soak (CORE_PORT=${CORE_PORT})"
   return 1
-}
-
-probe_once() {
-  local kind="$1" url="$2" expect_code="$3"
-  local code body
-  if [[ "${url}" == docker:* ]]; then
-    local ctr="${url#docker:}"
-    ctr="${ctr%%/*}"
-    local path="/${url#*/}"
-    body=$(docker exec "${ctr}" curl -s -o /tmp/p.body -w '%{http_code}' "http://127.0.0.1${path}" 2>/dev/null || echo "000")
-    code="${body: -3}"
-    body=$(docker exec "${ctr}" cat /tmp/p.body 2>/dev/null || true)
-  else
-    code=$(curl -k -s -o /tmp/p.body -w '%{http_code}' "${url}" 2>/dev/null || echo "000")
-    body=$(cat /tmp/p.body 2>/dev/null || true)
-  fi
-  PROBE_REQUESTS=$((PROBE_REQUESTS + 1))
-  case "${kind}" in
-    LIVENESS|READINESS|PUBLIC_OVERALL|DETAILED)
-      if [ "${code}" != "200" ] && [ "${code}" != "503" ]; then
-        PROBE_FAIL=$((PROBE_FAIL + 1))
-      fi
-      ;;
-    ABSENT)
-      if [ "${code}" != "404" ]; then
-        PROBE_FAIL=$((PROBE_FAIL + 1))
-      fi
-      ;;
-  esac
 }
 
 run_probe_soak() {
@@ -262,9 +265,11 @@ run_probe_soak() {
   local mem_start mem_mid mem_end
   mem_start=$(docker stats --no-stream --format '{{.Name}}={{.MemUsage}}' platform-core platform-sensor-net platform-analytics 2>/dev/null | tr '\n' ';')
   python3 - <<'PY' &
-import os, subprocess, time, json, urllib.request, ssl, uuid
+import os, subprocess, time, json, urllib.request, ssl, uuid, threading
 CORE=os.environ.get("CORE_PORT","28443")
 ctx=ssl._create_unverified_context()
+# Bound concurrent docker execs so soak does not starve container healthchecks.
+DOCKER_EXEC_SEM=threading.Semaphore(6)
 routes=[
  ("LIVENESS", f"https://127.0.0.1:{CORE}/actuator/health/liveness"),
  ("READINESS", f"https://127.0.0.1:{CORE}/actuator/health/readiness"),
@@ -291,16 +296,21 @@ def docker_curl(ctr, port, path):
   token = uuid.uuid4().hex
   script = (
       "f=/tmp/pb-" + token + "; "
-      "c=$(curl -s -o \"$f\" -w '%{http_code}' 'http://127.0.0.1:"
-      + str(port)
+      "c=$(curl -s --max-time 5 -o \"$f\" -w '%{http_code}' 'http://127.0.0.1:"
+      + str(int(port))
       + path
       + "'); "
-      "printf '%s\\n' \"$c\"; cat \"$f\"; rm -f \"$f\""
+      "printf '%s\\n' \"$c\"; cat \"$f\" 2>/dev/null; rm -f \"$f\""
   )
-  p = subprocess.run(
-      ["docker", "exec", ctr, "sh", "-c", script],
-      capture_output=True,
-  )
+  with DOCKER_EXEC_SEM:
+    try:
+      p = subprocess.run(
+          ["docker", "exec", ctr, "sh", "-c", script],
+          capture_output=True,
+          timeout=10,
+      )
+    except subprocess.TimeoutExpired:
+      return "000", b""
   raw = p.stdout or b""
   nl = raw.find(b"\n")
   if nl < 0:
@@ -331,17 +341,27 @@ def check_sensor(role, code, body):
     obj=json.loads(body.decode("utf-8","replace"))
   except Exception:
     return 1
-  if role in ("LIVENESS","READINESS"):
+  detailed_keys = ("document_type", "scheduler_status", "queue_depth")
+  if role == "LIVENESS":
     if "status" not in obj:
       return 1
-    # DETAILED fields must not appear on pure liveness
-    if role=="LIVENESS" and any(k in obj for k in ("document_type","scheduler_status","queue_depth")):
+    if any(k in obj for k in detailed_keys):
       return 1
-  if role=="DETAILED":
-    # compatibility /health and /healthz remain DETAILED evidence surface
-    if "document_type" not in obj and "component" not in obj and "status" not in obj:
+    return 0
+  if role == "READINESS":
+    if "status" not in obj:
       return 1
-  return 0
+    if any(k in obj for k in detailed_keys):
+      return 1
+    return 0
+  if role == "DETAILED":
+    # /health and /healthz must remain DETAILED support-evidence envelopes.
+    if obj.get("document_type") != "SUPPORT_EVIDENCE":
+      return 1
+    if "component" not in obj:
+      return 1
+    return 0
+  return 1
 
 def check_analytics_ok(code, body):
   if code not in ("200","503"):
@@ -361,7 +381,9 @@ import concurrent.futures
 def one(worker_id):
   local_fail=0
   local_reqs=0
-  while time.time()<deadline and local_reqs<400:
+  # Run the full soak window (no low per-worker cap) so >=5000 requests remain reachable
+  # under bounded docker-exec concurrency.
+  while time.time()<deadline:
     for role,url in routes:
       code,body=curl_http(url); local_reqs+=1
       local_fail+=check_core(role, code, body)
@@ -389,8 +411,22 @@ PY
   sleep 150
   mem_mid=$(docker stats --no-stream --format '{{.Name}}={{.MemUsage}}' platform-core platform-sensor-net platform-analytics 2>/dev/null | tr '\n' ';')
   set +e
-  wait "${probe_pid}"
-  local probe_rc=$?
+  local waited=0 probe_rc=124
+  while [ "${waited}" -lt 360 ]; do
+    if ! kill -0 "${probe_pid}" 2>/dev/null; then
+      wait "${probe_pid}"
+      probe_rc=$?
+      break
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+  if kill -0 "${probe_pid}" 2>/dev/null; then
+    kill "${probe_pid}" 2>/dev/null || true
+    wait "${probe_pid}" 2>/dev/null || true
+    probe_rc=124
+    fail_hard "Probe soak exceeded 360s wall clock (hung workers)"
+  fi
   set -e
   mem_end=$(docker stats --no-stream --format '{{.Name}}={{.MemUsage}}' platform-core platform-sensor-net platform-analytics 2>/dev/null | tr '\n' ';')
   MEM_COMPOSE="start=${mem_start} mid=${mem_mid} end=${mem_end}"
@@ -404,7 +440,7 @@ PY
   if [ "${PROBE_REQUESTS:-0}" -lt 5000 ]; then
     fail_hard "Probe soak requests ${PROBE_REQUESTS} < 5000"
   fi
-  MEM_ASSESSMENT="Compose samples captured; no automated MiB delta parser — review MEM_COMPOSE; Go logger windows assessed in unit stress"
+  MEM_ASSESSMENT="memory_gate=GO_HEAP_ONLY; Compose RSS samples observational — review MEM_COMPOSE; Go logger windows hard-gated in unit stress"
 }
 
 run_correlation_stress() {
