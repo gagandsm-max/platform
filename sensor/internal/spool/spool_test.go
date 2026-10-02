@@ -189,7 +189,7 @@ func TestQuarantineLogIncludesSpoolKind(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &entry); err != nil {
 		t.Fatalf("decode quarantine log: %v\n%s", err, logs.String())
 	}
-	if entry["event_code"] != CodeCorruption {
+	if entry["event_code"] != string(CodeCorruption) {
 		t.Fatalf("event_code=%v want=%s log=%v", entry["event_code"], CodeCorruption, entry)
 	}
 	safe, ok := entry["safe_context"].(map[string]any)
