@@ -716,8 +716,11 @@ func (s *Syncer) setError(code string, degraded bool) {
 	if degraded {
 		s.status.Degraded = true
 	}
-	// Do not clear TrustedApplied or CoreAuthorityEstablished; transient/auth
-	// errors retain prior local trust and previously established Core authority.
+	// Transient/auth errors retain prior local trust and previously established
+	// Core authority. All other sync errors are fail-closed for local trust.
+	if code != ErrCodeSyncTransient && code != ErrCodeAuthFailed {
+		s.status.TrustedApplied = false
+	}
 }
 
 func errorCode(err error) string {

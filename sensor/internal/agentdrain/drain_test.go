@@ -13,6 +13,7 @@ import (
 
 	"platform/sensor/internal/coreclient"
 	"platform/sensor/internal/spool"
+	"platform/sensor/internal/supportability"
 )
 
 type fakeTransport struct {
@@ -1061,7 +1062,8 @@ func TestAuthorityPoisonSuccessfulLogOmitsPathAndPayload(t *testing.T) {
 	s, dir := openSpool(t)
 	rec := appendDurable(t, s, 1)
 	var logBuf strings.Builder
-	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := supportability.NewJSONLogger(&logBuf, slog.LevelDebug, "0.1.0-test", "sensor-instance-test").
+		With("sensor_id", "sensor-infra-01")
 	d, _ := newAuthorityPoisonDrain(t, s, dir, logger)
 
 	_, err := d.RunOnce(context.Background())
@@ -1072,17 +1074,24 @@ func TestAuthorityPoisonSuccessfulLogOmitsPathAndPayload(t *testing.T) {
 		t.Fatalf("AuthorityPoisonCount=%d", d.Metrics().AuthorityPoisonCount.Load())
 	}
 	logOutput := logBuf.String()
-	if !strings.Contains(logOutput, "Parked terminal agent-ingress record") {
-		t.Fatalf("expected parking log, got %s", logOutput)
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(logOutput)), &entry); err != nil {
+		t.Fatalf("decode parking log: %v\n%s", err, logOutput)
 	}
-	if !strings.Contains(logOutput, "event_code=ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION") {
-		t.Fatalf("log must contain canonical event_code: %s", logOutput)
+	if entry["message"] != "Parked terminal agent-ingress record" {
+		t.Fatalf("unexpected parking log: %v", entry)
 	}
-	if !strings.Contains(logOutput, "safe_context=map[sequence:1]") {
-		t.Fatalf("log must contain canonical safe_context sequence: %s", logOutput)
+	if entry["event_code"] != "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION" {
+		t.Fatalf("event_code=%v log=%v", entry["event_code"], entry)
 	}
-	if strings.Contains(logOutput, "poison_path") {
-		t.Fatalf("log must not contain poison_path: %s", logOutput)
+	safe, ok := entry["safe_context"].(map[string]any)
+	if !ok || safe["sequence"] != float64(1) {
+		t.Fatalf("safe_context=%v", entry["safe_context"])
+	}
+	for _, forbidden := range []string{"error", "error_code", "poison_path"} {
+		if _, exists := entry[forbidden]; exists {
+			t.Fatalf("non-canonical field %s leaked: %v", forbidden, entry)
+		}
 	}
 	if strings.Contains(logOutput, string(rec.Payload)) {
 		t.Fatalf("log must not contain payload: %s", logOutput)

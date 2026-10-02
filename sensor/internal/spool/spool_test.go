@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"platform/sensor/internal/control"
+	"platform/sensor/internal/supportability"
 )
 
 func openTest(t *testing.T, max int) *DiskSpool {
@@ -156,7 +157,8 @@ func TestPartialAndCorruptQuarantine(t *testing.T) {
 }
 func TestQuarantineLogIncludesSpoolKind(t *testing.T) {
 	var logs bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	logger := supportability.NewJSONLogger(&logs, slog.LevelDebug, "0.1.0-test", "sensor-instance-test").
+		With("sensor_id", "sensor-infra-01")
 	dir := t.TempDir()
 	s, err := Open(Config{Dir: dir, MaxRecordBytes: 1024, Kind: KindAgentIngress, Logger: logger})
 	if err != nil {
@@ -183,8 +185,21 @@ func TestQuarantineLogIncludesSpoolKind(t *testing.T) {
 	if _, err = s.ReadBatch(10, 100); CodeOf(err) != CodeCorruption {
 		t.Fatalf("want corruption got %v", err)
 	}
-	if !strings.Contains(logs.String(), "\"spool_type\":\"agent_ingress\"") {
-		t.Fatalf("quarantine log must identify Agent ingress spool: %s", logs.String())
+	var entry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &entry); err != nil {
+		t.Fatalf("decode quarantine log: %v\n%s", err, logs.String())
+	}
+	if entry["event_code"] != CodeCorruption {
+		t.Fatalf("event_code=%v want=%s log=%v", entry["event_code"], CodeCorruption, entry)
+	}
+	safe, ok := entry["safe_context"].(map[string]any)
+	if !ok || safe["spool_type"] != "agent_ingress" {
+		t.Fatalf("safe_context=%v", entry["safe_context"])
+	}
+	for _, forbidden := range []string{"spool_type", "error_code", "error"} {
+		if _, exists := entry[forbidden]; exists {
+			t.Fatalf("non-canonical top-level %s leaked: %v", forbidden, entry)
+		}
 	}
 }
 
