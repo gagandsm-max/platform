@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"strings"
 	"testing"
 )
@@ -121,6 +122,8 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 	ctx := map[string]any{
 		"mode":             "trusted_continue",
 		"note":             "Bearer authentication failed",
+		"note_basic":       "Basic authentication rejected",
+		"outcome":          "token validation failed",
 		"password":         "fictional-secret",
 		"community":        "private",
 		"api_token":        "abc",
@@ -135,7 +138,10 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected retained safe context: %v", got)
 	}
-	if safe["mode"] != "trusted_continue" || safe["note"] != "Bearer authentication failed" {
+	if safe["mode"] != "trusted_continue" ||
+		safe["note"] != "Bearer authentication failed" ||
+		safe["note_basic"] != "Basic authentication rejected" ||
+		safe["outcome"] != "token validation failed" {
 		t.Fatalf("safe operational values missing: %v", safe)
 	}
 	for _, key := range []string{"password", "community", "api_token", "Authorization", "header", "private_material", "nested"} {
@@ -152,6 +158,73 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 	} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("credential material leaked: %s", buf.String())
+		}
+	}
+}
+
+func TestSafeContextRejectsEmbeddedAuthorizationAndMixedCasePEM(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	ctx := map[string]any{
+		"status":    "ok",
+		"detail":    "request failed; Authorization: Bearer abc123-token",
+		"upstream":  "upstream Authorization: Basic Zm9vOmJhcg==",
+		"pem_lower": "-----begin private key----- SECRET-SENTINEL -----end private key-----",
+		"prose":     "Bearer authentication failed",
+	}
+	logger.Info("test", "safe_context", ctx)
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected retained safe context: %v", got)
+	}
+	if safe["status"] != "ok" || safe["prose"] != "Bearer authentication failed" {
+		t.Fatalf("expected only safe values retained: %v", safe)
+	}
+	for _, key := range []string{"detail", "upstream", "pem_lower"} {
+		if _, present := safe[key]; present {
+			t.Fatalf("credential-bearing key %q retained: %v", key, safe)
+		}
+	}
+	raw := strings.ToLower(buf.String())
+	for _, sentinel := range []string{
+		"abc123-token",
+		"zm9vomjhcg==",
+		"secret-sentinel",
+		"authorization: bearer",
+		"authorization: basic",
+	} {
+		if strings.Contains(raw, sentinel) {
+			t.Fatalf("credential sentinel %q leaked: %s", sentinel, buf.String())
+		}
+	}
+}
+
+func TestSafeContextOmitsNonFiniteFloats(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	ctx := map[string]any{
+		"ok_int":      7,
+		"ok_float":    1.5,
+		"bad_nan":     math.NaN(),
+		"bad_pos_inf": math.Inf(1),
+		"bad_neg_inf": math.Inf(-1),
+	}
+	logger.Info("test", "safe_context", ctx)
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected retained safe context: %v", got)
+	}
+	if _, present := safe["ok_float"]; !present {
+		t.Fatalf("finite float omitted: %v", safe)
+	}
+	if _, present := safe["ok_int"]; !present {
+		t.Fatalf("int omitted: %v", safe)
+	}
+	for _, key := range []string{"bad_nan", "bad_pos_inf", "bad_neg_inf"} {
+		if _, present := safe[key]; present {
+			t.Fatalf("non-finite %q retained: %v", key, safe)
 		}
 	}
 }
@@ -184,7 +257,6 @@ func TestServiceInstanceIDIsStableFormatAndChangesAcrossGeneration(t *testing.T)
 		}
 	}
 }
-
 
 func TestComponentIdentityCannotBeOverridden(t *testing.T) {
 	var buf bytes.Buffer
@@ -224,7 +296,6 @@ func TestSafeContextRejectsPassphraseKeys(t *testing.T) {
 	}
 }
 
-
 type namedEventCode string
 
 func TestNamedStringEventCodeIsPreserved(t *testing.T) {
@@ -256,7 +327,6 @@ func TestSafeContextRejectsPwdAlias(t *testing.T) {
 		t.Fatalf("pwd material leaked: %s", buf.String())
 	}
 }
-
 
 func TestSafeContextRejectsSNMPPassAliases(t *testing.T) {
 	var buf bytes.Buffer

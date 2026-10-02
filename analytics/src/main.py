@@ -1,6 +1,7 @@
 import http.server
 import json
 import logging
+import math
 import os
 import re
 import signal
@@ -74,8 +75,13 @@ class JsonFormatter(logging.Formatter):
                 if self._secret_key(key):
                     continue
                 value = safe_context[key]
-                if isinstance(value, (bool, int, float)):
+                if isinstance(value, bool):
                     cleaned[key] = value
+                elif isinstance(value, int):
+                    cleaned[key] = value
+                elif isinstance(value, float):
+                    if math.isfinite(value):
+                        cleaned[key] = value
                 elif isinstance(value, str) and len(value) <= 256 and value.isprintable():
                     if self._looks_credential_like(value):
                         continue
@@ -84,6 +90,17 @@ class JsonFormatter(logging.Formatter):
                 log_obj["safe_context"] = cleaned
         # Enforce closed top-level shape.
         return json.dumps({k: v for k, v in log_obj.items() if k in self.ALLOWED})
+
+    _BEARER_FULL = re.compile(r"^\s*Bearer\s+[A-Za-z0-9._~+/=-]+\s*$", re.IGNORECASE)
+    _BASIC_FULL = re.compile(r"^\s*Basic\s+([A-Za-z0-9+/]+=*)\s*$", re.IGNORECASE)
+    _AUTH_BEARER_EMBEDDED = re.compile(
+        r"Authorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+",
+        re.IGNORECASE,
+    )
+    _AUTH_BASIC_EMBEDDED = re.compile(
+        r"Authorization\s*:\s*Basic\s+[A-Za-z0-9+/]+=*",
+        re.IGNORECASE,
+    )
 
     @staticmethod
     def _normalize_key(key: str) -> str:
@@ -123,17 +140,24 @@ class JsonFormatter(logging.Formatter):
                 return True
         return False
 
-    @staticmethod
-    def _looks_credential_like(value: str) -> bool:
-        # Match Slice-1 looksLikeAuthorizationCredential: reject credential
-        # blobs, not operational prose such as "Bearer authentication failed".
+    @classmethod
+    def _looks_credential_like(cls, value: str) -> bool:
+        # Targeted safe_context sanitization only: full credential blobs,
+        # embedded Authorization header credentials, and PEM private-key
+        # markers (case-insensitive). Operational prose such as
+        # "Bearer authentication failed" remains permitted.
         trimmed = value.strip()
-        if re.fullmatch(r"Bearer\s+[A-Za-z0-9._~+/=-]+", trimmed, flags=re.IGNORECASE):
+        if cls._BEARER_FULL.fullmatch(trimmed):
             return True
-        basic = re.fullmatch(r"Basic\s+([A-Za-z0-9+/]+=*)", trimmed, flags=re.IGNORECASE)
+        basic = cls._BASIC_FULL.fullmatch(trimmed)
         if basic is not None and len(basic.group(1)) >= 4:
             return True
-        return "-----BEGIN" in trimmed and "PRIVATE KEY" in trimmed.upper()
+        if cls._AUTH_BEARER_EMBEDDED.search(trimmed):
+            return True
+        if cls._AUTH_BASIC_EMBEDDED.search(trimmed):
+            return True
+        upper = trimmed.upper()
+        return "-----BEGIN" in upper and "PRIVATE KEY" in upper
 
 
 handler = logging.StreamHandler(sys.stdout)
@@ -156,51 +180,9 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def do_GET(self):
-        if self.path in ("/live", "/livez"):
-            status = "SHUTTING_DOWN" if self.shutting_down else "UP"
-            self._write_json(
-                200,
-                {
-                    "status": status,
-                    "component": COMPONENT,
-                    "ts": utc_ts(),
-                    "service_instance_id": SERVICE_INSTANCE_ID,
-                },
-            )
-            return
-
-        if self.path in ("/ready", "/readyz"):
-            # Placeholder Analytics has no durable dependencies yet; readiness is process-safe.
-            if self.shutting_down:
-                self._write_json(
-                    503,
-                    {
-                        "status": "NOT_READY",
-                        "ready": False,
-                        "http_semantic": 503,
-                        "component": COMPONENT,
-                        "ts": utc_ts(),
-                        "service_instance_id": SERVICE_INSTANCE_ID,
-                        "reason_code": "ANALYTICS_SHUTTING_DOWN",
-                    },
-                )
-                return
-            self._write_json(
-                200,
-                {
-                    "status": "UP",
-                    "ready": True,
-                    "http_semantic": 200,
-                    "component": COMPONENT,
-                    "ts": utc_ts(),
-                    "service_instance_id": SERVICE_INSTANCE_ID,
-                },
-            )
-            return
-
         if self.path in ("/health", "/healthz"):
-            # PUBLIC_OVERALL: preserve historic /health+/healthz consumers (Compose healthcheck).
-            # Slice 4 does not promote Analytics to DETAILED SUPPORT_EVIDENCE certification.
+            # PUBLIC_OVERALL only — Slice-1 certified Analytics baseline.
+            # Do not add /live|/ready aliases without a concrete consumer.
             state = "SHUTTING_DOWN" if self.shutting_down else "UP"
             code = 503 if self.shutting_down else 200
             self._write_json(

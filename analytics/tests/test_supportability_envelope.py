@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import logging
+import math
 import os
 import sys
 import unittest
@@ -39,7 +40,9 @@ class AnalyticsEnvelopeTests(unittest.TestCase):
         handler.setFormatter(self.main.JsonFormatter())
         self.main.logger.addHandler(handler)
         self.main.logger.info("probe", extra=extra)
-        return json.loads(buf.getvalue().strip().splitlines()[-1])
+        return buf.getvalue().strip().splitlines()[-1], json.loads(
+            buf.getvalue().strip().splitlines()[-1]
+        )
 
     def _get(self, path: str):
         handler = self.main.HealthHandler.__new__(self.main.HealthHandler)
@@ -55,10 +58,12 @@ class AnalyticsEnvelopeTests(unittest.TestCase):
         handler.send_header = lambda *_: None
         handler.end_headers = lambda: None
         handler.do_GET()
-        return status["code"], json.loads(body.getvalue().decode("utf-8"))
+        payload = body.getvalue()
+        parsed = json.loads(payload.decode("utf-8")) if payload else None
+        return status["code"], parsed
 
     def test_canonical_log_envelope(self):
-        obj = self._capture_log(safe_context={"mode": "ok"})
+        _, obj = self._capture_log(safe_context={"mode": "ok"})
         for key in ("ts", "level", "component", "version", "service_instance_id", "message"):
             self.assertIn(key, obj)
         self.assertEqual(obj["component"], "platform-analytics")
@@ -67,7 +72,7 @@ class AnalyticsEnvelopeTests(unittest.TestCase):
         self.assertEqual(obj["safe_context"], {"mode": "ok"})
 
     def test_safe_context_rejects_secret_keys_and_values(self):
-        obj = self._capture_log(
+        raw, obj = self._capture_log(
             safe_context={
                 "mode": "ok",
                 "community": "public",
@@ -78,17 +83,63 @@ class AnalyticsEnvelopeTests(unittest.TestCase):
                 "access_key": "AKIA_TEST",
                 "token_value": "Bearer abc",
                 "Authorization": "Bearer leaked-token",
-                "private_material": "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
+                "private_material": "-----BEGIN PRIVATE KEY-----MIIE-----END PRIVATE KEY-----",
                 "note": "Bearer authentication failed",
+                "note_basic": "Basic authentication rejected",
+                "outcome": "token validation failed",
             }
         )
         self.assertEqual(
             obj.get("safe_context"),
-            {"mode": "ok", "note": "Bearer authentication failed"},
+            {
+                "mode": "ok",
+                "note": "Bearer authentication failed",
+                "note_basic": "Basic authentication rejected",
+                "outcome": "token validation failed",
+            },
         )
+        lowered = raw.lower()
+        for sentinel in ("hunter2", "leaked-token", "-----begin private key-----"):
+            self.assertNotIn(sentinel, lowered)
+
+    def test_safe_context_rejects_embedded_authorization_and_mixed_case_pem(self):
+        raw, obj = self._capture_log(
+            safe_context={
+                "status": "ok",
+                "detail": "request failed; Authorization: Bearer abc123-token",
+                "upstream": "upstream Authorization: Basic Zm9vOmJhcg==",
+                "pem_lower": "-----begin private key----- SECRET-SENTINEL -----end private key-----",
+                "prose": "Bearer authentication failed",
+            }
+        )
+        self.assertEqual(
+            obj.get("safe_context"),
+            {"status": "ok", "prose": "Bearer authentication failed"},
+        )
+        lowered = raw.lower()
+        for sentinel in (
+            "abc123-token",
+            "zm9vomjhcg==",
+            "secret-sentinel",
+            "authorization: bearer",
+            "authorization: basic",
+        ):
+            self.assertNotIn(sentinel, lowered)
+
+    def test_safe_context_omits_non_finite_floats(self):
+        _, obj = self._capture_log(
+            safe_context={
+                "ok_int": 7,
+                "ok_float": 1.5,
+                "bad_nan": math.nan,
+                "bad_pos_inf": math.inf,
+                "bad_neg_inf": -math.inf,
+            }
+        )
+        self.assertEqual(obj.get("safe_context"), {"ok_float": 1.5, "ok_int": 7})
 
     def test_invalid_correlation_id_omitted(self):
-        obj = self._capture_log(correlation_id="bad/id with space")
+        _, obj = self._capture_log(correlation_id="bad/id with space")
         self.assertNotIn("correlation_id", obj)
 
     def test_public_overall_health_routes(self):
@@ -103,14 +154,11 @@ class AnalyticsEnvelopeTests(unittest.TestCase):
             self.assertNotIn("document_type", body)
             self.assertNotIn("service", body)
 
-    def test_live_and_ready_envelopes(self):
-        live_code, live = self._get("/live")
-        self.assertEqual(live_code, 200)
-        self.assertEqual(live["status"], "UP")
-        ready_code, ready = self._get("/ready")
-        self.assertEqual(ready_code, 200)
-        self.assertTrue(ready["ready"])
-        self.assertEqual(ready["http_semantic"], 200)
+    def test_unauthorized_probe_aliases_absent(self):
+        for path in ("/live", "/livez", "/ready", "/readyz"):
+            code, body = self._get(path)
+            self.assertEqual(code, 404, path)
+            self.assertIsNone(body)
 
 
 if __name__ == "__main__":
