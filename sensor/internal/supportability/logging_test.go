@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"strings"
 	"testing"
 )
@@ -168,6 +169,122 @@ func TestUnknownTopLevelAttributesAreDropped(t *testing.T) {
 		if _, ok := got[key]; ok {
 			t.Fatalf("unknown top-level key %q emitted: %v", key, got)
 		}
+	}
+}
+
+// BUILD-005 Slice 5: fail-first Sensor safe_context credential/prose/PEM/non-finite bar.
+func TestSlice5SafeContextCredentialProsePEMAndNonFinite(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	ctx := map[string]any{
+		"status":          "ok",
+		"bearer_full":     "Bearer abc123-token",
+		"basic_full":      "Basic Zm9vOmJhcg==",
+		"embed_bearer":    "request failed; Authorization: Bearer abc123-token",
+		"embed_basic":     "upstream Authorization: Basic Zm9vOmJhcg==",
+		"pem_lower":       "-----begin private key-----\nSECRET-SENTINEL\n-----end private key-----",
+		"pem_mixed":       "-----Begin Private Key-----\nSECRET-SENTINEL\n-----End Private Key-----",
+		"prose_bearer":    "Bearer authentication failed",
+		"prose_basic":     "Basic authentication rejected",
+		"outcome":         "token validation failed",
+		"bad_nan":         math.NaN(),
+		"bad_pos_inf":     math.Inf(1),
+		"bad_neg_inf":     math.Inf(-1),
+		"ok_float":        1.5,
+		"ok_int":          7,
+	}
+	logger.Info("slice5", "safe_context", ctx)
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected retained safe context: %v", got)
+	}
+	want := map[string]any{
+		"status":       "ok",
+		"prose_bearer": "Bearer authentication failed",
+		"prose_basic":  "Basic authentication rejected",
+		"outcome":      "token validation failed",
+		"ok_float":     1.5,
+		"ok_int":       float64(7),
+	}
+	for key, value := range want {
+		if safe[key] != value {
+			t.Fatalf("S5 retained key %q missing/wrong: got=%v want=%v full=%v", key, safe[key], value, safe)
+		}
+	}
+	for _, key := range []string{
+		"bearer_full", "basic_full", "embed_bearer", "embed_basic",
+		"pem_lower", "pem_mixed", "bad_nan", "bad_pos_inf", "bad_neg_inf",
+	} {
+		if _, present := safe[key]; present {
+			t.Fatalf("S5 unsafe key %q retained: %v", key, safe)
+		}
+	}
+	raw := strings.ToLower(buf.String())
+	for _, sentinel := range []string{
+		"abc123-token",
+		"zm9vomjhcg==",
+		"secret-sentinel",
+		"authorization: bearer",
+		"authorization: basic",
+	} {
+		if strings.Contains(raw, sentinel) {
+			t.Fatalf("S5 credential sentinel %q leaked: %s", sentinel, buf.String())
+		}
+	}
+}
+
+func assertNoDuplicateTopLevelKeys(t *testing.T, raw string) {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(strings.TrimSpace(raw)))
+	tok, err := dec.Token()
+	if err != nil {
+		t.Fatalf("decode start: %v", err)
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		t.Fatalf("expected object start, got %#v", tok)
+	}
+	seen := map[string]struct{}{}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			t.Fatalf("key token: %v", err)
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			t.Fatalf("expected string key, got %#v", keyTok)
+		}
+		if _, exists := seen[key]; exists {
+			t.Fatalf("duplicate top-level key %q in %s", key, raw)
+		}
+		seen[key] = struct{}{}
+		var skip any
+		if err := dec.Decode(&skip); err != nil {
+			t.Fatalf("skip value for %q: %v", key, err)
+		}
+	}
+}
+
+func TestSlice5EmittedJSONHasNoDuplicateTopLevelKeys(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf).With("component", "spoofed-component").With("sensor_id", "sensor-net-02")
+	logger.Warn("dup-key-cert",
+		"error_code", "CONTROL_SYNC_PENDING",
+		"correlation_id", "corr-slice5",
+		"service_instance_id", "sensor-instance-rebind",
+		"safe_context", map[string]any{"mode": "ok"},
+	)
+	raw := strings.TrimSpace(buf.String())
+	assertNoDuplicateTopLevelKeys(t, raw)
+	got := decodeOne(t, &buf)
+	if got["component"] != componentName {
+		t.Fatalf("component override leaked duplicate/wrong identity: %v", got)
+	}
+	if got["sensor_id"] != "sensor-net-02" {
+		t.Fatalf("sensor_id rebind lost: %v", got)
+	}
+	if got["service_instance_id"] != "sensor-instance-rebind" {
+		t.Fatalf("service_instance_id rebind lost: %v", got)
 	}
 }
 

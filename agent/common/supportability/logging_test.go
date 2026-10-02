@@ -272,6 +272,60 @@ func TestComponentIdentityCannotBeOverridden(t *testing.T) {
 	}
 }
 
+func assertNoDuplicateTopLevelKeys(t *testing.T, raw string) {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(strings.TrimSpace(raw)))
+	tok, err := dec.Token()
+	if err != nil {
+		t.Fatalf("decode start: %v", err)
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		t.Fatalf("expected object start, got %#v", tok)
+	}
+	seen := map[string]struct{}{}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			t.Fatalf("key token: %v", err)
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			t.Fatalf("expected string key, got %#v", keyTok)
+		}
+		if _, exists := seen[key]; exists {
+			t.Fatalf("duplicate top-level key %q in %s", key, raw)
+		}
+		seen[key] = struct{}{}
+		var skip any
+		if err := dec.Decode(&skip); err != nil {
+			t.Fatalf("skip value for %q: %v", key, err)
+		}
+	}
+}
+
+func TestSlice5EmittedJSONHasNoDuplicateTopLevelKeys(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf).With("component", "spoofed-component").With("agent_id", "agent-linux-02")
+	logger.Warn("dup-key-cert",
+		"error_code", "CONTROL_SYNC_PENDING",
+		"correlation_id", "corr-slice5",
+		"service_instance_id", "agent-instance-rebind",
+		"safe_context", map[string]any{"mode": "ok"},
+	)
+	raw := strings.TrimSpace(buf.String())
+	assertNoDuplicateTopLevelKeys(t, raw)
+	got := decodeOne(t, &buf)
+	if got["component"] != componentName {
+		t.Fatalf("component override leaked duplicate/wrong identity: %v", got)
+	}
+	if got["agent_id"] != "agent-linux-02" {
+		t.Fatalf("agent_id rebind lost: %v", got)
+	}
+	if got["service_instance_id"] != "agent-instance-rebind" {
+		t.Fatalf("service_instance_id rebind lost: %v", got)
+	}
+}
+
 func TestSafeContextRejectsPassphraseKeys(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newTestLogger(&buf)

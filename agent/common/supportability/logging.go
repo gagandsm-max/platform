@@ -1,6 +1,7 @@
 package supportability
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -55,15 +56,70 @@ func NewJSONLogger(w io.Writer, level slog.Leveler, version, serviceInstanceID s
 	if strings.TrimSpace(serviceInstanceID) == "" {
 		serviceInstanceID = NewServiceInstanceID()
 	}
-	handler := slog.NewJSONHandler(w, &slog.HandlerOptions{
+	base := slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level:       level,
 		ReplaceAttr: replaceAttr,
 	})
-	return slog.New(handler).With(
+	// Dedupe top-level keys so With()/record rebinds cannot emit duplicate JSON
+	// object keys. Last value wins; ReplaceAttr remains authoritative for shape.
+	return slog.New(&uniqueKeyHandler{inner: base}).With(
 		"component", componentName,
 		"version", version,
 		"service_instance_id", serviceInstanceID,
 	)
+}
+
+// uniqueKeyHandler folds Handler.WithAttrs and Record attrs into a single
+// top-level key set before delegating to the JSON handler.
+type uniqueKeyHandler struct {
+	inner slog.Handler
+	attrs []slog.Attr
+}
+
+func (h *uniqueKeyHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.inner.Enabled(ctx, level)
+}
+
+func (h *uniqueKeyHandler) Handle(ctx context.Context, r slog.Record) error {
+	merged := make(map[string]slog.Attr, len(h.attrs)+r.NumAttrs())
+	order := make([]string, 0, len(h.attrs)+r.NumAttrs())
+	put := func(a slog.Attr) {
+		a.Value = a.Value.Resolve()
+		// Apply ReplaceAttr before dedupe so rejected overrides cannot erase an
+		// earlier accepted identity attr (e.g. spoofed component last-wins).
+		a = replaceAttr(nil, a)
+		if a.Key == "" {
+			return
+		}
+		if _, exists := merged[a.Key]; !exists {
+			order = append(order, a.Key)
+		}
+		merged[a.Key] = a
+	}
+	for _, a := range h.attrs {
+		put(a)
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		put(a)
+		return true
+	})
+	nr := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
+	for _, key := range order {
+		nr.AddAttrs(merged[key])
+	}
+	return h.inner.Handle(ctx, nr)
+}
+
+func (h *uniqueKeyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	joined := make([]slog.Attr, 0, len(h.attrs)+len(attrs))
+	joined = append(joined, h.attrs...)
+	joined = append(joined, attrs...)
+	return &uniqueKeyHandler{inner: h.inner, attrs: joined}
+}
+
+func (h *uniqueKeyHandler) WithGroup(name string) slog.Handler {
+	// Groups are rejected by replaceAttr; keep chain intact for slog contract.
+	return &uniqueKeyHandler{inner: h.inner.WithGroup(name), attrs: h.attrs}
 }
 
 func replaceAttr(groups []string, attr slog.Attr) slog.Attr {

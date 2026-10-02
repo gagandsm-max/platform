@@ -156,7 +156,9 @@ function assertUtcTs(value, issues, source, p) {
 
 /**
  * Targeted Authorization credential-value detector for bounded context fields.
- * Matches credential-like Bearer/Basic values only — not ordinary prose with spaces.
+ * Matches credential-like Bearer/Basic values, embedded Authorization header
+ * credentials, and case-insensitive PEM private-key markers only — not ordinary
+ * operational prose such as "Bearer authentication failed".
  * Must NOT be applied to the normal structured-log message field.
  */
 function looksLikeAuthorizationCredential(value) {
@@ -167,7 +169,16 @@ function looksLikeAuthorizationCredential(value) {
   if (/^\s*Basic\s+[A-Za-z0-9+/]+=*\s*$/i.test(value) && value.replace(/^\s*Basic\s+/i, '').trim().length >= 4) {
     return true;
   }
+  // Embedded Authorization: Bearer|Basic credentials inside a larger string.
+  if (/Authorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+/i.test(value)) return true;
+  if (/Authorization\s*:\s*Basic\s+[A-Za-z0-9+/]+=*/i.test(value)) return true;
   return false;
+}
+
+function looksLikePrivateKeyMaterial(value) {
+  if (typeof value !== 'string') return false;
+  const upper = value.toUpperCase();
+  return upper.includes('-----BEGIN') && upper.includes('PRIVATE KEY');
 }
 
 function assertComponent(value, issues, source, p) {
@@ -207,9 +218,9 @@ function assertNoSecrets(obj, issues, source, pathPrefix = '$') {
   }
   if (!isObject(obj)) {
     if (typeof obj === 'string') {
-      // Distinctive PEM material only. Do not treat ordinary "Bearer ..." / "Basic ..."
-      // operational prose (e.g. log message) as credential leakage.
-      if (/^\s*-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/m.test(obj)) {
+      // Distinctive PEM material only (case-insensitive). Do not treat ordinary
+      // "Bearer ..." / "Basic ..." operational prose (e.g. log message) as leakage.
+      if (looksLikePrivateKeyMaterial(obj)) {
         add(issues, 'PRIVATE_KEY_MATERIAL', source, pathPrefix, 'PEM private-key material is prohibited');
       }
     }
@@ -254,6 +265,9 @@ function assertSafeContext(value, issues, source, p) {
     }
     if (typeof v === 'string' && looksLikeAuthorizationCredential(v)) {
       add(issues, 'AUTHORIZATION_MATERIAL', source, `${p}.${k}`, 'safe_context value contains Authorization credential material');
+    }
+    if (typeof v === 'string' && looksLikePrivateKeyMaterial(v)) {
+      add(issues, 'PRIVATE_KEY_MATERIAL', source, `${p}.${k}`, 'safe_context value contains PEM private-key material');
     }
   }
   assertNoSecrets(value, issues, source, p);

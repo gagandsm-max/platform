@@ -160,6 +160,39 @@ class AnalyticsEnvelopeTests(unittest.TestCase):
             self.assertEqual(code, 404, path)
             self.assertIsNone(body)
 
+    def test_emitted_json_has_no_duplicate_top_level_keys(self):
+        raw, obj = self._capture_log(safe_context={"mode": "ok"})
+
+        def no_duplicate_keys(pairs):
+            out = {}
+            for key, value in pairs:
+                if key in out:
+                    raise AssertionError(f"duplicate JSON key: {key}")
+                out[key] = value
+            return out
+
+        parsed = json.loads(raw, object_pairs_hook=no_duplicate_keys)
+        self.assertEqual(parsed["component"], "platform-analytics")
+        self.assertEqual(obj["component"], "platform-analytics")
+
+    def test_identity_bounds_valid_and_invalid_env(self):
+        # Valid bounds
+        self.assertEqual(self.main._sanitize_version("0.1.0-test"), "0.1.0-test")
+        self.assertEqual(
+            self.main._sanitize_service_instance_id("analytics-test-01"),
+            "analytics-test-01",
+        )
+        # Empty / oversize version falls back
+        self.assertEqual(self.main._sanitize_version(""), "0.1.0-dev")
+        self.assertEqual(self.main._sanitize_version("v" * 65), "0.1.0-dev")
+        # Invalid service_instance_id charset / length falls back to analytics-<hex>
+        bad_chars = self.main._sanitize_service_instance_id("analytics/bad id")
+        self.assertTrue(bad_chars.startswith("analytics-"))
+        self.assertNotEqual(bad_chars, "analytics/bad id")
+        self.assertRegex(bad_chars, r"^analytics-[0-9a-f]{32}$")
+        oversize = self.main._sanitize_service_instance_id("a" * 129)
+        self.assertRegex(oversize, r"^analytics-[0-9a-f]{32}$")
+
 
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT / "src"))

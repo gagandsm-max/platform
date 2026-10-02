@@ -13,10 +13,26 @@ from datetime import datetime, timezone
 
 
 COMPONENT = "platform-analytics"
-VERSION = os.getenv("PLATFORM_VERSION", "0.1.0-dev")
-SERVICE_INSTANCE_ID = os.getenv(
-    "PLATFORM_SERVICE_INSTANCE_ID",
-    f"analytics-{uuid.uuid4().hex}",
+_SERVICE_INSTANCE_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _sanitize_version(raw):
+    value = (raw or "").strip()
+    if value and len(value) <= 64 and all(ord(c) >= 32 for c in value):
+        return value[:64]
+    return "0.1.0-dev"
+
+
+def _sanitize_service_instance_id(raw):
+    value = (raw or "").strip()
+    if value and _SERVICE_INSTANCE_RE.fullmatch(value):
+        return value
+    return f"analytics-{uuid.uuid4().hex}"
+
+
+VERSION = _sanitize_version(os.getenv("PLATFORM_VERSION", "0.1.0-dev"))
+SERVICE_INSTANCE_ID = _sanitize_service_instance_id(
+    os.getenv("PLATFORM_SERVICE_INSTANCE_ID")
 )
 
 
