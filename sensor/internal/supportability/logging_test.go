@@ -273,7 +273,8 @@ func TestSlice5EmittedJSONHasNoDuplicateTopLevelKeys(t *testing.T) {
 		With("component", "spoofed-component").
 		With("version", "9.9.9-rebind").
 		With("service_instance_id", "sensor-instance-rebind").
-		With("sensor_id", "sensor-net-02")
+		With("sensor_id", "sensor-net-02").
+		With("agent_id", "agent-rebind-01")
 	logger.Warn("dup-key-cert",
 		"error_code", "CONTROL_SYNC_PENDING",
 		"correlation_id", "corr-slice5",
@@ -281,6 +282,7 @@ func TestSlice5EmittedJSONHasNoDuplicateTopLevelKeys(t *testing.T) {
 		"version", "8.8.8-rebind",
 		"service_instance_id", "sensor-instance-rebind-2",
 		"sensor_id", "sensor-net-03",
+		"agent_id", "agent-rebind-02",
 		"safe_context", map[string]any{"mode": "ok"},
 	)
 	raw := strings.TrimSpace(buf.String())
@@ -297,6 +299,9 @@ func TestSlice5EmittedJSONHasNoDuplicateTopLevelKeys(t *testing.T) {
 	}
 	if got["sensor_id"] != "sensor-net-01" {
 		t.Fatalf("sensor_id identity not immutable: %v", got)
+	}
+	if got["agent_id"] != "agent-rebind-01" {
+		t.Fatalf("agent_id identity not immutable once bound: %v", got)
 	}
 }
 
@@ -442,7 +447,11 @@ func TestAgentIDUsesBoundedStringContract(t *testing.T) {
 	for _, agentID := range []string{"agent/site 01", "Agent With Spaces"} {
 		t.Run(agentID, func(t *testing.T) {
 			var buf bytes.Buffer
-			logger := newTestLogger(&buf)
+			level := new(slog.LevelVar)
+			level.Set(slog.LevelDebug)
+			// Bind agent_id once at the call site under test — not after a prior
+			// accepted agent_id on the same logger chain.
+			logger := NewJSONLogger(&buf, level, "0.1.0-test", "sensor-instance-test")
 			logger.Warn("test", "agent_id", agentID)
 			got := decodeOne(t, &buf)
 			if got["agent_id"] != agentID {

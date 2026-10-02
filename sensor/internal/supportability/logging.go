@@ -83,7 +83,7 @@ func (h *uniqueKeyHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 func immutableRuntimeIdentityKey(key string) bool {
 	switch key {
-	case "component", "version", "service_instance_id", "sensor_id":
+	case "component", "version", "service_instance_id", "sensor_id", "agent_id":
 		return true
 	default:
 		return false
