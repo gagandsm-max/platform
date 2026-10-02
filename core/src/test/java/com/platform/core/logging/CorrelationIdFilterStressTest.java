@@ -15,8 +15,10 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * BUILD-005 supportability correlation stress (not ordinary unit CI default).
- * Invoked explicitly by tests/stress/run-build005-supportability-stress.sh.
+ * BUILD-005 supportability correlation stress.
+ * Invoked explicitly by tests/stress/run-build005-supportability-stress.sh
+ * via -Dtest=CorrelationIdFilterStressTest (safe to include in ordinary unit CI;
+ * bounded 2k iterations, no external I/O).
  */
 class CorrelationIdFilterStressTest {
 

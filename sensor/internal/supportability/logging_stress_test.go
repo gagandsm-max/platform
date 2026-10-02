@@ -153,6 +153,7 @@ func TestStressConcurrentStructuredLogging(t *testing.T) {
 		"STRESS-BEARER-SENTINEL",
 		"U1RSRVNTLUJBU0lD",
 		"STRESS-PEM-SENTINEL",
+		"stress-password-sentinel",
 	}
 	expect := map[string]string{
 		"component":           componentName,
@@ -192,7 +193,7 @@ func TestStressConcurrentStructuredLogging(t *testing.T) {
 				case 2:
 					ctx["detail"] = "-----BEGIN PRIVATE KEY-----\nSTRESS-PEM-SENTINEL\n-----END PRIVATE KEY-----"
 				case 3:
-					ctx["password"] = "should-omit"
+					ctx["password"] = "stress-password-sentinel"
 				case 4:
 					ctx["prose"] = "Bearer authentication failed"
 				case 5:
