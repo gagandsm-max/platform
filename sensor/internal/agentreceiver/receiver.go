@@ -94,7 +94,7 @@ func NewReceiver(cfg Config, identity AgentIdentityVerifier, authorizer Assignme
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Receiver{cfg: cfg, identity: identity, authorizer: authorizer, sink: sink, replay: NewReplayTracker(5000), metrics: NewReceiverMetrics(), logger: logger.With("component", "agentreceiver", "sensor_id", cfg.SensorID, "role", string(cfg.SensorRole))}, nil
+	return &Receiver{cfg: cfg, identity: identity, authorizer: authorizer, sink: sink, replay: NewReplayTracker(5000), metrics: NewReceiverMetrics(), logger: logger}, nil
 }
 
 func (rcv *Receiver) Metrics() *ReceiverMetrics     { return rcv.metrics }
@@ -135,11 +135,13 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	authAgent, err := rcv.identity.VerifyPeerIdentity(verifiedChain)
 	if err != nil || strings.TrimSpace(authAgent.FingerprintSHA256) == "" {
 		rcv.metrics.AuthFailures.Add(1)
-		rcv.logger.Warn("Peer identity verification failed", "remote_addr", r.RemoteAddr)
 		code := ErrCodeAuthInvalid
-		if err != nil && strings.Contains(err.Error(), ErrCodeAuthRequired) {
-			code = ErrCodeAuthRequired
-		}
+		rcv.logger.Warn("Peer identity verification failed",
+			"event_code", code,
+			"safe_context", map[string]any{
+				"remote_addr":  r.RemoteAddr,
+				"reason_class": "peer_identity_verification_failed",
+			})
 		rcv.writeJSONError(w, http.StatusUnauthorized, code, "Client certificate identity could not be verified")
 		return
 	}
@@ -183,7 +185,9 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if authErr, ok := AsAuthorizerError(err); ok && authErr.IsTransient() {
 			rcv.metrics.AuthorityTransientErrors.Add(1)
-			rcv.logger.Warn("Agent authority temporarily unavailable", "sensor_id", rcv.cfg.SensorID, "reason_class", "authority_transient")
+			rcv.logger.Warn("Agent authority temporarily unavailable",
+				"event_code", ErrCodeAgentAuthorityUnavailable,
+				"safe_context", map[string]any{"reason_class": "authority_transient"})
 			rcv.writeJSONError(w, http.StatusServiceUnavailable, ErrCodeAgentAuthorityUnavailable, "Agent authority temporarily unavailable")
 			return
 		}
@@ -192,14 +196,19 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if authErr, ok := AsAuthorizerError(err); ok && strings.TrimSpace(authErr.Code) != "" {
 			code = authErr.Code
 		}
-		rcv.logger.Warn("Agent delivery denied by assignment authorizer", "sensor_id", rcv.cfg.SensorID, "reason_class", "authority_definitive", "code", code)
+		rcv.logger.Warn("Agent delivery denied by assignment authorizer",
+			"event_code", code,
+			"safe_context", map[string]any{"reason_class": "authority_definitive"})
 		rcv.writeJSONError(w, http.StatusForbidden, code, "Agent is not assigned to this Infrastructure Sensor")
 		return
 	}
 	if !assignCtx.Assigned {
 		rcv.metrics.AuthorityDefinitiveDenials.Add(1)
 		rcv.metrics.AssignmentDenials.Add(1)
-		rcv.logger.Warn("Agent delivery denied by assignment authorizer", "agent_id", authAgent.AgentID, "sensor_id", rcv.cfg.SensorID, "reason_class", "authority_definitive")
+		rcv.logger.Warn("Agent delivery denied by assignment authorizer",
+			"agent_id", authAgent.AgentID,
+			"event_code", ErrCodeAgentNotAssigned,
+			"safe_context", map[string]any{"reason_class": "authority_definitive"})
 		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAgentNotAssigned, "Agent is not assigned to this Infrastructure Sensor")
 		return
 	}
@@ -214,7 +223,14 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Agent IDs are case-sensitive canonical resource identifiers (V005).
 	if strings.TrimSpace(env.AgentID) != assignCtx.AgentID {
 		rcv.metrics.AuthFailures.Add(1)
-		rcv.logger.Warn("Agent identity spoofing attempt detected", "assigned_agent_id", assignCtx.AgentID, "claimed_agent_id", env.AgentID, "remote_addr", r.RemoteAddr, "reason_class", "claim_mismatch")
+		rcv.logger.Warn("Agent identity spoofing attempt detected",
+			"event_code", ErrCodeAuthIdentityMismatch,
+			"safe_context", map[string]any{
+				"assigned_agent_id": assignCtx.AgentID,
+				"claimed_agent_id":  env.AgentID,
+				"remote_addr":       r.RemoteAddr,
+				"reason_class":      "claim_mismatch",
+			})
 		rcv.writeJSONError(w, http.StatusForbidden, ErrCodeAuthIdentityMismatch, "Claimed agentId does not match authenticated assignment")
 		return
 	}
@@ -261,9 +277,12 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logAttrs := []any{"agent_id", assignCtx.AgentID, "batch_id", env.BatchID, "schema_version", env.SchemaVersion}
+	logContext := map[string]any{
+		"batch_id":       env.BatchID,
+		"schema_version": env.SchemaVersion,
+	}
 	if env.SchemaVersion == SchemaVersionV2 && env.AgentStreamID != "" {
-		logAttrs = append(logAttrs, "agent_stream_id", env.AgentStreamID)
+		logContext["agent_stream_id"] = env.AgentStreamID
 	}
 
 	result, err := rcv.sink.AcceptBatch(r.Context(), env)
@@ -275,24 +294,49 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if IsStreamStaleOrFenced(err) {
 			rcv.metrics.ReplayConflicts.Add(1)
-			rcv.logger.Warn("Agent stream stale or fenced", append(logAttrs, "reason_class", "stale_or_fenced", "error", err)...)
+			logContext["reason_class"] = "stale_or_fenced"
+			rcv.logger.Warn("Agent stream stale or fenced",
+				"agent_id", assignCtx.AgentID,
+				"event_code", ErrCodeStreamStaleOrFenced,
+				"safe_context", logContext)
 			rcv.writeJSONError(w, http.StatusConflict, ErrCodeStreamStaleOrFenced, "Agent stream is stale or fenced")
 			return
 		}
 		if IsAssignmentGenerationStale(err) {
 			rcv.metrics.AssignmentGenerationStale.Add(1)
-			rcv.logger.Warn("Agent assignment generation stale", append(logAttrs, "reason_class", "assignment_generation_stale", "error", err)...)
+			logContext["reason_class"] = "assignment_generation_stale"
+			rcv.logger.Warn("Agent assignment generation stale",
+				"agent_id", assignCtx.AgentID,
+				"event_code", ErrCodeAssignmentGenerationStale,
+				"safe_context", logContext)
 			rcv.writeJSONError(w, http.StatusConflict, ErrCodeAssignmentGenerationStale, "Agent assignment generation is stale relative to durable local fence")
 			return
 		}
 		if IsLegacyStreamClosed(err) {
 			rcv.metrics.ReplayConflicts.Add(1)
-			rcv.logger.Warn("Legacy agent stream closed", append(logAttrs, "reason_class", "legacy_stream_closed", "error", err)...)
+			logContext["reason_class"] = "legacy_stream_closed"
+			rcv.logger.Warn("Legacy agent stream closed",
+				"agent_id", assignCtx.AgentID,
+				"event_code", ErrCodeLegacyStreamClosed,
+				"safe_context", logContext)
 			rcv.writeJSONError(w, http.StatusConflict, ErrCodeLegacyStreamClosed, "Legacy v1 agent stream is closed")
 			return
 		}
+		if strings.Contains(err.Error(), ErrCodeStreamOwnerCorrupt) {
+			logContext["reason_class"] = "lineage_integrity_corrupt"
+			rcv.logger.Error("Agent stream lineage owner state is corrupt",
+				"agent_id", assignCtx.AgentID,
+				"event_code", ErrCodeStreamOwnerCorrupt,
+				"safe_context", logContext)
+			rcv.writeJSONError(w, http.StatusConflict, ErrCodeStreamOwnerCorrupt, "Agent stream lineage state is corrupt")
+			return
+		}
 		rcv.metrics.SinkFailures.Add(1)
-		rcv.logger.Error("Acceptance sink refused or failed to process batch", append(logAttrs, "error", err, "reason_class", "sink_failure")...)
+		logContext["reason_class"] = "sink_failure"
+		rcv.logger.Error("Acceptance sink refused or failed to process batch",
+			"agent_id", assignCtx.AgentID,
+			"event_code", ErrCodeSinkFailed,
+			"safe_context", logContext)
 		rcv.writeJSONError(w, http.StatusServiceUnavailable, ErrCodeSinkFailed, "Sensor acceptance sink unavailable")
 		return
 	}

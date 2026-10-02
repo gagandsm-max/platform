@@ -89,8 +89,13 @@ func (e *Executor) Run(ctx context.Context, task Task) Result {
 	if timeout <= 0 { timeout = DefaultSNMPTimeout }
 
 	e.logger.Info("Starting discovery task execution",
-		"task_id", task.TaskID, "request_id", task.RequestID, "tenant_id", task.TenantID,
-		"target_count", len(task.Targets), "methods", task.RequestedMethods)
+		"request_id", task.RequestID,
+		"tenant_id", task.TenantID,
+		"safe_context", map[string]any{
+			"task_id":      task.TaskID,
+			"target_count": len(task.Targets),
+			"method_count": len(task.RequestedMethods),
+		})
 
 	type job struct{ index int }
 	jobs := make(chan job)
@@ -143,8 +148,13 @@ feed:
 		failureReason = "Discovery execution cancelled or deadline exceeded"
 	}
 	e.logger.Info("Discovery task completed",
-		"task_id", task.TaskID, "request_id", task.RequestID, "evidence_count", len(evidence),
-		"duration_ms", completedAt.Sub(startedAt).Milliseconds(), "status", status)
+		"request_id", task.RequestID,
+		"result", status,
+		"safe_context", map[string]any{
+			"task_id":        task.TaskID,
+			"evidence_count": len(evidence),
+			"duration_ms":    completedAt.Sub(startedAt).Milliseconds(),
+		})
 
 	return Result{
 		RequestID: task.RequestID, TenantID: task.TenantID, CorrelationID: task.CorrelationID,

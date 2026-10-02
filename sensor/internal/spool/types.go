@@ -77,9 +77,17 @@ func validClass(c RecordClass) bool {
 	return false
 }
 
+type SpoolKind string
+
+const (
+	KindTelemetry    SpoolKind = "telemetry"
+	KindAgentIngress SpoolKind = "agent_ingress"
+)
+
 type Config struct {
 	Dir            string
 	MaxRecordBytes int
+	Kind           SpoolKind
 	Logger         *slog.Logger
 }
 type AppendRequest struct {
@@ -139,6 +147,7 @@ type DiskSpool struct {
 	streamID       string
 	quarantineDir  string
 	maxRecordBytes int
+	kind           SpoolKind
 	logger         *slog.Logger
 	mu             sync.Mutex
 	state          diskState

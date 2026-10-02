@@ -56,7 +56,8 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 	s.state = lifecycleRunning
-	s.logger.Info("Starting sensor discovery worker loop", "sensor_id", s.sensorID, "interval", s.pollInterval)
+	s.logger.Info("Starting sensor discovery worker loop",
+		"safe_context", map[string]any{"interval_ms": s.pollInterval.Milliseconds()})
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -90,8 +91,12 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	}
 
 	s.logger.Info("Received fenced discovery task from Core",
-		"request_id", taskResp.RequestID, "tenant_id", taskResp.TenantID,
-		"assignment_version", taskResp.AssignmentVersion, "target_count", len(taskResp.Targets))
+		"request_id", taskResp.RequestID,
+		"tenant_id", taskResp.TenantID,
+		"safe_context", map[string]any{
+			"assignment_version": taskResp.AssignmentVersion,
+			"target_count":       len(taskResp.Targets),
+		})
 
 	targets := make([]Target, len(taskResp.Targets))
 	for i, address := range taskResp.Targets { targets[i] = Target{Address: address, Type: targetType(address)} }
@@ -129,7 +134,9 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	if err != nil { return err }
 	if ack.RequestID != task.RequestID { return fmt.Errorf("DISCOVERY_ACK_REQUEST_MISMATCH") }
 	if ack.Status != "ACCEPTED" && ack.Status != "ALREADY_ACCEPTED" { return fmt.Errorf("DISCOVERY_ACK_INVALID") }
-	s.logger.Info("Discovery result acknowledged by Core", "request_id", ack.RequestID, "status", ack.Status)
+	s.logger.Info("Discovery result acknowledged by Core",
+		"request_id", ack.RequestID,
+		"result", ack.Status)
 	return nil
 }
 

@@ -233,13 +233,74 @@ TEST_NUM=14
 TEST_DESC="Sensor Instances Startup, Health & Named Spool Volumes"
 NET_HEALTH=$(docker exec platform-sensor-net curl -s http://127.0.0.1:8088/health 2>/dev/null || echo "")
 INFRA_HEALTH=$(docker exec platform-sensor-infra curl -s http://127.0.0.1:8088/health 2>/dev/null || echo "")
+NET_READY=$(docker exec platform-sensor-net curl -s http://127.0.0.1:8088/readyz 2>/dev/null || echo "")
+INFRA_READY=$(docker exec platform-sensor-infra curl -s http://127.0.0.1:8088/readyz 2>/dev/null || echo "")
+NET_HEALTH_CODE=$(docker exec platform-sensor-net curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8088/health 2>/dev/null || echo "000")
+INFRA_HEALTH_CODE=$(docker exec platform-sensor-infra curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8088/health 2>/dev/null || echo "000")
+NET_READY_CODE=$(docker exec platform-sensor-net curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8088/readyz 2>/dev/null || echo "000")
+INFRA_READY_CODE=$(docker exec platform-sensor-infra curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8088/readyz 2>/dev/null || echo "000")
 
-if echo "${NET_HEALTH}" | grep -q '"status":"UP"' && echo "${INFRA_HEALTH}" | grep -q '"status":"UP"'; then
+validate_sensor_supportability() {
+    SENSOR_HEALTH_JSON="$1" SENSOR_READY_JSON="$2" SENSOR_HEALTH_CODE="$3" SENSOR_READY_CODE="$4" python3 - <<'PY'
+import json, os, sys
+
+HEALTH_ALLOWED = {
+    "document_type", "component", "version", "service_instance_id", "ts", "uptime_seconds",
+    "component_state", "storage_pressure_percent", "spool_pressure_percent", "queue_depth",
+    "queue_capacity", "scheduler_status", "control_reconciliation_status", "delivery_status",
+    "dependency_status", "counters", "gauges", "reason_codes", "state_timestamps",
+}
+READY_ALLOWED = {"status", "ready", "http_semantic", "component", "ts", "service_instance_id", "reason_code"}
+
+def valid_health(health, code):
+    return (
+        isinstance(health, dict)
+        and not (set(health) - HEALTH_ALLOWED)
+        and health.get("document_type") == "SUPPORT_EVIDENCE"
+        and health.get("component") == "platform-sensor"
+        and bool(health.get("service_instance_id"))
+        and bool(health.get("ts"))
+        and health.get("component_state") in ("UP", "DEGRADED")
+        and code == 200
+    )
+
+def valid_ready(ready, code):
+    return (
+        isinstance(ready, dict)
+        and not (set(ready) - READY_ALLOWED)
+        and ready.get("component") == "platform-sensor"
+        and ready.get("status") in ("UP", "DEGRADED")
+        and ready.get("ready") is True
+        and ready.get("http_semantic") == 200
+        and code == 200
+    )
+
+try:
+    health = json.loads(os.environ["SENSOR_HEALTH_JSON"])
+    ready = json.loads(os.environ["SENSOR_READY_JSON"])
+    health_code = int(os.environ["SENSOR_HEALTH_CODE"])
+    ready_code = int(os.environ["SENSOR_READY_CODE"])
+except Exception:
+    sys.exit(1)
+
+if not valid_health(health, health_code) or not valid_ready(ready, ready_code):
+    sys.exit(1)
+unknown = dict(ready)
+unknown["_unknown"] = True
+if valid_ready(unknown, ready_code):
+    sys.exit(1)
+if valid_ready(ready, 503):
+    sys.exit(1)
+sys.exit(0)
+PY
+}
+
+if validate_sensor_supportability "${NET_HEALTH}" "${NET_READY}" "${NET_HEALTH_CODE}" "${NET_READY_CODE}" && \
+   validate_sensor_supportability "${INFRA_HEALTH}" "${INFRA_READY}" "${INFRA_HEALTH_CODE}" "${INFRA_READY_CODE}"; then
     pass ${TEST_NUM} "${TEST_DESC}"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "sensor-net: ${NET_HEALTH}, sensor-infra: ${INFRA_HEALTH}"
+    fail ${TEST_NUM} "${TEST_DESC}" "sensor-net health=${NET_HEALTH_CODE}/${NET_HEALTH} ready=${NET_READY_CODE}/${NET_READY}; sensor-infra health=${INFRA_HEALTH_CODE}/${INFRA_HEALTH} ready=${INFRA_READY_CODE}/${INFRA_READY}"
 fi
-
 # ------------------------------------------------------------------------------
 # Test 15: Sensor Storage Watermark Threshold Guard
 # ------------------------------------------------------------------------------
@@ -377,6 +438,33 @@ docker exec platform-postgres psql -U platform_app -d platform -c "INSERT INTO p
 # Marker key in Valkey
 docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}" set restart_persist_key "preserved_across_down" > /dev/null 2>&1
 
+# Start an explicit non-Compose probe so isolation can never pass vacuously.
+# Reuse the already-local Postgres image; do not pull or add a dependency.
+FOREIGN_PROBE_NAME="platform-isolation-probe-$$"
+FOREIGN_PROBE_IMAGE=$(docker inspect -f '{{.Config.Image}}' platform-postgres 2>/dev/null || echo "")
+docker rm -f "${FOREIGN_PROBE_NAME}" > /dev/null 2>&1 || true
+FOREIGN_PROBE_STARTED=false
+if [ -n "${FOREIGN_PROBE_IMAGE}" ] && \
+   docker run -d --name "${FOREIGN_PROBE_NAME}" --entrypoint sh "${FOREIGN_PROBE_IMAGE}" \
+     -c 'while :; do sleep 60; done' > /dev/null 2>&1; then
+    FOREIGN_PROBE_STARTED=true
+fi
+
+# Snapshot unrelated container state immediately before the destructive
+# Platform Compose restart. Determine ownership from the exact current Compose
+# stack rather than a name prefix.
+PLATFORM_OWNED_BEFORE=$(docker compose ps -a --format '{{.Name}}' | sort)
+snapshot_foreign_container_states() {
+    docker ps -a --format '{{.Names}}' | sort | while IFS= read -r name; do
+        [ -n "${name}" ] || continue
+        if printf '%s\n' "${PLATFORM_OWNED_BEFORE}" | grep -Fxq "${name}"; then
+            continue
+        fi
+        running=$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || printf 'MISSING')
+        printf '%s|%s\n' "${name}" "${running}"
+    done
+}
+FOREIGN_BEFORE=$(snapshot_foreign_container_states)
 # Restart stack
 docker compose down > /dev/null 2>&1
 docker compose up -d > /dev/null 2>&1
@@ -400,11 +488,12 @@ docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valke
 
 # Structured logs
 CORE_LOG=$(docker logs --tail 20 platform-core 2>/dev/null | awk '/^\{/{print; exit}' || true)
-SENSOR_LOG=$(docker logs --tail 20 platform-sensor-net 2>/dev/null | awk '/^\{/{print; exit}' || true)
+SENSOR_LOG=$(docker logs --tail 100 platform-sensor-net 2>/dev/null | awk '/^\{/{print}' || true)
 ANALYTICS_LOG=$(docker logs --tail 20 platform-analytics 2>/dev/null | awk '/^\{/{print; exit}' || true)
 
 # Core uses BUILD-005 certified envelope (component, not legacy service).
-# Sensor/Analytics retain their existing "service" expectation until their slices.
+# Sensor now uses the BUILD-005 Slice-3 certified envelope; Analytics retains
+# its existing "service" expectation until its later bounded conformance slice.
 CORE_LOG_VALID=false
 if [ -n "${CORE_LOG}" ] && echo "${CORE_LOG}" | python3 -c '
 import json, sys
@@ -431,8 +520,63 @@ sys.exit(0)
 fi
 
 SENSOR_LOG_VALID=false
-if echo "${SENSOR_LOG}" | grep -q '"service"'; then SENSOR_LOG_VALID=true; fi
+if [ -n "${SENSOR_LOG}" ] && echo "${SENSOR_LOG}" | python3 -c '
+import json, sys
+required = ("ts", "level", "component", "version", "sensor_id", "service_instance_id", "message")
+allowed = {
+    "ts", "level", "component", "version", "service_instance_id", "message",
+    "node_id", "sensor_id", "agent_id", "tenant_id", "event_code", "correlation_id",
+    "request_id", "job_id", "entity_id", "protocol", "result", "retry_count", "safe_context",
+}
+legacy = ("timestamp", "time", "msg", "service", "environment", "thread", "logger", "error_code", "error", "stack_trace", "stackTrace")
 
+def no_duplicate_keys(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate JSON key: {key}")
+        obj[key] = value
+    return obj
+
+def valid_log(obj):
+    if not isinstance(obj, dict):
+        return False
+    if set(obj) - allowed:
+        return False
+    for key in required:
+        value = obj.get(key)
+        if value is None or (isinstance(value, str) and value.strip() == ""):
+            return False
+    if obj.get("component") != "platform-sensor":
+        return False
+    if any(key in obj for key in legacy):
+        return False
+    return True
+
+seen = 0
+last = None
+for raw in sys.stdin:
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        obj = json.loads(raw, object_pairs_hook=no_duplicate_keys)
+    except Exception:
+        sys.exit(1)
+    if not valid_log(obj):
+        sys.exit(1)
+    last = obj
+    seen += 1
+if seen == 0:
+    sys.exit(1)
+probe = dict(last)
+probe["_unknown"] = True
+if valid_log(probe):
+    sys.exit(1)
+sys.exit(0)
+'; then
+    SENSOR_LOG_VALID=true
+fi
 ANALYTICS_LOG_VALID=false
 if echo "${ANALYTICS_LOG}" | grep -q '"service"'; then ANALYTICS_LOG_VALID=true; fi
 
@@ -441,18 +585,30 @@ if [ "${CORE_LOG_VALID}" = "true" ] && [ "${SENSOR_LOG_VALID}" = "true" ] && [ "
     LOGS_OK=true
 fi
 
-# Isolation
-FOREIGN_ALL=$(docker ps -a --format '{{.Names}}' | grep -v '^platform' || true)
+# Isolation: verify every unrelated container present before the Platform
+# restart still exists with the same running/stopped state afterwards.
 FOREIGN_OK=true
 FOREIGN_COUNT=0
-if [ -n "${FOREIGN_ALL}" ]; then
-    FOREIGN_COUNT=$(echo "${FOREIGN_ALL}" | wc -l)
-    FOREIGN_RUNNING=$(docker ps --format '{{.Names}}' | grep -v '^platform' | wc -l)
-    if [ "${FOREIGN_RUNNING}" -lt "${FOREIGN_COUNT}" ]; then
-        FOREIGN_OK=false
-    fi
+FOREIGN_DETAIL=""
+if [ -n "${FOREIGN_BEFORE}" ]; then
+    FOREIGN_COUNT=$(printf '%s\n' "${FOREIGN_BEFORE}" | awk 'NF { count++ } END { print count+0 }')
+    while IFS='|' read -r name was_running; do
+        [ -n "${name}" ] || continue
+        now_running=$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || printf 'MISSING')
+        if [ "${now_running}" != "${was_running}" ]; then
+            FOREIGN_OK=false
+            FOREIGN_DETAIL="${FOREIGN_DETAIL}${name}:${was_running}->${now_running};"
+        fi
+    done <<< "${FOREIGN_BEFORE}"
 fi
-
+if [ "${FOREIGN_PROBE_STARTED}" != "true" ] || [ "${FOREIGN_COUNT}" -lt 1 ]; then
+    FOREIGN_OK=false
+    FOREIGN_DETAIL="${FOREIGN_DETAIL}synthetic_probe_missing;"
+elif ! printf '%s\n' "${FOREIGN_BEFORE}" | grep -Fq "${FOREIGN_PROBE_NAME}|true"; then
+    FOREIGN_OK=false
+    FOREIGN_DETAIL="${FOREIGN_DETAIL}synthetic_probe_not_running_before_restart;"
+fi
+docker rm -f "${FOREIGN_PROBE_NAME}" > /dev/null 2>&1 || true
 # Host runtime isolation is a developer-workstation policy. GitHub-hosted CI
 # runners intentionally ship Java/Go/Node and other language runtimes. Platform
 # project execution remains containerized in CI, so an ephemeral runner's PATH
@@ -487,7 +643,7 @@ fi
 if [ "${PERSIST_OK}" = "true" ] && [ "${LOGS_OK}" = "true" ] && [ "${FOREIGN_OK}" = "true" ] && [ "${HOST_ISOLATION_OK}" = "true" ]; then
     pass ${TEST_NUM} "${TEST_DESC} (Persistence verified, JSON logs valid, ${FOREIGN_COUNT} foreign container(s) intact, ${ISOLATION_DETAIL})"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "Persistence: ${PERSIST_OK}, Logs: ${LOGS_OK}, Foreign: ${FOREIGN_OK}, Isolation: ${HOST_ISOLATION_OK} (Pollution: ${HOST_POLLUTION}, SyntheticOK: ${SYNTHETIC_TEST_OK})"
+    fail ${TEST_NUM} "${TEST_DESC}" "Persistence: ${PERSIST_OK}, Logs: ${LOGS_OK}, Foreign: ${FOREIGN_OK}, ForeignDetail: ${FOREIGN_DETAIL:-none}, Isolation: ${HOST_ISOLATION_OK} (Pollution: ${HOST_POLLUTION}, SyntheticOK: ${SYNTHETIC_TEST_OK})"
 fi
 
 echo "========================================================================"

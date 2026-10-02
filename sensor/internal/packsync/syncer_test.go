@@ -365,6 +365,40 @@ func TestPackSyncAuthFailClosedRetainsApplied(t *testing.T) {
 	}
 }
 
+func TestFailClosedPackErrorClearsTrustedApplied(t *testing.T) {
+	s := &Syncer{}
+	s.setSuccess(7, 2)
+	if snap := s.Snapshot(); !snap.TrustedApplied || !snap.CoreAuthorityEstablished {
+		t.Fatalf("precondition trusted state missing: %+v", snap)
+	}
+
+	s.setError(ErrCodeRestartFailClosed, true)
+	snap := s.Snapshot()
+	if snap.TrustedApplied {
+		t.Fatalf("fail-closed error must clear TrustedApplied: %+v", snap)
+	}
+	if !snap.CoreAuthorityEstablished {
+		t.Fatalf("fail-closed local trust failure must not erase established Core authority: %+v", snap)
+	}
+	if snap.Ready() {
+		t.Fatalf("fail-closed pack state must not remain ready: %+v", snap)
+	}
+}
+
+func TestTransientAndAuthErrorsRetainTrustedApplied(t *testing.T) {
+	for _, code := range []string{ErrCodeSyncTransient, ErrCodeAuthFailed} {
+		t.Run(code, func(t *testing.T) {
+			s := &Syncer{}
+			s.setSuccess(7, 2)
+			s.setError(code, true)
+			snap := s.Snapshot()
+			if !snap.TrustedApplied || !snap.CoreAuthorityEstablished {
+				t.Fatalf("transient/auth error cleared trusted state: %+v", snap)
+			}
+		})
+	}
+}
+
 func TestRestartFailClosedOnBadChecksum(t *testing.T) {
 	dir := t.TempDir()
 	artDir := filepath.Join(dir, artifactsDirName)

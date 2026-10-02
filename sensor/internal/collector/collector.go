@@ -40,7 +40,11 @@ func NewCollectorEngine(
 }
 
 func (e *CollectorEngine) Start(ctx context.Context) {
-	e.logger.Info("Starting collector engine loop", "sensor_id", e.sensorID, "type", e.sensorType)
+	e.logger.Info("Starting collector engine loop",
+		"safe_context", map[string]any{
+			"sensor_type": e.sensorType,
+			"interval_ms": e.interval.Milliseconds(),
+		})
 
 	e.wg.Add(1)
 	go func() {
@@ -74,7 +78,8 @@ func (e *CollectorEngine) collectAndSpool(ctx context.Context) {
 	}
 	payloadBytes, err := json.Marshal(payloadData)
 	if err != nil {
-		e.logger.Error("Failed to marshal collector payload", "error", err)
+		e.logger.Error("Failed to marshal collector payload",
+			"error_code", "SENSOR_COLLECTOR_PAYLOAD_ENCODE_FAILED")
 		return
 	}
 
@@ -103,9 +108,16 @@ func (e *CollectorEngine) collectAndSpool(ctx context.Context) {
 
 	receipt, err := e.sink.Write(ctx, env)
 	if err != nil {
-		e.logger.Error("Failed to write observation to sink", "correlation_id", correlationID, "error", err)
+		e.logger.Error("Failed to write observation to sink",
+			"correlation_id", correlationID,
+			"error_code", "SENSOR_OBSERVATION_SINK_WRITE_FAILED")
 	} else {
-		e.logger.Debug("Observation written to durable sink", "correlation_id", correlationID, "sequence", receipt.Sequence, "record_id", receipt.RecordID)
+		e.logger.Debug("Observation written to durable sink",
+			"correlation_id", correlationID,
+			"safe_context", map[string]any{
+				"sequence":  receipt.Sequence,
+				"record_id": receipt.RecordID,
+			})
 	}
 }
 

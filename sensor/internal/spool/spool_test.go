@@ -1,8 +1,10 @@
 package spool
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"platform/sensor/internal/control"
+	"platform/sensor/internal/supportability"
 )
 
 func openTest(t *testing.T, max int) *DiskSpool {
@@ -152,6 +155,54 @@ func TestPartialAndCorruptQuarantine(t *testing.T) {
 		t.Fatal("degradation not exposed")
 	}
 }
+func TestQuarantineLogIncludesSpoolKind(t *testing.T) {
+	var logs bytes.Buffer
+	logger := supportability.NewJSONLogger(&logs, slog.LevelDebug, "0.1.0-test", "sensor-instance-test").
+		With("sensor_id", "sensor-infra-01")
+	dir := t.TempDir()
+	s, err := Open(Config{Dir: dir, MaxRecordBytes: 1024, Kind: KindAgentIngress, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.space = func(int64) (spaceStatus, error) {
+		return spaceStatus{totalBytes: 1000000, usedBytes: 1000, usedPct: .1}, nil
+	}
+	r := add(t, s, "payload")
+	p := filepath.Join(s.dir, recordFileName(r.Sequence))
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec Record
+	if err = json.Unmarshal(data, &rec); err != nil {
+		t.Fatal(err)
+	}
+	rec.Payload = []byte("evil")
+	bad, _ := json.Marshal(rec)
+	if err = os.WriteFile(p, bad, 0640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ReadBatch(10, 100); CodeOf(err) != CodeCorruption {
+		t.Fatalf("want corruption got %v", err)
+	}
+	var entry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &entry); err != nil {
+		t.Fatalf("decode quarantine log: %v\n%s", err, logs.String())
+	}
+	if entry["event_code"] != string(CodeCorruption) {
+		t.Fatalf("event_code=%v want=%s log=%v", entry["event_code"], CodeCorruption, entry)
+	}
+	safe, ok := entry["safe_context"].(map[string]any)
+	if !ok || safe["spool_type"] != "agent_ingress" {
+		t.Fatalf("safe_context=%v", entry["safe_context"])
+	}
+	for _, forbidden := range []string{"spool_type", "error_code", "error"} {
+		if _, exists := entry[forbidden]; exists {
+			t.Fatalf("non-canonical top-level %s leaked: %v", forbidden, entry)
+		}
+	}
+}
+
 func TestRecoveryQuarantinesPartial(t *testing.T) {
 	dir := t.TempDir()
 	if e := os.WriteFile(filepath.Join(dir, "record-00000000000000000001.json.tmp"), []byte("partial"), 0640); e != nil {

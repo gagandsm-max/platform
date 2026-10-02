@@ -110,7 +110,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	return &Server{
 		cfg:     cfg,
 		httpSrv: httpSrv,
-		logger:  logger.With("component", "agentreceiver.server"),
+		logger:  logger,
 		sem:     sem,
 	}, nil
 }
@@ -158,8 +158,10 @@ func (s *Server) ListenAndServe() error {
 	s.mu.Unlock()
 
 	s.logger.Info("Agent receiver TLS listener started",
-		"listen_addr", s.cfg.ListenAddr,
-		"client_auth", "RequireAndVerifyClientCert",
+		"safe_context", map[string]any{
+			"listen_configured": true,
+			"client_auth":       "RequireAndVerifyClientCert",
+		},
 	)
 	err := s.httpSrv.Serve(tls.NewListener(ln, s.httpSrv.TLSConfig))
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -175,6 +177,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		ctx, cancel = context.WithTimeout(context.Background(), s.cfg.ShutdownGrace)
 		defer cancel()
 	}
-	s.logger.Info("Agent receiver shutting down", "grace", s.cfg.ShutdownGrace.String())
+	s.logger.Info("Agent receiver shutting down",
+		"safe_context", map[string]any{"grace": s.cfg.ShutdownGrace.String()})
 	return s.httpSrv.Shutdown(ctx)
 }

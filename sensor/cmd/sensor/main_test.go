@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
 
 	"platform/sensor/internal/config"
+	"platform/sensor/internal/control"
 	sensorruntime "platform/sensor/internal/runtime"
 	"platform/sensor/internal/scheduler"
 )
@@ -205,6 +207,60 @@ func TestProductionSchedulerIdleShutdownWithinConfiguredGrace(t *testing.T) {
 	if elapsed > rt.Scheduler.ShutdownGracePeriod+250*time.Millisecond {
 		t.Fatalf("shutdown elapsed %v exceeded grace+allowance %v",
 			elapsed, rt.Scheduler.ShutdownGracePeriod+250*time.Millisecond)
+	}
+}
+
+func TestControlReconcileEventCodePrefersResultRejectCode(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		res  control.Result
+		err  error
+		want string
+	}{
+		{
+			name: "reject_code_over_ack_failure",
+			res:  control.Result{Code: control.CodeApplyFailed},
+			err:  &control.Error{Code: control.CodeAckFailed, Message: "injected rejected ACK failure"},
+			want: control.CodeApplyFailed,
+		},
+		{
+			name: "result_code_over_other_typed_error",
+			res:  control.Result{Code: control.CodeChecksumMismatch},
+			err:  control.NewApplyFailedError("injected apply failure", errors.New("raw dependency detail")),
+			want: control.CodeChecksumMismatch,
+		},
+		{
+			name: "typed_error_fallback",
+			res:  control.Result{},
+			err:  control.NewApplyFailedError("injected apply failure", nil),
+			want: control.CodeApplyFailed,
+		},
+		{
+			name: "generic_fallback",
+			res:  control.Result{},
+			err:  errors.New("unclassified failure"),
+			want: "SENSOR_CONTROL_RECONCILE_FAILED",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := controlReconcileEventCode(tc.res, tc.err); got != tc.want {
+				t.Fatalf("controlReconcileEventCode()=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestControlReconcileLogContextPreservesAckFailureCode(t *testing.T) {
+	res := control.Result{Action: "APPLY_FAILED", Code: control.CodeApplyFailed}
+	err := &control.Error{Code: control.CodeAckFailed, Message: "injected rejected ACK failure"}
+	ctx := controlReconcileLogContext(res, err)
+	if ctx["action"] != "APPLY_FAILED" || ctx["reason_class"] != "reconcile_failed" {
+		t.Fatalf("unexpected context: %v", ctx)
+	}
+	if ctx["ack_result_code"] != control.CodeAckFailed {
+		t.Fatalf("ack_result_code=%v want=%s", ctx["ack_result_code"], control.CodeAckFailed)
 	}
 }
 
