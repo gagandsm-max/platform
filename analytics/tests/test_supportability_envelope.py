@@ -126,6 +126,45 @@ class AnalyticsEnvelopeTests(unittest.TestCase):
         ):
             self.assertNotIn(sentinel, lowered)
 
+    def test_safe_context_rejects_equals_form_authorization_credentials(self):
+        raw, obj = self._capture_log(
+            safe_context={
+                "status": "ok",
+                "eq_bearer": "request failed; Authorization=Bearer SECRET-BEARER-SENTINEL",
+                "eq_sp_bearer": "request failed; Authorization = Bearer SECRET-BEARER-SENTINEL",
+                "eq_lc_bearer": "request failed; authorization=bearer SECRET-BEARER-SENTINEL",
+                "eq_basic": "upstream Authorization=Basic U0VDUkVULUJBQ0lD",
+                "eq_sp_basic": "upstream Authorization = Basic U0VDUkVULUJBQ0lD",
+                "eq_lc_basic": "upstream authorization=basic U0VDUkVULUJBQ0lD",
+                "prose_bearer": "Bearer authentication failed",
+                "prose_basic": "Basic authentication rejected",
+                "outcome": "token validation failed",
+                "prose_authz": "Authorization validation failed",
+                "prose_scheme": "authentication scheme Bearer rejected",
+            }
+        )
+        self.assertEqual(
+            obj.get("safe_context"),
+            {
+                "outcome": "token validation failed",
+                "prose_authz": "Authorization validation failed",
+                "prose_basic": "Basic authentication rejected",
+                "prose_bearer": "Bearer authentication failed",
+                "prose_scheme": "authentication scheme Bearer rejected",
+                "status": "ok",
+            },
+        )
+        lowered = raw.lower()
+        for sentinel in (
+            "secret-bearer-sentinel",
+            "u0vdukvulujbq0ld",
+            "authorization=bearer",
+            "authorization = bearer",
+            "authorization=basic",
+            "authorization = basic",
+        ):
+            self.assertNotIn(sentinel, lowered)
+
     def test_safe_context_omits_non_finite_floats(self):
         _, obj = self._capture_log(
             safe_context={

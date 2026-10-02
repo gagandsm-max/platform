@@ -170,8 +170,9 @@ function looksLikeAuthorizationCredential(value) {
     return true;
   }
   // Embedded Authorization: Bearer|Basic credentials inside a larger string.
-  if (/Authorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+/i.test(value)) return true;
-  if (/Authorization\s*:\s*Basic\s+[A-Za-z0-9+/]+=*/i.test(value)) return true;
+  // Accept colon or equals separators with optional surrounding whitespace.
+  if (/Authorization\s*[:=]\s*Bearer\s+[A-Za-z0-9._~+/=-]+/i.test(value)) return true;
+  if (/Authorization\s*[:=]\s*Basic\s+[A-Za-z0-9+/]+=*/i.test(value)) return true;
   return false;
 }
 

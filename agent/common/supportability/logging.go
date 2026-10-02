@@ -30,8 +30,8 @@ var (
 	safeKeyRE            = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 	bearerCredentialRE   = regexp.MustCompile(`(?i)^\s*Bearer\s+[A-Za-z0-9._~+/=-]+\s*$`)
 	basicCredentialRE    = regexp.MustCompile(`(?i)^\s*Basic\s+([A-Za-z0-9+/]+=*)\s*$`)
-	embeddedAuthBearerRE = regexp.MustCompile(`(?i)Authorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+`)
-	embeddedAuthBasicRE  = regexp.MustCompile(`(?i)Authorization\s*:\s*Basic\s+[A-Za-z0-9+/]+=*`)
+	embeddedAuthBearerRE = regexp.MustCompile(`(?i)Authorization\s*[:=]\s*Bearer\s+[A-Za-z0-9._~+/=-]+`)
+	embeddedAuthBasicRE  = regexp.MustCompile(`(?i)Authorization\s*[:=]\s*Basic\s+[A-Za-z0-9+/]+=*`)
 )
 
 // NewServiceInstanceID returns a non-authoritative identity unique to this

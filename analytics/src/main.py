@@ -110,11 +110,11 @@ class JsonFormatter(logging.Formatter):
     _BEARER_FULL = re.compile(r"^\s*Bearer\s+[A-Za-z0-9._~+/=-]+\s*$", re.IGNORECASE)
     _BASIC_FULL = re.compile(r"^\s*Basic\s+([A-Za-z0-9+/]+=*)\s*$", re.IGNORECASE)
     _AUTH_BEARER_EMBEDDED = re.compile(
-        r"Authorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+",
+        r"Authorization\s*[:=]\s*Bearer\s+[A-Za-z0-9._~+/=-]+",
         re.IGNORECASE,
     )
     _AUTH_BASIC_EMBEDDED = re.compile(
-        r"Authorization\s*:\s*Basic\s+[A-Za-z0-9+/]+=*",
+        r"Authorization\s*[:=]\s*Basic\s+[A-Za-z0-9+/]+=*",
         re.IGNORECASE,
     )
 

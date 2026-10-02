@@ -234,6 +234,54 @@ func TestSlice5SafeContextCredentialProsePEMAndNonFinite(t *testing.T) {
 	}
 }
 
+func TestSafeContextRejectsEqualsFormAuthorizationCredentials(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	ctx := map[string]any{
+		"status":       "ok",
+		"eq_bearer":    "request failed; Authorization=Bearer SECRET-BEARER-SENTINEL",
+		"eq_sp_bearer": "request failed; Authorization = Bearer SECRET-BEARER-SENTINEL",
+		"eq_lc_bearer": "request failed; authorization=bearer SECRET-BEARER-SENTINEL",
+		"eq_basic":     "upstream Authorization=Basic U0VDUkVULUJBQ0lD",
+		"eq_sp_basic":  "upstream Authorization = Basic U0VDUkVULUJBQ0lD",
+		"eq_lc_basic":  "upstream authorization=basic U0VDUkVULUJBQ0lD",
+		"prose_bearer": "Bearer authentication failed",
+		"prose_basic":  "Basic authentication rejected",
+		"outcome":      "token validation failed",
+		"prose_authz":  "Authorization validation failed",
+		"prose_scheme": "authentication scheme Bearer rejected",
+	}
+	logger.Info("test", "safe_context", ctx)
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected retained safe context: %v", got)
+	}
+	for _, key := range []string{"status", "prose_bearer", "prose_basic", "outcome", "prose_authz", "prose_scheme"} {
+		if _, present := safe[key]; !present {
+			t.Fatalf("benign prose/key %q omitted: %v", key, safe)
+		}
+	}
+	for _, key := range []string{"eq_bearer", "eq_sp_bearer", "eq_lc_bearer", "eq_basic", "eq_sp_basic", "eq_lc_basic"} {
+		if _, present := safe[key]; present {
+			t.Fatalf("equals-form credential key %q retained: %v", key, safe)
+		}
+	}
+	raw := strings.ToLower(buf.String())
+	for _, sentinel := range []string{
+		"secret-bearer-sentinel",
+		"u0vdukvulujbq0ld",
+		"authorization=bearer",
+		"authorization = bearer",
+		"authorization=basic",
+		"authorization = basic",
+	} {
+		if strings.Contains(raw, sentinel) {
+			t.Fatalf("equals-form credential sentinel %q leaked: %s", sentinel, buf.String())
+		}
+	}
+}
+
 func assertNoDuplicateTopLevelKeys(t *testing.T, raw string) {
 	t.Helper()
 	dec := json.NewDecoder(strings.NewReader(strings.TrimSpace(raw)))
