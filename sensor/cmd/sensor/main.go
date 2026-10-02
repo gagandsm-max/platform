@@ -78,11 +78,15 @@ func main() {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		logger.Error("Invalid Sensor configuration", "error_code", "SENSOR_CONFIG_INVALID", "error", err.Error())
+		logger.Error("Invalid Sensor configuration",
+			"error_code", "SENSOR_CONFIG_INVALID",
+			"safe_context", map[string]any{"reason_class": "config_load_failed"})
 		os.Exit(1)
 	}
 	if err := config.ApplyLogLevel(levelVar, cfg.Runtime.LogLevel); err != nil {
-		logger.Error("Invalid Sensor log level", "error_code", "SENSOR_CONFIG_INVALID", "error", err.Error())
+		logger.Error("Invalid Sensor log level",
+			"error_code", "SENSOR_CONFIG_INVALID",
+			"safe_context", map[string]any{"reason_class": "log_level_invalid"})
 		os.Exit(1)
 	}
 
@@ -104,25 +108,32 @@ func main() {
 		Logger:         logger,
 	})
 	if err != nil {
-		logger.Error("Failed to initialize disk spool", "error_code", "SENSOR_SPOOL_INIT_FAILED")
+		logger.Error("Failed to initialize disk spool",
+			"error_code", "SENSOR_SPOOL_INIT_FAILED",
+			"safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(1)
 	}
 
 	controlStorePath, err := prepareControlStorePath(rt.SpoolPath)
 	if err != nil {
-		logger.Error("Failed to prepare control store path", "error_code", "SENSOR_CONTROL_STORE_INIT_FAILED", "error", err.Error())
+		logger.Error("Failed to prepare control store path",
+			"error_code", "SENSOR_CONTROL_STORE_INIT_FAILED",
+			"safe_context", map[string]any{"reason_class": "path_preparation_failed"})
 		os.Exit(1)
 	}
 	controlStore, err := control.NewStore(controlStorePath)
 	if err != nil {
-		logger.Error("Failed to initialize control store", "error_code", "SENSOR_CONTROL_STORE_INIT_FAILED", "error", err.Error())
+		logger.Error("Failed to initialize control store",
+			"error_code", "SENSOR_CONTROL_STORE_INIT_FAILED",
+			"safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(1)
 	}
 	controlMetrics := &control.Metrics{}
 	controlStatus := control.NewStatusTracker(controlMetrics)
 	if _, loadErr := controlStore.Load(); loadErr != nil {
 		logger.Error("Control applied-state snapshot is untrusted",
-			"error_code", "SENSOR_CONTROL_STATE_CORRUPT", "error", loadErr.Error())
+			"error_code", "SENSOR_CONTROL_STATE_CORRUPT",
+			"safe_context", map[string]any{"reason_class": "state_corrupt"})
 		controlStatus.MarkUntrusted(control.CodeStateCorrupt)
 	}
 
@@ -138,7 +149,9 @@ func main() {
 
 	client, err := coreclient.New(coreClientConfigFromRuntime(rt, logger))
 	if err != nil {
-		logger.Error("Failed to initialize Core client", "error_code", "SENSOR_CORECLIENT_INIT_FAILED")
+		logger.Error("Failed to initialize Core client",
+			"error_code", "SENSOR_CORECLIENT_INIT_FAILED",
+			"safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(1)
 	}
 
@@ -152,13 +165,17 @@ func main() {
 
 	prodScheduler, err := newProductionScheduler(rt, logger)
 	if err != nil {
-		logger.Error("Failed to initialize production scheduler", "error_code", "SENSOR_SCHEDULER_INIT_FAILED", "error", err.Error())
+		logger.Error("Failed to initialize production scheduler",
+			"error_code", "SENSOR_SCHEDULER_INIT_FAILED",
+			"safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(1)
 	}
 
 	controlReconciler, err := control.NewReconciler(client, controlStore, rt, runtimeState, logger, controlMetrics)
 	if err != nil {
-		logger.Error("Failed to initialize control reconciler", "error_code", "SENSOR_CONTROL_INIT_FAILED", "error", err.Error())
+		logger.Error("Failed to initialize control reconciler",
+			"error_code", "SENSOR_CONTROL_INIT_FAILED",
+			"safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(1)
 	}
 
@@ -168,7 +185,9 @@ func main() {
 	healthServer.SetControl(controlStatus)
 	go func() {
 		if err := healthServer.Start(); err != nil {
-			logger.Error("Health server encountered error", "error_code", "SENSOR_HEALTH_SERVER_FAILED")
+			logger.Error("Health server encountered error",
+				"error_code", "SENSOR_HEALTH_SERVER_FAILED",
+				"safe_context", map[string]any{"reason_class": "runtime_failed"})
 		}
 	}()
 
@@ -191,13 +210,15 @@ func main() {
 	packDir, packDirErr := packsync.ResolveCapabilityPackDir(cfg.CapabilityPackDir, rt.SpoolPath)
 	if packDirErr != nil {
 		logger.Error("Failed to resolve Capability Pack staging directory",
-			"error_code", "SENSOR_PACK_INVALID_CONFIG", "error", packDirErr)
+			"error_code", "SENSOR_PACK_INVALID_CONFIG",
+			"safe_context", map[string]any{"reason_class": "config_path_invalid"})
 		os.Exit(1)
 	}
 	if filepath.Clean(packDir) == filepath.Clean(rt.SpoolPath) ||
 		(cfg.AgentSpoolDir != "" && filepath.Clean(packDir) == filepath.Clean(cfg.AgentSpoolDir)) {
 		logger.Error("Capability Pack directory must be distinct from telemetry/agent spool",
-			"error_code", "SENSOR_PACK_INVALID_CONFIG")
+			"error_code", "SENSOR_PACK_INVALID_CONFIG",
+			"safe_context", map[string]any{"reason_class": "config_path_conflict"})
 		os.Exit(1)
 	}
 	packSyncer, err = packsync.New(packsync.Config{
@@ -206,7 +227,9 @@ func main() {
 		Logger:       logger,
 	}, client)
 	if err != nil {
-		logger.Error("Failed to initialize Capability Pack sync", "error", err, "error_code", "SENSOR_PACK_INVALID_CONFIG")
+		logger.Error("Failed to initialize Capability Pack sync",
+			"error_code", "SENSOR_PACK_INVALID_CONFIG",
+			"safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(1)
 	}
 	healthServer.SetPackSync(packSyncer)
@@ -221,7 +244,9 @@ func main() {
 	if cfg.AgentReceiverEnabled {
 		agentServer, agentSpool, err = startAgentReceiver(cfg, client, logger)
 		if err != nil {
-			logger.Error("Failed to start Agent Receiver", "error", err, "error_code", "SENSOR_AGENT_RECEIVER_INIT_FAILED")
+			logger.Error("Failed to start Agent Receiver",
+				"error_code", "SENSOR_AGENT_RECEIVER_INIT_FAILED",
+				"safe_context", map[string]any{"reason_class": "startup_failed"})
 			os.Exit(1)
 		}
 		healthServer.SetAgentSpool(agentSpool)
@@ -242,7 +267,9 @@ func main() {
 			Logger:               logger,
 		}, agentSpool, client)
 		if err != nil {
-			logger.Error("Failed to initialize Agent drain", "error", err, "error_code", "SENSOR_AGENT_DRAIN_INIT_FAILED")
+			logger.Error("Failed to initialize Agent drain",
+				"error_code", "SENSOR_AGENT_DRAIN_INIT_FAILED",
+				"safe_context", map[string]any{"reason_class": "initialization_failed"})
 			os.Exit(1)
 		}
 		if err := agentDrain.Start(ctx); err != nil {
@@ -254,7 +281,9 @@ func main() {
 
 		go func() {
 			if err := agentServer.ListenAndServe(); err != nil {
-				logger.Error("Agent Receiver listener stopped", "error", err, "error_code", "SENSOR_AGENT_RECEIVER_LISTEN_FAILED")
+				logger.Error("Agent Receiver listener stopped",
+					"error_code", "SENSOR_AGENT_RECEIVER_LISTEN_FAILED",
+					"safe_context", map[string]any{"reason_class": "listener_failed"})
 			}
 		}()
 	}
@@ -273,7 +302,9 @@ func main() {
 	select {
 	case <-controlLoopDone:
 	case <-time.After(controlShutdownWait(rt.Transport.RequestTimeout)):
-		logger.Warn("Control reconcile loop shutdown timed out", "error_code", "SENSOR_CONTROL_SHUTDOWN_TIMEOUT")
+		logger.Warn("Control reconcile loop shutdown timed out",
+			"error_code", "SENSOR_CONTROL_SHUTDOWN_TIMEOUT",
+			"safe_context", map[string]any{"reason_class": "shutdown_timeout"})
 	}
 	if agentServer != nil {
 		shutdownAgentCtx, shutdownAgentCancel := context.WithTimeout(context.Background(), cfg.AgentReceiverShutdownGrace)
@@ -313,7 +344,9 @@ func main() {
 	}
 
 	if err := prodScheduler.Shutdown(context.Background()); err != nil {
-		logger.Warn("Production scheduler shutdown error", "error_code", "SENSOR_SCHEDULER_SHUTDOWN_FAILED", "error", err.Error())
+		logger.Warn("Production scheduler shutdown error",
+			"error_code", "SENSOR_SCHEDULER_SHUTDOWN_FAILED",
+			"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -324,7 +357,9 @@ func main() {
 			"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 	}
 	if err := healthServer.Shutdown(shutdownCtx); err != nil {
-		logger.Warn("Health server shutdown error", "error_code", "SENSOR_HEALTH_SHUTDOWN_FAILED")
+		logger.Warn("Health server shutdown error",
+			"error_code", "SENSOR_HEALTH_SHUTDOWN_FAILED",
+			"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 	}
 	logger.Info("Platform Sensor shutdown complete")
 }
@@ -356,6 +391,16 @@ func controlShutdownWait(requestTimeout time.Duration) time.Duration {
 	return wait
 }
 
+func controlReconcileEventCode(res control.Result, err error) string {
+	if code := strings.TrimSpace(control.CodeOf(err)); code != "" {
+		return code
+	}
+	if code := strings.TrimSpace(res.Code); code != "" {
+		return code
+	}
+	return "SENSOR_CONTROL_RECONCILE_FAILED"
+}
+
 func runControlReconcileLoop(
 	ctx context.Context,
 	rec *control.Reconciler,
@@ -375,10 +420,7 @@ func runControlReconcileLoop(
 		res, err := rec.RunOnce(ctx)
 		status.Observe(res, err)
 		if err != nil {
-			eventCode := strings.TrimSpace(res.Code)
-			if eventCode == "" {
-				eventCode = "SENSOR_CONTROL_RECONCILE_FAILED"
-			}
+			eventCode := controlReconcileEventCode(res, err)
 			logger.Warn("control reconcile iteration finished with error",
 				"event_code", eventCode,
 				"safe_context", map[string]any{
