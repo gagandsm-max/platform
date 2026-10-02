@@ -49,6 +49,7 @@ ID_MUT=0
 LEAKS=0
 NONFINITE=0
 PROBE_FAIL=0
+PROBE_SOAK_OK=0
 CORR_FAIL=0
 PANIC_DEADLOCK=0
 RACE_STATUS="RACE_TOOL_UNAVAILABLE"
@@ -263,10 +264,13 @@ ensure_compose() {
 
 run_probe_soak() {
   log "Running 5-minute mixed health/probe soak (>=5000 requests, 16 workers)..."
+  PROBE_SOAK_OK=0
   ensure_compose || return 0
   local end=$((SECONDS + 300))
   local workers=16
   export CORE_PORT
+  # Wipe prior-run artifact so hung/failed soaks cannot inherit stale success counters.
+  rm -f /tmp/build005-probe-soak.txt
   # sample memory
   local mem_start mem_mid mem_end
   mem_start=$(docker stats --no-stream --format '{{.Name}}={{.MemUsage}}' platform-core platform-sensor-net platform-analytics 2>/dev/null | tr '\n' ';')
@@ -436,15 +440,23 @@ PY
   set -e
   mem_end=$(docker stats --no-stream --format '{{.Name}}={{.MemUsage}}' platform-core platform-sensor-net platform-analytics 2>/dev/null | tr '\n' ';')
   MEM_COMPOSE="start=${mem_start} mid=${mem_mid} end=${mem_end}"
+  PROBE_REQUESTS=0
+  PROBE_FAIL=0
   if [ -f /tmp/build005-probe-soak.txt ]; then
     PROBE_REQUESTS=$(sed -n 's/requests=\([0-9]*\)/\1/p' /tmp/build005-probe-soak.txt | head -n1)
     PROBE_FAIL=$(sed -n 's/failures=\([0-9]*\)/\1/p' /tmp/build005-probe-soak.txt | head -n1)
+  elif [ "${probe_rc}" -eq 0 ]; then
+    fail_hard "Probe soak missing result artifact after claimed success"
+    probe_rc=1
   fi
   if [ "${probe_rc}" -ne 0 ] || [ "${PROBE_FAIL:-0}" -ne 0 ]; then
     fail_hard "Probe soak semantic failures=${PROBE_FAIL:-?} rc=${probe_rc}"
   fi
   if [ "${PROBE_REQUESTS:-0}" -lt 5000 ]; then
     fail_hard "Probe soak requests ${PROBE_REQUESTS} < 5000"
+  fi
+  if [ "${probe_rc}" -eq 0 ] && [ "${PROBE_FAIL:-0}" -eq 0 ] && [ "${PROBE_REQUESTS:-0}" -ge 5000 ]; then
+    PROBE_SOAK_OK=1
   fi
   MEM_ASSESSMENT="memory_gate=GO_HEAP_ONLY; Compose RSS samples observational — review MEM_COMPOSE; Go logger windows hard-gated in unit stress"
 }
@@ -494,8 +506,12 @@ run_recovery_smoke() {
     log "Skip recovery smoke — CI runtime markers present (live_port=${live_port:-?} PLATFORM_ENV=${env_name:-?})"
     return 0
   fi
-  if [ "${PROBE_REQUESTS:-0}" -lt 5000 ] || [ "${PROBE_FAIL:-0}" -ne 0 ]; then
+  if [ "${PROBE_SOAK_OK:-0}" -ne 1 ]; then
     log "Skip recovery smoke — probe soak did not complete successfully"
+    return 0
+  fi
+  if [ "${PROBE_REQUESTS:-0}" -lt 5000 ] || [ "${PROBE_FAIL:-0}" -ne 0 ]; then
+    log "Skip recovery smoke — probe soak counters not successful"
     return 0
   fi
   if ! docker compose ps --status running --format '{{.Name}}' 2>/dev/null | grep -q platform-analytics; then
@@ -535,6 +551,7 @@ print_summary() {
   echo "credential_sentinel_leaks=${LEAKS}"
   echo "nonfinite_leaks=${NONFINITE}"
   echo "probe_semantic_failures=${PROBE_FAIL}"
+  echo "probe_soak_ok=${PROBE_SOAK_OK}"
   echo "correlation_failures=${CORR_FAIL}"
   echo "panic_deadlock=${PANIC_DEADLOCK}"
   echo "race_status=${RACE_STATUS}"
