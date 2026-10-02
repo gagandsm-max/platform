@@ -123,7 +123,9 @@ func New(cfg Config, client CorePackClient) (*Syncer, error) {
 	}
 	if err := s.recoverOnStart(); err != nil {
 		s.setError(ErrCodeRestartFailClosed, true)
-		s.cfg.Logger.Error("capability pack restart recovery failed closed", "error_code", ErrCodeRestartFailClosed, "error", err)
+		s.cfg.Logger.Error("capability pack restart recovery failed closed",
+			"error_code", ErrCodeRestartFailClosed,
+			"safe_context", map[string]any{"reason_class": "restart_recovery_failed"})
 		// Keep running; do not corrupt telemetry. Status is DEGRADED.
 	}
 	return s, nil
@@ -181,7 +183,9 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 			// Fail closed without clearing applied.
 		}
 		s.setError(code, degraded)
-		s.cfg.Logger.Warn("capability pack desired-state fetch failed", "error_code", code, "error", err)
+		s.cfg.Logger.Warn("capability pack desired-state fetch failed",
+			"error_code", code,
+			"safe_context", map[string]any{"reason_class": "desired_state_fetch_failed"})
 		return
 	}
 
@@ -193,7 +197,8 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 	if err := validateAppliedInvariants(applied); err != nil {
 		s.setError(ErrCodeRestartFailClosed, true)
 		s.cfg.Logger.Error("capability pack applied invariants failed during sync",
-			"error_code", ErrCodeRestartFailClosed, "error", err)
+			"error_code", ErrCodeRestartFailClosed,
+			"safe_context", map[string]any{"reason_class": "applied_invariant_failed"})
 		return
 	}
 
@@ -212,7 +217,8 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 			if err := s.verifyAppliedArtifacts(applied); err != nil {
 				s.setError(ErrCodeRestartFailClosed, true)
 				s.cfg.Logger.Error("capability pack fast-path artifact revalidation failed",
-					"error_code", ErrCodeRestartFailClosed, "error", err)
+					"error_code", ErrCodeRestartFailClosed,
+					"safe_context", map[string]any{"reason_class": "artifact_revalidation_failed"})
 				return
 			}
 		}
@@ -232,7 +238,8 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 		if err := s.persistCoreAuthority(applied, appliedPresent); err != nil {
 			s.setError(ErrCodeDurableWrite, true)
 			s.cfg.Logger.Error("capability pack core-authority durable write failed",
-				"error_code", ErrCodeDurableWrite, "error", err)
+				"error_code", ErrCodeDurableWrite,
+				"safe_context", map[string]any{"reason_class": "durable_write_failed"})
 			return
 		}
 		s.setSuccess(desired.Generation, len(desired.Packs))
@@ -251,14 +258,19 @@ func (s *Syncer) syncOnce(ctx context.Context) {
 	if desired.Generation == applied.Generation && desired.Checksum != applied.Checksum {
 		s.setError(ErrCodeStateConflict, true)
 		s.cfg.Logger.Error("capability pack same-generation checksum conflict",
-			"error_code", ErrCodeStateConflict)
+			"error_code", ErrCodeStateConflict,
+			"safe_context", map[string]any{"generation": desired.Generation})
 		return
 	}
 
 	if err := s.applyDesired(ctx, desired); err != nil {
 		s.setError(errorCode(err), true)
 		s.cfg.Logger.Warn("capability pack apply failed; retaining prior applied state",
-			"error_code", errorCode(err), "error", err)
+			"error_code", errorCode(err),
+			"safe_context", map[string]any{
+				"generation":   desired.Generation,
+				"reason_class": "apply_failed",
+			})
 		return
 	}
 	s.setSuccess(desired.Generation, len(desired.Packs))
