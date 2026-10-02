@@ -409,11 +409,16 @@ docker exec platform-postgres psql -U platform_app -d platform -c "INSERT INTO p
 docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}" set restart_persist_key "preserved_across_down" > /dev/null 2>&1
 
 # Snapshot unrelated container state immediately before the destructive
-# Platform Compose restart. Preservation means a pre-existing stopped container
-# remains stopped and a running container remains running; neither may disappear.
+# Platform Compose restart. Determine ownership from the exact current Compose
+# stack rather than a name prefix so an unrelated container such as
+# platform-helper remains protected by this assertion.
+PLATFORM_OWNED_BEFORE=$(docker compose ps -a --format '{{.Name}}' | sort)
 snapshot_foreign_container_states() {
-    docker ps -a --format '{{.Names}}' | grep -v '^platform-' | sort | while IFS= read -r name; do
+    docker ps -a --format '{{.Names}}' | sort | while IFS= read -r name; do
         [ -n "${name}" ] || continue
+        if printf '%s\n' "${PLATFORM_OWNED_BEFORE}" | grep -Fxq "${name}"; then
+            continue
+        fi
         running=$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || printf 'MISSING')
         printf '%s|%s\n' "${name}" "${running}"
     done
