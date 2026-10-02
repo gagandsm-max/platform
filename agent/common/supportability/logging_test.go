@@ -305,24 +305,36 @@ func assertNoDuplicateTopLevelKeys(t *testing.T, raw string) {
 
 func TestSlice5EmittedJSONHasNoDuplicateTopLevelKeys(t *testing.T) {
 	var buf bytes.Buffer
-	logger := newTestLogger(&buf).With("component", "spoofed-component").With("agent_id", "agent-linux-02")
+	// Attempt valid rebinds of bound runtime identity. First accepted value must
+	// win; duplicate top-level keys must still be absent.
+	logger := newTestLogger(&buf).
+		With("component", "spoofed-component").
+		With("version", "9.9.9-rebind").
+		With("service_instance_id", "agent-instance-rebind").
+		With("agent_id", "agent-linux-02")
 	logger.Warn("dup-key-cert",
 		"error_code", "CONTROL_SYNC_PENDING",
 		"correlation_id", "corr-slice5",
-		"service_instance_id", "agent-instance-rebind",
+		"component", componentName,
+		"version", "8.8.8-rebind",
+		"service_instance_id", "agent-instance-rebind-2",
+		"agent_id", "agent-linux-03",
 		"safe_context", map[string]any{"mode": "ok"},
 	)
 	raw := strings.TrimSpace(buf.String())
 	assertNoDuplicateTopLevelKeys(t, raw)
 	got := decodeOne(t, &buf)
 	if got["component"] != componentName {
-		t.Fatalf("component override leaked duplicate/wrong identity: %v", got)
+		t.Fatalf("component identity not immutable: %v", got)
 	}
-	if got["agent_id"] != "agent-linux-02" {
-		t.Fatalf("agent_id rebind lost: %v", got)
+	if got["version"] != "0.1.0-test" {
+		t.Fatalf("version identity not immutable: %v", got)
 	}
-	if got["service_instance_id"] != "agent-instance-rebind" {
-		t.Fatalf("service_instance_id rebind lost: %v", got)
+	if got["service_instance_id"] != "agent-instance-test" {
+		t.Fatalf("service_instance_id identity not immutable: %v", got)
+	}
+	if got["agent_id"] != "agent-linux-01" {
+		t.Fatalf("agent_id identity not immutable: %v", got)
 	}
 }
 
@@ -441,7 +453,11 @@ func TestAgentIDUsesBoundedStringContract(t *testing.T) {
 	for _, agentID := range []string{"agent/site 01", "Agent With Spaces"} {
 		t.Run(agentID, func(t *testing.T) {
 			var buf bytes.Buffer
-			logger := newTestLogger(&buf)
+			level := new(slog.LevelVar)
+			level.Set(slog.LevelDebug)
+			// Bind agent_id once at the call site under test — not via newTestLogger,
+			// which already establishes immutable agent-linux-01 identity.
+			logger := NewJSONLogger(&buf, level, "0.1.0-test", "agent-instance-test")
 			logger.Warn("test", "agent_id", agentID)
 			got := decodeOne(t, &buf)
 			if got["agent_id"] != agentID {

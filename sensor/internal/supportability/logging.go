@@ -61,7 +61,8 @@ func NewJSONLogger(w io.Writer, level slog.Leveler, version, serviceInstanceID s
 		ReplaceAttr: replaceAttr,
 	})
 	// Dedupe top-level keys so With()/record rebinds cannot emit duplicate JSON
-	// object keys. Last value wins; ReplaceAttr remains authoritative for shape.
+	// object keys. Bound runtime identity is first-wins; contextual fields may
+	// still last-wins. ReplaceAttr remains authoritative for shape.
 	return slog.New(&uniqueKeyHandler{inner: base}).With(
 		"component", componentName,
 		"version", version,
@@ -80,20 +81,36 @@ func (h *uniqueKeyHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.inner.Enabled(ctx, level)
 }
 
+func immutableRuntimeIdentityKey(key string) bool {
+	switch key {
+	case "component", "version", "service_instance_id", "sensor_id":
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *uniqueKeyHandler) Handle(ctx context.Context, r slog.Record) error {
 	merged := make(map[string]slog.Attr, len(h.attrs)+r.NumAttrs())
 	order := make([]string, 0, len(h.attrs)+r.NumAttrs())
 	put := func(a slog.Attr) {
 		a.Value = a.Value.Resolve()
 		// Apply ReplaceAttr before dedupe so rejected overrides cannot erase an
-		// earlier accepted identity attr (e.g. spoofed component last-wins).
+		// earlier accepted identity attr (e.g. spoofed component).
 		a = replaceAttr(nil, a)
 		if a.Key == "" {
 			return
 		}
-		if _, exists := merged[a.Key]; !exists {
-			order = append(order, a.Key)
+		if _, exists := merged[a.Key]; exists {
+			// Bound runtime identity is immutable for this logger chain.
+			// Contextual fields retain last-accepted-wins for duplicates.
+			if immutableRuntimeIdentityKey(a.Key) {
+				return
+			}
+			merged[a.Key] = a
+			return
 		}
+		order = append(order, a.Key)
 		merged[a.Key] = a
 	}
 	for _, a := range h.attrs {

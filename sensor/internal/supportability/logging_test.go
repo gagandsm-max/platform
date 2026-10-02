@@ -120,14 +120,14 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newTestLogger(&buf)
 	ctx := map[string]any{
-		"mode":          "trusted_continue",
-		"password":      "fictional-secret",
-		"community":     "private",
-		"api_token":     "abc",
-		"Authorization": "Bearer abc123",
-		"header":        "Basic Zm9vOmJhcg==",
+		"mode":             "trusted_continue",
+		"password":         "fictional-secret",
+		"community":        "private",
+		"api_token":        "abc",
+		"Authorization":    "Bearer abc123",
+		"header":           "Basic Zm9vOmJhcg==",
 		"private_material": "-----BEGIN PRIVATE KEY-----abc",
-		"nested":        map[string]any{"x": 1},
+		"nested":           map[string]any{"x": 1},
 	}
 	logger.Info("test", "safe_context", ctx)
 	got := decodeOne(t, &buf)
@@ -177,21 +177,21 @@ func TestSlice5SafeContextCredentialProsePEMAndNonFinite(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newTestLogger(&buf)
 	ctx := map[string]any{
-		"status":          "ok",
-		"bearer_full":     "Bearer abc123-token",
-		"basic_full":      "Basic Zm9vOmJhcg==",
-		"embed_bearer":    "request failed; Authorization: Bearer abc123-token",
-		"embed_basic":     "upstream Authorization: Basic Zm9vOmJhcg==",
-		"pem_lower":       "-----begin private key-----\nSECRET-SENTINEL\n-----end private key-----",
-		"pem_mixed":       "-----Begin Private Key-----\nSECRET-SENTINEL\n-----End Private Key-----",
-		"prose_bearer":    "Bearer authentication failed",
-		"prose_basic":     "Basic authentication rejected",
-		"outcome":         "token validation failed",
-		"bad_nan":         math.NaN(),
-		"bad_pos_inf":     math.Inf(1),
-		"bad_neg_inf":     math.Inf(-1),
-		"ok_float":        1.5,
-		"ok_int":          7,
+		"status":       "ok",
+		"bearer_full":  "Bearer abc123-token",
+		"basic_full":   "Basic Zm9vOmJhcg==",
+		"embed_bearer": "request failed; Authorization: Bearer abc123-token",
+		"embed_basic":  "upstream Authorization: Basic Zm9vOmJhcg==",
+		"pem_lower":    "-----begin private key-----\nSECRET-SENTINEL\n-----end private key-----",
+		"pem_mixed":    "-----Begin Private Key-----\nSECRET-SENTINEL\n-----End Private Key-----",
+		"prose_bearer": "Bearer authentication failed",
+		"prose_basic":  "Basic authentication rejected",
+		"outcome":      "token validation failed",
+		"bad_nan":      math.NaN(),
+		"bad_pos_inf":  math.Inf(1),
+		"bad_neg_inf":  math.Inf(-1),
+		"ok_float":     1.5,
+		"ok_int":       7,
 	}
 	logger.Info("slice5", "safe_context", ctx)
 	got := decodeOne(t, &buf)
@@ -267,24 +267,36 @@ func assertNoDuplicateTopLevelKeys(t *testing.T, raw string) {
 
 func TestSlice5EmittedJSONHasNoDuplicateTopLevelKeys(t *testing.T) {
 	var buf bytes.Buffer
-	logger := newTestLogger(&buf).With("component", "spoofed-component").With("sensor_id", "sensor-net-02")
+	// Attempt valid rebinds of bound runtime identity. First accepted value must
+	// win; duplicate top-level keys must still be absent.
+	logger := newTestLogger(&buf).
+		With("component", "spoofed-component").
+		With("version", "9.9.9-rebind").
+		With("service_instance_id", "sensor-instance-rebind").
+		With("sensor_id", "sensor-net-02")
 	logger.Warn("dup-key-cert",
 		"error_code", "CONTROL_SYNC_PENDING",
 		"correlation_id", "corr-slice5",
-		"service_instance_id", "sensor-instance-rebind",
+		"component", componentName,
+		"version", "8.8.8-rebind",
+		"service_instance_id", "sensor-instance-rebind-2",
+		"sensor_id", "sensor-net-03",
 		"safe_context", map[string]any{"mode": "ok"},
 	)
 	raw := strings.TrimSpace(buf.String())
 	assertNoDuplicateTopLevelKeys(t, raw)
 	got := decodeOne(t, &buf)
 	if got["component"] != componentName {
-		t.Fatalf("component override leaked duplicate/wrong identity: %v", got)
+		t.Fatalf("component identity not immutable: %v", got)
 	}
-	if got["sensor_id"] != "sensor-net-02" {
-		t.Fatalf("sensor_id rebind lost: %v", got)
+	if got["version"] != "0.1.0-test" {
+		t.Fatalf("version identity not immutable: %v", got)
 	}
-	if got["service_instance_id"] != "sensor-instance-rebind" {
-		t.Fatalf("service_instance_id rebind lost: %v", got)
+	if got["service_instance_id"] != "sensor-instance-test" {
+		t.Fatalf("service_instance_id identity not immutable: %v", got)
+	}
+	if got["sensor_id"] != "sensor-net-01" {
+		t.Fatalf("sensor_id identity not immutable: %v", got)
 	}
 }
 
@@ -300,7 +312,6 @@ func TestServiceInstanceIDIsStableFormatAndChangesAcrossGeneration(t *testing.T)
 		}
 	}
 }
-
 
 func TestComponentIdentityCannotBeOverridden(t *testing.T) {
 	var buf bytes.Buffer
@@ -340,7 +351,6 @@ func TestSafeContextRejectsPassphraseKeys(t *testing.T) {
 	}
 }
 
-
 type namedEventCode string
 
 func TestNamedStringEventCodeIsPreserved(t *testing.T) {
@@ -372,7 +382,6 @@ func TestSafeContextRejectsPwdAlias(t *testing.T) {
 		t.Fatalf("pwd material leaked: %s", buf.String())
 	}
 }
-
 
 func TestSafeContextRejectsSNMPPassAliases(t *testing.T) {
 	var buf bytes.Buffer
