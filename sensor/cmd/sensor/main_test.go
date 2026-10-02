@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
 
 	"platform/sensor/internal/config"
+	"platform/sensor/internal/control"
 	sensorruntime "platform/sensor/internal/runtime"
 	"platform/sensor/internal/scheduler"
 )
@@ -205,6 +207,42 @@ func TestProductionSchedulerIdleShutdownWithinConfiguredGrace(t *testing.T) {
 	if elapsed > rt.Scheduler.ShutdownGracePeriod+250*time.Millisecond {
 		t.Fatalf("shutdown elapsed %v exceeded grace+allowance %v",
 			elapsed, rt.Scheduler.ShutdownGracePeriod+250*time.Millisecond)
+	}
+}
+
+func TestControlReconcileEventCodePrefersReturnedCodedError(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		res  control.Result
+		err  error
+		want string
+	}{
+		{
+			name: "typed_error_over_result_code",
+			res:  control.Result{Code: control.CodeChecksumMismatch},
+			err:  control.NewApplyFailedError("injected apply failure", errors.New("raw dependency detail")),
+			want: control.CodeApplyFailed,
+		},
+		{
+			name: "result_code_fallback",
+			res:  control.Result{Code: control.CodeCoreUnavailable},
+			err:  errors.New("unclassified transport failure"),
+			want: control.CodeCoreUnavailable,
+		},
+		{
+			name: "generic_fallback",
+			res:  control.Result{},
+			err:  errors.New("unclassified failure"),
+			want: "SENSOR_CONTROL_RECONCILE_FAILED",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := controlReconcileEventCode(tc.res, tc.err); got != tc.want {
+				t.Fatalf("controlReconcileEventCode()=%q want=%q", got, tc.want)
+			}
+		})
 	}
 }
 
