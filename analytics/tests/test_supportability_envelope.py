@@ -77,9 +77,15 @@ class AnalyticsEnvelopeTests(unittest.TestCase):
                 "priv_key": "opaque-priv",
                 "access_key": "AKIA_TEST",
                 "token_value": "Bearer abc",
+                "Authorization": "Bearer leaked-token",
+                "private_material": "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
+                "note": "Bearer authentication failed",
             }
         )
-        self.assertEqual(obj.get("safe_context"), {"mode": "ok"})
+        self.assertEqual(
+            obj.get("safe_context"),
+            {"mode": "ok", "note": "Bearer authentication failed"},
+        )
 
     def test_invalid_correlation_id_omitted(self):
         obj = self._capture_log(correlation_id="bad/id with space")

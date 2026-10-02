@@ -119,14 +119,15 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newTestLogger(&buf)
 	ctx := map[string]any{
-		"mode":          "trusted_continue",
-		"password":      "fictional-secret",
-		"community":     "private",
-		"api_token":     "abc",
-		"Authorization": "Bearer abc123",
-		"header":        "Basic Zm9vOmJhcg==",
+		"mode":             "trusted_continue",
+		"note":             "Bearer authentication failed",
+		"password":         "fictional-secret",
+		"community":        "private",
+		"api_token":        "abc",
+		"Authorization":    "Bearer abc123",
+		"header":           "Basic Zm9vOmJhcg==",
 		"private_material": "-----BEGIN PRIVATE KEY-----abc",
-		"nested":        map[string]any{"x": 1},
+		"nested":           map[string]any{"x": 1},
 	}
 	logger.Info("test", "safe_context", ctx)
 	got := decodeOne(t, &buf)
@@ -134,8 +135,8 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected retained safe context: %v", got)
 	}
-	if safe["mode"] != "trusted_continue" {
-		t.Fatalf("safe value missing: %v", safe)
+	if safe["mode"] != "trusted_continue" || safe["note"] != "Bearer authentication failed" {
+		t.Fatalf("safe operational values missing: %v", safe)
 	}
 	for _, key := range []string{"password", "community", "api_token", "Authorization", "header", "private_material", "nested"} {
 		if _, present := safe[key]; present {

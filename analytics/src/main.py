@@ -2,6 +2,7 @@ import http.server
 import json
 import logging
 import os
+import re
 import signal
 import sys
 import threading
@@ -124,11 +125,15 @@ class JsonFormatter(logging.Formatter):
 
     @staticmethod
     def _looks_credential_like(value: str) -> bool:
+        # Match Slice-1 looksLikeAuthorizationCredential: reject credential
+        # blobs, not operational prose such as "Bearer authentication failed".
         trimmed = value.strip()
-        lowered = trimmed.lower()
-        if lowered.startswith(("bearer ", "basic ")):
+        if re.fullmatch(r"Bearer\s+[A-Za-z0-9._~+/=-]+", trimmed, flags=re.IGNORECASE):
             return True
-        return "-----begin" in trimmed and "PRIVATE KEY" in trimmed.upper()
+        basic = re.fullmatch(r"Basic\s+([A-Za-z0-9+/]+=*)", trimmed, flags=re.IGNORECASE)
+        if basic is not None and len(basic.group(1)) >= 4:
+            return True
+        return "-----BEGIN" in trimmed and "PRIVATE KEY" in trimmed.upper()
 
 
 handler = logging.StreamHandler(sys.stdout)

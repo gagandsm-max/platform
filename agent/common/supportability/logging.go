@@ -22,10 +22,12 @@ const (
 )
 
 var (
-	boundedIDRE      = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
-	uuidRE           = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-	protocolResultRE = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
-	safeKeyRE        = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+	boundedIDRE          = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+	uuidRE               = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	protocolResultRE     = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+	safeKeyRE            = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+	bearerCredentialRE   = regexp.MustCompile(`(?i)^\s*Bearer\s+[A-Za-z0-9._~+/=-]+\s*$`)
+	basicCredentialRE    = regexp.MustCompile(`(?i)^\s*Basic\s+([A-Za-z0-9+/]+=*)\s*$`)
 )
 
 // NewServiceInstanceID returns a non-authoritative identity unique to this
@@ -297,9 +299,13 @@ func normalizeKey(key string) string {
 }
 
 func looksCredentialLike(value string) bool {
+	// Match Slice-1 looksLikeAuthorizationCredential: reject credential blobs,
+	// not operational prose such as "Bearer authentication failed".
 	trimmed := strings.TrimSpace(value)
-	lower := strings.ToLower(trimmed)
-	if strings.HasPrefix(lower, "bearer ") || strings.HasPrefix(lower, "basic ") {
+	if bearerCredentialRE.MatchString(trimmed) {
+		return true
+	}
+	if m := basicCredentialRE.FindStringSubmatch(trimmed); len(m) == 2 && len(m[1]) >= 4 {
 		return true
 	}
 	return strings.Contains(trimmed, "-----BEGIN") && strings.Contains(strings.ToUpper(trimmed), "PRIVATE KEY")

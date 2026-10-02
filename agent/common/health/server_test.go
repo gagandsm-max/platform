@@ -411,3 +411,34 @@ func TestReadyNotReadyWhileShuttingDown(t *testing.T) {
 		t.Fatalf("live shutdown body=%v", live)
 	}
 }
+
+func TestSupportEvidenceLocalQueueFailureKeepsTransportUp(t *testing.T) {
+	// Mimic delivery.recordQueueFailure: ReceiverAvailable stays true while
+	// LastFailureClass/LastErrorCode capture a local spool fault after a valid ACK.
+	prov := &mockStatsProvider{
+		receiverAvailable: true,
+		lastFailureClass:  client.FailureBlocked,
+		lastErrorCode:     "QUEUE_ACK_COMMIT_FAILED",
+	}
+	s, err := NewServer("127.0.0.1:0", prov, nil, WithIdentity("0.1.0-test", "agent-local-queue"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wHealth := httptest.NewRecorder()
+	s.handleHealth(wHealth, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if wHealth.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected /health 503 for local queue failure, got %d", wHealth.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(wHealth.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	deps, _ := body["dependency_status"].(map[string]any)
+	if deps["sensor_transport"] != "UP" {
+		t.Fatalf("local queue failure must not mark sensor_transport DOWN: %v", body)
+	}
+	if body["delivery_status"] != "FAILED" {
+		t.Fatalf("expected delivery_status FAILED for local queue failure, got %v", body["delivery_status"])
+	}
+}

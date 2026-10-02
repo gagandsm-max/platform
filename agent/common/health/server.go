@@ -349,7 +349,10 @@ func deliverySupportStatus(d delivery.DeliveryStats, q queue.QueueStats) string 
 }
 
 func sensorTransportStatus(d delivery.DeliveryStats) string {
-	if !d.ReceiverAvailable || d.LastFailureClass != "" {
+	// Transport depends on Sensor receiver availability only.
+	// Local queue failures keep ReceiverAvailable=true and must not be
+	// misreported as sensor_transport=DOWN (see delivery.recordQueueFailure).
+	if !d.ReceiverAvailable {
 		return "DOWN"
 	}
 	return "UP"
