@@ -239,7 +239,11 @@ func (hs *HealthServer) evaluate() evaluation {
 		pct, err := hs.spool.CheckStorageUsage()
 		if err != nil {
 			hs.logger.Warn("Sensor spool storage check failed",
-				"error_code", "SENSOR_SPOOL_STORAGE_CHECK_FAILED", "error", err)
+				"error_code", "SENSOR_SPOOL_STORAGE_CHECK_FAILED",
+				"safe_context", map[string]any{
+					"reason_class": "storage_check_failed",
+					"spool_type":   "telemetry",
+				})
 			ev.notReady(reasonSpoolCheck)
 		} else {
 			ev.storageKnown = true
@@ -261,7 +265,11 @@ func (hs *HealthServer) evaluate() evaluation {
 		pct, err := agentSpool.CheckStorageUsage()
 		if err != nil {
 			hs.logger.Warn("Agent ingress spool storage check failed",
-				"error_code", "SENSOR_AGENT_SPOOL_STORAGE_CHECK_FAILED", "error", err)
+				"error_code", "SENSOR_AGENT_SPOOL_STORAGE_CHECK_FAILED",
+				"safe_context", map[string]any{
+					"reason_class": "storage_check_failed",
+					"spool_type":   "agent_ingress",
+				})
 			ev.notReady(reasonAgentSpoolCheck)
 		} else {
 			ev.agentStorageKnown = true
