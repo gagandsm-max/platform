@@ -52,13 +52,16 @@ class JsonFormatter(logging.Formatter):
         }
         event_code = getattr(record, "event_code", None)
         if isinstance(event_code, str) and event_code.strip():
-            log_obj["event_code"] = event_code.strip()[:64]
+            cleaned_code = event_code.strip()[:64]
+            if all(c.isalnum() or c in "._:-" for c in cleaned_code):
+                log_obj["event_code"] = cleaned_code
         correlation_id = getattr(record, "correlation_id", None)
         if isinstance(correlation_id, str) and correlation_id.strip():
-            log_obj["correlation_id"] = correlation_id.strip()[:128]
+            cleaned_corr = correlation_id.strip()[:128]
+            if all(c.isalnum() or c in "._:-" for c in cleaned_corr):
+                log_obj["correlation_id"] = cleaned_corr
         safe_context = getattr(record, "safe_context", None)
         if isinstance(safe_context, dict) and safe_context:
-            # Bound safe_context to primitive non-secret values only.
             cleaned = {}
             for key in sorted(safe_context.keys())[:16]:
                 if not isinstance(key, str) or not key or len(key) > 64:
@@ -67,37 +70,65 @@ class JsonFormatter(logging.Formatter):
                     continue
                 if not all(c.isalnum() or c == "_" for c in key):
                     continue
-                lowered = "".join(c for c in key.lower() if c.isalnum())
-                if any(
-                    token in lowered
-                    for token in (
-                        "password",
-                        "passwd",
-                        "token",
-                        "secret",
-                        "authorization",
-                        "cookie",
-                        "credential",
-                        "bearer",
-                        "apikey",
-                        "privatekey",
-                    )
-                ):
+                if self._secret_key(key):
                     continue
                 value = safe_context[key]
                 if isinstance(value, (bool, int, float)):
                     cleaned[key] = value
                 elif isinstance(value, str) and len(value) <= 256 and value.isprintable():
-                    lowered_v = value.strip().lower()
-                    if lowered_v.startswith(("bearer ", "basic ")) or (
-                        "-----begin" in lowered_v and "private key" in value.upper()
-                    ):
+                    if self._looks_credential_like(value):
                         continue
                     cleaned[key] = value
             if cleaned:
                 log_obj["safe_context"] = cleaned
         # Enforce closed top-level shape.
         return json.dumps({k: v for k, v in log_obj.items() if k in self.ALLOWED})
+
+    @staticmethod
+    def _normalize_key(key: str) -> str:
+        return "".join(c for c in key.lower() if c.isalnum())
+
+    @classmethod
+    def _secret_key(cls, key: str) -> bool:
+        token = cls._normalize_key(key)
+        if token.endswith(
+            (
+                "authpass",
+                "privpass",
+                "privacypass",
+                "authkey",
+                "privkey",
+                "privacykey",
+                "accesskey",
+            )
+        ) or token == "bearer":
+            return True
+        for forbidden in (
+            "password",
+            "passwd",
+            "community",
+            "token",
+            "secret",
+            "privatekey",
+            "apikey",
+            "clientsecret",
+            "authorization",
+            "cookie",
+            "credential",
+            "passphrase",
+            "pwd",
+        ):
+            if forbidden in token:
+                return True
+        return False
+
+    @staticmethod
+    def _looks_credential_like(value: str) -> bool:
+        trimmed = value.strip()
+        lowered = trimmed.lower()
+        if lowered.startswith(("bearer ", "basic ")):
+            return True
+        return "-----begin" in trimmed and "PRIVATE KEY" in trimmed.upper()
 
 
 handler = logging.StreamHandler(sys.stdout)

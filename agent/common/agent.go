@@ -160,9 +160,9 @@ func NewAgentService(
 }
 
 func (s *AgentService) Start(ctx context.Context) error {
+	// agent_id/tenant_id are bound once via logger.With in linux main; do not
+	// re-emit them here (duplicate JSON keys invalidate envelope validators).
 	s.logger.Info("Starting Platform Agent service workers",
-		"agent_id", s.identity.AgentID,
-		"tenant_id", s.identity.TenantID,
 		"safe_context", map[string]any{
 			"host_id":            s.identity.HostID,
 			"os":                 s.identity.OS,

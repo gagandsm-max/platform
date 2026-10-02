@@ -490,8 +490,13 @@ docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valke
 CORE_LOG=$(docker logs --tail 20 platform-core 2>/dev/null | awk '/^\{/{print; exit}' || true)
 SENSOR_LOG=$(docker logs --tail 100 platform-sensor-net 2>/dev/null | awk '/^\{/{print}' || true)
 ANALYTICS_LOG=$(docker logs --tail 20 platform-analytics 2>/dev/null | awk '/^\{/{print; exit}' || true)
+ANALYTICS_HEALTH=$(docker exec platform-analytics curl -s http://127.0.0.1:8090/health 2>/dev/null || echo "")
+ANALYTICS_HEALTHZ=$(docker exec platform-analytics curl -s http://127.0.0.1:8090/healthz 2>/dev/null || echo "")
+ANALYTICS_HEALTH_CODE=$(docker exec platform-analytics curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/health 2>/dev/null || echo "000")
+ANALYTICS_HEALTHZ_CODE=$(docker exec platform-analytics curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/healthz 2>/dev/null || echo "000")
 
-# Core/Sensor/Analytics use BUILD-005 certified envelopes (component, not legacy service).
+# Core/Sensor/Analytics use BUILD-005 common envelopes (component, not legacy service).
+# Slice certification is Master-owned; this gate only validates runtime envelope shape.
 CORE_LOG_VALID=false
 if [ -n "${CORE_LOG}" ] && echo "${CORE_LOG}" | python3 -c '
 import json, sys
@@ -624,8 +629,56 @@ sys.exit(0)
     ANALYTICS_LOG_VALID=true
 fi
 
+ANALYTICS_HEALTH_VALID=false
+if [ "${ANALYTICS_HEALTH_CODE}" = "200" ] && [ "${ANALYTICS_HEALTHZ_CODE}" = "200" ] && \
+   echo "${ANALYTICS_HEALTH}" | python3 -c '
+import json, sys
+required = ("status", "component", "version", "ts", "service_instance_id")
+legacy = ("service", "document_type")
+try:
+    obj = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(obj, dict):
+    sys.exit(1)
+for key in required:
+    value = obj.get(key)
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        sys.exit(1)
+if obj.get("component") != "platform-analytics":
+    sys.exit(1)
+if obj.get("status") not in ("UP", "SHUTTING_DOWN"):
+    sys.exit(1)
+for key in legacy:
+    if key in obj:
+        sys.exit(1)
+sys.exit(0)
+' && echo "${ANALYTICS_HEALTHZ}" | python3 -c '
+import json, sys
+required = ("status", "component", "version", "ts", "service_instance_id")
+legacy = ("service", "document_type")
+try:
+    obj = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(obj, dict):
+    sys.exit(1)
+for key in required:
+    value = obj.get(key)
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        sys.exit(1)
+if obj.get("component") != "platform-analytics":
+    sys.exit(1)
+if "document_type" in obj or "service" in obj:
+    sys.exit(1)
+sys.exit(0)
+'; then
+    ANALYTICS_HEALTH_VALID=true
+fi
+
 LOGS_OK=false
-if [ "${CORE_LOG_VALID}" = "true" ] && [ "${SENSOR_LOG_VALID}" = "true" ] && [ "${ANALYTICS_LOG_VALID}" = "true" ]; then
+if [ "${CORE_LOG_VALID}" = "true" ] && [ "${SENSOR_LOG_VALID}" = "true" ] && \
+   [ "${ANALYTICS_LOG_VALID}" = "true" ] && [ "${ANALYTICS_HEALTH_VALID}" = "true" ]; then
     LOGS_OK=true
 fi
 

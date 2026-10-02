@@ -221,6 +221,10 @@ func (s *Server) evaluateReadiness() (status string, ready bool, httpStatus int,
 	ready = true
 	httpStatus = http.StatusOK
 
+	if s.shuttingDown.Load() {
+		return "NOT_READY", false, http.StatusServiceUnavailable, "AGENT_SHUTTING_DOWN"
+	}
+
 	var deliv delivery.DeliveryStats
 	if s.provider != nil {
 		deliv = s.provider.DeliveryStats()
@@ -236,6 +240,13 @@ func (s *Server) evaluateDetailed() (status string, ready bool, httpStatus int, 
 	ready = true
 	httpStatus = http.StatusOK
 
+	if s.shuttingDown.Load() {
+		status = "SHUTTING_DOWN"
+		ready = false
+		httpStatus = http.StatusServiceUnavailable
+		reasons = append(reasons, "AGENT_SHUTTING_DOWN")
+	}
+
 	var qStats queue.QueueStats
 	var dStats delivery.DeliveryStats
 	var collectorErrors int
@@ -246,7 +257,9 @@ func (s *Server) evaluateDetailed() (status string, ready bool, httpStatus int, 
 	}
 
 	if !dStats.ReceiverAvailable || dStats.LastFailureClass != "" {
-		status = "DEGRADED"
+		if status == "UP" {
+			status = "DEGRADED"
+		}
 		httpStatus = http.StatusServiceUnavailable
 		ready = false
 		reasons = append(reasons, unavailableReason(dStats))

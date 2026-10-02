@@ -370,3 +370,44 @@ func TestHealthzMuxAliasIsReadiness(t *testing.T) {
 		t.Fatalf("healthz must not be SUPPORT_EVIDENCE: %v", body)
 	}
 }
+
+func TestReadyNotReadyWhileShuttingDown(t *testing.T) {
+	s, err := NewServer("127.0.0.1:0", &mockStatsProvider{receiverAvailable: true}, nil,
+		WithIdentity("0.1.0-test", "agent-shutdown-ready"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.shuttingDown.Store(true)
+
+	wReady := httptest.NewRecorder()
+	s.handleReady(wReady, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if wReady.Code != http.StatusServiceUnavailable {
+		t.Fatalf("ready during shutdown=%d body=%s", wReady.Code, wReady.Body.String())
+	}
+	var ready map[string]any
+	if err := json.Unmarshal(wReady.Body.Bytes(), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if ready["ready"] != false || ready["status"] != "NOT_READY" || ready["reason_code"] != "AGENT_SHUTTING_DOWN" {
+		t.Fatalf("ready shutdown body=%v", ready)
+	}
+
+	wAlias := httptest.NewRecorder()
+	s.handleReady(wAlias, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if wAlias.Code != http.StatusServiceUnavailable {
+		t.Fatalf("healthz during shutdown=%d", wAlias.Code)
+	}
+
+	wLive := httptest.NewRecorder()
+	s.handleLive(wLive, httptest.NewRequest(http.MethodGet, "/live", nil))
+	if wLive.Code != http.StatusOK {
+		t.Fatalf("live during shutdown must remain 200, got %d", wLive.Code)
+	}
+	var live map[string]any
+	if err := json.Unmarshal(wLive.Body.Bytes(), &live); err != nil {
+		t.Fatal(err)
+	}
+	if live["status"] != "SHUTTING_DOWN" {
+		t.Fatalf("live shutdown body=%v", live)
+	}
+}
