@@ -80,7 +80,7 @@ func validClass(c RecordClass) bool {
 type SpoolKind string
 
 const (
-	KindTelemetry  SpoolKind = "telemetry"
+	KindTelemetry    SpoolKind = "telemetry"
 	KindAgentIngress SpoolKind = "agent_ingress"
 )
 
