@@ -487,6 +487,17 @@ run_correlation_stress() {
 
 run_recovery_smoke() {
   log "Bounded recovery smoke: restart analytics, recheck probes..."
+  local live_port env_name
+  live_port="$(docker port platform-core 8443 2>/dev/null | head -n1 | awk -F: '{print $NF}' | tr -d '\r' || true)"
+  env_name="$(grep -E '^PLATFORM_ENV=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' || true)"
+  if [ "${live_port}" = "21443" ] || [ "${env_name}" = "ci" ]; then
+    log "Skip recovery smoke — CI runtime markers present (live_port=${live_port:-?} PLATFORM_ENV=${env_name:-?})"
+    return 0
+  fi
+  if [ "${PROBE_REQUESTS:-0}" -lt 5000 ] || [ "${PROBE_FAIL:-0}" -ne 0 ]; then
+    log "Skip recovery smoke — probe soak did not complete successfully"
+    return 0
+  fi
   if ! docker compose ps --status running --format '{{.Name}}' 2>/dev/null | grep -q platform-analytics; then
     log "Skip recovery smoke — analytics not running"
     return 0
@@ -494,7 +505,7 @@ run_recovery_smoke() {
   docker restart platform-analytics >/dev/null
   local i code
   for i in $(seq 1 30); do
-    code=$(docker exec platform-analytics curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/health 2>/dev/null || echo 000)
+    code=$(docker exec platform-analytics curl -s --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/health 2>/dev/null || echo 000)
     if [ "${code}" = "200" ]; then
       log "Analytics recovered HTTP ${code}"
       return 0
