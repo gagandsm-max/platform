@@ -202,8 +202,14 @@ ensure_compose() {
     fail_hard "CI/isolation containers detected on host — refuse probe soak to avoid collision"
     return 1
   fi
+  # Fail closed before any mutate/bring-up when a global platform-core is on the CI host port,
+  # even if this checkout's compose project does not list that container (core_up=0).
+  if [ "${live_port}" = "21443" ]; then
+    fail_hard "platform-core published on CI port 21443 — refuse probe soak"
+    return 1
+  fi
   if [ "${core_up}" -eq 1 ]; then
-    if [ "${env_name}" = "ci" ] || [ "${live_port}" = "21443" ] || [ "${file_port}" = "21443" ]; then
+    if [ "${env_name}" = "ci" ] || [ "${file_port}" = "21443" ]; then
       fail_hard "CI runtime markers present (PLATFORM_ENV=${env_name:-?} live_port=${live_port:-?} file_port=${file_port:-?}) — refuse probe soak"
       return 1
     fi
