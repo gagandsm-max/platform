@@ -112,14 +112,28 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 				Code:      "COLLECTION_FAILED",
 				Summary:   err.Error(),
 			})
-			s.logger.Warn("Collector execution failed", "collector", c.Name(), "error", err)
+			s.logger.Warn("Collector execution failed",
+				"event_code", "AGENT_COLLECTOR_FAILED",
+				"result", "FAILED",
+				"safe_context", map[string]any{
+					"collector":    c.Name(),
+					"reason_class": "collection_failed",
+				},
+			)
 			continue
 		}
 
 		for _, sample := range samples {
 			obs, normErr := telemetry.Normalize(s.ident, c.Name(), startTime, sample)
 			if normErr != nil {
-				s.logger.Debug("Telemetry normalization rejected sample", "metric", sample.MetricKey, "error", normErr)
+				s.logger.Debug("Telemetry normalization rejected sample",
+					"event_code", "AGENT_TELEMETRY_NORMALIZE_REJECTED",
+					"result", "REJECTED",
+					"safe_context", map[string]any{
+						"metric_key":   sample.MetricKey,
+						"reason_class": "normalize_rejected",
+					},
+				)
 				continue
 			}
 			observations = append(observations, obs)
@@ -145,16 +159,32 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 	if len(observations) > 0 || len(collectorErrors) > 0 {
 		payload, err := json.Marshal(batch)
 		if err != nil {
-			s.logger.Error("Failed to marshal collection batch", "error", err)
+			s.logger.Error("Failed to marshal collection batch",
+				"event_code", "AGENT_COLLECTION_MARSHAL_FAILED",
+				"result", "FAILED",
+				"safe_context", map[string]any{"reason_class": "marshal_failed"},
+			)
 			return
 		}
 
 		if _, err := s.enqueuer.Enqueue(payload); err != nil {
 			s.runErrors++
-			s.logger.Error("Failed to enqueue collection batch", "error", err)
+			s.logger.Error("Failed to enqueue collection batch",
+				"event_code", "AGENT_COLLECTION_ENQUEUE_FAILED",
+				"result", "FAILED",
+				"safe_context", map[string]any{"reason_class": "enqueue_failed"},
+			)
 			return
 		}
-		s.logger.Debug("Enqueued collection batch", "observations", len(observations), "errors", len(collectorErrors), "durationMs", durationMs)
+		s.logger.Debug("Enqueued collection batch",
+			"event_code", "AGENT_COLLECTION_ENQUEUED",
+			"result", "ACCEPTED",
+			"safe_context", map[string]any{
+				"observation_count": len(observations),
+				"error_count":       len(collectorErrors),
+				"duration_ms":       durationMs,
+			},
+		)
 	}
 
 	s.lastRun = startTime

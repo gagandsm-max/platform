@@ -138,10 +138,17 @@ func (w *Worker) runLoop(ctx context.Context) {
 		if err != nil {
 			failClass := client.Classify(err)
 			if failClass == client.FailureOversized || failClass == client.FailureBlocked {
+				code := w.Stats().LastErrorCode
+				if code == "" {
+					code = "AGENT_DELIVERY_NOT_RETRYABLE"
+				}
 				w.logger.Error("Agent delivery is not retryable without operator intervention; queue retained",
-					"class", failClass,
-					"code", w.Stats().LastErrorCode,
-					"error", err,
+					"event_code", code,
+					"result", "RETAINED",
+					"safe_context", map[string]any{
+						"failure_class": string(failClass),
+						"reason_class":  "not_retryable",
+					},
 				)
 				select {
 				case <-w.stopCh:
@@ -193,7 +200,14 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 		failClass := client.Classify(err)
 		code := queueFailureCode(err)
 		w.recordQueueFailure(failClass, code)
-		w.logger.Error("Failed to read batch from queue", "class", failClass, "code", code, "error", err)
+		w.logger.Error("Failed to read batch from queue",
+			"event_code", code,
+			"result", "FAILED",
+			"safe_context", map[string]any{
+				"failure_class": string(failClass),
+				"reason_class":  "queue_read_failed",
+			},
+		)
 		return false, err
 	}
 
@@ -276,22 +290,34 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 			code = de.Code
 		}
 		w.recordFailure(failClass, code)
-		logArgs := []any{
-			"class", failClass,
-			"code", code,
-			"records", len(records),
-			"error", err,
+		eventCode := code
+		if eventCode == "" {
+			eventCode = "AGENT_DELIVERY_ATTEMPT_FAILED"
 		}
-		if schemaVersion == 2 {
-			logArgs = append(logArgs, "agentStreamId", agentStreamID)
+		safe := map[string]any{
+			"failure_class": string(failClass),
+			"record_count":  len(records),
+			"reason_class":  "delivery_attempt_failed",
 		}
-		w.logger.Debug("Delivery attempt failed", logArgs...)
+		if schemaVersion == 2 && agentStreamID != "" {
+			safe["agent_stream_configured"] = true
+		}
+		w.logger.Debug("Delivery attempt failed",
+			"event_code", eventCode,
+			"result", "FAILED",
+			"safe_context", safe,
+		)
 		return false, err
 	}
 
 	if err := validateAck(records, w.agentID, batchID, corrID, ack); err != nil {
 		w.recordFailure(client.FailurePermanent, "DELIVERY_ACK_INVALID")
-		w.logger.Error("Invalid delivery ACK rejected; queue retained", "error", err)
+		w.logger.Error("Invalid delivery ACK rejected; queue retained",
+			"event_code", "DELIVERY_ACK_INVALID",
+			"correlation_id", corrID,
+			"result", "RETAINED",
+			"safe_context", map[string]any{"reason_class": "ack_invalid"},
+		)
 		return false, err
 	}
 
@@ -302,7 +328,16 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 			code = queueFailureCode(err)
 		}
 		w.recordQueueFailure(failClass, code)
-		w.logger.Error("Failed to commit acknowledged records in queue", "through", ack.AcceptedThrough, "error", err)
+		w.logger.Error("Failed to commit acknowledged records in queue",
+			"event_code", code,
+			"correlation_id", corrID,
+			"result", "FAILED",
+			"safe_context", map[string]any{
+				"failure_class":     string(failClass),
+				"accepted_through":  ack.AcceptedThrough,
+				"reason_class":      "commit_failed",
+			},
+		)
 		return false, err
 	}
 
@@ -315,11 +350,19 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 	w.stats.ReceiverAvailable = w.transport.Available()
 	w.mu.Unlock()
 
-	if schemaVersion == 2 {
-		w.logger.Debug("Delivery batch acknowledged", "records", len(records), "acceptedThrough", ack.AcceptedThrough, "correlation_id", corrID, "agentStreamId", agentStreamID)
-	} else {
-		w.logger.Debug("Delivery batch acknowledged", "records", len(records), "acceptedThrough", ack.AcceptedThrough, "correlation_id", corrID)
+	ackSafe := map[string]any{
+		"record_count":     len(records),
+		"accepted_through": ack.AcceptedThrough,
 	}
+	if schemaVersion == 2 && agentStreamID != "" {
+		ackSafe["agent_stream_configured"] = true
+	}
+	w.logger.Debug("Delivery batch acknowledged",
+		"event_code", "AGENT_DELIVERY_OK",
+		"correlation_id", corrID,
+		"result", "ACCEPTED",
+		"safe_context", ackSafe,
+	)
 	return true, nil
 }
 

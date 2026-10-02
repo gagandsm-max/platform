@@ -491,9 +491,7 @@ CORE_LOG=$(docker logs --tail 20 platform-core 2>/dev/null | awk '/^\{/{print; e
 SENSOR_LOG=$(docker logs --tail 100 platform-sensor-net 2>/dev/null | awk '/^\{/{print}' || true)
 ANALYTICS_LOG=$(docker logs --tail 20 platform-analytics 2>/dev/null | awk '/^\{/{print; exit}' || true)
 
-# Core uses BUILD-005 certified envelope (component, not legacy service).
-# Sensor now uses the BUILD-005 Slice-3 certified envelope; Analytics retains
-# its existing "service" expectation until its later bounded conformance slice.
+# Core/Sensor/Analytics use BUILD-005 certified envelopes (component, not legacy service).
 CORE_LOG_VALID=false
 if [ -n "${CORE_LOG}" ] && echo "${CORE_LOG}" | python3 -c '
 import json, sys
@@ -578,7 +576,53 @@ sys.exit(0)
     SENSOR_LOG_VALID=true
 fi
 ANALYTICS_LOG_VALID=false
-if echo "${ANALYTICS_LOG}" | grep -q '"service"'; then ANALYTICS_LOG_VALID=true; fi
+if [ -n "${ANALYTICS_LOG}" ] && echo "${ANALYTICS_LOG}" | python3 -c '
+import json, sys
+required = ("ts", "level", "component", "version", "service_instance_id", "message")
+allowed = {
+    "ts", "level", "component", "version", "service_instance_id", "message",
+    "node_id", "sensor_id", "agent_id", "tenant_id", "event_code", "correlation_id",
+    "request_id", "job_id", "entity_id", "protocol", "result", "retry_count", "safe_context",
+}
+legacy = ("timestamp", "time", "msg", "service", "environment", "thread", "logger", "error_code", "error", "stack_trace", "stackTrace")
+
+def no_duplicate_keys(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate JSON key: {key}")
+        obj[key] = value
+    return obj
+
+def valid_log(obj):
+    if not isinstance(obj, dict):
+        return False
+    if set(obj) - allowed:
+        return False
+    for key in required:
+        value = obj.get(key)
+        if value is None or (isinstance(value, str) and value.strip() == ""):
+            return False
+    if obj.get("component") != "platform-analytics":
+        return False
+    if any(key in obj for key in legacy):
+        return False
+    return True
+
+try:
+    obj = json.loads(sys.stdin.read(), object_pairs_hook=no_duplicate_keys)
+except Exception:
+    sys.exit(1)
+if not valid_log(obj):
+    sys.exit(1)
+probe = dict(obj)
+probe["_unknown"] = True
+if valid_log(probe):
+    sys.exit(1)
+sys.exit(0)
+'; then
+    ANALYTICS_LOG_VALID=true
+fi
 
 LOGS_OK=false
 if [ "${CORE_LOG_VALID}" = "true" ] && [ "${SENSOR_LOG_VALID}" = "true" ] && [ "${ANALYTICS_LOG_VALID}" = "true" ]; then

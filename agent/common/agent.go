@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"platform/agent/common/client"
@@ -26,6 +27,25 @@ type AgentService struct {
 	worker    *delivery.Worker
 	healthSrv *health.Server
 	logger    *slog.Logger
+
+	version           string
+	serviceInstanceID string
+}
+
+// ServiceOption configures Agent service construction for BUILD-005 supportability identity.
+type ServiceOption func(*AgentService)
+
+// WithSupportabilityIdentity binds the health SUPPORT_EVIDENCE envelope to the
+// same process-local identity used by the canonical structured logger.
+func WithSupportabilityIdentity(version, serviceInstanceID string) ServiceOption {
+	return func(s *AgentService) {
+		if strings.TrimSpace(version) != "" {
+			s.version = version
+		}
+		if strings.TrimSpace(serviceInstanceID) != "" {
+			s.serviceInstanceID = serviceInstanceID
+		}
+	}
 }
 
 func NewAgentService(
@@ -33,6 +53,7 @@ func NewAgentService(
 	ident *identity.AgentIdentity,
 	tr client.Transport,
 	logger *slog.Logger,
+	opts ...ServiceOption,
 ) (*AgentService, error) {
 	if cfg == nil {
 		return nil, errors.New("AGENT_CONFIG_REQUIRED: config must be provided")
@@ -108,17 +129,28 @@ func NewAgentService(
 	}
 
 	svc := &AgentService{
-		cfg:       cfg,
-		identity:  ident,
-		queue:     q,
-		transport: tr,
-		scheduler: sched,
-		worker:    worker,
-		logger:    logger,
+		cfg:               cfg,
+		identity:          ident,
+		queue:             q,
+		transport:         tr,
+		scheduler:         sched,
+		worker:            worker,
+		logger:            logger,
+		version:           "0.1.0-dev",
+		serviceInstanceID: "",
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(svc)
+		}
 	}
 
 	// 5. Initialize health server
-	healthSrv, err := health.NewServer(cfg.HealthAddress, svc, logger)
+	healthOpts := []health.Option{}
+	if svc.version != "" || svc.serviceInstanceID != "" {
+		healthOpts = append(healthOpts, health.WithIdentity(svc.version, svc.serviceInstanceID))
+	}
+	healthSrv, err := health.NewServer(cfg.HealthAddress, svc, logger, healthOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("AGENT_HEALTH_INIT_FAILED: %w", err)
 	}
@@ -131,14 +163,19 @@ func (s *AgentService) Start(ctx context.Context) error {
 	s.logger.Info("Starting Platform Agent service workers",
 		"agent_id", s.identity.AgentID,
 		"tenant_id", s.identity.TenantID,
-		"host_id", s.identity.HostID,
-		"os", s.identity.OS,
-		"arch", s.identity.Arch,
-		"receiver_available", s.transport.Available(),
+		"safe_context", map[string]any{
+			"host_id":            s.identity.HostID,
+			"os":                 s.identity.OS,
+			"arch":               s.identity.Arch,
+			"receiver_available": s.transport.Available(),
+		},
 	)
 
 	// Start health server
 	if err := s.healthSrv.Start(); err != nil {
+		s.logger.Error("Failed to start health server",
+			"event_code", "AGENT_HEALTH_START_FAILED",
+			"safe_context", map[string]any{"reason_class": "startup_failed"})
 		return fmt.Errorf("AGENT_HEALTH_START_FAILED: %w", err)
 	}
 
@@ -152,7 +189,8 @@ func (s *AgentService) Start(ctx context.Context) error {
 }
 
 func (s *AgentService) Stop() error {
-	s.logger.Info("Stopping Platform Agent service")
+	s.logger.Info("Stopping Platform Agent service",
+		"safe_context", map[string]any{"reason_class": "shutdown_requested"})
 
 	// 1. Stop scheduler
 	s.scheduler.Stop()
@@ -164,7 +202,9 @@ func (s *AgentService) Stop() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := s.healthSrv.Stop(shutdownCtx); err != nil {
-		s.logger.Warn("Health server shutdown error", "error", err)
+		s.logger.Warn("Health server shutdown error",
+			"event_code", "AGENT_HEALTH_SHUTDOWN_FAILED",
+			"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 	}
 
 	s.logger.Info("Platform Agent service stopped cleanly")
