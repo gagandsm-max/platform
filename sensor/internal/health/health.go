@@ -21,7 +21,7 @@ import (
 const (
 	componentName         = "platform-sensor"
 	defaultVersion        = "0.1.0-dev"
-	hardStoragePercent    = 95.0
+	hardStoragePercent    = 80.0
 	reasonShuttingDown    = "SENSOR_SHUTTING_DOWN"
 	reasonSpoolCheck      = "SENSOR_SPOOL_UNWRITABLE"
 	reasonSpoolPressure   = "SENSOR_SPOOL_HARD_PRESSURE"

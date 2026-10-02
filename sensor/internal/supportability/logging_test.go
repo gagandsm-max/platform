@@ -285,6 +285,33 @@ func TestSafeContextRejectsSNMPPassAliases(t *testing.T) {
 	}
 }
 
+func TestSafeContextRejectsKeyCredentialAliases(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	logger.Info("test", "safe_context", map[string]any{
+		"mode":       "trusted_continue",
+		"auth_key":   "opaque-auth-key",
+		"priv_key":   "opaque-priv-key",
+		"access_key": "opaque-access-key",
+	})
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok || safe["mode"] != "trusted_continue" {
+		t.Fatalf("safe context missing: %v", got)
+	}
+	for _, key := range []string{"auth_key", "priv_key", "access_key"} {
+		if _, exists := safe[key]; exists {
+			t.Fatalf("credential key alias retained: %s in %v", key, safe)
+		}
+	}
+	raw := strings.ToLower(buf.String())
+	for _, forbidden := range []string{"opaque-auth-key", "opaque-priv-key", "opaque-access-key"} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("credential material leaked: %s", buf.String())
+		}
+	}
+}
+
 func TestAgentIDUsesBoundedStringContract(t *testing.T) {
 	for _, agentID := range []string{"agent/site 01", "Agent With Spaces"} {
 		t.Run(agentID, func(t *testing.T) {

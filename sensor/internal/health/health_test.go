@@ -329,13 +329,13 @@ func TestReadyzStorageProtectionAndAgentSpoolProtection(t *testing.T) {
 		reason string
 	}{
 		{"sensor_spool_pressure", func(hs *HealthServer) {
-			hs.spool = &fakeStorageStatusProvider{pct: 96}
+			hs.spool = &fakeStorageStatusProvider{pct: 80}
 		}, reasonSpoolPressure},
 		{"sensor_spool_unwritable", func(hs *HealthServer) {
 			hs.spool = &fakeStorageStatusProvider{err: errors.New("disk unavailable")}
 		}, reasonSpoolCheck},
 		{"agent_spool_pressure", func(hs *HealthServer) {
-			hs.agentSpool = &fakeStorageStatusProvider{pct: 96}
+			hs.agentSpool = &fakeStorageStatusProvider{pct: 80}
 		}, reasonAgentSpoolHard},
 	}
 	for _, tc := range cases {
@@ -352,6 +352,16 @@ func TestReadyzStorageProtectionAndAgentSpoolProtection(t *testing.T) {
 				t.Fatalf("livez=%d body=%v", rr.Code, body)
 			}
 		})
+	}
+}
+
+func TestReadyzStorageBelowProtectionWatermarkRemainsReady(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	hs.spool = &fakeStorageStatusProvider{pct: 79.9}
+
+	rr, body := request(t, hs, "/readyz")
+	if rr.Code != http.StatusOK || body["status"] != "UP" || body["ready"] != true {
+		t.Fatalf("below-watermark readiness=%d body=%v", rr.Code, body)
 	}
 }
 
