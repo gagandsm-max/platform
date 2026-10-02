@@ -135,12 +135,16 @@ func (rcv *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	authAgent, err := rcv.identity.VerifyPeerIdentity(verifiedChain)
 	if err != nil || strings.TrimSpace(authAgent.FingerprintSHA256) == "" {
 		rcv.metrics.AuthFailures.Add(1)
-		rcv.logger.Warn("Peer identity verification failed",
-			"safe_context", map[string]any{"remote_addr": r.RemoteAddr})
 		code := ErrCodeAuthInvalid
 		if err != nil && strings.Contains(err.Error(), ErrCodeAuthRequired) {
 			code = ErrCodeAuthRequired
 		}
+		rcv.logger.Warn("Peer identity verification failed",
+			"event_code", code,
+			"safe_context", map[string]any{
+				"remote_addr":  r.RemoteAddr,
+				"reason_class": "peer_identity_verification_failed",
+			})
 		rcv.writeJSONError(w, http.StatusUnauthorized, code, "Client certificate identity could not be verified")
 		return
 	}
