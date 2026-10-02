@@ -27,6 +27,10 @@ docker run --rm \
     golang:1.27.1-alpine3.24 \
     go test -v ./...
 
+# BUILD-005 Slice 5 Sensor certification evidence (cross-runtime bar alignment).
+# Does not claim BUILD-005 closure; Master retains certification authority.
+bash "${ROOT_DIR}/tests/run-build-005-slice5-sensor-certification.sh"
+
 docker run --rm \
     --tmpfs "${GO_TEST_TMPFS}" \
     -v "${ROOT_DIR}/agent:/app/agent:ro" \

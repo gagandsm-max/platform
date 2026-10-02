@@ -499,11 +499,21 @@ ANALYTICS_HEALTHZ_CODE=$(docker exec platform-analytics curl -s -o /dev/null -w 
 # Slice certification is Master-owned; this gate only validates runtime envelope shape.
 CORE_LOG_VALID=false
 if [ -n "${CORE_LOG}" ] && echo "${CORE_LOG}" | python3 -c '
-import json, sys
+import json, sys, re
 required = ("ts", "level", "component", "version", "node_id", "service_instance_id", "message")
 legacy = ("timestamp", "service", "environment", "thread", "logger", "error_code", "stack_trace", "stackTrace")
+SI_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+def no_duplicate_keys(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate JSON key: {key}")
+        obj[key] = value
+    return obj
+
 try:
-    obj = json.load(sys.stdin)
+    obj = json.load(sys.stdin, object_pairs_hook=no_duplicate_keys)
 except Exception:
     sys.exit(1)
 if not isinstance(obj, dict):
@@ -513,6 +523,12 @@ for key in required:
     if value is None or (isinstance(value, str) and value.strip() == ""):
         sys.exit(1)
 if obj.get("component") != "platform-core":
+    sys.exit(1)
+version = obj.get("version")
+if not isinstance(version, str) or not (1 <= len(version) <= 64):
+    sys.exit(1)
+si = obj.get("service_instance_id")
+if not isinstance(si, str) or not SI_RE.fullmatch(si):
     sys.exit(1)
 for key in legacy:
     if key in obj:
@@ -524,7 +540,7 @@ fi
 
 SENSOR_LOG_VALID=false
 if [ -n "${SENSOR_LOG}" ] && echo "${SENSOR_LOG}" | python3 -c '
-import json, sys
+import json, sys, re
 required = ("ts", "level", "component", "version", "sensor_id", "service_instance_id", "message")
 allowed = {
     "ts", "level", "component", "version", "service_instance_id", "message",
@@ -532,6 +548,7 @@ allowed = {
     "request_id", "job_id", "entity_id", "protocol", "result", "retry_count", "safe_context",
 }
 legacy = ("timestamp", "time", "msg", "service", "environment", "thread", "logger", "error_code", "error", "stack_trace", "stackTrace")
+SI_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 def no_duplicate_keys(pairs):
     obj = {}
@@ -551,6 +568,12 @@ def valid_log(obj):
         if value is None or (isinstance(value, str) and value.strip() == ""):
             return False
     if obj.get("component") != "platform-sensor":
+        return False
+    version = obj.get("version")
+    if not isinstance(version, str) or not (1 <= len(version) <= 64):
+        return False
+    si = obj.get("service_instance_id")
+    if not isinstance(si, str) or not SI_RE.fullmatch(si):
         return False
     if any(key in obj for key in legacy):
         return False
@@ -582,7 +605,7 @@ sys.exit(0)
 fi
 ANALYTICS_LOG_VALID=false
 if [ -n "${ANALYTICS_LOG}" ] && echo "${ANALYTICS_LOG}" | python3 -c '
-import json, sys
+import json, sys, re
 required = ("ts", "level", "component", "version", "service_instance_id", "message")
 allowed = {
     "ts", "level", "component", "version", "service_instance_id", "message",
@@ -590,6 +613,7 @@ allowed = {
     "request_id", "job_id", "entity_id", "protocol", "result", "retry_count", "safe_context",
 }
 legacy = ("timestamp", "time", "msg", "service", "environment", "thread", "logger", "error_code", "error", "stack_trace", "stackTrace")
+SI_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 def no_duplicate_keys(pairs):
     obj = {}
@@ -609,6 +633,12 @@ def valid_log(obj):
         if value is None or (isinstance(value, str) and value.strip() == ""):
             return False
     if obj.get("component") != "platform-analytics":
+        return False
+    version = obj.get("version")
+    if not isinstance(version, str) or not (1 <= len(version) <= 64):
+        return False
+    si = obj.get("service_instance_id")
+    if not isinstance(si, str) or not SI_RE.fullmatch(si):
         return False
     if any(key in obj for key in legacy):
         return False
@@ -632,9 +662,10 @@ fi
 ANALYTICS_HEALTH_VALID=false
 if [ "${ANALYTICS_HEALTH_CODE}" = "200" ] && [ "${ANALYTICS_HEALTHZ_CODE}" = "200" ] && \
    echo "${ANALYTICS_HEALTH}" | python3 -c '
-import json, sys
+import json, sys, re
 required = ("status", "component", "version", "ts", "service_instance_id")
 legacy = ("service", "document_type")
+SI_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 try:
     obj = json.load(sys.stdin)
 except Exception:
@@ -646,6 +677,12 @@ for key in required:
     if value is None or (isinstance(value, str) and value.strip() == ""):
         sys.exit(1)
 if obj.get("component") != "platform-analytics":
+    sys.exit(1)
+version = obj.get("version")
+if not isinstance(version, str) or not (1 <= len(version) <= 64):
+    sys.exit(1)
+si = obj.get("service_instance_id")
+if not isinstance(si, str) or not SI_RE.fullmatch(si):
     sys.exit(1)
 if obj.get("status") not in ("UP", "SHUTTING_DOWN"):
     sys.exit(1)
@@ -654,9 +691,10 @@ for key in legacy:
         sys.exit(1)
 sys.exit(0)
 ' && echo "${ANALYTICS_HEALTHZ}" | python3 -c '
-import json, sys
+import json, sys, re
 required = ("status", "component", "version", "ts", "service_instance_id")
 legacy = ("service", "document_type")
+SI_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 try:
     obj = json.load(sys.stdin)
 except Exception:
@@ -668,6 +706,12 @@ for key in required:
     if value is None or (isinstance(value, str) and value.strip() == ""):
         sys.exit(1)
 if obj.get("component") != "platform-analytics":
+    sys.exit(1)
+version = obj.get("version")
+if not isinstance(version, str) or not (1 <= len(version) <= 64):
+    sys.exit(1)
+si = obj.get("service_instance_id")
+if not isinstance(si, str) or not SI_RE.fullmatch(si):
     sys.exit(1)
 if "document_type" in obj or "service" in obj:
     sys.exit(1)

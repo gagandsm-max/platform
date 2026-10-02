@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"reflect"
 	"regexp"
@@ -22,10 +23,14 @@ const (
 )
 
 var (
-	boundedIDRE      = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
-	uuidRE           = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-	protocolResultRE = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
-	safeKeyRE        = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+	boundedIDRE          = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+	uuidRE               = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	protocolResultRE     = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+	safeKeyRE            = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+	bearerCredentialRE   = regexp.MustCompile(`(?i)^\s*Bearer\s+[A-Za-z0-9._~+/=-]+\s*$`)
+	basicCredentialRE    = regexp.MustCompile(`(?i)^\s*Basic\s+([A-Za-z0-9+/]+=*)\s*$`)
+	embeddedAuthBearerRE = regexp.MustCompile(`(?i)Authorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+`)
+	embeddedAuthBasicRE  = regexp.MustCompile(`(?i)Authorization\s*:\s*Basic\s+[A-Za-z0-9+/]+=*`)
 )
 
 // NewServiceInstanceID returns a non-authoritative identity unique to this
@@ -261,8 +266,15 @@ func safePrimitive(value any) (any, bool) {
 		}
 		return v, true
 	case float32:
+		f := float64(v)
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil, false
+		}
 		return v, true
 	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil, false
+		}
 		return v, true
 	default:
 		return nil, false
@@ -299,12 +311,25 @@ func normalizeKey(key string) string {
 }
 
 func looksCredentialLike(value string) bool {
+	// Targeted safe_context sanitization only: full credential blobs, embedded
+	// Authorization header credentials, and PEM private-key markers
+	// (case-insensitive). Operational prose such as "Bearer authentication
+	// failed" remains permitted. This is not universal message scrubbing.
 	trimmed := strings.TrimSpace(value)
-	lower := strings.ToLower(trimmed)
-	if strings.HasPrefix(lower, "bearer ") || strings.HasPrefix(lower, "basic ") {
+	if bearerCredentialRE.MatchString(trimmed) {
 		return true
 	}
-	return strings.Contains(trimmed, "-----BEGIN") && strings.Contains(strings.ToUpper(trimmed), "PRIVATE KEY")
+	if m := basicCredentialRE.FindStringSubmatch(trimmed); len(m) == 2 && len(m[1]) >= 4 {
+		return true
+	}
+	if embeddedAuthBearerRE.MatchString(trimmed) {
+		return true
+	}
+	if embeddedAuthBasicRE.MatchString(trimmed) {
+		return true
+	}
+	upper := strings.ToUpper(trimmed)
+	return strings.Contains(upper, "-----BEGIN") && strings.Contains(upper, "PRIVATE KEY")
 }
 
 func containsControl(value string) bool {

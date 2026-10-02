@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"strings"
 	"testing"
 )
@@ -119,14 +120,17 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newTestLogger(&buf)
 	ctx := map[string]any{
-		"mode":          "trusted_continue",
-		"password":      "fictional-secret",
-		"community":     "private",
-		"api_token":     "abc",
-		"Authorization": "Bearer abc123",
-		"header":        "Basic Zm9vOmJhcg==",
+		"mode":             "trusted_continue",
+		"note":             "Bearer authentication failed",
+		"note_basic":       "Basic authentication rejected",
+		"outcome":          "token validation failed",
+		"password":         "fictional-secret",
+		"community":        "private",
+		"api_token":        "abc",
+		"Authorization":    "Bearer abc123",
+		"header":           "Basic Zm9vOmJhcg==",
 		"private_material": "-----BEGIN PRIVATE KEY-----abc",
-		"nested":        map[string]any{"x": 1},
+		"nested":           map[string]any{"x": 1},
 	}
 	logger.Info("test", "safe_context", ctx)
 	got := decodeOne(t, &buf)
@@ -134,8 +138,11 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected retained safe context: %v", got)
 	}
-	if safe["mode"] != "trusted_continue" {
-		t.Fatalf("safe value missing: %v", safe)
+	if safe["mode"] != "trusted_continue" ||
+		safe["note"] != "Bearer authentication failed" ||
+		safe["note_basic"] != "Basic authentication rejected" ||
+		safe["outcome"] != "token validation failed" {
+		t.Fatalf("safe operational values missing: %v", safe)
 	}
 	for _, key := range []string{"password", "community", "api_token", "Authorization", "header", "private_material", "nested"} {
 		if _, present := safe[key]; present {
@@ -151,6 +158,73 @@ func TestSafeContextRejectsSecretsCredentialsAndUnboundedShape(t *testing.T) {
 	} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("credential material leaked: %s", buf.String())
+		}
+	}
+}
+
+func TestSafeContextRejectsEmbeddedAuthorizationAndMixedCasePEM(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	ctx := map[string]any{
+		"status":    "ok",
+		"detail":    "request failed; Authorization: Bearer abc123-token",
+		"upstream":  "upstream Authorization: Basic Zm9vOmJhcg==",
+		"pem_lower": "-----begin private key----- SECRET-SENTINEL -----end private key-----",
+		"prose":     "Bearer authentication failed",
+	}
+	logger.Info("test", "safe_context", ctx)
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected retained safe context: %v", got)
+	}
+	if safe["status"] != "ok" || safe["prose"] != "Bearer authentication failed" {
+		t.Fatalf("expected only safe values retained: %v", safe)
+	}
+	for _, key := range []string{"detail", "upstream", "pem_lower"} {
+		if _, present := safe[key]; present {
+			t.Fatalf("credential-bearing key %q retained: %v", key, safe)
+		}
+	}
+	raw := strings.ToLower(buf.String())
+	for _, sentinel := range []string{
+		"abc123-token",
+		"zm9vomjhcg==",
+		"secret-sentinel",
+		"authorization: bearer",
+		"authorization: basic",
+	} {
+		if strings.Contains(raw, sentinel) {
+			t.Fatalf("credential sentinel %q leaked: %s", sentinel, buf.String())
+		}
+	}
+}
+
+func TestSafeContextOmitsNonFiniteFloats(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	ctx := map[string]any{
+		"ok_int":      7,
+		"ok_float":    1.5,
+		"bad_nan":     math.NaN(),
+		"bad_pos_inf": math.Inf(1),
+		"bad_neg_inf": math.Inf(-1),
+	}
+	logger.Info("test", "safe_context", ctx)
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected retained safe context: %v", got)
+	}
+	if _, present := safe["ok_float"]; !present {
+		t.Fatalf("finite float omitted: %v", safe)
+	}
+	if _, present := safe["ok_int"]; !present {
+		t.Fatalf("int omitted: %v", safe)
+	}
+	for _, key := range []string{"bad_nan", "bad_pos_inf", "bad_neg_inf"} {
+		if _, present := safe[key]; present {
+			t.Fatalf("non-finite %q retained: %v", key, safe)
 		}
 	}
 }
@@ -360,5 +434,102 @@ func TestAgentIDRejectsControlCharacters(t *testing.T) {
 	got := decodeOne(t, &buf)
 	if _, ok := got["agent_id"]; ok {
 		t.Fatalf("control-bearing agent_id emitted: %v", got)
+	}
+}
+
+func TestEmittedStructuredLogHasNoDuplicateTopLevelKeys(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	logger.Info("duplicate-key certification",
+		"correlation_id", "corr-slice5-01",
+		"event_code", "SENSOR_SLICE5_CERT",
+		"safe_context", map[string]any{"mode": "trusted_continue"},
+	)
+	raw := bytes.TrimSpace(buf.Bytes())
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode log: %v\n%s", err, raw)
+	}
+	seen := map[string]struct{}{}
+	tokDec := json.NewDecoder(bytes.NewReader(raw))
+	tok, err := tokDec.Token()
+	if err != nil {
+		t.Fatalf("token start: %v", err)
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok || delim != '{' {
+		t.Fatalf("expected object start, got %#v", tok)
+	}
+	for tokDec.More() {
+		keyTok, err := tokDec.Token()
+		if err != nil {
+			t.Fatalf("key token: %v", err)
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			t.Fatalf("expected string key, got %#v", keyTok)
+		}
+		if _, exists := seen[key]; exists {
+			t.Fatalf("duplicate top-level JSON key %q in %s", key, raw)
+		}
+		seen[key] = struct{}{}
+		var skip any
+		if err := tokDec.Decode(&skip); err != nil {
+			t.Fatalf("value decode for %q: %v", key, err)
+		}
+	}
+	end, err := tokDec.Token()
+	if err != nil {
+		t.Fatalf("token end: %v", err)
+	}
+	if endDelim, ok := end.(json.Delim); !ok || endDelim != '}' {
+		t.Fatalf("expected object end, got %#v", end)
+	}
+	for _, required := range []string{"ts", "level", "component", "version", "service_instance_id", "sensor_id", "message", "correlation_id", "event_code", "safe_context"} {
+		if _, ok := seen[required]; !ok {
+			t.Fatalf("missing required key %q in %v", required, seen)
+		}
+	}
+}
+
+func TestMessageJSONEscapingPreventsLogInjection(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	logger.Info("line1\"}\n{\"level\":\"ERROR\",\"message\":\"injected")
+	raw := bytes.TrimSpace(buf.Bytes())
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("message injection broke JSON: %v\n%s", err, raw)
+	}
+	msg, _ := got["message"].(string)
+	if !strings.Contains(msg, "injected") {
+		t.Fatalf("expected original message retained: %q", msg)
+	}
+	if strings.Count(string(raw), "\n") != 0 {
+		t.Fatalf("raw log must remain a single JSON object line: %q", raw)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	seen := map[string]struct{}{}
+	tok, err := dec.Token()
+	if err != nil {
+		t.Fatalf("token start: %v", err)
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		t.Fatalf("expected object, got %#v", tok)
+	}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			t.Fatalf("key: %v", err)
+		}
+		key := keyTok.(string)
+		if _, exists := seen[key]; exists {
+			t.Fatalf("duplicate key after injection attempt: %q", key)
+		}
+		seen[key] = struct{}{}
+		var skip any
+		if err := dec.Decode(&skip); err != nil {
+			t.Fatalf("value: %v", err)
+		}
 	}
 }
