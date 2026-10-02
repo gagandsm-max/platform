@@ -5,14 +5,38 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}"
-# Do not source .env (may contain local secrets). Port/image defaults only.
-if [ -z "${PLATFORM_CORE_HOST_PORT:-}" ] && [ -f .env.example ]; then
-  PLATFORM_CORE_HOST_PORT="$(grep -E '^PLATFORM_CORE_HOST_PORT=' .env.example | cut -d= -f2- | tr -d '"' || true)"
-fi
+
+log() { echo "==> $*"; }
+fail_hard() { echo "[HARD_FAIL] $*"; STRESS_PASS=0; }
+
+# Do not source .env (may contain local secrets). Prefer non-secret port keys only.
+resolve_core_host_port() {
+  local published
+  # Prefer the live published mapping when Core is already running (dev or CI ports).
+  published="$(docker port platform-core 8443 2>/dev/null | head -n1 | awk -F: '{print $NF}' | tr -d '\r' || true)"
+  if [[ "${published}" =~ ^[0-9]+$ ]]; then
+    echo "${published}"
+    return 0
+  fi
+  if [ -n "${PLATFORM_CORE_HOST_PORT:-}" ]; then
+    echo "${PLATFORM_CORE_HOST_PORT}"
+    return 0
+  fi
+  # Read only the port assignment line from .env / .env.example — never source the file.
+  local from_file=""
+  if [ -f .env ]; then
+    from_file="$(grep -E '^PLATFORM_CORE_HOST_PORT=' .env | head -n1 | cut -d= -f2- | tr -d '"' || true)"
+  fi
+  if [ -z "${from_file}" ] && [ -f .env.example ]; then
+    from_file="$(grep -E '^PLATFORM_CORE_HOST_PORT=' .env.example | head -n1 | cut -d= -f2- | tr -d '"' || true)"
+  fi
+  echo "${from_file:-28443}"
+}
 
 GO_IMG="${PLATFORM_STRESS_GO_IMAGE:-golang:1.27.1-alpine3.24}"
 GO_TMPFS="/tmp:rw,exec,size=2147483648,mode=1777"
-CORE_PORT="${PLATFORM_CORE_HOST_PORT:-28443}"
+CORE_PORT="$(resolve_core_host_port)"
+log "Resolved CORE_PORT=${CORE_PORT} (no .env source)"
 
 AGENT_EVENTS=0
 SENSOR_EVENTS=0
@@ -34,9 +58,6 @@ MEM_COMPOSE=""
 MEM_ASSESSMENT="UNMEASURED"
 STRESS_PASS=1
 DURATION_START=$(date +%s)
-
-log() { echo "==> $*"; }
-fail_hard() { echo "[HARD_FAIL] $*"; STRESS_PASS=0; }
 
 run_go_stress() {
   local module_path="$1"
@@ -161,20 +182,44 @@ run_analytics_stress() {
 
 ensure_compose() {
   log "Ensuring Compose runtime for probe soak..."
+  # Self-hosted Platform CI uses the same host; refuse soak while CI runtime is active.
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -Eq '^ci_|^platform-day0'; then
+    fail_hard "CI/isolation containers detected on host — refuse probe soak to avoid collision"
+    return 1
+  fi
+  # Also refuse when Core is published on the CI-only host port while .env expects dev defaults.
+  local live_port file_port
+  live_port="$(docker port platform-core 8443 2>/dev/null | head -n1 | awk -F: '{print $NF}' | tr -d '\r' || true)"
+  file_port="$(grep -E '^PLATFORM_CORE_HOST_PORT=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' || true)"
+  if [ "${live_port}" = "21443" ] && [ "${file_port:-28443}" = "28443" ]; then
+    fail_hard "Core published on CI port 21443 while .env expects 28443 — refuse probe soak (runner collision)"
+    return 1
+  fi
   if ! docker compose ps --status running --format '{{.Name}}' 2>/dev/null | grep -q 'platform-core'; then
     log "Bringing up Compose (make dev-up)..."
     make dev-up
   fi
+  CORE_PORT="$(resolve_core_host_port)"
+  export CORE_PORT
+  log "Probe soak using CORE_PORT=${CORE_PORT}"
   local i
   for i in $(seq 1 60); do
+    CORE_PORT="$(resolve_core_host_port)"
+    export CORE_PORT
     if curl -k -sf "https://127.0.0.1:${CORE_PORT}/actuator/health/liveness" >/dev/null 2>&1 \
       && docker exec platform-sensor-net curl -sf http://127.0.0.1:8088/livez >/dev/null 2>&1 \
       && docker exec platform-analytics curl -sf http://127.0.0.1:8090/health >/dev/null 2>&1; then
-      return 0
+      # Require two consecutive healthy polls so mid-start CI collision is less likely.
+      sleep 2
+      if curl -k -sf "https://127.0.0.1:${CORE_PORT}/actuator/health/liveness" >/dev/null 2>&1 \
+        && docker exec platform-sensor-net curl -sf http://127.0.0.1:8088/livez >/dev/null 2>&1 \
+        && docker exec platform-analytics curl -sf http://127.0.0.1:8090/health >/dev/null 2>&1; then
+        return 0
+      fi
     fi
     sleep 5
   done
-  fail_hard "Compose services not healthy for probe soak"
+  fail_hard "Compose services not healthy for probe soak (CORE_PORT=${CORE_PORT})"
   return 1
 }
 
@@ -242,14 +287,26 @@ def curl_http(url):
     return 0, b''
 
 def docker_curl(ctr, port, path):
-  tmp=f"/tmp/pb-{uuid.uuid4().hex}"
-  p=subprocess.run(
-    ["docker","exec",ctr,"curl","-s","-o",tmp,"-w","%{http_code}",f"http://127.0.0.1:{port}{path}"],
-    capture_output=True,text=True)
-  code=(p.stdout or "000").strip()[-3:]
-  body_p=subprocess.run(["docker","exec",ctr,"cat",tmp],capture_output=True)
-  subprocess.run(["docker","exec",ctr,"rm","-f",tmp],capture_output=True)
-  return code, body_p.stdout or b""
+  # Single docker exec; unique temp path avoids shared-/tmp races without 3x exec storms.
+  token = uuid.uuid4().hex
+  script = (
+      "f=/tmp/pb-" + token + "; "
+      "c=$(curl -s -o \"$f\" -w '%{http_code}' 'http://127.0.0.1:"
+      + str(port)
+      + path
+      + "'); "
+      "printf '%s\\n' \"$c\"; cat \"$f\"; rm -f \"$f\""
+  )
+  p = subprocess.run(
+      ["docker", "exec", ctr, "sh", "-c", script],
+      capture_output=True,
+  )
+  raw = p.stdout or b""
+  nl = raw.find(b"\n")
+  if nl < 0:
+    return "000", b""
+  code = raw[:nl].decode("ascii", "replace").strip()[-3:] or "000"
+  return code, raw[nl + 1 :]
 
 def check_core(role, code, body):
   if code not in (200,503):
@@ -414,7 +471,8 @@ print_summary() {
   echo "agent_log_events=${AGENT_EVENTS}"
   echo "sensor_log_events=${SENSOR_EVENTS}"
   echo "analytics_hostile_cases=${ANALYTICS_CASES}"
-  echo "concurrent_workers=32"
+  echo "concurrent_workers_logger=32"
+  echo "concurrent_workers_probe=16"
   echo "probe_soak_duration_s=300"
   echo "total_probe_requests=${PROBE_REQUESTS}"
   echo "correlation_ops=${CORR_OPS}"
