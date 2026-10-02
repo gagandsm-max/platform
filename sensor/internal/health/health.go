@@ -192,6 +192,7 @@ type evaluation struct {
 	storagePercent      float64
 	storageKnown        bool
 	agentStoragePercent float64
+	agentStoragePresent bool
 	agentStorageKnown   bool
 	pack                 packsync.Status
 	packPresent          bool
@@ -262,6 +263,7 @@ func (hs *HealthServer) evaluate() evaluation {
 	hs.mu.RUnlock()
 
 	if agentSpool != nil {
+		ev.agentStoragePresent = true
 		pct, err := agentSpool.CheckStorageUsage()
 		if err != nil {
 			hs.logger.Warn("Agent ingress spool storage check failed",
@@ -400,14 +402,17 @@ func dependencyStatus(ev evaluation) map[string]string {
 	case !ev.storageKnown:
 		out["local_spool"] = "DOWN"
 	case ev.storagePercent >= hardStoragePercent:
-		out["local_spool"] = "DEGRADED"
+		out["local_spool"] = "DOWN"
 	default:
 		out["local_spool"] = "UP"
 	}
-	if ev.agentStorageKnown {
-		if ev.agentStoragePercent >= hardStoragePercent {
-			out["agent_spool"] = "DEGRADED"
-		} else {
+	if ev.agentStoragePresent {
+		switch {
+		case !ev.agentStorageKnown:
+			out["agent_spool"] = "DOWN"
+		case ev.agentStoragePercent >= hardStoragePercent:
+			out["agent_spool"] = "DOWN"
+		default:
 			out["agent_spool"] = "UP"
 		}
 	}
@@ -529,7 +534,7 @@ func percentInt(v float64) int {
 	if v >= 100 {
 		return 100
 	}
-	return int(math.Round(v))
+	return int(math.Floor(v))
 }
 
 func maxZeroInt(v int) int {

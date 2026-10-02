@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -337,6 +338,9 @@ func TestReadyzStorageProtectionAndAgentSpoolProtection(t *testing.T) {
 		{"agent_spool_pressure", func(hs *HealthServer) {
 			hs.agentSpool = &fakeStorageStatusProvider{pct: 80}
 		}, reasonAgentSpoolHard},
+		{"agent_spool_unwritable", func(hs *HealthServer) {
+			hs.agentSpool = &fakeStorageStatusProvider{err: errors.New("agent disk unavailable")}
+		}, reasonAgentSpoolCheck},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -356,12 +360,48 @@ func TestReadyzStorageProtectionAndAgentSpoolProtection(t *testing.T) {
 }
 
 func TestReadyzStorageBelowProtectionWatermarkRemainsReady(t *testing.T) {
-	hs := newTestHealth(t, trustedPack())
-	hs.spool = &fakeStorageStatusProvider{pct: 79.9}
+	for _, pct := range []float64{79.5, 79.9} {
+		t.Run(fmt.Sprintf("%.1f", pct), func(t *testing.T) {
+			hs := newTestHealth(t, trustedPack())
+			hs.spool = &fakeStorageStatusProvider{pct: pct}
 
-	rr, body := request(t, hs, "/readyz")
-	if rr.Code != http.StatusOK || body["status"] != "UP" || body["ready"] != true {
-		t.Fatalf("below-watermark readiness=%d body=%v", rr.Code, body)
+			rr, body := request(t, hs, "/readyz")
+			if rr.Code != http.StatusOK || body["status"] != "UP" || body["ready"] != true {
+				t.Fatalf("below-watermark readiness=%d body=%v", rr.Code, body)
+			}
+			rr, body = request(t, hs, "/health")
+			if rr.Code != http.StatusOK || body["storage_pressure_percent"] == float64(80) {
+				t.Fatalf("below-watermark support evidence=%d body=%v", rr.Code, body)
+			}
+			if body["storage_pressure_percent"] != float64(79) {
+				t.Fatalf("storage_pressure_percent=%v want=79", body["storage_pressure_percent"])
+			}
+		})
+	}
+}
+
+func TestSupportEvidenceMarksHardStorageFailuresDown(t *testing.T) {
+	cases := []struct {
+		name string
+		wire func(*HealthServer)
+		key  string
+	}{
+		{"telemetry_pressure", func(hs *HealthServer) { hs.spool = &fakeStorageStatusProvider{pct: 80} }, "local_spool"},
+		{"agent_pressure", func(hs *HealthServer) { hs.agentSpool = &fakeStorageStatusProvider{pct: 80} }, "agent_spool"},
+		{"agent_check_failure", func(hs *HealthServer) {
+			hs.agentSpool = &fakeStorageStatusProvider{err: errors.New("agent disk unavailable")}
+		}, "agent_spool"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hs := newTestHealth(t, trustedPack())
+			tc.wire(hs)
+			rr, body := request(t, hs, "/health")
+			deps, ok := body["dependency_status"].(map[string]any)
+			if rr.Code != http.StatusServiceUnavailable || !ok || deps[tc.key] != "DOWN" {
+				t.Fatalf("support evidence=%d body=%v", rr.Code, body)
+			}
+		})
 	}
 }
 

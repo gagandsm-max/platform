@@ -326,6 +326,33 @@ func TestAgentIDUsesBoundedStringContract(t *testing.T) {
 	}
 }
 
+func TestSafeContextRejectsPrivacyAndBearerAliases(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	logger.Info("test", "safe_context", map[string]any{
+		"mode":              "trusted_continue",
+		"privacy_pass":      "opaque-privacy-pass",
+		"snmp_privacy_pass": "opaque-snmp-privacy-pass",
+		"privacy_key":       "opaque-privacy-key",
+		"bearer":            "opaque-bearer-token",
+	})
+	got := decodeOne(t, &buf)
+	safe, ok := got["safe_context"].(map[string]any)
+	if !ok || safe["mode"] != "trusted_continue" {
+		t.Fatalf("safe context missing: %v", got)
+	}
+	for _, key := range []string{"privacy_pass", "snmp_privacy_pass", "privacy_key", "bearer"} {
+		if _, exists := safe[key]; exists {
+			t.Fatalf("credential alias retained: %s in %v", key, safe)
+		}
+	}
+	for _, forbidden := range []string{"opaque-privacy-pass", "opaque-snmp-privacy-pass", "opaque-privacy-key", "opaque-bearer-token"} {
+		if strings.Contains(buf.String(), forbidden) {
+			t.Fatalf("credential material leaked: %s", buf.String())
+		}
+	}
+}
+
 func TestAgentIDRejectsControlCharacters(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newTestLogger(&buf)
