@@ -2273,6 +2273,67 @@ func TestRunOnceAfterStopNoCollectorNoEnqueue(t *testing.T) {
 	}
 }
 
+func TestStopAdmissionClosureAtomicRejectsRunOnceContender(t *testing.T) {
+	// Race Stop initiation against RunOnce at the admission boundary. Once
+	// shutdown wins (stopping=true + stopCh closed under one execMu critical
+	// section), contending RunOnce must not register work, collect, or enqueue.
+	for iter := 0; iter < 64; iter++ {
+		enq := &mockEnqueuer{}
+		col := &mockCollector{
+			name:    "cpu",
+			samples: []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 1, Unit: "%"}},
+		}
+		reg := mustRegistry(t, collector.Registration{
+			Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+		})
+		s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		stopErr := make(chan error, 1)
+		releaseContenders := make(chan struct{})
+		const contenders = 24
+		var wg sync.WaitGroup
+		wg.Add(contenders)
+		for i := 0; i < contenders; i++ {
+			go func() {
+				defer wg.Done()
+				<-releaseContenders
+				s.RunOnce(context.Background())
+			}()
+		}
+
+		go func() {
+			stopErr <- s.StopContext(context.Background())
+		}()
+
+		deadline := time.Now().Add(2 * time.Second)
+		for !s.AdmissionClosedForTest() {
+			if time.Now().After(deadline) {
+				t.Fatal("shutdown never closed admission")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		// Shutdown has won admission closure; release RunOnce contenders.
+		close(releaseContenders)
+		wg.Wait()
+
+		if err := <-stopErr; err != nil {
+			t.Fatalf("iter %d: Stop must complete normally: %v", iter, err)
+		}
+		if got := col.calls.Load(); got != 0 {
+			t.Fatalf("iter %d: post-stop contender must not invoke collectors, calls=%d", iter, got)
+		}
+		if enq.calls.Load() != 0 || enq.count() != 0 {
+			t.Fatalf("iter %d: post-stop contender must not enqueue, calls=%d count=%d", iter, enq.calls.Load(), enq.count())
+		}
+		if s.PendingItemCountForTest() != 0 {
+			t.Fatalf("iter %d: pending must be empty after clean Stop, got %d", iter, s.PendingItemCountForTest())
+		}
+	}
+}
+
 func TestCollectImmutableCanceledWhileLiveIsFailure(t *testing.T) {
 	// Result-first context.Canceled with immutable live completion state must stay failure
 	// even if parent cancellation arrives before classification.

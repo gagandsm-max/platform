@@ -892,10 +892,12 @@ func (s *Scheduler) spawnOutstandingWaiter(rt *collectorRuntime, resultCh <-chan
 
 func (s *Scheduler) beginStop() {
 	s.stopOnce.Do(func() {
-		close(s.stopCh)
-		// Atomically close admission before waiting so no new Add can race Wait.
+		// Shutdown initiation and admission closure are atomic under execMu so a
+		// concurrent RunOnce/admitExecution cannot register (execWG/runOnceWG Add)
+		// after stop has begun but before stopping is visible.
 		s.execMu.Lock()
 		s.stopping = true
+		close(s.stopCh)
 		s.execMu.Unlock()
 		go func() {
 			s.wg.Wait()
@@ -944,6 +946,14 @@ func (s *Scheduler) PendingItemCountForTest() int {
 		n += pendingItemCount(c)
 	}
 	return n
+}
+
+// AdmissionClosedForTest reports whether Stop has atomically closed execution
+// and RunOnce admission. Production callers must not use this.
+func (s *Scheduler) AdmissionClosedForTest() bool {
+	s.execMu.Lock()
+	defer s.execMu.Unlock()
+	return s.stopping
 }
 
 // Stop is a compatibility wrapper that waits without an external deadline.
