@@ -2276,7 +2276,7 @@ Green licences are permissive catalogue entries; yellow dependencies require leg
 
 At minimum benchmark:
 
-- SNWP-2500-v1 on 8C/16G Core;
+- SNWP-2500-v1 on 8C/32G Core;
 - Sensor 4C/16G normal workload baseline;
 - Sensor 8C/16G density target;
 - SNMPv3 CPU cost;

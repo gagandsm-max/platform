@@ -117,7 +117,7 @@
     "source": "testing/testing-performance-benchmarker.md",
     "description": "Performance/capacity evidence specialist for Platform. Use for hot paths, Core/Sensor sizing, ingestion, polling, UI/query, storage, HA replay and release regression benchmarking.",
     "canonical_path": "canonical/p0/platform-performance-benchmarker.md",
-    "sha256": "555f324c5b9ffccad3acf7029b3347af0941ca442df447d5f49498e83bfbf07f"
+    "sha256": "13b23ede88b1cc7efd131a2e192460afcaf9f0a1d1af817e4d202486dacd7a27"
   },
   {
     "name": "platform-api-platform-engineer",

@@ -83,7 +83,7 @@ No release promotion with failing P0/P1 tests, unresolved critical/high security
 
 ## 1. Core target
 
-≤2,500 reference network devices on 8 vCPU / 16 GB Core is a mandatory engineering target under a versioned Standard Network Workload Profile, not a blanket guarantee for arbitrary Flow/log/high-cardinality workloads.
+≤2,500 reference network devices on 8 vCPU / 32 GB Core is a mandatory engineering target under a versioned Standard Network Workload Profile, not a blanket guarantee for arbitrary Flow/log/high-cardinality workloads.
 
 ## 2. Sensor targets
 

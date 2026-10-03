@@ -26,7 +26,7 @@
 
 ## 2. Authoritative fixed requirements
 
-* Core ≤2,500 reference-device engineering target on **8 vCPU / 16 GB** under the eventual versioned SNWP-2500-v1 profile (**AUTHORITATIVE FIXED REQUIREMENT** for the compute envelope; workload constants themselves are TBD).
+* Core ≤2,500 reference-device engineering target on **8 vCPU / 32 GB** under the eventual versioned SNWP-2500-v1 profile (**AUTHORITATIVE FIXED REQUIREMENT** for the compute envelope; workload constants themselves are TBD).
 * Final SNWP constants are **not** frozen in mother docs and **must be discovered by benchmark** (**AUTHORITATIVE FIXED REQUIREMENT**).
 
 ---
@@ -57,7 +57,7 @@ Those may appear only as **PROPOSED TEST POINT — NON-AUTHORITATIVE** candidate
 * timeout/retry distribution;
 * event rates;
 * concurrent UI/query/report/RCA load where applicable;
-* acceptable CPU/RAM/disk/query/poll behaviour under the 8C/16G envelope.
+* acceptable CPU/RAM/disk/query/poll behaviour under the 8C/32G envelope.
 
 ---
 

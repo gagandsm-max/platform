@@ -2201,7 +2201,7 @@ Data placement policies shall be architecturally possible so future regional Cor
 ## 41. Non-functional requirements and SNWP
 ### 41.1 Resource efficiency
 
-- Core target up to 2,500 devices: 8 vCPU / 16 GB under certified Standard Network Workload Profile.
+- Core target up to 2,500 devices: 8 vCPU / 32 GB under certified Standard Network Workload Profile.
 - Sensor current planning baseline: 4 vCPU / 16 GB / 150 GB for ~800 normal network devices.
 - Sensor engineering benchmark target: 8 vCPU / 16 GB for ~2,000–2,500 normal devices where workload permits.
 - Agent footprint target: TBD by OS/workload benchmark; must be explicitly measured and kept low.
@@ -2232,7 +2232,7 @@ Use modular Core architecture rather than excessive microservices to fit resourc
 ---
 
 
-This profile exists to make the 8 vCPU / 16 GB Core target objectively testable. It is a **benchmark profile**, not a restriction on customer configuration.
+This profile exists to make the 8 vCPU / 32 GB Core target objectively testable. It is a **benchmark profile**, not a restriction on customer configuration.
 
 Engineering shall construct the profile using a representative mixture of enterprise network devices and record the exact composition in the performance test repository. The profile shall include at minimum:
 
