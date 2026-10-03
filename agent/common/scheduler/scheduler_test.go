@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -550,10 +551,11 @@ func TestSchedulerIndependentIntervals(t *testing.T) {
 
 func TestSchedulerPhaseSpreading(t *testing.T) {
 	interval := 15 * time.Second
+	ident := testIdent()
 	names := []string{"cpu", "memory", "filesystem", "diskio", "net"}
 	phases := map[time.Duration]string{}
 	for _, name := range names {
-		p := PhaseOffsetForTest(name, interval)
+		p := PhaseOffsetForTest(ident.TenantID, ident.AgentID, name, PhaseAlgorithmVersionForTest(), interval)
 		if p < 0 || p >= interval {
 			t.Fatalf("phase %v out of range for %s", p, name)
 		}
@@ -576,7 +578,7 @@ func TestSchedulerPhaseSpreading(t *testing.T) {
 			Timeout:   time.Second,
 		})
 	}
-	sched, err := NewScheduler(testIdent(), mustRegistry(t, regs...), &mockEnqueuer{}, 2, nil)
+	sched, err := NewScheduler(ident, mustRegistry(t, regs...), &mockEnqueuer{}, 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -890,3 +892,382 @@ func TestSlowCollectorDoesNotSerializeBeyondConcurrency(t *testing.T) {
 		t.Fatalf("looks overly serialized: elapsed=%v", elapsed)
 	}
 }
+
+func TestPhaseRestartStableAndFleetDistributed(t *testing.T) {
+	interval := 15 * time.Second
+	ident := testIdent()
+	alg := PhaseAlgorithmVersionForTest()
+
+	p1 := PhaseOffsetForTest(ident.TenantID, ident.AgentID, "cpu", alg, interval)
+	p2 := PhaseOffsetForTest(ident.TenantID, ident.AgentID, "cpu", alg, interval)
+	if p1 != p2 {
+		t.Fatalf("phase not restart-stable: %v vs %v", p1, p2)
+	}
+
+	// Reconstructed schedulers for the same Agent must expose the same phase.
+	reg := mustRegistry(t, collector.Registration{
+		Collector: &mockCollector{name: "cpu", samples: []telemetry.Sample{{MetricKey: "m", Value: 1, Unit: "u"}}},
+		Enabled:   true, Interval: interval, Timeout: time.Second,
+	})
+	s1, err := NewScheduler(ident, reg, &mockEnqueuer{}, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := NewScheduler(ident, mustRegistry(t, collector.Registration{
+		Collector: &mockCollector{name: "cpu", samples: []telemetry.Sample{{MetricKey: "m", Value: 1, Unit: "u"}}},
+		Enabled:   true, Interval: interval, Timeout: time.Second,
+	}), &mockEnqueuer{}, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s1.Status().Collectors[0].PhaseOffset != s2.Status().Collectors[0].PhaseOffset {
+		t.Fatalf("reconstructed scheduler phase drift: %v vs %v",
+			s1.Status().Collectors[0].PhaseOffset, s2.Status().Collectors[0].PhaseOffset)
+	}
+	if s1.Status().Collectors[0].PhaseOffset != p1 {
+		t.Fatalf("scheduler phase mismatch helper=%v sched=%v", p1, s1.Status().Collectors[0].PhaseOffset)
+	}
+
+	// Different Agents must not all collapse onto one phase for the same collector.
+	seen := map[time.Duration]string{}
+	for i := 0; i < 32; i++ {
+		id := &identity.AgentIdentity{
+			AgentID:  "agent-" + strconv.Itoa(i),
+			TenantID: "tenant-1",
+			HostID:   "host-1",
+			Hostname: "node-1",
+			OS:       "linux",
+			Arch:     "amd64",
+		}
+		p := PhaseOffsetForTest(id.TenantID, id.AgentID, "cpu", alg, interval)
+		seen[p] = id.AgentID
+	}
+	if len(seen) < 8 {
+		t.Fatalf("expected fleet phase distribution across Agents, distinct=%d", len(seen))
+	}
+
+	// Next due remains anchored to the same cadence boundary across restart.
+	now := time.Unix(1_700_000_000, 0).UTC()
+	due1 := NextCadenceDueForTest(now, interval, p1)
+	due2 := NextCadenceDueForTest(now.Add(3*time.Millisecond), interval, p1)
+	if !due1.Equal(due2) {
+		t.Fatalf("restart shifted cadence boundary: %v vs %v", due1, due2)
+	}
+	if due1.Before(now) {
+		t.Fatalf("due %v before now %v", due1, now)
+	}
+	// Boundary must sit on the phase lattice.
+	if (due1.UnixNano()-int64(p1))%int64(interval) != 0 {
+		t.Fatalf("due %v not aligned to phase lattice p=%v", due1, p1)
+	}
+}
+
+func TestNominalCadenceNoExecutionDrift(t *testing.T) {
+	interval := 100 * time.Millisecond
+	phase := 20 * time.Millisecond
+	fired := time.Unix(0, int64(phase)).UTC()
+	// Execution finishes 40ms after due (inside the period).
+	finished := fired.Add(40 * time.Millisecond)
+	next := CoalesceNextDueForTest(fired, finished, interval, phase)
+	want := fired.Add(interval)
+	if !next.Equal(want) {
+		t.Fatalf("execution duration shifted cadence: next=%v want=%v", next, want)
+	}
+}
+
+func TestMissedCyclesCoalesceSkip(t *testing.T) {
+	interval := 100 * time.Millisecond
+	phase := 10 * time.Millisecond
+	fired := time.Unix(0, int64(phase)).UTC()
+	// Wall clock jumped three periods ahead during a slow/blocked run.
+	now := fired.Add(3*interval + 5*time.Millisecond)
+	next := CoalesceNextDueForTest(fired, now, interval, phase)
+	if !next.After(now) {
+		t.Fatalf("next due %v must be after now %v", next, now)
+	}
+	// Exactly one future boundary — no catch-up stack.
+	prev := next.Add(-interval)
+	if prev.After(now) {
+		t.Fatalf("coalesce failed; leftover catch-up boundary %v after now %v", prev, now)
+	}
+	if (next.UnixNano()-int64(phase))%int64(interval) != 0 {
+		t.Fatalf("coalesced due not on phase lattice: %v", next)
+	}
+}
+
+func TestNoOverlappingExecutionPerCollector(t *testing.T) {
+	var inFlight atomic.Int32
+	var maxSeen atomic.Int32
+	release := make(chan struct{})
+	started := make(chan struct{}, 8)
+	c := &mockCollector{
+		name:     "slow",
+		release:  release,
+		started:  started,
+		samples:  []telemetry.Sample{{MetricKey: "m", Value: 1, Unit: "u"}},
+		inFlight: &inFlight,
+		maxSeen:  &maxSeen,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: c, Enabled: true, Interval: 15 * time.Millisecond, Timeout: time.Second,
+	})
+	sched, err := NewScheduler(testIdent(), reg, &mockEnqueuer{}, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sched.Start(ctx)
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		sched.Stop()
+		t.Fatal("collector did not start")
+	}
+	// Hold first execution while multiple nominal periods elapse.
+	time.Sleep(80 * time.Millisecond)
+	if got := int(maxSeen.Load()); got > 1 {
+		close(release)
+		sched.Stop()
+		t.Fatalf("overlapping executions observed: maxInFlight=%d", got)
+	}
+	close(release)
+	sched.Stop()
+	if c.calls.Load() < 1 {
+		t.Fatal("expected at least one execution")
+	}
+}
+
+func TestScheduleBoundedWhenIntervalLessThanExecution(t *testing.T) {
+	var inFlight atomic.Int32
+	var maxSeen atomic.Int32
+	c := &mockCollector{
+		name:     "long",
+		delay:    60 * time.Millisecond,
+		samples:  []telemetry.Sample{{MetricKey: "m", Value: 1, Unit: "u"}},
+		inFlight: &inFlight,
+		maxSeen:  &maxSeen,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: c, Enabled: true, Interval: 20 * time.Millisecond, Timeout: time.Second,
+	})
+	sched, err := NewScheduler(testIdent(), reg, &mockEnqueuer{}, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sched.Start(ctx)
+	time.Sleep(250 * time.Millisecond)
+	sched.Stop()
+
+	if got := int(maxSeen.Load()); got > 1 {
+		t.Fatalf("unbounded overlap under interval<execution: maxInFlight=%d", got)
+	}
+	if c.calls.Load() < 2 {
+		t.Fatalf("expected repeated coalesced runs, calls=%d", c.calls.Load())
+	}
+	// Cadence must not enqueue one record per missed tick; aggregate flush remains bounded.
+	// Primary invariant here is no overlapping self-execution.
+}
+
+func TestPendingMergePreservesMultipleContributions(t *testing.T) {
+	c := &mockCollector{name: "cpu", samples: []telemetry.Sample{{MetricKey: "m", Value: 1, Unit: "u"}}}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: c, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	enq := &mockEnqueuer{}
+	sched, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t1 := time.Unix(100, 0).UTC()
+	t2 := time.Unix(101, 0).UTC()
+	obs1, err := telemetry.Normalize(testIdent(), "cpu", t1, telemetry.Sample{MetricKey: "system.cpu.utilization", Value: 1, Unit: "%"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs2, err := telemetry.Normalize(testIdent(), "cpu", t2, telemetry.Sample{MetricKey: "system.cpu.utilization", Value: 2, Unit: "%"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sched.deposit(pendingContribution{
+		name: "cpu", collectedAt: t1, durationMs: 1,
+		observations: []telemetry.Observation{obs1},
+	})
+	sched.deposit(pendingContribution{
+		name: "cpu", collectedAt: t2, durationMs: 2,
+		observations: []telemetry.Observation{obs2},
+	})
+	sched.flushPending()
+
+	if enq.count() != 1 {
+		t.Fatalf("expected one aggregate batch, got %d", enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Observations) != 2 {
+		t.Fatalf("silent overwrite: expected 2 observations, got %d", len(batch.Observations))
+	}
+	if batch.Observations[0].Value != 1 || batch.Observations[1].Value != 2 {
+		t.Fatalf("observations not preserved: %+v", batch.Observations)
+	}
+}
+
+func TestSlowEnqueueFlushDoesNotOverwritePending(t *testing.T) {
+	c := &mockCollector{
+		name:    "cpu",
+		samples: []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 1, Unit: "%"}},
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: c, Enabled: true, Interval: 30 * time.Millisecond, Timeout: time.Second,
+	})
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	enq := &blockingEnqueuer{entered: entered, release: release}
+
+	sched, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First contribution + blocking flush.
+	t1 := time.Unix(200, 0).UTC()
+	obs1, err := telemetry.Normalize(testIdent(), "cpu", t1, telemetry.Sample{MetricKey: "system.cpu.utilization", Value: 11, Unit: "%"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sched.deposit(pendingContribution{
+		name: "cpu", collectedAt: t1, durationMs: 1,
+		observations: []telemetry.Observation{obs1},
+	})
+
+	flushDone := make(chan struct{})
+	go func() {
+		sched.flushPending()
+		close(flushDone)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("enqueue did not block")
+	}
+
+	// Second contribution arrives while flush/enqueue is still slow.
+	t2 := time.Unix(201, 0).UTC()
+	obs2, err := telemetry.Normalize(testIdent(), "cpu", t2, telemetry.Sample{MetricKey: "system.cpu.utilization", Value: 22, Unit: "%"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sched.deposit(pendingContribution{
+		name: "cpu", collectedAt: t2, durationMs: 1,
+		observations: []telemetry.Observation{obs2},
+	})
+
+	close(release)
+	select {
+	case <-flushDone:
+	case <-time.After(time.Second):
+		t.Fatal("flush did not complete")
+	}
+
+	// Flush the contribution that arrived during the slow enqueue window.
+	sched.flushPending()
+
+	if enq.count() != 2 {
+		t.Fatalf("expected both cycle batches to survive slow enqueue, got %d", enq.count())
+	}
+	values := map[float64]bool{}
+	enq.mu.Lock()
+	for _, raw := range enq.records {
+		var batch telemetry.CollectionBatch
+		if err := json.Unmarshal(raw, &batch); err != nil {
+			enq.mu.Unlock()
+			t.Fatal(err)
+		}
+		for _, obs := range batch.Observations {
+			values[obs.Value] = true
+		}
+	}
+	enq.mu.Unlock()
+	if !values[11] || !values[22] {
+		t.Fatalf("slow enqueue window lost observations: %v", values)
+	}
+}
+
+func TestPendingMergeSameCycleBeforeFlush(t *testing.T) {
+	// Same-collector contributions before any flush must merge, not overwrite.
+	c := &mockCollector{name: "cpu", samples: []telemetry.Sample{{MetricKey: "m", Value: 1, Unit: "u"}}}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: c, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	enq := &mockEnqueuer{}
+	sched, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Unix(300, 0).UTC()
+	for i := 0; i < 3; i++ {
+		ts := base.Add(time.Duration(i) * time.Second)
+		obs, err := telemetry.Normalize(testIdent(), "cpu", ts, telemetry.Sample{
+			MetricKey: "system.cpu.utilization", Value: float64(10 + i), Unit: "%",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sched.deposit(pendingContribution{
+			name: "cpu", collectedAt: ts, durationMs: int64(i + 1),
+			observations: []telemetry.Observation{obs},
+		})
+	}
+	sched.flushPending()
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Observations) != 3 {
+		t.Fatalf("expected merged 3 observations, got %d", len(batch.Observations))
+	}
+}
+
+type blockingEnqueuer struct {
+	mu       sync.Mutex
+	records  [][]byte
+	entered  chan struct{}
+	release  chan struct{}
+	calls    atomic.Int32
+}
+
+func (b *blockingEnqueuer) Enqueue(payload []byte) (*queue.Record, error) {
+	b.calls.Add(1)
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	<-b.release
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.records = append(b.records, payload)
+	return &queue.Record{Sequence: uint64(len(b.records)), Payload: payload}, nil
+}
+
+func (b *blockingEnqueuer) count() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.records)
+}
+
