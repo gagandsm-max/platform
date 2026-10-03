@@ -453,8 +453,12 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 
 	var res collectResult
 	timedOut := false
+	// resultWhileLive is true when Collect returned before runCtx terminated.
+	// Local cleanup cancel() must not be classified as service shutdown.
+	resultWhileLive := false
 	select {
 	case res = <-resultCh:
+		resultWhileLive = runCtx.Err() == nil
 		cancel()
 	case <-runCtx.Done():
 		select {
@@ -466,9 +470,12 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		}
 	}
 
-	// Capture cause before any test barrier / further scheduling work. Cause is
-	// immutable once runCtx is done, so later Stop() cannot rewrite classification.
-	runCause := context.Cause(runCtx)
+	// Cause is meaningful only when runCtx had already terminated before local
+	// cleanup cancel. If the result arrived while live, ignore post-cancel Cause.
+	var runCause error
+	if !resultWhileLive {
+		runCause = context.Cause(runCtx)
+	}
 	if s.classifyBarrier != nil {
 		s.classifyBarrier()
 	}
@@ -507,10 +514,11 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 
 	durationMs := s.now().Sub(startTime).Milliseconds()
 	if res.err != nil {
-		if isContextTermination(res.err) &&
+		if !resultWhileLive &&
+			isContextTermination(res.err) &&
 			errors.Is(runCause, context.Canceled) &&
 			!errors.Is(runCause, context.DeadlineExceeded) {
-			// Parent/service cancellation won first.
+			// Parent/service cancellation won first (runCtx already done).
 			return
 		}
 		summary := safeErrorSummary(res.err)

@@ -1962,3 +1962,116 @@ func TestRunOnceStopContextStressRace(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectorReturnedDeadlineExceededIsGenuineFailure(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{
+		name: "cpu",
+		err:  context.DeadlineExceeded,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RunOnce(context.Background())
+
+	_, errs := s.Stats()
+	if errs < 1 {
+		t.Fatalf("expected scheduler error counter increment, got %d", errs)
+	}
+	st := s.Status()
+	if len(st.Collectors) == 0 || st.Collectors[0].ErrorCount < 1 {
+		t.Fatalf("expected collector error counter increment, status=%+v", st.Collectors)
+	}
+	if enq.count() != 1 {
+		t.Fatalf("expected deposited failure batch, got %d records", enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Errors) != 1 || batch.Errors[0].Code != "COLLECTION_FAILED" {
+		t.Fatalf("expected COLLECTION_FAILED deposit, got %+v", batch.Errors)
+	}
+}
+
+func TestCollectorReturnedCanceledIsGenuineFailure(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{
+		name: "cpu",
+		err:  context.Canceled,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RunOnce(context.Background())
+
+	_, errs := s.Stats()
+	if errs < 1 {
+		t.Fatalf("collector-returned Canceled must remain a genuine failure, errs=%d", errs)
+	}
+	if enq.count() != 1 {
+		t.Fatalf("expected COLLECTION_FAILED deposit, got %d records", enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Errors) != 1 || batch.Errors[0].Code != "COLLECTION_FAILED" {
+		t.Fatalf("expected COLLECTION_FAILED, got %+v", batch.Errors)
+	}
+}
+
+func TestSuccessfulCollectorResultNoFailureFromCleanupCancel(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{
+		name:    "cpu",
+		samples: []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 1, Unit: "%"}},
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RunOnce(context.Background())
+
+	_, errs := s.Stats()
+	if errs != 0 {
+		t.Fatalf("successful collect must not record failure from cleanup cancel, errs=%d", errs)
+	}
+	st := s.Status()
+	if len(st.Collectors) > 0 && st.Collectors[0].ErrorCount != 0 {
+		t.Fatalf("collector ErrorCount must stay 0, got %d", st.Collectors[0].ErrorCount)
+	}
+	if enq.count() != 1 {
+		t.Fatalf("expected one success batch, got %d", enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Errors) != 0 {
+		t.Fatalf("cleanup cancel must not deposit errors, got %+v", batch.Errors)
+	}
+	if len(batch.Observations) != 1 {
+		t.Fatalf("expected one observation, got %d", len(batch.Observations))
+	}
+}
