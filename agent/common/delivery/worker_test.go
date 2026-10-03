@@ -759,3 +759,106 @@ func TestDeliveryWorkerRejectsMixedCutoverBatch(t *testing.T) {
 		t.Fatalf("must fail closed before transport, calls=%d", tr.calls)
 	}
 }
+
+func TestDeliveryWorkerStopContextIdempotentAndBounded(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	tr := &hangTransport{entered: entered, release: release}
+	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Minute, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Start(context.Background())
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deliver did not enter")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	if err := w.StopContext(ctx); err == nil {
+		t.Fatal("expected stop timeout while transport ignores cancel")
+	}
+
+	// Repeated StopContext must not hang creating extra waiters.
+	start := time.Now()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel2()
+	_ = w.StopContext(ctx2)
+	if time.Since(start) > 200*time.Millisecond {
+		t.Fatalf("repeated StopContext too slow: %v", time.Since(start))
+	}
+
+	close(release)
+	done := make(chan struct{})
+	go func() {
+		_ = w.StopContext(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not finish after release")
+	}
+}
+
+func TestDeliveryWorkerShutdownCancelDoesNotRecordFailure(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	tr := &coopTransport{entered: entered}
+	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deliver did not enter")
+	}
+	before := w.Stats()
+	cancel()
+	if err := w.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	after := w.Stats()
+	if after.RetryAttempt != before.RetryAttempt {
+		t.Fatalf("shutdown cancel recorded retry: before=%d after=%d", before.RetryAttempt, after.RetryAttempt)
+	}
+}
+
+type hangTransport struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (t *hangTransport) Available() bool { return true }
+func (t *hangTransport) Deliver(context.Context, client.Batch) (client.Ack, error) {
+	if t.entered != nil {
+		select {
+		case t.entered <- struct{}{}:
+		default:
+		}
+	}
+	<-t.release
+	return client.Ack{}, errors.New("released")
+}
+
+type coopTransport struct {
+	entered chan struct{}
+}
+
+func (t *coopTransport) Available() bool { return true }
+func (t *coopTransport) Deliver(ctx context.Context, _ client.Batch) (client.Ack, error) {
+	if t.entered != nil {
+		select {
+		case t.entered <- struct{}{}:
+		default:
+		}
+	}
+	<-ctx.Done()
+	return client.Ack{}, ctx.Err()
+}

@@ -115,6 +115,7 @@ type Scheduler struct {
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
+	stopDone chan struct{} // closed exactly once after wg.Wait completes
 	wg       sync.WaitGroup
 
 	inFlightCount atomic.Int32
@@ -194,6 +195,7 @@ func NewScheduler(
 		sem:            make(chan struct{}, maxConcurrency),
 		pending:        make(map[string]pendingContribution),
 		stopCh:         make(chan struct{}),
+		stopDone:       make(chan struct{}),
 	}, nil
 }
 
@@ -408,6 +410,23 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 	}
 
 	if timedOut {
+		// Parent/service shutdown cancellation must not be recorded as COLLECTION_FAILED.
+		// Genuine per-collector deadline expiry (parent still live) remains a failure.
+		if s.isServiceShutdown(ctx) {
+			rt.mu.Lock()
+			rt.outstanding = true
+			rt.mu.Unlock()
+			releaseAdmission()
+			go func() {
+				<-resultCh
+				rt.mu.Lock()
+				rt.outstanding = false
+				rt.inFlight = false
+				rt.mu.Unlock()
+			}()
+			return
+		}
+
 		summary := "collection_timeout"
 		if err := runCtx.Err(); err != nil {
 			summary = safeErrorSummary(err)
@@ -449,6 +468,9 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 
 	durationMs := s.now().Sub(startTime).Milliseconds()
 	if res.err != nil {
+		if s.isServiceShutdown(ctx) && isContextTermination(res.err) {
+			return
+		}
 		summary := safeErrorSummary(res.err)
 		s.finishCollectorFailure(rt, startTime, summary)
 		s.deposit(pendingContribution{
@@ -751,14 +773,52 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 	s.flushPending()
 }
 
-func (s *Scheduler) Stop() {
+// isServiceShutdown reports parent/runtime or stopCh cancellation. Per-collector
+// timeout alone (child deadline) is not service shutdown.
+func (s *Scheduler) isServiceShutdown(ctx context.Context) bool {
+	select {
+	case <-s.stopCh:
+		return true
+	default:
+	}
+	return ctx != nil && ctx.Err() != nil
+}
+
+func isContextTermination(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func (s *Scheduler) beginStop() {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
+		go func() {
+			s.wg.Wait()
+			s.mu.Lock()
+			s.running = false
+			s.mu.Unlock()
+			close(s.stopDone)
+		}()
 	})
-	s.wg.Wait()
-	s.mu.Lock()
-	s.running = false
-	s.mu.Unlock()
+}
+
+// StopContext requests scheduler shutdown and waits until loops exit or ctx ends.
+// Exactly one waiter coordinator is started; repeated calls share stopDone.
+func (s *Scheduler) StopContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.beginStop()
+	select {
+	case <-s.stopDone:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("SCHEDULER_STOP_TIMEOUT: %w", ctx.Err())
+	}
+}
+
+// Stop is a compatibility wrapper that waits without an external deadline.
+func (s *Scheduler) Stop() {
+	_ = s.StopContext(context.Background())
 }
 
 // Stats preserves the aggregate (lastRun, runErrors) contract used by health.

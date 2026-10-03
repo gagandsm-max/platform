@@ -1453,3 +1453,51 @@ func TestPendingOverflowErrorHeavyBoundRemainsReal(t *testing.T) {
 		t.Fatalf("error-heavy flushed errors unbounded: %d", len(batch.Errors))
 	}
 }
+
+func TestSchedulerStopContextIdempotent(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{name: "cpu", delay: time.Millisecond}
+	reg := mustRegistry(t, collector.Registration{Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Start(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := s.StopContext(ctx); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	if err := s.StopContext(ctx); err != nil {
+		t.Fatalf("repeated StopContext: %v", err)
+	}
+}
+
+func TestSchedulerShutdownCancelDoesNotRecordFailure(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{name: "cpu", started: started, release: release}
+	reg := mustRegistry(t, collector.Registration{Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 2 * time.Second})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Start(ctx)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+	_, errsBefore := s.Stats()
+	cancel()
+	if err := s.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	close(release)
+	_, errsAfter := s.Stats()
+	if errsAfter != errsBefore {
+		t.Fatalf("shutdown cancel recorded failure: before=%d after=%d", errsBefore, errsAfter)
+	}
+}

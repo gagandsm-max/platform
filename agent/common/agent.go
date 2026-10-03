@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"platform/agent/common/client"
@@ -16,6 +17,34 @@ import (
 	"platform/agent/common/identity"
 	"platform/agent/common/queue"
 	"platform/agent/common/scheduler"
+)
+
+// LifecycleState is the authoritative AgentService lifecycle state.
+// Slice 3 may map these values into health readiness; Slice 2 only exposes them.
+type LifecycleState string
+
+const (
+	LifecycleNew      LifecycleState = "NEW"
+	LifecycleStarting LifecycleState = "STARTING"
+	LifecycleRunning  LifecycleState = "RUNNING"
+	LifecycleStopping LifecycleState = "STOPPING"
+	LifecycleStopped  LifecycleState = "STOPPED"
+	LifecycleFailed   LifecycleState = "FAILED"
+)
+
+// defaultAgentShutdownBudget is the whole-service upper bound for Stop().
+// Slice 4 selects systemd TimeoutStopSec above this runtime budget.
+const defaultAgentShutdownBudget = 10 * time.Second
+
+var (
+	// ErrAlreadyRunning is returned when Start is invoked while STARTING/RUNNING.
+	ErrAlreadyRunning = errors.New("AGENT_ALREADY_RUNNING: Start rejected; service already started")
+	// ErrRestartUnsupported is returned for same-instance Start after STOPPED/FAILED.
+	ErrRestartUnsupported = errors.New("AGENT_RESTART_UNSUPPORTED: same-instance restart is not supported")
+	// ErrInvalidStartContext is returned when Start receives a nil or already-done context.
+	ErrInvalidStartContext = errors.New("AGENT_START_CONTEXT_INVALID: Start context must be usable")
+	// ErrShutdownTimeout is returned when Stop exceeds the service shutdown budget.
+	ErrShutdownTimeout = errors.New("AGENT_SHUTDOWN_TIMEOUT: service stop exceeded shutdown budget")
 )
 
 type AgentService struct {
@@ -30,6 +59,16 @@ type AgentService struct {
 
 	version           string
 	serviceInstanceID string
+
+	// registryOverride is applied only during NewAgentService construction.
+	registryOverride *collector.Registry
+
+	opMu           sync.Mutex // serializes Start/Stop bodies
+	lifeMu         sync.Mutex
+	state          LifecycleState
+	runCancel      context.CancelFunc
+	shutdownBudget time.Duration
+	stopErr        error
 }
 
 // ServiceOption configures Agent service construction for BUILD-005 supportability identity.
@@ -48,6 +87,14 @@ func WithSupportabilityIdentity(version, serviceInstanceID string) ServiceOption
 	}
 }
 
+// withCollectorRegistryForTest replaces the default collector registry. Unexported
+// so production callers cannot widen collection surface from Slice 2.
+func withCollectorRegistryForTest(reg *collector.Registry) ServiceOption {
+	return func(s *AgentService) {
+		s.registryOverride = reg
+	}
+}
+
 func NewAgentService(
 	cfg *config.Config,
 	ident *identity.AgentIdentity,
@@ -63,6 +110,21 @@ func NewAgentService(
 	}
 	if logger == nil {
 		logger = slog.Default()
+	}
+
+	svc := &AgentService{
+		cfg:               cfg,
+		identity:          ident,
+		logger:            logger,
+		version:           "0.1.0-dev",
+		serviceInstanceID: "",
+		state:             LifecycleNew,
+		shutdownBudget:    defaultAgentShutdownBudget,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(svc)
+		}
 	}
 
 	// If no transport injected, wire production HTTPS+mTLS to the assigned Sensor.
@@ -84,6 +146,7 @@ func NewAgentService(
 		}
 		tr = httpsTr
 	}
+	svc.transport = tr
 
 	// 1. Initialize durable queue
 	q, err := queue.NewDurableQueue(
@@ -95,18 +158,21 @@ func NewAgentService(
 	if err != nil {
 		return nil, fmt.Errorf("AGENT_QUEUE_INIT_FAILED: %w", err)
 	}
+	svc.queue = q
 
 	// 2. Initialize startup-immutable collector registry.
-	// Default collectors inherit the configured interval/timeout; the registry
-	// and scheduler still support distinct per-collector scheduling metadata.
-	registry, err := collector.NewDefaultRegistry(
-		cfg.MaxFilesystems,
-		cfg.CollectionInterval,
-		cfg.CollectionTimeout,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("AGENT_COLLECTOR_REGISTRY_INIT_FAILED: %w", err)
+	registry := svc.registryOverride
+	if registry == nil {
+		registry, err = collector.NewDefaultRegistry(
+			cfg.MaxFilesystems,
+			cfg.CollectionInterval,
+			cfg.CollectionTimeout,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("AGENT_COLLECTOR_REGISTRY_INIT_FAILED: %w", err)
+		}
 	}
+	svc.registryOverride = nil // drop construction-only reference
 
 	// 3. Initialize scheduler (per-collector schedule, timeout isolation,
 	// deterministic phase spreading, bounded concurrency).
@@ -120,6 +186,7 @@ func NewAgentService(
 	if err != nil {
 		return nil, fmt.Errorf("AGENT_SCHEDULER_INIT_FAILED: %w", err)
 	}
+	svc.scheduler = sched
 
 	// 4. Initialize delivery worker
 	worker, err := delivery.NewWorker(
@@ -136,23 +203,7 @@ func NewAgentService(
 	if err != nil {
 		return nil, fmt.Errorf("AGENT_DELIVERY_INIT_FAILED: %w", err)
 	}
-
-	svc := &AgentService{
-		cfg:               cfg,
-		identity:          ident,
-		queue:             q,
-		transport:         tr,
-		scheduler:         sched,
-		worker:            worker,
-		logger:            logger,
-		version:           "0.1.0-dev",
-		serviceInstanceID: "",
-	}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(svc)
-		}
-	}
+	svc.worker = worker
 
 	// 5. Initialize health server
 	healthOpts := []health.Option{}
@@ -168,56 +219,232 @@ func NewAgentService(
 	return svc, nil
 }
 
+// LifecycleState returns the race-safe authoritative service lifecycle state.
+func (s *AgentService) LifecycleState() LifecycleState {
+	s.lifeMu.Lock()
+	defer s.lifeMu.Unlock()
+	return s.state
+}
+
+func (s *AgentService) setShutdownBudgetForTest(d time.Duration) {
+	s.lifeMu.Lock()
+	defer s.lifeMu.Unlock()
+	s.shutdownBudget = d
+}
+
+func (s *AgentService) setState(next LifecycleState) {
+	s.lifeMu.Lock()
+	s.state = next
+	s.lifeMu.Unlock()
+}
+
+func (s *AgentService) setStateLocked(next LifecycleState) {
+	s.state = next
+}
+
 func (s *AgentService) Start(ctx context.Context) error {
-	// agent_id/tenant_id are bound once via logger.With in linux main; do not
-	// re-emit them here (duplicate JSON keys invalidate envelope validators).
-	s.logger.Info("Starting Platform Agent service workers",
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+
+	s.lifeMu.Lock()
+	switch s.state {
+	case LifecycleNew:
+		s.setStateLocked(LifecycleStarting)
+		s.lifeMu.Unlock()
+	case LifecycleStarting, LifecycleRunning, LifecycleStopping:
+		s.lifeMu.Unlock()
+		return ErrAlreadyRunning
+	case LifecycleStopped, LifecycleFailed:
+		s.lifeMu.Unlock()
+		return ErrRestartUnsupported
+	default:
+		s.lifeMu.Unlock()
+		return fmt.Errorf("AGENT_LIFECYCLE_INVALID: unexpected state %q", s.state)
+	}
+
+	s.logger.Info("Platform Agent service starting",
+		"event_code", "AGENT_SERVICE_STARTING",
 		"safe_context", map[string]any{
-			"host_id":            s.identity.HostID,
-			"os":                 s.identity.OS,
-			"arch":               s.identity.Arch,
-			"receiver_available": s.transport.Available(),
+			"lifecycle_state": string(LifecycleStarting),
+			"host_id":         s.identity.HostID,
+			"os":              s.identity.OS,
+			"arch":            s.identity.Arch,
 		},
 	)
 
-	// Start health server
+	if ctx == nil {
+		return s.failStart(fmt.Errorf("%w: nil context", ErrInvalidStartContext))
+	}
+	if err := ctx.Err(); err != nil {
+		return s.failStart(fmt.Errorf("%w: %v", ErrInvalidStartContext, err))
+	}
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+
 	if err := s.healthSrv.Start(); err != nil {
+		runCancel()
 		s.logger.Error("Failed to start health server",
 			"event_code", "AGENT_HEALTH_START_FAILED",
 			"safe_context", map[string]any{"reason_class": "startup_failed"})
-		return fmt.Errorf("AGENT_HEALTH_START_FAILED: %w", err)
+		return s.failStart(fmt.Errorf("AGENT_HEALTH_START_FAILED: %w", err))
 	}
 
-	// Start delivery loop
-	s.worker.Start(ctx)
+	s.worker.Start(runCtx)
+	s.scheduler.Start(runCtx)
 
-	// Start collection scheduler
-	s.scheduler.Start(ctx)
+	s.lifeMu.Lock()
+	s.runCancel = runCancel
+	s.setStateLocked(LifecycleRunning)
+	s.stopErr = nil
+	s.lifeMu.Unlock()
 
+	s.logger.Info("Platform Agent service running",
+		"event_code", "AGENT_SERVICE_RUNNING",
+		"safe_context", map[string]any{
+			"lifecycle_state":    string(LifecycleRunning),
+			"receiver_available": s.transport.Available(),
+		},
+	)
 	return nil
 }
 
+func (s *AgentService) failStart(err error) error {
+	s.lifeMu.Lock()
+	s.setStateLocked(LifecycleFailed)
+	s.stopErr = err
+	s.lifeMu.Unlock()
+	s.logger.Error("Platform Agent service startup failed",
+		"event_code", "AGENT_SERVICE_START_FAILED",
+		"safe_context", map[string]any{
+			"lifecycle_state": string(LifecycleFailed),
+			"reason_class":    "startup_failed",
+		},
+	)
+	return err
+}
+
 func (s *AgentService) Stop() error {
-	s.logger.Info("Stopping Platform Agent service",
-		"safe_context", map[string]any{"reason_class": "shutdown_requested"})
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 
-	// 1. Stop scheduler
-	s.scheduler.Stop()
+	s.lifeMu.Lock()
+	switch s.state {
+	case LifecycleStopped:
+		err := s.stopErr
+		s.lifeMu.Unlock()
+		return err
+	case LifecycleFailed:
+		// Startup failure or prior shutdown failure: terminal, idempotent.
+		err := s.stopErr
+		s.lifeMu.Unlock()
+		return err
+	case LifecycleNew:
+		s.setStateLocked(LifecycleStopped)
+		s.stopErr = nil
+		s.lifeMu.Unlock()
+		s.logger.Info("Platform Agent service stopped",
+			"event_code", "AGENT_SERVICE_STOPPED",
+			"safe_context", map[string]any{
+				"lifecycle_state": string(LifecycleStopped),
+				"reason_class":    "stop_before_start",
+			},
+		)
+		return nil
+	case LifecycleStarting, LifecycleRunning, LifecycleStopping:
+		s.setStateLocked(LifecycleStopping)
+		budget := s.shutdownBudget
+		cancel := s.runCancel
+		s.lifeMu.Unlock()
 
-	// 2. Stop delivery worker
-	s.worker.Stop()
+		if budget <= 0 {
+			budget = defaultAgentShutdownBudget
+		}
 
-	// 3. Stop health server
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := s.healthSrv.Stop(shutdownCtx); err != nil {
-		s.logger.Warn("Health server shutdown error",
-			"event_code", "AGENT_HEALTH_SHUTDOWN_FAILED",
-			"safe_context", map[string]any{"reason_class": "shutdown_failed"})
+		s.logger.Info("Platform Agent service stopping",
+			"event_code", "AGENT_SERVICE_STOPPING",
+			"safe_context", map[string]any{
+				"lifecycle_state": string(LifecycleStopping),
+				"reason_class":    "shutdown_requested",
+				"budget_ms":       budget.Milliseconds(),
+			},
+		)
+
+		// Cancel owned runtime context before waiting on component shutdown.
+		if cancel != nil {
+			cancel()
+		}
+
+		deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), budget)
+		defer deadlineCancel()
+
+		var (
+			schedErr  error
+			workerErr error
+			compWG    sync.WaitGroup
+		)
+		compWG.Add(2)
+		go func() {
+			defer compWG.Done()
+			schedErr = s.scheduler.StopContext(deadlineCtx)
+		}()
+		go func() {
+			defer compWG.Done()
+			workerErr = s.worker.StopContext(deadlineCtx)
+		}()
+		compWG.Wait()
+
+		healthErr := s.healthSrv.Stop(deadlineCtx)
+
+		if err := joinShutdownErrors(deadlineCtx, schedErr, workerErr, healthErr); err != nil {
+			stopErr := fmt.Errorf("%w: %v", ErrShutdownTimeout, err)
+			s.lifeMu.Lock()
+			s.setStateLocked(LifecycleFailed)
+			s.stopErr = stopErr
+			s.lifeMu.Unlock()
+			s.logger.Error("Platform Agent service shutdown failed",
+				"event_code", "AGENT_SERVICE_STOP_FAILED",
+				"safe_context", map[string]any{
+					"lifecycle_state": string(LifecycleFailed),
+					"reason_class":    "shutdown_timeout",
+				},
+			)
+			return stopErr
+		}
+
+		s.lifeMu.Lock()
+		s.setStateLocked(LifecycleStopped)
+		s.stopErr = nil
+		s.lifeMu.Unlock()
+		s.logger.Info("Platform Agent service stopped",
+			"event_code", "AGENT_SERVICE_STOPPED",
+			"safe_context", map[string]any{
+				"lifecycle_state": string(LifecycleStopped),
+				"reason_class":    "shutdown_complete",
+			},
+		)
+		return nil
+	default:
+		s.lifeMu.Unlock()
+		return fmt.Errorf("AGENT_LIFECYCLE_INVALID: unexpected state %q", s.state)
 	}
+}
 
-	s.logger.Info("Platform Agent service stopped cleanly")
-	return nil
+func joinShutdownErrors(deadlineCtx context.Context, errs ...error) error {
+	var parts []string
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		// Ignore bare context errors when a component already reported timeout.
+		parts = append(parts, err.Error())
+	}
+	if len(parts) == 0 {
+		if err := deadlineCtx.Err(); err != nil {
+			return err
+		}
+		return nil
+	}
+	return errors.New(strings.Join(parts, "; "))
 }
 
 func (s *AgentService) QueueStats() queue.QueueStats {
