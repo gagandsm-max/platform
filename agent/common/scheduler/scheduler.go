@@ -66,6 +66,11 @@ type Status struct {
 type collectResult struct {
 	samples []telemetry.Sample
 	err     error
+	// Immutable completion evidence captured in the Collect producer before
+	// resultCh publish. Classification must use these fields, not a later
+	// scheduler-side sampling of runCtx.
+	ctxDoneAtReturn  bool
+	ctxCauseAtReturn error
 }
 
 // pendingContribution is one collector's deposit into the open aggregate cycle.
@@ -119,13 +124,15 @@ type Scheduler struct {
 	stopDone chan struct{} // closed exactly once after loops + accepted executions complete
 	wg       sync.WaitGroup
 
-	// execMu + stopping gate registration of ALL collector executions (loops and RunOnce).
+	// execMu + stopping gate registration of ALL collector executions and RunOnce ops.
 	// execWG tracks every accepted execution through Collect completion, including
-	// non-cooperative outstanding waiters. Stop sets stopping under execMu before Wait
-	// so no positive Add can race a zero-counter Wait.
-	execMu   sync.Mutex
-	stopping bool
-	execWG   sync.WaitGroup
+	// non-cooperative outstanding waiters. runOnceWG tracks each accepted RunOnce
+	// through its final flushPending/enqueue. Stop sets stopping under execMu before
+	// Wait so no positive Add can race a zero-counter Wait.
+	execMu    sync.Mutex
+	stopping  bool
+	execWG    sync.WaitGroup
+	runOnceWG sync.WaitGroup
 
 	inFlightCount atomic.Int32
 
@@ -314,6 +321,8 @@ func (s *Scheduler) runFlushLoop(ctx context.Context) {
 		case <-ticker.C:
 			s.flushPending()
 		case <-s.stopCh:
+			// Opportunistic flush only. Authoritative final flush runs in beginStop
+			// after all accepted executions and RunOnce ops have completed.
 			s.flushPending()
 			return
 		case <-ctx.Done():
@@ -444,44 +453,49 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				resultCh <- collectResult{err: fmt.Errorf("COLLECTION_PANIC: %v", r)}
+				resultCh <- collectResult{
+					err:              fmt.Errorf("COLLECTION_PANIC: %v", r),
+					ctxDoneAtReturn:  runCtx.Err() != nil,
+					ctxCauseAtReturn: context.Cause(runCtx),
+				}
 			}
 		}()
 		samples, err := rt.entry.Collector.Collect(runCtx)
-		resultCh <- collectResult{samples: samples, err: err}
+		// Capture immutable completion evidence BEFORE publishing the result.
+		resultCh <- collectResult{
+			samples:          samples,
+			err:              err,
+			ctxDoneAtReturn:  runCtx.Err() != nil,
+			ctxCauseAtReturn: context.Cause(runCtx),
+		}
 	}()
 
 	var res collectResult
 	timedOut := false
-	// resultWhileLive is true when Collect returned before runCtx terminated.
-	// Local cleanup cancel() must not be classified as service shutdown.
-	resultWhileLive := false
 	select {
 	case res = <-resultCh:
-		resultWhileLive = runCtx.Err() == nil
+		// Local cleanup cancel happens only after immutable evidence is published.
 		cancel()
 	case <-runCtx.Done():
+		doneCause := context.Cause(runCtx)
 		select {
 		case res = <-resultCh:
 			cancel()
 		default:
 			timedOut = true
 			cancel()
+			// Synthesize immutable timeout evidence for classification.
+			res.ctxDoneAtReturn = true
+			res.ctxCauseAtReturn = doneCause
 		}
 	}
 
-	// Cause is meaningful only when runCtx had already terminated before local
-	// cleanup cancel. If the result arrived while live, ignore post-cancel Cause.
-	var runCause error
-	if !resultWhileLive {
-		runCause = context.Cause(runCtx)
-	}
 	if s.classifyBarrier != nil {
 		s.classifyBarrier()
 	}
 
 	if timedOut {
-		if errors.Is(runCause, context.Canceled) && !errors.Is(runCause, context.DeadlineExceeded) {
+		if isExpectedShutdownCause(res.ctxCauseAtReturn) {
 			// Service/runtime cancellation won first — suppress synthetic failure.
 			releaseAdmission()
 			outstandingOwned = true
@@ -490,8 +504,8 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		}
 
 		summary := "collection_timeout"
-		if err := runCtx.Err(); err != nil {
-			summary = safeErrorSummary(err)
+		if res.ctxCauseAtReturn != nil {
+			summary = safeErrorSummary(res.ctxCauseAtReturn)
 		}
 		s.finishCollectorFailure(rt, startTime, summary)
 		s.deposit(pendingContribution{
@@ -514,11 +528,10 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 
 	durationMs := s.now().Sub(startTime).Milliseconds()
 	if res.err != nil {
-		if !resultWhileLive &&
-			isContextTermination(res.err) &&
-			errors.Is(runCause, context.Canceled) &&
-			!errors.Is(runCause, context.DeadlineExceeded) {
-			// Parent/service cancellation won first (runCtx already done).
+		if isContextTermination(res.err) &&
+			res.ctxDoneAtReturn &&
+			isExpectedShutdownCause(res.ctxCauseAtReturn) {
+			// Parent/service cancellation was already the cause when Collect returned.
 			return
 		}
 		summary := safeErrorSummary(res.err)
@@ -804,11 +817,28 @@ func (s *Scheduler) runtimeByName(name string) *collectorRuntime {
 	return nil
 }
 
+// beginRunOnce stop-gates RunOnce registration. On true, caller owns runOnceWG+1
+// through final flushPending/enqueue.
+func (s *Scheduler) beginRunOnce() bool {
+	s.execMu.Lock()
+	defer s.execMu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.runOnceWG.Add(1)
+	return true
+}
+
 // RunOnce executes every enabled collector once with timeout isolation and
-// bounded concurrency, then flushes one aggregate durable batch. Executions are
-// stop-gated through the same admitExecution lifecycle as scheduler loops; once
-// Stop begins, RunOnce does not start new collector work.
+// bounded concurrency, then flushes one aggregate durable batch. The whole
+// operation (collectors + final flush) is stop-gated; once Stop begins, RunOnce
+// performs no collector work and no enqueue/flush.
 func (s *Scheduler) RunOnce(ctx context.Context) {
+	if !s.beginRunOnce() {
+		return
+	}
+	defer s.runOnceWG.Done()
+
 	var wg sync.WaitGroup
 	for _, rt := range s.runtimes {
 		if !rt.entry.Enabled {
@@ -827,6 +857,10 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 
 func isContextTermination(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func isExpectedShutdownCause(cause error) bool {
+	return errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded)
 }
 
 // spawnOutstandingWaiter keeps the accepted execution on execWG until Collect
@@ -859,13 +893,16 @@ func (s *Scheduler) spawnOutstandingWaiter(rt *collectorRuntime, resultCh <-chan
 func (s *Scheduler) beginStop() {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
-		// Atomically close admission before waiting so no new execWG.Add can race.
+		// Atomically close admission before waiting so no new Add can race Wait.
 		s.execMu.Lock()
 		s.stopping = true
 		s.execMu.Unlock()
 		go func() {
 			s.wg.Wait()
 			s.execWG.Wait()
+			s.runOnceWG.Wait()
+			// Authoritative final flush after all accepted deposits are complete.
+			s.flushPending()
 			s.mu.Lock()
 			s.running = false
 			s.mu.Unlock()
@@ -874,9 +911,11 @@ func (s *Scheduler) beginStop() {
 	})
 }
 
-// StopContext requests scheduler shutdown and waits until loops and accepted
-// collector executions (including outstanding waiters) exit, or ctx ends.
-// Exactly one waiter coordinator is started; repeated calls share stopDone.
+// StopContext requests scheduler shutdown and waits until loops, accepted
+// collector executions (including outstanding waiters), accepted RunOnce ops
+// through final flush, and the authoritative post-quiescence flush complete,
+// or ctx ends. Exactly one waiter coordinator is started; repeated calls share
+// stopDone.
 func (s *Scheduler) StopContext(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -894,6 +933,17 @@ func (s *Scheduler) StopContext(ctx context.Context) error {
 // observed and before classification. Production callers must leave this unset.
 func (s *Scheduler) SetClassifyBarrierForTest(fn func()) {
 	s.classifyBarrier = fn
+}
+
+// PendingItemCountForTest returns the current in-memory pending aggregation size.
+func (s *Scheduler) PendingItemCountForTest() int {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	n := 0
+	for _, c := range s.pending {
+		n += pendingItemCount(c)
+	}
+	return n
 }
 
 // Stop is a compatibility wrapper that waits without an external deadline.
