@@ -19,9 +19,11 @@ type mockEnqueuer struct {
 	mu      sync.Mutex
 	records [][]byte
 	err     error
+	calls   atomic.Int32
 }
 
 func (m *mockEnqueuer) Enqueue(payload []byte) (*queue.Record, error) {
+	m.calls.Add(1)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.err != nil {
@@ -38,16 +40,19 @@ func (m *mockEnqueuer) count() int {
 }
 
 type mockCollector struct {
-	name      string
-	samples   []telemetry.Sample
-	err       error
-	delay     time.Duration
-	started   chan struct{}
-	release   chan struct{}
-	calls     atomic.Int32
-	maxSeen   *atomic.Int32
-	inFlight  *atomic.Int32
-	enterHook func()
+	name         string
+	samples      []telemetry.Sample
+	err          error
+	delay        time.Duration
+	ignoreCancel bool
+	panicOnce    atomic.Bool
+	doPanic      bool
+	started      chan struct{}
+	release      chan struct{}
+	calls        atomic.Int32
+	maxSeen      *atomic.Int32
+	inFlight     *atomic.Int32
+	enterHook    func()
 }
 
 func (m *mockCollector) Name() string { return m.name }
@@ -71,6 +76,20 @@ func (m *mockCollector) Collect(ctx context.Context) ([]telemetry.Sample, error)
 		case m.started <- struct{}{}:
 		default:
 		}
+	}
+	if m.doPanic && m.panicOnce.CompareAndSwap(false, true) {
+		panic("simulated collector panic")
+	}
+	if m.ignoreCancel {
+		if m.release != nil {
+			<-m.release
+		} else if m.delay > 0 {
+			time.Sleep(m.delay)
+		}
+		if m.err != nil {
+			return nil, m.err
+		}
+		return m.samples, nil
 	}
 	if m.release != nil {
 		select {
@@ -142,28 +161,24 @@ func TestSchedulerRunOnce(t *testing.T) {
 
 	sched.RunOnce(context.Background())
 
-	// Per-collector enqueue: success batch + error batch.
-	if enq.count() != 2 {
-		t.Fatalf("expected 2 enqueued records, got %d", enq.count())
+	// Aggregate enqueue: one durable record per cycle, not per collector.
+	if enq.count() != 1 {
+		t.Fatalf("expected 1 aggregated enqueued record, got %d", enq.count())
 	}
 
-	var sawObs, sawErr bool
 	enq.mu.Lock()
-	defer enq.mu.Unlock()
-	for _, raw := range enq.records {
-		var batch telemetry.CollectionBatch
-		if err := json.Unmarshal(raw, &batch); err != nil {
-			t.Fatalf("failed to unmarshal batch: %v", err)
-		}
-		if len(batch.Observations) == 1 && batch.Observations[0].MetricKey == "system.cpu.utilization" {
-			sawObs = true
-		}
-		if len(batch.Errors) == 1 && batch.Errors[0].Collector == "mem_failing" {
-			sawErr = true
-		}
+	var batch telemetry.CollectionBatch
+	if err := json.Unmarshal(enq.records[0], &batch); err != nil {
+		enq.mu.Unlock()
+		t.Fatalf("failed to unmarshal batch: %v", err)
 	}
-	if !sawObs || !sawErr {
-		t.Fatalf("expected observation and error batches, sawObs=%v sawErr=%v", sawObs, sawErr)
+	enq.mu.Unlock()
+
+	if len(batch.Observations) != 1 || batch.Observations[0].MetricKey != "system.cpu.utilization" {
+		t.Fatalf("expected cpu observation in aggregate batch, got %+v", batch.Observations)
+	}
+	if len(batch.Errors) != 1 || batch.Errors[0].Collector != "mem_failing" {
+		t.Fatalf("expected mem_failing error in aggregate batch, got %+v", batch.Errors)
 	}
 
 	_, runErrors := sched.Stats()
@@ -173,6 +188,40 @@ func TestSchedulerRunOnce(t *testing.T) {
 	st := sched.Status()
 	if st.EnabledCollectors != 2 || st.TotalCollectors != 2 {
 		t.Fatalf("status collectors enabled=%d total=%d", st.EnabledCollectors, st.TotalCollectors)
+	}
+}
+
+func TestSchedulerAggregateEnqueuePreservesHorizon(t *testing.T) {
+	// Default-like cardinality: N collectors in one cycle must produce 1 queue record.
+	const n = 3
+	regs := make([]collector.Registration, 0, n)
+	for i := 0; i < n; i++ {
+		c := &mockCollector{
+			name:    "c" + string(rune('a'+i)),
+			samples: []telemetry.Sample{{MetricKey: "m", Value: float64(i), Unit: "u"}},
+		}
+		regs = append(regs, collector.Registration{
+			Collector: c, Enabled: true, Interval: 15 * time.Second, Timeout: time.Second,
+		})
+	}
+	enq := &mockEnqueuer{}
+	sched, err := NewScheduler(testIdent(), mustRegistry(t, regs...), enq, 2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sched.RunOnce(context.Background())
+	if enq.count() != 1 {
+		t.Fatalf("horizon regression: expected 1 aggregate record for %d collectors, got %d", n, enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Observations) != n {
+		t.Fatalf("expected %d observations in aggregate, got %d", n, len(batch.Observations))
 	}
 }
 
@@ -281,6 +330,141 @@ func TestSchedulerTimeoutIsolation(t *testing.T) {
 	}
 	if bStatus.ErrorCount != 0 || bStatus.RunCount != 1 {
 		t.Fatalf("B should succeed independently, status=%+v", *bStatus)
+	}
+	if enq.count() != 1 {
+		t.Fatalf("expected one aggregate enqueue, got %d", enq.count())
+	}
+}
+
+func TestSchedulerNonCooperativeTimeoutReleasesAdmission(t *testing.T) {
+	// Two non-cooperative collectors fill concurrency=2. If timeout does not release
+	// admission, the healthy collector waiting for a slot is starved indefinitely.
+	release1 := make(chan struct{})
+	release2 := make(chan struct{})
+	stuck1Started := make(chan struct{}, 1)
+	stuck2Started := make(chan struct{}, 1)
+	stuck1 := &mockCollector{
+		name:         "stuck1",
+		ignoreCancel: true,
+		release:      release1,
+		started:      stuck1Started,
+		samples:      []telemetry.Sample{{MetricKey: "s1", Value: 1, Unit: "u"}},
+	}
+	stuck2 := &mockCollector{
+		name:         "stuck2",
+		ignoreCancel: true,
+		release:      release2,
+		started:      stuck2Started,
+		samples:      []telemetry.Sample{{MetricKey: "s2", Value: 1, Unit: "u"}},
+	}
+	okStarted := make(chan struct{}, 1)
+	ok := &mockCollector{
+		name:    "ok",
+		started: okStarted,
+		samples: []telemetry.Sample{{MetricKey: "ok", Value: 1, Unit: "u"}},
+	}
+	reg := mustRegistry(t,
+		collector.Registration{Collector: stuck1, Enabled: true, Interval: time.Hour, Timeout: 40 * time.Millisecond},
+		collector.Registration{Collector: stuck2, Enabled: true, Interval: time.Hour, Timeout: 40 * time.Millisecond},
+		collector.Registration{Collector: ok, Enabled: true, Interval: time.Hour, Timeout: time.Second},
+	)
+	enq := &mockEnqueuer{}
+	sched, err := NewScheduler(testIdent(), reg, enq, 2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	var stuckWG sync.WaitGroup
+	stuckWG.Add(2)
+	go func() {
+		defer stuckWG.Done()
+		sched.executeCollector(ctx, sched.runtimes[0])
+	}()
+	go func() {
+		defer stuckWG.Done()
+		sched.executeCollector(ctx, sched.runtimes[1])
+	}()
+
+	for _, ch := range []chan struct{}{stuck1Started, stuck2Started} {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			close(release1)
+			close(release2)
+			t.Fatal("stuck collectors did not start")
+		}
+	}
+	if got := sched.Status().InFlight; got != 2 {
+		close(release1)
+		close(release2)
+		t.Fatalf("expected both admission slots held by stuck collectors, InFlight=%d", got)
+	}
+
+	okDone := make(chan struct{})
+	go func() {
+		sched.executeCollector(ctx, sched.runtimes[2])
+		close(okDone)
+	}()
+
+	select {
+	case <-okStarted:
+	case <-time.After(500 * time.Millisecond):
+		close(release1)
+		close(release2)
+		t.Fatal("ok collector starved — non-cooperative collectors held admission after timeout")
+	}
+
+	select {
+	case <-okDone:
+	case <-time.After(time.Second):
+		close(release1)
+		close(release2)
+		t.Fatal("ok executeCollector did not return")
+	}
+
+	stuckWG.Wait()
+	if st := sched.Status(); st.InFlight != 0 {
+		close(release1)
+		close(release2)
+		t.Fatalf("global admission InFlight=%d want 0 after timeout release", st.InFlight)
+	}
+	for _, name := range []string{"stuck1", "stuck2"} {
+		var st CollectorStatus
+		for _, c := range sched.Status().Collectors {
+			if c.Name == name {
+				st = c
+			}
+		}
+		if st.ErrorCount < 1 {
+			close(release1)
+			close(release2)
+			t.Fatalf("%s should record timeout failure: %+v", name, st)
+		}
+	}
+	if ok.calls.Load() != 1 {
+		close(release1)
+		close(release2)
+		t.Fatalf("ok calls=%d", ok.calls.Load())
+	}
+
+	close(release1)
+	close(release2)
+	deadline := time.Now().Add(time.Second)
+	for {
+		still := false
+		for _, c := range sched.Status().Collectors {
+			if (c.Name == "stuck1" || c.Name == "stuck2") && c.InFlight {
+				still = true
+			}
+		}
+		if !still {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stuck outstanding did not clear after release")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -491,8 +675,119 @@ func TestSchedulerCollectorErrorDoesNotKillOthers(t *testing.T) {
 	if okStatus.ErrorCount != 0 || okStatus.RunCount != 1 {
 		t.Fatalf("ok status=%+v", okStatus)
 	}
-	if enq.count() < 2 {
-		t.Fatalf("expected both collectors to enqueue, got %d", enq.count())
+	if enq.count() != 1 {
+		t.Fatalf("expected one aggregate enqueue, got %d", enq.count())
+	}
+}
+
+func TestSchedulerEnqueueFailureAccountingContinues(t *testing.T) {
+	ok := &mockCollector{
+		name:    "ok",
+		samples: []telemetry.Sample{{MetricKey: "ok.metric", Value: 1, Unit: "u"}},
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: ok, Enabled: true, Interval: 30 * time.Millisecond, Timeout: time.Second,
+	})
+	enq := &mockEnqueuer{err: errors.New("disk full")}
+	sched, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sched.RunOnce(context.Background())
+	if enq.calls.Load() < 1 {
+		t.Fatal("expected enqueue attempt")
+	}
+	if enq.count() != 0 {
+		t.Fatalf("enqueue should have failed closed, got %d records", enq.count())
+	}
+	_, runErrors := sched.Stats()
+	if runErrors < 1 {
+		t.Fatalf("expected runErrors accounting for enqueue failure, got %d", runErrors)
+	}
+	st := sched.Status()
+	if len(st.Collectors) != 1 || st.Collectors[0].LastError != "enqueue_failed" {
+		t.Fatalf("expected enqueue_failed collector status, got %+v", st.Collectors)
+	}
+
+	// Scheduler must continue operating after enqueue failure.
+	enq.err = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sched.Start(ctx)
+	deadline := time.Now().Add(2 * time.Second)
+	for enq.count() < 1 {
+		if time.Now().After(deadline) {
+			sched.Stop()
+			t.Fatal("scheduler did not continue after enqueue failure")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	sched.Stop()
+	if ok.calls.Load() < 2 {
+		t.Fatalf("expected continued collection after enqueue failure, calls=%d", ok.calls.Load())
+	}
+}
+
+func TestSchedulerPanicContained(t *testing.T) {
+	panicCollector := &mockCollector{
+		name:    "panicky",
+		doPanic: true,
+		samples: []telemetry.Sample{{MetricKey: "p", Value: 1, Unit: "u"}},
+	}
+	ok := &mockCollector{
+		name:    "ok",
+		samples: []telemetry.Sample{{MetricKey: "ok.metric", Value: 1, Unit: "u"}},
+	}
+	reg := mustRegistry(t,
+		collector.Registration{Collector: panicCollector, Enabled: true, Interval: time.Hour, Timeout: time.Second},
+		collector.Registration{Collector: ok, Enabled: true, Interval: time.Hour, Timeout: time.Second},
+	)
+	enq := &mockEnqueuer{}
+	sched, err := NewScheduler(testIdent(), reg, enq, 2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sched.RunOnce(context.Background())
+
+	if ok.calls.Load() != 1 {
+		t.Fatalf("ok collector should still run after panic containment, calls=%d", ok.calls.Load())
+	}
+	st := sched.Status()
+	var panicStatus, okStatus CollectorStatus
+	for _, c := range st.Collectors {
+		switch c.Name {
+		case "panicky":
+			panicStatus = c
+		case "ok":
+			okStatus = c
+		}
+	}
+	if panicStatus.ErrorCount < 1 || panicStatus.LastError == "" {
+		t.Fatalf("panic should become typed collector failure: %+v", panicStatus)
+	}
+	if okStatus.ErrorCount != 0 || okStatus.RunCount != 1 {
+		t.Fatalf("ok status=%+v", okStatus)
+	}
+	if enq.count() != 1 {
+		t.Fatalf("expected aggregate enqueue including panic error, got %d", enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawPanic := false
+	for _, e := range batch.Errors {
+		if e.Collector == "panicky" && e.Code == "COLLECTION_FAILED" {
+			sawPanic = true
+		}
+	}
+	if !sawPanic {
+		t.Fatalf("expected panicky COLLECTION_FAILED in batch errors: %+v", batch.Errors)
 	}
 }
 

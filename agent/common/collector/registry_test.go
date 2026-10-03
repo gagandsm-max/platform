@@ -97,6 +97,36 @@ func TestRegistryRejectsNilCollector(t *testing.T) {
 	}
 }
 
+func TestRegistryRejectsNegativeIntervalAndTimeout(t *testing.T) {
+	_, err := NewRegistry([]Registration{
+		{Collector: &stubCollector{name: "cpu"}, Enabled: true, Interval: -time.Second, Timeout: time.Second},
+	})
+	if err == nil || !strings.Contains(err.Error(), "COLLECTOR_REGISTRY_INTERVAL_INVALID") {
+		t.Fatalf("expected negative interval rejection, got %v", err)
+	}
+
+	_, err = NewRegistry([]Registration{
+		{Collector: &stubCollector{name: "cpu"}, Enabled: true, Interval: time.Second, Timeout: -time.Millisecond},
+	})
+	if err == nil || !strings.Contains(err.Error(), "COLLECTOR_REGISTRY_TIMEOUT_INVALID") {
+		t.Fatalf("expected negative timeout rejection, got %v", err)
+	}
+}
+
+func TestRegistryAcceptsZeroIntervalAndTimeout(t *testing.T) {
+	// Zero means "unset"; scheduler applies defaults. Negative is rejected above.
+	reg, err := NewRegistry([]Registration{
+		{Collector: &stubCollector{name: "cpu"}, Enabled: true, Interval: 0, Timeout: 0},
+	})
+	if err != nil {
+		t.Fatalf("zero interval/timeout should be accepted: %v", err)
+	}
+	entries := reg.Entries()
+	if len(entries) != 1 || entries[0].Interval != 0 || entries[0].Timeout != 0 {
+		t.Fatalf("unexpected entries: %+v", entries)
+	}
+}
+
 func TestRegistryEnforcesMaximumBound(t *testing.T) {
 	regs := make([]Registration, 0, MaxRegisteredCollectors+1)
 	for i := 0; i < MaxRegisteredCollectors+1; i++ {

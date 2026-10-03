@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"sync"
@@ -52,18 +53,33 @@ type Status struct {
 	Collectors        []CollectorStatus `json:"collectors"`
 }
 
+type collectResult struct {
+	samples []telemetry.Sample
+	err     error
+}
+
+// pendingContribution is one collector's deposit into the open aggregate cycle.
+type pendingContribution struct {
+	name         string
+	collectedAt  time.Time
+	durationMs   int64
+	observations []telemetry.Observation
+	errors       []telemetry.CollectorError
+}
+
 type collectorRuntime struct {
 	entry       collector.Entry
 	phaseOffset time.Duration
 	interval    time.Duration
 	timeout     time.Duration
 
-	mu         sync.Mutex
-	inFlight   bool
-	lastRun    time.Time
-	lastError  string
-	runCount   uint64
-	errorCount uint64
+	mu          sync.Mutex
+	inFlight    bool
+	outstanding bool // non-cooperative Collect still running after timeout
+	lastRun     time.Time
+	lastError   string
+	runCount    uint64
+	errorCount  uint64
 }
 
 type Scheduler struct {
@@ -71,10 +87,15 @@ type Scheduler struct {
 	registry       *collector.Registry
 	enqueuer       Enqueuer
 	maxConcurrency int
+	flushInterval  time.Duration
 	logger         *slog.Logger
 
 	runtimes []*collectorRuntime
 	sem      chan struct{}
+
+	pendingMu  sync.Mutex
+	pending    map[string]pendingContribution
+	cycleStart time.Time
 
 	mu        sync.Mutex
 	running   bool
@@ -118,6 +139,7 @@ func NewScheduler(
 		maxConcurrency = len(enabled)
 	}
 
+	flushInterval := time.Duration(0)
 	runtimes := make([]*collectorRuntime, 0, registry.Len())
 	for _, entry := range registry.Entries() {
 		interval := entry.Interval
@@ -128,6 +150,11 @@ func NewScheduler(
 		if timeout <= 0 {
 			timeout = defaultTimeout
 		}
+		if entry.Enabled {
+			if flushInterval <= 0 || interval < flushInterval {
+				flushInterval = interval
+			}
+		}
 		runtimes = append(runtimes, &collectorRuntime{
 			entry:       entry,
 			phaseOffset: phaseOffset(entry.Name, interval),
@@ -135,15 +162,20 @@ func NewScheduler(
 			timeout:     timeout,
 		})
 	}
+	if flushInterval <= 0 {
+		flushInterval = defaultInterval
+	}
 
 	return &Scheduler{
 		ident:          ident,
 		registry:       registry,
 		enqueuer:       enqueuer,
 		maxConcurrency: maxConcurrency,
+		flushInterval:  flushInterval,
 		logger:         logger,
 		runtimes:       runtimes,
 		sem:            make(chan struct{}, maxConcurrency),
+		pending:        make(map[string]pendingContribution),
 		stopCh:         make(chan struct{}),
 	}, nil
 }
@@ -167,6 +199,9 @@ func (s *Scheduler) Start(ctx context.Context) {
 	s.running = true
 	s.mu.Unlock()
 
+	s.wg.Add(1)
+	go s.runFlushLoop(ctx)
+
 	for _, rt := range s.runtimes {
 		if !rt.entry.Enabled {
 			continue
@@ -174,6 +209,26 @@ func (s *Scheduler) Start(ctx context.Context) {
 		rt := rt
 		s.wg.Add(1)
 		go s.runCollectorLoop(ctx, rt)
+	}
+}
+
+func (s *Scheduler) runFlushLoop(ctx context.Context) {
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(s.flushInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.flushPending()
+		case <-s.stopCh:
+			s.flushPending()
+			return
+		case <-ctx.Done():
+			s.flushPending()
+			return
+		}
 	}
 }
 
@@ -197,54 +252,117 @@ func (s *Scheduler) runCollectorLoop(ctx context.Context, rt *collectorRuntime) 
 }
 
 func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) {
+	rt.mu.Lock()
+	if rt.outstanding {
+		rt.mu.Unlock()
+		return
+	}
+	rt.mu.Unlock()
+
 	select {
 	case s.sem <- struct{}{}:
-		defer func() { <-s.sem }()
 	case <-s.stopCh:
 		return
 	case <-ctx.Done():
 		return
 	}
 
+	var releaseOnce sync.Once
+	releaseAdmission := func() {
+		releaseOnce.Do(func() {
+			<-s.sem
+			s.inFlightCount.Add(-1)
+		})
+	}
+
 	s.inFlightCount.Add(1)
 	rt.mu.Lock()
 	rt.inFlight = true
 	rt.mu.Unlock()
+
+	startTime := time.Now().UTC()
+	runCtx, cancel := context.WithTimeout(ctx, rt.timeout)
+
+	resultCh := make(chan collectResult, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				resultCh <- collectResult{err: fmt.Errorf("COLLECTION_PANIC: %v", r)}
+			}
+		}()
+		samples, err := rt.entry.Collector.Collect(runCtx)
+		resultCh <- collectResult{samples: samples, err: err}
+	}()
+
+	var res collectResult
+	timedOut := false
+	select {
+	case res = <-resultCh:
+		cancel()
+	case <-runCtx.Done():
+		select {
+		case res = <-resultCh:
+			cancel()
+		default:
+			timedOut = true
+			cancel()
+		}
+	}
+
+	if timedOut {
+		summary := "collection_timeout"
+		if err := runCtx.Err(); err != nil {
+			summary = safeErrorSummary(err)
+		}
+		s.finishCollectorFailure(rt, startTime, summary)
+		s.deposit(pendingContribution{
+			name:        rt.entry.Name,
+			collectedAt: startTime,
+			durationMs:  time.Since(startTime).Milliseconds(),
+			errors: []telemetry.CollectorError{{
+				Collector: rt.entry.Name,
+				Code:      "COLLECTION_FAILED",
+				Summary:   summary,
+			}},
+		})
+
+		rt.mu.Lock()
+		rt.outstanding = true
+		rt.mu.Unlock()
+		releaseAdmission()
+
+		// Bound: at most one waiter per collector while outstanding.
+		go func() {
+			<-resultCh
+			rt.mu.Lock()
+			rt.outstanding = false
+			rt.inFlight = false
+			rt.mu.Unlock()
+		}()
+		return
+	}
+
 	defer func() {
 		rt.mu.Lock()
 		rt.inFlight = false
 		rt.mu.Unlock()
-		s.inFlightCount.Add(-1)
+		releaseAdmission()
 	}()
 
-	startTime := time.Now().UTC()
-	runCtx, cancel := context.WithTimeout(ctx, rt.timeout)
-	defer cancel()
-
-	samples, err := rt.entry.Collector.Collect(runCtx)
-
-	var observations []telemetry.Observation
-	var collectorErrors []telemetry.CollectorError
-
-	if err != nil {
-		summary := safeErrorSummary(err)
-		collectorErrors = append(collectorErrors, telemetry.CollectorError{
-			Collector: rt.entry.Name,
-			Code:      "COLLECTION_FAILED",
-			Summary:   summary,
+	durationMs := time.Since(startTime).Milliseconds()
+	if res.err != nil {
+		summary := safeErrorSummary(res.err)
+		s.finishCollectorFailure(rt, startTime, summary)
+		s.deposit(pendingContribution{
+			name:        rt.entry.Name,
+			collectedAt: startTime,
+			durationMs:  durationMs,
+			errors: []telemetry.CollectorError{{
+				Collector: rt.entry.Name,
+				Code:      "COLLECTION_FAILED",
+				Summary:   summary,
+			}},
 		})
-		rt.mu.Lock()
-		rt.runCount++
-		rt.errorCount++
-		rt.lastRun = startTime
-		rt.lastError = summary
-		rt.mu.Unlock()
-
-		s.mu.Lock()
-		s.runErrors++
-		s.lastRun = startTime
-		s.mu.Unlock()
-
 		s.logger.Warn("Collector execution failed",
 			"event_code", "AGENT_COLLECTOR_FAILED",
 			"result", "FAILED",
@@ -253,36 +371,110 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 				"reason_class": "collection_failed",
 			},
 		)
-	} else {
-		for _, sample := range samples {
-			obs, normErr := telemetry.Normalize(s.ident, rt.entry.Name, startTime, sample)
-			if normErr != nil {
-				s.logger.Debug("Telemetry normalization rejected sample",
-					"event_code", "AGENT_TELEMETRY_NORMALIZE_REJECTED",
-					"result", "REJECTED",
-					"safe_context", map[string]any{
-						"metric_key":   sample.MetricKey,
-						"reason_class": "normalize_rejected",
-					},
-				)
-				continue
-			}
-			observations = append(observations, obs)
-		}
-		rt.mu.Lock()
-		rt.runCount++
-		rt.lastRun = startTime
-		rt.lastError = ""
-		rt.mu.Unlock()
-
-		s.mu.Lock()
-		s.lastRun = startTime
-		s.mu.Unlock()
+		return
 	}
 
-	durationMs := time.Since(startTime).Milliseconds()
+	var observations []telemetry.Observation
+	for _, sample := range res.samples {
+		obs, normErr := telemetry.Normalize(s.ident, rt.entry.Name, startTime, sample)
+		if normErr != nil {
+			s.logger.Debug("Telemetry normalization rejected sample",
+				"event_code", "AGENT_TELEMETRY_NORMALIZE_REJECTED",
+				"result", "REJECTED",
+				"safe_context", map[string]any{
+					"metric_key":   sample.MetricKey,
+					"reason_class": "normalize_rejected",
+				},
+			)
+			continue
+		}
+		observations = append(observations, obs)
+	}
+
+	rt.mu.Lock()
+	rt.runCount++
+	rt.lastRun = startTime
+	rt.lastError = ""
+	rt.mu.Unlock()
+
+	s.mu.Lock()
+	s.lastRun = startTime
+	s.mu.Unlock()
+
+	if len(observations) == 0 {
+		return
+	}
+	s.deposit(pendingContribution{
+		name:         rt.entry.Name,
+		collectedAt:  startTime,
+		durationMs:   durationMs,
+		observations: observations,
+	})
+}
+
+func (s *Scheduler) finishCollectorFailure(rt *collectorRuntime, startTime time.Time, summary string) {
+	rt.mu.Lock()
+	rt.runCount++
+	rt.errorCount++
+	rt.lastRun = startTime
+	rt.lastError = summary
+	rt.mu.Unlock()
+
+	s.mu.Lock()
+	s.runErrors++
+	s.lastRun = startTime
+	s.mu.Unlock()
+}
+
+func (s *Scheduler) deposit(c pendingContribution) {
+	if c.name == "" {
+		return
+	}
+	if len(c.observations) == 0 && len(c.errors) == 0 {
+		return
+	}
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	if s.cycleStart.IsZero() || c.collectedAt.Before(s.cycleStart) {
+		s.cycleStart = c.collectedAt
+	}
+	s.pending[c.name] = c
+}
+
+// flushPending aggregates per-collector deposits into one CollectionBatch so
+// durable-queue record cardinality tracks the collection cycle, not collector count.
+func (s *Scheduler) flushPending() {
+	s.pendingMu.Lock()
+	if len(s.pending) == 0 {
+		s.pendingMu.Unlock()
+		return
+	}
+	contribs := make([]pendingContribution, 0, len(s.pending))
+	for _, rt := range s.runtimes {
+		if c, ok := s.pending[rt.entry.Name]; ok {
+			contribs = append(contribs, c)
+		}
+	}
+	cycleStart := s.cycleStart
+	s.pending = make(map[string]pendingContribution)
+	s.cycleStart = time.Time{}
+	s.pendingMu.Unlock()
+
+	var observations []telemetry.Observation
+	var collectorErrors []telemetry.CollectorError
+	var maxDur int64
+	for _, c := range contribs {
+		observations = append(observations, c.observations...)
+		collectorErrors = append(collectorErrors, c.errors...)
+		if c.durationMs > maxDur {
+			maxDur = c.durationMs
+		}
+	}
 	if len(observations) == 0 && len(collectorErrors) == 0 {
 		return
+	}
+	if cycleStart.IsZero() {
+		cycleStart = time.Now().UTC()
 	}
 
 	batch := telemetry.CollectionBatch{
@@ -294,8 +486,8 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		Hostname:      s.ident.Hostname,
 		OS:            s.ident.OS,
 		Arch:          s.ident.Arch,
-		CollectedAt:   startTime,
-		DurationMs:    durationMs,
+		CollectedAt:   cycleStart,
+		DurationMs:    maxDur,
 		Observations:  observations,
 		Errors:        collectorErrors,
 	}
@@ -314,16 +506,21 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		s.mu.Lock()
 		s.runErrors++
 		s.mu.Unlock()
-		rt.mu.Lock()
-		rt.errorCount++
-		rt.lastError = "enqueue_failed"
-		rt.mu.Unlock()
+		for _, c := range contribs {
+			if rt := s.runtimeByName(c.name); rt != nil {
+				rt.mu.Lock()
+				rt.errorCount++
+				rt.lastError = "enqueue_failed"
+				rt.mu.Unlock()
+			}
+		}
 		s.logger.Error("Failed to enqueue collection batch",
 			"event_code", "AGENT_COLLECTION_ENQUEUE_FAILED",
 			"result", "FAILED",
 			"safe_context", map[string]any{
-				"collector":    rt.entry.Name,
-				"reason_class": "enqueue_failed",
+				"reason_class":      "enqueue_failed",
+				"observation_count": len(observations),
+				"error_count":       len(collectorErrors),
 			},
 		)
 		return
@@ -333,16 +530,25 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		"event_code", "AGENT_COLLECTION_ENQUEUED",
 		"result", "ACCEPTED",
 		"safe_context", map[string]any{
-			"collector":         rt.entry.Name,
 			"observation_count": len(observations),
 			"error_count":       len(collectorErrors),
-			"duration_ms":       durationMs,
+			"duration_ms":       maxDur,
+			"collector_count":   len(contribs),
 		},
 	)
 }
 
+func (s *Scheduler) runtimeByName(name string) *collectorRuntime {
+	for _, rt := range s.runtimes {
+		if rt.entry.Name == name {
+			return rt
+		}
+	}
+	return nil
+}
+
 // RunOnce executes every enabled collector once with timeout isolation and
-// bounded concurrency. Intended for tests and explicit one-shot collection.
+// bounded concurrency, then flushes one aggregate durable batch.
 func (s *Scheduler) RunOnce(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, rt := range s.runtimes {
@@ -357,6 +563,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 		}()
 	}
 	wg.Wait()
+	s.flushPending()
 }
 
 func (s *Scheduler) Stop() {
