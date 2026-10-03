@@ -1271,3 +1271,186 @@ func (b *blockingEnqueuer) count() int {
 	return len(b.records)
 }
 
+func pendingItemCountForTest(s *Scheduler, name string) int {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	return pendingItemCount(s.pending[name])
+}
+
+func mustObservation(t *testing.T, ident *identity.AgentIdentity, at time.Time, value float64) telemetry.Observation {
+	t.Helper()
+	obs, err := telemetry.Normalize(ident, "cpu", at, telemetry.Sample{
+		MetricKey: "system.cpu.utilization", Value: value, Unit: "%",
+	})
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	return obs
+}
+
+func TestPendingOverflowExplicitAndBounded(t *testing.T) {
+	ident := testIdent()
+	reg := mustRegistry(t, collector.Registration{
+		Collector: &mockCollector{name: "cpu", samples: []telemetry.Sample{{MetricKey: "m", Value: 1, Unit: "u"}}},
+		Enabled:   true, Interval: time.Hour, Timeout: time.Second,
+	})
+	enq := &mockEnqueuer{}
+	sched, err := NewScheduler(ident, reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Unix(400, 0).UTC()
+	for i := 0; i < maxPendingItemsPerCollector; i++ {
+		sched.deposit(pendingContribution{
+			name: "cpu", collectedAt: base.Add(time.Duration(i) * time.Millisecond), durationMs: 1,
+			observations: []telemetry.Observation{mustObservation(t, ident, base, float64(i))},
+		})
+	}
+	if got := pendingItemCountForTest(sched, "cpu"); got != maxPendingItemsPerCollector {
+		t.Fatalf("pre-overflow pending count=%d want %d", got, maxPendingItemsPerCollector)
+	}
+	if st := sched.Status(); st.PendingOverflows != 0 {
+		t.Fatalf("unexpected overflow before crossing bound: %+v", st)
+	}
+
+	// Crossing the bound must fail loud.
+	sched.deposit(pendingContribution{
+		name: "cpu", collectedAt: base.Add(time.Second), durationMs: 1,
+		observations: []telemetry.Observation{mustObservation(t, ident, base.Add(time.Second), 999)},
+	})
+
+	if got := pendingItemCountForTest(sched, "cpu"); got > maxPendingItemsPerCollector {
+		t.Fatalf("pending unbounded after overflow: count=%d bound=%d", got, maxPendingItemsPerCollector)
+	}
+	st := sched.Status()
+	if st.PendingOverflows < 1 {
+		t.Fatalf("PendingOverflows=%d want >=1", st.PendingOverflows)
+	}
+	_, runErrors := sched.Stats()
+	if runErrors < 1 || st.RunErrors < 1 {
+		t.Fatalf("RunErrors not reflected: stats=%d status=%d", runErrors, st.RunErrors)
+	}
+
+	// Repeated excess deposits must remain bounded and keep the marker.
+	overflowsBefore := st.PendingOverflows
+	for i := 0; i < 64; i++ {
+		sched.deposit(pendingContribution{
+			name: "cpu", collectedAt: base.Add(2*time.Second + time.Duration(i)*time.Millisecond), durationMs: 1,
+			observations: []telemetry.Observation{mustObservation(t, ident, base, float64(1000+i))},
+		})
+		if got := pendingItemCountForTest(sched, "cpu"); got > maxPendingItemsPerCollector {
+			t.Fatalf("unbounded growth under repeated overflow: count=%d", got)
+		}
+	}
+	st = sched.Status()
+	if st.PendingOverflows <= overflowsBefore {
+		t.Fatalf("repeated excess did not increment PendingOverflows: before=%d after=%d", overflowsBefore, st.PendingOverflows)
+	}
+
+	sched.flushPending()
+	if enq.count() != 1 {
+		t.Fatalf("expected one durable batch, got %d", enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawOverflow := false
+	for _, e := range batch.Errors {
+		if e.Code == "PENDING_OVERFLOW" && e.Collector == "cpu" {
+			sawOverflow = true
+			break
+		}
+	}
+	if !sawOverflow {
+		t.Fatalf("durable batch missing PENDING_OVERFLOW: %+v", batch.Errors)
+	}
+	if len(batch.Observations)+len(batch.Errors) > maxPendingItemsPerCollector {
+		t.Fatalf("flushed batch exceeded bound: obs=%d err=%d", len(batch.Observations), len(batch.Errors))
+	}
+}
+
+func TestPendingOverflowErrorHeavyBoundRemainsReal(t *testing.T) {
+	// Error-heavy pending has few/no observations to trim; the hard bound must still hold.
+	reg := mustRegistry(t, collector.Registration{
+		Collector: &mockCollector{name: "cpu", samples: []telemetry.Sample{{MetricKey: "m", Value: 1, Unit: "u"}}},
+		Enabled:   true, Interval: time.Hour, Timeout: time.Second,
+	})
+	enq := &mockEnqueuer{}
+	sched, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Unix(500, 0).UTC()
+	for i := 0; i < maxPendingItemsPerCollector; i++ {
+		sched.deposit(pendingContribution{
+			name: "cpu", collectedAt: base.Add(time.Duration(i) * time.Millisecond), durationMs: 1,
+			errors: []telemetry.CollectorError{{
+				Collector: "cpu",
+				Code:      "COLLECTION_FAILED",
+				Summary:   "err-" + strconv.Itoa(i),
+			}},
+		})
+	}
+	if got := pendingItemCountForTest(sched, "cpu"); got != maxPendingItemsPerCollector {
+		t.Fatalf("error-heavy fill count=%d want %d", got, maxPendingItemsPerCollector)
+	}
+
+	sched.deposit(pendingContribution{
+		name: "cpu", collectedAt: base.Add(time.Second), durationMs: 1,
+		errors: []telemetry.CollectorError{{
+			Collector: "cpu", Code: "COLLECTION_FAILED", Summary: "overflow-trigger",
+		}},
+	})
+
+	if got := pendingItemCountForTest(sched, "cpu"); got > maxPendingItemsPerCollector {
+		t.Fatalf("error-heavy overflow broke bound: count=%d bound=%d", got, maxPendingItemsPerCollector)
+	}
+	st := sched.Status()
+	if st.PendingOverflows < 1 || st.RunErrors < 1 {
+		t.Fatalf("error-heavy overflow not accounted: PendingOverflows=%d RunErrors=%d", st.PendingOverflows, st.RunErrors)
+	}
+
+	for i := 0; i < 100; i++ {
+		sched.deposit(pendingContribution{
+			name: "cpu", collectedAt: base.Add(2*time.Second + time.Duration(i)*time.Millisecond), durationMs: 1,
+			errors: []telemetry.CollectorError{{
+				Collector: "cpu", Code: "COLLECTION_FAILED", Summary: "more-" + strconv.Itoa(i),
+			}},
+		})
+		if got := pendingItemCountForTest(sched, "cpu"); got > maxPendingItemsPerCollector {
+			t.Fatalf("error-heavy repeated overflow unbounded: count=%d", got)
+		}
+	}
+
+	sched.flushPending()
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Observations) != 0 {
+		t.Fatalf("expected error-heavy batch without observations, got %d", len(batch.Observations))
+	}
+	sawOverflow := false
+	for _, e := range batch.Errors {
+		if e.Code == "PENDING_OVERFLOW" {
+			sawOverflow = true
+			break
+		}
+	}
+	if !sawOverflow {
+		t.Fatalf("error-heavy durable batch missing PENDING_OVERFLOW: %+v", batch.Errors)
+	}
+	if len(batch.Errors) > maxPendingItemsPerCollector {
+		t.Fatalf("error-heavy flushed errors unbounded: %d", len(batch.Errors))
+	}
+}
+

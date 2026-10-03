@@ -591,9 +591,17 @@ func (s *Scheduler) recordPendingOverflowLocked(collectorName string, target *pe
 			Code:      "PENDING_OVERFLOW",
 			Summary:   "pending aggregation bound exceeded; contribution dropped",
 		})
-		// Keep bound: drop oldest observations if needed to leave room for the marker.
-		for pendingItemCount(*target) > maxPendingItemsPerCollector && len(target.observations) > 0 {
+	}
+	// Hard bound must hold for observation-heavy and error-heavy pending alike.
+	// Drop oldest observations first, then oldest non-overflow errors; never drop
+	// the PENDING_OVERFLOW marker itself.
+	for pendingItemCount(*target) > maxPendingItemsPerCollector {
+		if len(target.observations) > 0 {
 			target.observations = target.observations[1:]
+			continue
+		}
+		if !trimOldestNonOverflowError(target) {
+			break
 		}
 	}
 	s.logger.Warn("Pending aggregation overflow",
@@ -605,6 +613,17 @@ func (s *Scheduler) recordPendingOverflowLocked(collectorName string, target *pe
 			"bound":        maxPendingItemsPerCollector,
 		},
 	)
+}
+
+func trimOldestNonOverflowError(target *pendingContribution) bool {
+	for i, e := range target.errors {
+		if e.Code == "PENDING_OVERFLOW" {
+			continue
+		}
+		target.errors = append(target.errors[:i], target.errors[i+1:]...)
+		return true
+	}
+	return false
 }
 
 // flushPending aggregates per-collector deposits into one CollectionBatch so
