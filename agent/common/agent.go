@@ -96,16 +96,25 @@ func NewAgentService(
 		return nil, fmt.Errorf("AGENT_QUEUE_INIT_FAILED: %w", err)
 	}
 
-	// 2. Initialize host collectors
-	collectors := collector.NewDefaultCollectors(cfg.MaxFilesystems)
-
-	// 3. Initialize scheduler
-	sched, err := scheduler.NewScheduler(
-		ident,
-		collectors,
-		q,
+	// 2. Initialize startup-immutable collector registry.
+	// Default collectors inherit the configured interval/timeout; the registry
+	// and scheduler still support distinct per-collector scheduling metadata.
+	registry, err := collector.NewDefaultRegistry(
+		cfg.MaxFilesystems,
 		cfg.CollectionInterval,
 		cfg.CollectionTimeout,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("AGENT_COLLECTOR_REGISTRY_INIT_FAILED: %w", err)
+	}
+
+	// 3. Initialize scheduler (per-collector schedule, timeout isolation,
+	// deterministic phase spreading, bounded concurrency).
+	sched, err := scheduler.NewScheduler(
+		ident,
+		registry,
+		q,
+		0, // default bounded concurrency
 		logger,
 	)
 	if err != nil {
@@ -221,4 +230,10 @@ func (s *AgentService) DeliveryStats() delivery.DeliveryStats {
 
 func (s *AgentService) CollectorStats() (time.Time, int) {
 	return s.scheduler.Stats()
+}
+
+// SchedulerStatus exposes detailed scheduler/collector evidence for Slice-1
+// operability inspection without changing readiness semantics.
+func (s *AgentService) SchedulerStatus() scheduler.Status {
+	return s.scheduler.Status()
 }
