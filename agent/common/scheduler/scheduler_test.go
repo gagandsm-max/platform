@@ -1453,4 +1453,3 @@ func TestPendingOverflowErrorHeavyBoundRemainsReal(t *testing.T) {
 		t.Fatalf("error-heavy flushed errors unbounded: %d", len(batch.Errors))
 	}
 }
-
