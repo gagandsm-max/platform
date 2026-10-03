@@ -1453,3 +1453,1124 @@ func TestPendingOverflowErrorHeavyBoundRemainsReal(t *testing.T) {
 		t.Fatalf("error-heavy flushed errors unbounded: %d", len(batch.Errors))
 	}
 }
+
+func TestSchedulerStopContextIdempotent(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{name: "cpu", delay: time.Millisecond}
+	reg := mustRegistry(t, collector.Registration{Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Start(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := s.StopContext(ctx); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	if err := s.StopContext(ctx); err != nil {
+		t.Fatalf("repeated StopContext: %v", err)
+	}
+}
+
+func TestSchedulerShutdownCancelDoesNotRecordFailure(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{name: "cpu", started: started, release: release}
+	reg := mustRegistry(t, collector.Registration{Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 2 * time.Second})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Start(ctx)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+	_, errsBefore := s.Stats()
+	cancel()
+	if err := s.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	close(release)
+	_, errsAfter := s.Stats()
+	if errsAfter != errsBefore {
+		t.Fatalf("shutdown cancel recorded failure: before=%d after=%d", errsBefore, errsAfter)
+	}
+}
+
+func TestSchedulerStopContextWaitsForOutstandingNonCooperative(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 40 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Start(context.Background())
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	// Allow per-collector timeout to create an outstanding waiter.
+	deadline := time.Now().Add(time.Second)
+	for {
+		st := s.Status()
+		if len(st.Collectors) > 0 && st.Collectors[0].Outstanding {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected outstanding after non-cooperative timeout")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	if err := s.StopContext(ctx); err == nil {
+		t.Fatal("StopContext must not report clean completion while outstanding")
+	}
+
+	// Repeated StopContext must stay bounded (no waiter multiplication).
+	start := time.Now()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel2()
+	_ = s.StopContext(ctx2)
+	if time.Since(start) > 200*time.Millisecond {
+		t.Fatalf("repeated StopContext too slow: %v", time.Since(start))
+	}
+
+	close(release)
+	cleanup, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cleanupCancel()
+	if err := s.StopContext(cleanup); err != nil {
+		t.Fatalf("outstanding waiter did not clean up after release: %v", err)
+	}
+	st := s.Status()
+	if len(st.Collectors) > 0 && st.Collectors[0].Outstanding {
+		t.Fatal("outstanding must clear after release")
+	}
+}
+
+func TestSchedulerDeadlineFirstRemainsFailureDespiteLaterShutdown(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+		samples:      []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 1, Unit: "%"}},
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 40 * time.Millisecond,
+	})
+	parent, parentCancel := context.WithCancel(context.Background())
+	defer parentCancel()
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	barrierHit := make(chan struct{})
+	proceed := make(chan struct{})
+	var barrierOnce sync.Once
+	s.SetClassifyBarrierForTest(func() {
+		barrierOnce.Do(func() { close(barrierHit) })
+		<-proceed
+	})
+
+	s.Start(parent)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+	select {
+	case <-barrierHit:
+	case <-time.After(2 * time.Second):
+		t.Fatal("classify barrier not reached after deadline")
+	}
+
+	// Shutdown begins AFTER the per-collector deadline already won.
+	parentCancel()
+	close(proceed)
+	close(release)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, errs := s.Stats()
+		if errs > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("deadline-first timeout must remain COLLECTION_FAILED")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_ = s.StopContext(context.Background())
+}
+
+func TestSchedulerShutdownFirstSuppressesFailure(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:    "cpu",
+		started: started,
+		release: release,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 2 * time.Second,
+	})
+	parent, parentCancel := context.WithCancel(context.Background())
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	barrierHit := make(chan struct{})
+	proceed := make(chan struct{})
+	var once sync.Once
+	s.SetClassifyBarrierForTest(func() {
+		once.Do(func() { close(barrierHit) })
+		<-proceed
+	})
+
+	s.Start(parent)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	// Shutdown wins first; then allow classification.
+	parentCancel()
+	select {
+	case <-barrierHit:
+	case <-time.After(2 * time.Second):
+		// Cooperative collector returns Canceled; barrier may run on non-timeout path too.
+	}
+	close(proceed)
+	close(release)
+	if err := s.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	_, errs := s.Stats()
+	if errs != 0 {
+		t.Fatalf("shutdown-first cancellation must not record failure, errs=%d", errs)
+	}
+}
+
+func TestSchedulerStopRaceWithTimeoutOutstandingTransition(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 5 * time.Millisecond, Timeout: 20 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Start(context.Background())
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+			defer cancel()
+			_ = s.StopContext(ctx)
+		}()
+	}
+	wg.Wait()
+	close(release)
+	cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.StopContext(cleanup); err != nil {
+		t.Fatalf("cleanup after race: %v", err)
+	}
+}
+
+func TestRunOnceStopContextTimesOutWhileNonCooperativeOutstanding(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: 30 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.RunOnce(context.Background())
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce collector did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	if err := s.StopContext(ctx); err == nil {
+		t.Fatal("StopContext must time out while RunOnce non-cooperative execution is outstanding")
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce did not finish after release")
+	}
+	cleanup, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cleanupCancel()
+	if err := s.StopContext(cleanup); err != nil {
+		t.Fatalf("StopContext should complete after release: %v", err)
+	}
+}
+
+func TestRunOnceAfterStopStartsNoCollectorCalls(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{name: "cpu", delay: time.Millisecond}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	s.RunOnce(context.Background())
+	if got := col.calls.Load(); got != 0 {
+		t.Fatalf("RunOnce after Stop must not invoke collectors, calls=%d", got)
+	}
+}
+
+func TestConcurrentRunOnceSingleFlightWhileOutstanding(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: 40 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); s.RunOnce(context.Background()) }()
+	go func() { defer wg.Done(); s.RunOnce(context.Background()) }()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		st := s.Status()
+		if len(st.Collectors) > 0 && st.Collectors[0].Outstanding {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected outstanding from first RunOnce")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := col.calls.Load(); got != 1 {
+		t.Fatalf("collector call count must stay 1 while outstanding, got %d", got)
+	}
+
+	close(release)
+	wg.Wait()
+	if got := col.calls.Load(); got != 1 {
+		t.Fatalf("collector execution multiplied after release, calls=%d", got)
+	}
+}
+
+func TestRunOnceSemaphoreWaiterSkippedAfterOutstandingRecheck(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	// maxConcurrency=1 forces the second admit to wait on the semaphore.
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: 40 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.RunOnce(context.Background())
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first collector did not start")
+	}
+
+	// Second RunOnce blocks on semaphore until first times out and releases.
+	secondDone := make(chan struct{})
+	go func() {
+		s.RunOnce(context.Background())
+		close(secondDone)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		st := s.Status()
+		if len(st.Collectors) > 0 && st.Collectors[0].Outstanding {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected first execution to become outstanding")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	select {
+	case <-secondDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second RunOnce did not finish after outstanding recheck skip")
+	}
+	if got := col.calls.Load(); got != 1 {
+		t.Fatalf("second execution must be skipped after outstanding recheck, calls=%d", got)
+	}
+
+	close(release)
+	wg.Wait()
+}
+
+func TestRunOnceStopContextStressRace(t *testing.T) {
+	enq := &mockEnqueuer{}
+	release := make(chan struct{})
+	close(release) // cooperative enough that some completes; ignoreCancel false by default
+	col := &mockCollector{
+		name:    "cpu",
+		delay:   5 * time.Millisecond,
+		release: nil,
+	}
+	// Mix non-cooperative bursts.
+	col2 := &mockCollector{
+		name:         "mem",
+		ignoreCancel: true,
+		delay:        30 * time.Millisecond,
+		release:      make(chan struct{}),
+	}
+	reg := mustRegistry(t,
+		collector.Registration{Collector: col, Enabled: true, Interval: time.Hour, Timeout: 15 * time.Millisecond},
+		collector.Registration{Collector: col2, Enabled: true, Interval: time.Hour, Timeout: 15 * time.Millisecond},
+	)
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			s.RunOnce(context.Background())
+		}()
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+			defer cancel()
+			_ = s.StopContext(ctx)
+		}()
+	}
+	wg.Wait()
+	close(col2.release)
+	cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.StopContext(cleanup); err != nil {
+		t.Fatalf("final StopContext: %v", err)
+	}
+	// Single-flight: while each collector can run multiple sequential times across
+	// iterations, overlapping multiplication is prevented; mem ignoreCancel with
+	// shared release means at most one outstanding at a time, so calls should be
+	// modest. Hard invariant checked: never more than one outstanding in status
+	// snapshot after stop.
+	st := s.Status()
+	for _, c := range st.Collectors {
+		if c.Outstanding {
+			t.Fatalf("collector %s still outstanding after final stop", c.Name)
+		}
+		if c.InFlight {
+			t.Fatalf("collector %s still in-flight after final stop", c.Name)
+		}
+	}
+}
+
+func TestCollectorReturnedDeadlineExceededIsGenuineFailure(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{
+		name: "cpu",
+		err:  context.DeadlineExceeded,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RunOnce(context.Background())
+
+	_, errs := s.Stats()
+	if errs < 1 {
+		t.Fatalf("expected scheduler error counter increment, got %d", errs)
+	}
+	st := s.Status()
+	if len(st.Collectors) == 0 || st.Collectors[0].ErrorCount < 1 {
+		t.Fatalf("expected collector error counter increment, status=%+v", st.Collectors)
+	}
+	if enq.count() != 1 {
+		t.Fatalf("expected deposited failure batch, got %d records", enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Errors) != 1 || batch.Errors[0].Code != "COLLECTION_FAILED" {
+		t.Fatalf("expected COLLECTION_FAILED deposit, got %+v", batch.Errors)
+	}
+}
+
+func TestCollectorReturnedCanceledIsGenuineFailure(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{
+		name: "cpu",
+		err:  context.Canceled,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RunOnce(context.Background())
+
+	_, errs := s.Stats()
+	if errs < 1 {
+		t.Fatalf("collector-returned Canceled must remain a genuine failure, errs=%d", errs)
+	}
+	if enq.count() != 1 {
+		t.Fatalf("expected COLLECTION_FAILED deposit, got %d records", enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Errors) != 1 || batch.Errors[0].Code != "COLLECTION_FAILED" {
+		t.Fatalf("expected COLLECTION_FAILED, got %+v", batch.Errors)
+	}
+}
+
+func TestSuccessfulCollectorResultNoFailureFromCleanupCancel(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{
+		name:    "cpu",
+		samples: []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 1, Unit: "%"}},
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RunOnce(context.Background())
+
+	_, errs := s.Stats()
+	if errs != 0 {
+		t.Fatalf("successful collect must not record failure from cleanup cancel, errs=%d", errs)
+	}
+	st := s.Status()
+	if len(st.Collectors) > 0 && st.Collectors[0].ErrorCount != 0 {
+		t.Fatalf("collector ErrorCount must stay 0, got %d", st.Collectors[0].ErrorCount)
+	}
+	if enq.count() != 1 {
+		t.Fatalf("expected one success batch, got %d", enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Errors) != 0 {
+		t.Fatalf("cleanup cancel must not deposit errors, got %+v", batch.Errors)
+	}
+	if len(batch.Observations) != 1 {
+		t.Fatalf("expected one observation, got %d", len(batch.Observations))
+	}
+}
+
+func TestStopFinalFlushEnqueuesAcceptedObservation(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+		samples:      []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 7, Unit: "%"}},
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 2 * time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Start(context.Background())
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	stopErr := make(chan error, 1)
+	go func() { stopErr <- s.StopContext(context.Background()) }()
+
+	// Allow flush loop to observe stop and exit before collector release.
+	time.Sleep(50 * time.Millisecond)
+	before := enq.count()
+	close(release)
+
+	select {
+	case err := <-stopErr:
+		if err != nil {
+			t.Fatalf("clean Stop failed: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("StopContext did not complete")
+	}
+	if enq.count() <= before {
+		t.Fatal("authoritative final flush must enqueue accepted observation after flush-loop exit")
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[len(enq.records)-1], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, obs := range batch.Observations {
+		if obs.MetricKey == "system.cpu.utilization" && obs.Value == 7 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("final durable batch missing accepted observation: %+v", batch.Observations)
+	}
+	if s.PendingItemCountForTest() != 0 {
+		t.Fatalf("pending must be empty after clean Stop, got %d", s.PendingItemCountForTest())
+	}
+}
+
+func TestStopFinalFlushEnqueuesAcceptedCollectorError(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+		err:          errors.New("post-stop collector failure"),
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 2 * time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Start(context.Background())
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	stopErr := make(chan error, 1)
+	go func() { stopErr <- s.StopContext(context.Background()) }()
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+
+	select {
+	case err := <-stopErr:
+		if err != nil {
+			t.Fatalf("clean Stop failed: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("StopContext did not complete")
+	}
+
+	found := false
+	enq.mu.Lock()
+	for _, raw := range enq.records {
+		var batch telemetry.CollectionBatch
+		if err := json.Unmarshal(raw, &batch); err != nil {
+			enq.mu.Unlock()
+			t.Fatal(err)
+		}
+		for _, e := range batch.Errors {
+			if e.Code == "COLLECTION_FAILED" {
+				found = true
+			}
+		}
+	}
+	enq.mu.Unlock()
+	if !found {
+		t.Fatal("final durable batch must contain COLLECTION_FAILED before clean Stop")
+	}
+	if s.PendingItemCountForTest() != 0 {
+		t.Fatalf("pending must be empty after clean Stop, got %d", s.PendingItemCountForTest())
+	}
+}
+
+func TestRunOnceBlockingEnqueueKeepsStopContextTimedOut(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	enq := &blockingEnqueuer{entered: entered, release: release}
+	col := &mockCollector{
+		name:    "cpu",
+		samples: []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 1, Unit: "%"}},
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runDone := make(chan struct{})
+	go func() {
+		s.RunOnce(context.Background())
+		close(runDone)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce final enqueue did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	if err := s.StopContext(ctx); err == nil {
+		t.Fatal("StopContext must not return clean while accepted RunOnce enqueue is blocked")
+	}
+
+	close(release)
+	select {
+	case <-runDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce did not finish after enqueue release")
+	}
+	cleanup, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cleanupCancel()
+	if err := s.StopContext(cleanup); err != nil {
+		t.Fatalf("StopContext should complete after enqueue release: %v", err)
+	}
+}
+
+func TestRunOnceAfterStopNoCollectorNoEnqueue(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{name: "cpu", delay: time.Millisecond, samples: []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 1, Unit: "%"}}}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	beforeCalls := enq.calls.Load()
+	s.RunOnce(context.Background())
+	if got := col.calls.Load(); got != 0 {
+		t.Fatalf("RunOnce after Stop must not invoke collectors, calls=%d", got)
+	}
+	if enq.calls.Load() != beforeCalls || enq.count() != 0 {
+		t.Fatalf("RunOnce after Stop must not enqueue, calls=%d count=%d", enq.calls.Load(), enq.count())
+	}
+}
+
+func TestStopAdmissionClosureAtomicRejectsRunOnceContender(t *testing.T) {
+	// Race Stop initiation against RunOnce at the admission boundary. Once
+	// shutdown wins (stopping=true + stopCh closed under one execMu critical
+	// section), contending RunOnce must not register work, collect, or enqueue.
+	for iter := 0; iter < 64; iter++ {
+		enq := &mockEnqueuer{}
+		col := &mockCollector{
+			name:    "cpu",
+			samples: []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 1, Unit: "%"}},
+		}
+		reg := mustRegistry(t, collector.Registration{
+			Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+		})
+		s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		stopErr := make(chan error, 1)
+		releaseContenders := make(chan struct{})
+		const contenders = 24
+		var wg sync.WaitGroup
+		wg.Add(contenders)
+		for i := 0; i < contenders; i++ {
+			go func() {
+				defer wg.Done()
+				<-releaseContenders
+				s.RunOnce(context.Background())
+			}()
+		}
+
+		go func() {
+			stopErr <- s.StopContext(context.Background())
+		}()
+
+		deadline := time.Now().Add(2 * time.Second)
+		for !s.AdmissionClosedForTest() {
+			if time.Now().After(deadline) {
+				t.Fatal("shutdown never closed admission")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		// Shutdown has won admission closure; release RunOnce contenders.
+		close(releaseContenders)
+		wg.Wait()
+
+		if err := <-stopErr; err != nil {
+			t.Fatalf("iter %d: Stop must complete normally: %v", iter, err)
+		}
+		if got := col.calls.Load(); got != 0 {
+			t.Fatalf("iter %d: post-stop contender must not invoke collectors, calls=%d", iter, got)
+		}
+		if enq.calls.Load() != 0 || enq.count() != 0 {
+			t.Fatalf("iter %d: post-stop contender must not enqueue, calls=%d count=%d", iter, enq.calls.Load(), enq.count())
+		}
+		if s.PendingItemCountForTest() != 0 {
+			t.Fatalf("iter %d: pending must be empty after clean Stop, got %d", iter, s.PendingItemCountForTest())
+		}
+	}
+}
+
+func TestCollectImmutableCanceledWhileLiveIsFailure(t *testing.T) {
+	// Result-first context.Canceled with immutable live completion state must stay failure
+	// even if parent cancellation arrives before classification.
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:    "cpu",
+		started: started,
+		release: release,
+		err:     context.Canceled,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: 2 * time.Second,
+	})
+	parent, parentCancel := context.WithCancel(context.Background())
+	defer parentCancel()
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	barrierHit := make(chan struct{})
+	proceed := make(chan struct{})
+	var once sync.Once
+	s.SetClassifyBarrierForTest(func() {
+		once.Do(func() { close(barrierHit) })
+		<-proceed
+	})
+
+	done := make(chan struct{})
+	go func() {
+		s.RunOnce(parent)
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+	close(release) // Collect returns Canceled while runCtx is still live
+	select {
+	case <-barrierHit:
+	case <-time.After(2 * time.Second):
+		t.Fatal("classify barrier not reached")
+	}
+	// Parent cancel AFTER immutable evidence was published — must not rewrite outcome.
+	parentCancel()
+	close(proceed)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce did not finish")
+	}
+
+	_, errs := s.Stats()
+	if errs < 1 {
+		t.Fatalf("immutable result-first Canceled must remain failure, errs=%d", errs)
+	}
+	if enq.count() != 1 {
+		t.Fatalf("expected COLLECTION_FAILED deposit, got %d", enq.count())
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Errors) != 1 || batch.Errors[0].Code != "COLLECTION_FAILED" {
+		t.Fatalf("expected COLLECTION_FAILED, got %+v", batch.Errors)
+	}
+}
+
+func TestCollectImmutableDeadlineExceededWhileLiveIsFailure(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:    "cpu",
+		started: started,
+		release: release,
+		err:     context.DeadlineExceeded,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: 2 * time.Second,
+	})
+	parent, parentCancel := context.WithCancel(context.Background())
+	defer parentCancel()
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	barrierHit := make(chan struct{})
+	proceed := make(chan struct{})
+	var once sync.Once
+	s.SetClassifyBarrierForTest(func() {
+		once.Do(func() { close(barrierHit) })
+		<-proceed
+	})
+
+	done := make(chan struct{})
+	go func() {
+		s.RunOnce(parent)
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+	close(release)
+	select {
+	case <-barrierHit:
+	case <-time.After(2 * time.Second):
+		t.Fatal("classify barrier not reached")
+	}
+	parentCancel()
+	close(proceed)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce did not finish")
+	}
+
+	_, errs := s.Stats()
+	if errs < 1 {
+		t.Fatalf("immutable result-first DeadlineExceeded must remain failure, errs=%d", errs)
+	}
+	var batch telemetry.CollectionBatch
+	enq.mu.Lock()
+	err = json.Unmarshal(enq.records[0], &batch)
+	enq.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Errors) != 1 || batch.Errors[0].Code != "COLLECTION_FAILED" {
+		t.Fatalf("expected COLLECTION_FAILED, got %+v", batch.Errors)
+	}
+}
+
+func TestCollectReturnWithParentCancelAlreadyPresentIsSuppressed(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	col := &mockCollector{
+		name:    "cpu",
+		started: started,
+		release: make(chan struct{}), // wait on ctx.Done via cooperative path without release signal
+	}
+	// Cooperative: wait on release OR ctx.Done. We never close release; parent cancel wins.
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 2 * time.Second,
+	})
+	parent, parentCancel := context.WithCancel(context.Background())
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Start(parent)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+	parentCancel()
+	if err := s.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	_, errs := s.Stats()
+	if errs != 0 {
+		t.Fatalf("parent-cancel-at-return must be suppressed, errs=%d", errs)
+	}
+}
+
+func TestCollectReturnWithDeadlineAlreadyPresentIsFailure(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	col := &mockCollector{
+		name:    "cpu",
+		started: started,
+		// Cooperative wait: returns ctx.Err() when deadline fires.
+		release: make(chan struct{}),
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 30 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Start(context.Background())
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, errs := s.Stats()
+		if errs > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("deadline-at-return must remain COLLECTION_FAILED")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_ = s.StopContext(context.Background())
+}
+
+func TestCleanStopLeavesPendingEmptyAndNoLaterEnqueue(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{
+		name:    "cpu",
+		samples: []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 3, Unit: "%"}},
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RunOnce(context.Background())
+	if err := s.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	if s.PendingItemCountForTest() != 0 {
+		t.Fatalf("pending must be empty after clean Stop, got %d", s.PendingItemCountForTest())
+	}
+	after := enq.calls.Load()
+	s.RunOnce(context.Background())
+	if enq.calls.Load() != after {
+		t.Fatalf("no enqueue may occur after clean Stop, before=%d after=%d", after, enq.calls.Load())
+	}
+	if got := col.calls.Load(); got != 1 {
+		t.Fatalf("post-stop RunOnce must not invoke collector again, calls=%d", got)
+	}
+}

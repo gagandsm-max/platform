@@ -21,6 +21,7 @@ const (
 	exitIdentity = 2
 	exitService  = 3
 	exitStart    = 4
+	exitStop     = 5
 )
 
 func main() {
@@ -86,8 +87,15 @@ func main() {
 	sig := <-sigCh
 	logger.Info("Platform Linux Agent received signal, shutting down",
 		"safe_context", map[string]any{"signal": sig.String()})
+	// AgentService owns runtime cancellation; Stop cancels and bounds shutdown.
+	// Parent cancel remains a belt-and-braces signal for any Start-scoped work.
 	cancel()
-	_ = svc.Stop()
+	if err := svc.Stop(); err != nil {
+		logger.Error("Platform Linux Agent shutdown failed",
+			"event_code", "AGENT_SERVICE_STOP_FAILED",
+			"safe_context", map[string]any{"reason_class": "shutdown_failed"})
+		os.Exit(exitStop)
+	}
 	logger.Info("Platform Linux Agent exited cleanly")
 }
 

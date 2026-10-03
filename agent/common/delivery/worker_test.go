@@ -759,3 +759,226 @@ func TestDeliveryWorkerRejectsMixedCutoverBatch(t *testing.T) {
 		t.Fatalf("must fail closed before transport, calls=%d", tr.calls)
 	}
 }
+
+func TestDeliveryWorkerStopContextIdempotentAndBounded(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	tr := &hangTransport{entered: entered, release: release}
+	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Minute, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Start(context.Background())
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deliver did not enter")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	if err := w.StopContext(ctx); err == nil {
+		t.Fatal("expected stop timeout while transport ignores cancel")
+	}
+
+	// Repeated StopContext must not hang creating extra waiters.
+	start := time.Now()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel2()
+	_ = w.StopContext(ctx2)
+	if time.Since(start) > 200*time.Millisecond {
+		t.Fatalf("repeated StopContext too slow: %v", time.Since(start))
+	}
+
+	close(release)
+	done := make(chan struct{})
+	go func() {
+		_ = w.StopContext(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not finish after release")
+	}
+}
+
+func TestDeliveryWorkerShutdownCancelDoesNotRecordFailure(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	tr := &coopTransport{entered: entered}
+	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deliver did not enter")
+	}
+	before := w.Stats()
+	cancel()
+	if err := w.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	after := w.Stats()
+	if after.RetryAttempt != before.RetryAttempt {
+		t.Fatalf("shutdown cancel recorded retry: before=%d after=%d", before.RetryAttempt, after.RetryAttempt)
+	}
+}
+
+type hangTransport struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (t *hangTransport) Available() bool { return true }
+func (t *hangTransport) Deliver(context.Context, client.Batch) (client.Ack, error) {
+	if t.entered != nil {
+		select {
+		case t.entered <- struct{}{}:
+		default:
+		}
+	}
+	<-t.release
+	return client.Ack{}, errors.New("released")
+}
+
+type coopTransport struct {
+	entered chan struct{}
+}
+
+func (t *coopTransport) Available() bool { return true }
+func (t *coopTransport) Deliver(ctx context.Context, _ client.Batch) (client.Ack, error) {
+	if t.entered != nil {
+		select {
+		case t.entered <- struct{}{}:
+		default:
+		}
+	}
+	<-ctx.Done()
+	return client.Ack{}, ctx.Err()
+}
+
+
+func TestDeliveryDeadlineFirstRemainsFailureDespiteLaterShutdown(t *testing.T) {
+	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
+	entered := make(chan struct{}, 1)
+	causeSeen := make(chan error, 1)
+	release := make(chan struct{})
+	tr := &causeOrderTransport{entered: entered, causeSeen: causeSeen, release: release}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, 40*time.Millisecond, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parent, parentCancel := context.WithCancel(context.Background())
+	defer parentCancel()
+	w.Start(parent)
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deliver did not enter")
+	}
+	var cause error
+	select {
+	case cause = <-causeSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("delivery deadline/cancel not observed")
+	}
+	if !errors.Is(cause, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline-first cause, got %v", cause)
+	}
+
+	// Shutdown begins AFTER the delivery deadline already won.
+	parentCancel()
+	close(release)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		st := w.Stats()
+		if st.RetryAttempt > 0 || st.LastErrorCode != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("deadline-first delivery failure must remain recorded")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_ = w.StopContext(context.Background())
+}
+
+func TestDeliveryShutdownFirstSuppressesFailure(t *testing.T) {
+	q := &mockQueue{records: []queue.Record{{Sequence: 1, ID: "rec-1", Payload: []byte("a")}}}
+	entered := make(chan struct{}, 1)
+	causeSeen := make(chan error, 1)
+	release := make(chan struct{})
+	tr := &causeOrderTransport{entered: entered, causeSeen: causeSeen, release: release}
+	w, err := NewWorker(q, tr, "agent-1", 10, 1024*1024, time.Millisecond, 10*time.Millisecond, time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parent, parentCancel := context.WithCancel(context.Background())
+	w.Start(parent)
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deliver did not enter")
+	}
+
+	before := w.Stats()
+	parentCancel() // shutdown wins first (deliveryTimeout is 1s)
+	var cause error
+	select {
+	case cause = <-causeSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown cancel not observed")
+	}
+	if !errors.Is(cause, context.Canceled) {
+		t.Fatalf("expected shutdown-first cause, got %v", cause)
+	}
+	close(release)
+	if err := w.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	after := w.Stats()
+	if after.RetryAttempt != before.RetryAttempt || after.LastErrorCode != before.LastErrorCode {
+		t.Fatalf("shutdown-first cancel mutated failure state: before=%+v after=%+v", before, after)
+	}
+}
+
+type causeOrderTransport struct {
+	entered   chan struct{}
+	causeSeen chan error
+	release   chan struct{}
+}
+
+func (t *causeOrderTransport) Available() bool { return true }
+func (t *causeOrderTransport) Deliver(ctx context.Context, _ client.Batch) (client.Ack, error) {
+	if t.entered != nil {
+		select {
+		case t.entered <- struct{}{}:
+		default:
+		}
+	}
+	<-ctx.Done()
+	cause := context.Cause(ctx)
+	if t.causeSeen != nil {
+		select {
+		case t.causeSeen <- cause:
+		default:
+		}
+	}
+	if t.release != nil {
+		<-t.release
+	}
+	if errors.Is(cause, context.DeadlineExceeded) {
+		return client.Ack{}, &client.DeliveryError{Code: "DELIVERY_CONTEXT_ABORTED", Class: client.FailureTemporary, Err: ctx.Err()}
+	}
+	return client.Ack{}, ctx.Err()
+}

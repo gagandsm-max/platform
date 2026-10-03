@@ -73,9 +73,13 @@ func TestAgentServiceLifecycle(t *testing.T) {
 		t.Fatal("expected injected unavailable transport to remain unavailable")
 	}
 
+	// Service owns runtime cancellation; caller cancel is not required for Stop.
 	cancel()
 	if err := svc.Stop(); err != nil {
 		t.Fatalf("failed to stop AgentService: %v", err)
+	}
+	if got := svc.LifecycleState(); got != LifecycleStopped {
+		t.Fatalf("expected STOPPED after clean Stop, got %s", got)
 	}
 	if qStats := svc.QueueStats(); qStats.ActiveCount < 1 {
 		t.Fatal("shutdown must retain unacknowledged queue records")

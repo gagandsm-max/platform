@@ -43,6 +43,7 @@ type CollectorStatus struct {
 	Timeout     time.Duration `json:"timeout"`
 	PhaseOffset time.Duration `json:"phase_offset"`
 	InFlight    bool          `json:"in_flight"`
+	Outstanding bool          `json:"outstanding,omitempty"`
 	LastRun     time.Time     `json:"last_run,omitempty"`
 	LastError   string        `json:"last_error,omitempty"`
 	RunCount    uint64        `json:"run_count"`
@@ -65,6 +66,11 @@ type Status struct {
 type collectResult struct {
 	samples []telemetry.Sample
 	err     error
+	// Immutable completion evidence captured in the Collect producer before
+	// resultCh publish. Classification must use these fields, not a later
+	// scheduler-side sampling of runCtx.
+	ctxDoneAtReturn  bool
+	ctxCauseAtReturn error
 }
 
 // pendingContribution is one collector's deposit into the open aggregate cycle.
@@ -115,9 +121,24 @@ type Scheduler struct {
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
+	stopDone chan struct{} // closed exactly once after loops + accepted executions complete
 	wg       sync.WaitGroup
 
+	// execMu + stopping gate registration of ALL collector executions and RunOnce ops.
+	// execWG tracks every accepted execution through Collect completion, including
+	// non-cooperative outstanding waiters. runOnceWG tracks each accepted RunOnce
+	// through its final flushPending/enqueue. Stop sets stopping under execMu before
+	// Wait so no positive Add can race a zero-counter Wait.
+	execMu    sync.Mutex
+	stopping  bool
+	execWG    sync.WaitGroup
+	runOnceWG sync.WaitGroup
+
 	inFlightCount atomic.Int32
+
+	// classifyBarrier, when set by tests, runs after runCtx termination is observed
+	// and before failure/shutdown classification. Production remains nil.
+	classifyBarrier func()
 }
 
 func NewScheduler(
@@ -194,6 +215,7 @@ func NewScheduler(
 		sem:            make(chan struct{}, maxConcurrency),
 		pending:        make(map[string]pendingContribution),
 		stopCh:         make(chan struct{}),
+		stopDone:       make(chan struct{}),
 	}, nil
 }
 
@@ -299,6 +321,8 @@ func (s *Scheduler) runFlushLoop(ctx context.Context) {
 		case <-ticker.C:
 			s.flushPending()
 		case <-s.stopCh:
+			// Opportunistic flush only. Authoritative final flush runs in beginStop
+			// after all accepted executions and RunOnce ops have completed.
 			s.flushPending()
 			return
 		case <-ctx.Done():
@@ -349,19 +373,54 @@ func (s *Scheduler) runCollectorLoop(ctx context.Context, rt *collectorRuntime) 
 	}
 }
 
-func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) {
-	rt.mu.Lock()
-	if rt.outstanding || rt.inFlight {
-		rt.mu.Unlock()
-		return
+// admitExecution stop-gates and single-flight-admits one collector execution.
+// On true, the caller owns: sem slot, inFlightCount+1, rt.inFlight=true, execWG+1
+// and must release via normal completion or spawnOutstandingWaiter.
+//
+// Per-collector busy state is revalidated only after semaphore acquisition so a
+// waiter can observe outstanding after the holder releases admission.
+func (s *Scheduler) admitExecution(rt *collectorRuntime, ctx context.Context) bool {
+	s.execMu.Lock()
+	stopping := s.stopping
+	s.execMu.Unlock()
+	if stopping {
+		return false
 	}
-	rt.mu.Unlock()
 
 	select {
 	case s.sem <- struct{}{}:
 	case <-s.stopCh:
-		return
+		return false
 	case <-ctx.Done():
+		return false
+	}
+
+	// Re-validate under execMu after admission so Stop cannot race a new Add
+	// and a second RunOnce cannot proceed while the first is in-flight/outstanding.
+	s.execMu.Lock()
+	if s.stopping {
+		s.execMu.Unlock()
+		<-s.sem
+		return false
+	}
+	rt.mu.Lock()
+	if rt.outstanding || rt.inFlight {
+		rt.mu.Unlock()
+		s.execMu.Unlock()
+		<-s.sem
+		return false
+	}
+	rt.inFlight = true
+	rt.mu.Unlock()
+	s.execWG.Add(1)
+	s.execMu.Unlock()
+
+	s.inFlightCount.Add(1)
+	return true
+}
+
+func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) {
+	if !s.admitExecution(rt, ctx) {
 		return
 	}
 
@@ -373,44 +432,80 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		})
 	}
 
-	s.inFlightCount.Add(1)
-	rt.mu.Lock()
-	rt.inFlight = true
-	rt.mu.Unlock()
+	outstandingOwned := false
+	defer func() {
+		if outstandingOwned {
+			return
+		}
+		rt.mu.Lock()
+		rt.inFlight = false
+		rt.mu.Unlock()
+		releaseAdmission()
+		s.execWG.Done()
+	}()
 
 	startTime := s.now()
+	// WithTimeout preserves immutable Cause: DeadlineExceeded if the per-collector
+	// deadline wins first; Canceled if parent/service cancellation wins first.
 	runCtx, cancel := context.WithTimeout(ctx, rt.timeout)
 
 	resultCh := make(chan collectResult, 1)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				resultCh <- collectResult{err: fmt.Errorf("COLLECTION_PANIC: %v", r)}
+				resultCh <- collectResult{
+					err:              fmt.Errorf("COLLECTION_PANIC: %v", r),
+					ctxDoneAtReturn:  runCtx.Err() != nil,
+					ctxCauseAtReturn: context.Cause(runCtx),
+				}
 			}
 		}()
 		samples, err := rt.entry.Collector.Collect(runCtx)
-		resultCh <- collectResult{samples: samples, err: err}
+		// Capture immutable completion evidence BEFORE publishing the result.
+		resultCh <- collectResult{
+			samples:          samples,
+			err:              err,
+			ctxDoneAtReturn:  runCtx.Err() != nil,
+			ctxCauseAtReturn: context.Cause(runCtx),
+		}
 	}()
 
 	var res collectResult
 	timedOut := false
 	select {
 	case res = <-resultCh:
+		// Local cleanup cancel happens only after immutable evidence is published.
 		cancel()
 	case <-runCtx.Done():
+		doneCause := context.Cause(runCtx)
 		select {
 		case res = <-resultCh:
 			cancel()
 		default:
 			timedOut = true
 			cancel()
+			// Synthesize immutable timeout evidence for classification.
+			res.ctxDoneAtReturn = true
+			res.ctxCauseAtReturn = doneCause
 		}
 	}
 
+	if s.classifyBarrier != nil {
+		s.classifyBarrier()
+	}
+
 	if timedOut {
+		if isExpectedShutdownCause(res.ctxCauseAtReturn) {
+			// Service/runtime cancellation won first — suppress synthetic failure.
+			releaseAdmission()
+			outstandingOwned = true
+			s.spawnOutstandingWaiter(rt, resultCh)
+			return
+		}
+
 		summary := "collection_timeout"
-		if err := runCtx.Err(); err != nil {
-			summary = safeErrorSummary(err)
+		if res.ctxCauseAtReturn != nil {
+			summary = safeErrorSummary(res.ctxCauseAtReturn)
 		}
 		s.finishCollectorFailure(rt, startTime, summary)
 		s.deposit(pendingContribution{
@@ -424,31 +519,21 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 			}},
 		})
 
-		rt.mu.Lock()
-		rt.outstanding = true
-		rt.mu.Unlock()
 		releaseAdmission()
-
+		outstandingOwned = true
 		// Bound: at most one waiter per collector while outstanding.
-		go func() {
-			<-resultCh
-			rt.mu.Lock()
-			rt.outstanding = false
-			rt.inFlight = false
-			rt.mu.Unlock()
-		}()
+		s.spawnOutstandingWaiter(rt, resultCh)
 		return
 	}
 
-	defer func() {
-		rt.mu.Lock()
-		rt.inFlight = false
-		rt.mu.Unlock()
-		releaseAdmission()
-	}()
-
 	durationMs := s.now().Sub(startTime).Milliseconds()
 	if res.err != nil {
+		if isContextTermination(res.err) &&
+			res.ctxDoneAtReturn &&
+			isExpectedShutdownCause(res.ctxCauseAtReturn) {
+			// Parent/service cancellation was already the cause when Collect returned.
+			return
+		}
 		summary := safeErrorSummary(res.err)
 		s.finishCollectorFailure(rt, startTime, summary)
 		s.deposit(pendingContribution{
@@ -732,9 +817,28 @@ func (s *Scheduler) runtimeByName(name string) *collectorRuntime {
 	return nil
 }
 
+// beginRunOnce stop-gates RunOnce registration. On true, caller owns runOnceWG+1
+// through final flushPending/enqueue.
+func (s *Scheduler) beginRunOnce() bool {
+	s.execMu.Lock()
+	defer s.execMu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.runOnceWG.Add(1)
+	return true
+}
+
 // RunOnce executes every enabled collector once with timeout isolation and
-// bounded concurrency, then flushes one aggregate durable batch.
+// bounded concurrency, then flushes one aggregate durable batch. The whole
+// operation (collectors + final flush) is stop-gated; once Stop begins, RunOnce
+// performs no collector work and no enqueue/flush.
 func (s *Scheduler) RunOnce(ctx context.Context) {
+	if !s.beginRunOnce() {
+		return
+	}
+	defer s.runOnceWG.Done()
+
 	var wg sync.WaitGroup
 	for _, rt := range s.runtimes {
 		if !rt.entry.Enabled {
@@ -751,14 +855,110 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 	s.flushPending()
 }
 
-func (s *Scheduler) Stop() {
+func isContextTermination(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func isExpectedShutdownCause(cause error) bool {
+	return errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded)
+}
+
+// spawnOutstandingWaiter keeps the accepted execution on execWG until Collect
+// finishes. At most one outstanding waiter per collector is permitted.
+func (s *Scheduler) spawnOutstandingWaiter(rt *collectorRuntime, resultCh <-chan collectResult) {
+	rt.mu.Lock()
+	if rt.outstanding {
+		// Unreachable under correct single-flight admission; finish our execWG credit.
+		rt.inFlight = false
+		rt.mu.Unlock()
+		go func() {
+			<-resultCh
+			s.execWG.Done()
+		}()
+		return
+	}
+	rt.outstanding = true
+	rt.mu.Unlock()
+
+	go func() {
+		defer s.execWG.Done()
+		<-resultCh
+		rt.mu.Lock()
+		rt.outstanding = false
+		rt.inFlight = false
+		rt.mu.Unlock()
+	}()
+}
+
+func (s *Scheduler) beginStop() {
 	s.stopOnce.Do(func() {
+		// Shutdown initiation and admission closure are atomic under execMu so a
+		// concurrent RunOnce/admitExecution cannot register (execWG/runOnceWG Add)
+		// after stop has begun but before stopping is visible.
+		s.execMu.Lock()
+		s.stopping = true
 		close(s.stopCh)
+		s.execMu.Unlock()
+		go func() {
+			s.wg.Wait()
+			s.execWG.Wait()
+			s.runOnceWG.Wait()
+			// Authoritative final flush after all accepted deposits are complete.
+			s.flushPending()
+			s.mu.Lock()
+			s.running = false
+			s.mu.Unlock()
+			close(s.stopDone)
+		}()
 	})
-	s.wg.Wait()
-	s.mu.Lock()
-	s.running = false
-	s.mu.Unlock()
+}
+
+// StopContext requests scheduler shutdown and waits until loops, accepted
+// collector executions (including outstanding waiters), accepted RunOnce ops
+// through final flush, and the authoritative post-quiescence flush complete,
+// or ctx ends. Exactly one waiter coordinator is started; repeated calls share
+// stopDone.
+func (s *Scheduler) StopContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.beginStop()
+	select {
+	case <-s.stopDone:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("SCHEDULER_STOP_TIMEOUT: %w", ctx.Err())
+	}
+}
+
+// SetClassifyBarrierForTest installs a hook invoked after runCtx termination is
+// observed and before classification. Production callers must leave this unset.
+func (s *Scheduler) SetClassifyBarrierForTest(fn func()) {
+	s.classifyBarrier = fn
+}
+
+// PendingItemCountForTest returns the current in-memory pending aggregation size.
+func (s *Scheduler) PendingItemCountForTest() int {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	n := 0
+	for _, c := range s.pending {
+		n += pendingItemCount(c)
+	}
+	return n
+}
+
+// AdmissionClosedForTest reports whether Stop has atomically closed execution
+// and RunOnce admission. Production callers must not use this.
+func (s *Scheduler) AdmissionClosedForTest() bool {
+	s.execMu.Lock()
+	defer s.execMu.Unlock()
+	return s.stopping
+}
+
+// Stop is a compatibility wrapper that waits without an external deadline.
+func (s *Scheduler) Stop() {
+	_ = s.StopContext(context.Background())
 }
 
 // Stats preserves the aggregate (lastRun, runErrors) contract used by health.
@@ -788,6 +988,7 @@ func (s *Scheduler) Status() Status {
 			Timeout:     rt.timeout,
 			PhaseOffset: rt.phaseOffset,
 			InFlight:    rt.inFlight,
+			Outstanding: rt.outstanding,
 			LastRun:     rt.lastRun,
 			LastError:   rt.lastError,
 			RunCount:    rt.runCount,
