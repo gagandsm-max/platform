@@ -279,6 +279,10 @@ func (s *AgentService) Start(ctx context.Context) error {
 		return s.failStart(fmt.Errorf("%w: %v", ErrInvalidStartContext, err))
 	}
 
+	// Deliberate detachment: Start(ctx) only validates that ctx is usable at
+	// startup. Runtime cancellation is owned exclusively by AgentService.Stop()
+	// via runCancel. Cancelling the caller's Start context after Start returns
+	// must not terminate workers/scheduler (see TestAgentServiceStartContextDetached).
 	runCtx, runCancel := context.WithCancel(context.Background())
 
 	if err := s.healthSrv.Start(); err != nil {

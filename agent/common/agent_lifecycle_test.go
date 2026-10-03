@@ -635,3 +635,166 @@ func (t *coopCancelTransport) Deliver(ctx context.Context, _ client.Batch) (clie
 	<-ctx.Done()
 	return client.Ack{}, ctx.Err()
 }
+
+func TestAgentServiceNonCooperativeCollectorStopTimesOut(t *testing.T) {
+	cfg := testAgentConfig(t, freeLoopbackAddr(t))
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &lifecycleCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	reg := singleCollectorRegistry(t, col, 10*time.Millisecond, 40*time.Millisecond)
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-noncoop-collect"), client.NewUnavailableTransport("x"), nil, withCollectorRegistryForTest(reg))
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	svc.setShutdownBudgetForTest(120 * time.Millisecond)
+
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	// Wait until scheduler has an outstanding non-cooperative waiter.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		st := svc.SchedulerStatus()
+		if len(st.Collectors) > 0 && st.Collectors[0].Outstanding {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected outstanding collector before Stop")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	start := time.Now()
+	err = svc.Stop()
+	elapsed := time.Since(start)
+	if err == nil || !errors.Is(err, ErrShutdownTimeout) {
+		t.Fatalf("expected ErrShutdownTimeout, got %v", err)
+	}
+	if elapsed > 800*time.Millisecond {
+		t.Fatalf("Stop exceeded bounded budget significantly: %v", elapsed)
+	}
+	if got := svc.LifecycleState(); got != LifecycleFailed {
+		t.Fatalf("expected FAILED, got %s", got)
+	}
+
+	start = time.Now()
+	err2 := svc.Stop()
+	if !errors.Is(err2, ErrShutdownTimeout) {
+		t.Fatalf("repeated Stop expected prior timeout err, got %v", err2)
+	}
+	if time.Since(start) > 200*time.Millisecond {
+		t.Fatalf("repeated Stop waited again: %v", time.Since(start))
+	}
+
+	close(release)
+	cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := svc.scheduler.StopContext(cleanup); err != nil {
+		t.Fatalf("scheduler outstanding did not clean up after release: %v", err)
+	}
+	st := svc.SchedulerStatus()
+	if len(st.Collectors) > 0 && st.Collectors[0].Outstanding {
+		t.Fatal("outstanding must clear after release")
+	}
+}
+
+func TestAgentServiceStartContextDetachedFromRuntime(t *testing.T) {
+	cfg := testAgentConfig(t, freeLoopbackAddr(t))
+	cfg.CollectionInterval = time.Hour
+	reg := singleCollectorRegistry(t, &lifecycleCollector{name: "cpu"}, time.Hour, time.Second)
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-start-detach"), client.NewUnavailableTransport("x"), nil, withCollectorRegistryForTest(reg))
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+
+	startCtx, startCancel := context.WithCancel(context.Background())
+	if err := svc.Start(startCtx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// Cancelling the caller's Start context must not terminate the service runtime.
+	startCancel()
+	time.Sleep(50 * time.Millisecond)
+	if got := svc.LifecycleState(); got != LifecycleRunning {
+		t.Fatalf("expected RUNNING after Start-context cancel, got %s", got)
+	}
+	if !svc.SchedulerStatus().Running {
+		t.Fatal("scheduler must keep running when only Start context is cancelled")
+	}
+	if err := svc.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if got := svc.LifecycleState(); got != LifecycleStopped {
+		t.Fatalf("expected STOPPED after Stop, got %s", got)
+	}
+}
+
+func TestAgentServiceCollectorDeadlineFirstRemainsFailure(t *testing.T) {
+	cfg := testAgentConfig(t, freeLoopbackAddr(t))
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &lifecycleCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	reg := singleCollectorRegistry(t, col, 10*time.Millisecond, 40*time.Millisecond)
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-deadline-first"), client.NewUnavailableTransport("x"), nil, withCollectorRegistryForTest(reg))
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+
+	barrierHit := make(chan struct{})
+	proceed := make(chan struct{})
+	var once sync.Once
+	svc.scheduler.SetClassifyBarrierForTest(func() {
+		once.Do(func() { close(barrierHit) })
+		<-proceed
+	})
+
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+	select {
+	case <-barrierHit:
+	case <-time.After(2 * time.Second):
+		t.Fatal("classify barrier not reached")
+	}
+
+	// Begin service shutdown only after collector deadline classification is ready.
+	go func() { _ = svc.Stop() }()
+	// Give Stop a moment to cancel runtime, then allow classification.
+	time.Sleep(20 * time.Millisecond)
+	close(proceed)
+	close(release)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, errs := svc.CollectorStats()
+		if errs > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("deadline-first collector timeout must remain recorded")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// Ensure Stop finishes (may timeout on outstanding until release already closed).
+	_ = svc.Stop()
+}

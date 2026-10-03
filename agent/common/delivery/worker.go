@@ -57,6 +57,10 @@ type Worker struct {
 	stopDone        chan struct{} // closed exactly once after wg.Wait completes
 	startOnce       sync.Once
 	wg              sync.WaitGroup
+
+	// classifyBarrier, when set by tests, runs after Deliver returns and before
+	// failure/shutdown classification. Production remains nil.
+	classifyBarrier func()
 }
 
 func NewWorker(
@@ -138,7 +142,7 @@ func (w *Worker) runLoop(ctx context.Context) {
 
 		delivered, err := w.DeliverOnce(ctx)
 		if err != nil {
-			if isShutdownDeliveryCancel(ctx, w.stopCh, err) {
+			if errors.Is(err, errDeliveryAbortedByShutdown) {
 				return
 			}
 			failClass := client.Classify(err)
@@ -283,14 +287,20 @@ func (w *Worker) DeliverOnce(ctx context.Context) (bool, error) {
 	w.stats.ReceiverAvailable = w.transport.Available()
 	w.mu.Unlock()
 
+	// WithTimeout preserves immutable Cause: DeadlineExceeded if the delivery
+	// attempt deadline wins first; Canceled if parent/service cancellation wins first.
 	delivCtx, cancel := context.WithTimeout(ctx, w.deliveryTimeout)
 	defer cancel()
 
 	ack, err := w.transport.Deliver(delivCtx, batch)
+	delivCause := context.Cause(delivCtx)
+	if w.classifyBarrier != nil {
+		w.classifyBarrier()
+	}
 	if err != nil {
-		// Expected service-shutdown cancellation must not mutate retry/failure state.
-		if isShutdownDeliveryCancel(ctx, w.stopCh, err) {
-			return false, err
+		// Classify from the attempt's Cause order — not from post-completion stopCh/parent state.
+		if isExpectedShutdownDeliveryErr(delivCause, err) {
+			return false, errDeliveryAbortedByShutdown
 		}
 		failClass := client.Classify(err)
 		var de *client.DeliveryError
@@ -489,20 +499,20 @@ func randomJitter() float64 {
 	return f*2 - 1
 }
 
-func isShutdownDeliveryCancel(ctx context.Context, stopCh <-chan struct{}, err error) bool {
+// errDeliveryAbortedByShutdown is returned when parent/service cancellation won
+// the attempt context race first. It must not mutate retry/failure stats.
+var errDeliveryAbortedByShutdown = errors.New("DELIVERY_ABORTED_BY_SHUTDOWN")
+
+func isExpectedShutdownDeliveryErr(delivCause error, err error) bool {
 	if err == nil {
 		return false
 	}
-	shutdown := false
-	select {
-	case <-stopCh:
-		shutdown = true
-	default:
+	// Real per-attempt deadline won first — genuine failure even if Stop follows.
+	if errors.Is(delivCause, context.DeadlineExceeded) {
+		return false
 	}
-	if ctx != nil && ctx.Err() != nil {
-		shutdown = true
-	}
-	if !shutdown {
+	// Parent/service cancellation won first.
+	if !errors.Is(delivCause, context.Canceled) {
 		return false
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -513,6 +523,12 @@ func isShutdownDeliveryCancel(ctx context.Context, stopCh <-chan struct{}, err e
 		return true
 	}
 	return false
+}
+
+// SetClassifyBarrierForTest installs a hook invoked after Deliver returns and
+// before classification. Production callers must leave this unset.
+func (w *Worker) SetClassifyBarrierForTest(fn func()) {
+	w.classifyBarrier = fn
 }
 
 func (w *Worker) beginStop() {

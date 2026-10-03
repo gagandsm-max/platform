@@ -1501,3 +1501,221 @@ func TestSchedulerShutdownCancelDoesNotRecordFailure(t *testing.T) {
 		t.Fatalf("shutdown cancel recorded failure: before=%d after=%d", errsBefore, errsAfter)
 	}
 }
+
+func TestSchedulerStopContextWaitsForOutstandingNonCooperative(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 40 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Start(context.Background())
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	// Allow per-collector timeout to create an outstanding waiter.
+	deadline := time.Now().Add(time.Second)
+	for {
+		st := s.Status()
+		if len(st.Collectors) > 0 && st.Collectors[0].Outstanding {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected outstanding after non-cooperative timeout")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	if err := s.StopContext(ctx); err == nil {
+		t.Fatal("StopContext must not report clean completion while outstanding")
+	}
+
+	// Repeated StopContext must stay bounded (no waiter multiplication).
+	start := time.Now()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel2()
+	_ = s.StopContext(ctx2)
+	if time.Since(start) > 200*time.Millisecond {
+		t.Fatalf("repeated StopContext too slow: %v", time.Since(start))
+	}
+
+	close(release)
+	cleanup, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cleanupCancel()
+	if err := s.StopContext(cleanup); err != nil {
+		t.Fatalf("outstanding waiter did not clean up after release: %v", err)
+	}
+	st := s.Status()
+	if len(st.Collectors) > 0 && st.Collectors[0].Outstanding {
+		t.Fatal("outstanding must clear after release")
+	}
+}
+
+func TestSchedulerDeadlineFirstRemainsFailureDespiteLaterShutdown(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+		samples:      []telemetry.Sample{{MetricKey: "system.cpu.utilization", Value: 1, Unit: "%"}},
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 40 * time.Millisecond,
+	})
+	parent, parentCancel := context.WithCancel(context.Background())
+	defer parentCancel()
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	barrierHit := make(chan struct{})
+	proceed := make(chan struct{})
+	var barrierOnce sync.Once
+	s.SetClassifyBarrierForTest(func() {
+		barrierOnce.Do(func() { close(barrierHit) })
+		<-proceed
+	})
+
+	s.Start(parent)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+	select {
+	case <-barrierHit:
+	case <-time.After(2 * time.Second):
+		t.Fatal("classify barrier not reached after deadline")
+	}
+
+	// Shutdown begins AFTER the per-collector deadline already won.
+	parentCancel()
+	close(proceed)
+	close(release)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, errs := s.Stats()
+		if errs > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("deadline-first timeout must remain COLLECTION_FAILED")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_ = s.StopContext(context.Background())
+}
+
+func TestSchedulerShutdownFirstSuppressesFailure(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:    "cpu",
+		started: started,
+		release: release,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 10 * time.Millisecond, Timeout: 2 * time.Second,
+	})
+	parent, parentCancel := context.WithCancel(context.Background())
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	barrierHit := make(chan struct{})
+	proceed := make(chan struct{})
+	var once sync.Once
+	s.SetClassifyBarrierForTest(func() {
+		once.Do(func() { close(barrierHit) })
+		<-proceed
+	})
+
+	s.Start(parent)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	// Shutdown wins first; then allow classification.
+	parentCancel()
+	select {
+	case <-barrierHit:
+	case <-time.After(2 * time.Second):
+		// Cooperative collector returns Canceled; barrier may run on non-timeout path too.
+	}
+	close(proceed)
+	close(release)
+	if err := s.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	_, errs := s.Stats()
+	if errs != 0 {
+		t.Fatalf("shutdown-first cancellation must not record failure, errs=%d", errs)
+	}
+}
+
+func TestSchedulerStopRaceWithTimeoutOutstandingTransition(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: 5 * time.Millisecond, Timeout: 20 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Start(context.Background())
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+			defer cancel()
+			_ = s.StopContext(ctx)
+		}()
+	}
+	wg.Wait()
+	close(release)
+	cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.StopContext(cleanup); err != nil {
+		t.Fatalf("cleanup after race: %v", err)
+	}
+}

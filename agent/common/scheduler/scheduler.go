@@ -43,6 +43,7 @@ type CollectorStatus struct {
 	Timeout     time.Duration `json:"timeout"`
 	PhaseOffset time.Duration `json:"phase_offset"`
 	InFlight    bool          `json:"in_flight"`
+	Outstanding bool          `json:"outstanding,omitempty"`
 	LastRun     time.Time     `json:"last_run,omitempty"`
 	LastError   string        `json:"last_error,omitempty"`
 	RunCount    uint64        `json:"run_count"`
@@ -115,10 +116,17 @@ type Scheduler struct {
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
-	stopDone chan struct{} // closed exactly once after wg.Wait completes
+	stopDone chan struct{} // closed exactly once after loops + outstanding waiters complete
 	wg       sync.WaitGroup
+	// outstandingWG tracks timeout/shutdown result waiters for non-cooperative Collect.
+	// Kept separate from wg to avoid Add/Wait misuse against loop membership.
+	outstandingWG sync.WaitGroup
 
 	inFlightCount atomic.Int32
+
+	// classifyBarrier, when set by tests, runs after runCtx termination is observed
+	// and before failure/shutdown classification. Production remains nil.
+	classifyBarrier func()
 }
 
 func NewScheduler(
@@ -381,6 +389,8 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 	rt.mu.Unlock()
 
 	startTime := s.now()
+	// WithTimeout preserves immutable Cause: DeadlineExceeded if the per-collector
+	// deadline wins first; Canceled if parent/service cancellation wins first.
 	runCtx, cancel := context.WithTimeout(ctx, rt.timeout)
 
 	resultCh := make(chan collectResult, 1)
@@ -409,21 +419,18 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		}
 	}
 
+	// Capture cause before any test barrier / further scheduling work. Cause is
+	// immutable once runCtx is done, so later Stop() cannot rewrite classification.
+	runCause := context.Cause(runCtx)
+	if s.classifyBarrier != nil {
+		s.classifyBarrier()
+	}
+
 	if timedOut {
-		// Parent/service shutdown cancellation must not be recorded as COLLECTION_FAILED.
-		// Genuine per-collector deadline expiry (parent still live) remains a failure.
-		if s.isServiceShutdown(ctx) {
-			rt.mu.Lock()
-			rt.outstanding = true
-			rt.mu.Unlock()
+		if errors.Is(runCause, context.Canceled) && !errors.Is(runCause, context.DeadlineExceeded) {
+			// Service/runtime cancellation won first — suppress synthetic failure.
 			releaseAdmission()
-			go func() {
-				<-resultCh
-				rt.mu.Lock()
-				rt.outstanding = false
-				rt.inFlight = false
-				rt.mu.Unlock()
-			}()
+			s.spawnOutstandingWaiter(rt, resultCh)
 			return
 		}
 
@@ -443,19 +450,9 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 			}},
 		})
 
-		rt.mu.Lock()
-		rt.outstanding = true
-		rt.mu.Unlock()
 		releaseAdmission()
-
 		// Bound: at most one waiter per collector while outstanding.
-		go func() {
-			<-resultCh
-			rt.mu.Lock()
-			rt.outstanding = false
-			rt.inFlight = false
-			rt.mu.Unlock()
-		}()
+		s.spawnOutstandingWaiter(rt, resultCh)
 		return
 	}
 
@@ -468,7 +465,10 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 
 	durationMs := s.now().Sub(startTime).Milliseconds()
 	if res.err != nil {
-		if s.isServiceShutdown(ctx) && isContextTermination(res.err) {
+		if isContextTermination(res.err) &&
+			errors.Is(runCause, context.Canceled) &&
+			!errors.Is(runCause, context.DeadlineExceeded) {
+			// Parent/service cancellation won first.
 			return
 		}
 		summary := safeErrorSummary(res.err)
@@ -773,19 +773,32 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 	s.flushPending()
 }
 
-// isServiceShutdown reports parent/runtime or stopCh cancellation. Per-collector
-// timeout alone (child deadline) is not service shutdown.
-func (s *Scheduler) isServiceShutdown(ctx context.Context) bool {
-	select {
-	case <-s.stopCh:
-		return true
-	default:
-	}
-	return ctx != nil && ctx.Err() != nil
-}
-
 func isContextTermination(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// spawnOutstandingWaiter tracks at most one post-timeout Collect waiter per
+// collector and includes it in stop completion via outstandingWG.
+func (s *Scheduler) spawnOutstandingWaiter(rt *collectorRuntime, resultCh <-chan collectResult) {
+	rt.mu.Lock()
+	if rt.outstanding {
+		rt.mu.Unlock()
+		// Preserve at-most-one outstanding waiter: drain without an extra waiter.
+		go func() { <-resultCh }()
+		return
+	}
+	rt.outstanding = true
+	rt.mu.Unlock()
+
+	s.outstandingWG.Add(1)
+	go func() {
+		defer s.outstandingWG.Done()
+		<-resultCh
+		rt.mu.Lock()
+		rt.outstanding = false
+		rt.inFlight = false
+		rt.mu.Unlock()
+	}()
 }
 
 func (s *Scheduler) beginStop() {
@@ -793,6 +806,7 @@ func (s *Scheduler) beginStop() {
 		close(s.stopCh)
 		go func() {
 			s.wg.Wait()
+			s.outstandingWG.Wait()
 			s.mu.Lock()
 			s.running = false
 			s.mu.Unlock()
@@ -801,8 +815,9 @@ func (s *Scheduler) beginStop() {
 	})
 }
 
-// StopContext requests scheduler shutdown and waits until loops exit or ctx ends.
-// Exactly one waiter coordinator is started; repeated calls share stopDone.
+// StopContext requests scheduler shutdown and waits until loops and outstanding
+// collector waiters exit, or ctx ends. Exactly one waiter coordinator is started;
+// repeated calls share stopDone.
 func (s *Scheduler) StopContext(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -814,6 +829,12 @@ func (s *Scheduler) StopContext(ctx context.Context) error {
 	case <-ctx.Done():
 		return fmt.Errorf("SCHEDULER_STOP_TIMEOUT: %w", ctx.Err())
 	}
+}
+
+// SetClassifyBarrierForTest installs a hook invoked after runCtx termination is
+// observed and before classification. Production callers must leave this unset.
+func (s *Scheduler) SetClassifyBarrierForTest(fn func()) {
+	s.classifyBarrier = fn
 }
 
 // Stop is a compatibility wrapper that waits without an external deadline.
@@ -848,6 +869,7 @@ func (s *Scheduler) Status() Status {
 			Timeout:     rt.timeout,
 			PhaseOffset: rt.phaseOffset,
 			InFlight:    rt.inFlight,
+			Outstanding: rt.outstanding,
 			LastRun:     rt.lastRun,
 			LastError:   rt.lastError,
 			RunCount:    rt.runCount,
