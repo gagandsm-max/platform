@@ -1719,3 +1719,246 @@ func TestSchedulerStopRaceWithTimeoutOutstandingTransition(t *testing.T) {
 		t.Fatalf("cleanup after race: %v", err)
 	}
 }
+
+func TestRunOnceStopContextTimesOutWhileNonCooperativeOutstanding(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: 30 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.RunOnce(context.Background())
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce collector did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	if err := s.StopContext(ctx); err == nil {
+		t.Fatal("StopContext must time out while RunOnce non-cooperative execution is outstanding")
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce did not finish after release")
+	}
+	cleanup, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cleanupCancel()
+	if err := s.StopContext(cleanup); err != nil {
+		t.Fatalf("StopContext should complete after release: %v", err)
+	}
+}
+
+func TestRunOnceAfterStopStartsNoCollectorCalls(t *testing.T) {
+	enq := &mockEnqueuer{}
+	col := &mockCollector{name: "cpu", delay: time.Millisecond}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StopContext(context.Background()); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	s.RunOnce(context.Background())
+	if got := col.calls.Load(); got != 0 {
+		t.Fatalf("RunOnce after Stop must not invoke collectors, calls=%d", got)
+	}
+}
+
+func TestConcurrentRunOnceSingleFlightWhileOutstanding(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: 40 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); s.RunOnce(context.Background()) }()
+	go func() { defer wg.Done(); s.RunOnce(context.Background()) }()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not start")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		st := s.Status()
+		if len(st.Collectors) > 0 && st.Collectors[0].Outstanding {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected outstanding from first RunOnce")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := col.calls.Load(); got != 1 {
+		t.Fatalf("collector call count must stay 1 while outstanding, got %d", got)
+	}
+
+	close(release)
+	wg.Wait()
+	if got := col.calls.Load(); got != 1 {
+		t.Fatalf("collector execution multiplied after release, calls=%d", got)
+	}
+}
+
+func TestRunOnceSemaphoreWaiterSkippedAfterOutstandingRecheck(t *testing.T) {
+	enq := &mockEnqueuer{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	col := &mockCollector{
+		name:         "cpu",
+		ignoreCancel: true,
+		started:      started,
+		release:      release,
+	}
+	// maxConcurrency=1 forces the second admit to wait on the semaphore.
+	reg := mustRegistry(t, collector.Registration{
+		Collector: col, Enabled: true, Interval: time.Hour, Timeout: 40 * time.Millisecond,
+	})
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.RunOnce(context.Background())
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first collector did not start")
+	}
+
+	// Second RunOnce blocks on semaphore until first times out and releases.
+	secondDone := make(chan struct{})
+	go func() {
+		s.RunOnce(context.Background())
+		close(secondDone)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		st := s.Status()
+		if len(st.Collectors) > 0 && st.Collectors[0].Outstanding {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected first execution to become outstanding")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	select {
+	case <-secondDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second RunOnce did not finish after outstanding recheck skip")
+	}
+	if got := col.calls.Load(); got != 1 {
+		t.Fatalf("second execution must be skipped after outstanding recheck, calls=%d", got)
+	}
+
+	close(release)
+	wg.Wait()
+}
+
+func TestRunOnceStopContextStressRace(t *testing.T) {
+	enq := &mockEnqueuer{}
+	release := make(chan struct{})
+	close(release) // cooperative enough that some completes; ignoreCancel false by default
+	col := &mockCollector{
+		name:    "cpu",
+		delay:   5 * time.Millisecond,
+		release: nil,
+	}
+	// Mix non-cooperative bursts.
+	col2 := &mockCollector{
+		name:         "mem",
+		ignoreCancel: true,
+		delay:        30 * time.Millisecond,
+		release:      make(chan struct{}),
+	}
+	reg := mustRegistry(t,
+		collector.Registration{Collector: col, Enabled: true, Interval: time.Hour, Timeout: 15 * time.Millisecond},
+		collector.Registration{Collector: col2, Enabled: true, Interval: time.Hour, Timeout: 15 * time.Millisecond},
+	)
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			s.RunOnce(context.Background())
+		}()
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+			defer cancel()
+			_ = s.StopContext(ctx)
+		}()
+	}
+	wg.Wait()
+	close(col2.release)
+	cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.StopContext(cleanup); err != nil {
+		t.Fatalf("final StopContext: %v", err)
+	}
+	// Single-flight: while each collector can run multiple sequential times across
+	// iterations, overlapping multiplication is prevented; mem ignoreCancel with
+	// shared release means at most one outstanding at a time, so calls should be
+	// modest. Hard invariant checked: never more than one outstanding in status
+	// snapshot after stop.
+	st := s.Status()
+	for _, c := range st.Collectors {
+		if c.Outstanding {
+			t.Fatalf("collector %s still outstanding after final stop", c.Name)
+		}
+		if c.InFlight {
+			t.Fatalf("collector %s still in-flight after final stop", c.Name)
+		}
+	}
+}

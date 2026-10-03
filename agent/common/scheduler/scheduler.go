@@ -116,11 +116,16 @@ type Scheduler struct {
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
-	stopDone chan struct{} // closed exactly once after loops + outstanding waiters complete
+	stopDone chan struct{} // closed exactly once after loops + accepted executions complete
 	wg       sync.WaitGroup
-	// outstandingWG tracks timeout/shutdown result waiters for non-cooperative Collect.
-	// Kept separate from wg to avoid Add/Wait misuse against loop membership.
-	outstandingWG sync.WaitGroup
+
+	// execMu + stopping gate registration of ALL collector executions (loops and RunOnce).
+	// execWG tracks every accepted execution through Collect completion, including
+	// non-cooperative outstanding waiters. Stop sets stopping under execMu before Wait
+	// so no positive Add can race a zero-counter Wait.
+	execMu   sync.Mutex
+	stopping bool
+	execWG   sync.WaitGroup
 
 	inFlightCount atomic.Int32
 
@@ -359,19 +364,54 @@ func (s *Scheduler) runCollectorLoop(ctx context.Context, rt *collectorRuntime) 
 	}
 }
 
-func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) {
-	rt.mu.Lock()
-	if rt.outstanding || rt.inFlight {
-		rt.mu.Unlock()
-		return
+// admitExecution stop-gates and single-flight-admits one collector execution.
+// On true, the caller owns: sem slot, inFlightCount+1, rt.inFlight=true, execWG+1
+// and must release via normal completion or spawnOutstandingWaiter.
+//
+// Per-collector busy state is revalidated only after semaphore acquisition so a
+// waiter can observe outstanding after the holder releases admission.
+func (s *Scheduler) admitExecution(rt *collectorRuntime, ctx context.Context) bool {
+	s.execMu.Lock()
+	stopping := s.stopping
+	s.execMu.Unlock()
+	if stopping {
+		return false
 	}
-	rt.mu.Unlock()
 
 	select {
 	case s.sem <- struct{}{}:
 	case <-s.stopCh:
-		return
+		return false
 	case <-ctx.Done():
+		return false
+	}
+
+	// Re-validate under execMu after admission so Stop cannot race a new Add
+	// and a second RunOnce cannot proceed while the first is in-flight/outstanding.
+	s.execMu.Lock()
+	if s.stopping {
+		s.execMu.Unlock()
+		<-s.sem
+		return false
+	}
+	rt.mu.Lock()
+	if rt.outstanding || rt.inFlight {
+		rt.mu.Unlock()
+		s.execMu.Unlock()
+		<-s.sem
+		return false
+	}
+	rt.inFlight = true
+	rt.mu.Unlock()
+	s.execWG.Add(1)
+	s.execMu.Unlock()
+
+	s.inFlightCount.Add(1)
+	return true
+}
+
+func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) {
+	if !s.admitExecution(rt, ctx) {
 		return
 	}
 
@@ -383,10 +423,17 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		})
 	}
 
-	s.inFlightCount.Add(1)
-	rt.mu.Lock()
-	rt.inFlight = true
-	rt.mu.Unlock()
+	outstandingOwned := false
+	defer func() {
+		if outstandingOwned {
+			return
+		}
+		rt.mu.Lock()
+		rt.inFlight = false
+		rt.mu.Unlock()
+		releaseAdmission()
+		s.execWG.Done()
+	}()
 
 	startTime := s.now()
 	// WithTimeout preserves immutable Cause: DeadlineExceeded if the per-collector
@@ -430,6 +477,7 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		if errors.Is(runCause, context.Canceled) && !errors.Is(runCause, context.DeadlineExceeded) {
 			// Service/runtime cancellation won first — suppress synthetic failure.
 			releaseAdmission()
+			outstandingOwned = true
 			s.spawnOutstandingWaiter(rt, resultCh)
 			return
 		}
@@ -451,17 +499,11 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		})
 
 		releaseAdmission()
+		outstandingOwned = true
 		// Bound: at most one waiter per collector while outstanding.
 		s.spawnOutstandingWaiter(rt, resultCh)
 		return
 	}
-
-	defer func() {
-		rt.mu.Lock()
-		rt.inFlight = false
-		rt.mu.Unlock()
-		releaseAdmission()
-	}()
 
 	durationMs := s.now().Sub(startTime).Milliseconds()
 	if res.err != nil {
@@ -755,7 +797,9 @@ func (s *Scheduler) runtimeByName(name string) *collectorRuntime {
 }
 
 // RunOnce executes every enabled collector once with timeout isolation and
-// bounded concurrency, then flushes one aggregate durable batch.
+// bounded concurrency, then flushes one aggregate durable batch. Executions are
+// stop-gated through the same admitExecution lifecycle as scheduler loops; once
+// Stop begins, RunOnce does not start new collector work.
 func (s *Scheduler) RunOnce(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, rt := range s.runtimes {
@@ -777,22 +821,25 @@ func isContextTermination(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
-// spawnOutstandingWaiter tracks at most one post-timeout Collect waiter per
-// collector and includes it in stop completion via outstandingWG.
+// spawnOutstandingWaiter keeps the accepted execution on execWG until Collect
+// finishes. At most one outstanding waiter per collector is permitted.
 func (s *Scheduler) spawnOutstandingWaiter(rt *collectorRuntime, resultCh <-chan collectResult) {
 	rt.mu.Lock()
 	if rt.outstanding {
+		// Unreachable under correct single-flight admission; finish our execWG credit.
+		rt.inFlight = false
 		rt.mu.Unlock()
-		// Preserve at-most-one outstanding waiter: drain without an extra waiter.
-		go func() { <-resultCh }()
+		go func() {
+			<-resultCh
+			s.execWG.Done()
+		}()
 		return
 	}
 	rt.outstanding = true
 	rt.mu.Unlock()
 
-	s.outstandingWG.Add(1)
 	go func() {
-		defer s.outstandingWG.Done()
+		defer s.execWG.Done()
 		<-resultCh
 		rt.mu.Lock()
 		rt.outstanding = false
@@ -804,9 +851,13 @@ func (s *Scheduler) spawnOutstandingWaiter(rt *collectorRuntime, resultCh <-chan
 func (s *Scheduler) beginStop() {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
+		// Atomically close admission before waiting so no new execWG.Add can race.
+		s.execMu.Lock()
+		s.stopping = true
+		s.execMu.Unlock()
 		go func() {
 			s.wg.Wait()
-			s.outstandingWG.Wait()
+			s.execWG.Wait()
 			s.mu.Lock()
 			s.running = false
 			s.mu.Unlock()
@@ -815,9 +866,9 @@ func (s *Scheduler) beginStop() {
 	})
 }
 
-// StopContext requests scheduler shutdown and waits until loops and outstanding
-// collector waiters exit, or ctx ends. Exactly one waiter coordinator is started;
-// repeated calls share stopDone.
+// StopContext requests scheduler shutdown and waits until loops and accepted
+// collector executions (including outstanding waiters) exit, or ctx ends.
+// Exactly one waiter coordinator is started; repeated calls share stopDone.
 func (s *Scheduler) StopContext(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
