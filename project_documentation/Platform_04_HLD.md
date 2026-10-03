@@ -58,7 +58,7 @@ The Core package installs the following logical units on each Core node:
 - Valkey.
 - Core health/housekeeping/storage protection agents.
 
-Not every logical unit must be a separate OS process on smaller deployments; deployment packaging must preserve modularity while meeting the 8C/16G target.
+Not every logical unit must be a separate OS process on smaller deployments; deployment packaging must preserve modularity while meeting the 8C/32G target.
 
 ### 3.2 Sensor package
 
@@ -960,11 +960,11 @@ Planning targets pending certification:
 
 | Devices | Standalone Core | HA Core pair |
 |---:|---|---|
-| 1,000 | 1 × 8C/16G | 2 × 8C/16G |
-| 2,000–2,500 | 1 × 8C/16G | 2 × 8C/16G |
-| 5,000 | 1 × 12C/24G | 2 × 12C/24G |
-| 10,000 | 1 × 16C/32G | 2 × 16C/32G |
-| 15,000 | 1 × 24C/48G | 2 × 24C/48G |
+| 1,000 | 1 × 8C/32G | 2 × 8C/32G |
+| 2,000–2,500 | 1 × 8C/32G | 2 × 8C/32G |
+| 5,000 | 1 × 12C/48G | 2 × 12C/48G |
+| 10,000 | 1 × 16C/64G | 2 × 16C/64G |
+| 15,000 | 1 × 24C/96G | 2 × 24C/96G |
 
 The ≤2,500 profile is the mandatory optimization target under SNWP-2500-v1. Higher profiles are planning baselines until benchmarked.
 

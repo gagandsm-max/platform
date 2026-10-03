@@ -55,7 +55,7 @@ The architecture is governed by the following constraints already decided:
 | ARC-P09 | Policy-driven behavior | Polling, thresholds, validation, retention, placement and workflow are configured through hierarchical policy. |
 | ARC-P10 | Protect live monitoring | Historical storage is reclaimable before live monitoring is allowed to stop due to disk pressure. |
 | ARC-P11 | Fail safe | Ambiguous HA conditions must not create two authoritative active Cores. |
-| ARC-P12 | Modular, not microservice-heavy by default | Fit the 8C/16G Core target by avoiding unnecessary JVM/service overhead. |
+| ARC-P12 | Modular, not microservice-heavy by default | Fit the 8C/32G Core target by avoiding unnecessary JVM/service overhead. |
 | ARC-P13 | API-first implementation, UI-first experience | All normal customer workflows use UI backed by stable APIs. |
 | ARC-P14 | Security by default | HTTPS/mTLS, least privilege, auditing, secret protection and signed artifacts are baseline. |
 | ARC-P15 | Clean-room + approved OSS | Reuse commodity permissive OSS; own differentiated Platform logic. |
@@ -217,7 +217,7 @@ Data plane owns: Sensor/Agent collection, local durable spool, mTLS upload to Co
 
 ### 5.4 Modular Core
 
-To satisfy the 8 vCPU / 16 GB target for the reference ≤2,500-device workload, the Java control plane should be modular rather than split into dozens of always-running JVM microservices.
+To satisfy the 8 vCPU / 32 GB target for the reference ≤2,500-device workload, the Java control plane should be modular rather than split into dozens of always-running JVM microservices.
 
 Recommended runtime grouping:
 
@@ -1167,7 +1167,7 @@ Windows Agent source can be cross-compiled and most functional tests can run in 
 ## 33. Scalability and performance architecture
 ### 33.1 Core reference target
 
-Up to 2,500 devices under SNWP-2500-v1: 8 vCPU / 16 GB RAM mandatory optimization target.
+Up to 2,500 devices under SNWP-2500-v1: 8 vCPU / 32 GB RAM mandatory optimization target.
 
 ### 33.2 Sensor planning baseline
 
@@ -1419,7 +1419,7 @@ Platform must monitor itself: collectors, Sensors, queues, ingestion lag, droppe
 | Risk | Impact | Required mitigation |
 |---|---|---|
 | Two-node stateful services without third quorum | Split brain/data availability | Fail-safe active/passive design, fencing/positive failure confirmation, Sensor replay, failure lab before GA |
-| 8C/16G Core target too aggressive for all-in-one Core stack | Product footprint misses goal | Strict resource envelopes, modular runtime, benchmark SNWP-2500-v1, tune Kafka/ClickHouse/Java memory |
+| 8C/32G Core target too aggressive for all-in-one Core stack | Product footprint misses goal | Strict resource envelopes, modular runtime, benchmark SNWP-2500-v1, tune Kafka/ClickHouse/Java memory |
 | High-cardinality custom APIs/OTel | Storage/query blow-up | Cardinality guardrails, quotas, mapping review, alerting |
 | Flow/syslog overload starves polling | False gaps/alerts | Separate worker pools and dedicated Streaming Sensor thresholds |
 | Stale topology leads to wrong RCA | Wrong diagnosis | edge provenance/freshness, telemetry quality, confidence reduction, inconclusive outcome |

@@ -57,7 +57,7 @@ Benchmark Platform against versioned workload profiles and measured workload dim
 ## Specialist rules
 
 1. Measure workload using poll ops/sec, metrics/sec, entity/interface cardinality, interval, RTT/timeouts, flow records/sec, syslog EPS, streaming rate, NCM/synthetic jobs, concurrent users/query/RCA load and retention—not device count alone.
-2. Use SNWP-2500-v1 or another explicitly versioned workload profile when testing the 8 vCPU/16 GB Core objective; treat final profile constants as benchmark-defined, not invented.
+2. Use SNWP-2500-v1 or another explicitly versioned workload profile when testing the 8 vCPU/32 GB Core objective; treat final profile constants as benchmark-defined, not invented.
 3. Capture CPU, RAM, disk, queue/backlog, ingestion lag, drops, query latency, dashboard render, compression, cleanup and recovery/replay behavior as applicable.
 4. Compare against the prior certified/baseline build and call out regressions; do not invent p95/SLO thresholds that the documents leave TBD.
 5. For Sensors, keep polling and high-rate streaming classes distinct and report MWU/capacity headroom and failure behavior.

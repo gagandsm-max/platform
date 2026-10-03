@@ -620,7 +620,7 @@ Detailed UI contracts remain in `Platform_09_UI_UX_Master.md`.
 
 ### 36.1 Core
 
-For the agreed reference workload, **8 vCPU / 16 GB RAM for up to 2,500 devices** is a mandatory engineering optimization target. It must be validated against the defined Standard Network Workload Profile (SNWP); it is not a claim that every possible 2,500-device workload fits that footprint. SNWP is a TARGET/PROFILE, not benchmark certification by documentation.
+For the agreed reference workload, **8 vCPU / 32 GB RAM for up to 2,500 devices** is a mandatory engineering optimization target. It must be validated against the defined Standard Network Workload Profile (SNWP); it is not a claim that every possible 2,500-device workload fits that footprint. SNWP is a TARGET/PROFILE, not benchmark certification by documentation.
 
 ### 36.2 Sensor
 

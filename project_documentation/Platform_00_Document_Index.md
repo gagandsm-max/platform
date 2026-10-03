@@ -265,7 +265,7 @@ A1 makes this contract normative. Completing the field set for every capability 
 - Sensor/Agent external channel: HTTPS/gRPC over mTLS; Kafka stays internal.
 - Data stack: PostgreSQL authoritative control state, ClickHouse high-volume telemetry analytics, Kafka streaming backbone, Valkey cache/ephemeral state.
 - Go Sensors/Agents; Java 21 Core; React/TypeScript UI; Python for selected NCM/AI/analytics workers.
-- Core ≤2,500 reference devices: 8 vCPU/16 GB mandatory engineering target under SNWP-2500-v1.
+- Core ≤2,500 reference devices: 8 vCPU/32 GB mandatory engineering target under SNWP-2500-v1.
 - UI-driven provisioning: individual, CSV/XLSX bulk and network auto-discovery.
 - Placement is locality + reachability + capacity + HA + security aware.
 - Full always-on DPI/full APM remain excluded initially; **bounded triggered packet evidence** is an approved diagnostic capability and does not reopen the full-DPI decision.

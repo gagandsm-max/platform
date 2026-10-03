@@ -17,12 +17,12 @@ All numbers below are **engineering planning targets until benchmark-certified**
 
 | Monitored network devices | Core count | Engineering target per Core |
 |---:|---:|---|
-| 1,000 | 1 | **8 vCPU / 16 GB RAM** |
-| 2,000 | 1 | **8 vCPU / 16 GB RAM** |
-| up to 2,500 | 1 | **8 vCPU / 16 GB RAM mandatory optimization target under SNWP-2500-v1** |
-| 5,000 | 1 | **12 vCPU / 24 GB RAM planning target** |
-| 10,000 | 1 | **16 vCPU / 32 GB RAM planning target** |
-| 15,000 | 1 | **24 vCPU / 48 GB RAM planning target** |
+| 1,000 | 1 | **8 vCPU / 32 GB RAM** |
+| 2,000 | 1 | **8 vCPU / 32 GB RAM** |
+| up to 2,500 | 1 | **8 vCPU / 32 GB RAM mandatory optimization target under SNWP-2500-v1** |
+| 5,000 | 1 | **12 vCPU / 48 GB RAM planning target** |
+| 10,000 | 1 | **16 vCPU / 64 GB RAM planning target** |
+| 15,000 | 1 | **24 vCPU / 96 GB RAM planning target** |
 
 ### 2.2 HA
 
@@ -30,12 +30,12 @@ HA uses **exactly two full Core nodes**, one Active and one Standby. Each full C
 
 | Devices | Full Core nodes | Per-Core target |
 |---:|---:|---|
-| 1,000 | 2 | 8 vCPU / 16 GB |
-| 2,000 | 2 | 8 vCPU / 16 GB |
-| up to 2,500 | 2 | 8 vCPU / 16 GB |
-| 5,000 | 2 | 12 vCPU / 24 GB |
-| 10,000 | 2 | 16 vCPU / 32 GB |
-| 15,000 | 2 | 24 vCPU / 48 GB |
+| 1,000 | 2 | 8 vCPU / 32 GB |
+| 2,000 | 2 | 8 vCPU / 32 GB |
+| up to 2,500 | 2 | 8 vCPU / 32 GB |
+| 5,000 | 2 | 12 vCPU / 48 GB |
+| 10,000 | 2 | 16 vCPU / 64 GB |
+| 15,000 | 2 | 24 vCPU / 96 GB |
 
 The exact two-Core synchronization/fencing mechanisms for Kafka/ClickHouse/PostgreSQL are P0 engineering spikes. Technology must adapt to the fixed product requirement; no third full Core may be introduced silently.
 
@@ -47,19 +47,19 @@ Planning envelopes below are hard design targets until benchmark certification:
 
 | Per-Core target | Core-resident local-intelligence peak budget (if enabled) | Core-resident LLM class (if enabled) | Concurrent local LLM requests | Notes |
 |---|---:|---|---:|---|
-| **8 vCPU / 16 GB** | **≤2 vCPU burst / ≤3 GB RAM peak** | **0.5B–1.5B parameter, 4-bit quantized** | **1** | Standard smallest Core. A model above 1.5B is not assumed; up to ~3B may be admitted only if SNWP certification proves no monitoring regression. |
-| **12 vCPU / 24 GB** | **≤3 vCPU burst / ≤4 GB RAM peak** | **1B–3B, 4-bit quantized** | **1–2** | Extra capacity primarily buys monitoring/user concurrency, not permission for an unnecessarily large model. |
-| **16 vCPU / 32 GB** | **≤3 vCPU burst / ≤5 GB RAM peak** | **1B–3B, 4-bit quantized** | **2** | AI remains lower priority than live monitoring and storage. |
-| **24 vCPU / 48 GB** | **≤4 vCPU burst / ≤6 GB RAM peak** | **1B–3B, 4-bit quantized** | **2–4** | Higher concurrency is preferred over increasing model size. |
+| **8 vCPU / 32 GB** | **≤2 vCPU burst / ≤3 GB RAM peak** | **0.5B–1.5B parameter, 4-bit quantized** | **1** | Standard smallest Core. A model above 1.5B is not assumed; up to ~3B may be admitted only if SNWP certification proves no monitoring regression. |
+| **12 vCPU / 48 GB** | **≤3 vCPU burst / ≤4 GB RAM peak** | **1B–3B, 4-bit quantized** | **1–2** | Extra capacity primarily buys monitoring/user concurrency, not permission for an unnecessarily large model. |
+| **16 vCPU / 64 GB** | **≤3 vCPU burst / ≤5 GB RAM peak** | **1B–3B, 4-bit quantized** | **2** | AI remains lower priority than live monitoring and storage. |
+| **24 vCPU / 96 GB** | **≤4 vCPU burst / ≤6 GB RAM peak** | **1B–3B, 4-bit quantized** | **2–4** | Higher concurrency is preferred over increasing model size. |
 
-When Core-resident local intelligence is enabled on the 8 vCPU / 16 GB tier, the normal non-interactive target is **<1 vCPU average and approximately 1–1.5 GB RAM**, with the larger peak envelope used only during bounded inference/analytics activity. The base product does not require Core-resident LLM inference.
+When Core-resident local intelligence is enabled on the 8 vCPU / 32 GB tier, the normal non-interactive target is **<1 vCPU average and approximately 1–1.5 GB RAM**, with the larger peak envelope used only during bounded inference/analytics activity. The base product does not require Core-resident LLM inference.
 
 Mandatory resource rules:
 
 - **No mandatory GPU/NPU.** Optional accelerator support may be certified later, but no GPU may become a prerequisite for standard Core monitoring, alerting or deterministic RCA.
 - **No foundation-model training/fine-tuning on customer production Core.** Platform ships/loads approved pre-trained quantized local models. Customer-specific intelligence comes from evidence retrieval, tools, topology, Similar Incident Memory and policy, not foundation-model fine-tuning.
 - Lightweight statistical/ML baseline recalibration is permitted, but it is scheduled, bounded, interruptible and lower priority than live monitoring.
-- Local LLM inference is **on demand**. On the 8/16 tier the model should be unloaded or memory-mapped with minimal resident state when idle and released after a bounded idle period unless benchmarked headroom permits keeping it warm.
+- Local LLM inference is **on demand**. On the 8/32 tier the model should be unloaded or memory-mapped with minimal resident state when idle and released after a bounded idle period unless benchmarked headroom permits keeping it warm.
 - Small-Core local LLM operating context should normally remain **2K–4K tokens**; Platform retrieval/context builders reduce large telemetry sets to bounded structured evidence before inference. Raw high-volume telemetry is not streamed wholesale into an LLM.
 - GNN inference operates on bounded incident-relevant temporal subgraphs, not the full enterprise graph for every observation.
 - AI resource limits are enforced by a Resource Governor/circuit breaker. Recommended degradation order under resource pressure is: postpone model recalibration/training → reduce/queue LLM concurrency → defer optional GNN/embedding work → unload/suspend local LLM. Deterministic monitoring, alert qualification and RCA continue.
@@ -155,9 +155,9 @@ Customer modes: **Automatic (recommended)**, **Automatic with Approval**, **Manu
 
 ## 8. Standard Network Workload Profile SNWP-2500-v1
 
-The 8 vCPU/16 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; and Flow/syslog below dedicated-streaming threshold. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
+The 8 vCPU/32 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; and Flow/syslog below dedicated-streaming threshold. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
 
-**CORE_RESOURCE_FEASIBILITY_GATE_1** (governance checkpoint after BUILD-060–065 are runnable enough for representative aggregate measurements; before BUILD-066): FEASIBILITY CHECKPOINT, **not** capacity certification. Measures Core JVM CPU/RAM, heap, PostgreSQL, Kafka, ClickHouse, Valkey, OS/filesystem/cache reserve, disk/IO, ingestion lag/backlog, protected workload latency, recovery reserve and dominant bottleneck, with baseline AI/local inference DISABLED/DEFAULT-OFF. Result: `PASS` / `CONDITIONAL_PASS` / `FAIL`. The 8-vCPU / 16-GB Core profile remains **TARGET / NOT BENCHMARK-CERTIFIED**. Do not silently increase hardware minimums on FAIL. Full capacity/scale certification remains BUILD-130.
+**CORE_RESOURCE_FEASIBILITY_GATE_1** (governance checkpoint after BUILD-060–065 are runnable enough for representative aggregate measurements; before BUILD-066): FEASIBILITY CHECKPOINT, **not** capacity certification. Measures Core JVM CPU/RAM, heap, PostgreSQL, Kafka, ClickHouse, Valkey, OS/filesystem/cache reserve, disk/IO, ingestion lag/backlog, protected workload latency, recovery reserve and dominant bottleneck, with baseline AI/local inference DISABLED/DEFAULT-OFF. Result: `PASS` / `CONDITIONAL_PASS` / `FAIL`. The 8-vCPU / 32-GB Core profile remains **TARGET / NOT BENCHMARK-CERTIFIED**. Do not silently increase hardware minimums on FAIL. Full capacity/scale certification remains BUILD-130.
 
 A separate Heavy Network Workload profile covers high-interface, aggressive polling, heavy routing, gNMI, API/NCM and high-rate stream cases.
 

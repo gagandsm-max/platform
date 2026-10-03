@@ -74,7 +74,7 @@ Nothing in this document selects a commercial model/provider, vector database, m
 | `PRD-MIA-032` | P0 | AI/ML operations shall expose model/prompt/policy/version provenance, latency, error/timeout/fallback rates, token/compute usage where relevant, cache use, grounding/evidence coverage and decision audit. |
 | `PRD-MIA-033` | P0 | Platform shall implement the Local Intelligence capability as bounded logical modules under the existing modular Core/analytics architecture; the module map in §15.1 is authoritative and does not imply one process/microservice per module. |
 | `PRD-MIA-034` | P0 | Supported Local AI/ML/LLM may execute on Core only within a certified non-interference envelope in `Platform_11`; deployments requiring compute isolation shall support an optional dedicated local/private inference provider through the same AI Gateway. Standard monitoring remains CPU-first with **no mandatory GPU**, and monitoring/ingestion/storage/alert/deterministic-RCA objectives take precedence over all AI work. |
-| `PRD-MIA-035` | P0 | **If Core-resident LLM inference is enabled** on the 8 vCPU/16 GB tier, the certified target profile is a **0.5B–1.5B parameter 4-bit-quantized** model with one concurrent request; larger models, including up to approximately 3B, require explicit benchmark certification and may not silently raise the minimum Core requirement. Core-resident LLM is optional, not a prerequisite for base monitoring/RCA. |
+| `PRD-MIA-035` | P0 | **If Core-resident LLM inference is enabled** on the 8 vCPU/32 GB tier, the certified target profile is a **0.5B–1.5B parameter 4-bit-quantized** model with one concurrent request; larger models, including up to approximately 3B, require explicit benchmark certification and may not silently raise the minimum Core requirement. Core-resident LLM is optional, not a prerequisite for base monitoring/RCA. |
 | `PRD-MIA-036` | P0 | Customer production Core shall not train or fine-tune foundation LLMs. Local LLM intelligence shall use approved pretrained quantized artifacts plus Platform evidence retrieval/tools; lightweight statistical/ML recalibration remains permitted when bounded and interruptible. |
 | `PRD-MIA-037` | P0 | Local LLM input shall be produced by a bounded context/evidence builder; high-volume raw telemetry shall be aggregated/queried by Platform first, and the supported small-Core operating context shall normally remain within a 2K–4K token envelope unless benchmarked otherwise. |
 | `PRD-MIA-038` | P0 | GNN inference shall use bounded incident-relevant temporal subgraphs and shall not evaluate the complete enterprise graph for every observation; GNN remains optional assistance behind deterministic RCA and may be deferred under resource pressure. |
@@ -312,7 +312,7 @@ Standard smallest-Core target applies only when the local LLM is certified to ru
 Optional Core-resident smallest-tier profile:
 
 ```text
-Core tier                  8 vCPU / 16 GB RAM
+Core tier                  8 vCPU / 32 GB RAM
 Local LLM target           0.5B–1.5B parameters, 4-bit quantized
 Concurrent local requests  1
 Operating context          normally 2K–4K tokens
@@ -327,7 +327,7 @@ A model up to approximately 3B may be enabled on a tier only after that exact mo
 ### 15.4 Local ML/GNN operating contract
 
 - Baseline/anomaly/cohort/forecast functions shall favor incremental/statistical/classical models over deep networks where accuracy is sufficient.
-- Normal continuous ML activity on the 8/16 Core targets a sub-core average CPU footprint and bounded memory; expensive fitting/recalibration is scheduled, interruptible and may be postponed indefinitely while the Core is under pressure.
+- Normal continuous ML activity on the 8/32 Core targets a sub-core average CPU footprint and bounded memory; expensive fitting/recalibration is scheduled, interruptible and may be postponed indefinitely while the Core is under pressure.
 - GNN inference is incident/event driven over bounded temporal subgraphs. Training/experimentation is not part of the live monitoring hot path.
 - Optional embedding computation is batch/on-demand and shall not become a prerequisite for Similar Incident Memory or runbook retrieval; deterministic/structured search remains the fallback.
 - Customer-specific behavior is expressed through Platform data/evidence retrieval, policy, feedback and governed lightweight models—not through continuous foundation-model fine-tuning.
@@ -346,7 +346,7 @@ The Local Intelligence Orchestrator and deployment controls enforce this priorit
 
 When CPU, memory, swap, ingestion lag, Kafka/ClickHouse backlog, query latency, incident-storm load or storage pressure crosses the certified guard band, Platform shall progressively postpone training/recalibration, reduce or queue LLM concurrency, defer optional embeddings/GNN, unload the local LLM and finally disable optional AI assistance before protected monitoring functions are allowed to miss objectives.
 
-The 8/16 profile shall normally unload/release the local LLM after a bounded idle period unless a benchmarked warm-model profile proves sufficient headroom. AI queue depth and degraded/suspended state are visible to the user and to Platform self-monitoring.
+The 8/32 profile shall normally unload/release the local LLM after a bounded idle period unless a benchmarked warm-model profile proves sufficient headroom. AI queue depth and degraded/suspended state are visible to the user and to Platform self-monitoring.
 
 ### 15.6 Local model lifecycle and offline packaging
 
@@ -503,7 +503,7 @@ The deterministic certification corpus expands the existing Platform_22 evaluati
 | `REQ-MIA-029` | P0 | AI observability records version/provenance/latency/error/fallback/evidence coverage/tool decisions while secret-scanning logs/traces/support/evaluation bundles. |
 | `REQ-MIA-030` | P0 | Air-gap tests prove core deterministic monitoring requires no external AI/internet service and locally configured AI can be disabled without functional collapse. |
 | `REQ-MIA-031` | P0 | Architecture/component tests map the §15.1 logical modules to bounded deployment units and prove no module bypasses authoritative telemetry/evidence, tenant scope or deterministic RCA/tool policy. |
-| `REQ-MIA-032` | P0 | SNWP-2500-v1 resource certification proves the supported 8 vCPU/16 GB local-intelligence profile remains within **≤2 vCPU AI burst and ≤3 GB aggregate AI peak RAM**, with no regression beyond approved monitoring/ingestion/query/failover tolerances. |
+| `REQ-MIA-032` | P0 | SNWP-2500-v1 resource certification proves the supported 8 vCPU/32 GB local-intelligence profile remains within **≤2 vCPU AI burst and ≤3 GB aggregate AI peak RAM**, with no regression beyond approved monitoring/ingestion/query/failover tolerances. |
 | `REQ-MIA-033` | P0 | CPU-only certification proves all mandatory Local AI/ML/LLM capabilities can operate without a GPU; optional accelerator failure/removal does not disable core monitoring or supported CPU fallback. |
 | `REQ-MIA-034` | P0 | When Core-resident LLM is enabled, tests prove small-Core 0.5B–1.5B Q4 operation, single-request concurrency, bounded 2K–4K context, idle unload/release behavior and refusal to enable an uncertified larger model/profile; with it disabled, base monitoring/RCA remains complete. |
 | `REQ-MIA-035` | P0 | Production packaging/tests prove foundation-model training/fine-tuning is unavailable on customer Core while lightweight ML recalibration remains bounded, interruptible and lower priority than monitoring. |

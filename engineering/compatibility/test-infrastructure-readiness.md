@@ -48,7 +48,7 @@ The readiness matrix may state that a **capability** can be created locally with
 | **Redis / Valkey Monitored Target** | **NEEDS CREATION** | Dedicated unauthenticated/standalone Valkey target | Add monitored target container on Day 9. |
 | **Two-Core HA Testing (Active/Standby VIP)** | **NEEDS USER/EXTERNAL ACCESS** | Local Compose has profiles, but true VIP / ARP takeover requires 2 separate hosts/VMs | User/Lab to provide 2 networked Linux VMs for HA multi-node certification. |
 | **Disaster Recovery (DR) Test Environment** | **NEEDS USER/EXTERNAL ACCESS** | Requires independent second site / network | User/Lab to provide secondary DR VM instance or isolated network namespace. |
-| **2,500-Device Benchmark Environment** | **NEEDS USER/EXTERNAL ACCESS** | Requires 8C/16G dedicated VM/host compute | Dedicated benchmark instance required for 24h certified test run (Day 18). |
+| **2,500-Device Benchmark Environment** | **NEEDS USER/EXTERNAL ACCESS** | Requires 8C/32G dedicated VM/host compute | Dedicated benchmark instance required for 24h certified test run (Day 18). |
 | **Ubuntu 24.x Clean VM (Package Install)** | **NEEDS USER/EXTERNAL ACCESS** | Requires bare-metal or KVM/VirtualBox VM for `.deb` install, systemd autostart, host reboot testing | User/Lab to provide clean Ubuntu 24.04 VM with root access for packaging verification. |
 | **RHEL 9.x Clean VM (Package Install)** | **NEEDS USER/EXTERNAL ACCESS** | Requires RHEL 9 VM for `.rpm` install, SELinux enforcement, systemd verification | User/Lab to provide clean RHEL 9 VM for `.rpm` packaging certification. |
 | **Windows VM / Test Runner** | **NEEDS USER/EXTERNAL ACCESS** | Windows Service / MSI install and SCM reboot testing cannot run inside Linux Docker | User/Lab to provide Windows Server 2022 / Windows 11 VM with WinRM / PowerShell access. |
@@ -81,4 +81,4 @@ To exit Day 30 and pass commercial GA, the lab or user must supply:
 1. **Packaging VMs:** Clean Ubuntu 24.04 and RHEL 9.x VMs for `.deb`/`.rpm` install, systemd, and reboot validation.
 2. **Windows Runner:** Windows Server 2022 / Windows 11 VM for MSI, Windows Service, and code-signing validation.
 3. **High-Availability Cluster:** Two networked Linux instances with L2 connectivity for VIP/fencing failover testing.
-4. **Benchmark Host:** One 8C/16G host for the 24-hour SNWP-2500 performance certification.
+4. **Benchmark Host:** One 8C/32G host for the 24-hour SNWP-2500 performance certification.
