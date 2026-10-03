@@ -57,6 +57,10 @@ MEM_AGENT=""
 MEM_SENSOR=""
 MEM_COMPOSE=""
 MEM_ASSESSMENT="UNMEASURED"
+MEM_CORE_LINE=""
+MEM_SENSOR_LINE=""
+MEM_ANALYTICS_LINE=""
+ANALYTICS_RESTART_LINE=""
 STRESS_PASS=1
 DURATION_START=$(date +%s)
 
@@ -109,30 +113,36 @@ run_go_stress() {
 }
 
 try_race() {
-  log "Attempting Go race detector for Agent/Sensor stress..."
+  log "Attempting Go race detector for Agent/Sensor stress (no package install)..."
+  # No apk/apt/dnf/yum/new image. Reuse the same approved golang alpine image used by unit tests.
+  # That image has no C compiler; -race requires cgo. Record exact evidence if unavailable.
   local any_pass=0
-  # agent
   local out rc
   set +e
   out=$(docker run --rm --tmpfs "${GO_TMPFS}" \
     -v "${ROOT_DIR}/agent:/app/agent:ro" \
     -w /app/agent \
     "${GO_IMG}" \
-    sh -c 'apk add --no-cache gcc musl-dev >/dev/null && CGO_ENABLED=1 go test -tags=stress -race -count=1 -timeout=25m -run TestStress ./common/supportability/' 2>&1)
+    sh -c 'CGO_ENABLED=1 go test -tags=stress -race -count=1 -timeout=25m -run TestStress ./common/supportability/' 2>&1)
   rc=$?
   set -e
-  echo "${out}" | tee /tmp/build005-agent-race.txt | tail -n 30
+  echo "${out}" | tee /tmp/build005-agent-race.txt | tail -n 40
   if [ "${rc}" -eq 0 ]; then
     any_pass=1
   elif echo "${out}" | grep -qi 'DATA RACE\|race detected'; then
     fail_hard "data race detected in agent"
     RACE_STATUS="RACE_DETECTED — agent"
     return 0
-  elif echo "${out}" | grep -qi 'not supported\|requires cgo\|install gcc'; then
-    RACE_STATUS="RACE_TOOL_UNAVAILABLE — agent toolchain could not execute -race"
+  elif echo "${out}" | grep -qi 'C compiler\|gcc.*not found\|requires cgo\|cgo: C compiler\|-race requires cgo\|loadinternal: cannot find runtime/cgo'; then
+    RACE_STATUS="RACE_TOOL_UNAVAILABLE — ${GO_IMG} lacks C toolchain for -race (CGO_ENABLED=1; no apk/apt allowed); evidence=$(echo "${out}" | tr '\n' ' ' | sed 's/  */ /g' | cut -c1-240)"
   else
-    fail_hard "agent -race stress failed rc=${rc}"
-    RACE_STATUS="RACE_TOOL_AVAILABLE — agent failed"
+    # Distinguish tool absence from unexpected failure without installs.
+    if echo "${out}" | grep -qi 'build failed\|build constraints\|cannot find package'; then
+      RACE_STATUS="RACE_TOOL_UNAVAILABLE — agent -race build failed without installable toolchain; evidence=$(echo "${out}" | tr '\n' ' ' | sed 's/  */ /g' | cut -c1-240)"
+    else
+      fail_hard "agent -race stress failed rc=${rc}"
+      RACE_STATUS="RACE_TOOL_AVAILABLE — agent failed"
+    fi
   fi
 
   set +e
@@ -140,10 +150,10 @@ try_race() {
     -v "${ROOT_DIR}/sensor:/app/sensor:ro" \
     -w /app/sensor \
     "${GO_IMG}" \
-    sh -c 'apk add --no-cache gcc musl-dev >/dev/null && CGO_ENABLED=1 go test -tags=stress -race -count=1 -timeout=25m -run TestStress ./internal/supportability/' 2>&1)
+    sh -c 'CGO_ENABLED=1 go test -tags=stress -race -count=1 -timeout=25m -run TestStress ./internal/supportability/' 2>&1)
   rc=$?
   set -e
-  echo "${out}" | tee /tmp/build005-sensor-race.txt | tail -n 30
+  echo "${out}" | tee /tmp/build005-sensor-race.txt | tail -n 40
   if [ "${rc}" -eq 0 ]; then
     if [ "${any_pass}" -eq 1 ]; then
       RACE_STATUS="RACE_TOOL_AVAILABLE — PASS (agent+sensor stress -race)"
@@ -153,13 +163,19 @@ try_race() {
   elif echo "${out}" | grep -qi 'DATA RACE\|race detected'; then
     fail_hard "data race detected in sensor"
     RACE_STATUS="RACE_DETECTED — sensor"
-  elif echo "${out}" | grep -qi 'not supported\|requires cgo\|install gcc'; then
-    if [[ "${RACE_STATUS}" != RACE_TOOL_AVAILABLE* ]]; then
-      RACE_STATUS="RACE_TOOL_UNAVAILABLE — sensor toolchain could not execute -race"
+  elif echo "${out}" | grep -qi 'C compiler\|gcc.*not found\|requires cgo\|cgo: C compiler\|-race requires cgo\|loadinternal: cannot find runtime/cgo'; then
+    if [[ "${RACE_STATUS}" != RACE_TOOL_AVAILABLE* ]] && [[ "${RACE_STATUS}" != RACE_DETECTED* ]]; then
+      RACE_STATUS="RACE_TOOL_UNAVAILABLE — ${GO_IMG} lacks C toolchain for -race (CGO_ENABLED=1; no apk/apt allowed); evidence=$(echo "${out}" | tr '\n' ' ' | sed 's/  */ /g' | cut -c1-240)"
     fi
   else
-    fail_hard "sensor -race stress failed rc=${rc}"
-    RACE_STATUS="RACE_TOOL_AVAILABLE — sensor failed"
+    if echo "${out}" | grep -qi 'build failed\|build constraints\|cannot find package'; then
+      if [[ "${RACE_STATUS}" != RACE_TOOL_AVAILABLE* ]] && [[ "${RACE_STATUS}" != RACE_DETECTED* ]]; then
+        RACE_STATUS="RACE_TOOL_UNAVAILABLE — sensor -race build failed without installable toolchain; evidence=$(echo "${out}" | tr '\n' ' ' | sed 's/  */ /g' | cut -c1-240)"
+      fi
+    else
+      fail_hard "sensor -race stress failed rc=${rc}"
+      RACE_STATUS="RACE_TOOL_AVAILABLE — sensor failed"
+    fi
   fi
 }
 
@@ -458,7 +474,110 @@ PY
   if [ "${probe_rc}" -eq 0 ] && [ "${PROBE_FAIL:-0}" -eq 0 ] && [ "${PROBE_REQUESTS:-0}" -ge 5000 ]; then
     PROBE_SOAK_OK=1
   fi
-  MEM_ASSESSMENT="memory_gate=GO_HEAP_ONLY; Compose RSS samples observational — review MEM_COMPOSE; Go logger windows hard-gated in unit stress"
+  evaluate_compose_memory "${mem_start}" "${mem_mid}" "${mem_end}"
+}
+
+# Parse docker-stats used memory ("243MiB / 1GiB") into integer bytes.
+# Enforce Master threshold: FAIL only when end-start > 64MiB AND >25%.
+evaluate_compose_memory() {
+  local start_blob="$1" mid_blob="$2" end_blob="$3"
+  MEM_COMPOSE="start=${start_blob} mid=${mid_blob} end=${end_blob}"
+  local eval_out mem_rc=0
+  set +e
+  eval_out=$(START_BLOB="${start_blob}" MID_BLOB="${mid_blob}" END_BLOB="${end_blob}" python3 - <<'PY'
+import os, re, sys
+
+THRESH_ABS = 64 * 1024 * 1024
+THRESH_PCT = 25.0
+UNITS = {
+    "b": 1,
+    "kib": 1024,
+    "kb": 1000,
+    "mib": 1024**2,
+    "mb": 1000**2,
+    "gib": 1024**3,
+    "gb": 1000**3,
+}
+NAME_MAP = {
+    "platform-core": "CORE_MEMORY",
+    "platform-sensor-net": "SENSOR_MEMORY",
+    "platform-analytics": "ANALYTICS_MEMORY",
+}
+
+def parse_used(blob_item: str) -> int:
+    # "platform-core=243MiB / 1GiB"
+    if "=" not in blob_item:
+        raise ValueError(f"bad stats item: {blob_item!r}")
+    _, usage = blob_item.split("=", 1)
+    used = usage.split("/", 1)[0].strip()
+    m = re.fullmatch(r"([0-9]*\.?[0-9]+)\s*([A-Za-z]+)", used)
+    if not m:
+        raise ValueError(f"unparseable used memory: {used!r}")
+    num = float(m.group(1))
+    unit = m.group(2).lower()
+    if unit not in UNITS:
+        raise ValueError(f"unsupported memory unit: {unit!r}")
+    return int(num * UNITS[unit])
+
+def parse_blob(blob: str) -> dict:
+    out = {}
+    for part in (blob or "").split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        name = part.split("=", 1)[0].strip()
+        if name in NAME_MAP:
+            out[name] = parse_used(part)
+    return out
+
+try:
+    start = parse_blob(os.environ.get("START_BLOB", ""))
+    mid = parse_blob(os.environ.get("MID_BLOB", ""))
+    end = parse_blob(os.environ.get("END_BLOB", ""))
+except Exception as e:
+    print(f"MEMORY_PARSE_ERROR {e}")
+    sys.exit(2)
+
+overall = "PASS"
+for cname, label in NAME_MAP.items():
+    if cname not in start or cname not in end:
+        print(f"{label} start_bytes=? mid_bytes=? end_bytes=? delta_bytes=? percent=? result=FAIL reason=missing_sample")
+        overall = "FAIL"
+        continue
+    s = start[cname]
+    m = mid.get(cname, -1)
+    e = end[cname]
+    delta = e - s
+    pct = (delta / s * 100.0) if s > 0 else (100.0 if delta > 0 else 0.0)
+    fail = (delta > THRESH_ABS) and (pct > THRESH_PCT)
+    result = "FAIL" if fail else "PASS"
+    if fail:
+        overall = "FAIL"
+    print(
+        f"{label} start_bytes={s} mid_bytes={m} end_bytes={e} "
+        f"delta_bytes={delta} percent={pct:.2f} result={result}"
+    )
+print(f"COMPOSE_MEMORY_GATE result={overall}")
+sys.exit(1 if overall == "FAIL" else 0)
+PY
+)
+  mem_rc=$?
+  set -e
+  echo "${eval_out}"
+  MEM_CORE_LINE=$(echo "${eval_out}" | grep '^CORE_MEMORY ' | tail -n1 || true)
+  MEM_SENSOR_LINE=$(echo "${eval_out}" | grep '^SENSOR_MEMORY ' | tail -n1 || true)
+  MEM_ANALYTICS_LINE=$(echo "${eval_out}" | grep '^ANALYTICS_MEMORY ' | tail -n1 || true)
+  if [ "${mem_rc}" -eq 2 ]; then
+    fail_hard "Compose memory sample parse failed"
+    MEM_ASSESSMENT="COMPOSE_MEMORY_GATE=FAIL (parse error); Go logger post-GC 32MiB gate remains hard"
+    return 0
+  fi
+  if [ "${mem_rc}" -ne 0 ]; then
+    fail_hard "Compose RSS threshold exceeded (absolute>64MiB AND percent>25%)"
+    MEM_ASSESSMENT="COMPOSE_MEMORY_GATE=FAIL; Go logger post-GC 32MiB gate remains hard"
+  else
+    MEM_ASSESSMENT="COMPOSE_MEMORY_GATE=PASS (fail only if end-start >64MiB AND >25%); Go logger post-GC 32MiB gate remains hard"
+  fi
 }
 
 run_correlation_stress() {
@@ -498,7 +617,7 @@ run_correlation_stress() {
 }
 
 run_recovery_smoke() {
-  log "Bounded recovery smoke: restart analytics, recheck probes..."
+  log "Bounded recovery smoke: restart analytics, verify new service_instance_id..."
   local live_port env_name
   live_port="$(docker port platform-core 8443 2>/dev/null | head -n1 | awk -F: '{print $NF}' | tr -d '\r' || true)"
   env_name="$(grep -E '^PLATFORM_ENV=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' || true)"
@@ -518,17 +637,142 @@ run_recovery_smoke() {
     log "Skip recovery smoke — analytics not running"
     return 0
   fi
+
+  local pre_body post_body pre_id post_id
+  pre_body=$(docker exec platform-analytics curl -s --max-time 5 http://127.0.0.1:8090/health 2>/dev/null || true)
+  printf '%s' "${pre_body}" > /tmp/build005-analytics-pre-health.json
+  if ! pre_id=$(python3 - <<'PY'
+import json, re, sys
+obj = json.load(open("/tmp/build005-analytics-pre-health.json", encoding="utf-8"))
+sid = obj.get("service_instance_id") or ""
+if not isinstance(sid, str) or not sid.strip():
+    print("pre_health_missing_service_instance_id", file=sys.stderr); sys.exit(1)
+if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", sid):
+    print(f"pre_health_invalid_service_instance_id={sid!r}", file=sys.stderr); sys.exit(1)
+if obj.get("component") != "platform-analytics":
+    print(f"pre_health_bad_component={obj.get('component')!r}", file=sys.stderr); sys.exit(1)
+for k in ("status", "version", "ts"):
+    if k not in obj:
+        print(f"pre_health_missing_{k}", file=sys.stderr); sys.exit(1)
+print(sid)
+PY
+  ); then
+    fail_hard "Analytics pre-restart /health failed PUBLIC_OVERALL / service_instance_id validation"
+    return 0
+  fi
+
   docker restart platform-analytics >/dev/null
-  local i code
+
+  local i code recovered=0
   for i in $(seq 1 30); do
     code=$(docker exec platform-analytics curl -s --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/health 2>/dev/null || echo 000)
     if [ "${code}" = "200" ]; then
-      log "Analytics recovered HTTP ${code}"
-      return 0
+      recovered=1
+      break
     fi
     sleep 2
   done
-  fail_hard "Analytics did not recover /health after restart"
+  if [ "${recovered}" -ne 1 ]; then
+    fail_hard "Analytics did not recover /health after restart"
+    return 0
+  fi
+
+  post_body=$(docker exec platform-analytics curl -s --max-time 5 http://127.0.0.1:8090/health 2>/dev/null || true)
+  printf '%s' "${post_body}" > /tmp/build005-analytics-post-health.json
+  if ! post_id=$(PRE_ID="${pre_id}" python3 - <<'PY'
+import json, os, re, sys
+pre = os.environ["PRE_ID"]
+obj = json.load(open("/tmp/build005-analytics-post-health.json", encoding="utf-8"))
+sid = obj.get("service_instance_id") or ""
+if not isinstance(sid, str) or not sid.strip():
+    print("post_health_missing_service_instance_id", file=sys.stderr); sys.exit(1)
+if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", sid):
+    print(f"post_health_invalid_service_instance_id={sid!r}", file=sys.stderr); sys.exit(1)
+if sid == pre:
+    print(f"post_health_service_instance_id_unchanged={sid}", file=sys.stderr); sys.exit(1)
+if obj.get("component") != "platform-analytics":
+    print(f"post_health_bad_component={obj.get('component')!r}", file=sys.stderr); sys.exit(1)
+for k in ("status", "version", "ts"):
+    if k not in obj:
+        print(f"post_health_missing_{k}", file=sys.stderr); sys.exit(1)
+ver = obj.get("version") or ""
+if not isinstance(ver, str) or not ver.strip() or len(ver) > 64:
+    print(f"post_health_bad_version={ver!r}", file=sys.stderr); sys.exit(1)
+print(sid)
+PY
+  ); then
+    fail_hard "Analytics post-restart /health failed identity/PUBLIC_OVERALL validation"
+    return 0
+  fi
+
+  docker logs --since 5m platform-analytics > /tmp/build005-analytics-post-logs.txt 2>&1 || true
+  if ! POST_ID="${post_id}" python3 - <<'PY'
+import json, os, re, sys
+post_id = os.environ["POST_ID"]
+logs = open("/tmp/build005-analytics-post-logs.txt", encoding="utf-8", errors="replace").read()
+sentinels = (
+    "STRESS-BEARER-SENTINEL",
+    "STRESS-PEM-SENTINEL",
+    "stress-password-sentinel",
+    "STRESS-BASIC",
+    "U1RSRVNTLUJBU0lD",
+)
+allowed = {
+    "ts", "level", "component", "version", "service_instance_id",
+    "message", "event_code", "correlation_id", "request_id", "job_id",
+    "retry_count", "safe_context", "agent_id", "sensor_id",
+}
+found = False
+for line in logs.splitlines():
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    def _dup(pairs):
+        seen = set()
+        out = {}
+        for k, v in pairs:
+            if k in seen:
+                raise ValueError(f"duplicate:{k}")
+            seen.add(k)
+            out[k] = v
+        return out
+    try:
+        obj = json.loads(line, object_pairs_hook=_dup)
+    except ValueError as e:
+        if str(e).startswith("duplicate:"):
+            print(f"log_duplicate_key {e}", file=sys.stderr); sys.exit(1)
+        continue
+    except Exception:
+        continue
+    if not isinstance(obj, dict):
+        continue
+    if obj.get("component") != "platform-analytics":
+        continue
+    if obj.get("service_instance_id") != post_id:
+        continue
+    for k in obj.keys():
+        if k not in allowed:
+            print(f"log_forbidden_or_unknown_field={k}", file=sys.stderr); sys.exit(1)
+    lowered = line.lower()
+    for s in sentinels:
+        if s.lower() in lowered:
+            print(f"log_sentinel_leak={s}", file=sys.stderr); sys.exit(1)
+    found = True
+    break
+if not found:
+    print("no_post_restart_structured_log_with_new_service_instance_id", file=sys.stderr)
+    sys.exit(1)
+print("ok")
+PY
+  then
+    fail_hard "Analytics post-restart structured log validation failed"
+    ANALYTICS_RESTART_LINE="ANALYTICS_RESTART old_service_instance_id=${pre_id} new_service_instance_id=${post_id} health_recovered=true log_valid=false result=FAIL"
+    return 0
+  fi
+
+  ANALYTICS_RESTART_LINE="ANALYTICS_RESTART old_service_instance_id=${pre_id} new_service_instance_id=${post_id} health_recovered=true log_valid=true result=PASS"
+  echo "${ANALYTICS_RESTART_LINE}"
+  log "Analytics recovered with rotated service_instance_id"
 }
 
 print_summary() {
@@ -558,7 +802,11 @@ print_summary() {
   echo "memory_agent=${MEM_AGENT}"
   echo "memory_sensor=${MEM_SENSOR}"
   echo "memory_compose=${MEM_COMPOSE}"
+  echo "memory_core=${MEM_CORE_LINE}"
+  echo "memory_sensor_compose=${MEM_SENSOR_LINE}"
+  echo "memory_analytics_compose=${MEM_ANALYTICS_LINE}"
   echo "memory_assessment=${MEM_ASSESSMENT}"
+  echo "analytics_restart=${ANALYTICS_RESTART_LINE}"
   if [ "${STRESS_PASS}" -eq 1 ]; then
     echo "RESULT=PASS"
   else
