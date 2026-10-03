@@ -633,8 +633,13 @@ run_recovery_smoke() {
     log "Skip recovery smoke — probe soak counters not successful"
     return 0
   fi
-  if ! docker compose ps --status running --format '{{.Name}}' 2>/dev/null | grep -q platform-analytics; then
-    log "Skip recovery smoke — analytics not running"
+  if ! docker inspect -f '{{.State.Running}}' platform-analytics 2>/dev/null | grep -qx true; then
+    fail_hard "Analytics restart-identity required after successful probe soak but platform-analytics is not running"
+    return 0
+  fi
+  # Prefer direct container health over compose-project listing (shared host / name collision).
+  if ! docker exec platform-analytics curl -sf --max-time 5 http://127.0.0.1:8090/health >/dev/null 2>&1; then
+    fail_hard "Analytics restart-identity required but /health is not reachable before restart"
     return 0
   fi
 
@@ -762,7 +767,7 @@ for line in logs.splitlines():
 if not found:
     print("no_post_restart_structured_log_with_new_service_instance_id", file=sys.stderr)
     sys.exit(1)
-print("ok")
+sys.exit(0)
 PY
   then
     fail_hard "Analytics post-restart structured log validation failed"
@@ -776,6 +781,15 @@ PY
 }
 
 print_summary() {
+  # After a successful soak, restart-identity evidence is mandatory for RESULT=PASS.
+  if [ "${PROBE_SOAK_OK:-0}" -eq 1 ]; then
+    case "${ANALYTICS_RESTART_LINE}" in
+      *" result=PASS") ;;
+      *)
+        fail_hard "Analytics restart-identity evidence missing or not PASS (analytics_restart=${ANALYTICS_RESTART_LINE:-empty})"
+        ;;
+    esac
+  fi
   local duration=$(( $(date +%s) - DURATION_START ))
   echo "========================================================================"
   echo "BUILD-005 SUPPORTABILITY STRESS SUMMARY"
