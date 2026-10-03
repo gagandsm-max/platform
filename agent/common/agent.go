@@ -20,7 +20,7 @@ import (
 )
 
 // LifecycleState is the authoritative AgentService lifecycle state.
-// Slice 3 may map these values into health readiness; Slice 2 only exposes them.
+// Slice 3 maps these values into health readiness via RuntimeSnapshot.
 type LifecycleState string
 
 const (
@@ -463,8 +463,39 @@ func (s *AgentService) CollectorStats() (time.Time, int) {
 	return s.scheduler.Stats()
 }
 
-// SchedulerStatus exposes detailed scheduler/collector evidence for Slice-1
-// operability inspection without changing readiness semantics.
+// SchedulerStatus exposes detailed scheduler/collector evidence for operability
+// inspection. Readiness consumes the same evidence via RuntimeSnapshot.
 func (s *AgentService) SchedulerStatus() scheduler.Status {
 	return s.scheduler.Status()
+}
+
+// RuntimeSnapshot adapts authoritative AgentService evidence for health readiness.
+// Lifecycle is read first and released before queue/delivery/scheduler locks.
+func (s *AgentService) RuntimeSnapshot() health.RuntimeSnapshot {
+	life := string(s.LifecycleState())
+
+	qStats := s.queue.Stats()
+	dStats := s.worker.Stats()
+	st := s.scheduler.Status()
+
+	collectors := make([]health.CollectorSnapshot, 0, len(st.Collectors))
+	for _, c := range st.Collectors {
+		collectors = append(collectors, health.CollectorSnapshot{
+			Name:        c.Name,
+			Enabled:     c.Enabled,
+			Outstanding: c.Outstanding,
+			LastError:   c.LastError,
+		})
+	}
+
+	return health.RuntimeSnapshot{
+		Lifecycle:          life,
+		Queue:              qStats,
+		Delivery:           dStats,
+		SchedulerRunning:   st.Running,
+		EnabledCollectors:  st.EnabledCollectors,
+		Collectors:         collectors,
+		CollectorLastRun:   st.LastRun,
+		CollectorRunErrors: st.RunErrors,
+	}
 }
