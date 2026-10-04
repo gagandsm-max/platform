@@ -2295,7 +2295,7 @@ deterministically spread periodic trigger OR trustworthy OS/package change signa
 
 Current implementation state: production Agent collection remains scalar (`HostCollector → Sample → Observation → CollectionBatch`) and must not fake structured inventory through metric labels. End-to-end persistence is not claimed until BUILD-016/062/063/064/098 foundations exist.
 
-Change-triggered refresh is coalesced; it does not replace periodic authoritative reconciliation. Only a `COMPLETE`, non-truncated, authoritative `FULL` snapshot for the same source/scope may infer general absence/removal. `PARTIAL`/`FAILED`/truncated/`TARGETED` captures and permission/access failures yield quality/degraded evidence and must not generate mass or unrelated removals.
+Change-triggered refresh is coalesced; it does not replace periodic authoritative reconciliation. Only a `COMPLETE`, non-truncated, authoritative `FULL` snapshot for the same endpoint authority + native source + stable/versioned `inventory_scope` may infer general absence/removal. `PARTIAL`/`FAILED`/truncated/`TARGETED` captures and permission/access failures yield quality/degraded evidence and must not generate mass or unrelated removals. Same-capture retries keep a stable `snapshot_id` and are idempotent; duplicate replay must not emit duplicate `SOFTWARE_*` events or fabricate first/last-seen. Older/stale FULL snapshots arriving after newer authoritative FULL state may be retained as historical/late evidence but must not roll current authority backwards or create reverse change events; ordering prefers enclosing Agent/Sensor/Diagnostic Job transport/job sequencing over wall-clock-only arrival.
 
 ### DF-ENDPOINT-MON-001 — Customer selects process/service to monitor
 

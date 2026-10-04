@@ -3015,11 +3015,17 @@ software_inventory_snapshot
     normalization_confidence nullable
 ```
 
-Core derives current-state `first_seen_at` / `last_seen_at` and change events from reconciled evidence; Agents do not invent historical first/last-seen truth.
+`snapshot_id` identifies one capture and remains stable across retries/replay of that capture; a new capture receives a new `snapshot_id`. Core reconciliation is idempotent on authoritative snapshot identity. Duplicate replay must not create duplicate authoritative state, duplicate `SOFTWARE_*` events or false lifecycle history.
+
+`inventory_scope` is the stable/versioned canonical comparison-scope identity for the certified collector/source definition. Absence/removal compares only same endpoint authority + same native source + same `inventory_scope`. Distinct certified collector/source-definition versions that change enumerated authority must use distinct `inventory_scope` values so a scope/source-definition change cannot masquerade as mass uninstall/install.
+
+Ordering / stale protection: prefer enclosing Agent stream/durable-envelope sequence, assignment generation and Sensor ingress/delivery provenance (BUILD-016/062) on the Agent path, or authoritative Diagnostic/collection job + Sensor/vantage execution identity/order on the agentless path. Wall-clock timestamps alone are not sole ordering authority when stronger transport/job ordering exists. An older FULL snapshot arriving after a newer authoritative FULL snapshot may be retained as historical/late evidence but MUST NOT roll current-state authority backwards or generate reverse change events. Later Core arrival alone does not confer authority. Late/out-of-order evidence retains original capture time/provenance.
+
+Core derives current-state `first_seen_at` / `last_seen_at` and change events from reconciled evidence; Agents do not invent historical first/last-seen truth. Replay, stale delivery or normalization-resolver changes must not fabricate lifecycle changes.
 
 Native source/package identity is always preserved and remains authoritative for reconciliation. A normalized product identity is optional and versioned. Name similarity alone may not merge packages from different sources. Normalization-resolver changes must not masquerade as `SOFTWARE_INSTALLED` / `SOFTWARE_REMOVED` / `SOFTWARE_VERSION_CHANGED`.
 
-Removal/absence inference is permitted only from a `COMPLETE`, non-truncated, authoritative `FULL` snapshot for the same source/scope. `PARTIAL`, `FAILED`, truncated and `TARGETED` captures must not generate mass or unrelated removals. Source permission/access failure is monitoring-quality evidence, not uninstall evidence.
+Removal/absence inference is permitted only from a `COMPLETE`, non-truncated, authoritative `FULL` snapshot for the same endpoint authority + native source + `inventory_scope`, compared against the prior authoritative FULL for that same key. `PARTIAL`, `FAILED`, truncated and `TARGETED` captures must not generate mass or unrelated removals. Source permission/access failure is monitoring-quality evidence, not uninstall evidence.
 
 Default authoritative reconciliation is approximately 24 hours with deterministic spreading/jitter. A reliable OS/package-manager change signal may request earlier coalesced reconciliation. Inventory refresh is lower priority than live monitoring and durable telemetry.
 

@@ -778,7 +778,17 @@ software_inventory_snapshot
 
 Tenant/entity authority fields are inherited from existing transport/Core authority conventions and must not be duplicated as endpoint-authored truth that overrides Core identity.
 
-Current inventory authority is Core-reconciled state. `first_seen_at` and `last_seen_at` are Core-derived lifecycle fields and are not accepted as endpoint-authored historical truth. Native source/package identity remains authoritative for reconciliation; normalized product identity is optional/versioned/provenance-bearing and must not masquerade as package uninstall/install/version-change when only the resolver changes.
+`snapshot_id` identifies one inventory capture. It MUST remain stable across retries/replay of that same capture; a genuinely new capture MUST receive a new `snapshot_id`. Core reconciliation is idempotent on authoritative snapshot identity.
+
+`inventory_scope` is the stable/versioned canonical comparison-scope identity for the certified collector/source definition (opaque/versioned fingerprint of what that source enumerates). Distinct certified collector/source-definition versions that change enumerated authority MUST use distinct `inventory_scope` values. Absence/removal may compare only the same endpoint authority + same native source + same `inventory_scope`.
+
+Replay / ordering / stale-snapshot authority:
+
+- Duplicate replay of an identical `snapshot_id` must not create duplicate authoritative state, duplicate `SOFTWARE_*` events, incorrect `first_seen_at`/`last_seen_at` mutation, or false lifecycle history.
+- An older authoritative snapshot arriving after a newer authoritative snapshot may be retained as historical/late evidence if policy permits, but MUST NOT replace newer current-state authority or generate reverse false change events. Later Core arrival alone does not confer authority.
+- Ordering authority MUST preferentially inherit trustworthy enclosing execution/transport ordering: Agent path uses Agent stream/durable-envelope sequence, assignment generation and Sensor ingress/delivery provenance under BUILD-016/BUILD-062 replay/idempotency; agentless path uses authoritative collection/Diagnostic Job identity, Sensor/vantage execution identity and governed job ordering/generation where available. Wall-clock `started_at`/`completed_at` alone MUST NOT become sole ordering authority when stronger transport/job ordering exists. Late/out-of-order evidence retains original capture time/provenance.
+
+Current inventory authority is Core-reconciled state. `first_seen_at` and `last_seen_at` are Core-derived lifecycle fields and are not accepted as endpoint-authored historical truth. Replay, stale snapshot delivery or normalization-resolver changes must not fabricate lifecycle changes or masquerade as package uninstall/install/version-change. Native source/package identity remains authoritative for reconciliation; normalized product identity is optional/versioned/provenance-bearing.
 
 Normalized change event classes remain:
 
@@ -786,10 +796,11 @@ Normalized change event classes remain:
 
 Removal/absence safety:
 
-- only a `COMPLETE`, non-truncated, authoritative `FULL` reconciliation for the same source/scope may infer general absence/removal;
+- only a `COMPLETE`, non-truncated, authoritative `FULL` reconciliation for the same endpoint authority + native source + `inventory_scope` may infer general absence/removal against the prior authoritative FULL snapshot for that same comparison key;
 - `PARTIAL`, `FAILED` or truncated capture must never generate mass removal;
 - `TARGETED` refresh cannot infer absence of unrelated packages;
-- source permission/access failure is monitoring-quality evidence, not uninstall evidence.
+- source permission/access failure is monitoring-quality evidence, not uninstall evidence;
+- a source/`inventory_scope` definition change must not appear as mass uninstall/install; incompatible FULL snapshots must not be compared as identical authority scope.
 
 Software inventory is structured evidence and shall not be encoded as high-cardinality scalar metric labels on the current scalar Agent metric path (`HostCollector → Sample → Observation → CollectionBatch`).
 

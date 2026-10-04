@@ -367,15 +367,21 @@ Certification requires applicable Linux and Windows tests for:
 - snapshot completeness semantics (`FULL|TARGETED`, `COMPLETE|PARTIAL|FAILED`, truncation/loss reasons, item_count);
 - native source/package identity preservation;
 - version/vendor/architecture/scope/provenance mapping;
+- stable/versioned `inventory_scope` comparison identity and proof that source/scope-definition changes do not appear as mass uninstall/install;
 - install, removal and version-change reconciliation under removal-safety rules;
-- proof that only `COMPLETE` + non-truncated + authoritative `FULL` same-source/scope snapshots may infer general absence/removal;
+- proof that only `COMPLETE` + non-truncated + authoritative `FULL` same endpoint+native-source+`inventory_scope` snapshots may infer general absence/removal;
 - proof that `PARTIAL`/`FAILED`/truncated/`TARGETED` captures and permission/access failures never generate mass or unrelated removals;
+- same-capture retry with stable `snapshot_id` and Core idempotency;
+- duplicate replay of identical `snapshot_id` does not create duplicate authoritative state, duplicate `SOFTWARE_*` events or false first/last-seen mutation;
+- late older FULL snapshot after newer FULL authority does not roll current state backwards or generate reverse change events;
+- out-of-order arrival retains original capture provenance and does not gain authority merely by later Core arrival;
+- transport/job ordering preferred over wall-clock-only ordering when stronger Agent/Sensor/Diagnostic Job sequencing exists;
 - daily deterministic spreading and reliable change-trigger coalescing;
 - missed local event repaired by later authoritative reconciliation;
 - restart/disconnect/replay/idempotency;
 - large installed-set CPU/RAM/I/O/network bounds;
 - tenant isolation and API/RBAC;
-- normalization ambiguity/false-merge negative fixtures and proof that resolver-only changes do not masquerade as package events;
+- normalization ambiguity/false-merge negative fixtures and proof that resolver-only changes do not masquerade as package events or fabricate first/last-seen lifecycle changes;
 - proof that typed inventory is not faked through scalar metric labels on the current Agent CollectionBatch path;
 - proof that no patch/deployment/remediation action is implied.
 
