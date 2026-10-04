@@ -31,22 +31,41 @@ func TestProcessServiceSelectorValidKinds(t *testing.T) {
 	}
 }
 
-func TestProcessServiceSelectorRejectsPIDAndUnsafe(t *testing.T) {
+func TestProcessServiceSelectorAcceptsLiteralExactValues(t *testing.T) {
+	// Exact selector VALUES are literal data. Metacharacters and numeric names
+	// remain representable because KIND + exact match + non-execution is the boundary.
+	cases := []ProcessServiceSelector{
+		{Kind: SelectorKindProcessName, Value: "1234"},
+		{Kind: SelectorKindProcessName, Value: "worker*blue"},
+		{Kind: SelectorKindProcessName, Value: "name[1]"},
+		{Kind: SelectorKindProcessName, Value: "bash -c id"},
+		{Kind: SelectorKindExecutablePath, Value: "/opt/acme/bin/app;blue"},
+		{Kind: SelectorKindExecutablePath, Value: "/opt/My App/bin/service"},
+		{Kind: SelectorKindServiceID, Value: "literal$name.service"},
+		{Kind: SelectorKindProcessName, Value: "nginx|worker"},
+		{Kind: SelectorKindExecutablePath, Value: "/bin/sh -c evil"},
+	}
+	for _, sel := range cases {
+		if err := sel.Validate(); err != nil {
+			t.Fatalf("literal exact selector %#v must be accepted: %v", sel, err)
+		}
+	}
+}
+
+func TestProcessServiceSelectorRejectsForbiddenKindsAndInvalidValues(t *testing.T) {
 	cases := []ProcessServiceSelector{
 		{Kind: "PID", Value: "1234"},
 		{Kind: "PROCESS_ID", Value: "1234"},
-		{Kind: SelectorKindProcessName, Value: "1234"},
-		{Kind: "", Value: "nginx"},
-		{Kind: SelectorKindServiceID, Value: ""},
-		{Kind: SelectorKindServiceID, Value: "nginx\x00.service"},
-		{Kind: SelectorKindProcessName, Value: "ngin*"},
-		{Kind: SelectorKindProcessName, Value: "nginx|evil"},
-		{Kind: SelectorKindExecutablePath, Value: "/bin/sh -c evil"},
-		{Kind: SelectorKindProcessName, Value: "bash -c id"},
 		{Kind: "REGEX", Value: "nginx.*"},
 		{Kind: "GLOB", Value: "nginx*"},
 		{Kind: "SHELL", Value: "systemctl status nginx"},
 		{Kind: "COMMAND", Value: "ps aux"},
+		{Kind: "SCRIPT", Value: "restart.sh"},
+		{Kind: "", Value: "nginx"},
+		{Kind: SelectorKindServiceID, Value: ""},
+		{Kind: SelectorKindServiceID, Value: "  nginx.service"},
+		{Kind: SelectorKindServiceID, Value: "nginx.service  "},
+		{Kind: SelectorKindServiceID, Value: "nginx\x00.service"},
 		{Kind: SelectorKindServiceID, Value: strings.Repeat("n", maxProcessServiceSelectorValueLen+1)},
 	}
 	for _, sel := range cases {
@@ -110,6 +129,88 @@ func TestProcessServiceCataloguePIDOnlyRejected(t *testing.T) {
 	}
 	if err := cat.Validate(); err == nil {
 		t.Fatal("PID-only catalogue entry must fail")
+	}
+}
+
+func TestProcessServiceRuntimeValidation(t *testing.T) {
+	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	base := func(rt *ProcessServiceRuntimeInstance) ProcessServiceDiscoveryCatalogue {
+		return ProcessServiceDiscoveryCatalogue{
+			SchemaVersion:    ProcessServiceSchemaVersion,
+			CatalogueID:      "cat-runtime-val",
+			CollectedAt:      now,
+			SourceProvenance: "agent.linux.fixture",
+			Quality:          "OBSERVED",
+			Entries: []ProcessServiceCatalogueEntry{
+				{
+					ServiceID:        "sshd.service",
+					Runtime:          rt,
+					SourceProvenance: "systemd",
+					Quality:          "OBSERVED",
+				},
+			},
+		}
+	}
+
+	if err := base(&ProcessServiceRuntimeInstance{PID: 1, ObservedAt: now}).Validate(); err != nil {
+		t.Fatalf("valid PID + ObservedAt must be accepted: %v", err)
+	}
+	if err := base(&ProcessServiceRuntimeInstance{PID: 0, ObservedAt: now}).Validate(); err == nil {
+		t.Fatal("runtime PID 0 must be rejected")
+	}
+	if err := base(&ProcessServiceRuntimeInstance{PID: -1, ObservedAt: now}).Validate(); err == nil {
+		t.Fatal("negative runtime PID must be rejected")
+	}
+	if err := base(&ProcessServiceRuntimeInstance{PID: 42, ObservedAt: time.Time{}}).Validate(); err == nil {
+		t.Fatal("runtime with zero ObservedAt must be rejected")
+	}
+	if err := base(&ProcessServiceRuntimeInstance{
+		PID:           42,
+		ObservedAt:    now,
+		InstanceToken: strings.Repeat("t", maxProcessServiceInstanceTokenLen+1),
+	}).Validate(); err == nil {
+		t.Fatal("oversized InstanceToken must be rejected without truncation")
+	}
+	if err := base(&ProcessServiceRuntimeInstance{
+		PID:           42,
+		ObservedAt:    now,
+		InstanceToken: "tok\x00en",
+	}).Validate(); err == nil {
+		t.Fatal("control character in InstanceToken must be rejected")
+	}
+}
+
+func TestProcessServiceCatalogueIncompleteReasonValidation(t *testing.T) {
+	now := time.Now().UTC()
+	cat := ProcessServiceDiscoveryCatalogue{
+		SchemaVersion:    ProcessServiceSchemaVersion,
+		CatalogueID:      "cat-reason-val",
+		CollectedAt:      now,
+		SourceProvenance: "agent.linux.fixture",
+		Quality:          "PARTIAL",
+		Truncated:        true,
+		IncompleteReason: "entry safety bound reached",
+		Entries: []ProcessServiceCatalogueEntry{
+			{ProcessFamilyName: "worker", SourceProvenance: "proc", Quality: "OBSERVED"},
+		},
+	}
+	if err := cat.Validate(); err != nil {
+		t.Fatalf("valid truncated catalogue rejected: %v", err)
+	}
+
+	cat.IncompleteReason = ""
+	if err := cat.Validate(); err == nil {
+		t.Fatal("truncated catalogue without reason must be rejected")
+	}
+
+	cat.IncompleteReason = strings.Repeat("r", maxProcessServiceIncompleteReasonLen+1)
+	if err := cat.Validate(); err == nil {
+		t.Fatal("oversized IncompleteReason must be rejected without truncation")
+	}
+
+	cat.IncompleteReason = "bound\x00reached"
+	if err := cat.Validate(); err == nil {
+		t.Fatal("control character in IncompleteReason must be rejected")
 	}
 }
 
@@ -234,21 +335,21 @@ func TestStructuredEvidenceNotHostCollectorOrScalarSample(t *testing.T) {
 	}
 }
 
-func TestPackageMetadataAndSelectorsAreNotShellInput(t *testing.T) {
+func TestPackageMetadataAndSelectorsAreNotExecutable(t *testing.T) {
 	snap := validInventoryBase(t)
 	// Control-bearing package metadata is rejected (no silent normalization into shell input).
 	snap.Items[0].ProductName = "openssl\n"
 	if err := snap.Validate(); err == nil {
 		t.Fatal("control characters in package metadata must be rejected")
 	}
-	// Selector values that look like shell/command forms are rejected.
+	// Literal exact selector values that look shell-like remain data and are accepted.
 	for _, sel := range []ProcessServiceSelector{
 		{Kind: SelectorKindProcessName, Value: "sh -c id"},
 		{Kind: SelectorKindExecutablePath, Value: "/bin/sh -c evil"},
 		{Kind: SelectorKindProcessName, Value: "nginx;reboot"},
 	} {
-		if err := sel.Validate(); err == nil {
-			t.Fatalf("shell-form selector %#v must be rejected", sel)
+		if err := sel.Validate(); err != nil {
+			t.Fatalf("literal exact selector %#v must be accepted as data: %v", sel, err)
 		}
 	}
 	// Inventory/selector models expose no execute/command API.

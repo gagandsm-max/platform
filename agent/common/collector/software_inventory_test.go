@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -187,6 +188,35 @@ func TestSoftwareInventoryDuplicateNativeIdentitiesNotCollapsed(t *testing.T) {
 	}
 }
 
+func TestSoftwareInventoryDuplicateNativeIDsDeterministicOrder(t *testing.T) {
+	snap := validInventoryBase(t)
+	snap.Items = []SoftwareInventoryItem{
+		{NativePackageID: "pkg-zeta", ProductName: "z", Version: "1", InstallationScope: InstallationScopeMachine},
+		{NativePackageID: "pkg-alpha", ProductName: "a", Version: "1", InstallationScope: InstallationScopeMachine},
+		{NativePackageID: "pkg-zeta", ProductName: "z", Version: "1", InstallationScope: InstallationScopeMachine},
+		{NativePackageID: "pkg-beta", ProductName: "b", Version: "1", InstallationScope: InstallationScopeMachine},
+		{NativePackageID: "pkg-alpha", ProductName: "a", Version: "1", InstallationScope: InstallationScopeMachine},
+		{NativePackageID: "pkg-beta", ProductName: "b", Version: "1", InstallationScope: InstallationScopeMachine},
+		{NativePackageID: "pkg-unique", ProductName: "u", Version: "1", InstallationScope: InstallationScopeMachine},
+	}
+	snap.ItemCount = len(snap.Items)
+	if err := snap.Validate(); err != nil {
+		t.Fatalf("multi-duplicate snapshot must validate: %v", err)
+	}
+	want := []string{"pkg-alpha", "pkg-beta", "pkg-zeta"}
+	for i := 0; i < 8; i++ {
+		got := snap.DuplicateNativePackageIDs()
+		if len(got) != len(want) {
+			t.Fatalf("iteration %d: expected %d duplicates, got %#v", i, len(want), got)
+		}
+		for j := range want {
+			if got[j] != want[j] {
+				t.Fatalf("iteration %d: expected sorted %#v, got %#v", i, want, got)
+			}
+		}
+	}
+}
+
 func TestSoftwareInventoryNormalizedIdentityNotAuthoritative(t *testing.T) {
 	snap := validInventoryBase(t)
 	conf := 0.4
@@ -223,6 +253,62 @@ func TestSoftwareInventoryNormalizedIdentityNotAuthoritative(t *testing.T) {
 	snap.Items[0].NormalizationVersion = ""
 	if err := snap.Validate(); err == nil {
 		t.Fatal("normalized_product_id without normalization_version must fail")
+	}
+}
+
+func TestSoftwareInventoryNormalizationConfidenceConsistency(t *testing.T) {
+	snap := validInventoryBase(t)
+	conf := 0.5
+	snap.Items[0].NormalizationConfidence = &conf
+	if err := snap.Validate(); err == nil {
+		t.Fatal("confidence without normalized_product_id must be rejected")
+	}
+
+	snap = validInventoryBase(t)
+	snap.Items[0].NormalizedProductID = "openssl"
+	snap.Items[0].NormalizationVersion = "norm-v1"
+	if err := snap.Validate(); err != nil {
+		t.Fatalf("normalized ID + version with nil confidence must remain valid: %v", err)
+	}
+
+	nan := math.NaN()
+	posInf := math.Inf(1)
+	negInf := math.Inf(-1)
+	neg := -0.1
+	above := 1.1
+	zero := 0.0
+	negZero := math.Copysign(0, -1)
+	one := 1.0
+
+	cases := []struct {
+		name    string
+		conf    float64
+		wantErr bool
+	}{
+		{name: "NaN", conf: nan, wantErr: true},
+		{name: "+Inf", conf: posInf, wantErr: true},
+		{name: "-Inf", conf: negInf, wantErr: true},
+		{name: "below 0", conf: neg, wantErr: true},
+		{name: "above 1", conf: above, wantErr: true},
+		{name: "0", conf: zero, wantErr: false},
+		{name: "-0", conf: negZero, wantErr: false},
+		{name: "1", conf: one, wantErr: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := validInventoryBase(t)
+			s.Items[0].NormalizedProductID = "openssl"
+			s.Items[0].NormalizationVersion = "norm-v1"
+			c := tc.conf
+			s.Items[0].NormalizationConfidence = &c
+			err := s.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatalf("confidence %v must be rejected", tc.conf)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("confidence %v must be accepted: %v", tc.conf, err)
+			}
+		})
 	}
 }
 

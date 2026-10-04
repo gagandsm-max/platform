@@ -3,6 +3,8 @@ package collector
 import (
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -55,8 +57,8 @@ const (
 type InventorySourceMode string
 
 const (
-	InventorySourceModeAgent      InventorySourceMode = "AGENT"
-	InventorySourceModeSSH        InventorySourceMode = "SSH"
+	InventorySourceModeAgent       InventorySourceMode = "AGENT"
+	InventorySourceModeSSH         InventorySourceMode = "SSH"
 	InventorySourceModeWinRMWMICIM InventorySourceMode = "WINRM_WMI_CIM"
 )
 
@@ -82,37 +84,37 @@ const (
 // SoftwareInventoryItem retains authoritative native package identity.
 // NormalizedProductID is optional, versioned and never authoritative.
 type SoftwareInventoryItem struct {
-	NativePackageID                 string
-	ProductName                     string
-	Version                         string
-	VendorPublisher                 string // optional
-	Architecture                    string // optional
-	InstallationScope               InstallationScope
-	AuthoritativeInstallOrUpdateAt  *time.Time // nullable / provenance-qualified when set
-	NormalizedProductID             string     // optional, non-authoritative
-	NormalizationVersion            string     // required when NormalizedProductID is set
-	NormalizationConfidence         *float64   // optional; must be in [0,1] when set
+	NativePackageID                string
+	ProductName                    string
+	Version                        string
+	VendorPublisher                string // optional
+	Architecture                   string // optional
+	InstallationScope              InstallationScope
+	AuthoritativeInstallOrUpdateAt *time.Time // nullable / provenance-qualified when set
+	NormalizedProductID            string     // optional, non-authoritative
+	NormalizationVersion           string     // required when NormalizedProductID is set
+	NormalizationConfidence        *float64   // optional; must be in [0,1] when set
 }
 
 // SoftwareInventorySnapshot is the typed Agent-side inventory source evidence.
 // Endpoint/tenant/entity authority is inherited later from transport/Core and
 // must not be self-asserted here as canonical entity truth.
 type SoftwareInventorySnapshot struct {
-	SchemaVersion           int
-	SnapshotID              string
-	SourceMode              InventorySourceMode
-	SourceType              InventorySourceType
-	InventoryScope          string
-	SnapshotMode            SnapshotMode
-	StartedAt               time.Time
-	CompletedAt             time.Time
-	CaptureStatus           CaptureStatus
-	ItemCount               int
-	Truncated               bool
-	IncompleteOrLossReason  string
-	SourceProvenance        string
-	Quality                 string
-	Items                   []SoftwareInventoryItem
+	SchemaVersion          int
+	SnapshotID             string
+	SourceMode             InventorySourceMode
+	SourceType             InventorySourceType
+	InventoryScope         string
+	SnapshotMode           SnapshotMode
+	StartedAt              time.Time
+	CompletedAt            time.Time
+	CaptureStatus          CaptureStatus
+	ItemCount              int
+	Truncated              bool
+	IncompleteOrLossReason string
+	SourceProvenance       string
+	Quality                string
+	Items                  []SoftwareInventoryItem
 }
 
 // Validate checks deterministic typed-source invariants for one snapshot.
@@ -215,6 +217,7 @@ func (s SoftwareInventorySnapshot) DuplicateNativePackageIDs() []string {
 			dups = append(dups, id)
 		}
 	}
+	sort.Strings(dups)
 	return dups
 }
 
@@ -260,7 +263,13 @@ func (item SoftwareInventoryItem) validate(index int) error {
 		return fmt.Errorf("%s.normalization_version set without normalized_product_id", prefix)
 	}
 	if item.NormalizationConfidence != nil {
+		if normID == "" {
+			return fmt.Errorf("%s.normalization_confidence set without normalized_product_id", prefix)
+		}
 		c := *item.NormalizationConfidence
+		if math.IsNaN(c) || math.IsInf(c, 0) {
+			return fmt.Errorf("%s.normalization_confidence must be finite: %v", prefix, c)
+		}
 		if c < 0 || c > 1 {
 			return fmt.Errorf("%s.normalization_confidence out of range: %v", prefix, c)
 		}

@@ -18,13 +18,15 @@ const ProcessServiceSchemaVersion = 1
 
 // Implementation safety bounds (not customer-facing product capacity contracts).
 const (
-	maxProcessServiceSelectorValueLen   = 512
-	maxProcessServiceCatalogueEntries   = 2048
-	maxProcessServiceIdentityLen        = 512
-	maxProcessServiceNameLen            = 256
-	maxProcessServiceProvenanceLen      = 512
-	maxProcessServiceQualityLen         = 128
-	maxProcessServiceCatalogueIDLen     = 128
+	maxProcessServiceSelectorValueLen    = 512
+	maxProcessServiceCatalogueEntries    = 2048
+	maxProcessServiceIdentityLen         = 512
+	maxProcessServiceNameLen             = 256
+	maxProcessServiceProvenanceLen       = 512
+	maxProcessServiceQualityLen          = 128
+	maxProcessServiceCatalogueIDLen      = 128
+	maxProcessServiceInstanceTokenLen    = 256
+	maxProcessServiceIncompleteReasonLen = 512
 )
 
 // SelectorKind enumerates durable process/service monitor selector classes.
@@ -72,15 +74,9 @@ func (s ProcessServiceSelector) Validate() error {
 	if hasControlRunes(value) {
 		return errors.New("PROCESS_SERVICE_SELECTOR_VALUE_INVALID: control characters are prohibited")
 	}
-	if looksLikeShellOrPatternExpression(value) {
-		return errors.New("PROCESS_SERVICE_SELECTOR_VALUE_REJECTED: regex/glob/shell/command expressions are not supported")
-	}
-	// Exact process-name fallback: reject PID-looking values as durable selectors.
-	if s.Kind == SelectorKindProcessName {
-		if _, err := strconv.Atoi(value); err == nil {
-			return errors.New("PROCESS_SERVICE_SELECTOR_VALUE_REJECTED: PID numeric values are not durable PROCESS_NAME selectors")
-		}
-	}
+	// Selector VALUES are literal exact-match data only. They are never executed,
+	// shell-quoted, globbed or compiled as regex. Security is kind allowlist +
+	// exact match + non-execution — not a metacharacter blacklist on values.
 	return nil
 }
 
@@ -104,20 +100,20 @@ func (s ProcessServiceSelector) SelectorPrecedenceRank() int {
 // ProcessServiceRuntimeInstance carries ephemeral runtime observations only.
 // PID must never become durable selector/entity authority.
 type ProcessServiceRuntimeInstance struct {
-	PID            int
-	ObservedAt     time.Time
-	InstanceToken  string // optional opaque runtime token; not durable entity authority
+	PID           int
+	ObservedAt    time.Time
+	InstanceToken string // optional opaque runtime token; not durable entity authority
 }
 
 // ProcessServiceCatalogueEntry distinguishes stable identity from ephemeral PID.
 type ProcessServiceCatalogueEntry struct {
-	ServiceID           string // stable service/unit identity when available
-	ExecutableIdentity  string // stable executable identity when available
-	ExecutablePath      string // executable path when available
-	ProcessFamilyName   string // process family / exact name when applicable
-	Runtime             *ProcessServiceRuntimeInstance
-	SourceProvenance    string
-	Quality             string
+	ServiceID          string // stable service/unit identity when available
+	ExecutableIdentity string // stable executable identity when available
+	ExecutablePath     string // executable path when available
+	ProcessFamilyName  string // process family / exact name when applicable
+	Runtime            *ProcessServiceRuntimeInstance
+	SourceProvenance   string
+	Quality            string
 }
 
 // PreferredDurableSelector returns the highest-precedence durable selector that
@@ -192,6 +188,9 @@ func (c ProcessServiceDiscoveryCatalogue) Validate() error {
 	if c.Truncated && strings.TrimSpace(c.IncompleteReason) == "" {
 		return errors.New("PROCESS_SERVICE_CATALOGUE_REASON_REQUIRED: truncated catalogues require incomplete_reason")
 	}
+	if err := optionalProcessToken("incomplete_reason", c.IncompleteReason, maxProcessServiceIncompleteReasonLen); err != nil {
+		return err
+	}
 	for i, entry := range c.Entries {
 		if err := entry.validate(i); err != nil {
 			return err
@@ -228,8 +227,14 @@ func (e ProcessServiceCatalogueEntry) validate(index int) error {
 		return fmt.Errorf("%s: insufficient identity; PID-only rows are not durable catalogue evidence", prefix)
 	}
 	if e.Runtime != nil {
-		if e.Runtime.PID < 0 {
-			return fmt.Errorf("%s.runtime.pid invalid", prefix)
+		if e.Runtime.PID <= 0 {
+			return fmt.Errorf("%s.runtime.pid invalid: must be > 0", prefix)
+		}
+		if e.Runtime.ObservedAt.IsZero() {
+			return fmt.Errorf("%s.runtime.observed_at is required", prefix)
+		}
+		if err := optionalProcessToken(prefix+".runtime.instance_token", e.Runtime.InstanceToken, maxProcessServiceInstanceTokenLen); err != nil {
+			return err
 		}
 		// PID may exist as ephemeral observation but must never validate as durable selector.
 		pidSelector := ProcessServiceSelector{Kind: "PID", Value: strconv.Itoa(e.Runtime.PID)}
@@ -262,39 +267,6 @@ func optionalProcessToken(field, value string, maxLen int) error {
 		return nil
 	}
 	return requireProcessToken(field, value, maxLen)
-}
-
-func looksLikeShellOrPatternExpression(value string) bool {
-	// Exact selectors only: reject glob/regex/shell metacharacters and command forms.
-	// Do not reject '+' (e.g. process name "c++") or '.' (common in paths/names).
-	if strings.ContainsAny(value, "*?[]{}|^$\\`") {
-		return true
-	}
-	if strings.Contains(value, "$(") || strings.Contains(value, "${") {
-		return true
-	}
-	if strings.Contains(value, "&&") || strings.Contains(value, "||") || strings.Contains(value, ";") {
-		return true
-	}
-	if strings.Contains(value, "|") {
-		return true
-	}
-	if strings.Contains(value, "../") {
-		return true
-	}
-	lower := strings.ToLower(value)
-	if strings.Contains(lower, " -c ") {
-		return true
-	}
-	if strings.ContainsRune(value, ' ') && (strings.HasPrefix(lower, "sh ") ||
-		strings.HasPrefix(lower, "bash ") ||
-		strings.HasPrefix(lower, "cmd ") ||
-		strings.HasPrefix(lower, "powershell ") ||
-		strings.Contains(lower, "/sh ") ||
-		strings.Contains(lower, "/bash ")) {
-		return true
-	}
-	return false
 }
 
 // ---------------------------------------------------------------------------
