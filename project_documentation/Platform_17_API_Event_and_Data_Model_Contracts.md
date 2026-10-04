@@ -737,3 +737,63 @@ TraceContextReference:
 - **Scope:** Carried as optional reference metadata in syslog, flow records, diagnostic captures, alert evidence bundles, and Investigation Session items.
 - **Phase-1 Architectural Boundary:** AmrudAi Phase 1 supports OTLP metrics and logs with trace-ready contracts and data models (`trace_id`, `span_id` reference fields). AmrudAi Phase 1 does NOT store trace spans, does NOT operate a trace datastore (such as Jaeger or Tempo), and does NOT construct distributed trace waterfall graphs.
 - **Phase 1.5 Scope:** Phase 1.5 may add bounded customer-provided trace and dependency evidence (such as `trace_id`, `span_id`, service identity, dependency edges, latency/error summaries, selected exemplars) under separate implementation and certification. Full distributed trace storage, APM bytecode instrumentation, and dedicated trace backends remain excluded and require future explicit architecture change control.
+
+---
+
+## Phase-1 software inventory, monitor-selection and EDS-definition contracts — Issues #169/#170
+
+### Software inventory
+
+Canonical logical observation:
+
+```text
+software_inventory_observation
+  schema_version
+  tenant_id
+  entity_id
+  source_mode AGENT|SSH|WINRM_WMI_CIM
+  source_type
+  native_package_id
+  product_name
+  normalized_product_id? / normalization_version? / normalization_confidence?
+  version
+  vendor_publisher?
+  architecture?
+  installation_scope MACHINE|USER|UNKNOWN
+  authoritative_install_or_update_time?
+  observed_at
+  source_provenance
+  quality
+```
+
+Current inventory authority is Core-reconciled state. `first_seen_at` and `last_seen_at` are Core-derived lifecycle fields and are not accepted as endpoint-authored historical truth.
+
+Normalized change event classes:
+
+`SOFTWARE_INSTALLED | SOFTWARE_REMOVED | SOFTWARE_VERSION_CHANGED`.
+
+A removal is emitted only after reconciliation supports absence under an authoritative source; collector failure/permission denial is not evidence that all software was removed.
+
+Software inventory is structured evidence and shall not be encoded as high-cardinality scalar metric labels. Public/internal query contracts are tenant/RBAC scoped and bounded.
+
+### Process/service monitor definition
+
+API/data contracts carry a stable selector and effective policy reference. PID may be returned as an observation but is prohibited as the durable selector key. Supported selector classes are service/unit identity, executable identity/path and bounded exact process name according to certified OS behavior.
+
+Create/update/delete/Stop Monitoring operations are audited, tenant/resource authorized and versioned. Remediation authority is a separate contract.
+
+### Criticality/Profile assignment
+
+Expose business Criticality, suggested profile, effective profile/version, inheritance source and assignment mode `AUTO_FROM_CRITICALITY|EXPLICIT_PROFILE`. API updates preserve explicit override semantics and return capacity/admission failures without partially mutating effective policy.
+
+### Trigger-specific EDS definitions
+
+Existing EDS `definition_id/definition_version` is the authoritative extension point. Phase-1 built-ins include:
+
+`EDS_CPU_PRESSURE`, `EDS_MEMORY_PRESSURE`, `EDS_FILESYSTEM_CAPACITY`, `EDS_BLOCK_IO_PRESSURE`, `EDS_PROCESS_FAILURE`, `EDS_PROCESS_RESTART_LOOP`, `EDS_PROCESS_UNRESPONSIVE`, `EDS_NETWORK_DEGRADATION`.
+
+No second Fast-RCA bundle schema is introduced.
+
+EDS/Diagnostic Job evidence may carry optional `evidence_window_id` and/or canonical context/relationship snapshot reference when associated with an Incident Flight Recorder / Investigation evidence window. Related OOB/virtualization/storage/path evidence remains separate evidence references with its own source/vantage/provenance; it is not copied into the endpoint EDS payload as fabricated local context.
+
+Factual indicator values are versioned evidence fields, not free-form root-cause prose. Core RCA references evidence IDs and preserves revisions.
