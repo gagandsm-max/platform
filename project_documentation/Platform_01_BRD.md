@@ -225,7 +225,7 @@ Platform shall cover, directly or through approved extensibility:
 - Database monitoring
 - Kubernetes/container monitoring
 - AWS, Azure and GCP monitoring (and OCI where product requirements already authorize)
-- OpenTelemetry metrics and logs; trace-context reference boundary (`REQ-INF-010`) without marketing full APM or storing distributed traces in Phase 1
+- OpenTelemetry metrics, logs and bounded traces (`REQ-INF-010`) for operational application/service observability, dependency evidence and RCA, without marketing a full developer-centric APM suite
 - Synthetic ICMP/TCP/DNS/HTTP/HTTPS/API/TLS tests
 - DNS/DHCP/NTP monitoring
 - Identity infrastructure monitoring (AD/LDAP/DC replication/Kerberos/RADIUS/TACACS+) where supported by secure probes/APIs

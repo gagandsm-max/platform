@@ -2251,7 +2251,8 @@ Rules:
 
 ---
 
-## 112. Flow DF-OTEL-002 — OpenTelemetry trace reference boundary and Phase-1.5 deferral flow
+## 112. Historical Flow DF-OTEL-002 — v3.2.2 trace-reference boundary (SUPERSEDED)
+> **Non-normative v3.2.2 provenance only:** this entire subsection is superseded for current implementation by `DF-OTEL-003` below. Its Phase-1.5 trace deferral MUST NOT be used as current architecture authority.
 
 > **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Governed by `REQ-INF-010` and `DEC-ARCH-044`.
 

@@ -30,7 +30,7 @@ The architecture is governed by the following constraints already decided:
 - Core and Sensor managed storage have a mandatory 80% storage-protection watermark.
 - DR capability is required in v1.0.
 - **Hard Phase-1 product boundaries:**
-  - Full APM, bytecode instrumentation, method-level timing, continuous profiling, flame graphs, and RUM are excluded.
+  - Full developer-centric APM, unrestricted method-level profiling, continuous profiling, flame graphs, and full RUM/session replay are excluded. Standards-based OpenTelemetry automatic instrumentation certified under `REQ-INF-010` is allowed for operational service observability.
   - Full DPI, always-on packet capture, TLS decryption, and packet payload reconstruction are excluded. (Existing bounded incident-triggered packet evidence remains active and is preserved).
   - Mandatory GPU/NPU, third Core node, dedicated trace database, dedicated graph database, and separate eBPF backend are excluded.
 - Gemini is accessed through an AI Gateway; causal RCA is not LLM-only.
@@ -1505,7 +1505,7 @@ AmrudAi Phase 1 is **Unified Network & Infrastructure Observability**. It define
 ### 44.2 Hard product boundaries
 
 Phase 1 explicitly enforces strict architectural boundaries:
-- **No full APM:** No code-level transaction tracing, no Java/.NET bytecode instrumentation, no method-level timing, no continuous profiling, no flame graphs, and no Real User Monitoring (RUM).
+- **No full developer-centric APM:** bounded operational distributed tracing is permitted under `REQ-INF-010`, but source/IDE navigation, unrestricted method-level profiling, continuous profiling, flame graphs and full RUM/session replay are not Phase-1 requirements. Java/.NET/Node/Python OpenTelemetry automatic instrumentation may be certified where upstream mechanisms are safe and supported.
 - **No full DPI:** No always-on bulk packet capture, no TLS decryption, and no continuous packet payload reconstruction. (Existing bounded, incident-triggered packet evidence under `PRD-OIV-002` remains active and is preserved).
 - **No dedicated new backends:** No mandatory GPU/NPU hardware, no third Core node for quorum, no separate eBPF database or service, no standalone trace database (Jaeger/Tempo), and no dedicated graph database. PostgreSQL, ClickHouse, Kafka, and Valkey remain the sole authoritative data stores.
 
@@ -1537,7 +1537,7 @@ Active path probing is executed by Network Sensors toward monitored infrastructu
 ### 44.5 OpenTelemetry phase boundary
 
 - **Phase 1:** Ingestion and storage of OpenTelemetry metrics and structured logs. Extraction of W3C `trace_id` and `span_id` as correlation reference fields on logs, events, and alerts.
-- **Phase 1.5:** May add bounded customer-provided trace and dependency evidence (such as trace_id, span_id, service identity, dependency edges, latency/error summaries, or selected exemplars) subject to separate implementation and certification; it does not automatically imply a full distributed trace backend, storage of all spans, unlimited trace retention, APM, bytecode agents, or a trace database. Full distributed trace storage/analysis requires future explicit architecture change control.
+- **v3.3.0 Phase 1:** bounded customer-supplied OTLP traces and dependency evidence are accepted and may be retained in existing ClickHouse under `REQ-INF-010`; retention, sampling, cardinality, privacy and query limits are mandatory. No dedicated trace database or full developer-centric APM backend is implied.
 
 ### 44.6 Cloud network depth closure
 

@@ -55,7 +55,7 @@ Platform shall provide a **Unified Network & Infrastructure Observability** expe
 18. Data retention, rollups, archive, capacity forecasting and storage protection.
 19. Extensibility through MIB Studio, API Studio and Device Pack Studio.
 
-**Hard product boundaries:** Full APM, bytecode instrumentation, method-level timing, continuous profiling, flame graphs, full DPI, always-on bulk PCAP, TLS decryption, and packet payload reconstruction are excluded from Phase 1. (Existing bounded incident-triggered packet evidence under `PRD-OIV-002` remains active and is preserved).
+**Hard product boundaries:** Full developer-centric APM, unrestricted method-level profiling, continuous profiling, flame graphs, full RUM/session replay, full DPI, always-on bulk PCAP, TLS decryption, and packet payload reconstruction are excluded from Phase 1. Standards-based OpenTelemetry zero-code/automatic instrumentation certified under `REQ-INF-010` is permitted for operational service observability and does not by itself constitute full APM. (Existing bounded incident-triggered packet evidence under `PRD-OIV-002` remains active and is preserved).
 
 ---
 
@@ -805,7 +805,7 @@ Monitor node/pod/container health, CPU/memory, restarts, pending/failed state, e
 
 OpenTelemetry integration adheres to a two-phase contract boundary (`REQ-INF-010`):
 - **Phase 1:** Ingestion and storage of OpenTelemetry metrics and structured logs into ClickHouse. W3C `trace_id` and `span_id` are extracted as correlation reference fields on logs, events, alerts, and investigations without requiring distributed trace storage.
-- **Phase 1.5:** May add bounded customer-provided trace and dependency evidence (such as trace_id, span_id, service identity, dependency edges, latency/error summaries, or selected exemplars) subject to separate implementation and certification; it does not automatically imply a full distributed trace backend, storage of all spans, unlimited trace retention, APM, bytecode agents, or a trace database. Full distributed trace storage/analysis requires future explicit architecture change control.
+- **v3.3.0 Phase 1:** Accepts bounded OTLP trace/span evidence under `REQ-INF-010` for service health, dependency evidence, incident correlation, RCA and investigation, with governed retention/sampling/cardinality/privacy controls. This does not imply storage of all spans, unlimited retention, a dedicated trace database or full APM. Phase 1.5 adds specialist trace depth only where separately certified.
 
 ---
 

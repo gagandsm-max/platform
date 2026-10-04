@@ -1386,7 +1386,7 @@ Core processes ingest and correlate observability telemetry without introducing 
 - **ClickHouse Storage (BUILD-064):** Analytics workers persist typed records into ClickHouse analytics tables (physical schema, table layout, engine selection, ordering keys, codecs, and TTL owned by BUILD-064).
 - **Temporal Operational Graph:** Dynamically updates communication edges between process entities and remote services with observed latency and throughput.
 - **Deterministic RCA Engine:** Correlates socket timeouts, retransmission bursts, and path divergence events with alert symptoms, while preserving `INCONCLUSIVE` outcomes.
-- **Architectural Boundary:** No separate eBPF database, no dedicated traceroute store, no APM backend, and no full distributed trace span store without explicit change control (Phase 1 supports OTLP metrics/logs; Phase 1.5 supports bounded customer-provided trace/dependency summaries only). PostgreSQL, ClickHouse, Kafka, and Valkey remain the sole authoritative datastores.
+- **Architectural Boundary:** No separate eBPF database, no dedicated traceroute store, no full developer-centric APM backend and no dedicated trace database. Phase 1 supports bounded OTLP metrics/logs/traces under `REQ-INF-010`, with retained spans using existing ClickHouse subject to v3.3.0 schema/capacity/security gates. PostgreSQL, ClickHouse, Kafka, and Valkey remain the sole authoritative datastores.
 
 ---
 

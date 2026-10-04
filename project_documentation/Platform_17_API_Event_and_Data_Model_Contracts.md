@@ -562,7 +562,7 @@ Wire `{status, code, message}` remains. Semantic classes: `INVALID_CONTRACT`, `A
 
 ## 11. Network & Infrastructure Observability data model and event contracts supplement — v3.2.2
 
-> **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Governed by `REQ-INF-013` (bounded Linux Agent eBPF process-to-network telemetry), `REQ-NET-016` (active path hop/loss/latency/fingerprint observability), `REQ-INF-008` (cloud network entities/relationships/change evidence), and `REQ-INF-010` (OTLP phase boundary: metrics/logs in Phase 1, bounded trace/dependency summaries in Phase 1.5). Target Phase-1 capabilities are subject to applicable implementation, benchmark, and certification gates.
+> **Historical reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). The v3.2.2 `REQ-INF-010` trace deferral referenced here is superseded by the v3.3.0 OTLP metrics/logs/bounded-traces Phase-1 decision below. Other Issue #142 decisions remain intact.
 
 ### 11.1 Purpose and architectural constraints
 
@@ -735,8 +735,8 @@ TraceContextReference:
 ```
 
 - **Scope:** Carried as optional reference metadata in syslog, flow records, diagnostic captures, alert evidence bundles, and Investigation Session items.
-- **Phase-1 Architectural Boundary:** AmrudAi Phase 1 supports OTLP metrics and logs with trace-ready contracts and data models (`trace_id`, `span_id` reference fields). AmrudAi Phase 1 does NOT store trace spans, does NOT operate a trace datastore (such as Jaeger or Tempo), and does NOT construct distributed trace waterfall graphs.
-- **Phase 1.5 Scope:** Phase 1.5 may add bounded customer-provided trace and dependency evidence (such as `trace_id`, `span_id`, service identity, dependency edges, latency/error summaries, selected exemplars) under separate implementation and certification. Full distributed trace storage, APM bytecode instrumentation, and dedicated trace backends remain excluded and require future explicit architecture change control.
+- **v3.3.0 Phase-1 Architectural Boundary:** AmrudAi Phase 1 supports OTLP metrics, logs and bounded traces. Retained spans may be stored in existing ClickHouse and rendered in bounded operational trace detail/waterfall views. AmrudAi does not add a dedicated Jaeger/Tempo-style trace datastore or claim a full developer-centric APM backend.
+- **Phase 1.5 Scope:** Phase 1.5 may add specialist trace-analysis depth and additional runtime certification after Phase-1 trace foundations. Full developer-centric APM, continuous profiling, full RUM/session replay, unbounded trace retention and dedicated trace backends remain excluded unless separately change-controlled.
 
 ---
 

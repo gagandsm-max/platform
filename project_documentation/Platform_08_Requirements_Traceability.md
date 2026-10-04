@@ -848,7 +848,7 @@ Low-level scheduling mechanics intentionally use RTM marker `—` in the BRD col
 | REQ-INF-007 | Database monitoring packs + generic SQL query monitor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-008 | AWS/Azure/GCP/OCI cloud monitoring with hierarchy/ephemeral lifecycle, quota/throttle/freshness, connector self-health; Phase-1 cloud-network entities, relationships and material change evidence without claiming advanced provider route analysis; vendor IDs never override tenant/entity authority | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-009 | Kubernetes/Docker/container monitoring | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-INF-010 | OpenTelemetry metrics and logs for Phase 1 with trace-ready contracts; Phase 1.5 bounded customer-supplied trace and dependency evidence without mandatory proprietary or full-bytecode APM | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-INF-010 | OpenTelemetry metrics, logs and bounded traces for Phase 1 operational application/service observability, dependency evidence, incident correlation and RCA without full developer-centric APM | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-011 | Identity operational monitoring: AD/LDAP/Kerberos/RADIUS/TACACS+/M365/Exchange | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-012 | Synthetic monitoring ICMP/TCP/DNS/HTTP/HTTPS/API/TLS | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-INF-013 | Bounded Linux Agent eBPF process/service/container-to-network evidence with local aggregation, explicit quality/provenance, resource protection, no payload/APM implication and canonical entity correlation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
