@@ -1,7 +1,7 @@
 # Platform — Decision, Source & Assumption-Control Register
 
 **Document ID:** PLATFORM-DECISION-001  
-**Version:** 3.2.2  
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Decision Provenance**
 
 ## 1. Purpose
@@ -395,3 +395,93 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Trigger-specific EDS definitions | ARCH-DELEGATED | Use bounded `EDS_*` definition IDs under `ENDPOINT_DIAGNOSTIC_SNAPSHOT`; do not label endpoint definitions `RCA_*` because endpoint capture is not causal authority. |
 | Cross-vantage RCA | ARCH-DELEGATED | Core may associate bounded capability/relationship-aware OOB/virtualization/storage/path evidence with endpoint EDS. Guest Agents do not infer hypervisor cause; endpoint OS evidence does not fabricate chassis/OOB truth. |
 | First-GA VM Fast-RCA depth | ARCH-DELEGATED | VMware is the first deep cross-vantage virtualization certification path through BUILD-033. Other hypervisors remain monitoring targets and require separate promotion/evidence for equivalent Fast-RCA depth. |
+
+
+## 10. v3.3.0 evidence-based product/architecture decisions
+
+### Capability disposition matrix
+
+| Capability | External capability verified | Current AmrudAi state | Gap/value | Complexity | Decision | Architecture |
+|---|---|---|---|---|---|---|
+| Investigation Workbench | SolarWinds PerfStack/AlertStack verified | Existing Investigation Session, Unified Timeline, Flight Recorder, RCA | Productization/compare UX gap; very high NOC value | Medium | Phase 1 | Projection over existing query/timeline/evidence/graph; no new backend |
+| Path Intelligence | SolarWinds NetPath path/current-history verified | `REQ-NET-016` active-path + temporal topology already specified | Integration/productization gap; very high network RCA value | Medium | Phase 1 | Existing active-path + temporal graph authority |
+| Endpoint & Switch-Port Intelligence | SolarWinds UDT current/history switch-port/IP/MAC verified | IPAM/topology/WLAN partial | Genuine endpoint-location/history gap | Medium-high | Phase 1.5 | Canonical identity/temporal graph only; `REQ-NET-017` |
+| Browser Journey Synthetics | SolarWinds WPM multi-step browser transactions verified | Protocol synthetics exist; browser journey future requirement | High service assurance value, browser-runtime burden | High | Phase 1.5 | BUILD-047; isolated runner; OSS/runtime spike |
+| Database Performance Intelligence | SolarWinds DPA wait/query/plan/blocking depth verified | DB health/sessions/waits targets exist | Query fingerprint/wait/blocking/regression depth gap | High | Phase 1.5 | Extend BUILD-035; no DBA/autotuning authority |
+| Virtualization Optimization | SolarWinds VMAN recommendations/capacity verified | VMware performance/cross-vantage monitoring specified | Recommendation/rightsizing gap | Medium-high | Phase 1.5 | Deterministic evidence-backed recommendations; no auto-placement |
+| NCM Firmware Lifecycle | SolarWinds NCM firmware repository/upgrade workflow verified | Firmware inventory/risk + NCM jobs partial | Genuine privileged lifecycle gap | Very high | Phase 1.5 | Existing NCM job/approval/audit/pack authority; staged/canary/rollback where proven |
+| NCM Compliance Packs | SolarWinds NCM policy/STIG reports verified | Compliance/golden config already specified | OOB content/productization gap | Medium | Phase 1 | Official baseline checks; legal/licence gate for branded CIS/STIG content |
+| Wireless Experience | SolarWinds NPM wireless clients/rogues/heatmaps verified | WLAN controller/AP/client/radio/RSSI/SNR already specified | Core largely covered; heatmap/floorplan gap | Medium-high | Core Phase 1; heatmap Phase 1.5 | Existing network graph/UI; no RF authority duplicate |
+| Deep VoIP | SolarWinds VNQM CDR/CMR/MOS/call search verified | Basic VoIP/CUCM health/quality specified | Specialist call-detail gap | High | Phase 2 | Extend network/voice packs only after broader observability |
+| Content/Pack Ecosystem | SolarWinds SAM OOB templates + THWACK verified | Capability Pack framework specified/partial | Trust/distribution/productization gap | Medium-high | Official+Private P1; Partner P1.5; Community Future | Single Capability Pack system; signing/provenance/licence/security/rollback |
+| Full always-on DPI/QoE | SolarWinds QoE packet sensor verified | Flow + bounded triggered packet evidence already chosen | High footprint/privacy burden; weak fit | High | Rejected as primary Phase-1 capability | Keep Flow; incident-triggered bounded packet evidence only |
+| Regional federation/EOC-style | SolarWinds EOC verified | v1 exactly-two-Core HA + MSP model | Useful later, risks premature distributed-Core complexity | Very high | Phase 2/change-controlled | Do not reopen v1 topology |
+| SolarWinds-style cloud AIOps/AI agent | AlertStack/Root Cause Assist/SW1 verified | Evidence-qualified RCA/AI Gateway already stronger governed direction | Learn UX/correlation lessons; no architecture replacement | Medium | Retain existing roadmap | AI explains/suggests; deterministic evidence remains authority |
+
+### OpenTelemetry decision matrix
+
+| Question | v3.3.0 decision |
+|---|---|
+| Phase-1 traces? | Yes — bounded OTLP traces for operational application/service observability, dependency evidence, incident/RCA and investigation; not full APM. |
+| Ingress location? | Preferred assigned Sensor OTLP ingress feeding existing durable Sensor→Core path. |
+| Direct Core? | Supported only as controlled disabled-by-default exception with identical tenant/security/quota/redaction controls. Customer-managed Collector is first-class. |
+| Security/tenant identity? | TLS/mTLS/scoped token as deployment requires; tenant authority from authenticated Platform ingress/Sensor assignment, never resource attributes. |
+| Resource/service identity? | Reconcile `service.name/namespace/instance`, host, pod, container and cloud attrs into canonical entities with provenance/confidence. |
+| Metrics/logs/traces correlation? | Trace/span IDs for logs; exemplars where supplied; canonical resource/entity mapping across signals. |
+| ID representation? | API logical trace ID = 32 hex chars (16 bytes), span ID = 16 hex chars (8 bytes); physical storage type is a schema spike. |
+| Storage? | Retained spans/summaries in ClickHouse; PostgreSQL control/config/mapping/investigation metadata only; no dedicated trace DB. |
+| Object storage? | Not for normal traces; only existing governed evidence artifacts such as browser screenshots/Flight Recorder packets when applicable. |
+| Sampling? | Preserve upstream sampling; support head sampling. Customer-Collector tail sampling allowed. Native Platform tail sampling requires P0 HA/scale proof. |
+| Error/high-latency priority? | Prefer via proven tail policy or source sampling; cannot reconstruct upstream-dropped traces. |
+| Flight Recorder? | Pins selected retained trace references/evidence under governed incident retention; no blanket indefinite trace storage. |
+| Retention? | Tenant/policy bounded; exact defaults are benchmark/TBD, not guessed. |
+| Cardinality? | Hard per-request/span/attribute/service/tenant limits, quotas, bounded queries and noisy-neighbor isolation. |
+| PII/secrets? | Headers/cookies/query values/bodies/baggage/DB parameters and unsafe statement text denied by default; allowlist/redact/hash before persistence. |
+| Sizing impact? | Separate trace workload model; current Core/Sensor sizing does not automatically include traces. |
+| Performance gate? | Measured spans/sec, bytes/span, CPU/RAM, Kafka/ClickHouse pressure, query concurrency, outage spool and HA replay. |
+| Failure/backpressure? | Bounded queues/retry, memory limits, drop/shed accounting and receiver health; loss never represented as application DOWN. |
+| App UX? | Service health/rate/errors/latency/dependencies/resource context/logs/changes/incidents/retained trace detail. |
+| Service-map UX? | Uses canonical temporal graph; span-derived edges show provenance/confidence/freshness. |
+| Phase-1 runtimes? | Java, .NET, Node.js, Python by proven signal/runtime dimension. |
+| Phase-1.5 runtimes? | Go, PHP and additional stacks after certification matrix. |
+| RCA participation? | Corroborating typed evidence under deterministic evidence/RCA contracts; INCONCLUSIVE remains first-class. |
+| Change intelligence? | Deployment/version/resource attributes and external change events may correlate; OTel data does not fabricate deployment truth. |
+| APM boundary? | No profiler/flamegraphs/IDE/source navigation/full RUM/session replay/unlimited retention/developer-suite parity. |
+| Collector topology? | Sensor preferred; exact embedded-vs-supervised Collector packaging is P0 implementation spike. |
+| Tail-sampling topology? | P0 spike must prove trace-ID-aware routing, memory bounds, failover and duplicate/partial behavior. |
+| Semantic conventions? | Pin certified OTel semantic-convention version per release; Development-status conventions are certified separately and never assumed stable. |
+| Zero-code? | Java/.NET/Node/Python target P1; optional K8s Operator injection; manual/direct OTLP remains supported. |
+| Database attributes? | Prefer low-cardinality query summaries; sensitive/non-parameterized text requires sanitization and policy. |
+| Implementation truth? | Specification only. OSS-045 remains APPROVED_NOT_IMPLEMENTED; BUILD-036 remains not implemented until build evidence exists. |
+
+### Phase allocation
+
+**Phase 1:** finite Official Certified Pack baseline; Customer Private Packs; OTLP metrics/logs/bounded traces and application/service observability; Investigation Workbench productization; Path Intelligence closure; baseline NCM compliance packs; existing network/infrastructure/DB/cloud/K8s/NCM/IPAM/RCA/OIV architecture.
+
+**Phase 1.5:** endpoint/access-port intelligence; browser journeys; deeper DB query-performance intelligence; virtualization optimization; NCM firmware lifecycle; wireless RF heat maps; Partner Verified Packs; Go/PHP/additional OTel certification; optional advanced/native tail-sampling only after P0 proof.
+
+**Phase 2:** deep VoIP CDR/CMR/MOS/per-call path; regional federation/change-controlled multi-region Core evolution; other specialist depth.
+
+**Future:** public/community pack marketplace until supply-chain, sandbox, provenance/licensing, compatibility and support governance are mature.
+
+### External primary-source basis
+
+The architecture review used current primary documentation including:
+- SolarWinds PerfStack: https://documentation.solarwinds.com/en/success_center/orionplatform/content/core-perfstack-performance-analysis-dashboard-sw1003.htm
+- SolarWinds NetPath: https://documentation.solarwinds.com/en/success_center/npm/content/npm-netpath.htm
+- SolarWinds UDT: https://documentation.solarwinds.com/en/success_center/udt/content/udt-home-page.htm
+- SolarWinds WPM: https://documentation.solarwinds.com/en/success_center/wpm/content/wpm-create-recordings.htm
+- SolarWinds DPA: https://documentation.solarwinds.com/en/success_center/dpa/content/dpa-query-details.htm
+- SolarWinds VMAN: https://documentation.solarwinds.com/en/success_center/vman/content/vman-recommendations.htm
+- SolarWinds NCM firmware/compliance: https://documentation.solarwinds.com/en/success_center/ncm/content/ncm-firmware-upgrades.htm and https://documentation.solarwinds.com/en/success_center/ncm/content/ncm-compliance.htm
+- SolarWinds NPM wireless: https://documentation.solarwinds.com/en/success_center/npm/content/npm-viewing-wireless-data-sw1481.htm
+- SolarWinds AlertStack: https://documentation.solarwinds.com/en/success_center/orionplatform/content/core-alertstack.htm
+- SolarWinds EOC: https://documentation.solarwinds.com/en/success_center/eoc/content/eoc_homepage.htm
+- SolarWinds SAM templates: https://documentation.solarwinds.com/en/success_center/sam/content/sam-using-application-monitor-templates-sw1115.htm
+- SolarWinds QoE packet analysis: https://documentation.solarwinds.com/en/success_center/npm/content/core-qoe-packet-analysis-sensor-sw1575.htm
+- OpenTelemetry OTLP specification: https://opentelemetry.io/docs/specs/otlp/
+- OpenTelemetry semantic conventions: https://opentelemetry.io/docs/specs/semconv/
+- OpenTelemetry Collector deployment/security: https://opentelemetry.io/docs/collector/deploy/ and https://opentelemetry.io/docs/security/
+- OpenTelemetry service resource semantics: https://opentelemetry.io/docs/specs/semconv/resource/service/
+- OpenTelemetry database semantics: https://opentelemetry.io/docs/specs/semconv/db/
+- OpenTelemetry zero-code: https://opentelemetry.io/docs/zero-code/

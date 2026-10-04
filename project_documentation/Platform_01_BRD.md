@@ -1,7 +1,7 @@
 # Platform — Business Requirements Document (BRD)
 
 **Document ID:** PLATFORM-BRD-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — Business Requirements Authority (**A2.1 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Implementation model:** Clean-room implementation; independent project, not part of ThoughtData, Enterprise360 or NetAI
@@ -747,3 +747,19 @@ For the first-GA Network & Infrastructure Observability scope, AmrudAi shall pro
 The business objective is materially shorter investigation time with low monitored-endpoint overhead and no false certainty.
 
 Explicit exclusions remain: endpoint patch/deployment management, vulnerability scanning, licence metering, EDR, unrestricted shell/PowerShell, endpoint LLM/GNN causal engines, always-on PCAP/full DPI, and unsupported causal guesses.
+
+
+## 43. v3.3.0 business outcomes — out-of-box operations and application-service evidence
+
+AmrudAi shall reduce enterprise time-to-value by making common technologies useful immediately after governed discovery/onboarding rather than requiring customers to manually author large monitor sets.
+
+Phase-1 business outcomes:
+- common enterprise technologies have finite, deeply tested Official Certified Pack targets with identification, inventory, normalized telemetry/entities/relationships, safe default profiles, dashboards, alerts, qualification, RCA/diagnostic semantics, compatibility and known limitations;
+- customer onboarding recommends the applicable certified pack, shows compatibility/required access/Sensor capacity impact, performs preflight and requires approval before monitoring activation;
+- application/service observability accepts bounded OpenTelemetry metrics, logs and traces for service health, dependency evidence, incident correlation and operational RCA without becoming a full developer APM suite;
+- investigations can compare relevant metrics, alerts, incidents, flow, logs, events, topology/path history, configuration/change evidence, OTel service/trace evidence, database state, synthetics, Sensor health and Flight Recorder evidence in one governed investigation workflow;
+- active-path evidence is integrated with topology, routing/interface state, Flow, provider/circuit context, synthetics, service dependencies and incident/RCA evidence rather than presented as a disconnected path tool.
+
+The customer-value rule is: **common technologies work out of the box; uncommon technologies remain extensible without Core product-code forks.**
+
+This requirement does not convert specification targets into implementation/support claims. Full traditional APM, always-on full DPI/NDR, unsafe autonomous remediation and unrestricted community code execution remain outside the Phase-1 boundary.

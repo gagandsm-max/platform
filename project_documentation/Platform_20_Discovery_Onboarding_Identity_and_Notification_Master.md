@@ -1,7 +1,7 @@
 # Platform — Discovery, Onboarding, Identity & Notification Master
 
 **Document ID:** PLATFORM-ONBOARDING-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Discovery / Onboarding / Identity / Notification**
 **Product:** Platform
 **Change class:** Additive approved product scope clarification; does not remove or weaken any v3.2.1/v3.2.2 requirement
@@ -802,3 +802,24 @@ After activation, Criticality/Profile changes use the normal BUILD-070 policy/de
 If `EXPLICIT_PROFILE` is active, a later Criticality change may update the suggestion but must not silently replace the effective profile. Switching back to automatic mapping is an explicit authorized/audited action.
 
 Bulk Criticality/profile changes require capacity/MWU preview and deterministic spread before activation so onboarding or later metadata edits cannot generate synchronized collection storms.
+
+
+## v3.3.0 OOB pack and application onboarding
+
+### Technology-to-pack onboarding
+
+Discovery identifies evidence; it does not silently activate monitoring. For a candidate entity, onboarding may recommend an Official Certified Pack based on vendor/product/model/version/protocol/API evidence. The review shows confidence/provenance, supported version range, required credentials/access/firewall, certification dimensions, known limitations and Sensor/MWU capacity preview before approval.
+
+Pack activation reuses canonical entity identity and desired-state/placement authority. A pack does not create a duplicate inventory/identity namespace.
+
+### Add Application / OTel onboarding
+
+Authorized users may onboard an application/service by selecting runtime/environment and one of:
+- manual/direct OTel SDK/exporter configuration;
+- customer-managed OTel Collector;
+- eligible certified zero-code instrumentation profile;
+- optional Kubernetes Operator injection where explicitly authorized.
+
+Preflight verifies endpoint trust, authentication, connectivity, resource/service identity attributes, redaction/sampling policy and expected capacity. The UI previews how OTel resource attributes map to existing canonical host/pod/container/cloud/service entities and flags ambiguous identity.
+
+No OTel-supplied tenant identifier can override the authenticated onboarding/ingress tenant. Service appearance in UI requires accepted fresh telemetry and a successful canonical mapping state; UNKNOWN/AMBIGUOUS remains valid when evidence is insufficient.

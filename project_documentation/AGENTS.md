@@ -220,3 +220,20 @@ Non-negotiable boundaries:
 - Built-in trigger-specific EDS definitions remain bounded and evidence-oriented; endpoint indicators are factual evidence qualifications, not unsupported causal conclusions.
 - Guest Agents do not infer hypervisor cause. Physical/OOB, virtualization, storage and path evidence comes from the certified owning vantage and is correlated by Core with independent provenance.
 - Routine monitoring, authority/control and telemetry durability always take priority over software inventory refreshes and diagnostic enrichment under resource pressure.
+
+
+## v3.3.0 OOB monitoring and OTLP trace safeguards
+
+For Phase-1 Official Certified Pack, application/service observability, OTLP trace, Investigation Workbench, Path Intelligence, or pack-trust work, mandatory preflight includes `Platform_00`, `Platform_02`, `Platform_03`, `Platform_05`, `Platform_06`, `Platform_07`, `Platform_08`, `Platform_09`, `Platform_10`, `Platform_11`, `Platform_12`, `Platform_14`, `Platform_15`, `Platform_16`, `Platform_17`, `Platform_18`, `Platform_19`, `Platform_20`, `Platform_22`, `Platform_23` and the Master Build Sequence Register.
+
+- Phase-1 OTLP support includes bounded metrics, logs and traces for operational application/service observability. This is not permission to build full developer-centric APM, continuous profiling, RUM/session replay, unlimited trace retention or arbitrary high-cardinality storage.
+- OTLP tenant authority comes from authenticated Platform ingress/Sensor assignment, never from caller-supplied OpenTelemetry resource attributes.
+- OTel resource/service attributes are observed identity evidence mapped through the canonical entity model with provenance/confidence; they never create a second identity authority.
+- Retained traces use existing telemetry architecture and ClickHouse; PostgreSQL remains control/configuration/metadata authority. No trace-specific database is authorized.
+- Tail sampling managed by AmrudAi requires an explicit benchmark/HA engineering gate; customer-managed OTel Collector tail sampling may be supported without claiming a native Platform tail-sampling backend.
+- Official Certified Packs and Customer Private Packs are Phase-1 pack trust classes. Partner Verified is Phase 1.5. A public/community marketplace is not authorized.
+- A named technology in the Phase-1 certification baseline is a certification target only. It is not implemented, certified or shipped until dimensional evidence passes.
+- Common technologies should work out of the box; uncommon technologies use the existing Capability Pack / Device Pack / MIB Studio / API Studio extension path without Core forks.
+- Investigation Workbench is a productized projection over existing Investigation Session, Unified Operations Timeline, Flight Recorder, graph, query and RCA contracts; it is not a new evidence backend.
+- Path Intelligence extends existing active-path and temporal-graph authority; it must not create a second topology store.
+- Always-on full DPI remains deferred. Bounded incident-triggered packet evidence remains governed by existing privacy, authorization, retention and evidence contracts.

@@ -1,7 +1,7 @@
 # Platform — High-Level Design (HLD)
 
 **Document ID:** PLATFORM-HLD-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — High-Level Design Authority (**A2.2 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
@@ -1403,3 +1403,14 @@ The following are logical responsibilities inside existing deployment units, not
 - **Deterministic RCA** — existing Core RCA responsibility; endpoint/Sensor evidence producers never become causal authority.
 
 Failure boundaries are explicit: unsupported/denied inventory fields become partial inventory evidence; process selector ambiguity blocks or requests review rather than silently monitoring the wrong workload; profile-capacity denial leaves current policy intact; failed/partial/suppressed diagnostics remain visible and do not degrade routine monitoring durability.
+
+
+## 48. v3.3.0 HLD responsibilities
+
+- **Sensor OTLP ingress:** terminates governed OTLP/gRPC or OTLP/HTTP, authenticates the deployment/tenant path, performs bounded validation/redaction/resource processing, records receiver health/drop/backpressure and forwards through the existing durable Sensor→Core path. It may use an admitted OTel Collector distribution internally but does not become a new authority.
+- **Core ingestion/query:** validates canonical envelope/tenant authority, streams accepted traces using existing ingestion foundations, writes retained spans/summaries to ClickHouse and exposes tenant/RBAC-bounded service/trace queries.
+- **Entity/graph:** reconciles OTel service/resource evidence and span-derived dependency edges into the existing canonical temporal graph with source, confidence and freshness.
+- **Investigation/RCA:** consumes retained OTel evidence alongside metrics/logs/network/infra/change/path/database/synthetic evidence. Trace evidence is corroborating evidence; AI/LLM does not become causal truth.
+- **Capability Pack runtime:** remains the only pack runtime. OOB pack defaults, compatibility, dashboards, alerts, diagnostics and certification metadata do not justify per-pack services/databases.
+- **Browser journey runner (Phase 1.5):** requires a separately admitted isolated browser runtime with credential/screenshot/resource controls; the existing test-only Playwright allowance does not authorize a shipped synthetic runtime.
+- **Firmware lifecycle (Phase 1.5):** reuses existing NCM job/approval/audit/credential/device-pack authority; no separate firmware automation service is authorized by specification.

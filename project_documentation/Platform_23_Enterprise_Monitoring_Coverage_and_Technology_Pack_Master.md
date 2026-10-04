@@ -1,10 +1,10 @@
 # Platform — Enterprise Monitoring Coverage, Capability Packs and Real-Customer Certification Master
 
 **Document ID:** PLATFORM-EMC-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Specialized Master**
 **Product:** Platform
-**Change class:** Additive v3.2.2 product/engineering requirements; EMC-0 specification only. No runtime implementation, vendor-pack shipment, certification achievement or contractual guarantee is claimed by this document.
+**Change class:** v3.3.0 product/engineering requirements and certification targets; specification only. No runtime implementation, vendor-pack shipment, certification achievement or contractual guarantee is claimed by this document.
 
 ---
 
@@ -630,3 +630,126 @@ Process/service certification must prove stable selector semantics and PID-reuse
 EDS certification remains dimensional per definition and OS/version/privilege. Listing `EDS_CPU_PRESSURE` or another definition in a pack does not certify that definition until its evidence/resource/security/negative-path matrix passes.
 
 Physical and virtualization Fast-RCA coverage is multi-vantage: endpoint, OOB, hypervisor, storage and network evidence keep separate provenance. A technology pack may declare the evidence it can provide but does not become causal authority.
+
+
+## 24. v3.3.0 formal product requirements
+
+| PRD ID | Requirement |
+|---|---|
+| `PRD-EMC-023` | Platform shall make common enterprise technologies useful out of the box through a complete Official Certified Pack product contract rather than metric collection alone. |
+| `PRD-EMC-024` | Platform shall govern Capability Pack trust classes and shall not open a public/community marketplace before signing, provenance, licence, security, compatibility and rollback controls are mature. |
+| `PRD-EMC-025` | Phase 1 shall target a finite deeply certified OOB technology baseline rather than broad unverified vendor-name coverage. |
+
+## 25. v3.3.0 Official Certified Pack product contract
+
+An Official Certified Pack normally contains, where applicable:
+1. identification rules;
+2. supported versions/models;
+3. credential/authentication model;
+4. discovery;
+5. inventory;
+6. normalized metrics;
+7. normalized entities;
+8. topology/dependency relationships;
+9. health calculation;
+10. recommended Monitoring Profile;
+11. default collection intervals;
+12. safe adaptive-polling behavior;
+13. default dashboards;
+14. default alerts;
+15. alert qualification;
+16. baseline/anomaly candidates;
+17. relevant events;
+18. RCA semantics;
+19. recommended diagnostics;
+20. runbook references;
+21. capacity/MWU effect;
+22. compatibility metadata;
+23. data-quality expectations;
+24. known limitations;
+25. version/provenance;
+26. upgrade compatibility;
+27. deterministic fixtures;
+28. certification tests/evidence.
+
+Threshold/profile defaults are governed recommendations and remain customer-overrideable. A pack cannot hard-code customer-specific business thresholds as universal truth.
+
+### Trust classes
+
+- **OFFICIAL_CERTIFIED — Phase 1:** Platform-owned/reviewed signed pack with full applicable certification evidence.
+- **CUSTOMER_PRIVATE — Phase 1:** tenant/private pack with validation/security/provenance/version/rollback, explicitly not Platform-certified.
+- **PARTNER_VERIFIED — Phase 1.5:** partner provenance plus Platform verification policy and explicit support ownership.
+- **COMMUNITY — Future:** reserved only; no public marketplace or arbitrary community execution is authorized.
+
+All pack classes use the same Capability Pack runtime. No second framework is created.
+
+## 26. Phase-1 finite OOB certification baseline
+
+The following **30 technology families are certification targets, not current support claims**. GA support for each requires implementation plus applicable dimensional/version evidence.
+
+### Network — 9
+1. Cisco IOS / IOS-XE
+2. Cisco NX-OS
+3. Cisco ASA
+4. Juniper Junos
+5. Arista EOS
+6. Aruba/HPE switching (certified product/version profiles, beginning with AOS-CX where appropriate)
+7. Fortinet FortiGate / FortiOS
+8. Palo Alto PAN-OS
+9. F5 BIG-IP
+
+### Infrastructure / hardware / identity — 5
+10. Microsoft Windows Server
+11. Ubuntu LTS
+12. Red Hat Enterprise Linux 9 family
+13. Redfish hardware management (vendor-neutral baseline; vendor extensions separately certified)
+14. Microsoft Active Directory + DNS + DHCP infrastructure pack family
+
+### Virtualization / storage — 3
+15. VMware vSphere / vCenter / ESXi
+16. Microsoft Hyper-V
+17. NetApp ONTAP
+
+### Database — 4
+18. PostgreSQL
+19. Microsoft SQL Server
+20. Oracle Database
+21. MySQL / MariaDB
+
+### Application / middleware — 4
+22. Microsoft IIS
+23. NGINX
+24. Apache HTTP Server
+25. JVM / Apache Tomcat operational pack family
+
+### Containers / cloud — 4
+26. Kubernetes
+27. AWS core infrastructure profile
+28. Azure core infrastructure profile
+29. GCP core infrastructure profile
+
+### SaaS — 1
+30. Microsoft 365 Service Health / service incidents and change communications using supported Microsoft Graph APIs
+
+"Core cloud" profiles prioritize compute, network, load-balancing, storage, managed database and managed Kubernetes health/topology where the provider API supports them; they do not claim every provider service.
+
+This baseline intentionally excludes broad shallow coverage. Phase-1.5 candidates include Cisco/Aruba and other vendor-specific WLAN depth, SD-WAN vendor packs, Check Point/Extreme/Dell network, Nutanix/Proxmox, Pure/Dell/HPE storage and FC fabrics, MongoDB/ClickHouse/OpenSearch/Redis/Kafka/RabbitMQ, additional SaaS and other families after evidence prioritization.
+
+Vendor protocol/API availability is necessary but insufficient. Shipping vendor-specific MIB/template/policy content requires applicable IP/licensing review; legal approval is not inferred from public technical documentation.
+
+## 27. v3.3.0 capability phasing
+
+- **Phase 1:** OOB Official Certified baseline; Customer Private Packs; Investigation Workbench productization; Path Intelligence productization; core WLAN experience already under `REQ-NET-009`; baseline NCM compliance packs; operational OTel service observability under `REQ-INF-010`.
+- **Phase 1.5:** endpoint/access-port intelligence; browser journeys; DB query/wait/regression depth; virtualization optimization; NCM firmware lifecycle; wireless heat maps; Partner Verified Packs; additional OTel runtimes.
+- **Phase 2:** deep CDR/CMR/MOS/per-call VoIP; regional federation; specialist depth justified by field demand.
+- **Future:** public/community pack marketplace.
+
+Full always-on DPI and full traditional developer-centric APM remain rejected from Phase 1.
+
+## 28. v3.3.0 formal traceability requirements
+
+| REQ ID | Owning PRD | Required evidence |
+|---|---|---|
+| `REQ-EMC-023` | `PRD-EMC-023` | Pack certification proves all applicable OOB product-contract dimensions, default/profile safety, capacity/MWU, data quality/limitations, fixtures and upgrade compatibility. |
+| `REQ-EMC-024` | `PRD-EMC-024` | Trust-class tests prove signing/checksum/provenance/licence/security/tenant scope/compatibility/rollback and prevent Customer/Partner/Community packs from masquerading as Official. |
+| `REQ-EMC-025` | `PRD-EMC-025` | Each named Phase-1 baseline family has an explicit supported-version/protocol/API certification record; missing evidence remains NOT CERTIFIED and is never collapsed into a generic support claim. |

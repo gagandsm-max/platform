@@ -1,7 +1,7 @@
 # Platform — Sizing, Capacity, Sensor Distribution & Storage Master
 
 **Document ID:** PLATFORM-SIZING-001  
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Engineering Sizing Model**  
 **Product:** Platform
 
@@ -338,3 +338,34 @@ Under pressure, protected ordering remains:
 `authority/control → routine collection → telemetry durability → critical events → diagnostic evidence → bulk/old replay`.
 
 Fast RCA certification measures endpoint capture overhead, Agent/Sensor upload, Core evidence fan-out, incident/RCA latency and effect on protected monitoring. No fixed universal CPU/RAM/latency promise is created without BUILD-019/130/134 evidence.
+
+
+## 9. v3.3.0 trace and OOB workload capacity gates
+
+### Phase-1 OTLP trace workload model
+
+Trace support does not inherit an unlimited capacity claim from metrics/logs. Certification SHALL publish measured values for:
+- accepted spans/sec per Sensor and Core tier;
+- compressed and decompressed bytes/sec and bytes/span distributions;
+- spans/request and attributes/events/links per span;
+- active service/instance/resource cardinality;
+- Kafka bytes/sec and partition pressure attributable to traces;
+- ClickHouse rows/sec, compressed bytes/span, merge pressure and trace-query concurrency;
+- receiver/processor CPU/RAM;
+- Sensor durable-spool bandwidth/horizon under Core outage;
+- tenant noisy-neighbor behavior;
+- HA replay/duplicate/out-of-order behavior.
+
+For a certified profile with retained span rate `S`, measured compressed stored bytes/span `B` and retention days `R`, raw capacity planning shall use the measured equivalent of `S × B × 86,400 × R` plus index/metadata/merge/replication headroom. No default S/B/R values are declared until benchmark evidence exists.
+
+**P0-OTEL-CAPACITY:** exact certified spans/sec, request/attribute limits, default sampling, default retention, ClickHouse physical schema/partitioning and Core/Sensor sizing deltas are release-blocking benchmark outputs for trace GA. Existing 8C/32GB Core or Sensor capacity statements do not automatically include an unbounded trace workload.
+
+### Sampling and retention
+
+Head sampling and upstream/customer-Collector sampling are supported with provenance. Native tail sampling remains gated by a memory/routing/HA benchmark. Error/high-latency prioritization may be configured where full-trace tail policy is available, but the Platform cannot recover upstream-dropped spans.
+
+Retention is tenant/policy bounded. Investigation/Flight Recorder may pin references or selected evidence under governed incident retention without converting all traces to indefinite storage.
+
+### Other specialist capacity gates
+
+Phase-1.5 browser journeys require measured concurrent browsers/Sensor, CPU/RAM per browser, artifact bytes/run and isolation from routine monitoring. Wireless heat maps require bounded client/AP/site rendering and collection budgets. Firmware rollout uses explicit concurrency/blast-radius limits and is never capacity-admitted as an ordinary polling job.

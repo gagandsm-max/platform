@@ -1,7 +1,7 @@
 # Platform — Operational Intelligence, MTTR Reduction & Customer Value Master
 
 **Document ID:** PLATFORM-INTELVALUE-001  
-**Version:** 3.2.2  
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Operational Intelligence / MTTR / Customer Value**  
 **Product:** Platform  
 **Change class:** Additive approved product scope; does not remove or weaken any v3.2.1 requirement
@@ -413,3 +413,18 @@ The Orchestrator shall prefer already-collected evidence when sufficient, and ac
 Every source retains its own evidence reference, event/observed time, quality and provenance. Missing, late, denied and contradictory evidence remains explicit.
 
 Endpoint EDS indicators and software changes are supporting evidence, never automatic root cause. Deterministic Core RCA may create a later immutable revision when additional OOB/virtualization/storage/software-change evidence arrives; prior revisions remain available.
+
+
+## v3.3.0 operational-intelligence integration
+
+Investigation Workbench is the user-facing productization of existing cross-signal investigation mechanics. MTTR measurement should distinguish:
+- time to qualified detection;
+- time to assemble correlated evidence;
+- time to first defensible hypothesis;
+- time to verified remediation/recovery.
+
+OTel trace/service evidence may improve these intervals by exposing service dependencies, error/latency context and infrastructure relationships, but no generic MTTR percentage or causal claim is permitted without measured cohort evidence.
+
+Path Intelligence, OOB packs and OTLP service observability contribute evidence to the existing Incident/Investigation/RCA model. Their operational value metrics must include data-quality/sampling coverage and must not score missing/dropped telemetry as healthy.
+
+Pack onboarding value may measure time-to-first-useful-dashboard, manual-monitor steps avoided, preflight failure rate and certified-pack coverage, with methodology disclosed.

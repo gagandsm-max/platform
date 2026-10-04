@@ -1,7 +1,7 @@
 # Platform — Protocol, Security, Credential & Connector Master
 
 **Document ID:** PLATFORM-PROTOCOL-001  
-**Version:** 3.2.2  
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Protocol/Security/Connector Contract**  
 **Product:** Platform
 
@@ -245,3 +245,31 @@ The existing Diagnostic Job and query-pack controls apply unchanged: tenant/enti
 ### Windows installed-software inventory side-effect prohibition
 
 Windows installed-software inventory is observational. Certified Agent/WinRM/WMI/CIM implementations must not use an enumeration mechanism known to trigger installer consistency checks, repair/reconfiguration, installation or other target mutation as a side effect merely to discover software. In particular, `Win32_Product`-style MSI inventory is not an approved default discovery mechanism. Prefer read-only supported registry/package/MSIX/AppX/OS inventory sources appropriate to the certified Windows version, with explicit provenance and partial-source behavior.
+
+
+## 11. v3.3.0 OTLP and high-risk feature protocol/security contract
+
+### OTLP metrics/logs/traces
+
+Phase-1 accepts OTLP/gRPC and OTLP/HTTP for metrics, logs and bounded traces. Preferred ingress is through an assigned Sensor OTLP endpoint; direct Core ingress is a controlled disabled-by-default exception.
+
+Required controls:
+- TLS; mTLS and/or scoped bearer/API token according to deployment profile;
+- authenticated Platform tenant/deployment binding outside OTel resource attributes;
+- server-side RBAC/tenant scope for query/configuration;
+- receiver request/decompression/body limits, rate limits, span/attribute/event/link/cardinality bounds;
+- malformed protobuf/JSON rejection without worker crash;
+- replay/duplicate-tolerant span identity handling;
+- bounded retry/queue/backpressure and explicit drop/shed accounting;
+- resource/service attribute normalization with provenance, never tenant override;
+- attribute allowlist/denylist, redaction/hash policy before persistence;
+- Authorization/Cookie/set-cookie, URL query values, baggage values, request/response bodies, DB parameters and unsanitized sensitive query text denied by default;
+- secrets may not be copied from OTel payloads into logs/audit/error messages.
+
+Customer-managed Collectors are supported. A Platform-managed tail-sampling tier requires separate scale/HA admission because all spans of a trace require consistent routing/state.
+
+### Browser synthetics and firmware
+
+Phase-1.5 browser journeys require isolated browser execution, credential-vault references, no secret echo, screenshot/content policy, SSRF/egress controls, bounded concurrency/time, artifact retention and browser supply-chain patching.
+
+Phase-1.5 firmware jobs require maker-checker, device/model/version compatibility, signed/approved repository policy, cryptographic image integrity, storage/flash preflight, config backup, maintenance window, canary/staged rollout, reboot/post-check, bounded blast radius, audit and rollback only where vendor/platform semantics prove it safe.

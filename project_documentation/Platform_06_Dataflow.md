@@ -1,7 +1,7 @@
 # Platform — End-to-End Dataflow & Sequence Documentation
 
 **Document ID:** PLATFORM-DF-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — End-to-End Dataflow & Sequence Documentation Authority (**A2.2 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
@@ -2346,3 +2346,35 @@ normal monitoring observation
 ```
 
 No all-source fan-out occurs for every alert. Guest EDS never directly interrogates a hypervisor as causal authority; endpoint OS evidence never fabricates BMC/RAID/power facts.
+
+
+## DF-OTEL-003 — Phase-1 operational OTLP traces (v3.3.0; supersedes Phase-1.5 trace deferral)
+
+Any earlier DF-OTEL wording that defers bounded trace ingestion to Phase 1.5 is superseded by this flow.
+
+```mermaid
+flowchart LR
+  APP[Instrumented app / SDK] -->|OTLP metrics logs traces| COC[Customer OTel Collector optional]
+  APP -->|OTLP allowed| SOTLP[Assigned Sensor OTLP ingress]
+  COC -->|preferred governed OTLP| SOTLP
+  COC -. controlled exception .-> COTLP[Core OTLP ingress disabled by default]
+  SOTLP --> VAL[Bounded auth schema redaction quota]
+  VAL --> DSP[Sensor durable spool / delivery]
+  DSP --> ING[Existing Core ingestion authority]
+  COTLP --> ING
+  ING --> KAF[Internal Kafka]
+  KAF --> CH[ClickHouse metrics logs retained spans]
+  ING --> PG[PostgreSQL control metadata only]
+  CH --> QRY[Bounded query / service health / investigation]
+  QRY --> GRAPH[Canonical temporal entity/dependency graph]
+  QRY --> INV[Investigation Workbench / Incident / RCA / Flight Recorder]
+```
+
+Rules:
+1. Tenant identity is established by authenticated Platform ingress/Sensor assignment, not OTel attributes.
+2. Redaction/admission/cardinality policy executes before durable high-volume persistence.
+3. Sensor disconnect/backpressure uses bounded durable behavior and explicit drop/shed/lag health.
+4. Direct Core OTLP is an exception path with the same controls and never bypasses tenant authority.
+5. Logs↔traces use trace/span IDs; exemplar linkage is used only when supplied by source metrics.
+6. Span-derived dependencies preserve temporal provenance/confidence and do not overwrite governed topology.
+7. Sampling provenance is retained. Native Platform tail sampling is not GA until its P0 scale/HA gate passes.

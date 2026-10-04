@@ -1,7 +1,7 @@
 # Platform — Product Requirements Document (PRD)
 
 **Document ID:** PLATFORM-PRD-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — Complete Product Capability Authority (**A2.1 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Depends on:** `Platform_01_BRD.md`
@@ -2347,3 +2347,54 @@ These are definitions/profiles under one EDS diagnostic type, not independent RC
 For qualifying physical-server or VM incidents, Core may associate additional evidence from certified Hardware/OOB, virtualization, storage and path/network vantages. Guest endpoint evidence shall not claim hypervisor truth; OS evidence shall not claim chassis/RAID/power truth. Missing or contradictory evidence reduces confidence and `INCONCLUSIVE` remains a correct result.
 
 Deep first-GA VM cross-vantage certification is VMware-first through BUILD-033. Other hypervisor families remain monitoring targets but are not silently promoted to equivalent deep Fast-RCA certification without explicit change control and evidence.
+
+
+## 45. v3.3.0 product contract — OOB depth, operational traces and phased specialist capabilities
+
+### Phase-1 out-of-box customer workflow
+
+After an authorized customer supplies network scopes, credentials/connectors and optional OTel application onboarding, Platform shall:
+1. discover candidate assets/evidence without auto-activating monitoring;
+2. identify technology/version with confidence/provenance;
+3. recommend the compatible Official Certified Pack where one exists;
+4. expose compatibility/certification dimensions and known limitations;
+5. run credential/protocol/version/preflight checks;
+6. disclose required access/firewall/security requirements;
+7. preview Sensor/Core capacity and MWU impact;
+8. require governed approval under onboarding policy;
+9. activate monitoring through existing desired-state/placement authority;
+10. populate useful dashboards and inventory automatically;
+11. create canonical topology/dependency relationships from evidence;
+12. apply safe default Monitoring Profiles/cadences;
+13. apply baseline alerts and qualification logic;
+14. preserve No Data/Unknown/Stale/Monitoring Degraded semantics;
+15. feed qualified incidents, Investigation and RCA;
+16. permit governed customer overrides without rewriting pack internals.
+
+A pack is not "OOB certified" merely because it collects metrics. The full contract is owned by Platform_23.
+
+### Phase-1 application/service observability
+
+`REQ-INF-010` is revised: Phase 1 accepts OTLP metrics, logs **and bounded traces**. Traces are used for operational service health, request/error/latency evidence, dependency discovery, trace/log correlation, supported exemplar linkage, infrastructure/Kubernetes/database/queue/external-API relationship evidence, incident correlation and RCA.
+
+Phase-1 application/service views may expose, where supported by valid source semantics: request/throughput rate, errors/error rate, latency distribution/percentiles, HTTP status classes, inbound/outbound dependencies, DB/messaging/external dependency latency, runtime/service-instance health, deployment/version/resource context, related logs/incidents/changes and retained trace evidence.
+
+OpenTelemetry evidence must not be presented as standardized when the upstream semantic convention/runtime does not provide it. Messaging/runtime/host semantic maturity is certified dimension-by-dimension.
+
+Official Phase-1 instrumentation certification targets are **Java, .NET, Node.js and Python** for the signal dimensions proven stable/supported by the applicable upstream implementation. Go and PHP are Phase 1.5 certification targets. Manual/direct OTLP and customer-managed Collector deployments remain supported; Kubernetes Operator injection is optional, not mandatory.
+
+The boundary remains operational observability, not full APM. Excluded from Phase 1: continuous/source-code profiling, flame graphs, IDE/source navigation, full frontend RUM/session replay, unlimited trace retention, arbitrary code-level diagnostics and developer-centric APM parity.
+
+### Existing capability productization
+
+- `REQ-UI-021` / `REQ-UI-022`: Phase 1 productizes existing cross-signal comparison/Investigation Session/Unified Timeline/Flight Recorder behavior as the **Investigation Workbench**; no second evidence subsystem.
+- `REQ-NET-016`: Phase 1 productizes existing active-path and historical-topology behavior as **Path Intelligence** with multi-vantage path history/change, hop latency/loss/jitter, routing/interface/Flow/config/synthetic/provider/service-impact correlation; no second topology authority.
+- `REQ-NCM-001`: Phase 1 adds baseline Official Certified NCM compliance packs for safe vendor/internal security configuration checks. CIS/STIG-branded content is shipped only where legal/licensing review permits and never implies regulatory certification.
+
+### Phase 1.5 / Phase 2 decisions
+
+`REQ-NET-017` — **Phase 1.5 Endpoint & Access-Port Intelligence:** canonical-graph correlation of MAC/IP/endpoint/user evidence (when identity sources permit), switch/port/VLAN/AP association, movement/history, port utilization/state and new/rogue endpoint evidence. IP/MAC/user observations remain mutable/provenance-bearing; no second identity database and no employee surveillance.
+
+Phase 1.5 also includes, under existing requirement owners: multi-step browser journey synthetics (`PRD-EGC-013` / `REQ-EGC-013`), deeper query/wait DB performance intelligence (`REQ-INF-007`), evidence-backed virtualization optimization (`REQ-INF-004`), high-risk NCM firmware lifecycle under maker-checker/rollback controls (`REQ-NCM-001/003`), wireless RF/site heat maps as an extension of `REQ-NET-009`, and Partner Verified Packs.
+
+Deep VoIP CDR/CMR/per-call MOS/call-path analytics remain Phase 2 under `REQ-NET-010`. Regional federation remains Phase 2/change-controlled. Public/community pack exchange remains Future.

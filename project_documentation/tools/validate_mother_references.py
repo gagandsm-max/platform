@@ -29,7 +29,7 @@ MATURITY_STATES = (
 )
 
 # --- A1 pinned constitutional invariants (deliberate change control required) ---
-CANONICAL_MOTHER_REFERENCE_VERSION = "3.2.2"
+CANONICAL_MOTHER_REFERENCE_VERSION = "3.3.0"
 CANONICAL_GLOBAL_REQUIREMENT_INDEX = "Platform_08_Requirements_Traceability.md"
 CANONICAL_GLOBAL_PRODUCT_REQUIREMENT_INDEX = (
     "Platform_08_Requirements_Traceability.md"

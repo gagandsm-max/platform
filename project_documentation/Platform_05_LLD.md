@@ -1,7 +1,7 @@
 # Platform — Low-Level Design (LLD)
 
 **Document ID:** PLATFORM-LLD-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — Low-Level Design Authority (**A2.2 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
@@ -3090,3 +3090,35 @@ Historical growth, software/configuration change, hypervisor/datastore state and
 ### Windows installed-software inventory side-effect prohibition
 
 Windows installed-software inventory is observational. Certified Agent/WinRM/WMI/CIM implementations must not use an enumeration mechanism known to trigger installer consistency checks, repair/reconfiguration, installation or other target mutation as a side effect merely to discover software. In particular, `Win32_Product`-style MSI inventory is not an approved default discovery mechanism. Prefer read-only supported registry/package/MSIX/AppX/OS inventory sources appropriate to the certified Windows version, with explicit provenance and partial-source behavior.
+
+
+## 56. v3.3.0 operational trace and OOB-pack LLD contracts
+
+### Logical retained span contract
+
+A retained operational span shall carry, subject to bounds/redaction:
+- schema version and authenticated tenant authority inherited from ingress;
+- trace ID, span ID and optional parent span ID;
+- start/end/duration and observed/ingested timestamps;
+- span kind/name/status/error classification;
+- reconciled service/entity references plus original bounded OTel Resource provenance;
+- bounded semantic attributes after policy filtering;
+- bounded events/links where retained;
+- sampling provenance/flags;
+- source Sensor/ingress provenance and data-quality/drop-partial markers.
+
+Caller-supplied resource attributes never carry tenant authority. Trace/span IDs are correlation identities, not tenant/entity identifiers.
+
+Physical ClickHouse types, partition/order keys, codecs, retention tiers and materialized summaries are **P0-OTEL-TRACE-SCHEMA** evidence-gated design work; they must not be guessed from this logical contract.
+
+### Attribute/privacy defaults
+
+Headers, cookies, authorization data, URL query values, request/response bodies, baggage values, database parameters and unsanitized non-parameterized database statement text are not retained by default. Allowlist/redaction/hash policy precedes persistence. Low-cardinality `db.query.summary` is preferred for grouping; any query-text capture must follow sanitization policy and explicit customer configuration.
+
+### Service health derivation
+
+Span-derived rate/error/latency and dependency summaries may be computed only from evidence with known sampling semantics. Sampled traces must not be treated as complete request counts unless an authoritative metric/source supports that inference. Missing spans/parents and partial traces remain explicit quality states.
+
+### Official Certified Pack minimum
+
+An Official Certified Pack must declare and certify, where applicable: identity, supported versions/models, authentication/credential model, discovery, inventory, normalized metrics/entities, topology/dependencies, health logic, recommended profile, default cadence, adaptive-poll behavior, dashboards, alerts, qualification, anomaly candidates, events, RCA semantics, diagnostics/runbooks, MWU/resource effect, compatibility, data quality, known limitations, provenance/version, upgrade compatibility, fixtures and certification tests. Defaults are overrideable policy, never universal customer-specific thresholds.

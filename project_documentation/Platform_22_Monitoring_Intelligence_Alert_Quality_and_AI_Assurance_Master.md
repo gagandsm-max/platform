@@ -1,7 +1,7 @@
 # Platform — Monitoring Intelligence, Alert Quality and AI Assurance Master
 
 **Document ID:** PLATFORM-MIA-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Monitoring Intelligence / Alert Quality / AI Assurance**
 **Product:** Platform
 **Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation, commercial provider commitment or readiness claim
@@ -592,3 +592,18 @@ Historical growth, recent software/configuration change, hypervisor contention, 
 | `REQ-MIA-056` | P1 | `PRD-MIA-060`: cross-vantage fixtures prove capability/relationship-aware bounded fan-out, independent provenance, contradictory/missing evidence, physical OOB and VMware correlation where certified, no guest→hypervisor causal shortcut, and immutable RCA revision when late evidence changes the probable cause. |
 
 Triggered Fast RCA is product terminology only. It does not create a second RCA/diagnostic runtime.
+
+
+## v3.3.0 OTLP trace evidence in alert qualification and RCA
+
+Retained trace spans and trace-derived service-dependency edges are eligible evidence inputs when provenance, sampling state, freshness, tenant/entity mapping and data quality are known.
+
+Rules:
+- a sampled trace corpus is not authoritative request-volume truth unless corroborated by an unsampled metric/source;
+- missing parent/spans, receiver drops and sampling must reduce evidence coverage/confidence rather than fabricate causal completeness;
+- trace error/latency/dependency evidence may corroborate an incident hypothesis, but a single span does not establish root cause by itself;
+- span-derived service dependencies must be reconciled with network, Kubernetes, infrastructure, DB, cloud and configured dependency evidence;
+- contradictory evidence remains visible; `INCONCLUSIVE` remains a valid RCA result;
+- AI/LLM may explain or suggest next evidence acquisition but cannot elevate trace data into causal truth or execute remediation without normal policy/approval.
+
+Incident Flight Recorder may pin selected trace references/evidence under retention policy; it must not silently extend all tenant trace retention.

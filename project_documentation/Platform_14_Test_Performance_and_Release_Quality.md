@@ -1,7 +1,7 @@
 # Platform — Test, Performance, Benchmark & Release Quality Master
 
 **Document ID:** PLATFORM-QUALITY-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Consolidation rule:** This document preserves the normative content of the listed v3.1 source documents (via v3.2/v3.2.1). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement. v3.2.2 adds specialized-master quality supplements in §6 without rewriting the base gates.
@@ -430,3 +430,35 @@ For each scenario prove:
 - diagnostics do not materially worsen simulated CPU, memory, disk or network pressure.
 
 VMware/API terminology and metric availability must be certified against supported versions; documentation names do not prove API availability.
+
+
+## 7. v3.3.0 certification gates — OOB packs and OTLP traces
+
+### Official Certified Pack gate
+
+Each pack target must prove applicable identification/discovery/inventory/metrics/entity/topology/event/health/profile/cadence/dashboard/alert/qualification/RCA/diagnostic/runbook/capacity/compatibility/data-quality/upgrade behaviors against supported-version fixtures. Negative suites cover unsupported versions, malformed/missing fields, authentication/authorization failure, timeout/rate limit, schema drift, no-data/stale/degraded behavior, topology ambiguity, upgrade regression and tenant isolation.
+
+A family name in Platform_23 cannot pass release certification without an explicit certification record. Partial dimensional certification must remain visible and cannot be collapsed to "supported."
+
+### OTLP metrics/logs/traces gate
+
+Before Phase-1 trace certification, tests shall cover:
+- valid OTLP gRPC/HTTP metrics, logs and traces;
+- malformed protobuf/JSON, decompression/payload limits and unsupported encodings;
+- wrong tenant/deployment, bad/expired credentials and certificate failures;
+- duplicate/out-of-order spans, missing parent/partial trace and clock anomalies;
+- huge attributes, attribute-count/cardinality attacks and malicious resource identifiers;
+- sensitive-attribute/header/query/body/baggage/DB-data redaction;
+- sampling provenance, head sampling and any certified tail-sampling behavior;
+- receiver backpressure, bounded queue/retry, dropped/shed accounting;
+- Sensor disconnect/Core failover/HA replay and duplicate tolerance;
+- Kafka/ClickHouse pressure and bounded query concurrency;
+- retention expiry and Flight Recorder pin/reference behavior;
+- service/entity mapping conflicts and cross-tenant isolation;
+- proof that trace loss/receiver degradation never asserts monitored service DOWN without independent evidence.
+
+Trace GA additionally requires the Platform_11 P0 workload benchmark and physical ClickHouse schema review.
+
+### High-risk Phase-1.5 gates
+
+Browser journeys require bad credential/DNS/TLS/selector-change/timeouts/browser crash/secret-redaction/screenshot-policy/SSRF/capacity isolation tests. Firmware lifecycle requires wrong image/bad checksum/incompatible model/insufficient flash/backup/approval/canary/partial-rollout/reboot/post-validation/rollback tests. These gates do not imply those features are implemented.

@@ -1,7 +1,7 @@
 # Platform — API, Event, Data Model & Schema Contracts
 
 **Document ID:** PLATFORM-CONTRACTDATA-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract (TRANSITIONAL_LEGACY)**
 **Normalization state:** TRANSITIONAL_LEGACY. BUILD-000 freezes a bounded edge/control contract subsection below; the remainder awaits later normalization.
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
@@ -836,3 +836,72 @@ No second Fast-RCA bundle schema is introduced.
 EDS/Diagnostic Job evidence may carry optional `evidence_window_id` and/or canonical context/relationship snapshot reference when associated with an Incident Flight Recorder / Investigation evidence window. Related OOB/virtualization/storage/path evidence remains separate evidence references with its own source/vantage/provenance; it is not copied into the endpoint EDS payload as fabricated local context.
 
 Factual indicator values are versioned evidence fields, not free-form root-cause prose. Core RCA references evidence IDs and preserves revisions.
+
+
+## v3.3.0 OTLP trace and OOB certification data contracts
+
+### Logical `trace_span_v1`
+
+```text
+trace_span_v1
+  schema_version
+  tenant_authority_ref        # inherited from authenticated ingress; not caller resource attrs
+  trace_id                    # 16-byte identity; API renders 32 lowercase hex chars
+  span_id                     # 8-byte identity; API renders 16 lowercase hex chars
+  parent_span_id?
+  name
+  span_kind
+  start_time
+  end_time
+  duration
+  status_code
+  error_type?
+  service_entity_ref?
+  service_namespace?
+  service_name?
+  service_instance_id?
+  resource_entity_refs[]
+  bounded_resource_attributes
+  bounded_span_attributes
+  bounded_events[]
+  bounded_links[]
+  sampling_provenance
+  source_ingress_ref
+  source_sensor_ref?
+  observed_at
+  ingested_at
+  quality
+  partial_reason?
+```
+
+The physical ClickHouse type/partition/order/codec/materialization is intentionally **TBD under P0-OTEL-TRACE-SCHEMA**. PostgreSQL must not become a raw span store.
+
+Trace query APIs require tenant/RBAC scope, bounded time windows, result/page limits, allowed sort/group fields, query cost limits and redacted attribute projection. Cross-signal APIs may accept trace ID/span ID filters and return canonical entity/incident/investigation references.
+
+### Service dependency evidence
+
+A span-derived dependency edge records source service/entity, destination service/entity or external dependency identity, protocol/semantic class, first/last observed time, source trace evidence reference, provenance, confidence and freshness. Such an edge is temporal evidence and does not silently override authoritative configured/discovered dependency relationships.
+
+### OOB pack certification record
+
+```text
+pack_certification_record
+  pack_id
+  pack_version
+  trust_class OFFICIAL_CERTIFIED|CUSTOMER_PRIVATE|PARTNER_VERIFIED|COMMUNITY
+  supported_platform_range
+  supported_target_versions[]
+  certification_dimensions
+  fixture/evidence_refs[]
+  credential_model
+  default_profile_ref?
+  capacity_mwu_profile_ref?
+  known_limitations[]
+  provenance
+  licence_review_ref?
+  signature/checksum
+  certified_at?
+  certified_by?
+```
+
+`COMMUNITY` is a reserved future enum and does not imply a public marketplace exists. Customer-private records must not assert Official certification.

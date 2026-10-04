@@ -1,7 +1,7 @@
 # Platform — Authoritative Open-Source Software Catalogue
 
 **Document ID:** PLATFORM-OSS-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — Dependency Allow-List Authority (**A2.3 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
@@ -82,7 +82,7 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 | OSS-042 | Hardware | Redfish/Swordfish | Gofish | BSD-3-Clause | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Infrastructure Sensor | Redfish/Swordfish hardware inventory/health collection. | Platform owns normalized hardware entity model and vendor packs. |
 | OSS-043 | Virtualization | VMware vSphere | govmomi | Apache-2.0 | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Infrastructure Sensor | vCenter/ESXi inventory, topology and metrics via vSphere APIs. | Platform owns graph, monitoring policy, dashboards and alerts. |
 | OSS-044 | Containers | Kubernetes client | client-go | Apache-2.0 | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Infrastructure/Cloud Sensor | Kubernetes API, inventory, events and workload discovery. | Platform owns canonical K8s graph and correlation. |
-| OSS-045 | Observability | OpenTelemetry / OTLP | OpenTelemetry Collector + contrib | Apache-2.0 | USE/INTEGRATE | APPROVED_NOT_IMPLEMENTED | Sensor/Core ingestion | OTLP metrics/logs ingestion and selected receivers/exporters where appropriate. | Platform does not market full APM initially. Trace storage/UX is future-ready only. |
+| OSS-045 | Observability | OpenTelemetry / OTLP | OpenTelemetry Collector + contrib | Apache-2.0 | USE/INTEGRATE | APPROVED_NOT_IMPLEMENTED | Sensor/Core ingestion | OTLP metrics/logs/bounded traces plus selected receivers/processors/exporters for operational application/service observability. | No full APM claim. Exact release version/contrib component set, CVE/license scan, Sensor packaging, tail-sampling topology and resource benchmark remain implementation gates. |
 | OSS-046 | Containers | Docker/container runtime API | Moby/Docker client libraries | Apache-2.0 | CANDIDATE | CANDIDATE | Infrastructure Sensor | Container runtime inventory/metrics where Docker API is used. | Use only required client APIs and version-pin. |
 | OSS-047 | Cloud | AWS API/monitoring | AWS SDK for Go v2 | Apache-2.0 | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Cloud Sensor | AWS inventory/monitoring API access. | Platform owns entity normalization and policy. Version-level dependency scan mandatory. |
 | OSS-048 | Cloud | Azure API/monitoring | Azure SDK for Go | MIT / component-specific review | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Cloud Sensor | Azure inventory/monitoring APIs. | Version-level component/license scan required. |
@@ -262,3 +262,12 @@ Tooling-only status does not mean licensing can be ignored; it means the tool is
 ### 10.1 Podman decision
 
 Podman compatibility is **not** a v1 engineering requirement. Adding a second local container runtime would increase variance in Compose compatibility, networking, volume behavior, rootless operation and support burden. The project will standardize on Docker Compose until a customer/developer requirement justifies another runtime.
+
+
+## v3.3.0 OSS disposition
+
+No new shipped runtime dependency is approved by this architecture change beyond the already-governed OpenTelemetry entry above.
+
+The repository's Playwright use remains **test tooling only**. Phase-1.5 browser journey synthetics may evaluate Playwright/Chromium or another engine, but a shipped browser runtime requires separate exact-version OSS admission, browser supply-chain/CVE review, sandboxing, offline packaging, resource benchmarks and screenshot/credential security certification.
+
+Likewise, Phase-1.5 firmware lifecycle and Partner Pack work do not authorize vendor SDKs or redistributable vendor content by declaration. Any such dependency/content must pass normal OSS/licensing/change control.

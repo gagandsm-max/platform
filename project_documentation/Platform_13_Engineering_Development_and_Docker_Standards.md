@@ -1,7 +1,7 @@
 # Platform — Engineering, Development & Docker Standards
 
 **Document ID:** PLATFORM-ENGDEV-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
 **Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
@@ -156,3 +156,13 @@ Container stdout/stderr must be structured and bounded by Docker logging setting
 ## 11. Windows Agent exception
 
 Agent business logic and cross-compilation can run in Docker. Final Windows Service/SCM/MSI/reboot testing requires an isolated Windows VM/CI runner. This is required for correctness; Linux containers cannot certify Windows service semantics.
+
+
+## v3.3.0 engineering rules for OTel and pack depth
+
+- OpenTelemetry Collector/contrib, SDK and semantic-convention versions used for certification must be pinned and recorded through OSS/release governance; upstream "latest" is never a production dependency contract.
+- Development-status OTel semantic conventions must be isolated behind versioned normalization adapters and contract fixtures.
+- Trace ingestion code must use bounded decode/validation, explicit cancellation/timeouts and measured allocation profiles; no unbounded attribute/map copying.
+- Pack development remains declarative/data-driven where possible. Official/Private packs may not introduce arbitrary executable code merely for convenience.
+- Every Official Certified Pack requires deterministic known-good and malformed/version-drift fixtures suitable for offline CI.
+- Test-only browser tooling is not a shipped browser-synthetic runtime. Runtime admission is separate.

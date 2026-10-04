@@ -1,7 +1,7 @@
 # Platform — CI/CD, Packaging & Distribution Master
 
 **Document ID:** PLATFORM-RELEASEENG-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
 **Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
@@ -103,3 +103,16 @@ If and when `github.com/cilium/ebpf` (or another formally approved eBPF loader d
 - **Graceful degradation on uncertified / incompatible platforms:** On a base-Agent-supported OS outside the certified eBPF matrix (or where the host kernel lacks required eBPF/BTF features or privileges), eBPF instrumentation remains strictly disabled and reports capability state as `UNSUPPORTED` or `KERNEL_INCOMPATIBLE`. Base host metric, systemd, and disk monitoring continue unaffected without crash, panic, or install failure. Expansion of the certified eBPF OS matrix is owned by **BUILD-019** benchmark and test evidence.
 - **Signing and provenance:** eBPF probe objects and Go loader binaries are built reproducibly in CI, signed with the release signing key, and catalogued in the release SBOM (SPDX/CycloneDX). No compilation from C sources is required or performed on the target customer host during installation.
 - **Air-gapped offline distribution:** The offline release bundle includes all necessary kernel compatibility assets; no external internet repository access is attempted or required at runtime.
+
+
+## v3.3.0 Capability Pack distribution trust
+
+Phase-1 distribution shall distinguish:
+- **Official Certified Pack:** Platform-produced/reviewed, signed, provenance/licence metadata complete, compatibility/certification evidence attached.
+- **Customer Private Pack:** tenant/private distribution only; authenticated upload/import, validation/security scan, provenance, versioning and rollback; never represented as Platform-certified.
+- **Partner Verified Pack (Phase 1.5):** partner provenance plus Platform verification policy/certification dimensions; support ownership explicit.
+- **Community/Public Pack:** Future only; no marketplace/public execution is authorized by v3.3.0.
+
+Pack promotion requires deterministic build/package identity, signature/checksum verification, dependency/licence/security checks, compatibility metadata and rollback-safe previous version retention. A pack artifact may not silently add an unreviewed binary/runtime dependency.
+
+Official-pack CI must publish the certification record and supported-version matrix as release evidence. Vendor-provided MIB/template/policy content may be redistributed only after applicable legal/licensing approval; otherwise Platform uses permitted standards/API definitions or customer-supplied content.

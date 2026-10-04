@@ -1,7 +1,7 @@
 # Platform — Installation, Upgrade, Rollback & Operational Runbooks
 
 **Document ID:** PLATFORM-OPSINSTALL-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
 **Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the v3.2.2 enterprise-SNMP operational-runbook supplement. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
@@ -144,3 +144,25 @@ Operational runbooks shall include the following new failure classes without cre
 Support evidence shall expose the last inventory reconciliation, effective process/service monitor selector, effective Monitoring Profile source/mode, EDS job/result status and related evidence-window references without exposing credentials/secrets.
 
 No installation/upgrade change is required merely by these logical features beyond their owning future BUILDs; BUILD-018/126 remain packaging/install authorities.
+
+
+## v3.3.0 operations — OTel onboarding and OOB packs
+
+### OTLP deployment profiles
+
+Supported operational profiles are:
+1. **Preferred:** workload SDK/customer Collector → assigned Sensor OTLP ingress → existing Sensor durable path → Core.
+2. **Customer-managed gateway:** customer OTel Collector performs local processing/sampling and forwards to assigned Sensor.
+3. **Controlled exception:** direct Core OTLP ingress where topology requires it, disabled by default and protected by the same auth/tenant/quota/redaction controls.
+
+Installation shall generate explicit endpoints, trust material, minimum required firewall rules, redaction/sampling defaults and preflight verification. Kubernetes Operator injection is optional and must not be installed into customer clusters without explicit authorization.
+
+Collector/Sensor health must expose ingress availability, accepted/rejected/dropped spans, queue/backlog, export failures, memory/resource pressure and data freshness. Failure of OTel ingress is monitoring degradation, not proof that the monitored service is down.
+
+Upgrades pin OTel Collector/contrib and semantic-convention compatibility, preserve backward-readable retained trace data, validate service/entity mapping and support rollback of configuration/binary changes. Air-gapped installation requires signed offline artifacts and exact dependency inventory.
+
+### OOB pack operations
+
+Pack install/upgrade/rollback is versioned and signed. Official/Private/Partner trust class, compatibility range, credential/preflight requirements, resource impact and certification dimensions are visible before activation. Unsupported target versions degrade explicitly rather than silently applying an incompatible pack.
+
+Customer Private Packs remain tenant/private and are never upgraded into Official status without a separate certification process.

@@ -1,7 +1,7 @@
 # Platform — Mother Reference Documentation Constitution
 
 **Document ID:** PLATFORM-INDEX-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
@@ -114,7 +114,7 @@ A Platform number becomes canonical only when the corresponding specialized mast
 9. merge;
 10. only then does that number become canonical.
 
-Multiple parallel candidate PRs must not each claim the same next number. Merge order against then-current `main` determines allocation. Candidate documents remain **unnumbered/unallocated until final reconciliation**; temporary internal names are allowed, but they confer no reservation authority. Number assignment, rename and cross-reference updates must occur atomically before merge. A candidate specialized master must not silently advance the set-wide Mother Reference version (currently **v3.2.2**); version changes require separate set-wide change control.
+Multiple parallel candidate PRs must not each claim the same next number. Merge order against then-current `main` determines allocation. Candidate documents remain **unnumbered/unallocated until final reconciliation**; temporary internal names are allowed, but they confer no reservation authority. Number assignment, rename and cross-reference updates must occur atomically before merge. A candidate specialized master must not silently advance the set-wide Mother Reference version (currently **v3.3.0**); version changes require separate set-wide change control.
 
 ## 6. Source precedence
 
@@ -472,7 +472,7 @@ This v3.2.2 reconciliation adds a first-class **no-context-switch NOC troublesho
 
 The approved scope includes persistent contextual action bars; a Troubleshoot drawer/workspace; embedded governed CLI; on-demand ICMP/traceroute/SNMP/TCP/DNS/SSH/API/domain tests; multi-vantage verification; deterministic `Verify Now`; Live Evidence distinguishing monitored state from fresh operator-triggered verification; `Why?`, `What Changed?` and `Compare`; Investigation Sessions; deterministic diagnostic packs; and risk-proportionate controls. Platform_22 remains authoritative for planner-selected Active Evidence Acquisition/AI investigation safety, and Platform_21 remains authoritative for the broader Incident Command Workspace.
 
-This reconciliation updates existing base/specialized masters and keeps the authoritative set at **25 files** and version **v3.2.2**.
+This reconciliation updates existing base/specialized masters and keeps the authoritative set at **25 files** and version **v3.3.0**.
 
 ### 4.4 2026-09-19 NOC integration-audit closure
 
@@ -568,3 +568,22 @@ Authoritative scope additions are:
 - reuse of existing BUILD-012/015 EDS and BUILD-100 deterministic RCA rather than creation of a second diagnostics/RCA framework.
 
 The exact requirements, data contracts, security/capacity controls, UI behavior, tests and BUILD ownership are distributed to their normal owning Mother References and indexed by Platform_08.
+
+
+## v3.3.0 change-control — out-of-box depth and operational application/service observability
+
+This release is a deliberate set-wide Mother Reference change from v3.2.2 to **v3.3.0**. It changes specification/architecture only; it does not claim implementation, certification or deployment.
+
+The authoritative set remains the same 25 files; no Platform_24 is allocated. Existing owners are strengthened rather than duplicated.
+
+Key decisions:
+- Phase 1 promotes **bounded OTLP traces** alongside metrics/logs for application/service health, dependency discovery, incident correlation, RCA and operational investigation. Prior Phase-1.5 trace-deferral wording is superseded where it conflicts with this decision.
+- Full developer-centric APM remains outside Phase 1: no continuous profiler/flame graphs, source/IDE navigation, full frontend RUM/session replay, unrestricted method-level profiling or unlimited high-cardinality trace retention.
+- Always-on full DPI remains deferred; bounded incident-triggered packet evidence remains permitted under existing controls.
+- Phase 1 productizes the existing Investigation Session/Unified Timeline/Flight Recorder as an **Investigation Workbench** and the existing active-path/temporal-graph capability as **Path Intelligence**. Neither creates a new subsystem, database, topology authority or identity authority.
+- Phase 1 makes out-of-box usability a release criterion through a finite **Official Certified Pack** baseline and a stronger pack product contract. Pack-family presence is still only a target until implementation/certification evidence exists.
+- Phase 1 includes Official Certified Packs and Customer Private Packs; Partner Verified is Phase 1.5; public/community exchange is Future.
+- Specialist depth is deliberately phased: endpoint/access-port intelligence, browser journeys, deeper DB performance intelligence, virtualization optimization, NCM firmware lifecycle and RF heat maps are Phase 1.5; deep CDR/CMR/MOS VoIP is Phase 2; regional federation remains Phase 2/change-controlled.
+- New functionality reuses modular Core, distributed Sensors, PostgreSQL authority, ClickHouse telemetry/history, Kafka internal streaming, Valkey ephemeral state, Sensor durable buffering and the canonical entity/temporal graph. No new database or default microservice is authorized by this release.
+
+External evidence and detailed disposition are recorded in `Platform_12_Decision_Source_Register.md`; pack targets and certification contracts are owned by `Platform_23`; OTLP protocol/security/capacity/data-model controls remain distributed to their existing owners.

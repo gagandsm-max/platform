@@ -1,7 +1,7 @@
 # Platform — UI/UX, Navigation & Out-of-Box Dashboard Master
 
 **Document ID:** PLATFORM-UIUX-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
@@ -7451,3 +7451,36 @@ Do not create a second “Fast RCA dashboard.” Triggered Fast RCA is presented
 The UI may show which EDS definition ran, capture status, evidence categories, missing/denied/suppressed evidence, related physical/virtualization/storage/path vantages, evidence age/provenance, current RCA revision, prior revisions, confidence, contradictions and missing evidence.
 
 Endpoint indicators are visually labelled as evidence, not final cause. VMware/hardware/storage evidence is shown with its own vantage. `INCONCLUSIVE` is a supported outcome.
+
+
+## v3.3.0 UI/UX — OOB onboarding, Investigation Workbench and application/service observability
+
+### Investigation Workbench
+
+The productized Investigation Workbench is not a new evidence store. It projects existing authorized data into a synchronized time context and permits governed comparison of metrics, alerts/incidents, Flow, logs/Syslog/traps, topology/history, active paths, routing/interface evidence, configuration changes, OTel service/trace evidence, database evidence, cloud/deployment changes, synthetics, provider/circuit evidence, Sensor health and Flight Recorder/Live Evidence.
+
+Selection/drill-down preserves tenant/resource scope, time range, timezone, provenance, data-quality and sampling state. Unsupported/missing evidence is explicit. Users may pin evidence to an Investigation Session without mutating source telemetry.
+
+### Application / Service Observability
+
+Phase-1 service pages shall provide, where supported by source semantics:
+- service health and instance/resource context;
+- request/rate, error/error-rate and latency percentile views with sampling/source disclosure;
+- inbound/outbound dependencies, DB/messaging/external-call latency;
+- related infrastructure/Kubernetes/container/cloud entities;
+- related logs by trace/span correlation;
+- retained trace search/detail/waterfall limited by tenant/query/retention policy;
+- deployment/version/change context;
+- related incidents, probable-cause evidence and Investigation links.
+
+No UI implies full APM: no code profiler/flamegraph/IDE/source navigation/session replay requirement.
+
+### Add Application onboarding
+
+The governed flow is: Add Application → choose runtime/environment → select manual OTLP, customer-managed Collector or eligible certified zero-code profile → generate minimum-permission configuration → show endpoint/auth/redaction/sampling/resource requirements → preflight connectivity → preview service identity mapping/capacity → activate → verify fresh telemetry/dependencies/dashboard.
+
+Kubernetes Operator injection is an optional method, not a required deployment dependency.
+
+### OOB Pack onboarding acceptance
+
+Discovery results shall recommend compatible certified packs, show certification dimensions/version range/credentials/firewall/MWU/limitations, run preflight and require governed activation. A named but uncertified family must be labelled accordingly; UI must not imply support from catalogue presence alone.

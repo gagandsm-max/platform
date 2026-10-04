@@ -1,7 +1,7 @@
 # Platform — Master Architecture Document
 
 **Document ID:** PLATFORM-ARC-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — System Architecture Authority (**A2.1 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Depends on:** `Platform_01_BRD.md`, `Platform_02_PRD.md`
@@ -1339,7 +1339,7 @@ The v1 document listed only names. The v2 architecture freezes how OSS is used a
 | OSS-042 | Hardware | Redfish/Swordfish | Gofish | BSD-3-Clause | USE/WRAP | Infrastructure Sensor | Redfish/Swordfish hardware inventory/health collection. | Platform owns normalized hardware entity model and vendor packs. |
 | OSS-043 | Virtualization | VMware vSphere | govmomi | Apache-2.0 | USE/WRAP | Infrastructure Sensor | vCenter/ESXi inventory, topology and metrics via vSphere APIs. | Platform owns graph, monitoring policy, dashboards and alerts. |
 | OSS-044 | Containers | Kubernetes client | client-go | Apache-2.0 | USE/WRAP | Infrastructure/Cloud Sensor | Kubernetes API, inventory, events and workload discovery. | Platform owns canonical K8s graph and correlation. |
-| OSS-045 | Observability | OpenTelemetry / OTLP | OpenTelemetry Collector + contrib | Apache-2.0 | USE/INTEGRATE | Sensor/Core ingestion | OTLP metrics/logs ingestion and selected receivers/exporters where appropriate. | Platform does not market full APM initially. Trace storage/UX is future-ready only. |
+| OSS-045 | Observability | OpenTelemetry / OTLP | OpenTelemetry Collector + contrib | Apache-2.0 | USE/INTEGRATE | Sensor/Core ingestion | OTLP metrics/logs/bounded-traces ingestion and selected receivers/processors/exporters where appropriate. | Platform uses traces for operational application/service observability and does not market full developer-centric APM. |
 | OSS-046 | Containers | Docker/container runtime API | Moby/Docker client libraries | Apache-2.0 | CANDIDATE | Infrastructure Sensor | Container runtime inventory/metrics where Docker API is used. | Use only required client APIs and version-pin. |
 | OSS-047 | Cloud | AWS API/monitoring | AWS SDK for Go v2 | Apache-2.0 | USE/WRAP | Cloud Sensor | AWS inventory/monitoring API access. | Platform owns entity normalization and policy. Version-level dependency scan mandatory. |
 | OSS-048 | Cloud | Azure API/monitoring | Azure SDK for Go | MIT / component-specific review | USE/WRAP | Cloud Sensor | Azure inventory/monitoring APIs. | Version-level component/license scan required. |
@@ -1582,3 +1582,35 @@ No second diagnostic scheduler, evidence store, transport, endpoint RCA engine, 
 Cross-vantage evidence is requested only when entity relationships, policy, capability, authorization and capacity justify it. Physical hardware evidence comes from BUILD-032/OOB, VMware evidence from BUILD-033, storage evidence from BUILD-034, path evidence from BUILD-040, and other domains from their owning connectors. All vantages retain independent provenance and contradictions.
 
 Endpoint indicators are factual evidence qualifications. Core alone owns probable cause, confidence, contradictions, missing evidence, alternatives and `INCONCLUSIVE`.
+
+
+## 45. v3.3.0 architecture — operational OTLP traces, OOB packs and investigation productization
+
+### OTLP ingress and authority
+
+Preferred Phase-1 flow is application/SDK or customer-managed OTel Collector → **assigned Sensor OTLP ingress** → bounded Sensor processing/durable delivery → existing Core ingestion/streaming → ClickHouse. A controlled direct-to-Core OTLP endpoint may be enabled for deployment cases where Sensor routing is infeasible, but it must use the same tenant authentication, schema, quotas, redaction, rate limits and authority checks and is disabled by default for ordinary monitored workloads.
+
+The exact packaging choice between an embedded Collector distribution and a supervised Collector process inside the Sensor deployment is an implementation spike; it does not authorize a new product microservice, control plane or database.
+
+Authenticated Platform endpoint/Sensor assignment determines tenant authority. `service.name`, `service.namespace`, `service.instance.id`, host, Kubernetes, container and cloud resource attributes are observed identity evidence only. They are reconciled into canonical entities/relationships with provenance/confidence and cannot override tenant/entity authority.
+
+### Storage and correlation
+
+- ClickHouse remains the high-volume store for retained spans and trace-derived operational summaries.
+- PostgreSQL stores control/configuration state such as ingress configuration, sampling/retention policy, saved investigation references and governed service/entity mappings; it is not a raw span store.
+- Kafka remains internal transport where the existing ingestion architecture requires it.
+- Object/artifact storage is not required for normal trace retention. Existing evidence-artifact storage remains available for governed Flight Recorder, browser-synthetic screenshots and bounded packet/evidence artifacts.
+- API trace IDs are canonical 16-byte/32-hex trace identifiers and span IDs 8-byte/16-hex identifiers; the exact physical ClickHouse encoding/schema is a P0 engineering spike before implementation.
+- Logs may correlate by trace/span ID; metrics may link through exemplars when the source provides them. Span-derived service dependencies are temporal/provenance-bearing graph evidence, not silent governed-CMDB truth.
+
+### Sampling, overload and HA
+
+Phase 1 accepts upstream/head-sampled traces and preserves sampling provenance. Customer-managed OTel Collector tail sampling is supported where configured. Native Platform-managed tail sampling requires a P0 benchmark/HA design proving trace-ID-aware routing, memory bounds, failover behavior, dropped-span accounting and correctness before GA certification.
+
+Receiver admission must bound compressed/decompressed request bytes, spans/request, spans/sec, attributes/span, attribute bytes, events/links, tenant/service cardinality and in-flight memory. Backpressure/drop/shed counters are Platform-health evidence and must not be misreported as application failure.
+
+### Product architecture boundaries
+
+Investigation Workbench is a UI/query projection over existing Unified Operations Timeline, Investigation Sessions, Live Evidence, Flight Recorder, temporal graph, query services and RCA. Path Intelligence is a product projection over existing active-path evidence and temporal topology. Neither introduces a new store or authority.
+
+Capability Packs remain the single OOB/extensibility framework. Official/Private/Partner trust classifications are policy/certification metadata on that framework, not separate pack systems.

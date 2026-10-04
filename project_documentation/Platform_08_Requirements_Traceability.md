@@ -1,7 +1,7 @@
 # Platform — Requirements Traceability & Completeness Matrix
 
 **Document ID:** PLATFORM-RTM-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Global Traceability Index (A2.3 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Last reconciliation:** 2026-10-04 — Issues #169/#170 Phase-1 endpoint operations and Triggered Fast RCA formal-ID registry reconciliation; marker-bounded global primary counts mechanically verified as REQ 379 / PRD 201 (supersedes stale 2026-09-24 A2.3 narrative 372/199)
@@ -103,6 +103,9 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 | REQ-EMC-020 | Server fixtures prove CPU/pressure, memory/swap, filesystem/inodes, block I/O, NIC, process, service, OS and applicable event/hardware coverage | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 23. Formal traceability requirements | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md; A1 indexes only — specialized cross-layer RTM not revalidated |
 | REQ-EMC-021 | Privilege/credential/path/collector failures map to missing/degraded evidence; negative tests prevent false host/service-down assertion | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 23. Formal traceability requirements | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md; A1 indexes only — specialized cross-layer RTM not revalidated |
 | REQ-EMC-022 | Capability Pack manifest/certification distinguishes continuous collectors from EDS Diagnostic Job profile diagnostics and records version/privilege/evidence/resource support; no second diagnostics framework | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 23. Formal traceability requirements | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md; A1 indexes only — specialized cross-layer RTM not revalidated |
+| REQ-EMC-023 | Official Certified Packs satisfy the v3.3.0 OOB product contract including compatibility, preflight, defaults, dashboards, alerts, qualification, RCA/diagnostics, MWU/data-quality/limitations and certification fixtures | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 23. Formal traceability requirements | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | v3.3.0 OOB certification target; listing is not certification |
+| REQ-EMC-024 | Capability Pack trust classes enforce signing/provenance/licence/security/compatibility/rollback: Official Certified and Customer Private Phase 1, Partner Verified Phase 1.5, Community/Public Future | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 23. Formal traceability requirements | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | v3.3.0 pack-governance target; no public marketplace authorized |
+| REQ-EMC-025 | Phase-1 OOB certification baseline is the finite named technology-family target set in Platform_23; each target requires dimensional/version evidence and may not be marketed as supported before certification | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 23. Formal traceability requirements | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | v3.3.0 finite GA certification target; implementation/certification pending |
 | REQ-EXT-001 | MIB Studio upload/import/revision/provenance/licensing/dependency/compile/test/OID-table-notification mapping/firmware compatibility and device pack generation | `Platform_08_Requirements_Traceability.md` | Extensibility | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-EXT-002 | API Studio monitoring-source collection (schema/auth/pagination/mapping/rate/cadence/freshness/schema-drift/provenance) distinct from integration delivery; inbound/outbound/callback webhooks with auth/replay/SSRF/egress/ | `Platform_08_Requirements_Traceability.md` | Extensibility | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-EXT-003 | Device Pack canonical package across SNMP/REST/gNMI/CLI/NCM/topology/alerts/RCA/dashboards | `Platform_08_Requirements_Traceability.md` | Extensibility | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
@@ -124,7 +127,7 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 | REQ-INF-007 | Database monitoring packs + generic SQL query monitor | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-INF-008 | AWS/Azure/GCP/OCI cloud monitoring with hierarchy/ephemeral lifecycle, quota/throttle/freshness, connector self-health; Phase-1 cloud-network entities, relationships and material change evidence without claiming advanced provider route analysis; vendor IDs never override tenant/entity authority | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-INF-009 | Kubernetes/Docker/container monitoring | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
-| REQ-INF-010 | OpenTelemetry metrics and logs for Phase 1 with trace-ready contracts; Phase 1.5 bounded customer-supplied trace and dependency evidence without mandatory proprietary or full-bytecode APM | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
+| REQ-INF-010 | OpenTelemetry metrics, logs and bounded traces for Phase 1 operational application/service observability, dependency evidence, incident correlation and RCA without full developer-centric APM | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | v3.3.0 promotes bounded OTLP traces to Phase 1; implementation/benchmark/certification still pending |
 | REQ-INF-011 | Identity operational monitoring: AD/LDAP/Kerberos/RADIUS/TACACS+/M365/Exchange | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-INF-012 | Synthetic monitoring ICMP/TCP/DNS/HTTP/HTTPS/API/TLS | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-INF-013 | Bounded Linux Agent eBPF process/service/container-to-network evidence with local aggregation, explicit quality/provenance, resource protection, no payload/APM implication and canonical entity correlation | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
@@ -232,6 +235,7 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 | REQ-NET-014 | Path Analysis workspace | `Platform_08_Requirements_Traceability.md` | Network monitoring | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-NET-015 | IPv4/IPv6/dual-stack first-class support | `Platform_08_Requirements_Traceability.md` | Network monitoring | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-NET-016 | Active path observability including source/vantage, protocol/port where applicable, path identity/fingerprint/history/change, hop/destination latency/loss/jitter where reliable, incomplete-hop semantics, bounded dynamic targeting and non-interference/resource protection | `Platform_08_Requirements_Traceability.md` | Network monitoring | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
+| REQ-NET-017 | Phase-1.5 endpoint/access-port intelligence correlates MAC/IP/user evidence, switch-port/VLAN/AP association and movement/history through canonical identity/temporal graph with privacy/provenance; no second identity database | `Platform_02_PRD.md` | 45. v3.3.0 product contract — OOB depth, operational traces and phased specialist capabilities | BASE_RTM_INDEXED | SPECIFIED | v3.3.0 architecture requirement; implementation not started |
 | REQ-OIV-001 | First-class SaaS monitoring | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | 14. Requirements traceability supplement | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md; A1 indexes only — specialized cross-layer RTM not revalidated |
 | REQ-OIV-002 | Triggered packet evidence | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | 14. Requirements traceability supplement | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md; A1 indexes only — specialized cross-layer RTM not revalidated |
 | REQ-OIV-003 | Cloud-native dependency discovery | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | 14. Requirements traceability supplement | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md; A1 indexes only — specialized cross-layer RTM not revalidated |
@@ -409,7 +413,7 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 
 <!-- END GLOBAL PRIMARY REQ REGISTRY -->
 
-**Registry totals:** 379 unique formal requirement IDs (all `REQ-*`, including `REQ-OSS-008`; marker-bounded GLOBAL PRIMARY REQ REGISTRY mechanical count 2026-10-04). Former formal ID `OSS-008` is historical/migrated only.
+**Registry totals:** 383 unique formal requirement IDs (all `REQ-*`, including `REQ-OSS-008`; marker-bounded GLOBAL PRIMARY REQ REGISTRY mechanical count 2026-10-04). Former formal ID `OSS-008` is historical/migrated only.
 
 Specialized-family rows (`REQ-OIV-*`, `REQ-ONB-*`, `REQ-EGC-*`, `REQ-MIA-*`, `REQ-EMC-*`) are indexed here for global completeness. Their cross-layer BRD/PRD/Architecture/HLD/LLD/Dataflow normalization may still be incomplete; A1 records that accurately and does not fabricate checkmarks.
 
@@ -461,6 +465,9 @@ The following marker-delimited table is the **only** canonical primary PRD regis
 | PRD-EMC-020 | Certified server monitoring shall cover host CPU/scheduler pressure, memory/swap/paging pressure, filesystem/inode capacity, block I/O, network/NIC quality, OS/uptime, bounded process/service health and applicable hardwa | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 3. Formal product requirements | REQ-EMC | SPECIFIED |
 | PRD-EMC-021 | Linux Agent, Windows Agent, SSH and WinRM/WMI/CIM monitoring shall expose explicit capability/privilege gaps; unsupported or failed collection shall be represented as missing/degraded monitoring evidence rather than targ | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 3. Formal product requirements | REQ-EMC | SPECIFIED |
 | PRD-EMC-022 | Infrastructure Capability Packs shall declare continuous-monitoring collectors and bounded EDS diagnostics separately. EDS is Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` within the existing Troubleshoot / Live  | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 3. Formal product requirements | REQ-EMC | SPECIFIED |
+| PRD-EMC-023 | Platform shall make common enterprise technologies useful out of the box through a complete Official Certified Pack product contract rather than metric collection alone. | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 3. Formal product requirements | REQ-EMC-023 | SPECIFIED |
+| PRD-EMC-024 | Platform shall govern Capability Pack trust classes and shall not open a public/community marketplace before signing, provenance, licence, security, compatibility and rollback controls are mature. | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 3. Formal product requirements | REQ-EMC-024 | SPECIFIED |
+| PRD-EMC-025 | Phase 1 shall target a finite deeply certified OOB technology baseline rather than broad unverified vendor-name coverage. | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | 3. Formal product requirements | REQ-EMC-025 | SPECIFIED |
 | PRD-HA-001 | Exactly two full Core nodes shall comprise the standard HA application pair. | `Platform_02_PRD.md` | 5.3 HA behavior | — | SPECIFIED |
 | PRD-HA-002 | Exactly one shall be Active and the other Standby during normal operation. | `Platform_02_PRD.md` | 5.3 HA behavior | — | SPECIFIED |
 | PRD-HA-003 | Both shall continuously synchronize required persistent state. | `Platform_02_PRD.md` | 5.3 HA behavior | — | SPECIFIED |
@@ -626,7 +633,7 @@ The following marker-delimited table is the **only** canonical primary PRD regis
 
 <!-- END GLOBAL PRIMARY PRD REGISTRY -->
 
-**Registry totals (Issues #169/#170 reconciliation):** 201 unique formal PRD IDs (marker-bounded GLOBAL PRIMARY PRD REGISTRY mechanical count 2026-10-04).
+**Registry totals (v3.3.0 reconciliation):** 204 unique formal PRD IDs (marker-bounded GLOBAL PRIMARY PRD REGISTRY mechanical count 2026-10-04).
 
 Related REQ family is recorded only where the family relationship is explicitly supported by naming/owner structure. A2 does not invent REQ↔PRD mappings beyond that.
 
@@ -1148,3 +1155,23 @@ This RTM revision adds `REQ-TIME-*` and `REQ-SCHED-*` only. Flow/Log/Cloud/Exten
 | `PRD-MIA-060` / `REQ-MIA-056` — bounded cross-vantage evidence association for physical/VM incidents | Platform_22 + Platform_19/17 | Phase 1 | SPECIFIED | entity-relationship/capability-aware fan-out; independent provenance; missing/contradictory evidence; physical OOB and VMware first-GA scenarios where owning builds are certified; no guest→hypervisor causal shortcut; immutable RCA revisions |
 
 Maturity remains `SPECIFIED` until corresponding production source exists. Documentation does not imply implementation, testing or certification.
+
+
+## v3.3.0 cross-layer traceability reconciliation
+
+| Capability decision | Formal authority | Phase | Cross-layer mapping / required evidence |
+|---|---|---|---|
+| Investigation Workbench | `REQ-UI-021`, `REQ-UI-022`, BUILD-085 | Phase 1 | Existing Investigation Session + Unified Timeline + Flight Recorder + graph/query/RCA; UI-UX, API/query, security, timeline ordering/provenance and incident/RCA tests |
+| Path Intelligence | `REQ-NET-016`, BUILD-040/048 | Phase 1 | Existing active-path + temporal topology; multi-vantage/path history/interface/routing/Flow/change/synthetic/provider/service-impact correlation |
+| Operational OTLP metrics/logs/traces | `REQ-INF-010`, BUILD-036/062–064 | Phase 1 | Architecture/HLD/LLD/dataflow/protocol/sizing/API/security/test/ops updated; full APM excluded |
+| OOB Official Certified Packs | `PRD-EMC-023` / `REQ-EMC-023` | Phase 1 | Platform_23 pack contract + onboarding/UI/capacity/security/quality/distribution/operations gates |
+| Pack trust classes/ecosystem | `PRD-EMC-024` / `REQ-EMC-024` | Phase 1 / 1.5 / Future | Official+Private P1; Partner Verified P1.5; public Community Future |
+| Finite Phase-1 pack baseline | `PRD-EMC-025` / `REQ-EMC-025` | Phase 1 | Named Platform_23 targets; every family remains unimplemented/uncertified until evidence passes |
+| Endpoint/access-port intelligence | `REQ-NET-017` | Phase 1.5 | Canonical identity/temporal graph + IPAM/network discovery; privacy and mutable identity evidence tests |
+| Browser journey synthetics | `PRD-EGC-013` / `REQ-EGC-013`, BUILD-047 | Phase 1.5 | Browser-runtime OSS/security/capacity spike, secret/screenshot isolation, distributed execution and failure artifacts |
+| Deeper DB performance intelligence | `REQ-INF-007`, BUILD-035 | Phase 1.5 | Query fingerprint/wait/blocking/deadlock/plan-change/regression evidence without DBA/autotuning authority |
+| Virtualization optimization | `REQ-INF-004`, BUILD-033 | Phase 1.5 | Evidence-backed rightsizing/capacity/imbalance recommendations; no autonomous placement |
+| NCM compliance packs | `REQ-NCM-001/002/003`, BUILD-090 | Phase 1 | Safe baseline checks; CIS/STIG-branded redistribution requires legal/licence approval; no certification claim |
+| NCM firmware lifecycle | `REQ-NCM-001/003`, BUILD-090 | Phase 1.5 | Repository/image integrity/compatibility/preflight/backup/approval/canary/staged rollout/post-validation/rollback where vendor permits |
+| Wireless experience | `REQ-NET-009` | Phase 1 core; heat maps Phase 1.5 | Controller/AP/radio/client/RSSI/SNR/auth/roaming/rogue evidence; floorplan/calibration heatmap gated separately |
+| Deep VoIP | `REQ-NET-010` | Phase 2 | CDR/CMR/MOS/per-call path specialist depth |

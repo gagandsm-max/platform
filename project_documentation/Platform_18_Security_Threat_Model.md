@@ -1,7 +1,7 @@
 # Platform — Security Threat Model
 
 **Document ID:** PLATFORM-THREAT-001  
-**Version:** 3.2.2  
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference
 
 ## 1. Assets
@@ -120,3 +120,31 @@ Additional threats and mandatory controls for Linux kernel instrumentation and a
 | Diagnostic evidence leaks software/process/customer data | minimize to approved metadata; no arbitrary files/env/secrets/payloads/unrestricted command lines/logs; RBAC/tenant scope/retention/redaction |
 
 No new privilege, endpoint Python runtime, unrestricted shell/PowerShell facility or endpoint causal AI is authorized by these enhancements.
+
+
+## 11. v3.3.0 threat extension — OTLP traces, OOB packs, browser journeys and firmware
+
+### New/expanded threats
+
+- forged resource/service attributes attempting tenant/entity takeover;
+- stolen OTLP tokens/certificates and cross-tenant replay;
+- protobuf/JSON decompression or oversized-payload exhaustion;
+- span/attribute/event/link/cardinality amplification and trace-ID hot-key attacks;
+- telemetry poisoning designed to create false service dependencies or RCA evidence;
+- secrets/PII in HTTP headers, cookies, URL query strings, baggage, bodies, DB parameters/query text, exception messages or logs;
+- tail-sampling memory exhaustion, trace fragmentation and inconsistent sampling across replicas;
+- malicious/supply-chain-compromised Capability Packs, forged signatures, licence/provenance laundering and unsupported-version activation;
+- browser-synthetic credential theft, SSRF/egress pivoting, sensitive screenshots/artifacts and browser sandbox escape;
+- firmware repository/image tampering, downgrade/incompatible image, device bricking, excessive rollout blast radius and malicious rollback image.
+
+### Required mitigations
+
+OTLP ingress binds tenant authority outside payload attributes, authenticates transport/deployment, limits decompressed size/rate/cardinality, rejects malformed data, records drop/shed evidence and applies data minimization/redaction before persistence. Service/resource attributes cannot directly create authorization scope.
+
+Sensitive HTTP/body/baggage/database parameter capture is deny-by-default. Non-parameterized database query text requires sanitization that removes literal values before retention; lower-cardinality summaries are preferred.
+
+Capability Packs require signature/checksum/provenance/licence/security/compatibility validation. Phase-1 pack format remains declarative wherever possible and may not provide arbitrary code execution.
+
+Browser and firmware threats are Phase-1.5 gates, not Phase-1 implementation claims. Firmware execution always requires existing RBAC/JIT/reason/approval/maker-checker/audit/blast-radius controls and vendor-supported rollback semantics.
+
+AI may summarize trace evidence or recommend tests but cannot bypass evidence qualification, authorization or deterministic execution controls.

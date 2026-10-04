@@ -1,7 +1,7 @@
 # Platform — Enterprise Gap Closure Master
 
 **Document ID:** PLATFORM-EGC-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Enterprise Gap Closure**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation or readiness claim
@@ -208,3 +208,10 @@ The following enterprise adoption gaps are now explicitly closed at the **requir
 4. **Triggered Fast RCA / endpoint diagnostics** — owned by Platform_22 `PRD-MIA-059/060`: EDS is extended with bounded trigger-specific definitions and related-vantage evidence association; no second diagnostics/RCA authority is created.
 
 These are first-GA targets, not implementation claims. Their exit depends on the Build Register owners and Platform_14 certification evidence.
+
+
+## v3.3.0 phase reconciliation
+
+`PRD-EGC-013` / `REQ-EGC-013` multi-step browser synthetics are promoted from unspecified future sequencing to **Phase 1.5**, not Phase 1. A shipped browser engine remains unselected pending OSS/security/capacity admission. Required evidence includes multi-step navigation/login/form/assertions, per-step timing, distributed execution, failure artifacts, credential isolation, screenshot policy/redaction, browser crash/timeout behavior and capacity isolation.
+
+Regional federation remains Phase 2/change-controlled and does not alter the v1 exactly-two-Core contract. Endpoint DEX privacy boundaries remain unchanged.
