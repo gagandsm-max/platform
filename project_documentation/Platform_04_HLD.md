@@ -1281,7 +1281,11 @@ A complete local stack shall be decomposable into logical groups: Core applicati
 
 ### 44.3 Linux package service layout
 
-Each installable component has a dedicated package, OS service and data boundary. Standard paths shall follow Linux conventions, with exact final paths governed by `Platform_15_CI_CD_Packaging_and_Distribution.md`.
+Each installable component has a dedicated package and service-management boundary. Where a package owns multiple required runtime processes, each separately managed process has explicit OS supervision, dependency ordering/readiness, boot enablement and bounded crash recovery. For Core this includes PostgreSQL, ClickHouse, Kafka and Valkey whenever they are deployed as separate mandatory services, in addition to Platform Core application/ingest/query processes required by the enabled deployment profile.
+
+After a supported host reboot, the required profile shall return to operational service without routine customer process-start commands. Optional, scheduled and on-demand workers may remain inactive when their capability/workload is not enabled or no work is due.
+
+Standard paths shall follow Linux conventions, with exact final paths governed by `Platform_15_CI_CD_Packaging_and_Distribution.md`.
 
 ### 44.4 Runtime health/logging subsystem
 
