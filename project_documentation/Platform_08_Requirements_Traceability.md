@@ -1127,3 +1127,17 @@ Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack complete
 ### Historical — Handoff baseline note — 2026-09-21
 
 This RTM revision adds `REQ-TIME-*` and `REQ-SCHED-*` only. Flow/Log/Cloud/Extensibility/ITSM strengthen existing owners rather than creating parallel namespaces. No `Platform_24+` specialized master is required at this baseline. Implementation truth classification (`SPECIFIED`/`IMPLEMENTED`/`TESTED`/`BENCHMARKED`/`CERTIFIED`/`DEPLOYED`) must be preserved for Counter64, HA, scheduler, timezone persistence, FLOW/LOG roles and remaining enterprise runtimes.
+
+---
+
+## Phase-1 endpoint operations traceability supplement — Issues #169/#170
+
+| Requirement | Authoritative source | Release | Status | Required evidence |
+|---|---|---|---|---|
+| `REQ-INF-014` — Windows/Linux installed-software inventory and change evidence | Platform_02 + Platform_05/06/17 | Phase 1 | SPECIFIED | Linux/Windows Agent fixtures + live hosts; native source identity/version/vendor/architecture/scope/provenance; daily-spread reconciliation; reliable change-trigger coalescing; install/remove/version-change diff; partial-source behavior; tenant isolation; resource/cardinality tests; no false normalization |
+| `REQ-INF-015` — customer-selectable process/service monitoring | Platform_02 + Platform_05/09/17 | Phase 1 | SPECIFIED | Monitor/Stop Monitoring UI/API; stable selector; PID reuse negative case; instance/restart/CPU/memory/unresponsive conditions; RBAC/audit; high-cardinality short-lived process protection; no remediation-authority implication |
+| `REQ-INF-016` — Criticality/Monitoring-Profile separation and mapping | Platform_02 + Platform_05/20 | Phase 1 | SPECIFIED | AUTO_FROM_CRITICALITY vs EXPLICIT_PROFILE determinism; explicit override survives Criticality change; capacity preview/admission; versioned desired state; deterministic spread; audit |
+| `PRD-MIA-059` / `REQ-MIA-055` — built-in trigger-specific bounded EDS definitions | Platform_22 + Platform_05/17 | Phase 1 | SPECIFIED | Profile-specific positive/negative/partial/suppressed/resource tests; no unbounded full-machine audit; factual indicators only; no false PROCESS_HUNG |
+| `PRD-MIA-060` / `REQ-MIA-056` — bounded cross-vantage evidence association for physical/VM incidents | Platform_22 + Platform_19/17 | Phase 1 | SPECIFIED | entity-relationship/capability-aware fan-out; independent provenance; missing/contradictory evidence; physical OOB and VMware first-GA scenarios where owning builds are certified; no guest→hypervisor causal shortcut; immutable RCA revisions |
+
+Maturity remains `SPECIFIED` until corresponding production source exists. Documentation does not imply implementation, testing or certification.
