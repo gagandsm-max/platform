@@ -784,3 +784,21 @@ Operational self-monitoring includes candidate queue depth/age, review backlog, 
 ### 13.1 Definition of done
 
 Implementation of this capability family is not complete until the applicable requirements above have code, tests, observability, security/tenant-isolation coverage, upgrade/migration behavior where state is introduced, UI states, audit evidence and operational runbooks. A UI-only queue or bell without server-side scope, lifecycle and durable identity semantics is non-conformant.
+
+---
+
+## Criticality and Monitoring Profile assignment reconciliation — Issue #169
+
+Onboarding continues to collect/review Criticality and proposed Monitoring Profile, but their semantics are now explicit:
+
+- **Criticality** = business importance metadata.
+- **Monitoring Profile** = effective monitoring behavior.
+- **Assignment mode** = `AUTO_FROM_CRITICALITY` or `EXPLICIT_PROFILE`.
+
+During onboarding the review screen shows Criticality, suggested profile, effective profile, inheritance source, assignment mode and capacity impact.
+
+After activation, Criticality/Profile changes use the normal BUILD-070 policy/desired-state path; onboarding does not become a second policy engine.
+
+If `EXPLICIT_PROFILE` is active, a later Criticality change may update the suggestion but must not silently replace the effective profile. Switching back to automatic mapping is an explicit authorized/audited action.
+
+Bulk Criticality/profile changes require capacity/MWU preview and deterministic spread before activation so onboarding or later metadata edits cannot generate synchronized collection storms.
