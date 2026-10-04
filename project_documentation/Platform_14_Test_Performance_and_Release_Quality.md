@@ -363,18 +363,23 @@ Phase-1 Unified Network & Infrastructure Observability capability claims are gov
 
 Certification requires applicable Linux and Windows tests for:
 
-- authoritative package/product enumeration from supported sources;
+- authoritative package/product enumeration from supported sources into a versioned `software_inventory_snapshot` envelope;
+- snapshot completeness semantics (`FULL|TARGETED`, `COMPLETE|PARTIAL|FAILED`, truncation/loss reasons, item_count);
 - native source/package identity preservation;
 - version/vendor/architecture/scope/provenance mapping;
-- install, removal and version-change reconciliation;
+- install, removal and version-change reconciliation under removal-safety rules;
+- proof that only `COMPLETE` + non-truncated + authoritative `FULL` same-source/scope snapshots may infer general absence/removal;
+- proof that `PARTIAL`/`FAILED`/truncated/`TARGETED` captures and permission/access failures never generate mass or unrelated removals;
 - daily deterministic spreading and reliable change-trigger coalescing;
 - missed local event repaired by later authoritative reconciliation;
-- partial/privilege-denied/unsupported source behavior without mass false-removal;
 - restart/disconnect/replay/idempotency;
 - large installed-set CPU/RAM/I/O/network bounds;
 - tenant isolation and API/RBAC;
-- normalization ambiguity/false-merge negative fixtures;
+- normalization ambiguity/false-merge negative fixtures and proof that resolver-only changes do not masquerade as package events;
+- proof that typed inventory is not faked through scalar metric labels on the current Agent CollectionBatch path;
 - proof that no patch/deployment/remediation action is implied.
+
+Deterministic RCA certification must prove RCA remains available with contradictions/missing evidence/`INCONCLUSIVE` when software inventory/change evidence is absent; BUILD-098 evidence is consumed when available and must not be a hard runtime dependency.
 
 ### Process/service monitoring
 

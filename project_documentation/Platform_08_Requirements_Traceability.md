@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Global Traceability Index (A2.3 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
-**Last reconciliation:** 2026-09-24 — A2.3 OSS catalogue + formal OSS-008→REQ-OSS-008 reconciliation (Issue #108); registry count remains 372/199
+**Last reconciliation:** 2026-10-04 — Issues #169/#170 Phase-1 endpoint operations and Triggered Fast RCA formal-ID registry reconciliation; marker-bounded global primary counts mechanically verified as REQ 379 / PRD 201 (supersedes stale 2026-09-24 A2.3 narrative 372/199)
 **Normalization state:** NORMALIZED_V1 (global index layer). Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Purpose
@@ -409,7 +409,7 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 
 <!-- END GLOBAL PRIMARY REQ REGISTRY -->
 
-**Registry totals:** 372 unique formal requirement IDs (all `REQ-*`, including `REQ-OSS-008`). Former formal ID `OSS-008` is historical/migrated only.
+**Registry totals:** 379 unique formal requirement IDs (all `REQ-*`, including `REQ-OSS-008`; marker-bounded GLOBAL PRIMARY REQ REGISTRY mechanical count 2026-10-04). Former formal ID `OSS-008` is historical/migrated only.
 
 Specialized-family rows (`REQ-OIV-*`, `REQ-ONB-*`, `REQ-EGC-*`, `REQ-MIA-*`, `REQ-EMC-*`) are indexed here for global completeness. Their cross-layer BRD/PRD/Architecture/HLD/LLD/Dataflow normalization may still be incomplete; A1 records that accurately and does not fabricate checkmarks.
 
@@ -626,7 +626,7 @@ The following marker-delimited table is the **only** canonical primary PRD regis
 
 <!-- END GLOBAL PRIMARY PRD REGISTRY -->
 
-**Registry totals (A2.3 reconciliation):** 199 unique formal PRD IDs.
+**Registry totals (Issues #169/#170 reconciliation):** 201 unique formal PRD IDs (marker-bounded GLOBAL PRIMARY PRD REGISTRY mechanical count 2026-10-04).
 
 Related REQ family is recorded only where the family relationship is explicitly supported by naming/owner structure. A2 does not invent REQ↔PRD mappings beyond that.
 

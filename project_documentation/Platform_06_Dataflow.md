@@ -2277,21 +2277,25 @@ Rules:
 
 ### DF-ENDPOINT-INV-001 — Installed software reconciliation
 
+Logical target path:
+
 ```text
 deterministically spread periodic trigger OR trustworthy OS/package change signal
 → local resource/admission check
 → bounded OS-native inventory enumeration
-→ typed snapshot preserving native source/package identity
-→ Agent durable queue or governed agentless Sensor path
-→ Core validation/entity authority
-→ software inventory reconciliation
-→ current inventory state
-→ diff against prior authoritative state
-→ SOFTWARE_INSTALLED | SOFTWARE_REMOVED | SOFTWARE_VERSION_CHANGED
-→ Timeline / Investigation / deterministic RCA evidence consumers
+→ versioned software_inventory_snapshot (FULL|TARGETED; COMPLETE|PARTIAL|FAILED; truncation/quality)
+→ typed Agent evidence boundary (BUILD-011/014) or governed agentless Sensor producer (BUILD-030/031 when certified)
+→ physical Agent structured-envelope/durable delivery (BUILD-016) when Agent path
+→ Core envelope acceptance/authority (BUILD-062)
+→ physical stream/history realization as required (BUILD-063/064)
+→ BUILD-098 software inventory reconciliation / current state / change evidence / query
+→ SOFTWARE_INSTALLED | SOFTWARE_REMOVED | SOFTWARE_VERSION_CHANGED (only under removal-safety rules)
+→ Timeline / Investigation / deterministic RCA evidence consumers (when available)
 ```
 
-Change-triggered refresh is coalesced; it does not replace periodic authoritative reconciliation. Missing/denied source access yields partial/degraded inventory quality rather than silent removal of all software.
+Current implementation state: production Agent collection remains scalar (`HostCollector → Sample → Observation → CollectionBatch`) and must not fake structured inventory through metric labels. End-to-end persistence is not claimed until BUILD-016/062/063/064/098 foundations exist.
+
+Change-triggered refresh is coalesced; it does not replace periodic authoritative reconciliation. Only a `COMPLETE`, non-truncated, authoritative `FULL` snapshot for the same source/scope may infer general absence/removal. `PARTIAL`/`FAILED`/truncated/`TARGETED` captures and permission/access failures yield quality/degraded evidence and must not generate mass or unrelated removals.
 
 ### DF-ENDPOINT-MON-001 — Customer selects process/service to monitor
 

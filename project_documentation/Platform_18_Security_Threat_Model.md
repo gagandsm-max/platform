@@ -109,7 +109,7 @@ Additional threats and mandatory controls for Linux kernel instrumentation and a
 | Threat | Mandatory control |
 |---|---|
 | Malicious package metadata causes parser/normalization injection or cardinality exhaustion | Typed bounded parsers; preserve native identity; length/item limits; normalization version/provenance; reject malformed data; no package strings promoted to commands or metric-label explosions |
-| Package-manager/registry source unavailable is misread as mass uninstall | Source-health/quality state; authoritative reconciliation; failure/permission denial cannot generate global removal events |
+| Package-manager/registry source unavailable or incomplete snapshot is misread as mass uninstall | Versioned `software_inventory_snapshot` completeness (`COMPLETE|PARTIAL|FAILED`, truncation, `FULL|TARGETED`); only COMPLETE non-truncated authoritative FULL same-source/scope snapshots may infer general absence/removal; failure/permission denial and PARTIAL/FAILED/truncated/TARGETED captures cannot generate mass or unrelated removals |
 | Agentless software inventory becomes generic shell/PowerShell | Platform-owned signed/versioned allowlisted query packs, fixed operations + typed parameters, timeout/output bounds, read-only privilege and audit; no user/model supplied command strings |
 | Process monitor selector is redirected by PID reuse or ambiguous pattern | PID prohibited as durable identity; stable service/executable selectors; bounded exact-name fallback; ambiguity/reconciliation state rather than silent retargeting |
 | Customer selector becomes command/regex injection | No shell expression contract; bounded typed selector schema; canonical escaping/validation; target/resource authorization |

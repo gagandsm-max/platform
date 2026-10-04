@@ -1555,9 +1555,13 @@ Observability Phase 1 capabilities are governed by the versioned `OBS-P1 enrichm
 
 No new microservice, database or endpoint daemon is introduced.
 
-`Windows/Linux OS source → existing Agent or governed agentless query pack → typed software inventory evidence → existing durable Agent/Sensor/Core path → Core inventory reconciliation → PostgreSQL current authority + Kafka/ClickHouse change/history where appropriate → Query/UI/Timeline/RCA consumers`.
+Logical target path:
 
-Linux BUILD-011 and Windows BUILD-014 own source-side collection/normalization. BUILD-098 owns end-to-end software inventory reconciliation/change evidence. Source-native identity is retained; normalization across package ecosystems is nullable/versioned and shall not merge similarly named products without sufficient evidence.
+`Windows/Linux OS source → BUILD-011/014 typed software_inventory_snapshot evidence boundary (or certified BUILD-030/031 agentless producer) → BUILD-016 Agent structured-envelope/durable delivery (Agent path) → BUILD-062 Core acceptance/authority → BUILD-063/064 stream/history realization as required → BUILD-098 reconciliation/current-state/change evidence/query → PostgreSQL current authority + Kafka/ClickHouse history where appropriate → Query/UI/Timeline/RCA consumers (when available)`.
+
+Current implementation state: production Agent collection is scalar (`HostCollector → Sample → Observation → CollectionBatch`) and cannot truthfully carry structured software inventory as metric labels. BUILD-011/014 must not claim downstream persistence; BUILD-030/031 are optional certified producers, not hard prerequisites for the Agent path.
+
+Source-native identity is retained; normalization across package ecosystems is nullable/versioned and shall not merge similarly named products without sufficient evidence. Absence/removal inference requires a `COMPLETE`, non-truncated, authoritative `FULL` snapshot for the same source/scope. Software-change evidence is corroborating only and must not be a hard runtime prerequisite for deterministic RCA.
 
 ### Process/service monitoring
 

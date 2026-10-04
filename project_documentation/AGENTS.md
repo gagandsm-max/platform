@@ -211,9 +211,9 @@ For work involving **installed-software inventory**, **customer-selectable proce
 
 Non-negotiable boundaries:
 
-- Installed-software inventory is a **Phase-1 / first-GA requirement** for supported Windows/Linux endpoints. It is inventory/change evidence, not patch management, software deployment, vulnerability management, licence metering, EDR or endpoint management.
-- Linux BUILD-011 and Windows BUILD-014 own bounded OS-native source collection/normalization primitives; end-to-end current-state reconciliation, change evidence, query/API integration and downstream consumption are owned by BUILD-098.
-- Structured software inventory must not be forced into high-cardinality scalar metric labels merely to reuse the metric envelope.
+- Installed-software inventory is a **Phase-1 / first-GA requirement** for supported Windows/Linux endpoints by Master architecture decision (`PHASE_1_ACCEPTED_BY_ARCHITECTURE_AUTHORITY`) after Founder objective + Phase-allocation delegation. It is inventory/change evidence, not patch management, software deployment, vulnerability management, licence metering, EDR or endpoint management.
+- Linux BUILD-011 and Windows BUILD-014 own bounded OS-native source collection/normalization and typed `software_inventory_snapshot` evidence boundaries; BUILD-016/062/063/064 own structured transport/ingestion/storage foundations; BUILD-098 owns end-to-end reconciliation/current-state/change evidence/query. BUILD-030/031 agentless producers are optional when certified. Current scalar Agent CollectionBatch path must not fake structured inventory.
+- Structured software inventory must not be forced into high-cardinality scalar metric labels merely to reuse the metric envelope. Software-change evidence is corroborating only and must not hard-block deterministic RCA.
 - Process/service monitoring uses stable service/unit/executable selectors; PID is runtime evidence only and never durable monitor identity.
 - Criticality describes business importance. Monitoring Profile describes monitoring behavior. `AUTO_FROM_CRITICALITY` and `EXPLICIT_PROFILE` are distinct assignment modes; explicit profile assignment is never silently replaced by a later Criticality change.
 - Triggered Fast RCA is a **product experience over the existing Diagnostic Job / EDS / Live Evidence / Investigation / Incident Evidence Window / deterministic Core RCA architecture**. It is not a second endpoint RCA engine, diagnostic scheduler, evidence store, transport or causal authority.

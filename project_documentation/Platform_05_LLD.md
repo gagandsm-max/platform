@@ -2983,35 +2983,47 @@ Physical storage and streaming schemas are decoupled from logical contracts:
 
 ### Software inventory evidence
 
-Logical source observation:
+Logical source evidence is a versioned bounded authoritative snapshot/envelope. Item-level rows alone cannot safely authorize absence/removal.
 
 ```text
-software_inventory_observation
+software_inventory_snapshot
   schema_version
-  tenant_id
-  entity_id
+  snapshot_id
   source_mode AGENT|SSH|WINRM_WMI_CIM
   source_type DPKG|RPM|MSI|WINDOWS_PRODUCT_SOURCE|PACKAGE_MANAGER|OTHER_CERTIFIED
-  native_package_id
-  product_name
-  normalized_product_id nullable
-  normalization_version nullable
-  normalization_confidence nullable
-  version
-  vendor_publisher nullable
-  architecture nullable
-  installation_scope MACHINE|USER|UNKNOWN
-  authoritative_install_or_update_time nullable
-  observed_at
+  # authoritative endpoint/Agent/host context inherited from transport/Core authority
+  inventory_scope
+  snapshot_mode FULL|TARGETED
+  started_at
+  completed_at
+  capture_status COMPLETE|PARTIAL|FAILED
+  item_count
+  truncated
+  incomplete_or_loss_reason nullable
   source_provenance
   quality
+  items[]
+    native_package_id
+    product_name
+    version
+    vendor_publisher nullable
+    architecture nullable
+    installation_scope MACHINE|USER|UNKNOWN
+    authoritative_install_or_update_time nullable
+    normalized_product_id nullable
+    normalization_version nullable
+    normalization_confidence nullable
 ```
 
 Core derives current-state `first_seen_at` / `last_seen_at` and change events from reconciled evidence; Agents do not invent historical first/last-seen truth.
 
-Native source/package identity is always preserved. A normalized product identity is optional and versioned. Name similarity alone may not merge packages from different sources.
+Native source/package identity is always preserved and remains authoritative for reconciliation. A normalized product identity is optional and versioned. Name similarity alone may not merge packages from different sources. Normalization-resolver changes must not masquerade as `SOFTWARE_INSTALLED` / `SOFTWARE_REMOVED` / `SOFTWARE_VERSION_CHANGED`.
+
+Removal/absence inference is permitted only from a `COMPLETE`, non-truncated, authoritative `FULL` snapshot for the same source/scope. `PARTIAL`, `FAILED`, truncated and `TARGETED` captures must not generate mass or unrelated removals. Source permission/access failure is monitoring-quality evidence, not uninstall evidence.
 
 Default authoritative reconciliation is approximately 24 hours with deterministic spreading/jitter. A reliable OS/package-manager change signal may request earlier coalesced reconciliation. Inventory refresh is lower priority than live monitoring and durable telemetry.
+
+Current Agent scalar collection (`HostCollector → Sample → Observation → CollectionBatch`) cannot truthfully carry this structured snapshot. BUILD-011/014 own typed source-side snapshot/evidence boundaries without claiming persistence; BUILD-016 owns physical Agent structured-envelope/delivery evolution; BUILD-062 owns Core acceptance/authority; BUILD-063/064 own streaming/history realization as required; BUILD-098 owns reconciliation/current-state/change/query integration.
 
 ### Process/service monitoring selector
 

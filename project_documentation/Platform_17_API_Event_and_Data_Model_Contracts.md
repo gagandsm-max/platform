@@ -744,37 +744,65 @@ TraceContextReference:
 
 ### Software inventory
 
-Canonical logical observation:
+Canonical logical structured evidence is a versioned bounded authoritative snapshot/envelope. Item rows alone are insufficient for absence/removal inference.
 
 ```text
-software_inventory_observation
+software_inventory_snapshot
   schema_version
-  tenant_id
-  entity_id
+  snapshot_id
   source_mode AGENT|SSH|WINRM_WMI_CIM
   source_type
-  native_package_id
-  product_name
-  normalized_product_id? / normalization_version? / normalization_confidence?
-  version
-  vendor_publisher?
-  architecture?
-  installation_scope MACHINE|USER|UNKNOWN
-  authoritative_install_or_update_time?
-  observed_at
+  # authoritative endpoint/Agent/host context inherited from transport/Core authority
+  inventory_scope
+  snapshot_mode FULL|TARGETED
+  started_at
+  completed_at
+  capture_status COMPLETE|PARTIAL|FAILED
+  item_count
+  truncated
+  incomplete_or_loss_reason?
   source_provenance
   quality
+  items[]
+    native_package_id
+    product_name
+    version
+    vendor_publisher?
+    architecture?
+    installation_scope MACHINE|USER|UNKNOWN
+    authoritative_install_or_update_time?
+    normalized_product_id?
+    normalization_version?
+    normalization_confidence?
 ```
 
-Current inventory authority is Core-reconciled state. `first_seen_at` and `last_seen_at` are Core-derived lifecycle fields and are not accepted as endpoint-authored historical truth.
+Tenant/entity authority fields are inherited from existing transport/Core authority conventions and must not be duplicated as endpoint-authored truth that overrides Core identity.
 
-Normalized change event classes:
+Current inventory authority is Core-reconciled state. `first_seen_at` and `last_seen_at` are Core-derived lifecycle fields and are not accepted as endpoint-authored historical truth. Native source/package identity remains authoritative for reconciliation; normalized product identity is optional/versioned/provenance-bearing and must not masquerade as package uninstall/install/version-change when only the resolver changes.
+
+Normalized change event classes remain:
 
 `SOFTWARE_INSTALLED | SOFTWARE_REMOVED | SOFTWARE_VERSION_CHANGED`.
 
-A removal is emitted only after reconciliation supports absence under an authoritative source; collector failure/permission denial is not evidence that all software was removed.
+Removal/absence safety:
 
-Software inventory is structured evidence and shall not be encoded as high-cardinality scalar metric labels. Public/internal query contracts are tenant/RBAC scoped and bounded.
+- only a `COMPLETE`, non-truncated, authoritative `FULL` reconciliation for the same source/scope may infer general absence/removal;
+- `PARTIAL`, `FAILED` or truncated capture must never generate mass removal;
+- `TARGETED` refresh cannot infer absence of unrelated packages;
+- source permission/access failure is monitoring-quality evidence, not uninstall evidence.
+
+Software inventory is structured evidence and shall not be encoded as high-cardinality scalar metric labels on the current scalar Agent metric path (`HostCollector → Sample → Observation → CollectionBatch`).
+
+Physical ownership boundary (logical target vs current implementation):
+
+- BUILD-011/014 collect/normalize bounded typed inventory snapshots and expose an internal typed evidence boundary; they do not fake inventory through scalar metric labels and do not claim downstream persistence;
+- BUILD-016 owns physical Agent structured-envelope / durable-delivery evolution required for typed inventory evidence;
+- BUILD-062 owns Core envelope acceptance, authority validation and ingestion;
+- BUILD-063 owns physical streaming realization;
+- BUILD-064 owns physical historical/fact storage where appropriate;
+- BUILD-098 consumes canonical structured inventory evidence and owns reconciliation/current-state/change-evidence/query behavior.
+
+Public/internal query contracts are tenant/RBAC scoped and bounded.
 
 ### Process/service monitor definition
 
