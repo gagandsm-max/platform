@@ -2395,6 +2395,6 @@ The boundary remains operational observability, not full APM. Excluded from Phas
 
 `REQ-NET-017` — **Phase 1.5 Endpoint & Access-Port Intelligence:** canonical-graph correlation of MAC/IP/endpoint/user evidence (when identity sources permit), switch/port/VLAN/AP association, movement/history, port utilization/state and new/rogue endpoint evidence. IP/MAC/user observations remain mutable/provenance-bearing; no second identity database and no employee surveillance.
 
-Phase 1.5 also includes, under existing requirement owners: multi-step browser journey synthetics (`PRD-EGC-013` / `REQ-EGC-013`), deeper query/wait DB performance intelligence (`REQ-INF-007`), evidence-backed virtualization optimization (`REQ-INF-004`), high-risk NCM firmware lifecycle under maker-checker/rollback controls (`REQ-NCM-001/003`), wireless RF/site heat maps as an extension of `REQ-NET-009`, and Partner Verified Packs.
+Phase 1.5 also includes, under existing requirement owners: multi-step browser journey synthetics (`PRD-EGC-013` / `REQ-EGC-012`), deeper query/wait DB performance intelligence (`REQ-INF-007`), evidence-backed virtualization optimization (`REQ-INF-004`), high-risk NCM firmware lifecycle under maker-checker/rollback controls (`REQ-NCM-001/003`), wireless RF/site heat maps as an extension of `REQ-NET-009`, and Partner Verified Packs.
 
 Deep VoIP CDR/CMR/per-call MOS/call-path analytics remain Phase 2 under `REQ-NET-010`. Regional federation remains Phase 2/change-controlled. Public/community pack exchange remains Future.

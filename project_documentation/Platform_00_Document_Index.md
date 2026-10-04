@@ -5,19 +5,19 @@
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-10-04 — Phase-1 endpoint operations, software inventory, selectable process/service monitoring, Criticality/Profile governance, and Triggered Fast RCA/EDS cross-vantage reconciliation (Issues #169/#170; set version remains v3.2.2)
+**Last reconciliation:** 2026-10-05 — v3.3.0 OOB monitoring depth, operational OpenTelemetry traces, Investigation Workbench/Path Intelligence productization and controlled specialist phasing; prior Issue #169/#170 endpoint/Fast-RCA decisions remain intact.
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Authority
 
 1. The canonical GitHub repository `https://github.com/gagandsm-max/platform` (`main` after merge) is the authoritative system of record for Platform Mother References and implementation.
-2. Current Mother Reference version is **3.2.2**.
+2. Current Mother Reference version is **3.3.0**.
 3. The exact authoritative Mother Reference set is the **25-file set** listed in §5 (`project_documentation/AGENTS.md` plus `Platform_00` through `Platform_23`). Supporting artifacts such as `mother_reference_manifest.json` and `project_documentation/tools/validate_mother_references.py` are governance tooling, **not** additional Mother References and must not be numbered as `Platform_24+`.
 4. Source precedence is defined in §6. Conflicts require documented change control; implementation must not silently choose a convenient interpretation.
 5. Mother documents are READ-MOSTLY. Deliberate change control is mandatory (see §12).
 6. Repository implementation does **not** silently override an explicit approved product decision recorded in the Mother References or Decision Register.
 7. If implementation discovers false, stale or contradictory documentation, engineering must correct the Mother References through change control rather than knowingly preserve a false specification.
-8. v3.2.2 supersedes v3.2.1 as the authoritative Platform mother-reference set after merge to canonical GitHub `main`. Earlier v1/v2/v3.0/v3.1 generated master packages and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as Platform engineering sources of truth. Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other supplied reference material remains reference/evidence only and never overrides this set.
+8. v3.3.0 supersedes v3.2.2 as the authoritative Platform mother-reference set after merge to canonical GitHub `main`. Earlier v1/v2/v3.0/v3.1/v3.2.x generated/historical states and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as current Platform engineering sources of truth except where explicitly retained as historical provenance. Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other supplied reference material remains reference/evidence only and never overrides this set.
 9. Open/draft PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not change the authoritative Mother Reference set or version.
 
 ## 2. No-assumption rule

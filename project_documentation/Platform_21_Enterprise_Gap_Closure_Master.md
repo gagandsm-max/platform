@@ -212,6 +212,6 @@ These are first-GA targets, not implementation claims. Their exit depends on the
 
 ## v3.3.0 phase reconciliation
 
-`PRD-EGC-013` / `REQ-EGC-013` multi-step browser synthetics are promoted from unspecified future sequencing to **Phase 1.5**, not Phase 1. A shipped browser engine remains unselected pending OSS/security/capacity admission. Required evidence includes multi-step navigation/login/form/assertions, per-step timing, distributed execution, failure artifacts, credential isolation, screenshot policy/redaction, browser crash/timeout behavior and capacity isolation.
+`PRD-EGC-013` / `REQ-EGC-012` multi-step browser synthetics are promoted from unspecified future sequencing to **Phase 1.5**, not Phase 1. A shipped browser engine remains unselected pending OSS/security/capacity admission. Required evidence includes multi-step navigation/login/form/assertions, per-step timing, distributed execution, failure artifacts, credential isolation, screenshot policy/redaction, browser crash/timeout behavior and capacity isolation.
 
 Regional federation remains Phase 2/change-controlled and does not alter the v1 exactly-two-Core contract. Endpoint DEX privacy boundaries remain unchanged.

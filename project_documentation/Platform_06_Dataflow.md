@@ -2263,14 +2263,14 @@ flowchart LR
   OIC -->|Structured Logs| LOG[Kafka: telemetry.logs.v1 -> ClickHouse]
   OIC -->|Extract W3C trace_id / span_id| REF[Correlate Reference Attributes on Logs & Events]
   REF -->|Reference Context| INV[Investigation Sessions & RCA Evidence]
-  OIC -.->|Phase 1.5: Bounded Trace & Dependency Evidence| DEF[Phase 1.5 Trace / Dependency Summaries: Separately Certified]
+  OIC -.->|HISTORICAL v3.2.2 ONLY: bounded trace evidence was deferred| DEF[SUPERSEDED by DF-OTEL-003]
 ```
 
 Rules:
 - OpenTelemetry metrics and structured logs are fully ingested and stored in ClickHouse in Phase 1.
 - Trace context (`trace_id`, `span_id`) is extracted as reference metadata and attached to corresponding logs, events, and investigation evidence.
-- Phase 1.5 may add bounded customer-provided trace/dependency evidence (e.g. trace_id, span_id, service identity, dependency edge, latency/error summary, selected exemplar) under separate implementation and certification.
-- Full distributed trace span payloads, span storage backends, and full distributed waterfall reconstructions are not part of Phase 1 or 1.5 and require future explicit architecture change control. No trace database is operated in Phase 1.
+- HISTORICAL v3.2.2 ONLY: bounded customer trace/dependency evidence was deferred; v3.3.0 `DF-OTEL-003` now governs Phase-1 bounded traces.
+- HISTORICAL v3.2.2 ONLY: this former exclusion is superseded by v3.3.0 bounded retained spans in existing ClickHouse. Dedicated trace databases and full developer-centric APM remain excluded.
 
 ---
 
