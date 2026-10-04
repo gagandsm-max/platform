@@ -1995,16 +1995,18 @@ No production claim is made until this architecture is implemented and validated
 8. Developer can verify `docker compose ps`/Platform health and continue without host-runtime repair.
 9. If recovery fails, documented reset/rebuild path exists and failure logs are retained.
 
-## 100. Flow DF-091 — Linux Core/Sensor/Agent boot and recovery
+## 100. Flow DF-091 — Linux mandatory-runtime boot and recovery
 
 1. Linux host boots.
-2. systemd starts enabled Platform service after required OS/network dependencies.
-3. Service loads protected configuration and identity.
-4. Service emits STARTING lifecycle event.
+2. `systemd` starts every enabled mandatory service for the selected profile in dependency-aware order. For Core this includes separately managed PostgreSQL, ClickHouse, Kafka and Valkey services where applicable, followed by required Platform Core application/ingest/query services; Sensor and Linux Agent required services follow the same invariant.
+3. Each service loads protected configuration/identity/state and emits a STARTING lifecycle event.
+4. Readiness/health checks distinguish process start from dependency-ready operation.
 5. Dependency connections use bounded retry/backoff.
-6. Service reaches HEALTHY or DEGRADED with reason code.
-7. If process crashes, systemd performs bounded restart according to policy.
-8. Repeated failure creates a visible health condition and preserves diagnostic logs.
+6. The required profile reaches HEALTHY or an explicit DEGRADED state with reason code; no routine customer process-start command is required after reboot.
+7. If a mandatory process crashes, its supervisor performs bounded automatic restart according to policy.
+8. If a dependency remains unavailable, dependents remain DEGRADED/RECOVERING and continue safe retries rather than entering tight restart loops.
+9. Repeated failure creates a visible crash-loop/health condition and preserves diagnostic logs.
+10. Optional, scheduled or on-demand workers remain inactive when not enabled or when no work is due.
 
 ## 101. Flow DF-092 — Windows Agent boot and recovery
 
