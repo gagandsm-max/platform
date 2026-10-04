@@ -79,25 +79,35 @@ Optional governed inputs:
 
 TLS material is validated before network/spool activation. Private keys must be regular, non-symlink files without group/world permissions. Errors/logs do not print secret material.
 
-Startup exit codes: `1` configuration, `2` identity, `3` service init, `4` start.
+Startup/shutdown exit codes: `1` configuration, `2` identity, `3` service init, `4` start, `5` service shutdown failure.
 
 ## Linux service lifecycle
 
-`agent/linux/systemd/platform-agent.service` is the LLD §71.3 unit contract (also published under `deploy/systemd/` for installer packaging):
+`agent/linux/systemd/platform-agent.service` is the Mother LLD §85.3 unit contract (also published under `deploy/systemd/` for later installer packaging; `.deb`/`.rpm` packaging remains BUILD-018):
 
 - dedicated `platform-agent` user/group created by the Linux package (this unit does not create them)
 - required `EnvironmentFile=/etc/platform/agent.env` (missing file fails the unit; fail-closed)
 - `StateDirectory=platform/agent` with working directory `/var/lib/platform/agent`
-- `Restart=on-failure` with bounded `RestartSec`
-- explicit start/stop timeouts
+- `Restart=on-failure` with bounded `RestartSec=5`
+- explicit crash-loop bound: `StartLimitIntervalSec=60` / `StartLimitBurst=5`
+- explicit start/stop timeouts (`TimeoutStartSec=30`, `TimeoutStopSec=20`; stop timeout remains above the AgentService 10s shutdown budget)
 - `NoNewPrivileges=true`
 - SIGTERM graceful stop
 
-Real host `systemd` install/enable/reboot certification is **NOT_RUN — REQUIRES HOST CERTIFICATION** on Cursor Cloud / Docker-only environments. Package this unit from `.deb`/`.rpm` in a later installer tranche.
+Real host `systemd` install/enable/reboot certification is **NOT_RUN — REQUIRES HOST CERTIFICATION** on a real systemd-capable Linux host. Cursor Cloud / Docker-only environments cannot complete that gate.
 
 ## Health
 
-`/live` reports process liveness (loopback only). `/ready` and `/health` are ready when the Sensor HTTPS transport is wired **and** the last delivery attempt did not fail. They degrade on Sensor transport unavailability, last delivery failure, queue full, quarantine, or collector errors. Constructing an mTLS client is not treated as Sensor reachability.
+Loopback-only health endpoints use certified Slice-3 local-safety semantics:
+
+- `/live` — process liveness; HTTP 200 while the process can answer (including shutdown signaling).
+- `/ready` and `/healthz` — readiness:
+  - `UP` / HTTP 200 when locally healthy;
+  - `DEGRADED` / HTTP 200 / `ready=true` for Sensor/upstream or partial collector degradation while durable local buffering remains safe;
+  - `NOT_READY` / HTTP 503 only for local unsafe/unexecutable state (examples: lifecycle failure, scheduler unavailable, zero enabled collectors, all enabled collectors blocked/outstanding, queue hard capacity/integrity block, `BLOCKED` or `OVERSIZED` delivery hold).
+- `/health` — same readiness decision as `/ready`, with `SUPPORT_EVIDENCE` detail.
+
+Constructing an mTLS client is not treated as Sensor reachability.
 
 ## Windows
 
