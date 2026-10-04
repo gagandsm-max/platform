@@ -1140,9 +1140,9 @@ Production Core/Sensor/Linux Agent are installed as native Linux packages and ma
 
 ### 32.4 Service supervision architecture
 
-Linux services use dedicated non-login service identities, least privilege, explicit filesystem ownership and `systemd` units with boot enablement, health-aware startup and bounded restart behavior. Windows Agent runs as a dedicated Windows Service with automatic start and recovery actions.
+Every mandatory runtime process required by the selected deployment profile is supervised. Linux Core, Sensor and Agent services use dedicated non-login service identities, least privilege, explicit filesystem ownership and `systemd` units with boot enablement, dependency-aware startup and bounded restart behavior. Separately managed mandatory Core runtime dependencies, including PostgreSQL, ClickHouse, Kafka and Valkey when deployed as independent processes/services, are covered by the same boot-start and supervised-recovery invariant. Windows Agent runs as a dedicated Windows Service with automatic start and recovery actions.
 
-A restart mechanism is not allowed to hide a persistent fault. After configured repeated failures, the component must remain diagnosable and the Platform must raise a visible health condition.
+A host reboot or recoverable process crash must not require routine customer action to restore the selected monitoring/control profile. Optional, scheduled or on-demand workers need not remain resident when no enabled workload requires them. A restart mechanism is not allowed to hide a persistent fault: after configured repeated failures, the component must remain diagnosable and the Platform must raise a visible health condition.
 
 ### 32.5 Observability of Platform itself
 
