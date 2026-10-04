@@ -222,8 +222,11 @@ Core, Sensor and Linux Agent shall ship as both `.deb` and `.rpm` packages for c
 
 ### PRD-SVC-001 — Auto-start and recovery
 
-- Linux Core, Sensor and Agent services shall be enabled at install time for automatic boot startup.
-- Windows Agent shall be installed as an automatically starting Windows Service.
+- Every mandatory runtime service required by the enabled deployment profile shall be enabled at install/activation time for automatic boot startup; this includes Core, Sensor and Linux Agent services and any separately managed mandatory Core data/runtime services such as PostgreSQL, ClickHouse, Kafka and Valkey.
+- Windows Agent shall be installed as an automatically starting Windows Service with configured SCM recovery actions.
+- Any unexpected recoverable process exit shall trigger supervised restart using bounded delay/backoff; routine customer intervention shall not be required to restore the affected service.
+- Dependency-aware startup shall not report a component HEALTHY merely because its process exists; readiness must reflect required dependency health.
+- Optional, scheduled or on-demand workers may remain stopped when their capability/workload is not enabled or no work is due; "always on" applies to services required to keep the selected deployment profile operational.
 - Services shall expose explicit states: STARTING, HEALTHY, DEGRADED, STOPPING, STOPPED, FAILED, RECOVERING.
 - Repeated crash loops shall be surfaced as Platform/system alerts rather than being hidden by infinite restart.
 
