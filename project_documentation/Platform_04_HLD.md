@@ -1281,7 +1281,11 @@ A complete local stack shall be decomposable into logical groups: Core applicati
 
 ### 44.3 Linux package service layout
 
-Each installable component has a dedicated package, OS service and data boundary. Standard paths shall follow Linux conventions, with exact final paths governed by `Platform_15_CI_CD_Packaging_and_Distribution.md`.
+Each installable component has a dedicated package and service-management boundary. Where a package owns multiple required runtime processes, each separately managed process has explicit OS supervision, dependency ordering/readiness, boot enablement and bounded crash recovery. For Core this includes PostgreSQL, ClickHouse, Kafka and Valkey whenever they are deployed as separate mandatory services, in addition to Platform Core application/ingest/query processes required by the enabled deployment profile.
+
+After a supported host reboot, the required profile shall return to operational service without routine customer process-start commands. Automatic boot/start and supervised recovery preserve authority/role/fencing/replication/durability/rejoin contracts and must not self-promote Standby, bypass fencing or data-service safe-rejoin rules, create dual-active authority, repeatedly force-start known-unsafe local state, or treat process existence as recovery success. If safe automatic recovery cannot be established, the component remains FAILED/DEGRADED/RECOVERING with actionable evidence and a governed operator/runbook path; standalone/non-HA bounded supervised restart remains mandatory. BUILD-120–124 own exactly-two-Core HA authority/fencing and stateful failover/rejoin mechanics. Optional, scheduled and on-demand workers may remain inactive when their capability/workload is not enabled or no work is due.
+
+Standard paths shall follow Linux conventions, with exact final paths governed by `Platform_15_CI_CD_Packaging_and_Distribution.md`.
 
 ### 44.4 Runtime health/logging subsystem
 

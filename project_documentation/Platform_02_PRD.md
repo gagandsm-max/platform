@@ -222,8 +222,14 @@ Core, Sensor and Linux Agent shall ship as both `.deb` and `.rpm` packages for c
 
 ### PRD-SVC-001 — Auto-start and recovery
 
-- Linux Core, Sensor and Agent services shall be enabled at install time for automatic boot startup.
-- Windows Agent shall be installed as an automatically starting Windows Service.
+- Every mandatory runtime service required by the enabled deployment profile shall be enabled at install/activation time for automatic boot startup; this includes Core, Sensor and Linux Agent services and any separately managed mandatory Core data/runtime services such as PostgreSQL, ClickHouse, Kafka and Valkey.
+- Windows Agent shall be installed as an automatically starting Windows Service with configured SCM recovery actions.
+- Any unexpected recoverable process exit shall trigger supervised restart using bounded delay/backoff; routine customer intervention shall not be required to restore the affected service.
+- Automatic boot/start and supervised recovery shall preserve the component's existing authority, role, fencing, replication, durability and rejoin contracts. Automatic recovery must not self-promote a Standby into an authoritative role; bypass Core Active/Standby fencing; bypass PostgreSQL/Kafka/ClickHouse replication, durability or safe-rejoin rules; create dual-active authority; repeatedly force-start a component whose local state is known unsafe, corrupt or incompatible; or treat PID/process existence as recovery success.
+- If safe automatic recovery cannot be established, the component shall remain in an explicit FAILED, DEGRADED or RECOVERING state with actionable health/diagnostic evidence and a governed operator/runbook path rather than forcing unsafe restart. For standalone/non-HA deployments, normal bounded supervised restart remains mandatory.
+- Exactly-two-Core HA authority/fencing and stateful service failover/rejoin mechanics remain owned by BUILD-120–124. This continuity requirement does not select Patroni, repmgr, ClickHouse Keeper, Kafka quorum topology, etcd, Consul, Raft, witness nodes, a third Core, or a new supervisor service.
+- Dependency-aware startup shall not report a component HEALTHY merely because its process exists; readiness must reflect required dependency health.
+- Optional, scheduled or on-demand workers may remain stopped when their capability/workload is not enabled or no work is due; "always on" applies to services required to keep the selected deployment profile operational.
 - Services shall expose explicit states: STARTING, HEALTHY, DEGRADED, STOPPING, STOPPED, FAILED, RECOVERING.
 - Repeated crash loops shall be surfaced as Platform/system alerts rather than being hidden by infinite restart.
 

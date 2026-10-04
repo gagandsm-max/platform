@@ -2711,7 +2711,9 @@ For the interactive development profile, long-lived stateful and Platform servic
 
 ### 85.3 Linux systemd unit contract
 
-Core, Sensor and Linux Agent packages shall install systemd units with at least:
+Every separately managed mandatory Linux runtime process delivered by the enabled Core, Sensor or Linux Agent profile shall have an explicit `systemd` unit (or an approved equivalent supervisor owned by that package). For Core this includes PostgreSQL, ClickHouse, Kafka and Valkey when they run as separate mandatory services, plus the Platform application/ingest/query services required by the selected profile.
+
+Units shall define dependency ordering/readiness without treating process existence as service readiness, and shall use at least:
 
 ```ini
 [Service]
@@ -2724,7 +2726,7 @@ TimeoutStopSec=<explicit>
 NoNewPrivileges=true
 ```
 
-Units shall be enabled at package installation unless an explicit package option requests staging without startup. Exact hardening directives are component-specific and must be validated against required network/file capabilities.
+Mandatory units shall be enabled at package installation/profile activation unless an explicit staging option intentionally prevents startup. Recoverable unexpected exits shall restart automatically with bounded delay/backoff, while preserving the component's existing authority, role, fencing, replication, durability and rejoin contracts. Automatic restart must not self-promote Standby, bypass Core Active/Standby fencing, bypass PostgreSQL/Kafka/ClickHouse replication/durability/safe-rejoin rules, create dual-active authority, repeatedly force-start known-unsafe/corrupt/incompatible local state, or treat process existence as recovery success. If safe automatic recovery cannot be established, the unit/component remains FAILED/DEGRADED/RECOVERING with actionable health/diagnostic evidence and a governed operator/runbook path; standalone/non-HA bounded supervised restart remains mandatory. Exactly-two-Core HA authority/fencing and stateful failover/rejoin remain owned by BUILD-120–124 and are not selected by this systemd contract. Optional, scheduled or on-demand workers shall not be forced permanently resident when no enabled workload requires them. Persistent crash loops shall transition to visible diagnosable health failure rather than restart silently forever. Exact hardening directives are component-specific and must be validated against required network/file capabilities.
 
 ### 85.4 Windows Service contract
 
