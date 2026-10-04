@@ -732,3 +732,18 @@ Normative companions (not duplicated here):
 ## 42. A2.1 migration note
 
 A2.1 absorbed historical Version 3.0 reconciliation blocks (BRD-OSS, BRD-COMP, BRD-LIC, BRD-STOR), v3.1 development/packaging/continuity sections and v3.2.2 display-timezone outcomes into the numbered normative sections above. Chronological appendices are removed as competing normative truth. Git history retains chronology. Formal identifiers remain in `Platform_08_Requirements_Traceability.md` without net-new or removed IDs under A2.1.
+
+---
+
+## Phase-1 endpoint operational depth — Issues #169/#170
+
+For the first-GA Network & Infrastructure Observability scope, AmrudAi shall provide the following endpoint-operational outcomes for supported Windows/Linux estates:
+
+1. **Installed-software visibility:** maintain a governed current inventory of installed software/packages with version, publisher/vendor, architecture, package/source identity, installation scope and provenance where the operating system exposes them reliably; retain evidence of installation, removal and version change.
+2. **Customer-selectable process/service monitoring:** authorized users can choose discovered processes/services to monitor without scripts, YAML or local Agent configuration. Monitoring policy is expressed through the normal Monitoring Profile / Policy architecture.
+3. **Business Criticality-driven defaults:** Criticality may suggest or automatically map to an effective Monitoring Profile, but Criticality and Monitoring Profile remain separate concepts and customer override is governed/audited.
+4. **Triggered Fast RCA:** when a qualifying monitored condition occurs, AmrudAi rapidly gathers bounded, relevant evidence using the existing Endpoint Diagnostic Snapshot / Diagnostic Job architecture and correlates it with available network, virtualization, storage and hardware/OOB evidence in Core.
+
+The business objective is materially shorter investigation time with low monitored-endpoint overhead and no false certainty.
+
+Explicit exclusions remain: endpoint patch/deployment management, vulnerability scanning, licence metering, EDR, unrestricted shell/PowerShell, endpoint LLM/GNN causal engines, always-on PCAP/full DPI, and unsupported causal guesses.
