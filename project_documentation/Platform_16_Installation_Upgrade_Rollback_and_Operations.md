@@ -127,3 +127,20 @@ Support bundles collect eBPF operational status, map usage, dropped/shed counter
 - **Incomplete traceroutes:** Intermediate hops returning `*` (ICMP time-exceeded suppressed) must not be treated as path failure if destination is reachable. Operators should verify destination probe results and edge status.
 - **Hidden hops and ECMP variance:** Alternating path fingerprints across probes indicate multi-path routing (ECMP/flow-hashing), not path flapping. The UI and alerts group ECMP path variants under the canonical path identifier.
 - **Multi-vantage contradiction:** Different Sensors reporting conflicting reachability to the same target indicates localized network partition, WAN path failure, or upstream routing issues. The incident console correlates multi-vantage evidence to identify the fault domain.
+
+---
+
+## Phase-1 endpoint operations runbook extension — Issues #169/#170
+
+Operational runbooks shall include the following new failure classes without creating new resident services:
+
+- **Software inventory source degraded/unsupported/permission denied:** preserve prior authoritative current state, mark freshness/quality degraded, do not emit mass uninstall events, and retry/reconcile on the governed schedule.
+- **Software inventory reconciliation backlog/cardinality pressure:** throttle/spread lower-priority inventory work before routine monitoring or telemetry durability is affected; expose backlog and last successful authoritative reconciliation.
+- **Process/service selector ambiguity or PID reuse:** do not silently retarget; mark review/unsupported selector state and preserve the last valid monitor definition until an authorized correction.
+- **Criticality/Profile capacity denial:** keep the previous effective profile, surface projected capacity/MWU impact and reason, and do not partially apply a bulk profile expansion.
+- **EDS suppressed/partial/resource guarded:** show the diagnostic definition, trigger, missing evidence and suppression/resource reason; routine monitoring remains authoritative and continues where safe.
+- **Cross-vantage evidence unavailable:** retain endpoint EDS and other available evidence independently; do not convert missing OOB/VMware/storage/path evidence into confirmation of a cause.
+
+Support evidence shall expose the last inventory reconciliation, effective process/service monitor selector, effective Monitoring Profile source/mode, EDS job/result status and related evidence-window references without exposing credentials/secrets.
+
+No installation/upgrade change is required merely by these logical features beyond their owning future BUILDs; BUILD-018/126 remain packaging/install authorities.
