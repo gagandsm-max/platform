@@ -50,6 +50,13 @@ type StatsProvider interface {
 	RuntimeSnapshot() RuntimeSnapshot
 }
 
+// readinessInput is one request-scoped capture of mutable readiness inputs.
+// /ready, /healthz and /health must evaluate and render from the same capture.
+type readinessInput struct {
+	shuttingDown bool
+	snapshot     RuntimeSnapshot
+}
+
 // readinessDecision is the single evaluator result for readiness and support evidence.
 type readinessDecision struct {
 	status     string
@@ -181,7 +188,8 @@ func (s *Server) handleLive(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
-	d := s.evaluateReadiness()
+	in := s.captureReadinessInput()
+	d := evaluateReadiness(in)
 	body := map[string]any{
 		"status":              d.status,
 		"ready":               d.ready,
@@ -200,11 +208,12 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	d := s.evaluateReadiness()
-	snap := s.snapshot()
+	in := s.captureReadinessInput()
+	d := evaluateReadiness(in)
+	snap := in.snapshot
 
 	componentState := d.status
-	if s.shuttingDown.Load() {
+	if in.shuttingDown {
 		componentState = "SHUTTING_DOWN"
 	}
 
@@ -246,17 +255,33 @@ func (s *Server) snapshot() RuntimeSnapshot {
 	return s.provider.RuntimeSnapshot()
 }
 
+// captureReadinessInput reads shuttingDown and RuntimeSnapshot exactly once for
+// a request. Handlers must reuse this capture for decision and rendering.
+func (s *Server) captureReadinessInput() readinessInput {
+	return readinessInput{
+		shuttingDown: s.shuttingDown.Load(),
+		snapshot:     s.snapshot(),
+	}
+}
+
+// evaluateReadiness captures readiness inputs once and evaluates them. Kept as
+// a Server method for existing tests; request handlers use capture + evaluate.
+func (s *Server) evaluateReadiness() readinessDecision {
+	return evaluateReadiness(s.captureReadinessInput())
+}
+
 // evaluateReadiness is the single local-safety readiness decision for /ready,
 // /healthz and /health. External Sensor/upstream degradation yields DEGRADED
 // with ready=true while local collection + durable buffering remain safe.
-func (s *Server) evaluateReadiness() readinessDecision {
+// It operates only on the captured input and must not re-read mutable state.
+func evaluateReadiness(in readinessInput) readinessDecision {
 	var hard, degraded []string
 
-	if s.shuttingDown.Load() {
+	if in.shuttingDown {
 		hard = appendUnique(hard, "AGENT_SHUTTING_DOWN")
 	}
 
-	snap := s.snapshot()
+	snap := in.snapshot
 	hard = appendUnique(hard, lifecycleHardReasons(snap.Lifecycle)...)
 
 	if snap.Lifecycle == "RUNNING" {

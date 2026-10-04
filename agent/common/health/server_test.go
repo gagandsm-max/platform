@@ -664,3 +664,252 @@ func TestConcurrentSnapshotReadinessRace(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// countingSnapshotProvider counts RuntimeSnapshot calls for request-consistency proofs.
+type countingSnapshotProvider struct {
+	mu    sync.Mutex
+	calls int
+	snap  RuntimeSnapshot
+}
+
+func (p *countingSnapshotProvider) RuntimeSnapshot() RuntimeSnapshot {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	return p.snap
+}
+
+func (p *countingSnapshotProvider) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+// alternatingSnapshotProvider returns distinct snapshots on successive calls.
+type alternatingSnapshotProvider struct {
+	mu     sync.Mutex
+	calls  int
+	first  RuntimeSnapshot
+	second RuntimeSnapshot
+}
+
+func (p *alternatingSnapshotProvider) RuntimeSnapshot() RuntimeSnapshot {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	if p.calls == 1 {
+		return p.first
+	}
+	return p.second
+}
+
+func (p *alternatingSnapshotProvider) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+func degradedSafeSnapshot() RuntimeSnapshot {
+	return RuntimeSnapshot{
+		Lifecycle:         "RUNNING",
+		SchedulerRunning:  true,
+		EnabledCollectors: 1,
+		Collectors: []CollectorSnapshot{{
+			Name:    "cpu",
+			Enabled: true,
+		}},
+		Queue: queue.QueueStats{
+			ActiveCount: 3,
+			ActiveBytes: 512,
+		},
+		Delivery: delivery.DeliveryStats{
+			ReceiverAvailable: false,
+			Attempts:          4,
+			Successes:         1,
+			LastErrorCode:     "SENSOR_TRANSPORT_UNAVAILABLE",
+			LastFailureClass:  client.FailureTemporary,
+		},
+	}
+}
+
+func hardUnsafeSnapshot() RuntimeSnapshot {
+	return RuntimeSnapshot{
+		Lifecycle:         "RUNNING",
+		SchedulerRunning:  true,
+		EnabledCollectors: 1,
+		Collectors: []CollectorSnapshot{{
+			Name:    "cpu",
+			Enabled: true,
+		}},
+		Queue: queue.QueueStats{
+			ActiveCount: 99,
+			ActiveBytes: 4096,
+			AtCapacity:  true,
+		},
+		Delivery: delivery.DeliveryStats{
+			ReceiverAvailable: true,
+			Attempts:          10,
+			Successes:         9,
+		},
+	}
+}
+
+func TestHealthSingleRuntimeSnapshotPerRequest(t *testing.T) {
+	prov := &countingSnapshotProvider{snap: healthyProvider().RuntimeSnapshot()}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHealth(t, s, http.StatusOK, "UP", "")
+	if got := prov.callCount(); got != 1 {
+		t.Fatalf("RuntimeSnapshot calls=%d want=1", got)
+	}
+}
+
+func TestHealthConsumesOnlyFirstCapturedSnapshotDegradedThenUnsafe(t *testing.T) {
+	prov := &alternatingSnapshotProvider{
+		first:  degradedSafeSnapshot(),
+		second: hardUnsafeSnapshot(),
+	}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := assertHealth(t, s, http.StatusOK, "DEGRADED", "SENSOR_TRANSPORT_UNAVAILABLE")
+	if got := prov.callCount(); got != 1 {
+		t.Fatalf("RuntimeSnapshot calls=%d want=1 (second hard-unsafe must not be consumed)", got)
+	}
+	if body["queue_depth"] != float64(3) {
+		t.Fatalf("queue_depth mixed second snapshot: %v", body["queue_depth"])
+	}
+	if body["delivery_status"] != "FAILED" {
+		t.Fatalf("delivery_status=%v want=FAILED from first snapshot", body["delivery_status"])
+	}
+	deps, _ := body["dependency_status"].(map[string]any)
+	if deps["sensor_transport"] != "DOWN" {
+		t.Fatalf("sensor_transport=%v want=DOWN from first snapshot", deps["sensor_transport"])
+	}
+	if _, hasCap := body["queue_capacity"]; hasCap {
+		t.Fatalf("queue_capacity must not appear from second hard-unsafe snapshot: %v", body)
+	}
+	counters, _ := body["counters"].(map[string]any)
+	if counters["queue_active_count"] != float64(3) || counters["delivery_attempts"] != float64(4) {
+		t.Fatalf("counters mixed second snapshot: %v", counters)
+	}
+	raw, _ := json.Marshal(body["reason_codes"])
+	if strings.Contains(string(raw), "QUEUE_FULL") {
+		t.Fatalf("reason_codes mixed second hard-unsafe snapshot: %s", raw)
+	}
+}
+
+func TestHealthConsumesOnlyFirstCapturedSnapshotUnsafeThenSafe(t *testing.T) {
+	prov := &alternatingSnapshotProvider{
+		first:  hardUnsafeSnapshot(),
+		second: degradedSafeSnapshot(),
+	}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := assertHealth(t, s, http.StatusServiceUnavailable, "NOT_READY", "QUEUE_FULL")
+	if got := prov.callCount(); got != 1 {
+		t.Fatalf("RuntimeSnapshot calls=%d want=1 (second safe snapshot must not be consumed)", got)
+	}
+	if body["queue_depth"] != float64(99) {
+		t.Fatalf("queue_depth mixed second snapshot: %v", body["queue_depth"])
+	}
+	if body["queue_capacity"] != float64(99) {
+		t.Fatalf("queue_capacity=%v want=99 from first hard-unsafe snapshot", body["queue_capacity"])
+	}
+	deps, _ := body["dependency_status"].(map[string]any)
+	if deps["sensor_transport"] != "UP" {
+		t.Fatalf("sensor_transport=%v want=UP from first snapshot", deps["sensor_transport"])
+	}
+	counters, _ := body["counters"].(map[string]any)
+	if counters["queue_active_count"] != float64(99) || counters["delivery_attempts"] != float64(10) {
+		t.Fatalf("counters mixed second snapshot: %v", counters)
+	}
+	raw, _ := json.Marshal(body["reason_codes"])
+	if strings.Contains(string(raw), "SENSOR_TRANSPORT_UNAVAILABLE") {
+		t.Fatalf("reason_codes mixed second degraded snapshot: %s", raw)
+	}
+}
+
+func TestHealthShutdownCaptureConsistentWithComponentState(t *testing.T) {
+	t.Run("false_then_flip_true_during_snapshot", func(t *testing.T) {
+		var s *Server
+		prov := &shutdownFlipProvider{
+			snap: healthyProvider().RuntimeSnapshot(),
+			flip: func() {
+				s.shuttingDown.Store(true)
+			},
+		}
+		var err error
+		s, err = NewServer("127.0.0.1:0", prov, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Capture starts with shuttingDown=false; provider flips during snapshot.
+		// Decision and component_state must both use the captured false value.
+		body := assertHealth(t, s, http.StatusOK, "UP", "")
+		if body["component_state"] != "UP" {
+			t.Fatalf("component_state=%v want=UP from captured shutdown=false", body["component_state"])
+		}
+		if s.shuttingDown.Load() != true {
+			t.Fatal("provider did not flip shuttingDown during snapshot")
+		}
+		if got := prov.callCount(); got != 1 {
+			t.Fatalf("RuntimeSnapshot calls=%d want=1", got)
+		}
+	})
+	t.Run("true_then_flip_false_during_snapshot", func(t *testing.T) {
+		var s *Server
+		prov := &shutdownFlipProvider{
+			snap: healthyProvider().RuntimeSnapshot(),
+			flip: func() {
+				s.shuttingDown.Store(false)
+			},
+		}
+		var err error
+		s, err = NewServer("127.0.0.1:0", prov, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.shuttingDown.Store(true)
+		body := assertHealth(t, s, http.StatusServiceUnavailable, "SHUTTING_DOWN", "AGENT_SHUTTING_DOWN")
+		if body["component_state"] != "SHUTTING_DOWN" {
+			t.Fatalf("component_state=%v want=SHUTTING_DOWN from captured shutdown=true", body["component_state"])
+		}
+		if s.shuttingDown.Load() != false {
+			t.Fatal("provider did not clear shuttingDown during snapshot")
+		}
+		if got := prov.callCount(); got != 1 {
+			t.Fatalf("RuntimeSnapshot calls=%d want=1", got)
+		}
+	})
+}
+
+// shutdownFlipProvider flips Server.shuttingDown while returning a snapshot,
+// proving readiness and component_state share one request capture.
+type shutdownFlipProvider struct {
+	mu    sync.Mutex
+	calls int
+	snap  RuntimeSnapshot
+	flip  func()
+}
+
+func (p *shutdownFlipProvider) RuntimeSnapshot() RuntimeSnapshot {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	if p.flip != nil {
+		p.flip()
+	}
+	return p.snap
+}
+
+func (p *shutdownFlipProvider) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
