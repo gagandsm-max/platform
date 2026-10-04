@@ -2316,3 +2316,34 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 ## 44. A2.1 migration note
 
 A2.1 absorbed Version 3.0 / v3.1 / v3.2.2 and related reconciliation content into the numbered normative sections above. Chronological appendices and residual “must-not-lose” checklists are not current normative truth. Git history preserves chronology. Formal `PRD-*` identifiers remain indexed in `Platform_08_Requirements_Traceability.md` without net-new or removed IDs under A2.1.
+
+---
+
+## Phase-1 endpoint operations requirements — Issues #169/#170
+
+| Requirement ID | Phase-1 product requirement |
+|---|---|
+| `REQ-INF-014` | Platform shall maintain installed-software inventory for supported Windows/Linux servers, VMs and endpoints. Where reliably available it records native package/product identity, product/package name, optional normalized identity with provenance/confidence, version, vendor/publisher, architecture, package/source type, installation scope, authoritative install/update time when supplied by the OS source, observation time and source provenance. Core owns first-seen/last-seen reconciliation. Periodic authoritative reconciliation defaults to approximately daily with deterministic spreading/jitter; trustworthy OS/package-change evidence may trigger earlier coalesced reconciliation. Normalized changes include `SOFTWARE_INSTALLED`, `SOFTWARE_REMOVED`, and `SOFTWARE_VERSION_CHANGED`. The capability does not imply patch management, deployment, vulnerability management, licence metering, EDR or endpoint management. |
+| `REQ-INF-015` | From Server/VM/Endpoint Processes/Services UI, an authorized user shall be able to select a discovered process/service, choose Monitor, configure applicable conditions, save through the normal Monitoring Profile/Policy architecture, inspect effective policy and Stop Monitoring. Durable identity prefers OS service/unit identity, then executable identity/path, then bounded exact process-name fallback; PID is never durable monitor identity. Conditions may include expected absence/stopped state, unexpected termination, restart/restart-rate, expected instance range, sustained CPU/memory and suspected unresponsiveness where supported. RBAC and audit are mandatory; alert policy does not grant application-restart authority. |
+| `REQ-INF-016` | Business Criticality and Monitoring Profile shall remain separate. Platform shall support governed automatic mapping (`AUTO_FROM_CRITICALITY`) and explicit profile assignment (`EXPLICIT_PROFILE`). Built-in baseline Monitoring Profile templates are `CRITICAL`, `STANDARD`, and `BASIC`; customers may use governed custom profiles. An explicit profile is not silently replaced when Criticality changes. Automatic changes require preview/capacity impact, versioned desired state, admission, deterministic spreading and reconciliation. Collectors remain policy-agnostic and do not hard-code Criticality branches. |
+
+### Triggered Fast RCA product behavior
+
+The product may use the customer-facing term **Triggered Fast RCA**, but implementation reuses the existing `ENDPOINT_DIAGNOSTIC_SNAPSHOT` Diagnostic Job / Live Evidence / Investigation architecture.
+
+Built-in bounded EDS definition families for Phase 1 are:
+
+- `EDS_CPU_PRESSURE`
+- `EDS_MEMORY_PRESSURE`
+- `EDS_FILESYSTEM_CAPACITY`
+- `EDS_BLOCK_IO_PRESSURE`
+- `EDS_PROCESS_FAILURE`
+- `EDS_PROCESS_RESTART_LOOP`
+- `EDS_PROCESS_UNRESPONSIVE`
+- `EDS_NETWORK_DEGRADATION`
+
+These are definitions/profiles under one EDS diagnostic type, not independent RCA engines. Each definition collects only trigger-relevant evidence under hard timeout/item/byte/log-window/resource limits.
+
+For qualifying physical-server or VM incidents, Core may associate additional evidence from certified Hardware/OOB, virtualization, storage and path/network vantages. Guest endpoint evidence shall not claim hypervisor truth; OS evidence shall not claim chassis/RAID/power truth. Missing or contradictory evidence reduces confidence and `INCONCLUSIVE` remains a correct result.
+
+Deep first-GA VM cross-vantage certification is VMware-first through BUILD-033. Other hypervisor families remain monitoring targets but are not silently promoted to equivalent deep Fast-RCA certification without explicit change control and evidence.
