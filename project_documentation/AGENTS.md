@@ -202,3 +202,21 @@ Do not paste the agent or Skill catalogue here. Resolve it from manifests.
 - Evidence: typed claims, exact-head current-base CI, no writer self-certification
 
 Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.2.2. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
+
+---
+
+## v3.2.2 Phase-1 endpoint operations and Triggered Fast RCA reconciliation
+
+For work involving **installed-software inventory**, **customer-selectable process/service monitoring**, **Criticality-to-Monitoring-Profile mapping**, or **Triggered Fast RCA / Endpoint Diagnostic Snapshot (EDS)**, mandatory preflight reading includes `Platform_02`, `Platform_03`, `Platform_05`, `Platform_06`, `Platform_08`, `Platform_09`, `Platform_11`, `Platform_12`, `Platform_14`, `Platform_17`, `Platform_18`, `Platform_19`, `Platform_20`, `Platform_22`, `Platform_23` and the Master Build Sequence Register.
+
+Non-negotiable boundaries:
+
+- Installed-software inventory is a **Phase-1 / first-GA requirement** for supported Windows/Linux endpoints. It is inventory/change evidence, not patch management, software deployment, vulnerability management, licence metering, EDR or endpoint management.
+- Linux BUILD-011 and Windows BUILD-014 own bounded OS-native source collection/normalization primitives; end-to-end current-state reconciliation, change evidence, query/API integration and downstream consumption are owned by BUILD-098.
+- Structured software inventory must not be forced into high-cardinality scalar metric labels merely to reuse the metric envelope.
+- Process/service monitoring uses stable service/unit/executable selectors; PID is runtime evidence only and never durable monitor identity.
+- Criticality describes business importance. Monitoring Profile describes monitoring behavior. `AUTO_FROM_CRITICALITY` and `EXPLICIT_PROFILE` are distinct assignment modes; explicit profile assignment is never silently replaced by a later Criticality change.
+- Triggered Fast RCA is a **product experience over the existing Diagnostic Job / EDS / Live Evidence / Investigation / Incident Evidence Window / deterministic Core RCA architecture**. It is not a second endpoint RCA engine, diagnostic scheduler, evidence store, transport or causal authority.
+- Built-in trigger-specific EDS definitions remain bounded and evidence-oriented; endpoint indicators are factual evidence qualifications, not unsupported causal conclusions.
+- Guest Agents do not infer hypervisor cause. Physical/OOB, virtualization, storage and path evidence comes from the certified owning vantage and is correlated by Core with independent provenance.
+- Routine monitoring, authority/control and telemetry durability always take priority over software inventory refreshes and diagnostic enrichment under resource pressure.
