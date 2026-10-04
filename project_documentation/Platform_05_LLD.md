@@ -3068,3 +3068,7 @@ Factual indicator vocabulary may include, only with direct evidence and versione
 `PROCESS_HUNG` is not asserted merely because a PID exists and CPU is low. When responsiveness cannot be established, use `SUSPECTED_UNRESPONSIVE` or `INCONCLUSIVE`.
 
 Historical growth, software/configuration change, hypervisor/datastore state and chassis/OOB state remain Core/other-vantage evidence rather than being fabricated inside endpoint EDS.
+
+### Windows installed-software inventory side-effect prohibition
+
+Windows installed-software inventory is observational. Certified Agent/WinRM/WMI/CIM implementations must not use an enumeration mechanism known to trigger installer consistency checks, repair/reconfiguration, installation or other target mutation as a side effect merely to discover software. In particular, `Win32_Product`-style MSI inventory is not an approved default discovery mechanism. Prefer read-only supported registry/package/MSIX/AppX/OS inventory sources appropriate to the certified Windows version, with explicit provenance and partial-source behavior.
