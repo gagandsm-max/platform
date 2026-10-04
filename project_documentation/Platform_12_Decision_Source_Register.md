@@ -377,3 +377,20 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | BUILD-120–124 execution after BUILD-075 | ARCH-DELEGATED | Execution order: BUILD-075 → BUILD-120–124 → BUILD-080+. BUILD IDs are not renumbered or duplicated. |
 | Availability Qualification Deadline | USER-FIXED + ARCH-DELEGATED certification | Bounded maximum qualification interval for availability-class evidence. Forbid indefinite No Data wait and forbid timeout→DEVICE_DOWN encoding. Certification owned primarily by BUILD-080/BUILD-082 with Platform_14 evidence. |
 | First GA cut line | USER-FIXED | First GA: **Network & Infrastructure Observability core**. Deterministic RCA remains first-GA scope. BUILD-102 GNN and BUILD-103 local-LLM/advanced AI are roadmap capabilities / not first-GA blockers unless later promoted. Issue #145 remains separate FUTURE Phase-2 architecture / change-control authority. Certified Issue #142 Phase-1 observability decisions remain preserved. Accessibility automation remains outside this immediate reconciliation (automated rendered-page accessibility certification remains required before broad BUILD-111–118 scale-out under existing authority). |
+
+---
+
+## Phase-1 endpoint operations decisions — Issues #169/#170
+
+| Decision | Authority | Recorded decision |
+|---|---|---|
+| Installed-software inventory release scope | USER-FIXED (Founder 2026-10-04) | Installed-software inventory is Phase-1 / first-GA required for supported Windows/Linux endpoints; it is not deferred to Phase 1.1. |
+| Installed-software implementation ownership | ARCH-DELEGATED | BUILD-011/014 own Linux/Windows Agent source collection primitives; BUILD-030/031 may add safe agentless evidence where certified; BUILD-098 owns end-to-end current-state reconciliation, change evidence and API/query integration. No new service/database is selected. |
+| Software identity normalization | ARCH-DELEGATED | Preserve native package/source identity. Cross-platform normalized identity is optional, versioned and provenance/confidence-bearing; name similarity alone is insufficient for merge. |
+| Process/service monitor identity | ARCH-DELEGATED | Prefer stable OS service/unit identity, then executable identity/path, then bounded exact process-name fallback. PID is ephemeral evidence and never durable monitor authority. |
+| Criticality vs Monitoring Profile | ARCH-DELEGATED | Criticality expresses business importance; Monitoring Profile expresses collection/validation/alert behavior. `AUTO_FROM_CRITICALITY` and `EXPLICIT_PROFILE` are separate modes; explicit assignment is never silently replaced by a Criticality change. |
+| Criticality profile templates | ARCH-DELEGATED | Baseline built-in Monitoring Profile templates are CRITICAL, STANDARD and BASIC. CRITICAL is richer monitoring within certified budgets, not “all metrics at maximum frequency”. |
+| Triggered Fast RCA architecture | ARCH-DELEGATED after Founder objective | Reuse existing Diagnostic Job/EDS/Live Evidence/Investigation/Evidence Window and deterministic Core RCA. Do not create a second endpoint RCA engine, diagnostic scheduler, transport, evidence store or causal authority. |
+| Trigger-specific EDS definitions | ARCH-DELEGATED | Use bounded `EDS_*` definition IDs under `ENDPOINT_DIAGNOSTIC_SNAPSHOT`; do not label endpoint definitions `RCA_*` because endpoint capture is not causal authority. |
+| Cross-vantage RCA | ARCH-DELEGATED | Core may associate bounded capability/relationship-aware OOB/virtualization/storage/path evidence with endpoint EDS. Guest Agents do not infer hypervisor cause; endpoint OS evidence does not fabricate chassis/OOB truth. |
+| First-GA VM Fast-RCA depth | ARCH-DELEGATED | VMware is the first deep cross-vantage virtualization certification path through BUILD-033. Other hypervisors remain monitoring targets and require separate promotion/evidence for equivalent Fast-RCA depth. |
