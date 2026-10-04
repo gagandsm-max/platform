@@ -2976,3 +2976,95 @@ Physical storage and streaming schemas are decoupled from logical contracts:
 2. **Kafka Streaming Backbone (BUILD-063):** Owns physical topic naming, partition strategies, schema serialization formats (JSON / Avro / Protobuf), retry/rebalance behavior, and retention configurations for process-network and active-path event streams.
 3. **ClickHouse Fact Storage (BUILD-064):** Owns physical ClickHouse table DDL, storage layout, engine choice (selected and certified according to idempotency, retention, rollups, and query performance without preselection at documentation stage), partitioning schemes, primary sorting keys (`ORDER BY`), codec compression, and lifecycle TTL policies for historical process-network and path-hop facts.
 4. **No Standalone Datastores:** Telemetry is stored strictly within authoritative Platform datastores (PostgreSQL, ClickHouse, Kafka, Valkey). No separate eBPF or path probing database is introduced.
+
+---
+
+## Phase-1 endpoint inventory, selector and Triggered Fast RCA LLD — Issues #169/#170
+
+### Software inventory evidence
+
+Logical source observation:
+
+```text
+software_inventory_observation
+  schema_version
+  tenant_id
+  entity_id
+  source_mode AGENT|SSH|WINRM_WMI_CIM
+  source_type DPKG|RPM|MSI|WINDOWS_PRODUCT_SOURCE|PACKAGE_MANAGER|OTHER_CERTIFIED
+  native_package_id
+  product_name
+  normalized_product_id nullable
+  normalization_version nullable
+  normalization_confidence nullable
+  version
+  vendor_publisher nullable
+  architecture nullable
+  installation_scope MACHINE|USER|UNKNOWN
+  authoritative_install_or_update_time nullable
+  observed_at
+  source_provenance
+  quality
+```
+
+Core derives current-state `first_seen_at` / `last_seen_at` and change events from reconciled evidence; Agents do not invent historical first/last-seen truth.
+
+Native source/package identity is always preserved. A normalized product identity is optional and versioned. Name similarity alone may not merge packages from different sources.
+
+Default authoritative reconciliation is approximately 24 hours with deterministic spreading/jitter. A reliable OS/package-manager change signal may request earlier coalesced reconciliation. Inventory refresh is lower priority than live monitoring and durable telemetry.
+
+### Process/service monitoring selector
+
+```text
+process_service_monitor_definition
+  monitor_definition_id
+  tenant_id
+  entity_scope
+  selector_kind SERVICE_ID|EXECUTABLE_IDENTITY|EXECUTABLE_PATH|PROCESS_NAME
+  selector_value
+  selector_constraints optional
+  expected_instance_min optional
+  expected_instance_max optional
+  condition_set
+  monitoring_profile_id
+  policy_version
+  enabled
+  created_by / updated_by / audit_ref
+```
+
+Selector preference is OS service/unit identity → executable identity/path → bounded exact process-name fallback. Regex/shell expressions and arbitrary command strings are not the normal selector contract. PID is a runtime observation only and must not survive as durable authority across restart/PID reuse.
+
+### Criticality/Profile binding
+
+```text
+monitoring_profile_assignment
+  tenant_id
+  entity_or_scope_id
+  criticality
+  assignment_mode AUTO_FROM_CRITICALITY|EXPLICIT_PROFILE
+  suggested_profile_id
+  effective_profile_id
+  effective_profile_version
+  source_policy_ref
+  capacity_preview_ref
+  updated_at
+  audit_ref
+```
+
+When `EXPLICIT_PROFILE` is active, changing Criticality updates business metadata/suggestion but does not silently replace the effective profile.
+
+### Built-in EDS definitions
+
+All definitions use canonical `diagnostic_type=ENDPOINT_DIAGNOSTIC_SNAPSHOT` and existing `definition_id/definition_version` fields:
+
+`EDS_CPU_PRESSURE`, `EDS_MEMORY_PRESSURE`, `EDS_FILESYSTEM_CAPACITY`, `EDS_BLOCK_IO_PRESSURE`, `EDS_PROCESS_FAILURE`, `EDS_PROCESS_RESTART_LOOP`, `EDS_PROCESS_UNRESPONSIVE`, `EDS_NETWORK_DEGRADATION`.
+
+No definition performs an unbounded complete-machine audit. In particular, unrestricted recursive filesystem walks such as `du /` are prohibited.
+
+Factual indicator vocabulary may include, only with direct evidence and versioned provenance:
+
+`CPU_PRESSURE`, `RUN_QUEUE_PRESSURE`, `IO_WAIT_PRESSURE`, `CPU_THROTTLING`, `MEMORY_PRESSURE`, `SWAP_PRESSURE`, `OOM_EVENT`, `FILESYSTEM_CAPACITY_PRESSURE`, `INODE_PRESSURE`, `FILESYSTEM_READ_ONLY`, `BLOCK_IO_PRESSURE`, `BLOCK_DEVICE_ERROR`, `FILESYSTEM_ERROR`, `PROCESS_EXITED`, `SERVICE_FAILED`, `RESTART_LOOP`, `SUSPECTED_UNRESPONSIVE`, `THERMAL_PRESSURE`, `MCE_EVENT`, `PCIE_AER_EVENT`, `WHEA_HARDWARE_ERROR`, `NIC_ERROR_PRESSURE`, `NIC_DROP_PRESSURE`.
+
+`PROCESS_HUNG` is not asserted merely because a PID exists and CPU is low. When responsiveness cannot be established, use `SUSPECTED_UNRESPONSIVE` or `INCONCLUSIVE`.
+
+Historical growth, software/configuration change, hypervisor/datastore state and chassis/OOB state remain Core/other-vantage evidence rather than being fabricated inside endpoint EDS.
