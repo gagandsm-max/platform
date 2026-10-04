@@ -195,3 +195,16 @@ Founder approval remains required for commercial licence quantities/pricing/SKUs
 ## 10. Implementation-status disclaimer
 
 At creation, this document is a requirements/architecture authority only. It does not assert that any `PRD-EGC-*` or `REQ-EGC-*` capability has been implemented, benchmarked, certified or released. Implementation status must be established from exact source, executable tests, CI/runtime evidence and release records.
+
+---
+
+## Phase-1 endpoint operations gap-closure reconciliation — Issues #169/#170
+
+The following enterprise adoption gaps are now explicitly closed at the **requirements/architecture** level for Phase 1, while remaining subject to implementation and certification in their owning BUILDs:
+
+1. **Installed-software inventory** — `REQ-INF-014`: supported Windows/Linux endpoints require current package/software inventory plus install/remove/version-change evidence. BUILD-011/014 provide source primitives and BUILD-098 owns end-to-end reconciliation/API/change evidence. This does not expand into patch management, vulnerability management, licence metering, EDR or software deployment.
+2. **Customer-selectable process/service monitoring** — `REQ-INF-015`: Monitor/Stop Monitoring is an in-product governed workflow using stable service/executable selectors and existing Monitoring Profile/Policy authority; PID is not durable identity.
+3. **Criticality-driven monitoring depth** — `REQ-INF-016`: Criticality and Monitoring Profile remain separate; automatic mapping and explicit override are deterministic, capacity-admitted and audited.
+4. **Triggered Fast RCA / endpoint diagnostics** — owned by Platform_22 `PRD-MIA-059/060`: EDS is extended with bounded trigger-specific definitions and related-vantage evidence association; no second diagnostics/RCA authority is created.
+
+These are first-GA targets, not implementation claims. Their exit depends on the Build Register owners and Platform_14 certification evidence.
