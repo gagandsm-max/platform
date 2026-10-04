@@ -30,6 +30,7 @@ docker run --rm \
 docker run --rm \
     --tmpfs "${GO_TEST_TMPFS}" \
     -v "${ROOT_DIR}/agent:/app/agent:ro" \
+    -v "${ROOT_DIR}/deploy:/deploy:ro" \
     -w /app/agent \
     golang:1.27.1-alpine3.24 \
     go test -v ./...
