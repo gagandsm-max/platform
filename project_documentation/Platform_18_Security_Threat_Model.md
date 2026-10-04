@@ -101,3 +101,21 @@ Additional threats and mandatory controls for Linux kernel instrumentation and a
 | **Rapid connection cardinality attacks** | Ephemeral port churn or randomized target IP floods explode cardinality in Agent local aggregation tables, exhausting Agent RAM. | Local aggregation table cardinality budget: bounded active keys per configurable aggregation interval. Top-N heavy-hitter sorting with explicit overflow bucket (`other_endpoints`). Memory and CPU resource budgets derived from BUILD-019 / BUILD-130 benchmark certification. If memory exceeds limit, aggregation switches to coarse sampling with explicit `SAMPLED`, `PARTIAL`, and `shed_records_count` indicators. |
 | **Active path probe amplification & SSRF abuse** | Operator or compromised API schedules high-rate ICMP/TCP/UDP traceroutes toward external targets, causing Platform to participate in DDoS or network scanning. | Tenant/entity authorization on all probe targets. Probes strictly bounded to verified monitored infrastructure entities, cloud endpoints, or licensed outside-in targets. Bounded probe rate limits and scheduling (flow-stable techniques evaluated in BUILD-040). Hard concurrency limits on Sensors. Arbitrary CIDR range sweeping is rejected. |
 | **Unsupported kernel crash / panic** | Loading modern eBPF bytecode on non-BTF or outdated kernel causes kernel oops or system panic. | Comprehensive pre-flight compatibility check: probe for BTF (`/sys/kernel/btf/vmlinux`), certified kernel compatibility matrix (Ubuntu 24.x / RHEL 9.x), and required eBPF helper functions. If pre-flight check fails, Agent transitions gracefully to `KERNEL_INCOMPATIBLE` or `UNSUPPORTED` without loading probes. System panics, kernel crashes, or boot loops are strictly prevented. |
+
+---
+
+## Phase-1 endpoint inventory and Triggered Fast RCA threat extension — Issues #169/#170
+
+| Threat | Mandatory control |
+|---|---|
+| Malicious package metadata causes parser/normalization injection or cardinality exhaustion | Typed bounded parsers; preserve native identity; length/item limits; normalization version/provenance; reject malformed data; no package strings promoted to commands or metric-label explosions |
+| Package-manager/registry source unavailable is misread as mass uninstall | Source-health/quality state; authoritative reconciliation; failure/permission denial cannot generate global removal events |
+| Agentless software inventory becomes generic shell/PowerShell | Platform-owned signed/versioned allowlisted query packs, fixed operations + typed parameters, timeout/output bounds, read-only privilege and audit; no user/model supplied command strings |
+| Process monitor selector is redirected by PID reuse or ambiguous pattern | PID prohibited as durable identity; stable service/executable selectors; bounded exact-name fallback; ambiguity/reconciliation state rather than silent retargeting |
+| Customer selector becomes command/regex injection | No shell expression contract; bounded typed selector schema; canonical escaping/validation; target/resource authorization |
+| Criticality mass edit triggers monitoring storm | capacity/MWU preview, admission, versioned desired state, deterministic spreading and rollback; collectors do not self-accelerate from raw Criticality |
+| Triggered Fast RCA fans out across estate and worsens outage | endpoint/site/tenant/estate budgets; relationship/capability-aware fan-out; reuse existing evidence; cancellation/deadlines; routine monitoring/durability priority |
+| Guest evidence is promoted to hypervisor/hardware truth | source/vantage provenance and type separation; guest cannot author hypervisor/OOB facts; Core contradiction/correlation only |
+| Diagnostic evidence leaks software/process/customer data | minimize to approved metadata; no arbitrary files/env/secrets/payloads/unrestricted command lines/logs; RBAC/tenant scope/retention/redaction |
+
+No new privilege, endpoint Python runtime, unrestricted shell/PowerShell facility or endpoint causal AI is authorized by these enhancements.
