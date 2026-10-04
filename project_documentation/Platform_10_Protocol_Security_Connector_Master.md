@@ -241,3 +241,7 @@ Customer Monitor/Stop Monitoring policy never turns a displayed PID, process com
 Cross-vantage enrichment reuses certified owning connectors. Core may request or associate bounded OOB/virtualization/storage/path evidence only for authorized canonical related entities. Browser, endpoint Agent and local AI do not obtain arbitrary connector credentials or unrestricted target reachability.
 
 The existing Diagnostic Job and query-pack controls apply unchanged: tenant/entity authority, fencing/generation, deadline, output bounds, rate/storm controls, audit and secret minimization.
+
+### Windows installed-software inventory side-effect prohibition
+
+Windows installed-software inventory is observational. Certified Agent/WinRM/WMI/CIM implementations must not use an enumeration mechanism known to trigger installer consistency checks, repair/reconfiguration, installation or other target mutation as a side effect merely to discover software. In particular, `Win32_Product`-style MSI inventory is not an approved default discovery mechanism. Prefer read-only supported registry/package/MSIX/AppX/OS inventory sources appropriate to the certified Windows version, with explicit provenance and partial-source behavior.
