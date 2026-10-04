@@ -354,3 +354,68 @@ Phase-1 Unified Network & Infrastructure Observability capability claims are gov
 14. **Telemetry overload and load-shedding:** Extreme metric, flow, and syslog surges exercise Sensor spool watermarks, Kafka consumer backpressure, and ClickHouse micro-batching without dropping high-priority control or liveness signals.
 15. **Core and Sensor interruption and replay:** Active Core crash or Sensor disconnection verifies zero duplicate authority, stateful failover within the <60s target, and idempotent replay of buffered Sensor spools upon reconnection.
 16. **Low-compute and non-interference guarantee:** Bounded Linux eBPF telemetry and active path probing must measurably operate within declared CPU, RAM, and network envelopes; if resource contention occurs, optional enrichment must yield, throttle, or suspend before primary monitoring, collection, durable transport, ingestion, alert qualification, incident processing, or deterministic RCA are degraded.
+
+---
+
+## Phase-1 endpoint operations certification supplement — Issues #169/#170
+
+### Installed-software inventory
+
+Certification requires applicable Linux and Windows tests for:
+
+- authoritative package/product enumeration from supported sources;
+- native source/package identity preservation;
+- version/vendor/architecture/scope/provenance mapping;
+- install, removal and version-change reconciliation;
+- daily deterministic spreading and reliable change-trigger coalescing;
+- missed local event repaired by later authoritative reconciliation;
+- partial/privilege-denied/unsupported source behavior without mass false-removal;
+- restart/disconnect/replay/idempotency;
+- large installed-set CPU/RAM/I/O/network bounds;
+- tenant isolation and API/RBAC;
+- normalization ambiguity/false-merge negative fixtures;
+- proof that no patch/deployment/remediation action is implied.
+
+### Process/service monitoring
+
+Test:
+- Monitor and Stop Monitoring workflow;
+- service/unit and executable selectors;
+- PID reuse/restart does not retarget monitoring incorrectly;
+- minimum/maximum instances, absent/stopped, restart-rate, CPU/memory and suspected-unresponsive conditions where supported;
+- short-lived process-cardinality stress;
+- RBAC/audit;
+- alert creation does not grant restart/remediation authority.
+
+### Criticality/Profile mapping
+
+Test:
+- deterministic mapping and inheritance;
+- `AUTO_FROM_CRITICALITY` vs `EXPLICIT_PROFILE`;
+- explicit profile survives Criticality change;
+- capacity/MWU preview and admission;
+- large-scope profile change is spread/bounded and does not create a poll/collection storm;
+- rollback/version/audit behavior.
+
+### Triggered Fast RCA
+
+Extend the existing EDS/RCA corpus with trigger-specific ground truth:
+
+- CPU-bound process vs high iowait vs VMware CPU contention vs directly evidenced thermal throttling;
+- memory growth/pressure, swap/OOM and VMware ballooning/contention;
+- filesystem capacity, inode exhaustion, block latency/error and datastore/storage contention;
+- OOM-killed process, dependency unavailable, port/listener conflict, restart loop, deliberate stop and false-hung case;
+- NIC errors/drops, local route/gateway issue, remote/path issue and contradictory local-vs-path evidence.
+
+For each scenario prove:
+- the correct bounded EDS definition ran;
+- expected evidence/provenance exists;
+- unavailable/denied evidence is explicit;
+- unsupported causes are not asserted;
+- contradictions lower confidence;
+- `INCONCLUSIVE` is emitted when appropriate;
+- late evidence produces a new immutable RCA revision rather than rewriting history;
+- cross-vantage fan-out is bounded and authorization/capacity aware;
+- diagnostics do not materially worsen simulated CPU, memory, disk or network pressure.
+
+VMware/API terminology and metric availability must be certified against supported versions; documentation names do not prove API availability.
