@@ -2270,3 +2270,75 @@ Rules:
 - Trace context (`trace_id`, `span_id`) is extracted as reference metadata and attached to corresponding logs, events, and investigation evidence.
 - Phase 1.5 may add bounded customer-provided trace/dependency evidence (e.g. trace_id, span_id, service identity, dependency edge, latency/error summary, selected exemplar) under separate implementation and certification.
 - Full distributed trace span payloads, span storage backends, and full distributed waterfall reconstructions are not part of Phase 1 or 1.5 and require future explicit architecture change control. No trace database is operated in Phase 1.
+
+---
+
+## Phase-1 endpoint operations dataflows — Issues #169/#170
+
+### DF-ENDPOINT-INV-001 — Installed software reconciliation
+
+```text
+deterministically spread periodic trigger OR trustworthy OS/package change signal
+→ local resource/admission check
+→ bounded OS-native inventory enumeration
+→ typed snapshot preserving native source/package identity
+→ Agent durable queue or governed agentless Sensor path
+→ Core validation/entity authority
+→ software inventory reconciliation
+→ current inventory state
+→ diff against prior authoritative state
+→ SOFTWARE_INSTALLED | SOFTWARE_REMOVED | SOFTWARE_VERSION_CHANGED
+→ Timeline / Investigation / deterministic RCA evidence consumers
+```
+
+Change-triggered refresh is coalesced; it does not replace periodic authoritative reconciliation. Missing/denied source access yields partial/degraded inventory quality rather than silent removal of all software.
+
+### DF-ENDPOINT-MON-001 — Customer selects process/service to monitor
+
+```text
+Server/VM/Endpoint → Processes/Services
+→ select discovered stable service/process identity
+→ Monitor
+→ choose supported conditions
+→ effective Monitoring Profile / policy preview
+→ RBAC + tenant scope + capacity/MWU admission
+→ versioned policy save + audit
+→ desired-state reconciliation
+→ deterministic spread
+→ collectors execute effective selector/policy
+```
+
+PID is never durable selector authority. Stop Monitoring updates the governed definition; it does not require local Agent config editing.
+
+### DF-ENDPOINT-PROFILE-001 — Criticality-driven profile
+
+```text
+Criticality change
+→ resolve AUTO_FROM_CRITICALITY vs EXPLICIT_PROFILE
+→ calculate suggested/effective Monitoring Profile
+→ preview capacity/MWU/coverage delta
+→ admission
+→ versioned desired state
+→ deterministic spread/reconciliation
+```
+
+Under `EXPLICIT_PROFILE`, Criticality changes do not silently replace the effective profile.
+
+### DF-RCA-001 — Triggered Fast RCA
+
+```text
+normal monitoring observation
+→ capture eligibility
+→ trigger-specific EDS definition
+→ authority/expiry/resource/cooldown/storm gate
+→ bounded endpoint EDS
+→ durable evidence
+→ Live Evidence / Investigation / Incident Evidence Window
+→ relation/capability-aware optional evidence from OOB / VMware / storage / path
+→ independent provenance + missing/contradictory evidence
+→ deterministic Core RCA
+→ immutable RCA revision
+→ later evidence may create a new revision; history is preserved
+```
+
+No all-source fan-out occurs for every alert. Guest EDS never directly interrogates a hypervisor as causal authority; endpoint OS evidence never fabricates BMC/RAID/power facts.
