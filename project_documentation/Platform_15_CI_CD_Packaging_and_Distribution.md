@@ -76,6 +76,12 @@ Exact final paths must remain consistent across `.deb` and `.rpm` unless OS conv
 
 Separate least-privilege service users for Core/Sensor/Agent as appropriate. No interactive shell unless required for support and explicitly controlled.
 
+### 3.1 Runtime service continuity
+
+Package installation/profile activation shall register and enable every mandatory runtime service required by the selected deployment profile. Linux services use the approved `systemd` supervision contract with boot enablement, dependency-aware readiness and bounded restart on recoverable failure. When PostgreSQL, ClickHouse, Kafka or Valkey are packaged/deployed as separate mandatory Core services, their service definitions and enablement are part of the Core distribution contract rather than a manual post-install step.
+
+Package scripts must be idempotent and must not require a customer to run ad-hoc start commands after a supported reboot or recoverable process crash. Optional, scheduled or on-demand workers may remain disabled/inactive until their capability or workload requires them. Repeated crash loops must remain observable and diagnosable.
+
 ## 4. Windows Agent
 
 Runtime: `PlatformAgent.exe` (name subject to branding freeze), compiled and code-signed. GA installer: code-signed MSI. Convenience wrappers: `install-agent.bat`, `uninstall-agent.bat`, optionally parameterized for silent enterprise deployment. BAT is not the runtime binary.
