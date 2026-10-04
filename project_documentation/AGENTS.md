@@ -85,7 +85,7 @@ No implementation may permanently diverge from mother-reference truth. If implem
 - All routine local development and automated testing run in Docker Compose. Do not install project-specific Java/Go/Python/Node/Kafka/PostgreSQL/ClickHouse/Valkey dependencies directly on the developer laptop.
 - Docker development must be reboot-safe through named volumes, health checks, deterministic startup and documented reset/recovery.
 - Production Core/Sensor/Linux Agent are native `.deb` and `.rpm` packages. Windows Agent is a compiled code-signed Windows Service packaged as MSI, with BAT wrappers for scripted install/uninstall.
-- Core, Sensor and Agents auto-start after host reboot and implement supervised recovery with visible crash-loop diagnostics.
+- Every mandatory runtime service required by the enabled deployment profile auto-starts after host reboot and implements bounded supervised recovery with dependency-aware readiness and visible crash-loop diagnostics. This includes Core/Sensor/Agents and separately managed mandatory Core data/runtime services such as PostgreSQL, ClickHouse, Kafka and Valkey where applicable. Optional/on-demand workers run only when required; customers must not need routine manual process starts after reboot or a recoverable crash.
 - Structured logs, stable error codes, correlation IDs, health state and support diagnostics are mandatory. Never log secrets.
 - Only dependencies approved in `Platform_07_OSS_Catalog.md` may ship. New OSS requires catalogue + transitive-license/CVE/SBOM review before merge.
 - Two full Core nodes only for HA: Active/Standby, <60s failover target. Sensors continue collecting/buffering during Core failover while capacity permits (80% storage protection; absolute zero-loss is not promised).
