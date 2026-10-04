@@ -529,7 +529,7 @@ Core installer asks Standalone vs HA. For HA it collects HA endpoint/VIP and pee
 
 ### 31.4 Reboot and failure continuity
 
-Core, Sensor and Linux Agent auto-start at OS boot and recover through `systemd`. Windows Agent registers as an automatically starting Windows Service with SCM recovery. A machine restart must not require manual application startup.
+Every mandatory runtime component required by the selected deployment profile must be installed in an enabled and supervised state. Core, Sensor and Linux Agent services, plus any separately managed mandatory Core runtime dependencies (including PostgreSQL, ClickHouse, Kafka and Valkey where they run as separate services), auto-start at OS boot and recover from unexpected process failure through `systemd` or the approved component supervisor. Windows Agent registers as an automatically starting Windows Service with SCM recovery. A machine restart or recoverable process crash must not require routine customer action to restore monitoring/control service. Optional, scheduled or on-demand workers are not required to remain resident when no enabled workload requires them. Persistent crash loops must remain visible and diagnosable rather than being hidden by endless restart.
 
 ### 31.5 Upgrades
 
