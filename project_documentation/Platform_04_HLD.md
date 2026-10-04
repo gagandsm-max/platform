@@ -1387,3 +1387,19 @@ Core processes ingest and correlate observability telemetry without introducing 
 - **Temporal Operational Graph:** Dynamically updates communication edges between process entities and remote services with observed latency and throughput.
 - **Deterministic RCA Engine:** Correlates socket timeouts, retransmission bursts, and path divergence events with alert symptoms, while preserving `INCONCLUSIVE` outcomes.
 - **Architectural Boundary:** No separate eBPF database, no dedicated traceroute store, no APM backend, and no full distributed trace span store without explicit change control (Phase 1 supports OTLP metrics/logs; Phase 1.5 supports bounded customer-provided trace/dependency summaries only). PostgreSQL, ClickHouse, Kafka, and Valkey remain the sole authoritative datastores.
+
+---
+
+## Phase-1 endpoint operations HLD reconciliation — Issues #169/#170
+
+The following are logical responsibilities inside existing deployment units, not new services:
+
+- **Software Inventory Collector** — Agent/agentless source adapter producing bounded typed inventory snapshots with native source identity and provenance.
+- **Software Inventory Reconciler** — Core inventory/entity module responsibility that compares authoritative snapshots, maintains current state and emits normalized change evidence; physically owned by BUILD-098.
+- **Process/Service Monitor Definition** — existing Monitoring Profile/Policy module responsibility using stable selectors and versioned effective policy.
+- **Criticality/Profile Mapper** — policy-resolution responsibility producing suggested/effective profile plus assignment mode; never embedded in collectors.
+- **EDS Definition Catalogue** — existing Diagnostic Job / Capability Pack definition responsibility for trigger-specific EDS definitions.
+- **Cross-Vantage Evidence Orchestration** — existing Investigation / Incident Evidence Window coordination that associates endpoint EDS with already-collected or separately authorized bounded OOB/virtualization/storage/path evidence.
+- **Deterministic RCA** — existing Core RCA responsibility; endpoint/Sensor evidence producers never become causal authority.
+
+Failure boundaries are explicit: unsupported/denied inventory fields become partial inventory evidence; process selector ambiguity blocks or requests review rather than silently monitoring the wrong workload; profile-capacity denial leaves current policy intact; failed/partial/suppressed diagnostics remain visible and do not degrade routine monitoring durability.

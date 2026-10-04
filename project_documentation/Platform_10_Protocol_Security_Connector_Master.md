@@ -212,3 +212,36 @@ Agent/Sensor credentials, reusable secrets and unrestricted device-control capab
 2. **Probe Rate and Concurrency Limits:** Probing operations enforce bounded rate limits, bounded intervals, bounded TTL ceilings, and per-hop timeouts to prevent network flooding and avoid self-induced congestion. Exact defaults and tunable ranges are determined and certified in BUILD-040.
 3. **Non-O(N²) Target Bounds:** Probing is restricted to explicitly configured infrastructure paths, inter-site links, cloud interconnects, and licensed outside-in probe targets. Automated all-to-all (full mesh) probing across arbitrary endpoints is strictly prohibited to prevent combinatorial probe explosions.
 4. **Middlebox and Hidden-Hop Handling:** Intermediate routers or firewalls that rate-limit or silently drop ICMP Time Exceeded packets produce unresponsive hops. Such hops are explicitly recorded with `hop_state = UNRESPONSIVE` or `HIDDEN`, preserving the hop index in the ordered path record without asserting target unreachable or path failure.
+
+---
+
+## Phase-1 endpoint inventory/process/Fast-RCA connector reconciliation — Issues #169/#170
+
+### Agentless installed-software inventory
+
+Where Linux SSH or Windows WinRM/WMI/CIM agentless software inventory is certified, it uses the same governed query-pack model as diagnostics:
+
+- Platform-owned fixed/versioned operation definitions;
+- typed constrained parameters;
+- read-only least privilege;
+- bounded timeout/output/item count;
+- normalized typed result schema;
+- no user/model supplied arbitrary shell or PowerShell;
+- no raw package-manager command output as the durable/public contract;
+- source/provenance/partial-failure state retained.
+
+A query/source failure is inventory-monitoring degradation and is not evidence that all software was uninstalled.
+
+### Process/service monitor safety
+
+Customer Monitor/Stop Monitoring policy never turns a displayed PID, process command line or user-provided expression into an executable command. Durable selectors are typed service/unit/executable identities with bounded exact-name fallback; PID reuse cannot silently retarget a monitor.
+
+### Triggered Fast RCA connector behavior
+
+Cross-vantage enrichment reuses certified owning connectors. Core may request or associate bounded OOB/virtualization/storage/path evidence only for authorized canonical related entities. Browser, endpoint Agent and local AI do not obtain arbitrary connector credentials or unrestricted target reachability.
+
+The existing Diagnostic Job and query-pack controls apply unchanged: tenant/entity authority, fencing/generation, deadline, output bounds, rate/storm controls, audit and secret minimization.
+
+### Windows installed-software inventory side-effect prohibition
+
+Windows installed-software inventory is observational. Certified Agent/WinRM/WMI/CIM implementations must not use an enumeration mechanism known to trigger installer consistency checks, repair/reconfiguration, installation or other target mutation as a side effect merely to discover software. In particular, `Win32_Product`-style MSI inventory is not an approved default discovery mechanism. Prefer read-only supported registry/package/MSIX/AppX/OS inventory sources appropriate to the certified Windows version, with explicit provenance and partial-source behavior.

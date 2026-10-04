@@ -2976,3 +2976,117 @@ Physical storage and streaming schemas are decoupled from logical contracts:
 2. **Kafka Streaming Backbone (BUILD-063):** Owns physical topic naming, partition strategies, schema serialization formats (JSON / Avro / Protobuf), retry/rebalance behavior, and retention configurations for process-network and active-path event streams.
 3. **ClickHouse Fact Storage (BUILD-064):** Owns physical ClickHouse table DDL, storage layout, engine choice (selected and certified according to idempotency, retention, rollups, and query performance without preselection at documentation stage), partitioning schemes, primary sorting keys (`ORDER BY`), codec compression, and lifecycle TTL policies for historical process-network and path-hop facts.
 4. **No Standalone Datastores:** Telemetry is stored strictly within authoritative Platform datastores (PostgreSQL, ClickHouse, Kafka, Valkey). No separate eBPF or path probing database is introduced.
+
+---
+
+## Phase-1 endpoint inventory, selector and Triggered Fast RCA LLD — Issues #169/#170
+
+### Software inventory evidence
+
+Logical source evidence is a versioned bounded authoritative snapshot/envelope. Item-level rows alone cannot safely authorize absence/removal.
+
+```text
+software_inventory_snapshot
+  schema_version
+  snapshot_id
+  source_mode AGENT|SSH|WINRM_WMI_CIM
+  source_type DPKG|RPM|MSI|WINDOWS_PRODUCT_SOURCE|PACKAGE_MANAGER|OTHER_CERTIFIED
+  # authoritative endpoint/Agent/host context inherited from transport/Core authority
+  inventory_scope
+  snapshot_mode FULL|TARGETED
+  started_at
+  completed_at
+  capture_status COMPLETE|PARTIAL|FAILED
+  item_count
+  truncated
+  incomplete_or_loss_reason nullable
+  source_provenance
+  quality
+  items[]
+    native_package_id
+    product_name
+    version
+    vendor_publisher nullable
+    architecture nullable
+    installation_scope MACHINE|USER|UNKNOWN
+    authoritative_install_or_update_time nullable
+    normalized_product_id nullable
+    normalization_version nullable
+    normalization_confidence nullable
+```
+
+`snapshot_id` identifies one capture and remains stable across retries/replay of that capture; a new capture receives a new `snapshot_id`. Core reconciliation is idempotent on authoritative snapshot identity. Duplicate replay must not create duplicate authoritative state, duplicate `SOFTWARE_*` events or false lifecycle history.
+
+`inventory_scope` is the stable/versioned canonical comparison-scope identity for the certified collector/source definition. Absence/removal compares only same endpoint authority + same native source + same `inventory_scope`. Distinct certified collector/source-definition versions that change enumerated authority must use distinct `inventory_scope` values so a scope/source-definition change cannot masquerade as mass uninstall/install.
+
+Ordering / stale protection: prefer enclosing Agent stream/durable-envelope sequence, assignment generation and Sensor ingress/delivery provenance (BUILD-016/062) on the Agent path, or authoritative Diagnostic/collection job + Sensor/vantage execution identity/order on the agentless path. Wall-clock timestamps alone are not sole ordering authority when stronger transport/job ordering exists. An older FULL snapshot arriving after a newer authoritative FULL snapshot may be retained as historical/late evidence but MUST NOT roll current-state authority backwards or generate reverse change events. Later Core arrival alone does not confer authority. Late/out-of-order evidence retains original capture time/provenance.
+
+Core derives current-state `first_seen_at` / `last_seen_at` and change events from reconciled evidence; Agents do not invent historical first/last-seen truth. Replay, stale delivery or normalization-resolver changes must not fabricate lifecycle changes.
+
+Native source/package identity is always preserved and remains authoritative for reconciliation. A normalized product identity is optional and versioned. Name similarity alone may not merge packages from different sources. Normalization-resolver changes must not masquerade as `SOFTWARE_INSTALLED` / `SOFTWARE_REMOVED` / `SOFTWARE_VERSION_CHANGED`.
+
+Removal/absence inference is permitted only from a `COMPLETE`, non-truncated, authoritative `FULL` snapshot for the same endpoint authority + native source + `inventory_scope`, compared against the prior authoritative FULL for that same key. `PARTIAL`, `FAILED`, truncated and `TARGETED` captures must not generate mass or unrelated removals. Source permission/access failure is monitoring-quality evidence, not uninstall evidence.
+
+Default authoritative reconciliation is approximately 24 hours with deterministic spreading/jitter. A reliable OS/package-manager change signal may request earlier coalesced reconciliation. Inventory refresh is lower priority than live monitoring and durable telemetry.
+
+Current Agent scalar collection (`HostCollector → Sample → Observation → CollectionBatch`) cannot truthfully carry this structured snapshot. BUILD-011/014 own typed source-side snapshot/evidence boundaries without claiming persistence; BUILD-016 owns physical Agent structured-envelope/delivery evolution; BUILD-062 owns Core acceptance/authority; BUILD-063/064 own streaming/history realization as required; BUILD-098 owns reconciliation/current-state/change/query integration.
+
+### Process/service monitoring selector
+
+```text
+process_service_monitor_definition
+  monitor_definition_id
+  tenant_id
+  entity_scope
+  selector_kind SERVICE_ID|EXECUTABLE_IDENTITY|EXECUTABLE_PATH|PROCESS_NAME
+  selector_value
+  selector_constraints optional
+  expected_instance_min optional
+  expected_instance_max optional
+  condition_set
+  monitoring_profile_id
+  policy_version
+  enabled
+  created_by / updated_by / audit_ref
+```
+
+Selector preference is OS service/unit identity → executable identity/path → bounded exact process-name fallback. Regex/shell expressions and arbitrary command strings are not the normal selector contract. PID is a runtime observation only and must not survive as durable authority across restart/PID reuse.
+
+### Criticality/Profile binding
+
+```text
+monitoring_profile_assignment
+  tenant_id
+  entity_or_scope_id
+  criticality
+  assignment_mode AUTO_FROM_CRITICALITY|EXPLICIT_PROFILE
+  suggested_profile_id
+  effective_profile_id
+  effective_profile_version
+  source_policy_ref
+  capacity_preview_ref
+  updated_at
+  audit_ref
+```
+
+When `EXPLICIT_PROFILE` is active, changing Criticality updates business metadata/suggestion but does not silently replace the effective profile.
+
+### Built-in EDS definitions
+
+All definitions use canonical `diagnostic_type=ENDPOINT_DIAGNOSTIC_SNAPSHOT` and existing `definition_id/definition_version` fields:
+
+`EDS_CPU_PRESSURE`, `EDS_MEMORY_PRESSURE`, `EDS_FILESYSTEM_CAPACITY`, `EDS_BLOCK_IO_PRESSURE`, `EDS_PROCESS_FAILURE`, `EDS_PROCESS_RESTART_LOOP`, `EDS_PROCESS_UNRESPONSIVE`, `EDS_NETWORK_DEGRADATION`.
+
+No definition performs an unbounded complete-machine audit. In particular, unrestricted recursive filesystem walks such as `du /` are prohibited.
+
+Factual indicator vocabulary may include, only with direct evidence and versioned provenance:
+
+`CPU_PRESSURE`, `RUN_QUEUE_PRESSURE`, `IO_WAIT_PRESSURE`, `CPU_THROTTLING`, `MEMORY_PRESSURE`, `SWAP_PRESSURE`, `OOM_EVENT`, `FILESYSTEM_CAPACITY_PRESSURE`, `INODE_PRESSURE`, `FILESYSTEM_READ_ONLY`, `BLOCK_IO_PRESSURE`, `BLOCK_DEVICE_ERROR`, `FILESYSTEM_ERROR`, `PROCESS_EXITED`, `SERVICE_FAILED`, `RESTART_LOOP`, `SUSPECTED_UNRESPONSIVE`, `THERMAL_PRESSURE`, `MCE_EVENT`, `PCIE_AER_EVENT`, `WHEA_HARDWARE_ERROR`, `NIC_ERROR_PRESSURE`, `NIC_DROP_PRESSURE`.
+
+`PROCESS_HUNG` is not asserted merely because a PID exists and CPU is low. When responsiveness cannot be established, use `SUSPECTED_UNRESPONSIVE` or `INCONCLUSIVE`.
+
+Historical growth, software/configuration change, hypervisor/datastore state and chassis/OOB state remain Core/other-vantage evidence rather than being fabricated inside endpoint EDS.
+
+### Windows installed-software inventory side-effect prohibition
+
+Windows installed-software inventory is observational. Certified Agent/WinRM/WMI/CIM implementations must not use an enumeration mechanism known to trigger installer consistency checks, repair/reconfiguration, installation or other target mutation as a side effect merely to discover software. In particular, `Win32_Product`-style MSI inventory is not an approved default discovery mechanism. Prefer read-only supported registry/package/MSIX/AppX/OS inventory sources appropriate to the certified Windows version, with explicit provenance and partial-source behavior.

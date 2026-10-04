@@ -309,3 +309,32 @@ Exact CPU/RAM/GPU/model combinations are release-certified profiles, not univers
 ## Scheduler / freshness capacity notes — v3.2.2 handoff
 
 Admission and MWU accounting must observe CPU, RAM, spool/disk horizon, queue depth, execution latency, timeout/error rate, upload backlog and freshness debt. Low-priority work may defer only inside governed freshness limits. Protect liveness, recovery, critical operational monitoring and authority/control work. Adaptive/event storms must not accelerate unbounded populations. No new monitoring datastore is invented for self-observability.
+
+---
+
+## Phase-1 endpoint inventory and Triggered Fast RCA capacity addendum — Issues #169/#170
+
+### Installed-software inventory
+
+- Default authoritative reconciliation is approximately once per 24 hours, but schedules are deterministically spread/jittered; fleet scans must not align at midnight or restart time.
+- Trustworthy OS/package change signals may request earlier reconciliation, subject to coalescing/cooldown and resource admission.
+- Enumeration item count, payload bytes, duration and Agent/Sensor concurrency are bounded and benchmarked per supported profile.
+- Differential/change evidence may reduce transport/storage cost, but periodic full authoritative reconciliation remains required to repair missed local events.
+- Inventory work is lower priority than authority/control, routine monitoring and durable telemetry.
+- Software/package names/versions are inventory dimensions, not unbounded metric-label cardinality.
+- Exact per-endpoint inventory limits are release-certified measurements, not universal documentation promises.
+
+### Process/service monitoring and Criticality-driven profiles
+
+- Monitoring arbitrary transient process populations is prohibited. Stable selectors and bounded monitored-definition counts are capacity inputs.
+- A bulk Criticality/profile change uses capacity preview/admission and deterministic rollout; it must not synchronously accelerate an estate.
+- CRITICAL does not mean maximum frequency/all metrics; all profiles remain constrained by certified Agent/Sensor/Core/cardinality budgets.
+
+### Triggered Fast RCA
+
+Existing EDS budgets remain authoritative. Cross-vantage enrichment adds explicit fan-out budgets per incident/site/tenant and does not automatically query every OOB/virtualization/storage/path source. Evidence already present in the time window is reused before issuing another active diagnostic where sufficient.
+
+Under pressure, protected ordering remains:
+`authority/control → routine collection → telemetry durability → critical events → diagnostic evidence → bulk/old replay`.
+
+Fast RCA certification measures endpoint capture overhead, Agent/Sensor upload, Core evidence fan-out, incident/RCA latency and effect on protected monitoring. No fixed universal CPU/RAM/latency promise is created without BUILD-019/130/134 evidence.

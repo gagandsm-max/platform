@@ -4,7 +4,7 @@
 **Version:** 3.2.2
 **Status:** **Authoritative Mother Reference — Global Traceability Index (A2.3 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
-**Last reconciliation:** 2026-09-24 — A2.3 OSS catalogue + formal OSS-008→REQ-OSS-008 reconciliation (Issue #108); registry count remains 372/199
+**Last reconciliation:** 2026-10-04 — Issues #169/#170 Phase-1 endpoint operations and Triggered Fast RCA formal-ID registry reconciliation; marker-bounded global primary counts mechanically verified as REQ 379 / PRD 201 (supersedes stale 2026-09-24 A2.3 narrative 372/199)
 **Normalization state:** NORMALIZED_V1 (global index layer). Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Purpose
@@ -128,6 +128,9 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 | REQ-INF-011 | Identity operational monitoring: AD/LDAP/Kerberos/RADIUS/TACACS+/M365/Exchange | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-INF-012 | Synthetic monitoring ICMP/TCP/DNS/HTTP/HTTPS/API/TLS | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-INF-013 | Bounded Linux Agent eBPF process/service/container-to-network evidence with local aggregation, explicit quality/provenance, resource protection, no payload/APM implication and canonical entity correlation | `Platform_08_Requirements_Traceability.md` | Infrastructure/Cloud | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
+| REQ-INF-014 | Installed-software inventory for supported Windows/Linux endpoints with bounded authoritative reconciliation, source/provenance, version and normalized software-change evidence | `Platform_02_PRD.md` | Phase-1 endpoint operations requirements — Issues #169/#170 | BASE_RTM_INDEXED | SPECIFIED | Normative prose in Platform_02_PRD.md; A1 indexes only — does not fabricate historical layer checkmarks |
+| REQ-INF-015 | Authorized customer-selectable process/service monitoring using stable selectors; PID is not durable monitoring identity | `Platform_02_PRD.md` | Phase-1 endpoint operations requirements — Issues #169/#170 | BASE_RTM_INDEXED | SPECIFIED | Normative prose in Platform_02_PRD.md; A1 indexes only — does not fabricate historical layer checkmarks |
+| REQ-INF-016 | Business Criticality and Monitoring Profile remain separate, supporting governed AUTO_FROM_CRITICALITY and EXPLICIT_PROFILE behavior while collectors remain policy-agnostic | `Platform_02_PRD.md` | Phase-1 endpoint operations requirements — Issues #169/#170 | BASE_RTM_INDEXED | SPECIFIED | Normative prose in Platform_02_PRD.md; A1 indexes only — does not fabricate historical layer checkmarks |
 | REQ-INT-001 | ServiceNow/BMC/ServiceDesk Plus/SummitAI/Freshservice/Jira SM/generic REST ITSM with binding, certification, preflight, mapping/preview, idempotency and callback auth; external ticket state does not override Platform hea | `Platform_08_Requirements_Traceability.md` | Integration/Governance/Security | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-INT-002 | Email/Teams/Slack/WhatsApp/webhook/SMS/PagerDuty channels | `Platform_08_Requirements_Traceability.md` | Integration/Governance/Security | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-INT-003 | Bidirectional ITSM field/state/note synchronization where API allows | `Platform_08_Requirements_Traceability.md` | Integration/Governance/Security | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
@@ -206,6 +209,8 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 | REQ-MIA-052 | PRD-MIA-056`: API/UI tests expose first causal evidence vs first alert, rejected hypotheses, missing evidence, child evidence, blast radius, change/recovery evidence and progressive drill-down without losing tenant/RBAC  | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | 17. Formal traceability requirements | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md; A1 indexes only — specialized cross-layer RTM not revalidated |
 | REQ-MIA-053 | PRD-MIA-057`: deterministic RCA certification corpus covers network/infrastructure/cross-domain positive+negative chains, stale/out-of-order/replayed evidence, missing telemetry and recovery, including redundancy-success | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | 17. Formal traceability requirements | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md; A1 indexes only — specialized cross-layer RTM not revalidated |
 | REQ-MIA-054 | PRD-MIA-058`: operator ground-truth feedback is tenant-scoped, audited/version-bound, records correctness class/final cause where supplied and cannot directly mutate active rules/models. | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | 17. Formal traceability requirements | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md; A1 indexes only — specialized cross-layer RTM not revalidated |
+| REQ-MIA-055 | PRD-MIA-059`: per-definition Linux/Windows tests prove trigger relevance, bounded deadline/items/bytes/log lookback, cancellation, partial/suppressed reasons, factual indicator provenance, false-hung negative cases and no unrestricted full-machine audit. | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Formal traceability additions | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md; A1 indexes only — specialized cross-layer RTM not revalidated |
+| REQ-MIA-056 | PRD-MIA-060`: cross-vantage fixtures prove capability/relationship-aware bounded fan-out, independent provenance, contradictory/missing evidence, physical OOB and VMware correlation where certified, no guest→hypervisor causal shortcut, and immutable RCA revision when late evidence changes the probable cause. | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Formal traceability additions | SPECIALIZED_SUPPLEMENT_INDEXED | SPECIFIED | Normative prose in Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md; A1 indexes only — specialized cross-layer RTM not revalidated |
 | REQ-NCM-001 | NCM Day-1: backup/version/diff/change/compliance/golden config/templates/bulk push/approval/rollback/report/API | `Platform_08_Requirements_Traceability.md` | NCM/IPAM/CLI | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-NCM-002 | NCM change evidence enters RCA timeline | `Platform_08_Requirements_Traceability.md` | NCM/IPAM/CLI | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-NCM-003 | Separate NCM concurrency/rate/window controls | `Platform_08_Requirements_Traceability.md` | NCM/IPAM/CLI | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
@@ -404,7 +409,7 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 
 <!-- END GLOBAL PRIMARY REQ REGISTRY -->
 
-**Registry totals:** 372 unique formal requirement IDs (all `REQ-*`, including `REQ-OSS-008`). Former formal ID `OSS-008` is historical/migrated only.
+**Registry totals:** 379 unique formal requirement IDs (all `REQ-*`, including `REQ-OSS-008`; marker-bounded GLOBAL PRIMARY REQ REGISTRY mechanical count 2026-10-04). Former formal ID `OSS-008` is historical/migrated only.
 
 Specialized-family rows (`REQ-OIV-*`, `REQ-ONB-*`, `REQ-EGC-*`, `REQ-MIA-*`, `REQ-EMC-*`) are indexed here for global completeness. Their cross-layer BRD/PRD/Architecture/HLD/LLD/Dataflow normalization may still be incomplete; A1 records that accurately and does not fabricate checkmarks.
 
@@ -524,6 +529,8 @@ The following marker-delimited table is the **only** canonical primary PRD regis
 | PRD-MIA-056 | RCA presentation/API shall expose first causal evidence separately from first alert, correlated child evidence, rejected hypotheses, missing evidence, blast radius, relevant changes, recovery validation and optional Simi | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | 3. Formal product requirements | REQ-MIA | SPECIFIED |
 | PRD-MIA-057 | RCA certification shall include deterministic positive, negative, contradictory, missing/stale/out-of-order/replayed-evidence and recovery scenarios across network, infrastructure and cross-domain failure chains, includi | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | 3. Formal product requirements | REQ-MIA | SPECIFIED |
 | PRD-MIA-058 | Human final RCA/ground-truth feedback shall distinguish Correct, Partially Correct, Incorrect and Appropriate Inconclusive, remain tenant-scoped/audited/version-bound, and shall not directly retrain or mutate production  | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | 3. Formal product requirements | REQ-MIA | SPECIFIED |
+| PRD-MIA-059 | Phase-1 bounded trigger-specific EDS definitions under the single ENDPOINT_DIAGNOSTIC_SNAPSHOT Diagnostic Job type. | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Formal product requirement additions | REQ-MIA | SPECIFIED |
+| PRD-MIA-060 | Bounded Core cross-vantage evidence association preserving independent provenance and contradictions, with VMware as the first-GA deep virtualization correlation target. | `Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md` | Formal product requirement additions | REQ-MIA | SPECIFIED |
 | PRD-OIV-001 | First-class SaaS monitoring | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | 3. Formal product requirements | REQ-OIV | SPECIFIED |
 | PRD-OIV-002 | Triggered packet evidence | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | 3. Formal product requirements | REQ-OIV | SPECIFIED |
 | PRD-OIV-003 | Cloud-native dependency discovery | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | 3. Formal product requirements | REQ-OIV | SPECIFIED |
@@ -619,7 +626,7 @@ The following marker-delimited table is the **only** canonical primary PRD regis
 
 <!-- END GLOBAL PRIMARY PRD REGISTRY -->
 
-**Registry totals (A2.3 reconciliation):** 199 unique formal PRD IDs.
+**Registry totals (Issues #169/#170 reconciliation):** 201 unique formal PRD IDs (marker-bounded GLOBAL PRIMARY PRD REGISTRY mechanical count 2026-10-04).
 
 Related REQ family is recorded only where the family relationship is explicitly supported by naming/owner structure. A2 does not invent REQ↔PRD mappings beyond that.
 
@@ -1127,3 +1134,17 @@ Existing Device Pack RTM rows (`REQ-EXT-*`) remain the base Device Pack complete
 ### Historical — Handoff baseline note — 2026-09-21
 
 This RTM revision adds `REQ-TIME-*` and `REQ-SCHED-*` only. Flow/Log/Cloud/Extensibility/ITSM strengthen existing owners rather than creating parallel namespaces. No `Platform_24+` specialized master is required at this baseline. Implementation truth classification (`SPECIFIED`/`IMPLEMENTED`/`TESTED`/`BENCHMARKED`/`CERTIFIED`/`DEPLOYED`) must be preserved for Counter64, HA, scheduler, timezone persistence, FLOW/LOG roles and remaining enterprise runtimes.
+
+---
+
+## Phase-1 endpoint operations traceability supplement — Issues #169/#170
+
+| Requirement | Authoritative source | Release | Status | Required evidence |
+|---|---|---|---|---|
+| `REQ-INF-014` — Windows/Linux installed-software inventory and change evidence | Platform_02 + Platform_05/06/17 | Phase 1 | SPECIFIED | Linux/Windows Agent fixtures + live hosts; native source identity/version/vendor/architecture/scope/provenance; daily-spread reconciliation; reliable change-trigger coalescing; install/remove/version-change diff; partial-source behavior; tenant isolation; resource/cardinality tests; no false normalization |
+| `REQ-INF-015` — customer-selectable process/service monitoring | Platform_02 + Platform_05/09/17 | Phase 1 | SPECIFIED | Monitor/Stop Monitoring UI/API; stable selector; PID reuse negative case; instance/restart/CPU/memory/unresponsive conditions; RBAC/audit; high-cardinality short-lived process protection; no remediation-authority implication |
+| `REQ-INF-016` — Criticality/Monitoring-Profile separation and mapping | Platform_02 + Platform_05/20 | Phase 1 | SPECIFIED | AUTO_FROM_CRITICALITY vs EXPLICIT_PROFILE determinism; explicit override survives Criticality change; capacity preview/admission; versioned desired state; deterministic spread; audit |
+| `PRD-MIA-059` / `REQ-MIA-055` — built-in trigger-specific bounded EDS definitions | Platform_22 + Platform_05/17 | Phase 1 | SPECIFIED | Profile-specific positive/negative/partial/suppressed/resource tests; no unbounded full-machine audit; factual indicators only; no false PROCESS_HUNG |
+| `PRD-MIA-060` / `REQ-MIA-056` — bounded cross-vantage evidence association for physical/VM incidents | Platform_22 + Platform_19/17 | Phase 1 | SPECIFIED | entity-relationship/capability-aware fan-out; independent provenance; missing/contradictory evidence; physical OOB and VMware first-GA scenarios where owning builds are certified; no guest→hypervisor causal shortcut; immutable RCA revisions |
+
+Maturity remains `SPECIFIED` until corresponding production source exists. Documentation does not imply implementation, testing or certification.

@@ -1546,3 +1546,39 @@ Cloud monitoring under `REQ-INF-008` is clarified to include first-class Phase-1
 ### 44.7 Sizing overlay OBS-P1 over SNWP-2500-v1
 
 Observability Phase 1 capabilities are governed by the versioned `OBS-P1 enrichment overlay` defined in `Platform_11` §8.1. OBS-P1 benchmarks must prove whether eBPF local aggregation, active path probing, and cloud-network enrichment fit within existing planned hardware baselines (Network Sensor current planning baseline: 4 vCPU / 16 GB RAM / 150 GB SSD for ~800 normal network devices, with 8 vCPU / 16 GB RAM as an engineering benchmark objective for 2,000–2,500 devices) under low-compute non-interference gates; they may not be pre-declared certified.
+
+---
+
+## Phase-1 endpoint operations architecture — Issues #169/#170
+
+### Installed-software inventory
+
+No new microservice, database or endpoint daemon is introduced.
+
+Logical target path:
+
+`Windows/Linux OS source → BUILD-011/014 typed software_inventory_snapshot evidence boundary (or certified BUILD-030/031 agentless producer) → BUILD-016 Agent structured-envelope/durable delivery (Agent path) → BUILD-062 Core acceptance/authority → BUILD-063/064 stream/history realization as required → BUILD-098 reconciliation/current-state/change evidence/query → PostgreSQL current authority + Kafka/ClickHouse history where appropriate → Query/UI/Timeline/RCA consumers (when available)`.
+
+Current implementation state: production Agent collection is scalar (`HostCollector → Sample → Observation → CollectionBatch`) and cannot truthfully carry structured software inventory as metric labels. BUILD-011/014 must not claim downstream persistence; BUILD-030/031 are optional certified producers, not hard prerequisites for the Agent path.
+
+Source-native identity is retained; normalization across package ecosystems is nullable/versioned and shall not merge similarly named products without sufficient evidence. Absence/removal inference requires a `COMPLETE`, non-truncated, authoritative `FULL` snapshot for the same source/scope. Software-change evidence is corroborating only and must not be a hard runtime prerequisite for deterministic RCA.
+
+### Process/service monitoring
+
+Discovery/collection may observe transient PIDs, but durable monitoring policy binds to stable service/unit or executable selectors. Monitoring definitions are governed by BUILD-070; collectors execute effective policy and do not become policy authorities.
+
+### Criticality and Monitoring Profile
+
+Criticality is business metadata. Monitoring Profile is operational behavior. Mapping is an existing policy concern, not a collector concern. `AUTO_FROM_CRITICALITY` and `EXPLICIT_PROFILE` are distinct assignment modes. Policy changes pass through existing capacity/admission/versioned desired-state/reconciliation mechanics so a mass Criticality edit cannot create an uncontrolled polling storm.
+
+### Triggered Fast RCA
+
+Triggered Fast RCA is a product-level composition of existing architecture:
+
+`monitoring observation → capture eligibility → Diagnostic Job / ENDPOINT_DIAGNOSTIC_SNAPSHOT → bounded evidence → existing durable path → Live Evidence / Investigation / Incident Evidence Window → deterministic Core RCA revision`.
+
+No second diagnostic scheduler, evidence store, transport, endpoint RCA engine, alert engine or causal database is permitted.
+
+Cross-vantage evidence is requested only when entity relationships, policy, capability, authorization and capacity justify it. Physical hardware evidence comes from BUILD-032/OOB, VMware evidence from BUILD-033, storage evidence from BUILD-034, path evidence from BUILD-040, and other domains from their owning connectors. All vantages retain independent provenance and contradictions.
+
+Endpoint indicators are factual evidence qualifications. Core alone owns probable cause, confidence, contradictions, missing evidence, alternatives and `INCONCLUSIVE`.

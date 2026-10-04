@@ -354,3 +354,79 @@ Phase-1 Unified Network & Infrastructure Observability capability claims are gov
 14. **Telemetry overload and load-shedding:** Extreme metric, flow, and syslog surges exercise Sensor spool watermarks, Kafka consumer backpressure, and ClickHouse micro-batching without dropping high-priority control or liveness signals.
 15. **Core and Sensor interruption and replay:** Active Core crash or Sensor disconnection verifies zero duplicate authority, stateful failover within the <60s target, and idempotent replay of buffered Sensor spools upon reconnection.
 16. **Low-compute and non-interference guarantee:** Bounded Linux eBPF telemetry and active path probing must measurably operate within declared CPU, RAM, and network envelopes; if resource contention occurs, optional enrichment must yield, throttle, or suspend before primary monitoring, collection, durable transport, ingestion, alert qualification, incident processing, or deterministic RCA are degraded.
+
+---
+
+## Phase-1 endpoint operations certification supplement — Issues #169/#170
+
+### Installed-software inventory
+
+Certification requires applicable Linux and Windows tests for:
+
+- authoritative package/product enumeration from supported sources into a versioned `software_inventory_snapshot` envelope;
+- snapshot completeness semantics (`FULL|TARGETED`, `COMPLETE|PARTIAL|FAILED`, truncation/loss reasons, item_count);
+- native source/package identity preservation;
+- version/vendor/architecture/scope/provenance mapping;
+- stable/versioned `inventory_scope` comparison identity and proof that source/scope-definition changes do not appear as mass uninstall/install;
+- install, removal and version-change reconciliation under removal-safety rules;
+- proof that only `COMPLETE` + non-truncated + authoritative `FULL` same endpoint+native-source+`inventory_scope` snapshots may infer general absence/removal;
+- proof that `PARTIAL`/`FAILED`/truncated/`TARGETED` captures and permission/access failures never generate mass or unrelated removals;
+- same-capture retry with stable `snapshot_id` and Core idempotency;
+- duplicate replay of identical `snapshot_id` does not create duplicate authoritative state, duplicate `SOFTWARE_*` events or false first/last-seen mutation;
+- late older FULL snapshot after newer FULL authority does not roll current state backwards or generate reverse change events;
+- out-of-order arrival retains original capture provenance and does not gain authority merely by later Core arrival;
+- transport/job ordering preferred over wall-clock-only ordering when stronger Agent/Sensor/Diagnostic Job sequencing exists;
+- daily deterministic spreading and reliable change-trigger coalescing;
+- missed local event repaired by later authoritative reconciliation;
+- restart/disconnect/replay/idempotency;
+- large installed-set CPU/RAM/I/O/network bounds;
+- tenant isolation and API/RBAC;
+- normalization ambiguity/false-merge negative fixtures and proof that resolver-only changes do not masquerade as package events or fabricate first/last-seen lifecycle changes;
+- proof that typed inventory is not faked through scalar metric labels on the current Agent CollectionBatch path;
+- proof that no patch/deployment/remediation action is implied.
+
+Deterministic RCA certification must prove RCA remains available with contradictions/missing evidence/`INCONCLUSIVE` when software inventory/change evidence is absent; BUILD-098 evidence is consumed when available and must not be a hard runtime dependency.
+
+### Process/service monitoring
+
+Test:
+- Monitor and Stop Monitoring workflow;
+- service/unit and executable selectors;
+- PID reuse/restart does not retarget monitoring incorrectly;
+- minimum/maximum instances, absent/stopped, restart-rate, CPU/memory and suspected-unresponsive conditions where supported;
+- short-lived process-cardinality stress;
+- RBAC/audit;
+- alert creation does not grant restart/remediation authority.
+
+### Criticality/Profile mapping
+
+Test:
+- deterministic mapping and inheritance;
+- `AUTO_FROM_CRITICALITY` vs `EXPLICIT_PROFILE`;
+- explicit profile survives Criticality change;
+- capacity/MWU preview and admission;
+- large-scope profile change is spread/bounded and does not create a poll/collection storm;
+- rollback/version/audit behavior.
+
+### Triggered Fast RCA
+
+Extend the existing EDS/RCA corpus with trigger-specific ground truth:
+
+- CPU-bound process vs high iowait vs VMware CPU contention vs directly evidenced thermal throttling;
+- memory growth/pressure, swap/OOM and VMware ballooning/contention;
+- filesystem capacity, inode exhaustion, block latency/error and datastore/storage contention;
+- OOM-killed process, dependency unavailable, port/listener conflict, restart loop, deliberate stop and false-hung case;
+- NIC errors/drops, local route/gateway issue, remote/path issue and contradictory local-vs-path evidence.
+
+For each scenario prove:
+- the correct bounded EDS definition ran;
+- expected evidence/provenance exists;
+- unavailable/denied evidence is explicit;
+- unsupported causes are not asserted;
+- contradictions lower confidence;
+- `INCONCLUSIVE` is emitted when appropriate;
+- late evidence produces a new immutable RCA revision rather than rewriting history;
+- cross-vantage fan-out is bounded and authorization/capacity aware;
+- diagnostics do not materially worsen simulated CPU, memory, disk or network pressure.
+
+VMware/API terminology and metric availability must be certified against supported versions; documentation names do not prove API availability.

@@ -390,3 +390,26 @@ Incident-triggered packet evidence (`PRD-OIV-002` / `REQ-OIV-002`) is a core, ap
 - Triggered packet capture is privileged, bounded, resource-guarded, and tenant-scoped.
 - It is NOT demoted to Phase 1.5 or Phase 2.
 - Full always-on DPI, bulk PCAP storage, and continuous payload reconstruction remain hard exclusions outside Phase 1.
+
+---
+
+## Endpoint EDS and cross-vantage evidence-window linkage — Issues #169/#170
+
+Triggered Fast RCA reuses the existing Incident Flight Recorder / Evidence Window architecture.
+
+For a qualifying endpoint incident or authorized investigation, the Evidence Window Orchestrator may associate:
+
+- endpoint EDS Diagnostic Job evidence;
+- existing monitoring history;
+- software inventory/change evidence when BUILD-098 is available;
+- Hardware/OOB evidence from certified BUILD-032 sources;
+- virtualization evidence from certified BUILD-033 sources;
+- storage evidence from certified BUILD-034 sources;
+- path/network evidence from BUILD-040 and other certified network domains;
+- other existing change/log/topology evidence.
+
+The Orchestrator shall prefer already-collected evidence when sufficient, and active acquisition is relationship-aware, capability-aware, tenant/RBAC authorized, rate/resource bounded and cancellable. It shall not fan out every source for every alert.
+
+Every source retains its own evidence reference, event/observed time, quality and provenance. Missing, late, denied and contradictory evidence remains explicit.
+
+Endpoint EDS indicators and software changes are supporting evidence, never automatic root cause. Deterministic Core RCA may create a later immutable revision when additional OOB/virtualization/storage/software-change evidence arrives; prior revisions remain available.

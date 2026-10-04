@@ -2270,3 +2270,79 @@ Rules:
 - Trace context (`trace_id`, `span_id`) is extracted as reference metadata and attached to corresponding logs, events, and investigation evidence.
 - Phase 1.5 may add bounded customer-provided trace/dependency evidence (e.g. trace_id, span_id, service identity, dependency edge, latency/error summary, selected exemplar) under separate implementation and certification.
 - Full distributed trace span payloads, span storage backends, and full distributed waterfall reconstructions are not part of Phase 1 or 1.5 and require future explicit architecture change control. No trace database is operated in Phase 1.
+
+---
+
+## Phase-1 endpoint operations dataflows — Issues #169/#170
+
+### DF-ENDPOINT-INV-001 — Installed software reconciliation
+
+Logical target path:
+
+```text
+deterministically spread periodic trigger OR trustworthy OS/package change signal
+→ local resource/admission check
+→ bounded OS-native inventory enumeration
+→ versioned software_inventory_snapshot (FULL|TARGETED; COMPLETE|PARTIAL|FAILED; truncation/quality)
+→ typed Agent evidence boundary (BUILD-011/014) or governed agentless Sensor producer (BUILD-030/031 when certified)
+→ physical Agent structured-envelope/durable delivery (BUILD-016) when Agent path
+→ Core envelope acceptance/authority (BUILD-062)
+→ physical stream/history realization as required (BUILD-063/064)
+→ BUILD-098 software inventory reconciliation / current state / change evidence / query
+→ SOFTWARE_INSTALLED | SOFTWARE_REMOVED | SOFTWARE_VERSION_CHANGED (only under removal-safety rules)
+→ Timeline / Investigation / deterministic RCA evidence consumers (when available)
+```
+
+Current implementation state: production Agent collection remains scalar (`HostCollector → Sample → Observation → CollectionBatch`) and must not fake structured inventory through metric labels. End-to-end persistence is not claimed until BUILD-016/062/063/064/098 foundations exist.
+
+Change-triggered refresh is coalesced; it does not replace periodic authoritative reconciliation. Only a `COMPLETE`, non-truncated, authoritative `FULL` snapshot for the same endpoint authority + native source + stable/versioned `inventory_scope` may infer general absence/removal. `PARTIAL`/`FAILED`/truncated/`TARGETED` captures and permission/access failures yield quality/degraded evidence and must not generate mass or unrelated removals. Same-capture retries keep a stable `snapshot_id` and are idempotent; duplicate replay must not emit duplicate `SOFTWARE_*` events or fabricate first/last-seen. Older/stale FULL snapshots arriving after newer authoritative FULL state may be retained as historical/late evidence but must not roll current authority backwards or create reverse change events; ordering prefers enclosing Agent/Sensor/Diagnostic Job transport/job sequencing over wall-clock-only arrival.
+
+### DF-ENDPOINT-MON-001 — Customer selects process/service to monitor
+
+```text
+Server/VM/Endpoint → Processes/Services
+→ select discovered stable service/process identity
+→ Monitor
+→ choose supported conditions
+→ effective Monitoring Profile / policy preview
+→ RBAC + tenant scope + capacity/MWU admission
+→ versioned policy save + audit
+→ desired-state reconciliation
+→ deterministic spread
+→ collectors execute effective selector/policy
+```
+
+PID is never durable selector authority. Stop Monitoring updates the governed definition; it does not require local Agent config editing.
+
+### DF-ENDPOINT-PROFILE-001 — Criticality-driven profile
+
+```text
+Criticality change
+→ resolve AUTO_FROM_CRITICALITY vs EXPLICIT_PROFILE
+→ calculate suggested/effective Monitoring Profile
+→ preview capacity/MWU/coverage delta
+→ admission
+→ versioned desired state
+→ deterministic spread/reconciliation
+```
+
+Under `EXPLICIT_PROFILE`, Criticality changes do not silently replace the effective profile.
+
+### DF-RCA-001 — Triggered Fast RCA
+
+```text
+normal monitoring observation
+→ capture eligibility
+→ trigger-specific EDS definition
+→ authority/expiry/resource/cooldown/storm gate
+→ bounded endpoint EDS
+→ durable evidence
+→ Live Evidence / Investigation / Incident Evidence Window
+→ relation/capability-aware optional evidence from OOB / VMware / storage / path
+→ independent provenance + missing/contradictory evidence
+→ deterministic Core RCA
+→ immutable RCA revision
+→ later evidence may create a new revision; history is preserved
+```
+
+No all-source fan-out occurs for every alert. Guest EDS never directly interrogates a hypervisor as causal authority; endpoint OS evidence never fabricates BMC/RAID/power facts.

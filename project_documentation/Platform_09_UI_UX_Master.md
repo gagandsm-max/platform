@@ -7403,3 +7403,51 @@ Administration → Sensors/Pools shall expose optional customer-defined Region, 
 Pool views show at minimum scope, role/capability eligibility, health, capacity/headroom, failure-domain/placement policy, members, assignment counts and degraded/maintenance state. Reassignment/drain actions display generation/state and remain server-authorized/audited.
 
 Sensor/Agent enrollment UX shows token/authority expiry and resulting certificate/assignment state but never private keys or reusable secrets. DNS or IP/VIP bootstrap errors surface trust/SAN mismatch explicitly; the UI must not offer “disable certificate verification” or plaintext Platform transport as a production workaround.
+
+---
+
+## Phase-1 endpoint operations UI reconciliation — Issues #169/#170
+
+### Server/VM/Endpoint detail
+
+The Server Detail experience shall expose an **Installed Software** view/tab for supported Windows/Linux entities. It shows at minimum product/package name, version, vendor/publisher where available, architecture, source/package type, installation scope, last observed, first/last seen from Core reconciliation, provenance/quality and recent install/remove/version-change evidence. Unsupported or permission-limited fields are visibly unavailable rather than fabricated.
+
+### Process & Service monitoring workflow
+
+UI-032 Process & Service gains governed actions:
+
+1. select discovered process/service;
+2. **Monitor**;
+3. display the stable selector that will be used;
+4. configure supported conditions;
+5. select/inherit Monitoring Profile;
+6. preview capacity/MWU and inherited policy;
+7. save with RBAC/audit;
+8. show effective policy and current monitored state;
+9. **Stop Monitoring** where authorized.
+
+PID is displayed as current runtime evidence only and is never presented as durable monitor identity. Short-lived process populations are summarized/bounded; the UI does not encourage monitoring every transient PID.
+
+Applicable conditions include expected process absent, service stopped/failed, unexpected termination, restart/restart-rate, expected instance range, sustained CPU/memory and suspected unresponsiveness when an applicable evidence contract exists. Restart/remediation remains a separate privileged action and is not granted by Monitor.
+
+### Criticality and effective Monitoring Profile
+
+Entity detail/onboarding/profile surfaces show:
+
+- business Criticality;
+- suggested Monitoring Profile;
+- effective Monitoring Profile/version;
+- assignment mode `AUTO_FROM_CRITICALITY` or `EXPLICIT_PROFILE`;
+- inheritance/override source;
+- capacity impact;
+- audit history.
+
+Changing Criticality shall preview the resulting automatic-profile change. If an explicit profile is active, the UI clearly states that Criticality will not replace it unless the user deliberately changes assignment mode/profile.
+
+### Triggered Fast RCA presentation
+
+Do not create a second “Fast RCA dashboard.” Triggered Fast RCA is presented through existing Diagnostics/Evidence, Investigation and RCA experiences.
+
+The UI may show which EDS definition ran, capture status, evidence categories, missing/denied/suppressed evidence, related physical/virtualization/storage/path vantages, evidence age/provenance, current RCA revision, prior revisions, confidence, contradictions and missing evidence.
+
+Endpoint indicators are visually labelled as evidence, not final cause. VMware/hardware/storage evidence is shown with its own vantage. `INCONCLUSIVE` is a supported outcome.

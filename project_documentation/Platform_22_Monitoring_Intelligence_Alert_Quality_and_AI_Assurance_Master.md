@@ -562,3 +562,33 @@ Engineering dependency/runtime admission remains subject to normal architecture/
 ## 21. Implementation-status disclaimer
 
 At creation/update, this document is a requirements/architecture authority only. It does not assert that any `PRD-MIA-*` or `REQ-MIA-*` capability, local model, llama.cpp/ONNX runtime, GNN model or resource envelope has been implemented, benchmarked, certified or released. Implementation status must be established from exact source, executable tests, exact-head CI/runtime evidence and release records.
+
+---
+
+## Triggered Fast RCA / EDS definition reconciliation — Issue #170
+
+### Formal product requirement additions
+
+| PRD ID | Priority | Requirement |
+|---|---|---|
+| `PRD-MIA-059` | P0 | Phase-1 EDS shall provide versioned trigger-specific built-in definitions `EDS_CPU_PRESSURE`, `EDS_MEMORY_PRESSURE`, `EDS_FILESYSTEM_CAPACITY`, `EDS_BLOCK_IO_PRESSURE`, `EDS_PROCESS_FAILURE`, `EDS_PROCESS_RESTART_LOOP`, `EDS_PROCESS_UNRESPONSIVE`, and `EDS_NETWORK_DEGRADATION` under the single `ENDPOINT_DIAGNOSTIC_SNAPSHOT` Diagnostic Job type. Each definition is bounded to relevant evidence and shall not run an unbounded complete-machine audit or claim endpoint causal authority. |
+| `PRD-MIA-060` | P1 | For qualifying physical-server/VM incidents, Core may associate bounded relationship/capability-aware evidence from endpoint EDS, Hardware/OOB, virtualization, storage, path/network and existing change/history sources through the existing Investigation / Incident Evidence Window architecture. Each vantage retains provenance and contradictions. Guest Agents shall not infer hypervisor cause and OS evidence shall not invent chassis/OOB truth. VMware is the first-GA deep virtualization correlation target through BUILD-033; other hypervisor Fast-RCA depth requires separate promotion/certification. |
+
+### Factual endpoint indicator discipline
+
+Endpoint evidence may emit versioned factual indicators only when directly supported, including:
+
+`CPU_PRESSURE`, `RUN_QUEUE_PRESSURE`, `IO_WAIT_PRESSURE`, `CPU_THROTTLING`, `MEMORY_PRESSURE`, `SWAP_PRESSURE`, `OOM_EVENT`, `FILESYSTEM_CAPACITY_PRESSURE`, `INODE_PRESSURE`, `FILESYSTEM_READ_ONLY`, `BLOCK_IO_PRESSURE`, `BLOCK_DEVICE_ERROR`, `FILESYSTEM_ERROR`, `PROCESS_EXITED`, `SERVICE_FAILED`, `RESTART_LOOP`, `SUSPECTED_UNRESPONSIVE`, `THERMAL_PRESSURE`, `MCE_EVENT`, `PCIE_AER_EVENT`, `WHEA_HARDWARE_ERROR`, `NIC_ERROR_PRESSURE`, `NIC_DROP_PRESSURE`.
+
+A PID existing with low CPU is not proof of a hung process. Where responsiveness evidence is insufficient, the correct result is `SUSPECTED_UNRESPONSIVE` or `INCONCLUSIVE`.
+
+Historical growth, recent software/configuration change, hypervisor contention, datastore/storage state and OOB hardware state are correlated Core/other-vantage evidence, not fabricated endpoint facts.
+
+### Formal traceability additions
+
+| REQ ID | Priority | Acceptance evidence |
+|---|---|---|
+| `REQ-MIA-055` | P0 | `PRD-MIA-059`: per-definition Linux/Windows tests prove trigger relevance, bounded deadline/items/bytes/log lookback, cancellation, partial/suppressed reasons, factual indicator provenance, false-hung negative cases and no unrestricted full-machine audit. |
+| `REQ-MIA-056` | P1 | `PRD-MIA-060`: cross-vantage fixtures prove capability/relationship-aware bounded fan-out, independent provenance, contradictory/missing evidence, physical OOB and VMware correlation where certified, no guest→hypervisor causal shortcut, and immutable RCA revision when late evidence changes the probable cause. |
+
+Triggered Fast RCA is product terminology only. It does not create a second RCA/diagnostic runtime.

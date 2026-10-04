@@ -737,3 +737,102 @@ TraceContextReference:
 - **Scope:** Carried as optional reference metadata in syslog, flow records, diagnostic captures, alert evidence bundles, and Investigation Session items.
 - **Phase-1 Architectural Boundary:** AmrudAi Phase 1 supports OTLP metrics and logs with trace-ready contracts and data models (`trace_id`, `span_id` reference fields). AmrudAi Phase 1 does NOT store trace spans, does NOT operate a trace datastore (such as Jaeger or Tempo), and does NOT construct distributed trace waterfall graphs.
 - **Phase 1.5 Scope:** Phase 1.5 may add bounded customer-provided trace and dependency evidence (such as `trace_id`, `span_id`, service identity, dependency edges, latency/error summaries, selected exemplars) under separate implementation and certification. Full distributed trace storage, APM bytecode instrumentation, and dedicated trace backends remain excluded and require future explicit architecture change control.
+
+---
+
+## Phase-1 software inventory, monitor-selection and EDS-definition contracts — Issues #169/#170
+
+### Software inventory
+
+Canonical logical structured evidence is a versioned bounded authoritative snapshot/envelope. Item rows alone are insufficient for absence/removal inference.
+
+```text
+software_inventory_snapshot
+  schema_version
+  snapshot_id
+  source_mode AGENT|SSH|WINRM_WMI_CIM
+  source_type
+  # authoritative endpoint/Agent/host context inherited from transport/Core authority
+  inventory_scope
+  snapshot_mode FULL|TARGETED
+  started_at
+  completed_at
+  capture_status COMPLETE|PARTIAL|FAILED
+  item_count
+  truncated
+  incomplete_or_loss_reason?
+  source_provenance
+  quality
+  items[]
+    native_package_id
+    product_name
+    version
+    vendor_publisher?
+    architecture?
+    installation_scope MACHINE|USER|UNKNOWN
+    authoritative_install_or_update_time?
+    normalized_product_id?
+    normalization_version?
+    normalization_confidence?
+```
+
+Tenant/entity authority fields are inherited from existing transport/Core authority conventions and must not be duplicated as endpoint-authored truth that overrides Core identity.
+
+`snapshot_id` identifies one inventory capture. It MUST remain stable across retries/replay of that same capture; a genuinely new capture MUST receive a new `snapshot_id`. Core reconciliation is idempotent on authoritative snapshot identity.
+
+`inventory_scope` is the stable/versioned canonical comparison-scope identity for the certified collector/source definition (opaque/versioned fingerprint of what that source enumerates). Distinct certified collector/source-definition versions that change enumerated authority MUST use distinct `inventory_scope` values. Absence/removal may compare only the same endpoint authority + same native source + same `inventory_scope`.
+
+Replay / ordering / stale-snapshot authority:
+
+- Duplicate replay of an identical `snapshot_id` must not create duplicate authoritative state, duplicate `SOFTWARE_*` events, incorrect `first_seen_at`/`last_seen_at` mutation, or false lifecycle history.
+- An older authoritative snapshot arriving after a newer authoritative snapshot may be retained as historical/late evidence if policy permits, but MUST NOT replace newer current-state authority or generate reverse false change events. Later Core arrival alone does not confer authority.
+- Ordering authority MUST preferentially inherit trustworthy enclosing execution/transport ordering: Agent path uses Agent stream/durable-envelope sequence, assignment generation and Sensor ingress/delivery provenance under BUILD-016/BUILD-062 replay/idempotency; agentless path uses authoritative collection/Diagnostic Job identity, Sensor/vantage execution identity and governed job ordering/generation where available. Wall-clock `started_at`/`completed_at` alone MUST NOT become sole ordering authority when stronger transport/job ordering exists. Late/out-of-order evidence retains original capture time/provenance.
+
+Current inventory authority is Core-reconciled state. `first_seen_at` and `last_seen_at` are Core-derived lifecycle fields and are not accepted as endpoint-authored historical truth. Replay, stale snapshot delivery or normalization-resolver changes must not fabricate lifecycle changes or masquerade as package uninstall/install/version-change. Native source/package identity remains authoritative for reconciliation; normalized product identity is optional/versioned/provenance-bearing.
+
+Normalized change event classes remain:
+
+`SOFTWARE_INSTALLED | SOFTWARE_REMOVED | SOFTWARE_VERSION_CHANGED`.
+
+Removal/absence safety:
+
+- only a `COMPLETE`, non-truncated, authoritative `FULL` reconciliation for the same endpoint authority + native source + `inventory_scope` may infer general absence/removal against the prior authoritative FULL snapshot for that same comparison key;
+- `PARTIAL`, `FAILED` or truncated capture must never generate mass removal;
+- `TARGETED` refresh cannot infer absence of unrelated packages;
+- source permission/access failure is monitoring-quality evidence, not uninstall evidence;
+- a source/`inventory_scope` definition change must not appear as mass uninstall/install; incompatible FULL snapshots must not be compared as identical authority scope.
+
+Software inventory is structured evidence and shall not be encoded as high-cardinality scalar metric labels on the current scalar Agent metric path (`HostCollector → Sample → Observation → CollectionBatch`).
+
+Physical ownership boundary (logical target vs current implementation):
+
+- BUILD-011/014 collect/normalize bounded typed inventory snapshots and expose an internal typed evidence boundary; they do not fake inventory through scalar metric labels and do not claim downstream persistence;
+- BUILD-016 owns physical Agent structured-envelope / durable-delivery evolution required for typed inventory evidence;
+- BUILD-062 owns Core envelope acceptance, authority validation and ingestion;
+- BUILD-063 owns physical streaming realization;
+- BUILD-064 owns physical historical/fact storage where appropriate;
+- BUILD-098 consumes canonical structured inventory evidence and owns reconciliation/current-state/change-evidence/query behavior.
+
+Public/internal query contracts are tenant/RBAC scoped and bounded.
+
+### Process/service monitor definition
+
+API/data contracts carry a stable selector and effective policy reference. PID may be returned as an observation but is prohibited as the durable selector key. Supported selector classes are service/unit identity, executable identity/path and bounded exact process name according to certified OS behavior.
+
+Create/update/delete/Stop Monitoring operations are audited, tenant/resource authorized and versioned. Remediation authority is a separate contract.
+
+### Criticality/Profile assignment
+
+Expose business Criticality, suggested profile, effective profile/version, inheritance source and assignment mode `AUTO_FROM_CRITICALITY|EXPLICIT_PROFILE`. API updates preserve explicit override semantics and return capacity/admission failures without partially mutating effective policy.
+
+### Trigger-specific EDS definitions
+
+Existing EDS `definition_id/definition_version` is the authoritative extension point. Phase-1 built-ins include:
+
+`EDS_CPU_PRESSURE`, `EDS_MEMORY_PRESSURE`, `EDS_FILESYSTEM_CAPACITY`, `EDS_BLOCK_IO_PRESSURE`, `EDS_PROCESS_FAILURE`, `EDS_PROCESS_RESTART_LOOP`, `EDS_PROCESS_UNRESPONSIVE`, `EDS_NETWORK_DEGRADATION`.
+
+No second Fast-RCA bundle schema is introduced.
+
+EDS/Diagnostic Job evidence may carry optional `evidence_window_id` and/or canonical context/relationship snapshot reference when associated with an Incident Flight Recorder / Investigation evidence window. Related OOB/virtualization/storage/path evidence remains separate evidence references with its own source/vantage/provenance; it is not copied into the endpoint EDS payload as fabricated local context.
+
+Factual indicator values are versioned evidence fields, not free-form root-cause prose. Core RCA references evidence IDs and preserves revisions.

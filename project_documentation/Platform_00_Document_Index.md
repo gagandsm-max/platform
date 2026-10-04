@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
+**Last reconciliation:** 2026-10-04 — Phase-1 endpoint operations, software inventory, selectable process/service monitoring, Criticality/Profile governance, and Triggered Fast RCA/EDS cross-vantage reconciliation (Issues #169/#170; set version remains v3.2.2)
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Authority
@@ -551,3 +551,20 @@ Hard product boundaries are maintained: no full APM, continuous profiling, flame
 Candidate library `OSS-124` (`github.com/cilium/ebpf`, MIT, `CANDIDATE / NOT_SELECTED / NOT_IMPLEMENTED`) is registered in `Platform_07`. All 15 decision areas are formally recorded in `Platform_12` (`DEC-ARCH-036` to `DEC-ARCH-050`).
 
 This reconciliation updates the existing base and specialized masters and keeps the authoritative set at exactly **25 files**, version **v3.2.2**, and highest specialized master **Platform_23**. No `Platform_24` is introduced.
+
+---
+
+## Phase-1 endpoint operations reconciliation note
+
+Issues #169 and #170 extend the existing v3.2.2 capability set without creating a new Mother Reference or advancing the set-wide version.
+
+Authoritative scope additions are:
+
+- Phase-1 installed-software inventory for supported Windows/Linux endpoints;
+- customer-selectable process/service monitoring through the existing Monitoring Profile / Policy architecture;
+- explicit separation of business Criticality from effective Monitoring Profile, including automatic mapping versus explicit override;
+- trigger-specific bounded EDS definitions and cross-vantage evidence association for faster deterministic RCA;
+- a dedicated BUILD-098 for end-to-end Installed Software Inventory & Change Evidence;
+- reuse of existing BUILD-012/015 EDS and BUILD-100 deterministic RCA rather than creation of a second diagnostics/RCA framework.
+
+The exact requirements, data contracts, security/capacity controls, UI behavior, tests and BUILD ownership are distributed to their normal owning Mother References and indexed by Platform_08.
