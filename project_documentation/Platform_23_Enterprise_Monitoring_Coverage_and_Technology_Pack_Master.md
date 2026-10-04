@@ -610,3 +610,23 @@ At creation, this document is EMC-0 requirements/architecture authority only. It
 ## Final handoff baseline note — 2026-09-21 (Reconciled 2026-09-30)
 
 `Platform_23` remains the highest specialized Mother Reference. The 2026-09-21 architecture review determined **SPECIALIZED MASTER NOT REQUIRED AT THIS BASELINE** for Flow, Logs, Cloud, Extensibility or ITSM; those domains strengthen existing owners. The 2026-09-30 reconciliation (Issue #142) reaffirmed this boundary for Unified Network & Infrastructure Observability Phase 1: eBPF process-network telemetry and active path observability integrate into existing Agent/Sensor/Core and Capability Pack architecture without creating a new specialized master or competing framework. Capability Pack remains the single extension architecture. Dimensional certification and `SPECIFIED != IMPLEMENTED != CERTIFIED` classification remain mandatory.
+
+---
+
+## Phase-1 server inventory and Fast-RCA coverage reconciliation — Issues #169/#170
+
+For supported Windows/Linux server/VM/endpoint certification, coverage now also records:
+
+- installed-software inventory source coverage and authoritative reconciliation support under `REQ-INF-014`;
+- customer-selectable process/service monitoring selector coverage under `REQ-INF-015`;
+- Criticality/effective Monitoring Profile behavior under `REQ-INF-016`;
+- trigger-specific EDS definition support under `PRD-MIA-059`;
+- cross-vantage EDS/OOB/virtualization/storage/path evidence support under `PRD-MIA-060`.
+
+Software inventory certification is source-specific. A Linux distro/package manager, Windows source, Agent or agentless mode is not certified merely because another source is supported. Pack/source declarations must state native source, supported versions, required privilege, fields, limits, normalization behavior, expected partial/failure modes and test evidence.
+
+Process/service certification must prove stable selector semantics and PID-reuse safety, not merely enumerate a process list.
+
+EDS certification remains dimensional per definition and OS/version/privilege. Listing `EDS_CPU_PRESSURE` or another definition in a pack does not certify that definition until its evidence/resource/security/negative-path matrix passes.
+
+Physical and virtualization Fast-RCA coverage is multi-vantage: endpoint, OOB, hypervisor, storage and network evidence keep separate provenance. A technology pack may declare the evidence it can provide but does not become causal authority.
