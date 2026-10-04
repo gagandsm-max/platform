@@ -33,9 +33,13 @@ Install Sensor package, provide current Master Core address/enrollment material 
 
 Linux Agent native package or Windows MSI/BAT wrapper installs service, enrolls against current Master Core, receives identity and is directed by Core to the appropriate Sensor. Agent retains enough information to reconnect after reboot while Core may revise assignment.
 
-## 4. Auto-start
+## 4. Auto-start and supervised recovery
 
-Installers enable services automatically. Reboot test is mandatory before installation certification.
+Installers enable every mandatory runtime service required by the selected deployment profile automatically. Core, Sensor and Linux Agent services use `systemd` boot enablement and bounded supervised recovery; Windows Agent uses automatic SCM start and configured recovery actions. Where PostgreSQL, ClickHouse, Kafka or Valkey run as separate mandatory Core services, they are included in the same automatic enable/start/recovery contract.
+
+After a supported host reboot or recoverable process crash, the platform shall restore the required monitoring/control profile without routine customer process-start commands. Dependency-aware health/readiness governs startup order and recovery. Optional, scheduled or on-demand workers need not remain resident when no enabled workload requires them. Repeated crash loops must surface in Platform Health/diagnostics and must not be hidden by infinite restart.
+
+Installation certification requires both cold-reboot auto-start and process-kill/fault-injection recovery tests for the mandatory runtime set.
 
 ## 5. Upgrade
 
