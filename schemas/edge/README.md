@@ -1,7 +1,7 @@
 # Platform Edge Transport Contracts (BUILD-000)
 
 **Scope:** Agent↔Sensor and Sensor↔Core JSON transport contracts, sequence bounds, ACK durability, heartbeat v1, standard errors.
-**Mother Reference:** Platform v3.2.2.
+**Mother Reference:** Platform v3.3.0.
 **Issue:** #110.
 **Canonical base SHA:** `315a20980e89683666a64362f0ed3827bf613d4a`.
 

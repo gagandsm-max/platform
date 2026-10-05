@@ -1,7 +1,7 @@
 # Platform — Installation, Upgrade, Rollback & Operational Runbooks
 
 **Document ID:** PLATFORM-OPSINSTALL-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
 **Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the v3.2.2 enterprise-SNMP operational-runbook supplement. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
@@ -144,3 +144,32 @@ Operational runbooks shall include the following new failure classes without cre
 Support evidence shall expose the last inventory reconciliation, effective process/service monitor selector, effective Monitoring Profile source/mode, EDS job/result status and related evidence-window references without exposing credentials/secrets.
 
 No installation/upgrade change is required merely by these logical features beyond their owning future BUILDs; BUILD-018/126 remain packaging/install authorities.
+
+
+---
+
+## 13. v3.3.0 operational runbook additions
+
+### 13.1 OTLP source degradation/backpressure
+
+Operations must expose per source/tenant/ingress profile authentication failures, accepted/rejected/dropped records, cardinality interventions, queue depth/oldest age, retries/replay, Kafka/ClickHouse lag and storage pressure. Runbooks distinguish telemetry-source failure from monitored application/service failure. Under pressure, bounded OTLP enrichment is throttled/shed according to policy before protected monitoring/control/durability is impaired; silent loss is prohibited.
+
+### 13.2 Integration Service failure and recovery
+
+Runbooks cover vendor outage, credential expiry/revocation, webhook authentication failure/replay flood, 429/rate limiting, mapping/required-field failure, unsupported transition, inbox/outbox backlog, poison payload/quarantine/DLQ, loop suppression, wrong-CI/conflict queue and restart/checkpoint recovery. Replay/drain must preserve idempotency and vendor rate budgets; recovering from outage must not generate a thundering herd. Integration degradation never blocks core monitoring or changes observed target state.
+
+### 13.3 CMDB reconciliation
+
+Operations expose connector/binding counts, match-confidence/conflict states, stale external versions, incremental-sync checkpoint/lag, relationship reconciliation health and pending operator conflicts. External CI deletion/missing state does not automatically delete a Platform entity; decommission remains governed.
+
+### 13.4 NCM Change Assurance
+
+Runbooks cover stale/failed backup, precheck failure, external approval unavailable/rejected/stale, plan mutation, canary/batch stop, postcheck/stabilization failure, unsupported rollback, partial rollback and escalation. A failed rollback must preserve evidence and stop further destructive rollout. Maintenance/suppression is always explicitly ended or left in a visible failed/attention state; no silent indefinite maintenance.
+
+### 13.5 Firmware — Phase 1.5
+
+Runbooks cover image repository/provenance/integrity failure, entitlement/compatibility/intermediate-version uncertainty, insufficient flash/storage, transfer interruption, reboot timeout, canary failure, post-upgrade health failure and rollback unavailable/failed. Unsafe or uncertified rollback escalates rather than guessing.
+
+### 13.6 Browser journeys — Phase 1.5
+
+Before browser runtime release, operations must define browser worker crash cleanup, stale process cleanup, credential/token expiry, screenshot/artifact TTL/access/redaction, site/Sensor capacity exhaustion and degraded-mode behavior that cannot starve base monitoring.

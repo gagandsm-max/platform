@@ -1,7 +1,7 @@
 # Platform — CI/CD, Packaging & Distribution Master
 
 **Document ID:** PLATFORM-RELEASEENG-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform
 **Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
@@ -103,3 +103,14 @@ If and when `github.com/cilium/ebpf` (or another formally approved eBPF loader d
 - **Graceful degradation on uncertified / incompatible platforms:** On a base-Agent-supported OS outside the certified eBPF matrix (or where the host kernel lacks required eBPF/BTF features or privileges), eBPF instrumentation remains strictly disabled and reports capability state as `UNSUPPORTED` or `KERNEL_INCOMPATIBLE`. Base host metric, systemd, and disk monitoring continue unaffected without crash, panic, or install failure. Expansion of the certified eBPF OS matrix is owned by **BUILD-019** benchmark and test evidence.
 - **Signing and provenance:** eBPF probe objects and Go loader binaries are built reproducibly in CI, signed with the release signing key, and catalogued in the release SBOM (SPDX/CycloneDX). No compilation from C sources is required or performed on the target customer host during installation.
 - **Air-gapped offline distribution:** The offline release bundle includes all necessary kernel compatibility assets; no external internet repository access is attempted or required at runtime.
+
+
+---
+
+## 8. v3.3.0 governed Pack and privileged artifact distribution
+
+Capability Packs shipped by Platform are versioned release artifacts with declared provenance, integrity/signing metadata, compatibility range, licence/redistribution evidence, SBOM/third-party notices where applicable and promotion/rollback metadata. A pack cannot become Official Certified merely because it is packaged or signed; certification evidence remains Platform_23/14 authority.
+
+Phase-1.5 firmware images are **customer/vendor-entitled privileged artifacts**, not ordinary Platform dependencies. If Platform provides repository/caching/distribution functions, metadata must preserve source/vendor, exact image/version/model compatibility, entitlement/reference, checksum and vendor signature status where available, acquisition/import actor/time, approval state and immutable content identity. Firmware artifacts are access-controlled, auditable and excluded from general telemetry/support-bundle export. Platform must not redistribute vendor firmware without appropriate rights/entitlement.
+
+Selecting a browser-runtime package for Phase-1.5 synthetics requires separate Platform_07 admission, pinned browser/runtime provenance, SBOM/CVE/licence scans, signed/offline packaging strategy and rollback/upgrade evidence before release.

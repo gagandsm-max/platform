@@ -1,7 +1,7 @@
 # Platform — Decision, Source & Assumption-Control Register
 
 **Document ID:** PLATFORM-DECISION-001  
-**Version:** 3.2.2  
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Decision Provenance**
 
 ## 1. Purpose
@@ -313,7 +313,7 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 |---|---|---|
 | Codex suspended from normal Platform workflow | USER-FIXED | Effective 2026-09-27, Codex CLI / GitHub Codex is suspended from the normal Platform engineering workflow due to token/cost overhead. Codex must not be selected by normal task manifests or routing as writer, verifier, certification lane or exceptional elevated writer until a future explicit Founder governance decision reactivates it. Compatibility projection assets under `.codex/agents/` may remain in the repository but do not authorize Codex use. |
 | Antigravity absorbs former Codex independent-audit duties | USER-FIXED | Antigravity CLI retains its verifier-first, read-only/adversarial-by-default posture and additionally performs the independent exact-SHA audit, adversarial review, negative/failure/security challenge and certification-gate evidence/recommendation duties formerly assigned to Codex. Antigravity supplies independent certification-gate evidence; it is not final certification authority and may not self-certify. Exceptional Antigravity writing still requires explicit isolated `writerElevation`. |
-| Unchanged control-plane and writer authority | USER-FIXED | Cursor CLI remains the default bounded writer. ChatGPT + GitHub remain control plane, architecture/technical authority, source-truth authority, sequencing, merge gatekeeper and final technical certification authority. Cursor Cloud remains a never-writer. GitHub Copilot remains limited auxiliary PR/code-review only. Platform product version remains **3.2.2**. Authoritative machine-readable expression: `project_agents/tool_authority.json`. |
+| Unchanged control-plane and writer authority | USER-FIXED | Cursor CLI remains the default bounded writer. ChatGPT + GitHub remain control plane, architecture/technical authority, source-truth authority, sequencing, merge gatekeeper and final technical certification authority. Cursor Cloud remains a never-writer. GitHub Copilot remains limited auxiliary PR/code-review only. Platform product version remains **3.3.0**. Authoritative machine-readable expression: `project_agents/tool_authority.json`. |
 
 ## 19. USER-FIXED service assurance and reporting decisions — 2026-09-27
 
@@ -395,3 +395,49 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Trigger-specific EDS definitions | ARCH-DELEGATED | Use bounded `EDS_*` definition IDs under `ENDPOINT_DIAGNOSTIC_SNAPSHOT`; do not label endpoint definitions `RCA_*` because endpoint capture is not causal authority. |
 | Cross-vantage RCA | ARCH-DELEGATED | Core may associate bounded capability/relationship-aware OOB/virtualization/storage/path evidence with endpoint EDS. Guest Agents do not infer hypervisor cause; endpoint OS evidence does not fabricate chassis/OOB truth. |
 | First-GA VM Fast-RCA depth | ARCH-DELEGATED | VMware is the first deep cross-vantage virtualization certification path through BUILD-033. Other hypervisors remain monitoring targets and require separate promotion/evidence for equivalent Fast-RCA depth. |
+
+
+---
+
+## 23. v3.3.0 Founder-approved ACP-001..ACP-018 decisions — 2026-10-05
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Single Capability Pack architecture | USER-FIXED + ARCH-DELEGATED implementation | Capability Pack remains the only pack/extensibility architecture; no parallel Technology Pack framework. |
+| Investigation Workbench | USER-FIXED + ARCH-DELEGATED implementation | Productize existing Investigation Session/Unified Timeline/Flight Recorder/RCA; no second evidence store/RCA engine. |
+| Path Intelligence | USER-FIXED + ARCH-DELEGATED implementation | Extend active-path + canonical temporal graph; no second topology authority. |
+| OTel Phase-1 boundary | USER-FIXED | Phase 1 GA = OTLP metrics + structured logs + resource identity + trace/span correlation/exemplars where supplied; retained distributed spans are not a Phase-1 GA requirement. |
+| Bounded spans | USER-FIXED | Bounded sampled operational spans/service-edge/trace investigation are Phase 1.5 after P0 performance/security/sampling certification. |
+| OTel ingress profiles | ARCH-DELEGATED | Governed Sensor-local/Streaming-Event Sensor and controlled Core ingress are allowed under one trust/policy model. |
+| OTel datastore | ARCH-DELEGATED | Reuse PostgreSQL/ClickHouse/Kafka/Valkey roles; no mandatory new trace/telemetry database. |
+| NCM product direction | USER-FIXED + ARCH-DELEGATED implementation | NCM becomes Network Change & Configuration Assurance. |
+| Change Assurance Record | ARCH-DELEGATED | Evidence envelope references Change Plan/NCM/ITSM/config/graph/incident/audit; it is not a second workflow/config authority. |
+| Approval integrity | ARCH-DELEGATED | External approval binds immutable plan version, exact targets, rendered config/template hash and approved window; material mutation makes approval stale. |
+| Rollback semantics | ARCH-DELEGATED | Rollback is capability/vendor/device certified, never universal. |
+| Firmware phase | USER-FIXED | Firmware lifecycle is Phase 1.5, not Phase-1 GA. |
+| Integration Fabric placement | ARCH-DELEGATED | Implement logically inside existing Integration Service initially; no mandatory new Integration microservice. |
+| Phase-1 ITSM set | USER-FIXED | ServiceNow, Jira Service Management, BMC Helix, ManageEngine ServiceDesk Plus/MSP are Phase-1 certification targets. |
+| Phase-1.5 ITSM set | USER-FIXED | Ivanti, Freshservice/MSP, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM are certification-priority Phase-1.5 targets, not a global market ranking. |
+| ITSM authority | USER-FIXED + ARCH-DELEGATED implementation | External workflow/ticket state never overrides observed Platform monitoring truth or local authorization/safety. |
+| CMDB modes/authority | USER-FIXED + ARCH-DELEGATED implementation | Enrichment + bounded Publication Phase 1; reconciled bidirectional architecture Phase 1/deeper relationship certification Phase 1.5 with explicit field/class authority and conflicts. |
+| ServiceNow CI reconciliation | ARCH-DELEGATED / vendor-evidence constrained | Certified ServiceNow publication uses IRE by default unless later vendor certification proves a safer supported method. |
+| CMDB relationship truth | ARCH-DELEGATED | Declared external relationships coexist with observed graph relationships and never silently overwrite them. |
+| Browser journeys | USER-FIXED | Phase 1.5; browser engine remains P0 OSS/runtime/security/capacity decision. |
+| Endpoint/Switch-Port Intelligence | USER-FIXED | Phase 1.5; reuse canonical entity/graph/IPAM/discovery identity. |
+| DB Performance Intelligence | USER-FIXED | Phase 1.5; query/wait/blocking/deadlock/regression/plan evidence, no autonomous tuning. |
+| Virtualization Optimization | USER-FIXED | Phase 1.5 recommendations only; no autonomous VM/resource changes. |
+| Deep VoIP | USER-FIXED | Specialist VoIP depth is Phase 2. |
+| Full traditional APM | USER-FIXED | Excluded: continuous profiling/flame graphs/source/IDE developer tooling/full RUM/session replay/unlimited traces. |
+| Full always-on DPI/NDR | USER-FIXED | Excluded; bounded incident-triggered packet evidence remains permitted under existing security/privacy/retention controls. |
+
+### 23.1 P0 engineering spikes retained
+
+1. OTel trace economics/backend/schema/sampling/retention/backpressure and HA.
+2. Browser runtime and Playwright-or-alternative OSS/security/capacity admission.
+3. Exact first-four ITSM connector certification labs by edition/API/auth/workflow/CMDB capability.
+4. NCM semantic-parser and rollback capability matrix by vendor/version.
+5. Firmware entitlement/provenance/compatibility/intermediate-version/integrity/rollback matrix.
+6. Official Capability Pack exact product/version certification matrices and fixtures/lab evidence.
+7. External CI reconciliation/match-confidence/conflict thresholds against representative enterprise inventories.
+
+P0 spikes are evidence gates, not permission to invent numeric defaults or certification claims.

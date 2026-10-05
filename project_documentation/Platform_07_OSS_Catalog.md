@@ -1,7 +1,7 @@
 # Platform — Authoritative Open-Source Software Catalogue
 
 **Document ID:** PLATFORM-OSS-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — Dependency Allow-List Authority (**A2.3 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
@@ -82,7 +82,7 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 | OSS-042 | Hardware | Redfish/Swordfish | Gofish | BSD-3-Clause | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Infrastructure Sensor | Redfish/Swordfish hardware inventory/health collection. | Platform owns normalized hardware entity model and vendor packs. |
 | OSS-043 | Virtualization | VMware vSphere | govmomi | Apache-2.0 | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Infrastructure Sensor | vCenter/ESXi inventory, topology and metrics via vSphere APIs. | Platform owns graph, monitoring policy, dashboards and alerts. |
 | OSS-044 | Containers | Kubernetes client | client-go | Apache-2.0 | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Infrastructure/Cloud Sensor | Kubernetes API, inventory, events and workload discovery. | Platform owns canonical K8s graph and correlation. |
-| OSS-045 | Observability | OpenTelemetry / OTLP | OpenTelemetry Collector + contrib | Apache-2.0 | USE/INTEGRATE | APPROVED_NOT_IMPLEMENTED | Sensor/Core ingestion | OTLP metrics/logs ingestion and selected receivers/exporters where appropriate. | Platform does not market full APM initially. Trace storage/UX is future-ready only. |
+| OSS-045 | Observability | OpenTelemetry / OTLP | OpenTelemetry Collector + contrib | Apache-2.0 | USE/INTEGRATE | APPROVED_NOT_IMPLEMENTED | Sensor/Core ingestion | Phase-1 OTLP metrics/logs ingestion and selected certified receivers/processors/exporters where appropriate; Phase-1.5 may add bounded sampled-span handling through the same governed OTel basis after benchmark/security admission. | Platform does not market full developer-centric APM; no dedicated trace database or new proprietary instrumentation protocol is selected. |
 | OSS-046 | Containers | Docker/container runtime API | Moby/Docker client libraries | Apache-2.0 | CANDIDATE | CANDIDATE | Infrastructure Sensor | Container runtime inventory/metrics where Docker API is used. | Use only required client APIs and version-pin. |
 | OSS-047 | Cloud | AWS API/monitoring | AWS SDK for Go v2 | Apache-2.0 | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Cloud Sensor | AWS inventory/monitoring API access. | Platform owns entity normalization and policy. Version-level dependency scan mandatory. |
 | OSS-048 | Cloud | Azure API/monitoring | Azure SDK for Go | MIT / component-specific review | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Cloud Sensor | Azure inventory/monitoring APIs. | Version-level component/license scan required. |

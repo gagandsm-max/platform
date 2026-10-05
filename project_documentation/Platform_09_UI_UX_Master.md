@@ -1,7 +1,7 @@
 # Platform — UI/UX, Navigation & Out-of-Box Dashboard Master
 
 **Document ID:** PLATFORM-UIUX-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
@@ -7451,3 +7451,34 @@ Do not create a second “Fast RCA dashboard.” Triggered Fast RCA is presented
 The UI may show which EDS definition ran, capture status, evidence categories, missing/denied/suppressed evidence, related physical/virtualization/storage/path vantages, evidence age/provenance, current RCA revision, prior revisions, confidence, contradictions and missing evidence.
 
 Endpoint indicators are visually labelled as evidence, not final cause. VMware/hardware/storage evidence is shown with its own vantage. `INCONCLUSIVE` is a supported outcome.
+
+
+---
+
+## 15. v3.3.0 productized operations UX
+
+### 15.1 Investigation Workbench — Phase 1
+
+The existing Incident/Investigation experience is productized as one Investigation Workbench. It retains tenant/site/time scope while synchronizing available metrics, qualified alerts/incidents, Flow, logs/Syslog/traps/events, topology, Path Intelligence, routing/config/NCM changes, application/service telemetry, database/cloud/deployment events, synthetics, Sensor state, Flight Recorder and ITSM activity. Selecting evidence in one pane updates the common time/evidence context without creating another evidence store. Users can always distinguish observed fact, external/declarative context, inferred relationship, stale/missing evidence and RCA hypothesis; `INCONCLUSIVE` remains valid.
+
+### 15.2 Path Intelligence — Phase 1
+
+Path views show current/historical/multi-vantage path, path fingerprints/change, hop latency/loss/jitter where reliable, hidden/incomplete-hop quality, related interfaces/routing peers/config changes/Flow/synthetics/provider/business-service context and prior incident evidence. Path and topology time travel use the canonical temporal graph.
+
+### 15.3 OTel onboarding and service operations
+
+Administration exposes **Add OpenTelemetry Source** with ingress profile, endpoint/authentication, signal selection, tenant/site/source binding, connection test, telemetry preview, resource/service identity-resolution preview, cardinality/sensitive-field/quality findings, estimated capacity impact and controlled activation. Phase-1 service views use metrics/logs and trace-context/exemplars when present; Phase-1 UI does not promise distributed trace waterfall/search. Phase-1.5 may add bounded trace search/waterfall after certification.
+
+### 15.4 NCM Change Assurance
+
+NCM UI adds Change Plans, Assurance Records, Pre-checks, Risk/Blast Radius, External Change/Approval, Canary/Batches, Post-check/Stabilization and Outcome/Audit views. The approval panel displays exact plan version, target/config hashes and approved window and clearly marks `STALE_REAPPROVAL_REQUIRED`. Risk/blast-radius views expose evidence freshness/confidence and never present graph inference as certain impact.
+
+### 15.5 ITSM & CMDB Integration onboarding
+
+Administration -> Integrations -> ITSM & CMDB -> Add Integration provides vendor selection, endpoint/authentication, project/tenant context where applicable, capability discovery, permission validation, standard mapping proposal, unsupported/edition-limited capability disclosure, Integration Test Sandbox, enablement toggles and Integration Health. Mapping Studio provides declarative versioned mappings with preview/test/promotion/rollback; no executable customer scripting.
+
+Synchronization/conflict UI keeps **Monitoring State** separate from **External ITSM State**. CMDB reconciliation provides match evidence/confidence, external binding, authority profile, field/relationship conflicts and operator resolution/audit. External CI disappearance never presents the monitored entity as automatically deleted.
+
+### 15.6 Phase-1.5 specialist UX
+
+Endpoint & Switch-Port Intelligence adds MAC/IP/user-when-available/AP/switch/port/VLAN attachment history and provenance. Browser Journey Synthetics adds step/assertion/timing/failure-evidence views only after browser runtime admission. Database Performance Intelligence adds bounded fingerprint/wait/blocking/deadlock/regression/plan evidence. Virtualization Optimization shows evidence-backed recommendations requiring governed human action. None of these Phase-1.5 screens are first-GA implementation claims.

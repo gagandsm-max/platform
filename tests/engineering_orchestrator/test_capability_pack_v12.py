@@ -65,6 +65,7 @@ CAPABILITY_PACK_PATH_PREFIXES = (
 )
 
 PRODUCT_RUNTIME_PATH_PREFIXES = ("ui/", "core/", "sensor/", "agent/")
+PRODUCT_RUNTIME_DOCUMENTATION_ONLY_FILES = ("agent/README.md",)
 PRODUCT_RUNTIME_FORBIDDEN_FILES = (
     "ui/package.json",
     "core/pom.xml",
@@ -88,8 +89,11 @@ def _product_runtime_hits(changed_paths: list[str]) -> list[str]:
     return [
         name
         for name in changed_paths
-        if name in PRODUCT_RUNTIME_FORBIDDEN_FILES
-        or any(_path_matches_prefix(name, prefix) for prefix in PRODUCT_RUNTIME_PATH_PREFIXES)
+        if name not in PRODUCT_RUNTIME_DOCUMENTATION_ONLY_FILES
+        and (
+            name in PRODUCT_RUNTIME_FORBIDDEN_FILES
+            or any(_path_matches_prefix(name, prefix) for prefix in PRODUCT_RUNTIME_PATH_PREFIXES)
+        )
     ]
 
 
@@ -804,6 +808,13 @@ class CapabilityPackUiAmendmentTests(unittest.TestCase):
             "project_documentation/AGENTS.md",
             "core/src/main/resources/brand/amrud_blk.png",
             "ui/public/brand/amrud_whi.png",
+        ]
+        self.assertFalse(capability_pack_product_runtime_hits(paths))
+
+    def test_agent_readme_is_documentation_not_runtime(self) -> None:
+        paths = [
+            "project_agents/manifest.json",
+            "agent/README.md",
         ]
         self.assertFalse(capability_pack_product_runtime_hits(paths))
 

@@ -1,7 +1,7 @@
 # Platform — Protocol, Security, Credential & Connector Master
 
 **Document ID:** PLATFORM-PROTOCOL-001  
-**Version:** 3.2.2  
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Protocol/Security/Connector Contract**  
 **Product:** Platform
 
@@ -245,3 +245,30 @@ The existing Diagnostic Job and query-pack controls apply unchanged: tenant/enti
 ### Windows installed-software inventory side-effect prohibition
 
 Windows installed-software inventory is observational. Certified Agent/WinRM/WMI/CIM implementations must not use an enumeration mechanism known to trigger installer consistency checks, repair/reconfiguration, installation or other target mutation as a side effect merely to discover software. In particular, `Win32_Product`-style MSI inventory is not an approved default discovery mechanism. Prefer read-only supported registry/package/MSIX/AppX/OS inventory sources appropriate to the certified Windows version, with explicit provenance and partial-source behavior.
+
+
+---
+
+## 11. v3.3.0 OTLP, ITSM/CMDB and privileged-change connector contract
+
+### 11.1 OTLP ingress
+
+Certified OTLP/gRPC and OTLP/HTTP listeners are configurable and default to TLS-protected operation. mTLS is preferred where deployment permits; scoped token/OAuth-style credentials may be certified for compatible deployment profiles. Tenant/site/source authority is derived from the authenticated Platform ingress/connector binding, never from caller-supplied resource attributes or headers not bound by server configuration. Enforce compressed and post-decompression request bounds, record/attribute length/count limits, cardinality quotas, schema/protobuf/JSON validation where supported, rate limits, redaction/data-minimization policy and explicit accepted/rejected/dropped accounting.
+
+### 11.2 Platform-wide ITSM adapter contract
+
+Vendor adapters implement capability-advertised mappings over the canonical external-object model; unsupported objects/transitions must fail explicitly. Outbound connector egress uses destination allowlists/SSRF protections, TLS verification, proxy policy, least-privilege credentials, rate-budget awareness and deterministic operation/idempotency metadata. Inbound webhook/event processing requires connector authentication/signature where supported, replay protection, source binding, payload/schema/size bounds, rate limiting and server-side tenant derivation. Free-text comments/work notes are untrusted content and never directly become commands, templates, targets or authorization.
+
+Where webhooks/events are insufficient, bounded incremental polling must use provider-supported updated-since/cursor/checkpoint/pagination semantics when available; repeated full-instance scanning is prohibited where an incremental API exists.
+
+### 11.3 Connector certification priorities
+
+Phase 1 certification targets: ServiceNow, Jira Service Management, BMC Helix, ManageEngine ServiceDesk Plus / MSP. Phase 1.5 certification-priority targets: Ivanti Neurons for ITSM, Freshservice/Freshservice MSP, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM. Certification is exact cloud/on-prem variant, edition, API version, auth mode, object capability, approval/transition semantics, inbound-event/polling behavior, rate limits, custom fields and CMDB/assets/relationship behavior. A listed vendor is not a certified connector until evidence passes.
+
+### 11.4 ServiceNow CMDB
+
+Certified CI publication/reconciliation uses the Identification and Reconciliation Engine (IRE) path by default. Generic direct table insertion is not the standard publication mechanism. Exact IRE endpoint/behavior remains part of ServiceNow connector version/edition certification.
+
+### 11.5 NCM/firmware privileged boundary
+
+External ITSM approval is workflow evidence, not privileged execution authority. NCM execution additionally requires valid connector identity, expected external workflow state/approver, non-stale exact Change Plan/hash/targets/window binding, local RBAC/resource scope/policy/preconditions and audit. Stale/replayed approval is rejected. Firmware transfer/execution in Phase 1.5 requires approved repository/provenance/integrity and vendor-specific capability certification; no universal rollback claim.

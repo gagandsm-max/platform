@@ -2,7 +2,7 @@
 
 **Status:** NON-MOTHER engineering sequencing control  
 **Authoritative source:** `project_documentation/Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`  
-**Mother Reference:** Platform v3.2.2 after merge to canonical `main`
+**Mother Reference:** Platform v3.3.0 after merge to canonical `main`
 
 ## Objective
 

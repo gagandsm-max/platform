@@ -1,11 +1,11 @@
 # Platform — API, Event, Data Model & Schema Contracts
 
 **Document ID:** PLATFORM-CONTRACTDATA-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract (TRANSITIONAL_LEGACY)**
 **Normalization state:** TRANSITIONAL_LEGACY. BUILD-000 freezes a bounded edge/control contract subsection below; the remainder awaits later normalization.
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
-**Consolidation rule:** This v3.2.2 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the approved v3.2.2 NOC troubleshooting plus enterprise-SNMP correctness API/event/data contracts. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
+**Consolidation rule:** This v3.3.0 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the approved v3.2.2 NOC troubleshooting plus enterprise-SNMP correctness API/event/data contracts. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 **Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142); document remains TRANSITIONAL_LEGACY.
 
 ## 1. Purpose
@@ -836,3 +836,47 @@ No second Fast-RCA bundle schema is introduced.
 EDS/Diagnostic Job evidence may carry optional `evidence_window_id` and/or canonical context/relationship snapshot reference when associated with an Incident Flight Recorder / Investigation evidence window. Related OOB/virtualization/storage/path evidence remains separate evidence references with its own source/vantage/provenance; it is not copied into the endpoint EDS payload as fabricated local context.
 
 Factual indicator values are versioned evidence fields, not free-form root-cause prose. Core RCA references evidence IDs and preserves revisions.
+
+
+---
+
+## 13. v3.3.0 Integration, CMDB and Change Assurance contract supplement
+
+### 13.1 Canonical external-object API model
+
+Versioned connector APIs normalize vendor objects to:
+
+- `Incident` (Major Incident normally classification/extension);
+- `Problem`;
+- `Change`;
+- `ChangeTask`;
+- `Approval`;
+- `ExternalActivity{PUBLIC_COMMENT|INTERNAL_WORK_NOTE}`;
+- `MaintenanceWindow`;
+- `AssignmentRef`, `ExternalPrincipalRef`, `BusinessServiceRef`;
+- `CIRef`, `CIRelationshipRef`;
+- `AttachmentRef`, `ExternalBinding`, `SyncConflict`.
+
+Vendor-specific fields remain adapter extensions/mappings and must not leak into unrelated domain models as mandatory fields. Service Request may be represented for adapter interoperability but service-catalog-triggered privileged operation is Phase 2.
+
+### 13.2 Integration event envelope
+
+Inbound normalized events include server-derived `tenant_id`, `connector_id/version`, external event/object/type identifiers, external version/ETag where present, event time + received time, correlation/operation identity, origin/lineage, normalized object reference, mapping version, payload hash and authentication/verification result. Webhook payload tenant fields are never authoritative.
+
+Outbound operation records include stable operation ID/hash, connector/version, canonical object/reference, external binding, mapping version, correlation ID, retry class/attempt/not-before, rate-budget state and lineage. Delivery is at-least-once/idempotent; exactly-once is not claimed.
+
+### 13.3 ExternalBinding and relationship provenance
+
+ExternalBinding semantics are defined in Platform_05 §94.2. `CIRelationshipRef` maps external relationship ID/type to an existing canonical graph edge representation while preserving external source, authority/declaration class, confidence where relevant, first/last observation, freshness, lifecycle and supporting binding. Normalized relationship vocabulary may include `CONNECTED_TO`, `RUNS_ON`, `HOSTED_ON`, `DEPENDS_ON`, `USES`, `SERVES`, `MEMBER_OF`, `BACKED_BY` and `MANAGED_BY` where the external/product semantics are supportable. Vendor-specific relation types may remain namespaced rather than being falsely normalized. Imported declared relationships must remain distinguishable from independently observed technical evidence.
+
+### 13.4 Change Assurance API
+
+Change Plan API uses immutable/versioned plan semantics and optimistic concurrency/ETag. Approval validity references exact plan version, target-set hash, rendered-change/template hash and approved window. Mutation returns/causes `STALE_REAPPROVAL_REQUIRED` where any approval-bound material property changes. Change Assurance query returns references to risk/blast snapshots, precheck/canary/batch/postcheck/stabilization/rollback/outcome evidence and audit rather than duplicating underlying source records.
+
+### 13.5 OTLP Phase-1 data contract
+
+Metrics/logs preserve OpenTelemetry Resource and Instrumentation Scope metadata needed for correct semantics and compatibility, plus schema/semantic-convention provenance where supplied. Metric handling preserves instrument/temporality/monotonic/unit/histogram semantics where certified; logs preserve timestamps, severity, bounded body/attributes and trace/span correlation identifiers. No Phase-1 schema may require distributed span persistence. Phase-1.5 sampled span contracts, if activated, preserve trace/span/parent identity, kind/timing/status, bounded attributes/events/links and sampling provenance without changing canonical entity/service identity.
+
+### 13.6 Endpoint/access-port relationship evidence — Phase 1.5
+
+Attachment observations map mutable MAC/IP/user-when-available/AP/switch/port/VLAN evidence to canonical entities/graph with source, observed time, confidence/quality and history. PID/MAC/IP/user labels are not silently promoted to permanent global identity without reconciliation evidence.

@@ -1,10 +1,10 @@
 # Platform — Enterprise Gap Closure Master
 
 **Document ID:** PLATFORM-EGC-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Enterprise Gap Closure**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
-**Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation or readiness claim
+**Change class:** Additive v3.3.0 product/engineering requirements; no runtime implementation or readiness claim
 
 ---
 
@@ -47,7 +47,7 @@ Nothing in this document selects a new OSS dependency, database, mandatory micro
 | `PRD-EGC-010` | P1 | SASE/SSE/ZTNA integrations shall normalize service/connector/tunnel/session/policy/experience evidence into Platform inventory, topology, health and incident context without claiming to replace the security control plane. |
 | `PRD-EGC-011` | P1 | Platform shall provide a lean Incident Command Workspace that assembles incident state, evidence, timeline, ownership, actions and links to ITSM/collaboration systems; it shall not duplicate Slack/Teams/chat functionality. |
 | `PRD-EGC-012` | V1.x | Optional endpoint Digital Experience Monitoring may collect bounded device/application/network experience signals needed for service quality, with explicit tenant policy, transparency, minimization, retention controls and prohibitions on keystroke/content/user-surveillance collection. |
-| `PRD-EGC-013` | V1.x | Platform may add multi-step browser synthetics with scripted journeys, assertions, timing and evidence capture. No browser runtime or automation dependency is selected by this requirement. |
+| `PRD-EGC-013` | P1.5 | Platform may add multi-step browser synthetics with scripted journeys, assertions, timing and evidence capture. No browser runtime or automation dependency is selected by this requirement. |
 | `PRD-EGC-014` | V1.x | Platform may support customer-operated/outside-in probes for externally observed reachability and service experience. This does not commit Platform to operating a global managed probe SaaS. |
 | `PRD-EGC-015` | P2 | Future regional Core federation may provide governed cross-region inventory/service/incident summarization and continuity, but shall not alter the v1 exactly-two-Core Active/Standby contract without separate architecture change control. |
 
@@ -171,7 +171,7 @@ P0/P1 capability implementation is not complete until the relevant requirements 
 | `REQ-EGC-009` | P1 | SASE/SSE/ZTNA tests prove normalized identity/relationship mapping, secret handling, API rate/failure behavior and separation of observation from enforcement. |
 | `REQ-EGC-010` | P1 | Incident Command Workspace tests prove authoritative-object linkage, role/tenant scoping, external-integration degradation behavior and absence of an independent chat authority. |
 | `REQ-EGC-011` | V1.x | DEX privacy tests prove prohibited content/surveillance fields are not collected, tenant policy gates collection, and retention/export honor configured privacy controls. |
-| `REQ-EGC-012` | V1.x | Browser-synthetic implementation requires an approved dependency/security/performance decision plus deterministic journey, secret, evidence-retention and failure-isolation tests. |
+| `REQ-EGC-012` | P1.5 | Browser-synthetic implementation requires an approved dependency/security/performance decision plus deterministic journey, secret, evidence-retention and failure-isolation tests. |
 | `REQ-EGC-013` | V1.x | Outside-in probe implementation proves customer/probe identity, tenant scope, replay resistance, bounded buffering, time quality and explicit ownership/operating model. |
 | `REQ-EGC-014` | P2 | Regional federation requires separate architecture approval and tests for partition, authority, data residency, reconciliation and compatibility while preserving v1 two-Core HA semantics. |
 | `REQ-EGC-015` | P0 | Every capability introduced under this master exposes health/lag/error/capacity telemetry sufficient to distinguish Platform collection/control degradation from monitored-environment failure. |
@@ -208,3 +208,18 @@ The following enterprise adoption gaps are now explicitly closed at the **requir
 4. **Triggered Fast RCA / endpoint diagnostics** — owned by Platform_22 `PRD-MIA-059/060`: EDS is extended with bounded trigger-specific definitions and related-vantage evidence association; no second diagnostics/RCA authority is created.
 
 These are first-GA targets, not implementation claims. Their exit depends on the Build Register owners and Platform_14 certification evidence.
+
+
+---
+
+## 11. v3.3.0 controlled specialist phasing
+
+This reconciliation promotes the **requirement phase**, not implementation state:
+
+- `PRD-EGC-013 / REQ-EGC-012` multi-step browser journey synthetics -> **Phase 1.5**, with browser runtime/Playwright-or-alternative selection still P0 OSS/security/capacity work. Real browser login/navigation/form/assertion/step timing/distributed execution/failure evidence are required; full RUM/session replay are excluded.
+- `REQ-INF-007` Database Performance Intelligence -> **Phase 1.5** for safe query fingerprints, waits/wait classes where vendor semantics support them, blocking/deadlocks, expensive/slow workload, regressions and plan-change evidence plus host/storage/application dependency context. Autonomous tuning remains excluded.
+- `REQ-INF-004` Virtualization Optimization -> **Phase 1.5** for evidence-backed rightsizing, idle/zombie VM, snapshot/orphan storage, contention/imbalance/capacity recommendations. No recommendation directly changes VM/resource state without separately governed remediation.
+- `REQ-NET-017` Endpoint & Switch-Port Intelligence -> **Phase 1.5** through canonical entity/graph/IPAM/network discovery authority; no second endpoint database and no employee surveillance.
+- Deep specialist VoIP/CDR/CMR/MOS/call-path depth beyond existing operational network/VoIP monitoring remains **Phase 2**.
+
+These phase decisions reuse existing architecture owners and do not select new dependencies by themselves.

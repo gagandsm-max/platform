@@ -1,7 +1,7 @@
 # Platform — Discovery, Onboarding, Identity & Notification Master
 
 **Document ID:** PLATFORM-ONBOARDING-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Discovery / Onboarding / Identity / Notification**
 **Product:** Platform
 **Change class:** Additive approved product scope clarification; does not remove or weaken any v3.2.1/v3.2.2 requirement
@@ -10,7 +10,7 @@
 
 ## 1. Authority and purpose
 
-This document is the authoritative v3.2.2 specialized master for governed discovery, endpoint onboarding, Agent identity continuity and the in-product Notification Center.
+This document is the authoritative v3.3.0 specialized master for governed discovery, endpoint onboarding, Agent identity continuity and the in-product Notification Center.
 
 It follows the same consolidated logical-layer model used by `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md`: requirements are defined once and mapped to the product, architecture, HLD, LLD/data, dataflow, UI, security, quality and operations layers so implementation does not invent or duplicate load-bearing behavior across many files.
 
@@ -802,3 +802,22 @@ After activation, Criticality/Profile changes use the normal BUILD-070 policy/de
 If `EXPLICIT_PROFILE` is active, a later Criticality change may update the suggestion but must not silently replace the effective profile. Switching back to automatic mapping is an explicit authorized/audited action.
 
 Bulk Criticality/profile changes require capacity/MWU preview and deterministic spread before activation so onboarding or later metadata edits cannot generate synchronized collection storms.
+
+
+---
+
+## 15. v3.3.0 external identity and telemetry-source onboarding reconciliation
+
+### 15.1 External CI bindings do not create duplicate identity authority
+
+CMDB/ITSM external CIs map through `ExternalBinding` to the canonical Platform entity identity. External object IDs/classes, serial/model/IP/hostname/business metadata are match evidence or governed metadata according to field authority; they are not permission to create a duplicate monitored entity when an existing canonical identity is sufficiently matched. Low-confidence/conflicting matches enter explicit reconciliation rather than silent merge.
+
+External CI disappearance/retirement does not automatically delete or mark the canonical monitored entity down. Entity lifecycle/decommission remains Platform-governed with preserved binding/audit history.
+
+### 15.2 OTel source onboarding — Phase 1
+
+A governed OpenTelemetry source onboarding flow records ingress profile, endpoint, authentication/credential reference, tenant/site/source binding, allowed signals, rate/cardinality/redaction policy, semantic/schema compatibility, connection/telemetry preview, entity/service resolution preview, capacity estimate and activation generation. Telemetry resource attributes cannot self-select tenant/site. Ambiguous service/host/pod/container/cloud identity is visible before/after activation and can be reconciled without creating a second service/entity authority.
+
+### 15.3 Integration onboarding
+
+ITSM/CMDB connectors use the same governed onboarding principles: test network/TLS/proxy/authentication, discover API/version/capability/permissions, propose standard mappings, show unsupported/edition-limited features, exercise Integration Test Sandbox and activate only explicitly selected synchronization modes. Notification/onboarding events are deduplicated/rate-bounded so connector or reconciliation storms do not flood administrators.

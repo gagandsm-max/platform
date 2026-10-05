@@ -50,7 +50,7 @@ MINIMAL_DOCS = [
 ]
 
 
-def _header(doc_id: str | None, version: str = "3.2.2") -> str:
+def _header(doc_id: str | None, version: str = "3.3.0") -> str:
     if doc_id is None:
         return f"# AGENTS\n**Version:** {version}\n\n"
     return (
@@ -107,7 +107,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         legacy: list[dict] | None = None,
         extra_files: dict[str, str] | None = None,
         omit_files: set[str] | None = None,
-        version: str = "3.2.2",
+        version: str = "3.3.0",
         p00_sections: str | None = None,
         p08_extra: str = "",
         p08_historical: str | None = None,
@@ -377,7 +377,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
     def test_07_version_mismatch_fails(self) -> None:
         root = self._write_minimal(version="9.9.9")
         man = json.loads((root / "mother_reference_manifest.json").read_text())
-        man["motherReferenceVersion"] = "3.2.2"
+        man["motherReferenceVersion"] = "3.3.0"
         (root / "mother_reference_manifest.json").write_text(
             json.dumps(man), encoding="utf-8"
         )

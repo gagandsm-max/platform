@@ -1,6 +1,6 @@
 # Platform Agent runtime
 
-This directory contains the Linux-first Platform Agent runtime governed by Platform v3.2.2.
+This directory contains the Linux-first Platform Agent runtime governed by Platform v3.3.0.
 
 ## Architecture boundary
 

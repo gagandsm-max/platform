@@ -1,7 +1,7 @@
 # Platform — Business Requirements Document (BRD)
 
 **Document ID:** PLATFORM-BRD-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — Business Requirements Authority (**A2.1 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Implementation model:** Clean-room implementation; independent project, not part of ThoughtData, Enterprise360 or NetAI
@@ -747,3 +747,22 @@ For the first-GA Network & Infrastructure Observability scope, AmrudAi shall pro
 The business objective is materially shorter investigation time with low monitored-endpoint overhead and no false certainty.
 
 Explicit exclusions remain: endpoint patch/deployment management, vulnerability scanning, licence metering, EDR, unrestricted shell/PowerShell, endpoint LLM/GNN causal engines, always-on PCAP/full DPI, and unsupported causal guesses.
+
+
+---
+
+## 43. v3.3.0 business outcomes — out-of-box operations, change assurance and enterprise integration
+
+The Founder-approved v3.3.0 programme strengthens first-use value without widening Platform into a full developer APM or packet/NDR product.
+
+Phase-1 business outcomes are:
+
+1. **Useful out of box:** common enterprise technologies use Official Certified Capability Pack targets so discovery/onboarding can identify technology, preflight access, select a compatible monitoring profile and produce useful inventory, telemetry, topology, dashboards, alerts and diagnostics without weeks of manual monitor construction.
+2. **No-context-switch investigation:** the existing Incident/RCA/Unified Operations Timeline experience is productized as an Investigation Workbench combining authorized metrics, alerts/incidents, Flow, logs/events, path/topology, configuration/change, Sensor health, synthetics, ITSM and other available evidence with common time/scope context.
+3. **Operational service telemetry, not full APM:** Phase 1 accepts OTLP metrics and structured logs and preserves trace/span correlation context. Bounded sampled spans are Phase 1.5 subject to performance, privacy, cardinality, sampling and retention certification.
+4. **Network Change & Configuration Assurance:** NCM must progress beyond backup/push into planned, approved, staged, validated and auditable change with explicit risk/blast-radius evidence, exact approval binding and certified rollback only where supported.
+5. **Platform-wide enterprise workflow integration:** ITSM/CMDB integration reduces duplicate operational work across incidents, problems, changes, maintenance, approvals, NCM, remediation, RCA/PIR and inventory/business-service context while preserving Platform monitoring truth.
+
+Phase-1.5 specialist outcomes include endpoint/switch-port intelligence, browser journey synthetics, deeper DB performance intelligence, virtualization optimization, NCM firmware lifecycle and the second-wave ITSM connector certification set. Deep VoIP specialist depth is Phase 2.
+
+Explicit non-goals remain: full traditional developer-centric APM, continuous profiling/flame graphs/source navigation/full RUM/session replay, unlimited trace retention, full always-on DPI/NDR, uncontrolled automated NCM, another graph/CMDB, or customer-specific Core forks.
