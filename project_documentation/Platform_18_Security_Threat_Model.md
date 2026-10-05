@@ -1,7 +1,7 @@
 # Platform — Security Threat Model
 
 **Document ID:** PLATFORM-THREAT-001  
-**Version:** 3.2.2  
+**Version:** 3.3.0  
 **Status:** Authoritative Mother Reference
 
 ## 1. Assets
@@ -120,3 +120,33 @@ Additional threats and mandatory controls for Linux kernel instrumentation and a
 | Diagnostic evidence leaks software/process/customer data | minimize to approved metadata; no arbitrary files/env/secrets/payloads/unrestricted command lines/logs; RBAC/tenant scope/retention/redaction |
 
 No new privilege, endpoint Python runtime, unrestricted shell/PowerShell facility or endpoint causal AI is authorized by these enhancements.
+
+
+---
+
+## 12. v3.3.0 threat extension — OTLP, integrations, CMDB, NCM assurance and browser evidence
+
+| Threat | Mandatory control outcome |
+|---|---|
+| Forged external approval | Authenticated connector + expected workflow/approver + exact immutable Change Plan binding + independent local authorization/policy/preconditions. |
+| Stale approval replay | External event/version/replay checks plus plan version/target/config/window binding; stale approval rejected. |
+| Cross-tenant webhook/event | Tenant derived from authenticated connector/endpoint binding, never arbitrary payload tenant; server authorization before domain update. |
+| Sync-loop DoS | Multi-factor event/object/version/correlation/operation/hash/origin/lineage loop prevention plus rate limits. |
+| Malicious work note/comment | Treat all external text/HTML as untrusted; sanitize/escape; never parse free text as command, template, target, authorization or executable mapping. |
+| Malicious attachment | Explicit feature enablement, type/size limits, safe storage, malware scanning where supported/required, access/TTL/audit; never auto-execute. |
+| SSRF/egress abuse | Connector destination allowlists, URL/DNS/IP/redirect validation, proxy policy, private-address controls where applicable and bounded timeouts. |
+| CMDB poisoning / wrong CI match | Explicit authority profile, match evidence/confidence, conflict queue, tenant scope, no last-write-wins and no automatic destructive reconciliation. |
+| NCM command/template injection | Typed/validated templates and certified Device Pack actions; secret-safe rendering; no ITSM text -> CLI; RBAC/approval/audit. |
+| Firmware substitution/supply-chain | Approved repository/provenance, digest/signature when available, entitlement/compatibility validation, controlled access and audit. |
+| Unsafe rollback | Rollback only via certified vendor/device mechanism with preconditions; otherwise stop/escalate. |
+| OTLP tenant spoofing | Authenticated server-side source identity; OTel attributes never authorize tenant. |
+| OTel PII/secrets | Attribute/body classification, drop/mask/hash policy, bounded retention and AI data boundary before persistence/use where configured. |
+| OTel cardinality/volume attack | Per-source/tenant quotas, attribute/key/value/count limits, rate limits, cardinality intervention with visible accounting, bounded queues/backpressure. |
+| Compression/payload bomb/parser abuse | Pre/post-decompression limits, parse time/memory bounds, schema validation, malformed input rejection and rate controls. |
+| Browser credential leakage | Vault references/ephemeral secrets, worker isolation, no plaintext in logs/screenshots/support bundles, scoped access and rotation. |
+| Sensitive screenshots/artifacts | Explicit policy, encryption/access controls, redaction where supported, short TTL/legal-hold handling and audit. |
+| Malicious Capability Pack | Signature/integrity/provenance, schema validation, declared privileges/resource budget, compatibility/certification and no secret embedding. |
+| Compromised vendor API/account | Least-privilege service account, secret rotation/revocation, rate/circuit controls, audit/conflict visibility; external compromise cannot bypass local privileged policy. |
+| Vendor rate-limit exhaustion | Bounded queues, token/rate budgets, Retry-After aware scheduling where available, exponential backoff+jitter and backlog recovery protection. |
+
+Full developer-centric APM, full always-on DPI/NDR and ticket/comment-driven arbitrary execution remain outside the approved trust boundary.
