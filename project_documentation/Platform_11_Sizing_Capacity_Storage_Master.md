@@ -365,3 +365,8 @@ NCM concurrency budgets are independent of routine polling and bounded by tenant
 ### 14.5 Browser journey synthetics — Phase 1.5
 
 Before selecting/shipping a browser runtime, benchmark memory/browser, CPU/browser, concurrent journeys/Sensor, page/network size, screenshot/artifact volume, timeout/cancellation, browser crash cleanup, secret isolation and effect on protected Sensor workloads.
+
+
+### v3.3 formal CMDB scale requirement anchor
+
+- `REQ-CMDB-007` — CMDB reconciliation is incremental, idempotent, rate-bounded and audited; certification benchmarks representative 100K, 500K and 1M+ bindings/CIs plus multi-million relationships where applicable without converting those test points into universal capacity claims.
