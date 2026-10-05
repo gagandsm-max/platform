@@ -1616,3 +1616,12 @@ External CIs are bindings to canonical entities. External relationships enter th
 NCM execution continues through existing NCM orchestration/worker and assigned Sensor/device adapter boundaries. Change Assurance adds a plan/evidence lifecycle and references canonical topology/service/incident/change/audit state rather than duplicating them. Approval validity is checked against immutable Change Plan version, exact target-set hash, rendered configuration/template hash and approved maintenance window before execution; local Platform RBAC/policy/preconditions remain independently authoritative.
 
 Firmware remains Phase 1.5 and uses governed artifact storage/repository references; firmware binaries are not stored in PostgreSQL/ClickHouse telemetry tables.
+
+
+### 45.6 Formal v3.3 architecture requirement anchors
+
+These exact IDs are governed by the architecture decisions in §45.
+
+- `REQ-CMDB-004` — External CI relationships reuse the canonical temporal graph and preserve source/authority/confidence/freshness/lifecycle alongside observed technical relationships.
+- `REQ-OTEL-002` — OTLP tenant/source authority is server-derived from authenticated ingress; telemetry resource attributes are identity evidence, never tenant authorization.
+- `REQ-OTEL-004` — OTel reuses PostgreSQL control/policy, ClickHouse analytical history, Kafka internal transport and Valkey ephemeral/cache roles; no mandatory new telemetry/trace database is introduced.
