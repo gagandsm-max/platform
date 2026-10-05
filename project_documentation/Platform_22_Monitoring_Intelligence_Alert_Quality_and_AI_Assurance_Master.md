@@ -1,10 +1,10 @@
 # Platform — Monitoring Intelligence, Alert Quality and AI Assurance Master
 
 **Document ID:** PLATFORM-MIA-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Monitoring Intelligence / Alert Quality / AI Assurance**
 **Product:** Platform
-**Change class:** Additive v3.2.2 product/engineering requirements; no runtime implementation, commercial provider commitment or readiness claim
+**Change class:** Additive v3.3.0 product/engineering requirements; no runtime implementation, commercial provider commitment or readiness claim
 
 ---
 
@@ -592,3 +592,15 @@ Historical growth, recent software/configuration change, hypervisor contention, 
 | `REQ-MIA-056` | P1 | `PRD-MIA-060`: cross-vantage fixtures prove capability/relationship-aware bounded fan-out, independent provenance, contradictory/missing evidence, physical OOB and VMware correlation where certified, no guest→hypervisor causal shortcut, and immutable RCA revision when late evidence changes the probable cause. |
 
 Triggered Fast RCA is product terminology only. It does not create a second RCA/diagnostic runtime.
+
+
+---
+
+## 20. v3.3.0 evidence semantics for OTLP, integrations and change assurance
+
+- Phase-1 OTLP metrics/logs enter existing Alert Evidence Contracts with source health, freshness, timestamp quality, schema/entity-resolution quality, cardinality intervention, rejected/dropped/backlog evidence and no-data semantics. OTLP collection failure is not automatic application/service failure.
+- Trace/span identifiers and exemplars are correlation references in Phase 1. Phase-1.5 sampled spans and trace-derived service edges are additional evidence with sampling/provenance/retention quality; absence of a sampled span is never proof that a request/dependency did not exist.
+- External ITSM comments/work notes/provider updates, Change states and CMDB-declared relationships are typed external evidence/context. They cannot overwrite observed telemetry/topology or become causal proof merely because they are authoritative for external workflow/business metadata.
+- NCM Change Assurance supplies intended diff, precheck/risk/blast snapshot, approval, execution/canary/batch/postcheck/stabilization/rollback evidence to Change Intelligence/RCA. A change preceding an incident is temporal correlation unless additional evidence supports causality.
+- Investigation Workbench presents the same evidence/RCA truth and must expose contradictions, missing/stale evidence, external-vs-observed provenance and `INCONCLUSIVE`; it does not introduce an independent confidence or causal model.
+- AI/LLM may summarize mappings, external notes, trace/log context or proposed remediation only through existing AI Gateway/data/tool-policy controls. Untrusted log/ticket/CMDB text remains prompt-injection input and cannot directly select a tenant, execute NCM, alter authority or bypass approval.
