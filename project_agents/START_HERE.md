@@ -105,4 +105,4 @@ selectedSkills: [source_truth_rebaseline, exact_head_merge_gate, evidence_bundle
 
 If you are unsure which agent to use, do not guess. Route from `project_agents/manifest.json`, `project_agents/AGENT_MATRIX.md`, `project_agents/USAGE_PLAYBOOK.md`, `project_agents/skills/AGENT_SKILL_MATRIX.md`, and the applicable canonical skills.
 
-The Platform product version remains v3.2.2 unless the Founder explicitly changes it. The current Mother Reference file set and precedence are always discovered from `project_documentation/Platform_00_Document_Index.md`; no agent or guide may freeze a historical document count as permanent authority.
+The Platform product version is v3.3.0 under Founder-approved ACP-001..ACP-018 set-wide change control. Future version changes still require explicit change control. The current Mother Reference file set and precedence are always discovered from `project_documentation/Platform_00_Document_Index.md`; no agent or guide may freeze a historical document count as permanent authority.
