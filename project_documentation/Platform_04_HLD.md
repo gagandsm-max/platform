@@ -1,7 +1,7 @@
 # Platform — High-Level Design (HLD)
 
 **Document ID:** PLATFORM-HLD-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — High-Level Design Authority (**A2.2 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
@@ -1403,3 +1403,18 @@ The following are logical responsibilities inside existing deployment units, not
 - **Deterministic RCA** — existing Core RCA responsibility; endpoint/Sensor evidence producers never become causal authority.
 
 Failure boundaries are explicit: unsupported/denied inventory fields become partial inventory evidence; process selector ambiguity blocks or requests review rather than silently monitoring the wrong workload; profile-capacity denial leaves current policy intact; failed/partial/suppressed diagnostics remain visible and do not degrade routine monitoring durability.
+
+
+---
+
+## 48. v3.3.0 subsystem contract additions
+
+- **Capability Pack Runtime/Certification:** existing loader/registry/test-harness path gains Official Certified target metadata, safe default monitoring profile/dashboard/alert/diagnostic declarations and dimensional product/version evidence; vendor listing alone remains non-certification.
+- **Investigation Workbench Projection:** query/workspace layer composes existing timeline, graph, evidence, Flight Recorder, RCA, path, Flow, log, NCM, Sensor and integration data using one time/scope context. It owns no independent evidence persistence.
+- **Path Intelligence:** Network Sensor path engine plus graph/query consumers provide current/historical/multi-vantage path projection and correlation. Existing active-path scheduler/resource controls remain authoritative.
+- **OTLP Gateway profile:** existing Sensor runtime may host a certified OTLP receiver profile; controlled Core ingress may host the same logical trust/normalization contract. Signal processing is bounded and cannot starve protected monitoring workloads.
+- **NCM Change Assurance Coordinator:** logical NCM module owns Change Plan freezing, precheck/risk/blast-radius coordination, exact approval verification, canary/batch state, stop/postcheck/stabilization and Change Assurance evidence assembly. Device writes still execute only through certified NCM adapters/Sensors.
+- **Integration Service:** owns canonical external-object adapters, transactional outbox/inbox workers, webhook ingress, incremental-poll fallback, Mapping Studio definitions, Test Sandbox execution, SyncConflict state, connector capability/health and vendor rate budgets.
+- **CMDB Reconciler:** logical Integration Service function maps ExternalBinding records to canonical entity/relationship authority. It is not a second inventory database.
+
+Protected workload ordering remains: authority/control, telemetry durability, ingestion/current-state and critical alert qualification take precedence over OTel enrichment, investigation fan-out, CMDB reconciliation, connector replay and other non-critical enrichment during resource pressure.
