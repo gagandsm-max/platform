@@ -1,17 +1,17 @@
 # Platform — Mother Reference Documentation Constitution
 
 **Document ID:** PLATFORM-INDEX-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-10-04 — Phase-1 endpoint operations, software inventory, selectable process/service monitoring, Criticality/Profile governance, and Triggered Fast RCA/EDS cross-vantage reconciliation (Issues #169/#170; set version remains v3.2.2)
+**Last reconciliation:** 2026-10-05 — Founder-approved ACP-001..ACP-018 cross-cutting architecture reconciliation; set-wide Mother Reference version advances to v3.3.0 with no new Platform_24+ specialized master.
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Authority
 
 1. The canonical GitHub repository `https://github.com/gagandsm-max/platform` (`main` after merge) is the authoritative system of record for Platform Mother References and implementation.
-2. Current Mother Reference version is **3.2.2**.
+2. Current Mother Reference version is **3.3.0**.
 3. The exact authoritative Mother Reference set is the **25-file set** listed in §5 (`project_documentation/AGENTS.md` plus `Platform_00` through `Platform_23`). Supporting artifacts such as `mother_reference_manifest.json` and `project_documentation/tools/validate_mother_references.py` are governance tooling, **not** additional Mother References and must not be numbered as `Platform_24+`.
 4. Source precedence is defined in §6. Conflicts require documented change control; implementation must not silently choose a convenient interpretation.
 5. Mother documents are READ-MOSTLY. Deliberate change control is mandatory (see §12).
@@ -568,3 +568,23 @@ Authoritative scope additions are:
 - reuse of existing BUILD-012/015 EDS and BUILD-100 deterministic RCA rather than creation of a second diagnostics/RCA framework.
 
 The exact requirements, data contracts, security/capacity controls, UI behavior, tests and BUILD ownership are distributed to their normal owning Mother References and indexed by Platform_08.
+
+
+---
+
+## A.14 v3.3.0 ACP-001..ACP-018 architecture reconciliation — 2026-10-05
+
+This deliberate set-wide change control incorporates the Founder-approved ACP-001 through ACP-018 package without creating another Pack framework, topology authority, CMDB/entity database, RCA engine, mandatory Integration microservice or telemetry database. The authoritative set remains exactly 25 files: `project_documentation/AGENTS.md` plus `Platform_00` through `Platform_23`. No `Platform_24+` number is allocated by this reconciliation; older branches/issues/draft headers remain non-authoritative until merged.
+
+Current v3.3.0 governing deltas are:
+
+- Official Certified monitoring content remains one Capability Pack architecture; named Phase-1 vendors are certification targets, never implementation/certification claims.
+- Investigation Workbench productizes the existing Investigation Session / Unified Operations Timeline / Flight Recorder / RCA projection; Path Intelligence productizes existing active-path + canonical temporal-graph evidence.
+- `REQ-INF-010` remains the top-level OpenTelemetry phase boundary: Phase 1 GA ingests metrics and structured logs and preserves trace/span correlation context; bounded retained spans/service-edge investigation is Phase 1.5 after explicit performance/security/sampling gates. Full developer-centric APM remains excluded.
+- NCM evolves to Network Change & Configuration Assurance using existing NCM/graph/incident/audit authorities; exact approval binding and a Change Assurance evidence record are added. Firmware lifecycle is Phase 1.5.
+- ITSM/CMDB integration is platform-wide through the existing Integration Service. ITSM workflow state never overrides observed monitoring truth; CMDB reconciliation uses explicit field/relationship authority and no last-write-wins.
+- Phase-1 certified ITSM targets are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP. Ivanti, Freshservice, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM are the Phase-1.5 certification-priority connector set, not a global market-share ranking.
+- Endpoint/access-port intelligence, browser journey synthetics, deeper database performance intelligence and virtualization optimization are Phase 1.5. Deep VoIP remains Phase 2.
+- Full always-on DPI/NDR remains excluded; bounded incident-triggered packet evidence remains governed by existing security/privacy/retention contracts.
+
+Maturity invariant remains: **SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED**. This reconciliation changes product/architecture requirements only; it does not certify runtime capability.
