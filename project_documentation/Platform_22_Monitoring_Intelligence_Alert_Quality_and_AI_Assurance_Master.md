@@ -596,7 +596,7 @@ Triggered Fast RCA is product terminology only. It does not create a second RCA/
 
 ---
 
-## 20. v3.3.0 evidence semantics for OTLP, integrations and change assurance
+## 22. v3.3.0 evidence semantics for OTLP, integrations and change assurance
 
 - Phase-1 OTLP metrics/logs enter existing Alert Evidence Contracts with source health, freshness, timestamp quality, schema/entity-resolution quality, cardinality intervention, rejected/dropped/backlog evidence and no-data semantics. OTLP collection failure is not automatic application/service failure.
 - Trace/span identifiers and exemplars are correlation references in Phase 1. Phase-1.5 sampled spans and trace-derived service edges are additional evidence with sampling/provenance/retention quality; absence of a sampled span is never proof that a request/dependency did not exist.
