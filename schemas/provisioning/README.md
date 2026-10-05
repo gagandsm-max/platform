@@ -1,7 +1,7 @@
 # Platform Provisioning Readiness Contract Foundation
 
 **Scope:** static provisioning request, readiness/diagnostic evidence, Sensor-eligibility evidence, and connectivity-matrix contracts only.
-**Mother Reference:** Platform v3.2.2.
+**Mother Reference:** Platform v3.3.0.
 **Runtime connectivity/provisioning:** not implemented or certified by this checkpoint.
 
 ## 1. Purpose
