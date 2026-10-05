@@ -399,7 +399,7 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 
 ---
 
-## 18. v3.3.0 Founder-approved ACP-001..ACP-018 decisions — 2026-10-05
+## 23. v3.3.0 Founder-approved ACP-001..ACP-018 decisions — 2026-10-05
 
 | Decision | Classification | Governing statement |
 |---|---|---|
