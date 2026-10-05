@@ -107,7 +107,7 @@ If and when `github.com/cilium/ebpf` (or another formally approved eBPF loader d
 
 ---
 
-## 7. v3.3.0 governed Pack and privileged artifact distribution
+## 8. v3.3.0 governed Pack and privileged artifact distribution
 
 Capability Packs shipped by Platform are versioned release artifacts with declared provenance, integrity/signing metadata, compatibility range, licence/redistribution evidence, SBOM/third-party notices where applicable and promotion/rollback metadata. A pack cannot become Official Certified merely because it is packaged or signed; certification evidence remains Platform_23/14 authority.
 
