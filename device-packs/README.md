@@ -1,7 +1,7 @@
 # Platform Device Pack Contract Foundation
 
 **Scope:** contract, deterministic packaging, static validation, fictional fixtures, and EMC1.1 Core Capability Pack loader/registry foundation.
-**Mother Reference:** Platform v3.2.2.
+**Mother Reference:** Platform v3.3.0.
 **Runtime/device certification:** not included.
 
 ## 0. Capability Pack relationship (EMC1.1)
