@@ -342,7 +342,7 @@ Fast RCA certification measures endpoint capture overhead, Agent/Sensor upload, 
 
 ---
 
-## 14. v3.3.0 new workload dimensions and benchmark gates
+## 16. v3.3.0 new workload dimensions and benchmark gates
 
 No universal capacity number is introduced by ACP-001..ACP-018. New certification must measure the following independent dimensions and prove protected workloads retain headroom.
 
