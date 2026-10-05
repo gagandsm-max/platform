@@ -867,7 +867,7 @@ Outbound operation records include stable operation ID/hash, connector/version, 
 
 ### 13.3 ExternalBinding and relationship provenance
 
-ExternalBinding semantics are defined in Platform_05 §94.2. `CIRelationshipRef` maps external relationship ID/type to an existing canonical graph edge representation while preserving external source, authority/declaration class, confidence where relevant, first/last observation, freshness, lifecycle and supporting binding. Imported `DEPENDS_ON` or `CONNECTED_TO` must remain distinguishable from independently observed technical evidence.
+ExternalBinding semantics are defined in Platform_05 §94.2. `CIRelationshipRef` maps external relationship ID/type to an existing canonical graph edge representation while preserving external source, authority/declaration class, confidence where relevant, first/last observation, freshness, lifecycle and supporting binding. Normalized relationship vocabulary may include `CONNECTED_TO`, `RUNS_ON`, `HOSTED_ON`, `DEPENDS_ON`, `USES`, `SERVES`, `MEMBER_OF`, `BACKED_BY` and `MANAGED_BY` where the external/product semantics are supportable. Vendor-specific relation types may remain namespaced rather than being falsely normalized. Imported declared relationships must remain distinguishable from independently observed technical evidence.
 
 ### 13.4 Change Assurance API
 
