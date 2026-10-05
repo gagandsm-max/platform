@@ -346,23 +346,23 @@ Fast RCA certification measures endpoint capture overhead, Agent/Sensor upload, 
 
 No universal capacity number is introduced by ACP-001..ACP-018. New certification must measure the following independent dimensions and prove protected workloads retain headroom.
 
-### 14.1 OpenTelemetry
+### 16.1 OpenTelemetry
 
 Measure metrics points/s, structured log records/s, encoded/uncompressed bytes/record, resource/service count, attributes/record, active cardinality, compression ratio, accepted/rejected/dropped rates, Sensor/Core queue depth and oldest age, replay/recovery rate, ClickHouse write/query amplification and storage/retention. Phase-1.5 trace certification additionally measures spans/s, bytes/span, active/in-flight traces, trace duration distribution, sampling/tail-sampling memory/state, trace query latency and incident-retention overhead. Exact rates/retention remain P0 benchmark outputs.
 
-### 14.2 ITSM/Integration Service
+### 16.2 ITSM/Integration Service
 
 Measure outbound/inbound operations/s, webhook burst/storm handling, per-tenant queue isolation, external outage backlog, retry recovery without vendor thundering herd, 429/rate-limit recovery, DLQ/quarantine growth and connector-health latency. Retry traffic must not starve monitoring ingestion/control.
 
-### 14.3 CMDB reconciliation
+### 16.3 CMDB reconciliation
 
 Certification scenarios include representative **100K, 500K and 1M+ external bindings/CIs** and multi-million relationships where applicable, with incremental reconciliation windows, match/conflict processing, PostgreSQL/graph/query cost, API-rate limits and restart/checkpoint recovery. These are benchmark scales, not contractual limits or guaranteed capacities.
 
-### 14.4 NCM and firmware
+### 16.4 NCM and firmware
 
 NCM concurrency budgets are independent of routine polling and bounded by tenant, site, vendor/device family, HA/failure domain and device/vendor session/API limits. Measure backup/config size, diff/search workload, concurrent pre/post checks, batch/canary timing, rollback traffic and Integration Service dependency. Phase-1.5 firmware adds repository/storage/bandwidth, staged image transfer, reboot concurrency and rollback-image reserve.
 
-### 14.5 Browser journey synthetics — Phase 1.5
+### 16.5 Browser journey synthetics — Phase 1.5
 
 Before selecting/shipping a browser runtime, benchmark memory/browser, CPU/browser, concurrent journeys/Sensor, page/network size, screenshot/artifact volume, timeout/cancellation, browser crash cleanup, secret isolation and effect on protected Sensor workloads.
 
