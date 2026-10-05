@@ -3210,3 +3210,12 @@ Inbound processing checks a bounded combination of external event/object identit
 ### 94.5 OTel control/data boundary
 
 Phase-1 metrics/log records preserve Resource and Instrumentation Scope identity plus signal-appropriate semantics; logs preserve trace/span correlation IDs where present. Authenticated ingress identity supplies tenant/source authority. Resource/service attributes feed canonical entity resolution as evidence with provenance; unresolved/ambiguous identity produces explicit quality/reconciliation state rather than a duplicate authoritative entity. Sampled span schemas are reserved for Phase 1.5 after P0 benchmark/schema review and do not alter canonical service/entity identity.
+
+
+### 94.6 Formal v3.3 LLD requirement anchors
+
+These exact IDs are governed by the concrete v3.3 contracts in §94.
+
+- `REQ-CMDB-002` — ExternalBinding carries tenant/connector/internal entity/external identity plus match evidence/confidence, mapping/authority profile, external version and synchronization state; it must not create duplicate Platform entities.
+- `REQ-INT-009` — Echo-loop prevention combines external event/object/version, Platform correlation/operation/hash, origin and prior outbound lineage; one source marker is insufficient.
+- `REQ-NCM-007` — Change Assurance Record binds immutable plan/version, exact targets/configuration hashes, approved window, risk/blast evidence and execution/postcheck/stabilization/rollback/outcome evidence; material plan mutation stales approval.
