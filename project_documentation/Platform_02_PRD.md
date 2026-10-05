@@ -2433,3 +2433,26 @@ The following v3.3.0 requirement families are normative extensions of the produc
 | `REQ-INF-004` extension | Phase-1.5 Virtualization Optimization | Platform_09/11/14/17/21/23 |
 
 No row above implies implementation, benchmark, certification or deployment.
+
+
+### 58.9 Formal v3.3 requirement anchors
+
+The following exact IDs are owned by the v3.3 product requirements in §58. These anchors make RTM ownership explicit; they do not create duplicate product semantics.
+
+| Requirement | Normative owner statement |
+|---|---|
+| `REQ-CMDB-003` | Field/class authority and explicit conflict handling replace last-write-wins; external CMDB metadata cannot silently overwrite observed Platform technical truth. |
+| `REQ-CMDB-005` | Certified ServiceNow CI publication/reconciliation uses IRE by default; generic direct CMDB table writes are not the default integration path. |
+| `REQ-CMDB-006` | Missing/deleted external CIs do not automatically delete Platform entities; governed lifecycle/reconciliation and audit apply. |
+| `REQ-INT-010` | Mapping Studio is declarative, versioned, previewable, testable, auditable, promotable and rollback-capable; arbitrary customer Python/JavaScript is prohibited. |
+| `REQ-INT-011` | Integration Test Sandbox reports SUPPORTED, SUPPORTED_WITH_LIMITATION, PERMISSION_MISSING, API_EDITION_UNAVAILABLE or UNSUPPORTED based on real capability tests. |
+| `REQ-INT-012` | Phase-1 certified connector targets are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP, with exact edition/API/version/auth/workflow certification. |
+| `REQ-INT-013` | Phase-1.5 certification-priority targets are Ivanti, Freshservice/MSP, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM; this is not a global market-share ranking. |
+| `REQ-NCM-008` | Pre-change assurance evaluates certified reachability/auth/privilege/current-config/fresh-backup and applicable HA/routing/path/incident/service/freeze/ITSM context. |
+| `REQ-NCM-009` | Change risk is deterministic/explainable and graph-derived blast-radius evidence exposes confidence, freshness and uncertainty rather than AI certainty. |
+| `REQ-NCM-010` | Canary/fixed staged rollout uses bounded concurrency/failure-domain sequencing and explicit stop conditions; unsafe failure stops future batches. |
+| `REQ-NCM-011` | Post-change validation/stabilization compares configuration and operational evidence; rollback uses only certified safe vendor/device mechanisms, otherwise escalation is required. |
+| `REQ-NCM-012` | Firmware lifecycle is Phase 1.5 and includes approved provenance/integrity/compatibility/storage/backup/approval/canary/staging/reboot/postcheck/ITSM/audit with certified rollback only. |
+| `REQ-OTEL-003` | Phase-1 OTLP enforces request/decompression bounds, cardinality governance, sensitive-field policy, explicit reject/drop accounting and bounded backpressure; no-data is not service failure. |
+| `REQ-OTEL-005` | Phase-1.5 may add bounded sampled spans, short quota-controlled retention, trace search/waterfall, trace-derived service edges and sampling after benchmark gates. |
+| `REQ-OTEL-006` | Java/.NET/Node.js/Python instrumentation onboarding is a Phase-1.5 certification target; full developer APM/profiling/RUM/session replay remains excluded. |
