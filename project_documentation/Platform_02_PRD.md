@@ -2391,7 +2391,7 @@ Integration Fabric is logical functionality of the existing Integration Service;
 
 Outbound delivery uses a PostgreSQL transactional outbox to connector workers; inbound delivery uses authenticated webhook/event ingress or bounded incremental polling into a PostgreSQL inbox before governed domain update. Required mechanics include deterministic operation identity, idempotency, connector/version binding, retry classification/backoff+jitter, rate limits, quarantine/DLQ, pause/drain/replay, tenant quotas, lineage, webhook replay protection and multi-signal echo-loop prevention. Kafka may distribute internal normalized events but is not workflow-delivery truth.
 
-Phase-1 certified connector targets are **ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus / ServiceDesk Plus MSP**. Phase-1.5 certification-priority targets are **Ivanti Neurons for ITSM, Freshservice/Freshservice MSP, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM**. This is AmrudAi certification priority, not a claimed global market ranking. Every capability claim is edition/API/version/auth/workflow specific.
+Phase-1 connector certification targets are **ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus / ServiceDesk Plus MSP**. Phase-1.5 certification-priority targets are **Ivanti Neurons for ITSM, Freshservice/Freshservice MSP, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM**. This is AmrudAi certification priority, not a claimed global market ranking. Every capability claim is edition/API/version/auth/workflow specific.
 
 ### 58.6 CMDB authority and reconciliation
 
@@ -2446,7 +2446,7 @@ The following exact IDs are owned by the v3.3 product requirements in §58. Thes
 | `REQ-CMDB-006` | Missing/deleted external CIs do not automatically delete Platform entities; governed lifecycle/reconciliation and audit apply. |
 | `REQ-INT-010` | Mapping Studio is declarative, versioned, previewable, testable, auditable, promotable and rollback-capable; arbitrary customer Python/JavaScript is prohibited. |
 | `REQ-INT-011` | Integration Test Sandbox reports SUPPORTED, SUPPORTED_WITH_LIMITATION, PERMISSION_MISSING, API_EDITION_UNAVAILABLE or UNSUPPORTED based on real capability tests. |
-| `REQ-INT-012` | Phase-1 certified connector targets are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP, with exact edition/API/version/auth/workflow certification. |
+| `REQ-INT-012` | Phase-1 connector certification targets are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP, with exact edition/API/version/auth/workflow certification. |
 | `REQ-INT-013` | Phase-1.5 certification-priority targets are Ivanti, Freshservice/MSP, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM; this is not a global market-share ranking. |
 | `REQ-NCM-008` | Pre-change assurance evaluates certified reachability/auth/privilege/current-config/fresh-backup and applicable HA/routing/path/incident/service/freeze/ITSM context. |
 | `REQ-NCM-009` | Change risk is deterministic/explainable and graph-derived blast-radius evidence exposes confidence, freshness and uncertainty rather than AI certainty. |
