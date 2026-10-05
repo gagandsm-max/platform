@@ -2435,12 +2435,16 @@ The following v3.3.0 requirement families are normative extensions of the produc
 No row above implies implementation, benchmark, certification or deployment.
 
 
-### 58.9 Formal v3.3 requirement anchors
+### 58.10 Formal v3.3 requirement anchors
 
 The following exact IDs are owned by the v3.3 product requirements in §58. These anchors make RTM ownership explicit; they do not create duplicate product semantics.
 
 | Requirement | Normative owner statement |
 |---|---|
+| `REQ-CMDB-001` | CMDB supports governed Enrichment, bounded Publication, and Phase-1 architecture for Reconciled Bidirectional mode without a second entity/CMDB database. |
+| `REQ-INT-006` | The platform-wide canonical external-object model covers Incident, Problem, Change, ChangeTask, Approval, typed ExternalActivity, maintenance, assignment/principal, business service, CI/relationship, attachment, binding and conflict concepts. |
+| `REQ-NCM-006` | NCM Change & Configuration Assurance follows Plan -> Backup -> Compare -> Preflight -> Assess -> Approve -> Execute -> Validate -> Observe -> Rollback/Escalate -> Audit. |
+| `REQ-OTEL-001` | Phase-1 OTLP certification targets metrics and structured logs with resource identity and trace/span correlation identifiers/exemplars where supplied; retained distributed spans are not a Phase-1 GA requirement. |
 | `REQ-CMDB-003` | Field/class authority and explicit conflict handling replace last-write-wins; external CMDB metadata cannot silently overwrite observed Platform technical truth. |
 | `REQ-CMDB-005` | Certified ServiceNow CI publication/reconciliation uses IRE by default; generic direct CMDB table writes are not the default integration path. |
 | `REQ-CMDB-006` | Missing/deleted external CIs do not automatically delete Platform entities; governed lifecycle/reconciliation and audit apply. |
