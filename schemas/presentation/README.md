@@ -2,7 +2,7 @@
 
 **Contract family:** Presentation definitions
 **Schema version:** `1.0.0`
-**Authority:** Platform v3.2.2 Mother Reference
+**Authority:** Platform v3.3.0 Mother Reference
 **Checkpoint:** static contracts, metadata, deterministic validation and fictional fixtures only
 
 ## Purpose
