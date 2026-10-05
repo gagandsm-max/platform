@@ -1,7 +1,7 @@
 # Platform — End-to-End Dataflow & Sequence Documentation
 
 **Document ID:** PLATFORM-DF-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — End-to-End Dataflow & Sequence Documentation Authority (**A2.2 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
@@ -2346,3 +2346,104 @@ normal monitoring observation
 ```
 
 No all-source fan-out occurs for every alert. Guest EDS never directly interrogates a hypervisor as causal authority; endpoint OS evidence never fabricates BMC/RAID/power facts.
+
+
+---
+
+## 114. v3.3.0 cross-domain dataflows
+
+### DF-ACP-001 — Phase-1 OTLP metrics/logs
+
+```text
+OTel SDK / customer Collector
+ -> certified Sensor OTLP ingress OR controlled Core OTLP ingress
+ -> authenticate connector/source; derive tenant server-side
+ -> request/decompression bounds + schema checks + sensitive-field/cardinality policy
+ -> canonical resource/service/entity reconciliation preview/result
+ -> signal-specific normalization
+ -> bounded durable path / Kafka
+ -> ClickHouse metrics/log history + quality/drop/reject accounting
+ -> existing alert/investigation/graph consumers
+
+trace_id/span_id/exemplar links are preserved when supplied; retained distributed spans are not a Phase-1 GA requirement.
+```
+
+### DF-ACP-002 — Phase-1.5 bounded spans
+
+```text
+qualified OTLP spans
+ -> authenticated Phase-1 ingress contract
+ -> head/tail sampling policy (tail only after benchmark/certification)
+ -> bounded short-retention sampled-span history in existing analytical store
+ -> trace/service-edge derivation with provenance
+ -> Investigation Workbench / RCA / Change Intelligence
+ -> optional Incident Flight Recorder evidence pinning
+```
+
+Numerical rates, retention and sampling budgets remain P0 benchmark outputs.
+
+### DF-ACP-003 — Bidirectional ITSM delivery
+
+```text
+Platform domain transaction
+ -> same transaction records integration_outbox intent
+ -> Integration worker
+ -> capability/permission/mapping validation
+ -> vendor API with rate budget + deterministic operation/idempotency identity
+ -> success binding/version update OR retry/quarantine/DLQ
+
+Vendor webhook/event
+ -> authenticate/signature/replay/connector binding
+ -> server-derived tenant
+ -> integration_inbox de-duplicate/version check
+ -> adapter normalization
+ -> authority/conflict/policy evaluation
+ -> governed domain update
+
+No adequate vendor event path
+ -> bounded updated-since/cursor incremental poll
+ -> checkpoint/pagination/rate protection
+ -> same integration_inbox path
+```
+
+External closure never sets a monitored entity UP. It may create a synchronization conflict or policy-driven ticket update/reopen workflow.
+
+### DF-ACP-004 — CMDB reconciliation
+
+```text
+external CI/relationship
+ -> authenticated connector
+ -> ExternalBinding lookup/match evidence
+ -> authority profile + confidence
+ -> enrich canonical entity OR publish explicit conflict
+ -> declared relationship enters canonical graph with external provenance
+
+Platform observed entity/approved stable relationship
+ -> publication policy
+ -> mapping/preview
+ -> vendor reconciliation API (ServiceNow IRE for certified ServiceNow CI publication)
+ -> external binding/version update
+```
+
+Missing external CIs do not automatically delete Platform entities. Observed and declared relationships remain distinguishable.
+
+### DF-ACP-005 — NCM + external Change
+
+```text
+authorized Change Plan
+ -> exact targets -> fresh verified backup -> render/diff -> prechecks
+ -> deterministic risk + graph blast-radius snapshot
+ -> freeze plan/version + target/config hashes
+ -> create/update ITSM Change + evidence
+ -> receive authenticated approval
+ -> verify workflow/approver + exact plan/hash/targets/window
+ -> local RBAC/policy/preconditions
+ -> optional governed maintenance
+ -> canary -> validate -> fixed bounded batches
+ -> stop on failure -> certified rollback or escalation
+ -> postcheck -> stabilization -> before/after comparison
+ -> update ITSM -> end maintenance
+ -> finalize Change Assurance Record + audit
+```
+
+ITSM approval is necessary where policy requires but is never sufficient to bypass local safety/authorization.
