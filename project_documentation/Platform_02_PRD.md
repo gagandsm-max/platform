@@ -1,7 +1,7 @@
 # Platform — Product Requirements Document (PRD)
 
 **Document ID:** PLATFORM-PRD-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — Complete Product Capability Authority (**A2.1 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Depends on:** `Platform_01_BRD.md`
@@ -2347,3 +2347,66 @@ These are definitions/profiles under one EDS diagnostic type, not independent RC
 For qualifying physical-server or VM incidents, Core may associate additional evidence from certified Hardware/OOB, virtualization, storage and path/network vantages. Guest endpoint evidence shall not claim hypervisor truth; OS evidence shall not claim chassis/RAID/power truth. Missing or contradictory evidence reduces confidence and `INCONCLUSIVE` remains a correct result.
 
 Deep first-GA VM cross-vantage certification is VMware-first through BUILD-033. Other hypervisor families remain monitoring targets but are not silently promoted to equivalent deep Fast-RCA certification without explicit change control and evidence.
+
+
+---
+
+## 58. v3.3.0 approved product requirements — ACP-001..ACP-018
+
+### 58.1 Official Certified Capability Packs — Phase 1
+
+Platform shall use the existing single Capability Pack architecture. Phase-1 specification targets are: Cisco IOS/IOS-XE, Cisco NX-OS, Juniper Junos, Arista EOS, Fortinet FortiOS, Palo Alto PAN-OS, RHEL/Ubuntu Linux (Agent and SSH dimensions separately), Windows Server (Agent and WinRM/WMI dimensions separately), Windows infrastructure (AD/DC, DNS, DHCP, IIS and certificate health), generic Redfish with explicit vendor/version compatibility, VMware vSphere, Kubernetes, PostgreSQL, Microsoft SQL Server, AWS and Azure.
+
+Each named item is a **certification target**, not a shipped/implemented/certified claim. Applicable certification remains dimensional across Discovery, L1, L2, L3/routing, Topology, Diagnostics, NCM, Security and supported product/version. OOB behavior shall include identification, authentication/preflight, discovery/inventory, canonical entities/relationships, safe default collection/profile, dashboards, baseline alerts/qualification, diagnostics, limitations/provenance and version/upgrade behavior where the pack dimension supports them.
+
+Phase-1.5 roadmap targets include GCP; Aruba/HPE, Dell, Extreme, Check Point and F5; vendor WLAN/SD-WAN; Hyper-V/Nutanix/Proxmox; major storage/SAN families; Oracle/MySQL/MariaDB/SAP HANA/MongoDB/ClickHouse/OpenSearch; Apache/NGINX/Tomcat/JBoss/WebLogic/WebSphere; JVM/.NET/Node.js; Kafka/RabbitMQ/ActiveMQ/Redis; Microsoft 365 and demand-justified backup products. Listing remains non-certification.
+
+### 58.2 Investigation Workbench and Path Intelligence — Phase 1
+
+`REQ-RCA-012` is strengthened so the Unified Operations Timeline is the evidence plane projected as the **Investigation Workbench**. It synchronizes authorized metrics, alerts/incidents, Flow, logs/Syslog/traps/events, topology, active path/routing, configuration/NCM, application/service telemetry, database/cloud changes, deployments, synthetics, Sensor state, Flight Recorder and ITSM activity where available. It does not create a second evidence store, diagnostic scheduler or RCA engine.
+
+`REQ-NET-016` is strengthened as **Path Intelligence**: current/historical/multi-vantage path evidence, path fingerprint/change, hop/destination latency/loss/jitter where reliable, interface/routing/BGP/OSPF/BFD evidence where certified, Flow/configuration/provider/synthetic/service correlation and business-service impact projection through the canonical temporal graph. Hidden/incomplete hops preserve uncertainty and do not assert destination failure.
+
+### 58.3 OpenTelemetry Phase 1 and 1.5
+
+`REQ-INF-010` remains the governing phase boundary. **Phase 1 GA** supports OTLP metrics and structured logs over certified OTLP/gRPC and OTLP/HTTP profiles, resource/service identity reconciliation, trace/span correlation identifiers carried by signals, exemplars where present/useful, authenticated source/tenant binding, cardinality controls, redaction/sensitive-field policy, quality/drop/reject visibility and bounded backpressure. Governed Sensor-local/Streaming-Event Sensor ingress and controlled central/Core ingress are both permitted under the same trust/policy contract.
+
+Phase 1 does **not** require retained distributed spans, trace search/waterfalls, tail-sampling backend, profiler, flame graphs, RUM/session replay, unlimited trace retention or a dedicated trace database.
+
+**Phase 1.5** may add bounded sampled spans, short quota-controlled retention in the existing analytical store, trace search/waterfall, trace-derived service edges, head/tail sampling after benchmark, incident/error/slow-trace prioritization, Incident Flight Recorder pinning and guided Java/.NET/Node.js/Python instrumentation onboarding. Numerical span rate/size/retention/sampling limits remain P0 benchmark outputs.
+
+### 58.4 NCM — Network Change & Configuration Assurance
+
+NCM Phase 1 lifecycle is **Plan -> Backup -> Compare -> Preflight -> Assess -> Approve -> Execute -> Validate -> Observe -> Rollback/Escalate -> Audit**. It strengthens existing `REQ-NCM-001..005` with scheduled/on-demand/pre/post backup, protected history, change detection, evidence-based attribution, secret-safe configuration search, raw diff, semantic diff only through certified parsers, desired/golden state with inheritance/exceptions/drift, baseline compliance, versioned templates, deterministic pre-change checks, graph-derived blast-radius evidence, explainable deterministic risk, maker-checker, external ITSM approval binding, canary/fixed staged rollout, explicit stop criteria, post-change validation/stabilization and rollback only through certified adapter/device mechanisms.
+
+The **Change Assurance Record** is an evidence envelope referencing the immutable Change Plan, NCM job, ITSM Change, configuration versions, graph/risk evidence, approvals, incidents and audit. Material target/configuration/window semantics changing after approval make that approval stale. Execution-time deterioration may block an unchanged approved plan through local policy.
+
+NCM firmware lifecycle is Phase 1.5 and must include approved image provenance/repository, checksum/signature where available, entitlement/licensing constraints, compatibility/intermediate-version rules, storage/flash preflight, backup, approval, canary/staged rollout, reboot/health validation, certified rollback where safe, ITSM linkage and audit.
+
+### 58.5 Platform-wide ITSM/CMDB Integration Fabric — Phase 1
+
+Integration Fabric is logical functionality of the existing Integration Service; no mandatory new microservice is created. The common canonical integration model supports Incident, Problem, Change, ChangeTask, Approval, ExternalActivity (PUBLIC_COMMENT or INTERNAL_WORK_NOTE), MaintenanceWindow, AssignmentRef, ExternalPrincipalRef, BusinessServiceRef, CIRef, CIRelationshipRef, AttachmentRef, ExternalBinding and SyncConflict. Major Incident is normally an Incident classification/extension. Service Request may exist in adapter abstraction; service-catalog-initiated governed operations remain Phase 2.
+
+Outbound delivery uses a PostgreSQL transactional outbox to connector workers; inbound delivery uses authenticated webhook/event ingress or bounded incremental polling into a PostgreSQL inbox before governed domain update. Required mechanics include deterministic operation identity, idempotency, connector/version binding, retry classification/backoff+jitter, rate limits, quarantine/DLQ, pause/drain/replay, tenant quotas, lineage, webhook replay protection and multi-signal echo-loop prevention. Kafka may distribute internal normalized events but is not workflow-delivery truth.
+
+Phase-1 certified connector targets are **ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus / ServiceDesk Plus MSP**. Phase-1.5 certification-priority targets are **Ivanti Neurons for ITSM, Freshservice/Freshservice MSP, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM**. This is AmrudAi certification priority, not a claimed global market ranking. Every capability claim is edition/API/version/auth/workflow specific.
+
+### 58.6 CMDB authority and reconciliation
+
+Support Phase-1 **Enrichment** (CMDB -> Platform) and bounded **Publication** (Platform -> CMDB), plus Phase-1 architecture for governed bidirectional reconciliation with deeper relationship certification in Phase 1.5. External CIs bind to canonical Platform entities; no second entity database is created. Last-write-wins and automatic entity deletion from missing external CIs are prohibited.
+
+Observed reachability, telemetry, device configuration, routing, discovered technical topology/runtime relationships and RCA/evidence remain Platform technical truth. ITSM workflow/assignee/CAB state and normal business-owner/support-group/cost-centre/lifecycle metadata remain external authority by default; business criticality, declared service relationships, maintenance policy and selected tags/custom fields may use explicit configurable field/class authority. Conflicts remain visible/auditable.
+
+ServiceNow CI publication/reconciliation uses IRE as the certified default unless a later vendor-specific certification proves a safer supported method. Direct generic CMDB table insertion is not the default architecture.
+
+### 58.7 Integration Mapping Studio and Test Sandbox
+
+Mapping Studio shall be declarative/versioned and support internal field, external object/field, direction, type, transform, enum map, default/required, authority, null behavior, conflict policy and write condition. Mappings are previewable, testable, auditable, promotable and rollback-capable. Arbitrary Python/JavaScript execution is prohibited.
+
+The Integration Test Sandbox returns precise capability state: `SUPPORTED`, `SUPPORTED_WITH_LIMITATION`, `PERMISSION_MISSING`, `API_EDITION_UNAVAILABLE` or `UNSUPPORTED`, and may test authentication, permission, rate limit, CRUD/lifecycle transitions, comments/work notes, change/approval, inbound events, CMDB, relationships, mappings and idempotency.
+
+### 58.8 Controlled specialist phasing
+
+`REQ-NET-017` Endpoint & Switch-Port Intelligence is Phase 1.5 and uses the canonical graph for MAC/IP/user-when-available/AP/switch/port/VLAN attachment history, provenance/reconciliation and rogue/new endpoint evidence; no second endpoint database and no employee-surveillance model.
+
+`PRD-EGC-013` / `REQ-EGC-012` browser journey synthetics are Phase 1.5; Playwright is only a candidate until OSS/runtime/security/capacity admission. `REQ-INF-007` gains Phase-1.5 query fingerprint/wait/blocking/deadlock/regression/plan-change evidence where safely supported, with no autonomous tuning. `REQ-INF-004` gains Phase-1.5 evidence-backed virtualization optimization recommendations with no autonomous VM/resource change. Deep specialist VoIP beyond existing operational monitoring is Phase 2.
