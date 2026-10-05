@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -114,6 +115,9 @@ func parsePSIField(fields []string, prefix string) (float64, bool) {
 		}
 		v, err := strconv.ParseFloat(strings.TrimPrefix(f, prefix), 64)
 		if err != nil {
+			return 0, false
+		}
+		if math.IsNaN(v) || math.IsInf(v, 0) {
 			return 0, false
 		}
 		return v, true
@@ -471,18 +475,31 @@ func netStateSample(iface, rawState string) telemetry.Sample {
 	}
 }
 
+const operstateReadLimit = 64
+
 func readOperstate(iface string) string {
 	// Bound path to sysfs class/net only; reject traversal via name checks already applied.
 	path := filepath.Join("/sys/class/net", iface, "operstate")
 	if !strings.HasPrefix(path, "/sys/class/net/") {
 		return ""
 	}
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return ""
 	}
-	if len(b) > 64 {
-		b = b[:64]
+	defer f.Close()
+	return readBoundedTrimmed(f, operstateReadLimit)
+}
+
+// readBoundedTrimmed reads at most limit bytes from r (via LimitReader) and returns
+// the trimmed string. Unreadable/empty input yields "" (normalized to unknown).
+func readBoundedTrimmed(r io.Reader, limit int64) string {
+	if limit <= 0 {
+		return ""
+	}
+	b, err := io.ReadAll(io.LimitReader(r, limit))
+	if err != nil {
+		return ""
 	}
 	return strings.TrimSpace(string(b))
 }

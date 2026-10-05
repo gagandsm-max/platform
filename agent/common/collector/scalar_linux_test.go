@@ -4,6 +4,7 @@ package collector
 
 import (
 	"context"
+	"io"
 	"math"
 	"strings"
 	"testing"
@@ -54,6 +55,11 @@ func TestParsePSI_Malformed(t *testing.T) {
 		"garbage\n",
 		"some avg10=x avg60=0 avg300=0 total=1\n",
 		"some avg10=1 avg60=2\n", // missing fields
+		"some avg10=NaN avg60=0 avg300=0 total=1\n",
+		"some avg10=+Inf avg60=0 avg300=0 total=1\n",
+		"some avg10=-Inf avg60=0 avg300=0 total=1\n",
+		"some avg10=1 avg60=Inf avg300=0 total=1\n",
+		"some avg10=1 avg60=0 avg300=-nan total=1\n",
 	}
 	for _, in := range cases {
 		if _, ok := parsePSI(strings.NewReader(in)); ok {
@@ -159,15 +165,35 @@ func TestVmstatPresentMissingMalformed(t *testing.T) {
 	if len(present) != 5 {
 		t.Fatalf("expected 5 vmstat samples, got %d", len(present))
 	}
+	wantUnits := map[string]string{
+		"system.memory.page.faults":       "count",
+		"system.memory.page.major_faults": "count",
+		"system.memory.swap.pages_in":     "pages",
+		"system.memory.swap.pages_out":    "pages",
+		"system.memory.oom_kills":         "count",
+	}
+	wantValues := map[string]float64{
+		"system.memory.page.faults":       100,
+		"system.memory.page.major_faults": 10,
+		"system.memory.swap.pages_in":     2,
+		"system.memory.swap.pages_out":    3,
+		"system.memory.oom_kills":         0,
+	}
 	for _, s := range present {
-		if s.MetricKey == "system.memory.oom_kills" && s.Value != 0 {
-			t.Fatal("explicit zero oom_kill must be emitted")
+		if want, ok := wantUnits[s.MetricKey]; !ok || s.Unit != want {
+			t.Fatalf("unit mismatch for %s: got %q want %q", s.MetricKey, s.Unit, want)
+		}
+		if s.Value != wantValues[s.MetricKey] {
+			t.Fatalf("value mismatch for %s: got %v want %v", s.MetricKey, s.Value, wantValues[s.MetricKey])
 		}
 	}
 
 	partial := parseVmstatSamples(strings.NewReader("pgfault 9\nignored 1\n"))
 	if len(partial) != 1 || partial[0].MetricKey != "system.memory.page.faults" {
 		t.Fatalf("missing optional fields must not invent zeros: %+v", partial)
+	}
+	if partial[0].Unit != "count" {
+		t.Fatalf("pgfault unit=%q want count", partial[0].Unit)
 	}
 
 	malformed := parseVmstatSamples(strings.NewReader("pgfault notanumber\npswpin\n"))
@@ -344,6 +370,41 @@ func TestOperstateVocabulary(t *testing.T) {
 	}
 }
 
+func TestOperstateReadIsBounded(t *testing.T) {
+	// Prove the reader stops at the bound without allocating/reading the entire source first.
+	huge := strings.Repeat("x", 1024*1024)
+	cr := &countingReader{r: strings.NewReader(huge)}
+	got := readBoundedTrimmed(cr, operstateReadLimit)
+	if len(got) > int(operstateReadLimit) {
+		t.Fatalf("bounded read exceeded limit: len=%d limit=%d", len(got), operstateReadLimit)
+	}
+	if cr.n > operstateReadLimit {
+		t.Fatalf("underlying reader pulled %d bytes; bound is %d", cr.n, operstateReadLimit)
+	}
+	if got != strings.Repeat("x", int(operstateReadLimit)) {
+		t.Fatalf("unexpected bounded content len=%d", len(got))
+	}
+	empty := readBoundedTrimmed(strings.NewReader(""), operstateReadLimit)
+	if empty != "" {
+		t.Fatalf("empty source must yield empty raw (unknown): %q", empty)
+	}
+	// Canonical vocabulary still applies after bounded read.
+	if normalizeOperstate(readBoundedTrimmed(strings.NewReader("up\n"), operstateReadLimit)) != "up" {
+		t.Fatal("bounded up operstate must normalize to up")
+	}
+}
+
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
 func TestOSFactsParser(t *testing.T) {
 	in := "cpu 1 2 3\nbtime 1700000000\nprocs_running 4\nprocs_blocked 1\nintr 9\n"
 	facts, ok := parseOSFacts(strings.NewReader(in))
@@ -418,6 +479,9 @@ func TestNormalizeAcceptsNewMetricShapes(t *testing.T) {
 		{MetricKey: "system.memory.swap.total", Value: 1024, Unit: "bytes"},
 		{MetricKey: "system.memory.swap.utilization", Value: 12.5, Unit: "%"},
 		{MetricKey: "system.memory.page.faults", Value: 9, Unit: "count"},
+		{MetricKey: "system.memory.page.major_faults", Value: 1, Unit: "count"},
+		{MetricKey: "system.memory.swap.pages_in", Value: 2, Unit: "pages"},
+		{MetricKey: "system.memory.swap.pages_out", Value: 3, Unit: "pages"},
 		{MetricKey: "system.memory.oom_kills", Value: 0, Unit: "count"},
 		{MetricKey: "system.filesystem.inodes.total", Value: 100, Unit: "count", Labels: map[string]string{"mount": "/", "fstype": "ext4"}},
 		{MetricKey: "system.filesystem.inodes.utilization", Value: 50, Unit: "%", Labels: map[string]string{"mount": "/", "fstype": "ext4"}},

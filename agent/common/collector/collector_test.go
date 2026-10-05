@@ -17,18 +17,30 @@ func TestCollectorsExecution(t *testing.T) {
 		t.Fatalf("expected %d collectors, got %d", len(wantNames), len(collectors))
 	}
 
+	// Certified Slice-0/BUILD-010 collectors retain strict regression gates.
+	strictCollectors := map[string]struct{}{
+		"cpu": {}, "memory": {}, "filesystem": {},
+	}
+
 	ctx := context.Background()
 	for i, c := range collectors {
 		if c.Name() != wantNames[i] {
 			t.Fatalf("collector[%d]=%s want %s", i, c.Name(), wantNames[i])
 		}
 		samples, err := c.Collect(ctx)
+		_, strict := strictCollectors[c.Name()]
 		if err != nil {
-			// Explicit collection error is monitoring-health evidence, not panic/DOWN.
+			if strict {
+				t.Fatalf("collector %s returned unexpected error: %v", c.Name(), err)
+			}
+			// Slice-2 live collectors: explicit error is monitoring-health evidence, not host DOWN.
 			t.Logf("collector %s returned explicit error: %v", c.Name(), err)
 			continue
 		}
 		if len(samples) == 0 {
+			if strict {
+				t.Fatalf("collector %s produced 0 samples", c.Name())
+			}
 			t.Logf("collector %s produced 0 samples (allowed when source empty after bounds)", c.Name())
 			continue
 		}

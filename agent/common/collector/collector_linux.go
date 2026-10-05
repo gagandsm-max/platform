@@ -369,7 +369,7 @@ func parseVmstatSamples(r io.Reader) []telemetry.Sample {
 			continue
 		}
 		key := fields[0]
-		metric, ok := vmstatMetric(key)
+		metric, unit, ok := vmstatMetric(key)
 		if !ok {
 			continue
 		}
@@ -384,26 +384,26 @@ func parseVmstatSamples(r io.Reader) []telemetry.Sample {
 		samples = append(samples, telemetry.Sample{
 			MetricKey: metric,
 			Value:     float64(val),
-			Unit:      "count",
+			Unit:      unit,
 		})
 	}
 	return samples
 }
 
-func vmstatMetric(key string) (string, bool) {
+func vmstatMetric(key string) (metric string, unit string, ok bool) {
 	switch key {
 	case "pgfault":
-		return "system.memory.page.faults", true
+		return "system.memory.page.faults", "count", true
 	case "pgmajfault":
-		return "system.memory.page.major_faults", true
+		return "system.memory.page.major_faults", "count", true
 	case "pswpin":
-		return "system.memory.swap.pages_in", true
+		return "system.memory.swap.pages_in", "pages", true
 	case "pswpout":
-		return "system.memory.swap.pages_out", true
+		return "system.memory.swap.pages_out", "pages", true
 	case "oom_kill":
-		return "system.memory.oom_kills", true
+		return "system.memory.oom_kills", "count", true
 	default:
-		return "", false
+		return "", "", false
 	}
 }
 
