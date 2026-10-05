@@ -22,6 +22,10 @@ func NewDefaultCollectors(maxFilesystems int) []HostCollector {
 		NewCPUCollector(),
 		NewMemoryCollector(),
 		NewFilesystemCollector(maxFilesystems),
+		NewPressureCollector(),
+		NewDiskIOCollector(),
+		NewNetCollector(),
+		NewOSFactsCollector(),
 	}
 }
 
@@ -209,8 +213,41 @@ func (c *MemoryCollector) Collect(ctx context.Context) ([]telemetry.Sample, erro
 	}
 	defer memFile.Close()
 
-	scanner := bufio.NewScanner(io.LimitReader(memFile, 64*1024))
-	var totalKB, availKB, freeKB, buffersKB, cachedKB uint64
+	info, err := parseMeminfo(io.LimitReader(memFile, 64*1024))
+	if err != nil {
+		return nil, err
+	}
+
+	samples, err := meminfoSamples(info)
+	if err != nil {
+		return nil, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	vmFile, err := os.Open("/proc/vmstat")
+	if err == nil {
+		defer vmFile.Close()
+		samples = append(samples, parseVmstatSamples(io.LimitReader(vmFile, 64*1024))...)
+	}
+
+	return samples, nil
+}
+
+type meminfoValues struct {
+	totalKB  uint64
+	availKB  uint64
+	swapTot  uint64
+	swapFree uint64
+}
+
+func parseMeminfo(r io.Reader) (meminfoValues, error) {
+	scanner := bufio.NewScanner(r)
+	var totalKB, availKB, freeKB, buffersKB, cachedKB, swapTot, swapFree uint64
 	var hasAvail bool
 
 	for scanner.Scan() {
@@ -224,7 +261,10 @@ func (c *MemoryCollector) Collect(ctx context.Context) ([]telemetry.Sample, erro
 		if len(valFields) == 0 {
 			continue
 		}
-		val, _ := strconv.ParseUint(valFields[0], 10, 64)
+		val, err := strconv.ParseUint(valFields[0], 10, 64)
+		if err != nil {
+			continue
+		}
 
 		switch key {
 		case "MemTotal":
@@ -238,11 +278,15 @@ func (c *MemoryCollector) Collect(ctx context.Context) ([]telemetry.Sample, erro
 			buffersKB = val
 		case "Cached":
 			cachedKB = val
+		case "SwapTotal":
+			swapTot = val
+		case "SwapFree":
+			swapFree = val
 		}
 	}
 
 	if totalKB == 0 {
-		return nil, errors.New("MEMINFO_PARSE_FAILED: MemTotal was 0 or unreadable")
+		return meminfoValues{}, errors.New("MEMINFO_PARSE_FAILED: MemTotal was 0 or unreadable")
 	}
 
 	if !hasAvail {
@@ -251,19 +295,116 @@ func (c *MemoryCollector) Collect(ctx context.Context) ([]telemetry.Sample, erro
 	if availKB > totalKB {
 		availKB = totalKB
 	}
+	if swapFree > swapTot {
+		swapFree = swapTot
+	}
 
-	usedKB := totalKB - availKB
-	totalBytes := float64(totalKB * 1024)
-	availBytes := float64(availKB * 1024)
-	usedBytes := float64(usedKB * 1024)
-	util := (usedBytes / totalBytes) * 100.0
+	return meminfoValues{
+		totalKB:  totalKB,
+		availKB:  availKB,
+		swapTot:  swapTot,
+		swapFree: swapFree,
+	}, nil
+}
 
-	return []telemetry.Sample{
+func meminfoSamples(info meminfoValues) ([]telemetry.Sample, error) {
+	usedKB := info.totalKB - info.availKB
+	totalBytes, ok := kbToBytes(info.totalKB)
+	if !ok {
+		return nil, errors.New("MEMINFO_OVERFLOW: MemTotal exceeds convertible byte range")
+	}
+	availBytes, ok := kbToBytes(info.availKB)
+	if !ok {
+		return nil, errors.New("MEMINFO_OVERFLOW: MemAvailable exceeds convertible byte range")
+	}
+	usedBytes, ok := kbToBytes(usedKB)
+	if !ok {
+		return nil, errors.New("MEMINFO_OVERFLOW: used memory exceeds convertible byte range")
+	}
+	util := 0.0
+	if totalBytes > 0 {
+		util = (usedBytes / totalBytes) * 100.0
+	}
+
+	samples := []telemetry.Sample{
 		{MetricKey: "system.memory.total", Value: totalBytes, Unit: "bytes"},
 		{MetricKey: "system.memory.available", Value: availBytes, Unit: "bytes"},
 		{MetricKey: "system.memory.used", Value: usedBytes, Unit: "bytes"},
 		{MetricKey: "system.memory.utilization", Value: util, Unit: "%"},
-	}, nil
+	}
+
+	swapTotal, okTot := kbToBytes(info.swapTot)
+	swapAvail, okAvail := kbToBytes(info.swapFree)
+	swapUsed, okUsed := kbToBytes(info.swapTot - info.swapFree)
+	if okTot && okAvail && okUsed {
+		swapUtil := 0.0
+		if swapTotal > 0 {
+			swapUtil = (swapUsed / swapTotal) * 100.0
+		}
+		samples = append(samples,
+			telemetry.Sample{MetricKey: "system.memory.swap.total", Value: swapTotal, Unit: "bytes"},
+			telemetry.Sample{MetricKey: "system.memory.swap.available", Value: swapAvail, Unit: "bytes"},
+			telemetry.Sample{MetricKey: "system.memory.swap.used", Value: swapUsed, Unit: "bytes"},
+			telemetry.Sample{MetricKey: "system.memory.swap.utilization", Value: swapUtil, Unit: "%"},
+		)
+	}
+	return samples, nil
+}
+
+func kbToBytes(kb uint64) (float64, bool) {
+	if kb > (^uint64(0))/1024 {
+		return 0, false
+	}
+	return float64(kb * 1024), true
+}
+
+func parseVmstatSamples(r io.Reader) []telemetry.Sample {
+	scanner := bufio.NewScanner(r)
+	var samples []telemetry.Sample
+	seen := make(map[string]struct{}, 5)
+
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		key := fields[0]
+		metric, ok := vmstatMetric(key)
+		if !ok {
+			continue
+		}
+		if _, dup := seen[metric]; dup {
+			continue
+		}
+		val, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		seen[metric] = struct{}{}
+		samples = append(samples, telemetry.Sample{
+			MetricKey: metric,
+			Value:     float64(val),
+			Unit:      "count",
+		})
+	}
+	return samples
+}
+
+func vmstatMetric(key string) (string, bool) {
+	switch key {
+	case "pgfault":
+		return "system.memory.page.faults", true
+	case "pgmajfault":
+		return "system.memory.page.major_faults", true
+	case "pswpin":
+		return "system.memory.swap.pages_in", true
+	case "pswpout":
+		return "system.memory.swap.pages_out", true
+	case "oom_kill":
+		return "system.memory.oom_kills", true
+	default:
+		return "", false
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -390,10 +531,29 @@ func (c *FilesystemCollector) Collect(ctx context.Context) ([]telemetry.Sample, 
 			telemetry.Sample{MetricKey: "system.filesystem.used", Value: usedBytes, Unit: "bytes", Labels: labels},
 			telemetry.Sample{MetricKey: "system.filesystem.utilization", Value: util, Unit: "%", Labels: labels},
 		)
+		samples = append(samples, inodeSamples(stat.Files, stat.Ffree, labels)...)
 		mountCount++
 	}
 
 	return samples, nil
+}
+
+func inodeSamples(files, ffree uint64, labels map[string]string) []telemetry.Sample {
+	if files == 0 {
+		return nil
+	}
+	avail := ffree
+	if avail > files {
+		avail = files
+	}
+	used := files - avail
+	util := (float64(used) / float64(files)) * 100.0
+	return []telemetry.Sample{
+		{MetricKey: "system.filesystem.inodes.total", Value: float64(files), Unit: "count", Labels: labels},
+		{MetricKey: "system.filesystem.inodes.available", Value: float64(avail), Unit: "count", Labels: labels},
+		{MetricKey: "system.filesystem.inodes.used", Value: float64(used), Unit: "count", Labels: labels},
+		{MetricKey: "system.filesystem.inodes.utilization", Value: util, Unit: "%", Labels: labels},
+	}
 }
 
 // unescapeMountField decodes /proc/mounts octal escapes (e.g. \040 -> space).

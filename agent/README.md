@@ -14,15 +14,22 @@ Tenant and Sensor authority are **server-derived**. Agent payload `tenantId` is 
 
 ## Implemented Linux telemetry
 
-The Linux collectors use bounded standard-library `/proc` and `statfs` access only:
+The Linux collectors use bounded standard-library `/proc`, `/sys`, and `statfs` access only.
+
+Default registered collectors (`cpu`, `memory`, `filesystem`, `pressure`, `diskio`, `net`, `osfacts`):
 
 - uptime and boot time;
 - load averages;
 - CPU count and aggregate utilization;
-- memory total/available/used/utilization;
-- bounded mounted-filesystem total/used/free/utilization with mount and filesystem type.
+- memory total/available/used/utilization plus swap total/available/used/utilization;
+- optional `/proc/vmstat` paging counters when present (`page.faults`, `page.major_faults`, `swap.pages_in`, `swap.pages_out`, `oom_kills`) — missing fields are omitted, not invented as zero;
+- bounded mounted-filesystem block capacity and inode total/available/used/utilization with `mount` and `fstype` labels;
+- Linux PSI pressure from `/proc/pressure/{cpu,memory,io}` (`avg10`/`avg60`/`avg300`/`total` with `resource`+`scope`, plus per-resource `available`);
+- bounded block-device I/O from `/proc/diskstats` (hard ceiling 64 devices; kernel 512-byte sector accounting; `device` label);
+- bounded NIC counters from `/proc/net/dev` (hard ceiling 64 interfaces; loopback excluded) plus operstate vocabulary label (`up|down|unknown|dormant|lowerlayerdown|testing|notpresent|other`);
+- OS scalar facts: boot time (epoch seconds), processes running, processes blocked.
 
-This checkpoint does not collect process command lines, environment variables, packet contents, arbitrary command output, application traces, or unrestricted process data.
+This checkpoint does not collect process command lines, environment variables, packet contents, arbitrary command output, application traces, or unrestricted process data. Collector failure is monitoring-health/degraded evidence, never authoritative host DOWN.
 
 ## Durable local buffer
 
