@@ -583,7 +583,7 @@ Current v3.3.0 governing deltas are:
 - `REQ-INF-010` remains the top-level OpenTelemetry phase boundary: Phase 1 GA ingests metrics and structured logs and preserves trace/span correlation context; bounded retained spans/service-edge investigation is Phase 1.5 after explicit performance/security/sampling gates. Full developer-centric APM remains excluded.
 - NCM evolves to Network Change & Configuration Assurance using existing NCM/graph/incident/audit authorities; exact approval binding and a Change Assurance evidence record are added. Firmware lifecycle is Phase 1.5.
 - ITSM/CMDB integration is platform-wide through the existing Integration Service. ITSM workflow state never overrides observed monitoring truth; CMDB reconciliation uses explicit field/relationship authority and no last-write-wins.
-- Phase-1 certified ITSM targets are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP. Ivanti, Freshservice, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM are the Phase-1.5 certification-priority connector set, not a global market-share ranking.
+- Phase-1 ITSM connector certification targets are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP. Ivanti, Freshservice, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM are the Phase-1.5 certification-priority connector set, not a global market-share ranking.
 - Endpoint/access-port intelligence, browser journey synthetics, deeper database performance intelligence and virtualization optimization are Phase 1.5. Deep VoIP remains Phase 2.
 - Full always-on DPI/NDR remains excluded; bounded incident-triggered packet evidence remains governed by existing security/privacy/retention contracts.
 
