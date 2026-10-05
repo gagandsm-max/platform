@@ -751,7 +751,7 @@ Explicit exclusions remain: endpoint patch/deployment management, vulnerability 
 
 ---
 
-## 38. v3.3.0 business outcomes — out-of-box operations, change assurance and enterprise integration
+## 43. v3.3.0 business outcomes — out-of-box operations, change assurance and enterprise integration
 
 The Founder-approved v3.3.0 programme strengthens first-use value without widening Platform into a full developer APM or packet/NDR product.
 
