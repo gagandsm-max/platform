@@ -2410,3 +2410,24 @@ The Integration Test Sandbox returns precise capability state: `SUPPORTED`, `SUP
 `REQ-NET-017` Endpoint & Switch-Port Intelligence is Phase 1.5 and uses the canonical graph for MAC/IP/user-when-available/AP/switch/port/VLAN attachment history, provenance/reconciliation and rogue/new endpoint evidence; no second endpoint database and no employee-surveillance model.
 
 `PRD-EGC-013` / `REQ-EGC-012` browser journey synthetics are Phase 1.5; Playwright is only a candidate until OSS/runtime/security/capacity admission. `REQ-INF-007` gains Phase-1.5 query fingerprint/wait/blocking/deadlock/regression/plan-change evidence where safely supported, with no autonomous tuning. `REQ-INF-004` gains Phase-1.5 evidence-backed virtualization optimization recommendations with no autonomous VM/resource change. Deep specialist VoIP beyond existing operational monitoring is Phase 2.
+
+
+### 58.9 Formal requirement ownership and downstream mapping
+
+The following v3.3.0 requirement families are normative extensions of the product requirements above. `Platform_08` remains the single global primary registry; this table prevents the new IDs from becoming index-only/orphan requirements.
+
+| Requirement family | Normative product scope | Required downstream owners |
+|---|---|---|
+| `REQ-EMC-023..026` | Official Certified Pack baseline, OOB acceptance, dimensional/version certification, second-wave roadmap | Platform_23 primary specialized owner; Platform_03/04 architecture/HLD, Platform_09 UX, Platform_14 quality, Platform_11 capacity where applicable |
+| `REQ-RCA-012` extension | Investigation Workbench over Unified Operations Timeline | Platform_03/04/05/06, Platform_09, Platform_17, Platform_19, Platform_22 |
+| `REQ-NET-016` extension | Path Intelligence over active-path + canonical temporal graph | Platform_03/04/05/06, Platform_09/10/14/17/22/23 |
+| `REQ-OTEL-001..006` | Phase-1 OTLP metrics/logs/context and Phase-1.5 bounded sampled spans/runtime onboarding | Platform_03/04/05/06, Platform_09/10/11/14/16/17/18/19/20/22 |
+| `REQ-NCM-006..012` | Change & Configuration Assurance, exact approval binding, canary/staging/postcheck/certified rollback, Phase-1.5 firmware | Platform_03/04/05/06, Platform_09/10/11/14/16/17/18/19 |
+| `REQ-INT-006..013` | Platform-wide Integration Fabric, durable inbox/outbox, loop prevention, Mapping Studio/Test Sandbox and connector priorities | Platform_03/04/05/06, Platform_09/10/11/14/16/17/18/20/23 |
+| `REQ-CMDB-001..007` | CMDB modes, bindings, authority/conflicts, graph relationships, IRE, lifecycle and scale | Platform_03/04/05/06, Platform_09/10/11/14/16/17/18/20/23 |
+| `REQ-NET-017` | Phase-1.5 Endpoint & Switch-Port Intelligence | Platform_03/05/06, Platform_09/14/17/18/20/23 |
+| `REQ-EGC-012` phase update | Phase-1.5 browser journey synthetics | Platform_21 primary specialized owner plus Platform_09/11/14/16/18; dependency remains P0-unselected |
+| `REQ-INF-007` extension | Phase-1.5 Database Performance Intelligence | Platform_09/11/14/17/21/22/23 |
+| `REQ-INF-004` extension | Phase-1.5 Virtualization Optimization | Platform_09/11/14/17/21/23 |
+
+No row above implies implementation, benchmark, certification or deployment.
