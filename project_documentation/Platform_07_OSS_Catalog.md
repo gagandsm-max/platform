@@ -1,7 +1,7 @@
 # Platform — Authoritative Open-Source Software Catalogue
 
 **Document ID:** PLATFORM-OSS-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — Dependency Allow-List Authority (**A2.3 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
