@@ -1,7 +1,7 @@
 # Platform — Low-Level Design (LLD)
 
 **Document ID:** PLATFORM-LLD-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — Low-Level Design Authority (**A2.2 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
@@ -3090,3 +3090,123 @@ Historical growth, software/configuration change, hypervisor/datastore state and
 ### Windows installed-software inventory side-effect prohibition
 
 Windows installed-software inventory is observational. Certified Agent/WinRM/WMI/CIM implementations must not use an enumeration mechanism known to trigger installer consistency checks, repair/reconfiguration, installation or other target mutation as a side effect merely to discover software. In particular, `Win32_Product`-style MSI inventory is not an approved default discovery mechanism. Prefer read-only supported registry/package/MSIX/AppX/OS inventory sources appropriate to the certified Windows version, with explicit provenance and partial-source behavior.
+
+
+---
+
+## 94. v3.3.0 low-level integration and Change Assurance contracts
+
+The following are logical contracts; exact physical table/field names may differ if schema review preserves the semantics.
+
+### 94.1 Change Plan and Change Assurance
+
+```text
+change_plan
+  plan_id
+  tenant_id
+  version
+  target_set[]
+  target_set_hash
+  rendered_change_hash
+  intended_window
+  status
+  created_by
+  created_at
+
+change_assurance_record
+  assurance_id
+  tenant_id
+  plan_id
+  plan_version
+  target_set_hash
+  rendered_change_hash
+  proposed_diff_ref
+  risk_snapshot_ref
+  blast_radius_snapshot_ref
+  evidence_confidence_freshness
+  external_change_binding_ref
+  approval_evidence_ref
+  approved_window
+  precheck_manifest_ref
+  canary_batch_manifest_ref
+  postcheck_manifest_ref
+  stabilization_manifest_ref
+  incident_anomaly_refs[]
+  rollback_escalation_ref
+  outcome
+  evidence_manifest_ref
+  audit_ref
+```
+
+A material change to target-set, rendered privileged semantics/configuration hash or approved window after external approval transitions approval validity to `STALE_REAPPROVAL_REQUIRED`. Execution-time health/risk deterioration may independently block execution without mutating the approved plan.
+
+### 94.2 Integration durable state
+
+```text
+integration_outbox
+  tenant_id
+  operation_id
+  connector_id
+  connector_version
+  canonical_object_type/id
+  external_binding_ref
+  operation_hash
+  payload_version
+  attempt/retry_class/not_before
+  status
+  correlation_id
+  lineage_ref
+
+integration_inbox
+  tenant_id              # server-derived from authenticated connector binding
+  connector_id
+  external_event_id
+  external_object_id
+  external_version_etag
+  event_type
+  received_at
+  payload_hash
+  normalized_event_ref
+  status
+
+external_binding
+  tenant_id
+  connector_id
+  internal_entity_or_domain_id
+  external_system
+  external_object_type
+  external_object_id
+  external_class
+  match_evidence
+  match_confidence
+  mapping_version
+  authority_profile
+  external_version_etag
+  sync_state
+  last_sync_at
+
+sync_conflict
+  conflict_id
+  binding_ref
+  field_or_relationship
+  internal_value_ref
+  external_value_ref
+  authority_rule
+  detected_at
+  state
+  resolution/audit_ref
+```
+
+Outbox/inbox writes are transactional with authoritative local domain state where required. Retry is at-least-once with deterministic idempotency; exactly-once is not claimed.
+
+### 94.3 Canonical external objects
+
+Connector adapters normalize to: `Incident`, `Problem`, `Change`, `ChangeTask`, `Approval`, `ExternalActivity{PUBLIC_COMMENT|INTERNAL_WORK_NOTE}`, `MaintenanceWindow`, `AssignmentRef`, `ExternalPrincipalRef`, `BusinessServiceRef`, `CIRef`, `CIRelationshipRef`, `AttachmentRef`, `ExternalBinding`, `SyncConflict`. Major Incident is normally an Incident classification; Service Request is adapter-visible but service-catalog-initiated privileged operations remain Phase 2.
+
+### 94.4 Loop prevention
+
+Inbound processing checks a bounded combination of external event/object identity, external version/ETag where present, Platform correlation/operation ID, operation hash, origin/source and prior outbound mutation lineage. One mutable custom `source` field is never the sole loop-prevention control.
+
+### 94.5 OTel control/data boundary
+
+Phase-1 metrics/log records preserve Resource and Instrumentation Scope identity plus signal-appropriate semantics; logs preserve trace/span correlation IDs where present. Authenticated ingress identity supplies tenant/source authority. Resource/service attributes feed canonical entity resolution as evidence with provenance; unresolved/ambiguous identity produces explicit quality/reconciliation state rather than a duplicate authoritative entity. Sampled span schemas are reserved for Phase 1.5 after P0 benchmark/schema review and do not alter canonical service/entity identity.
