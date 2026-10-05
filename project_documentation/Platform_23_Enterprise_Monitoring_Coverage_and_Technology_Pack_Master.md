@@ -1,10 +1,10 @@
 # Platform — Enterprise Monitoring Coverage, Capability Packs and Real-Customer Certification Master
 
 **Document ID:** PLATFORM-EMC-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Specialized Master**
 **Product:** Platform
-**Change class:** Additive v3.2.2 product/engineering requirements; EMC-0 specification only. No runtime implementation, vendor-pack shipment, certification achievement or contractual guarantee is claimed by this document.
+**Change class:** Additive v3.3.0 product/engineering requirements; EMC-0 specification only. No runtime implementation, vendor-pack shipment, certification achievement or contractual guarantee is claimed by this document.
 
 ---
 
@@ -75,6 +75,10 @@ Existing Device Pack contracts remain valid. They are classifications/profiles u
 | `PRD-EMC-020` | Certified server monitoring shall cover host CPU/scheduler pressure, memory/swap/paging pressure, filesystem/inode capacity, block I/O, network/NIC quality, OS/uptime, bounded process/service health and applicable hardware/event evidence rather than CPU/memory/disk-capacity gauges alone. |
 | `PRD-EMC-021` | Linux Agent, Windows Agent, SSH and WinRM/WMI/CIM monitoring shall expose explicit capability/privilege gaps; unsupported or failed collection shall be represented as missing/degraded monitoring evidence rather than target failure. |
 | `PRD-EMC-022` | Infrastructure Capability Packs shall declare continuous-monitoring collectors and bounded EDS diagnostics separately. EDS is Diagnostic Job profile `ENDPOINT_DIAGNOSTIC_SNAPSHOT` within the existing Troubleshoot / Live Evidence architecture (not a second diagnostics framework). Packs shall declare supported OS/version, privilege, evidence fields, resource budget and dimensional certification state. |
+| `PRD-EMC-023` | Platform shall define the approved 16-profile Phase-1 Official Certified Capability Pack target baseline without implying implementation or achieved certification. |
+| `PRD-EMC-024` | Official Certified Packs shall satisfy the v3.3 OOB acceptance contract spanning identification, compatibility/preflight, discovery/inventory, canonical entities/relationships, safe default monitoring, dashboards, alerts/qualification, diagnostics, limitations/provenance and upgrade behavior where applicable. |
+| `PRD-EMC-025` | Capability support claims shall remain dimensional and exact product/version specific and derive from one machine-readable compatibility/certification source of truth. |
+| `PRD-EMC-026` | Phase-1.5 second-wave technology coverage is a roadmap/certification target only and requires evidence before support claims. |
 
 ---
 
@@ -556,6 +560,10 @@ Each `REQ-EMC-*` owns the corresponding `PRD-EMC-*`. Implementation status for a
 | `REQ-EMC-020` | `PRD-EMC-020` | PRD, HLD, LLD, Quality | Server fixtures prove CPU/pressure, memory/swap, filesystem/inodes, block I/O, NIC, process, service, OS and applicable event/hardware coverage |
 | `REQ-EMC-021` | `PRD-EMC-021` | Architecture, Security, Quality | Privilege/credential/path/collector failures map to missing/degraded evidence; negative tests prevent false host/service-down assertion |
 | `REQ-EMC-022` | `PRD-EMC-022` | Architecture, LLD, Quality, Capacity | Capability Pack manifest/certification distinguishes continuous collectors from EDS Diagnostic Job profile diagnostics and records version/privilege/evidence/resource support; no second diagnostics framework |
+| `REQ-EMC-023` | `PRD-EMC-023` | PRD, Capability Pack, Quality | Approved 16-profile Phase-1 target baseline is machine-readable and visibly target/not-certified until dimensional evidence exists |
+| `REQ-EMC-024` | `PRD-EMC-024` | PRD, HLD, UI, Quality | OOB acceptance proves identification/preflight/discovery/inventory/entities/relationships/default monitoring/dashboards/alerts/diagnostics/limitations/provenance/upgrade behavior as applicable |
+| `REQ-EMC-025` | `PRD-EMC-025` | Architecture, Quality, Operations | Support claims expose independent Discovery/L1/L2/L3/Topology/Diagnostics/NCM/Security/product-version states from one compatibility source |
+| `REQ-EMC-026` | `PRD-EMC-026` | PRD, Quality | Second-wave list remains Phase-1.5 roadmap/certification target and cannot be marketed as supported without evidence |
 
 ---
 
@@ -630,3 +638,68 @@ Process/service certification must prove stable selector semantics and PID-reuse
 EDS certification remains dimensional per definition and OS/version/privilege. Listing `EDS_CPU_PRESSURE` or another definition in a pack does not certify that definition until its evidence/resource/security/negative-path matrix passes.
 
 Physical and virtualization Fast-RCA coverage is multi-vantage: endpoint, OOB, hypervisor, storage and network evidence keep separate provenance. A technology pack may declare the evidence it can provide but does not become causal authority.
+
+
+---
+
+## 29. v3.3.0 Official Certified Capability Pack baseline and OOB acceptance
+
+### 29.1 Phase-1 certification targets — not current certification claims
+
+The approved first certification wave is:
+
+1. Cisco IOS / IOS-XE
+2. Cisco NX-OS
+3. Juniper Junos
+4. Arista EOS
+5. Fortinet FortiOS
+6. Palo Alto PAN-OS
+7. Linux — RHEL and Ubuntu, with Agent and SSH/agentless dimensions separately certified
+8. Windows Server — Agent and WinRM/WMI/CIM dimensions separately certified
+9. Windows Infrastructure — AD/Domain Controller, replication, DNS, DHCP, IIS and certificate health where applicable
+10. Generic Redfish — with explicit server-vendor/model/version compatibility dimensions
+11. VMware vSphere
+12. Kubernetes
+13. PostgreSQL
+14. Microsoft SQL Server
+15. AWS
+16. Azure
+
+Every item is a **certification target only**. Until the relevant pack/runtime/test evidence exists, status remains specified/not-certified. No vendor name may imply all dimensional capabilities.
+
+### 29.2 Official Certified Pack OOB acceptance contract
+
+Where applicable, an Official Certified Pack/profile must define and certify:
+
+1. identification and stable technology/device identity;
+2. exact vendor/product/version compatibility and known limitations;
+3. authentication/least-privilege requirements and preflight;
+4. discovery and duplicate-safe reconciliation;
+5. inventory;
+6. canonical metrics/state/events;
+7. canonical entities and relationships;
+8. health model and monitoring profile;
+9. safe default collection/adaptive behavior;
+10. out-of-box dashboards/views;
+11. baseline alert/qualification rules with evidence semantics;
+12. anomaly/baseline inputs where supported;
+13. diagnostics and troubleshooting actions;
+14. RCA/topology/path/service semantics where supported;
+15. MWU/resource/capacity cost metadata;
+16. data-quality/freshness/partial/failure expectations;
+17. provenance, pack version, Platform compatibility, upgrade/migration/rollback behavior;
+18. known-good fixtures and negative/certification tests.
+
+The broader §6 Capability Pack declaration remains authoritative; this list defines customer OOB acceptance, not a second schema or registry.
+
+### 29.3 Dimensional certification
+
+At minimum expose independent states for **Discovery, L1, L2, L3/routing where applicable, Topology, Diagnostics, NCM, Security and supported product/version**. A vendor/family may be certified in some dimensions and unsupported/experimental in others. UI/API/documentation support matrices are generated from the same machine-readable compatibility authority; independent marketing tables are prohibited.
+
+### 29.4 Phase-1.5 second-wave certification roadmap
+
+Evidence-dependent targets include GCP; Aruba/HPE, Dell networking, Extreme, Check Point, F5 and vendor WLAN/SD-WAN; Hyper-V, Nutanix, Proxmox; NetApp, Dell EMC, HPE/Pure Storage and Cisco MDS/FC fabric; Oracle, MySQL/MariaDB, SAP HANA, MongoDB, ClickHouse and OpenSearch; Apache, NGINX, Tomcat, JBoss/WildFly, WebLogic, WebSphere, JVM, .NET and Node.js; Kafka, RabbitMQ, ActiveMQ and Redis; Microsoft 365 and demand-justified backup products. Exact vendor/product/version/dimension scope remains certification work and is not a GA promise merely by appearing here.
+
+### 29.5 Integration Pack certification
+
+ITSM/CMDB adapters remain `INTEGRATION` Capability Packs using Platform_10 mechanics. Connector certification records exact deployment variant/edition/API/auth plus supported Incident/Problem/Change/Approval/activity/reverse-event/CMDB/relationship/business-service capabilities and limitations. Phase-1 connector priorities are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP; six Phase-1.5 certification-priority connectors are defined by `REQ-INT-013`.
