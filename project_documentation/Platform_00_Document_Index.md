@@ -17,7 +17,7 @@
 5. Mother documents are READ-MOSTLY. Deliberate change control is mandatory (see §12).
 6. Repository implementation does **not** silently override an explicit approved product decision recorded in the Mother References or Decision Register.
 7. If implementation discovers false, stale or contradictory documentation, engineering must correct the Mother References through change control rather than knowingly preserve a false specification.
-8. v3.2.2 supersedes v3.2.1 as the authoritative Platform mother-reference set after merge to canonical GitHub `main`. Earlier v1/v2/v3.0/v3.1 generated master packages and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as Platform engineering sources of truth. Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other supplied reference material remains reference/evidence only and never overrides this set.
+8. v3.3.0 supersedes v3.2.2 as the authoritative Platform mother-reference set after merge to canonical GitHub `main`. Earlier v1/v2/v3.0/v3.1/v3.2.x generated/historical states and the legacy `Platform_Master_Architecture_v1.0.docx` are superseded as current Platform engineering sources of truth except where explicitly retained as historical provenance. Original ThoughtData/Enterprise360, NetAI, SolarWinds, ManageEngine and other supplied reference material remains reference/evidence only and never overrides this set.
 9. Open/draft PR filenames, branch names, titles or draft document headers do **not** reserve a `Platform_NN` number and do not change the authoritative Mother Reference set or version.
 
 ## 2. No-assumption rule
@@ -114,7 +114,7 @@ A Platform number becomes canonical only when the corresponding specialized mast
 9. merge;
 10. only then does that number become canonical.
 
-Multiple parallel candidate PRs must not each claim the same next number. Merge order against then-current `main` determines allocation. Candidate documents remain **unnumbered/unallocated until final reconciliation**; temporary internal names are allowed, but they confer no reservation authority. Number assignment, rename and cross-reference updates must occur atomically before merge. A candidate specialized master must not silently advance the set-wide Mother Reference version (currently **v3.2.2**); version changes require separate set-wide change control.
+Multiple parallel candidate PRs must not each claim the same next number. Merge order against then-current `main` determines allocation. Candidate documents remain **unnumbered/unallocated until final reconciliation**; temporary internal names are allowed, but they confer no reservation authority. Number assignment, rename and cross-reference updates must occur atomically before merge. A candidate specialized master must not silently advance the set-wide Mother Reference version (currently **v3.3.0**); version changes require separate set-wide change control.
 
 ## 6. Source precedence
 
