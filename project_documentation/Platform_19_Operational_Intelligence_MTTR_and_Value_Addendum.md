@@ -417,7 +417,7 @@ Endpoint EDS indicators and software changes are supporting evidence, never auto
 
 ---
 
-## 16. v3.3.0 operational evidence integration
+## 18. v3.3.0 operational evidence integration
 
 ### 16.1 Investigation Workbench and Flight Recorder
 
