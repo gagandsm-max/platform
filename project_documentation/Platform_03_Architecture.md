@@ -1,7 +1,7 @@
 # Platform — Master Architecture Document
 
 **Document ID:** PLATFORM-ARC-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** Authoritative Mother Reference — System Architecture Authority (**A2.1 NORMALIZED_V1**)
 **Product name:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Depends on:** `Platform_01_BRD.md`, `Platform_02_PRD.md`
@@ -1582,3 +1582,37 @@ No second diagnostic scheduler, evidence store, transport, endpoint RCA engine, 
 Cross-vantage evidence is requested only when entity relationships, policy, capability, authorization and capacity justify it. Physical hardware evidence comes from BUILD-032/OOB, VMware evidence from BUILD-033, storage evidence from BUILD-034, path evidence from BUILD-040, and other domains from their owning connectors. All vantages retain independent provenance and contradictions.
 
 Endpoint indicators are factual evidence qualifications. Core alone owns probable cause, confidence, contradictions, missing evidence, alternatives and `INCONCLUSIVE`.
+
+
+---
+
+## 45. v3.3.0 architecture reconciliation — ACP-001..ACP-018
+
+### 45.1 One extensibility and evidence architecture
+
+Capability Pack remains the only pack/runtime extension architecture. Official OOB targets, Integration Packs, Device/Network Packs and future customer/partner classifications must load through existing Core/Sensor/Agent/connector boundaries and canonical entity/event/evidence contracts. No new database or Core service is introduced merely for a pack.
+
+Investigation Workbench is a UI/query/orchestration projection over existing Investigation Session, Unified Operations Timeline, Incident Flight Recorder, canonical graph and RCA authorities. Path Intelligence extends existing active-path collection and temporal graph. Neither creates another evidence store, topology authority or RCA engine.
+
+### 45.2 Governed OTLP ingress
+
+Two deployment profiles are architecturally permitted:
+
+1. application/SDK/customer Collector -> assigned Streaming/Event/Infrastructure Sensor OTLP ingress -> existing bounded Sensor durability -> Core ingestion/Kafka/ClickHouse;
+2. customer-central Collector -> controlled Core OTLP ingress where locality/routing makes Sensor ingress impractical.
+
+Both profiles use one trust contract: TLS/mTLS or scoped credential as certified, server-derived tenant/source identity, bounded request/decompression size, quotas, redaction, schema/semantic normalization, quality/drop accounting, backpressure and canonical service/entity resolution. Resource attributes never establish tenant authority. PostgreSQL owns source/policy/control metadata; ClickHouse owns high-volume metrics/log history and Phase-1.5 sampled spans if approved; Kafka remains internal transport; Valkey remains ephemeral. No dedicated trace datastore is authorized.
+
+### 45.3 Integration Fabric placement
+
+The existing modular **Integration Service** owns canonical external-object adapters, connection/capability profiles, transactional outbox/inbox processing, mappings, inbound authentication, bounded poll fallback, retry/rate limits, loop prevention, conflicts, health and audit. Vendor-specific adapters remain modules/Integration Packs rather than ServiceNow/Jira/BMC logic embedded across Incident, NCM or CMDB modules. A separate Integration microservice is not mandatory and requires future evidence of independent scaling/fault/security/lifecycle need.
+
+### 45.4 CMDB and graph authority
+
+External CIs are bindings to canonical entities. External relationships enter the existing canonical temporal graph as declared/external-provenance edges with authority/freshness/confidence/lifecycle; they may coexist with independently observed technical edges. They cannot silently replace observed routing/topology/runtime truth. No second graph or CMDB/entity database is created.
+
+### 45.5 NCM assurance architecture
+
+NCM execution continues through existing NCM orchestration/worker and assigned Sensor/device adapter boundaries. Change Assurance adds a plan/evidence lifecycle and references canonical topology/service/incident/change/audit state rather than duplicating them. Approval validity is checked against immutable Change Plan version, exact target-set hash, rendered configuration/template hash and approved maintenance window before execution; local Platform RBAC/policy/preconditions remain independently authoritative.
+
+Firmware remains Phase 1.5 and uses governed artifact storage/repository references; firmware binaries are not stored in PostgreSQL/ClickHouse telemetry tables.
