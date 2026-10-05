@@ -1,7 +1,7 @@
 # Platform — Operational Intelligence, MTTR Reduction & Customer Value Master
 
 **Document ID:** PLATFORM-INTELVALUE-001  
-**Version:** 3.2.2  
+**Version:** 3.3.0  
 **Status:** **Authoritative Mother Reference — Operational Intelligence / MTTR / Customer Value**  
 **Product:** Platform  
 **Change class:** Additive approved product scope; does not remove or weaken any v3.2.1 requirement
@@ -10,7 +10,7 @@
 
 ## 1. Authority and purpose
 
-This document is the authoritative v3.2.2 specialized master for the operational-intelligence and customer-value scope approved by the product owner on 2026-09-07.
+This document is the authoritative v3.3.0 specialized master for the operational-intelligence and customer-value scope approved by the product owner on 2026-09-07.
 
 It is intentionally consolidated rather than duplicating the same requirement text across BRD, PRD, Architecture, HLD, LLD, Dataflow, UI, data-contract, quality and threat-model files. For this capability family, the sections below carry the corresponding logical-layer authority:
 
@@ -413,3 +413,24 @@ The Orchestrator shall prefer already-collected evidence when sufficient, and ac
 Every source retains its own evidence reference, event/observed time, quality and provenance. Missing, late, denied and contradictory evidence remains explicit.
 
 Endpoint EDS indicators and software changes are supporting evidence, never automatic root cause. Deterministic Core RCA may create a later immutable revision when additional OOB/virtualization/storage/software-change evidence arrives; prior revisions remain available.
+
+
+---
+
+## 16. v3.3.0 operational evidence integration
+
+### 16.1 Investigation Workbench and Flight Recorder
+
+Investigation Workbench is the presentation/query/orchestration projection of existing Incident, Investigation Session, Unified Operations Timeline, Flight Recorder and RCA evidence. It may correlate Phase-1 OTLP metrics/logs and trace-context/exemplars; Phase-1.5 sampled spans may be referenced/pinned into an Incident Flight Recorder evidence manifest under bounded retention/legal-hold policy. OTel-derived service edges carry provenance/time/quality and remain evidence, not causal truth.
+
+### 16.2 ITSM external evidence
+
+Reverse ITSM updates such as provider notes, work notes, ticket state, assignment, scheduled change window or declared result are stored as typed external workflow/context evidence with source/provenance. They do not rewrite monitored telemetry, internal evidence or accepted root cause. A note such as a carrier fibre-cut confirmation may strengthen an investigation only as externally asserted evidence until corroborated/accepted under the RCA evidence model.
+
+### 16.3 Change Intelligence and NCM
+
+Change Intelligence consumes both external ITSM Change metadata and NCM Change Assurance evidence. Planned/actual timestamps, actor, target/CI, release/change identifiers and result are correlation inputs; temporal proximity remains distinct from causal proof. Change Assurance before/after evidence, canary/batch result, rollback and post-stabilization outcome may be pinned to the incident timeline/Flight Recorder where relevant.
+
+### 16.4 Problem management
+
+Similar Incident Memory may recommend creation/linkage of an external Problem and preserve its external binding, accepted RCA/workaround/known-error/corrective-action/PIR references. Automated external Problem creation is not a Phase-1 GA requirement; connector canonical support is established in Phase 1 and richer Problem workflow is Phase 1.5 unless a certified connector/use case promotes it through change control.
