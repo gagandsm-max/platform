@@ -430,7 +430,7 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 | Full traditional APM | USER-FIXED | Excluded: continuous profiling/flame graphs/source/IDE developer tooling/full RUM/session replay/unlimited traces. |
 | Full always-on DPI/NDR | USER-FIXED | Excluded; bounded incident-triggered packet evidence remains permitted under existing security/privacy/retention controls. |
 
-### 18.1 P0 engineering spikes retained
+### 23.1 P0 engineering spikes retained
 
 1. OTel trace economics/backend/schema/sampling/retention/backpressure and HA.
 2. Browser runtime and Playwright-or-alternative OSS/security/capacity admission.
