@@ -201,7 +201,7 @@ Do not paste the agent or Skill catalogue here. Resolve it from manifests.
 - Writer isolation: one writer per checkout; parallel writes use separate branches/worktrees
 - Evidence: typed claims, exact-head current-base CI, no writer self-certification
 
-Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.2.2. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
+Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.3.0. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
 
 ---
 
@@ -220,3 +220,24 @@ Non-negotiable boundaries:
 - Built-in trigger-specific EDS definitions remain bounded and evidence-oriented; endpoint indicators are factual evidence qualifications, not unsupported causal conclusions.
 - Guest Agents do not infer hypervisor cause. Physical/OOB, virtualization, storage and path evidence comes from the certified owning vantage and is correlated by Core with independent provenance.
 - Routine monitoring, authority/control and telemetry durability always take priority over software inventory refreshes and diagnostic enrichment under resource pressure.
+
+
+## v3.3.0 ACP-001..ACP-018 safeguards
+
+For work involving Official Certified Capability Packs, Investigation Workbench, Path Intelligence, OpenTelemetry/OTLP, NCM Change Assurance, ITSM/CMDB synchronization, Mapping Studio, connector certification, endpoint/switch-port intelligence, browser journeys, database performance intelligence or virtualization optimization, preflight the exact current Mother References and requirement owners before implementation.
+
+Non-negotiable boundaries:
+
+- Capability Pack remains the only extensibility/pack architecture. Do not introduce a parallel Technology Pack registry, SDK or Core fork.
+- Named Phase-1 and Phase-1.5 technologies/connectors are certification **targets** until exact product/version/dimension evidence passes; specification is not certification.
+- Investigation Workbench reuses Investigation Session, Unified Operations Timeline, Flight Recorder, canonical graph and deterministic RCA. Path Intelligence reuses active-path + temporal graph. Do not create competing evidence/topology/RCA authorities.
+- Phase-1 OTLP is metrics + structured logs + resource identity + trace/span correlation identifiers/exemplars where supplied. Retained sampled spans and trace waterfall/search are Phase 1.5 after explicit trace economics/security/sampling certification. Do not silently promote traces into the Phase-1 GA gate.
+- OTLP tenant/source authority is server-derived from authenticated ingress. OpenTelemetry resource attributes never select tenant authority. No mandatory trace database is authorized.
+- NCM execution requires exact Change Plan/version/target/configuration/window approval binding plus local Platform RBAC/policy/preconditions. ITSM approval alone never authorizes unsafe execution. Semantic diff and rollback are capability-certified, never universal. Firmware is Phase 1.5.
+- Integration Fabric is logical functionality of the existing Integration Service unless later evidence justifies a process boundary. Outbound uses transactional outbox; inbound uses authenticated inbox/event processing or bounded incremental polling. Free-text external content cannot trigger privileged commands.
+- ITSM workflow state never overrides monitored technical truth. External CIs/relationships bind/enrich the canonical entity/graph under explicit authority/conflict rules; no second CMDB/entity database and no last-write-wins.
+- ServiceNow CI publication/reconciliation uses certified IRE behavior by default. Exact vendor edition/API/auth/capability remains a certification gate.
+- Browser journeys are Phase 1.5 and do not preselect Playwright or another runtime until OSS/security/capacity admission. Full RUM/session replay remain excluded.
+- Full developer-centric APM and full always-on DPI/NDR remain excluded. Existing bounded incident-triggered packet evidence remains governed under Platform_19.
+
+The v3.3.0 requirements are architecture/product authority only. Runtime implementation, benchmark, certification and deployment remain owned by their future BUILDs and evidence gates.
