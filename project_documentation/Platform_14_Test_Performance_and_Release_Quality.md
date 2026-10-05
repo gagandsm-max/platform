@@ -1,7 +1,7 @@
 # Platform — Test, Performance, Benchmark & Release Quality Master
 
 **Document ID:** PLATFORM-QUALITY-001
-**Version:** 3.2.2
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Consolidation rule:** This document preserves the normative content of the listed v3.1 source documents (via v3.2/v3.2.1). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement. v3.2.2 adds specialized-master quality supplements in §6 without rewriting the base gates.
@@ -430,3 +430,36 @@ For each scenario prove:
 - diagnostics do not materially worsen simulated CPU, memory, disk or network pressure.
 
 VMware/API terminology and metric availability must be certified against supported versions; documentation names do not prove API availability.
+
+
+---
+
+## 12. v3.3.0 ACP certification and negative-test gates
+
+### 12.1 Official Certified Capability Packs
+
+A pack/profile is not certified by parser success or vendor name. Applicable gates cover supported product/version identification, authentication/least privilege, discovery/reconciliation/no-duplicates, inventory/entities/relationships, metric units/counter/state semantics, topology, safe default monitoring profile, dashboards/alerts/qualification, diagnostics, malformed/partial/timeout/auth failure/unsupported version, data quality, resource budget, upgrade/migration/rollback compatibility, provenance and dimensional Discovery/L1/L2/L3/Topology/Diagnostics/NCM/Security evidence.
+
+### 12.2 OTLP Phase 1
+
+Test certified OTLP/gRPC and HTTP profiles for metrics and logs, resource/scope identity, trace/span correlation IDs, exemplars where present, wrong tenant/source, invalid/revoked cert/token, malformed protobuf/JSON where supported, partial success, duplicate/replay, missing parent/reference, out-of-order timestamps, clock skew, huge attributes, cardinality attack, sensitive-field redaction, compressed/decompression bombs, rate limits, queue/backpressure, failover/replay, storage pressure, rejected/dropped accounting, entity-resolution conflicts and proof that OTLP source failure/no-data does not assert application DOWN.
+
+### 12.3 OTLP Phase 1.5 spans
+
+Before certification prove span schema correctness, head/tail sampling behavior, trace routing, sampling provenance, memory/state limits, restart/HA behavior, short-retention enforcement, trace query bounds, service-edge provenance, Flight Recorder pinning, cross-signal correlation and measured Core/Sensor/ClickHouse cost. Numerical acceptance values are benchmark outputs, not Mother Reference inventions.
+
+### 12.4 NCM Change Assurance
+
+Negative/edge tests include backup failure/staleness, config search redaction, raw/semantic diff parser mismatch, privilege failure, missing/forged/replayed/stale approval, modified-after-approval targets/config/window, concurrent/out-of-band change, precheck deterioration, canary failure, partial rollout, stop-condition enforcement, HA-pair/failure-domain sequencing, post-validation failure, unsupported/failed rollback, device unreachable, vendor rate/session limits, maintenance-window expiry and complete audit/evidence manifest.
+
+### 12.5 Firmware — Phase 1.5
+
+Test wrong/unauthorized image, checksum/signature failure, entitlement failure, unsupported model/version, missing intermediate release, insufficient storage, stale/failed backup, transfer interruption, canary/reboot/health failure, rollback unavailable/fails and supply-chain/provenance evidence. Firmware is not first-GA complete based on a successful happy-path upgrade.
+
+### 12.6 ITSM/CMDB
+
+Per certified connector/edition/API test authentication/permissions, standard/custom mappings, required fields, create/read/update/comments/work notes, allowed/unsupported transitions, resolve/reopen, change/approval, webhook authentication/replay/duplicate/out-of-order, polling checkpoint, vendor outage, retry/rate-limit recovery, loop prevention, wrong tenant, stale external version, conflict handling, wrong-CI prevention, CMDB read/write/relationships/business services where claimed, ServiceNow IRE behavior, no external state overriding monitoring truth and no free-text path to privileged execution. Integration Test Sandbox capability result must be precise rather than generic connection success.
+
+### 12.7 Phase-1.5 browser/DB/virtualization/endpoint
+
+Browser journeys require credential isolation, sandbox/runtime admission, deterministic steps/assertions/timing, screenshot/artifact access/TTL/redaction, crash/timeout/cancellation and capacity isolation. DB intelligence requires safe fingerprint/wait/blocking/deadlock/regression/plan evidence without dangerous query execution/autotuning. Virtualization recommendations require evidence/false-positive testing and no autonomous apply. Endpoint/switch-port history requires identity/provenance/movement/tenant/privacy tests and no duplicate endpoint store.
