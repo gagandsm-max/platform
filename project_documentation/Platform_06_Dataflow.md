@@ -2447,3 +2447,9 @@ authorized Change Plan
 ```
 
 ITSM approval is necessary where policy requires but is never sufficient to bypass local safety/authorization.
+
+
+### DF-ACP-006 Formal v3.3 integration requirement anchors
+
+- `REQ-INT-007` — Outbound integration flow is domain transaction -> PostgreSQL transactional outbox -> connector worker -> vendor API with deterministic operation identity, idempotency, retry/backoff+jitter, rate limits, quarantine/DLQ, pause/drain/replay, per-tenant quotas and lineage.
+- `REQ-INT-008` — Inbound flow is authenticated vendor event/webhook -> connector/tenant binding -> replay/idempotency validation -> PostgreSQL inbox -> normalized governed event; bounded updated-since/cursor polling is fallback when events are inadequate.
