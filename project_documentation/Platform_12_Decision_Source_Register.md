@@ -1,7 +1,7 @@
 # Platform — Decision, Source & Assumption-Control Register
 
 **Document ID:** PLATFORM-DECISION-001  
-**Version:** 3.3.0  
+**Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Decision Provenance**
 
 ## 1. Purpose
