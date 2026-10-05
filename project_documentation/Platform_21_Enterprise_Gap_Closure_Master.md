@@ -212,7 +212,7 @@ These are first-GA targets, not implementation claims. Their exit depends on the
 
 ---
 
-## 10. v3.3.0 controlled specialist phasing
+## 11. v3.3.0 controlled specialist phasing
 
 This reconciliation promotes the **requirement phase**, not implementation state:
 
