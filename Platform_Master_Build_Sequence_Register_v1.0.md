@@ -212,7 +212,7 @@ BUILD-000 → 001 → 002 → 003 → 004 → 005 → 010 → 011 → 016 → 01
 
 A future Master Chat must establish:
 - the current live GitHub `origin/main` SHA directly (verified at handoff/runtime);
-- Mother Reference v3.2.2 set (AGENTS.md + Platform_00..Platform_23);
+- Mother Reference v3.3.0 set (AGENTS.md + Platform_00..Platform_23);
 - Issue #122 (while BUILD-004 remains active) and Issue #92 for production certification governance;
 - this Build Sequence Register;
 - last fully certified BUILD ID;
