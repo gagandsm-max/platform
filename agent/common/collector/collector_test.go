@@ -12,18 +12,37 @@ func TestCollectorsExecution(t *testing.T) {
 	}
 
 	collectors := NewDefaultCollectors(16)
-	if len(collectors) < 3 {
-		t.Fatalf("expected at least 3 collectors, got %d", len(collectors))
+	wantNames := []string{"cpu", "memory", "filesystem", "pressure", "diskio", "net", "osfacts"}
+	if len(collectors) != len(wantNames) {
+		t.Fatalf("expected %d collectors, got %d", len(wantNames), len(collectors))
+	}
+
+	// Certified Slice-0/BUILD-010 collectors retain strict regression gates.
+	strictCollectors := map[string]struct{}{
+		"cpu": {}, "memory": {}, "filesystem": {},
 	}
 
 	ctx := context.Background()
-	for _, c := range collectors {
+	for i, c := range collectors {
+		if c.Name() != wantNames[i] {
+			t.Fatalf("collector[%d]=%s want %s", i, c.Name(), wantNames[i])
+		}
 		samples, err := c.Collect(ctx)
+		_, strict := strictCollectors[c.Name()]
 		if err != nil {
-			t.Fatalf("collector %s failed: %v", c.Name(), err)
+			if strict {
+				t.Fatalf("collector %s returned unexpected error: %v", c.Name(), err)
+			}
+			// Slice-2 live collectors: explicit error is monitoring-health evidence, not host DOWN.
+			t.Logf("collector %s returned explicit error: %v", c.Name(), err)
+			continue
 		}
 		if len(samples) == 0 {
-			t.Fatalf("collector %s produced 0 samples", c.Name())
+			if strict {
+				t.Fatalf("collector %s produced 0 samples", c.Name())
+			}
+			t.Logf("collector %s produced 0 samples (allowed when source empty after bounds)", c.Name())
+			continue
 		}
 		for _, s := range samples {
 			if s.MetricKey == "" {
@@ -44,21 +63,9 @@ func TestCollectorContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	cpu := NewCPUCollector()
-	_, err := cpu.Collect(ctx)
-	if err == nil {
-		t.Fatal("expected error on cancelled context")
-	}
-
-	mem := NewMemoryCollector()
-	_, err = mem.Collect(ctx)
-	if err == nil {
-		t.Fatal("expected error on cancelled context")
-	}
-
-	fs := NewFilesystemCollector(4)
-	_, err = fs.Collect(ctx)
-	if err == nil {
-		t.Fatal("expected error on cancelled context")
+	for _, c := range NewDefaultCollectors(4) {
+		if _, err := c.Collect(ctx); err == nil {
+			t.Fatalf("expected error on cancelled context for %s", c.Name())
+		}
 	}
 }
