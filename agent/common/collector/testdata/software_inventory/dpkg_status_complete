@@ -1,0 +1,67 @@
+Package: openssl
+Status: install ok installed
+Priority: important
+Section: utils
+Architecture: amd64
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Version: 3.0.13-0ubuntu3
+Depends: libc6 (>= 2.34), libssl3 (>= 3.0.13)
+Pre-Depends: something
+Recommends: ca-certificates
+Suggests: libssl-doc
+Description: Secure Sockets Layer toolkit - cryptographic utility
+ This package contains the openssl binary and related tools.
+Conffiles:
+ /etc/ssl/openssl.cnf abcdef1234567890
+Unknown-Field: must-be-ignored
+Multi-Arch: same
+
+Package: openssl
+Status: install ok installed
+Architecture: i386
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Version: 3.0.13-0ubuntu3
+Description: 32-bit openssl should remain a distinct native identity
+Depends: libc6
+
+Package: bash
+Status: install ok installed
+Architecture: amd64
+Version: 5.1-6ubuntu1
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Description: GNU Bourne Again SHell
+
+Package: openssl
+Status: install ok installed
+Architecture: amd64
+Version: 3.0.13-0ubuntu3
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+
+Package: leftover-config
+Status: deinstall ok config-files
+Architecture: amd64
+Version: 1.2.3
+Maintainer: Example
+Description: config-files records are not installed packages
+Conffiles:
+ /etc/leftover.conf deadbeef
+
+Package: uninstalled-pkg
+Status: deinstall ok not-installed
+Architecture: amd64
+Version: 0.1
+
+Package: purged-pkg
+Status: purge ok not-installed
+Architecture: amd64
+Version: 0.2
+
+Package: unpacked-pkg
+Status: install ok unpacked
+Architecture: amd64
+Version: 9.9.9
+
+Package: hold-pkg
+Status: hold ok installed
+Architecture: amd64
+Version: 8.8.8

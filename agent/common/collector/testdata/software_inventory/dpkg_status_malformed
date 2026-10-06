@@ -1,0 +1,11 @@
+Package: good
+Status: install ok installed
+Architecture: amd64
+Version: 1.0
+
+this line is not a field
+
+Package: also-good
+Status: install ok installed
+Architecture: amd64
+Version: 2.0

@@ -37,6 +37,16 @@ const (
 	maxSoftwareInventoryArchitectureLen    = 64
 	maxSoftwareInventoryNormalizedIDLen    = 256
 	maxSoftwareInventoryNormVersionLen     = 64
+
+	// Slice-4 source-collection safety ceilings. These are engineering
+	// parser/memory/process bounds, NOT product capacity or SKU commitments.
+	maxDpkgStatusBytes     = 8 << 20   // 8 MiB
+	maxDpkgStanzaBytes     = 1 << 20   // 1 MiB
+	maxDpkgLineBytes       = 256 << 10 // 256 KiB
+	maxRPMStdoutBytes      = 8 << 20   // 8 MiB
+	maxRPMStderrBytes      = 32 << 10  // 32 KiB
+	maxTargetedSelectors   = 256
+	maxTargetedSelectorLen = 512
 )
 
 type SnapshotMode string
