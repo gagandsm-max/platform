@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -167,8 +168,18 @@ func TestLinuxProcEnumerationMatchingAndBounds(t *testing.T) {
 			nginx = e
 		}
 	}
-	if nginx.ServiceID != "nginx.service" || nginx.ExecutablePath != bin || nginx.ExecutableIdentity == "" {
+	if nginx.ServiceID != "nginx.service" || nginx.ExecutablePath != bin {
 		t.Fatalf("nginx identity %+v", nginx)
+	}
+	if nginx.ExecutableIdentity != "" {
+		t.Fatalf("ExecutableIdentity must stay empty without hashing, got %q", nginx.ExecutableIdentity)
+	}
+	if strings.HasPrefix(nginx.ExecutableIdentity, "linux-dev-ino:") {
+		t.Fatal("dev/inode/size must not become ExecutableIdentity")
+	}
+	pref, err := nginx.PreferredDurableSelector()
+	if err != nil || pref.Kind != SelectorKindServiceID || pref.Value != "nginx.service" {
+		t.Fatalf("SERVICE_ID must be preferred durable selector, got %#v err=%v", pref, err)
 	}
 	if nginx.Runtime == nil || nginx.Runtime.PID != 42 || nginx.Runtime.State != "S" {
 		t.Fatalf("runtime %+v", nginx.Runtime)
@@ -561,6 +572,17 @@ func TestLiveLinuxProcessDiscoverySmoke(t *testing.T) {
 		if e.Runtime != nil && e.Runtime.PID <= 0 {
 			t.Fatal("invalid pid")
 		}
+		if strings.HasPrefix(e.ExecutableIdentity, "linux-dev-ino:") || strings.Contains(e.ExecutableIdentity, "linux-dev-ino") {
+			t.Fatalf("live ExecutableIdentity must not be dev/inode/size: %q", e.ExecutableIdentity)
+		}
+		if e.ExecutableIdentity != "" {
+			t.Fatalf("live discovery must not populate ExecutableIdentity without hashing, got %q", e.ExecutableIdentity)
+		}
+		if pref, err := e.PreferredDurableSelector(); err != nil {
+			t.Fatalf("live preferred selector: %v", err)
+		} else if pref.Kind == SelectorKindExecutableIdentity {
+			t.Fatalf("live preferred selector must not be EXECUTABLE_IDENTITY, got %#v", pref)
+		}
 		pidSel := ProcessServiceSelector{Kind: "PID", Value: fmt.Sprintf("%d", e.Runtime.PID)}
 		if pidSel.Validate() == nil {
 			t.Fatal("live PID accepted as durable selector")
@@ -925,4 +947,194 @@ func TestLinuxInternalSystemdTimeoutDistinctFromCallerCancel(t *testing.T) {
 	if parent.Err() != nil {
 		t.Fatalf("parent context should remain live, err=%v", parent.Err())
 	}
+}
+
+func TestLinuxDiscoveryDoesNotEmitDevInodeExecutableIdentity(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "app-bin")
+	if err := os.WriteFile(bin, []byte("elf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFakePID(t, root, 9, "appd", "S", bin, "", "", "", 1, 1, 10, 1)
+	src := newTestLinuxSource(t, root)
+	snap, err := src.Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Catalogue.Entries) != 1 {
+		t.Fatalf("entries %d", len(snap.Catalogue.Entries))
+	}
+	e := snap.Catalogue.Entries[0]
+	if e.ExecutableIdentity != "" {
+		t.Fatalf("weak filesystem identity leaked into ExecutableIdentity: %q", e.ExecutableIdentity)
+	}
+	if strings.Contains(e.ExecutableIdentity, "linux-dev-ino") || strings.Contains(e.ExecutablePath, "linux-dev-ino") {
+		t.Fatal("dev/inode/size token must not appear as durable identity")
+	}
+	if e.ExecutablePath != bin {
+		t.Fatalf("path %q", e.ExecutablePath)
+	}
+	pref, err := e.PreferredDurableSelector()
+	if err != nil || pref.Kind != SelectorKindExecutablePath || pref.Value != bin {
+		t.Fatalf("without SERVICE_ID, EXECUTABLE_PATH must be preferred, got %#v err=%v", pref, err)
+	}
+	if pref.Kind == SelectorKindExecutableIdentity {
+		t.Fatal("weak runtime filesystem identity must never become EXECUTABLE_IDENTITY")
+	}
+	if e.Runtime == nil || e.Runtime.PID != 9 {
+		t.Fatal("PID must remain ephemeral runtime evidence")
+	}
+	pidSel := ProcessServiceSelector{Kind: "PID", Value: "9"}
+	if pidSel.Validate() == nil || pidSel.MatchesEntry(e) {
+		t.Fatal("PID must not be a durable selector")
+	}
+}
+
+func TestLinuxPreferredDurableSelectorServiceThenPathThenName(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "named-bin")
+	if err := os.WriteFile(bin, []byte("elf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFakePID(t, root, 1, "svcproc", "S", bin, "0::/system.slice/app.service\n", "", "", 1, 1, 1, 1)
+	writeFakePID(t, root, 2, "pathproc", "S", bin, "", "", "", 1, 1, 1, 1)
+	writeFakePID(t, root, 3, "nameonly", "S", "", "", "", "", 1, 1, 1, 1)
+	src := newTestLinuxSource(t, root)
+	snap, err := src.Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]SelectorKind{}
+	for _, e := range snap.Catalogue.Entries {
+		if e.ExecutableIdentity != "" {
+			t.Fatalf("ExecutableIdentity populated for %s: %q", e.ProcessFamilyName, e.ExecutableIdentity)
+		}
+		pref, err := e.PreferredDurableSelector()
+		if err != nil {
+			t.Fatalf("%s: %v", e.ProcessFamilyName, err)
+		}
+		got[e.ProcessFamilyName] = pref.Kind
+	}
+	if got["svcproc"] != SelectorKindServiceID {
+		t.Fatalf("service-backed process: %s", got["svcproc"])
+	}
+	if got["pathproc"] != SelectorKindExecutablePath {
+		t.Fatalf("path-backed process: %s", got["pathproc"])
+	}
+	if got["nameonly"] != SelectorKindProcessName {
+		t.Fatalf("name-only process: %s", got["nameonly"])
+	}
+}
+
+func TestLinuxSourceRejectsDevInodeIdentityConstruction(t *testing.T) {
+	src, err := os.ReadFile("process_service_linux.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	if strings.Contains(body, "linux-dev-ino") {
+		t.Fatal("Linux discovery must not construct linux-dev-ino ExecutableIdentity")
+	}
+}
+
+func TestLinuxCallerDeadlineDuringSystemdExecution(t *testing.T) {
+	root := t.TempDir()
+	writeFakePID(t, root, 1, "init", "S", "", "", "", "", 1, 1, 1, 1)
+	src := newTestLinuxSource(t, root)
+	src.systemctlPath = "/usr/bin/systemctl"
+	src.systemdTimeout = 3 * time.Second
+	started := make(chan struct{})
+	src.runner = func(ctx context.Context, executable string, args []string) systemctlRunResult {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-ctx.Done()
+		return systemctlRunResult{err: ctx.Err()}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := src.Collect(ctx)
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("systemd runner did not start")
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Collect did not return after parent deadline")
+	}
+}
+
+func TestLinuxParentTerminationAfterFinalProcessInspection(t *testing.T) {
+	root := t.TempDir()
+	writeFakePID(t, root, 1, "onlyproc", "S", "", "", "", "", 1, 1, 1, 1)
+
+	t.Run("canceled", func(t *testing.T) {
+		src := newTestLinuxSource(t, root)
+		src.systemctlPath = ""
+		parent := newTerminableContext(context.Background())
+		src.openProcFile = func(path string, limit int) ([]byte, error) {
+			data, err := readBoundedFile(path, limit)
+			parent.terminate(context.Canceled)
+			return data, err
+		}
+		_, err := src.Collect(parent)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled after final inspection, got %v", err)
+		}
+	})
+
+	t.Run("deadlineExceeded", func(t *testing.T) {
+		src := newTestLinuxSource(t, root)
+		src.systemctlPath = ""
+		parent := newTerminableContext(context.Background())
+		src.openProcFile = func(path string, limit int) ([]byte, error) {
+			data, err := readBoundedFile(path, limit)
+			parent.terminate(context.DeadlineExceeded)
+			return data, err
+		}
+		_, err := src.Collect(parent)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("deadline after final inspection must not become success, got %v", err)
+		}
+	})
+}
+
+type terminableContext struct {
+	context.Context
+	done chan struct{}
+	mu   sync.Mutex
+	err  error
+}
+
+func newTerminableContext(parent context.Context) *terminableContext {
+	return &terminableContext{Context: parent, done: make(chan struct{})}
+}
+
+func (c *terminableContext) Done() <-chan struct{} { return c.done }
+
+func (c *terminableContext) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+func (c *terminableContext) terminate(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err != nil {
+		return
+	}
+	c.err = err
+	close(c.done)
 }

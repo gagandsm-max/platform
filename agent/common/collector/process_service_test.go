@@ -340,7 +340,7 @@ func TestProcessServiceExactSelectorMatchingAndPrecedence(t *testing.T) {
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	nginx := ProcessServiceCatalogueEntry{
 		ServiceID:          "nginx.service",
-		ExecutableIdentity: "linux-dev-ino:1:2:3",
+		ExecutableIdentity: "sha256:abcdef0123456789",
 		ExecutablePath:     "/usr/sbin/nginx",
 		ProcessFamilyName:  "nginx",
 		Runtime:            &ProcessServiceRuntimeInstance{PID: 100, ObservedAt: now, InstanceToken: "100:10"},
@@ -357,7 +357,7 @@ func TestProcessServiceExactSelectorMatchingAndPrecedence(t *testing.T) {
 	selService := ProcessServiceSelector{Kind: SelectorKindServiceID, Value: "nginx.service"}
 	selPath := ProcessServiceSelector{Kind: SelectorKindExecutablePath, Value: "/usr/sbin/nginx"}
 	selName := ProcessServiceSelector{Kind: SelectorKindProcessName, Value: "nginx"}
-	selIdent := ProcessServiceSelector{Kind: SelectorKindExecutableIdentity, Value: "linux-dev-ino:1:2:3"}
+	selIdent := ProcessServiceSelector{Kind: SelectorKindExecutableIdentity, Value: "sha256:abcdef0123456789"}
 	if !selService.MatchesEntry(nginx) || selService.MatchesEntry(sshd) {
 		t.Fatal("SERVICE_ID matching must be exact")
 	}
@@ -376,6 +376,19 @@ func TestProcessServiceExactSelectorMatchingAndPrecedence(t *testing.T) {
 	pref, err = pathOnly.PreferredDurableSelector()
 	if err != nil || pref.Kind != SelectorKindExecutablePath {
 		t.Fatalf("path must outrank name, got %#v", pref)
+	}
+	nameOnly := ProcessServiceCatalogueEntry{ProcessFamilyName: "nginx"}
+	pref, err = nameOnly.PreferredDurableSelector()
+	if err != nil || pref.Kind != SelectorKindProcessName {
+		t.Fatalf("name is last-resort durable selector, got %#v", pref)
+	}
+	weakFS := ProcessServiceCatalogueEntry{
+		ExecutablePath:    "/usr/sbin/nginx",
+		ProcessFamilyName: "nginx",
+	}
+	pref, err = weakFS.PreferredDurableSelector()
+	if err != nil || pref.Kind != SelectorKindExecutablePath || pref.Value != "/usr/sbin/nginx" {
+		t.Fatalf("empty ExecutableIdentity must not invent EXECUTABLE_IDENTITY, got %#v err=%v", pref, err)
 	}
 	matches := MatchProcessServiceSelectors([]ProcessServiceCatalogueEntry{nginx, sshd}, []ProcessServiceSelector{selService, selPath, selIdent, selName})
 	for _, m := range matches {

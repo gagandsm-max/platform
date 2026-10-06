@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"math"
 	"os"
@@ -96,7 +95,7 @@ func (s *LinuxProcessServiceSource) Collect(ctx context.Context) (ProcessService
 }
 
 func (s *LinuxProcessServiceSource) CollectMatching(ctx context.Context, selectors []ProcessServiceSelector) (ProcessServiceSourceSnapshot, error) {
-	if err := ctx.Err(); err != nil {
+	if err := parentContextTerminated(ctx); err != nil {
 		return ProcessServiceSourceSnapshot{}, err
 	}
 	now := s.now()
@@ -128,11 +127,14 @@ func (s *LinuxProcessServiceSource) CollectMatching(ctx context.Context, selecto
 		return ProcessServiceSourceSnapshot{}, err
 	}
 
-	if err := ctx.Err(); err != nil {
+	if err := parentContextTerminated(ctx); err != nil {
 		return ProcessServiceSourceSnapshot{}, err
 	}
 	svcClass, services, svcTrunc, svcReason, svcQuality, err := s.collectSystemd(ctx)
 	if err != nil {
+		return ProcessServiceSourceSnapshot{}, err
+	}
+	if err := parentContextTerminated(ctx); err != nil {
 		return ProcessServiceSourceSnapshot{}, err
 	}
 	sourceQuality := procQuality.merge(svcQuality)
@@ -183,6 +185,9 @@ func (s *LinuxProcessServiceSource) CollectMatching(ctx context.Context, selecto
 				}
 			}
 		}
+	}
+	if err := parentContextTerminated(ctx); err != nil {
+		return ProcessServiceSourceSnapshot{}, err
 	}
 	return snap, nil
 }
@@ -260,6 +265,9 @@ scan:
 			return ProcessServiceSourceClass(""), nil, false, "", quality, err
 		}
 		entry, skipped, skipClass := s.inspectPID(ctx, root, pid, now)
+		if err := parentContextTerminated(ctx); err != nil {
+			return ProcessServiceSourceClass(""), nil, false, "", quality, err
+		}
 		if skipped {
 			quality.noteProcessSkip(skipClass)
 			continue
@@ -278,6 +286,9 @@ scan:
 		truncated = true
 		class = ProcessServiceSourceTruncated
 		reason = "proc directory scan bound reached"
+	}
+	if err := parentContextTerminated(ctx); err != nil {
+		return ProcessServiceSourceClass(""), nil, false, "", quality, err
 	}
 	return class, entries, truncated, reason, quality, nil
 }
@@ -322,12 +333,12 @@ func (s *LinuxProcessServiceSource) inspectPID(ctx context.Context, root string,
 
 	statusRSS, hasStatusRSS := readStatusRSS(root, pid)
 	cgroupService := readCgroupService(root, pid)
-	exePath, exeIdent := readExeIdentity(root, pid)
+	exePath := readExePath(root, pid)
 
 	if hasControlRunes(name) || len(name) > maxProcessServiceNameLen {
 		name = ""
 	}
-	if name == "" && exePath == "" && exeIdent == "" && cgroupService == "" {
+	if name == "" && exePath == "" && cgroupService == "" {
 		return ProcessServiceCatalogueEntry{}, true, ProcessServiceSourceMalformed
 	}
 
@@ -362,12 +373,12 @@ func (s *LinuxProcessServiceSource) inspectPID(ctx context.Context, root string,
 	}
 
 	quality := "OBSERVED"
-	if name != "" && exePath == "" && exeIdent == "" && cgroupService == "" {
+	if name != "" && exePath == "" && cgroupService == "" {
 		quality = "AMBIGUOUS_NAME_ONLY"
 	}
 	entry := ProcessServiceCatalogueEntry{
 		ServiceID:          cgroupService,
-		ExecutableIdentity: exeIdent,
+		ExecutableIdentity: "",
 		ExecutablePath:     exePath,
 		ProcessFamilyName:  name,
 		Runtime:            rt,
@@ -517,33 +528,24 @@ func parseCgroupService(raw string) string {
 	return ""
 }
 
-func readExeIdentity(root string, pid int) (exePath, exeIdent string) {
+// readExePath returns the /proc/<pid>/exe symlink target when it is a bounded
+// path. Device/inode/size is not durable executable identity (inode reuse,
+// upgrade, reinstall) and must not populate ExecutableIdentity.
+func readExePath(root string, pid int) string {
 	exe, err := procPIDPath(root, pid, procPIDLeafExe)
 	if err != nil {
-		return "", ""
+		return ""
 	}
 	link, err := os.Readlink(exe)
 	if err != nil {
-		return "", ""
+		return ""
 	}
 	link = strings.TrimSuffix(link, " (deleted)")
 	link = strings.TrimSpace(link)
-	if link != "" && !hasControlRunes(link) && len(link) <= maxProcessServiceIdentityLen {
-		exePath = link
+	if link == "" || hasControlRunes(link) || len(link) > maxProcessServiceIdentityLen {
+		return ""
 	}
-	st, err := os.Stat(exe)
-	if err != nil {
-		return exePath, ""
-	}
-	sys, ok := st.Sys().(*syscall.Stat_t)
-	if !ok {
-		return exePath, ""
-	}
-	ident := fmt.Sprintf("linux-dev-ino:%d:%d:%d", sys.Dev, sys.Ino, st.Size())
-	if len(ident) <= maxProcessServiceIdentityLen && !hasControlRunes(ident) {
-		exeIdent = ident
-	}
-	return exePath, exeIdent
+	return link
 }
 
 func readProcIO(root string, pid int) (readBytes, writeBytes uint64, ok bool) {
@@ -660,19 +662,19 @@ func (s *LinuxProcessServiceSource) openBoundedProcFile(path string, limit int) 
 	return readBoundedFile(path, limit)
 }
 
-func callerCanceled(parent context.Context) error {
+// parentContextTerminated returns the parent/caller context error when the
+// caller has canceled or exceeded its deadline. This is execution authority
+// and must not be rewritten as source quality.
+func parentContextTerminated(parent context.Context) error {
 	if parent == nil {
 		return nil
 	}
-	if err := parent.Err(); errors.Is(err, context.Canceled) {
-		return err
-	}
-	return nil
+	return parent.Err()
 }
 
 func (s *LinuxProcessServiceSource) collectSystemd(ctx context.Context) (ProcessServiceSourceClass, []SystemdServiceObservation, bool, string, ProcessServiceSourceQualitySummary, error) {
 	var quality ProcessServiceSourceQualitySummary
-	if err := callerCanceled(ctx); err != nil {
+	if err := parentContextTerminated(ctx); err != nil {
 		return ProcessServiceSourceClass(""), nil, false, "", quality, err
 	}
 	if s.systemctlPath == "" || !systemctlExecutableAllowed(s.systemctlPath) {
@@ -690,10 +692,13 @@ func (s *LinuxProcessServiceSource) collectSystemd(ctx context.Context) (Process
 		runner = execSystemctl
 	}
 	listRes := runner(runCtx, s.systemctlPath, systemdListUnitsArgv())
-	if err := callerCanceled(ctx); err != nil {
+	if err := parentContextTerminated(ctx); err != nil {
 		return ProcessServiceSourceClass(""), nil, false, "", quality, err
 	}
 	if class, ok := classifySystemctlResult(runCtx, ctx, listRes); !ok {
+		if err := parentContextTerminated(ctx); err != nil {
+			return ProcessServiceSourceClass(""), nil, false, "", quality, err
+		}
 		return class, nil, false, "", quality, nil
 	}
 	units, listTrunc, err := parseSystemdListUnits(string(listRes.stdout))
@@ -715,17 +720,20 @@ func (s *LinuxProcessServiceSource) collectSystemd(ctx context.Context) (Process
 	if err != nil {
 		return ProcessServiceSourceMalformed, nil, truncated, reason, quality, nil
 	}
-	if err := callerCanceled(ctx); err != nil {
+	if err := parentContextTerminated(ctx); err != nil {
 		return ProcessServiceSourceClass(""), nil, truncated, reason, quality, err
 	}
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
 		return ProcessServiceSourceUnavailable, nil, truncated, reason, quality, nil
 	}
 	showRes := runner(runCtx, s.systemctlPath, showArgs)
-	if err := callerCanceled(ctx); err != nil {
+	if err := parentContextTerminated(ctx); err != nil {
 		return ProcessServiceSourceClass(""), nil, truncated, reason, quality, err
 	}
 	if class, ok := classifySystemctlResult(runCtx, ctx, showRes); !ok {
+		if err := parentContextTerminated(ctx); err != nil {
+			return ProcessServiceSourceClass(""), nil, truncated, reason, quality, err
+		}
 		return class, nil, truncated, reason, quality, nil
 	}
 	obs, rejected, err := parseSystemdShow(string(showRes.stdout))
@@ -743,12 +751,16 @@ func (s *LinuxProcessServiceSource) collectSystemd(ctx context.Context) (Process
 	} else if len(obs) == 0 && rejected > 0 {
 		class = ProcessServiceSourceMalformed
 	}
+	if err := parentContextTerminated(ctx); err != nil {
+		return ProcessServiceSourceClass(""), nil, truncated, reason, quality, err
+	}
 	return class, obs, truncated, reason, quality, nil
 }
 
 func classifySystemctlResult(runCtx, parent context.Context, res systemctlRunResult) (ProcessServiceSourceClass, bool) {
-	if errors.Is(parent.Err(), context.Canceled) {
-		return ProcessServiceSourceUnavailable, false
+	if parentContextTerminated(parent) != nil {
+		// Caller termination is not source quality; collectSystemd must propagate parent.Err().
+		return ProcessServiceSourceClass(""), false
 	}
 	if res.err == nil {
 		return ProcessServiceSourceObserved, true
