@@ -381,6 +381,42 @@ func (o SystemdServiceObservation) MainPIDIsDurableSelector() bool {
 	return pidSelector.Validate() == nil
 }
 
+// ProcessServiceSourceQualitySummary is a bounded categorical counter of
+// source-quality losses. It must not carry OS error strings, PIDs, or
+// durable identity. Mixed valid evidence remains usable; silent loss is not.
+type ProcessServiceSourceQualitySummary struct {
+	PIDRace               uint32
+	PermissionDenied      uint32
+	MalformedProcess      uint32
+	SystemdRejectedBlocks uint32
+}
+
+func (q ProcessServiceSourceQualitySummary) HasLoss() bool {
+	return q.PIDRace > 0 || q.PermissionDenied > 0 || q.MalformedProcess > 0 || q.SystemdRejectedBlocks > 0
+}
+
+func (q *ProcessServiceSourceQualitySummary) noteProcessSkip(class ProcessServiceSourceClass) {
+	if q == nil {
+		return
+	}
+	switch class {
+	case ProcessServiceSourcePIDRace:
+		q.PIDRace++
+	case ProcessServiceSourcePermissionDenied:
+		q.PermissionDenied++
+	case ProcessServiceSourceMalformed:
+		q.MalformedProcess++
+	}
+}
+
+func (q ProcessServiceSourceQualitySummary) merge(other ProcessServiceSourceQualitySummary) ProcessServiceSourceQualitySummary {
+	q.PIDRace += other.PIDRace
+	q.PermissionDenied += other.PermissionDenied
+	q.MalformedProcess += other.MalformedProcess
+	q.SystemdRejectedBlocks += other.SystemdRejectedBlocks
+	return q
+}
+
 // ProcessServiceSourceSnapshot is the local Slice-3 collection result.
 // It is not a HostCollector return, not a transport envelope, and not policy.
 type ProcessServiceSourceSnapshot struct {
@@ -388,6 +424,7 @@ type ProcessServiceSourceSnapshot struct {
 	Services           []SystemdServiceObservation
 	ProcessSourceClass ProcessServiceSourceClass
 	SystemdSourceClass ProcessServiceSourceClass
+	SourceQuality      ProcessServiceSourceQualitySummary
 	Matches            []ProcessServiceSelectorMatch
 }
 

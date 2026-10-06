@@ -227,6 +227,9 @@ func TestLinuxProcTruncationAndDirentBound(t *testing.T) {
 	if len(snap.Catalogue.Entries) != 2 {
 		t.Fatalf("entries %d", len(snap.Catalogue.Entries))
 	}
+	if got := cataloguePIDs(snap); !reflect.DeepEqual(got, []int{1, 2}) {
+		t.Fatalf("truncated PID set must be numeric-lowest, got %v", got)
+	}
 	if snap.ProcessSourceClass != ProcessServiceSourceTruncated {
 		t.Fatalf("class %s", snap.ProcessSourceClass)
 	}
@@ -639,5 +642,287 @@ func TestClassifyPermissionSyscall(t *testing.T) {
 	}
 	if classifyProcOpenError(os.ErrNotExist) != ProcessServiceSourceUnavailable {
 		t.Fatal("missing proc")
+	}
+}
+
+func cataloguePIDs(snap ProcessServiceSourceSnapshot) []int {
+	out := make([]int, 0, len(snap.Catalogue.Entries))
+	for _, e := range snap.Catalogue.Entries {
+		if e.Runtime != nil {
+			out = append(out, e.Runtime.PID)
+		}
+	}
+	return out
+}
+
+func TestLinuxProcTruncationIsDeterministicAcrossCreationOrder(t *testing.T) {
+	orders := [][]int{
+		{5, 1, 4, 2, 3},
+		{1, 2, 3, 4, 5},
+		{5, 4, 3, 2, 1},
+		{3, 5, 1, 4, 2},
+	}
+	var first []int
+	for i, order := range orders {
+		root := t.TempDir()
+		for _, pid := range order {
+			writeFakePID(t, root, pid, "w", "S", "", "", "", "", 0, 0, uint64(pid), 1)
+		}
+		src := newTestLinuxSource(t, root)
+		src.maxEntries = 3
+		src.maxDirents = 64
+		snap, err := src.Collect(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !snap.Catalogue.Truncated || snap.ProcessSourceClass != ProcessServiceSourceTruncated {
+			t.Fatalf("order %v expected truncation %#v class=%s", order, snap.Catalogue, snap.ProcessSourceClass)
+		}
+		got := cataloguePIDs(snap)
+		want := []int{1, 2, 3}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("creation order %v selected %v want %v", order, got, want)
+		}
+		if i == 0 {
+			first = append([]int{}, got...)
+		} else if !reflect.DeepEqual(got, first) {
+			t.Fatalf("selected PID set drifted: first=%v got=%v order=%v", first, got, order)
+		}
+	}
+}
+
+func TestLinuxMixedPIDSourceQualityEvidence(t *testing.T) {
+	root := t.TempDir()
+	writeFakePID(t, root, 1, "init", "S", "", "", "", "", 0, 0, 1, 1)
+
+	raceDir := filepath.Join(root, "99")
+	if err := os.Mkdir(raceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	permPID := 40
+	writeFakePID(t, root, permPID, "secret", "S", "", "", "", "", 0, 0, 40, 1)
+
+	bad := filepath.Join(root, "70")
+	if err := os.Mkdir(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bad, "stat"), []byte("not-a-stat"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	src := newTestLinuxSource(t, root)
+	src.openProcFile = func(path string, limit int) ([]byte, error) {
+		if strings.Contains(path, "/"+strconvPID(permPID)+"/") {
+			return nil, os.ErrPermission
+		}
+		return readBoundedFile(path, limit)
+	}
+	snap, err := src.Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundInit := false
+	for _, e := range snap.Catalogue.Entries {
+		if e.Runtime != nil && (e.Runtime.PID == 99 || e.Runtime.PID == permPID || e.Runtime.PID == 70) {
+			t.Fatalf("failed pid must not be catalogued: %+v", e)
+		}
+		if e.ProcessFamilyName == "init" {
+			foundInit = true
+		}
+	}
+	if !foundInit {
+		t.Fatal("valid process must remain usable")
+	}
+	q := snap.SourceQuality
+	if q.PIDRace == 0 || q.PermissionDenied == 0 || q.MalformedProcess == 0 {
+		t.Fatalf("expected all categorical counters, got %+v", q)
+	}
+	if q.PIDRace > 8 || q.PermissionDenied > 8 || q.MalformedProcess > 8 {
+		t.Fatalf("categorical failures must stay bounded, got %+v", q)
+	}
+	if snap.Catalogue.Quality != "PARTIAL" {
+		t.Fatalf("mixed quality %q", snap.Catalogue.Quality)
+	}
+	if snap.AssertsHostOrServiceDown() {
+		t.Fatal("source quality loss must not infer DOWN")
+	}
+}
+
+func TestLinuxValidProcessPlusPIDRace(t *testing.T) {
+	root := t.TempDir()
+	writeFakePID(t, root, 1, "init", "S", "", "", "", "", 0, 0, 1, 1)
+	if err := os.Mkdir(filepath.Join(root, "88"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := newTestLinuxSource(t, root)
+	snap, err := src.Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.SourceQuality.PIDRace == 0 || len(snap.Catalogue.Entries) == 0 {
+		t.Fatalf("expected valid+race %+v entries=%d", snap.SourceQuality, len(snap.Catalogue.Entries))
+	}
+	if snap.Catalogue.Quality != "PARTIAL" || snap.AssertsHostOrServiceDown() {
+		t.Fatalf("quality=%s down=%v", snap.Catalogue.Quality, snap.AssertsHostOrServiceDown())
+	}
+}
+
+func TestLinuxValidProcessPlusPermissionDenied(t *testing.T) {
+	root := t.TempDir()
+	writeFakePID(t, root, 1, "init", "S", "", "", "", "", 0, 0, 1, 1)
+	writeFakePID(t, root, 50, "hidden", "S", "", "", "", "", 0, 0, 50, 1)
+	src := newTestLinuxSource(t, root)
+	src.openProcFile = func(path string, limit int) ([]byte, error) {
+		if strings.Contains(path, "/50/") {
+			return nil, syscall.EACCES
+		}
+		return readBoundedFile(path, limit)
+	}
+	snap, err := src.Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.SourceQuality.PermissionDenied == 0 || len(snap.Catalogue.Entries) == 0 {
+		t.Fatalf("expected valid+permission %+v", snap.SourceQuality)
+	}
+	if snap.Catalogue.Quality != "PARTIAL" || snap.AssertsHostOrServiceDown() {
+		t.Fatal("permission denied must be PARTIAL, not DOWN")
+	}
+}
+
+func TestLinuxValidProcessPlusMalformedPIDSource(t *testing.T) {
+	root := t.TempDir()
+	writeFakePID(t, root, 1, "init", "S", "", "", "", "", 0, 0, 1, 1)
+	bad := filepath.Join(root, "71")
+	if err := os.Mkdir(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bad, "stat"), []byte("garbage"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := newTestLinuxSource(t, root)
+	snap, err := src.Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.SourceQuality.MalformedProcess == 0 || len(snap.Catalogue.Entries) == 0 {
+		t.Fatalf("expected valid+malformed %+v", snap.SourceQuality)
+	}
+	if snap.Catalogue.Quality != "PARTIAL" || snap.AssertsHostOrServiceDown() {
+		t.Fatal("malformed pid source must be PARTIAL, not DOWN")
+	}
+}
+
+func TestLinuxSystemdMixedMalformedPartialQuality(t *testing.T) {
+	root := t.TempDir()
+	writeFakePID(t, root, 1, "init", "S", "", "", "", "", 1, 1, 1, 1)
+	src := newTestLinuxSource(t, root)
+	src.systemctlPath = "/usr/bin/systemctl"
+	src.runner = func(ctx context.Context, executable string, args []string) systemctlRunResult {
+		if err := assertSystemctlArgvSafe(args); err != nil {
+			return systemctlRunResult{err: err}
+		}
+		switch args[0] {
+		case systemdListUnitsVerb:
+			return systemctlRunResult{stdout: []byte("nginx.service loaded active running nginx\nsshd.service loaded active running sshd\n")}
+		case systemdShowVerb:
+			return systemctlRunResult{stdout: []byte("Id=nginx.service\nActiveState=active\nSubState=running\nResult=success\nNRestarts=0\nMainPID=9\nExecMainStatus=0\n\nnot-a-block\n")}
+		default:
+			return systemctlRunResult{err: fmt.Errorf("unexpected verb %s", args[0])}
+		}
+	}
+	snap, err := src.Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.SourceQuality.SystemdRejectedBlocks == 0 {
+		t.Fatalf("malformed systemd block must be counted: %+v", snap.SourceQuality)
+	}
+	if len(snap.Services) != 1 || snap.Services[0].UnitID != "nginx.service" {
+		t.Fatalf("valid systemd evidence must remain: %#v", snap.Services)
+	}
+	if snap.Catalogue.Quality != "PARTIAL" {
+		t.Fatalf("quality %s", snap.Catalogue.Quality)
+	}
+	if snap.SystemdSourceClass != ProcessServiceSourceObserved {
+		t.Fatalf("mixed systemd class %s", snap.SystemdSourceClass)
+	}
+	if snap.AssertsHostOrServiceDown() {
+		t.Fatal("systemd malformed mix must not infer DOWN")
+	}
+}
+
+func TestLinuxCallerCancelDuringSystemdExecution(t *testing.T) {
+	root := t.TempDir()
+	writeFakePID(t, root, 1, "init", "S", "", "", "", "", 1, 1, 1, 1)
+	src := newTestLinuxSource(t, root)
+	src.systemctlPath = "/usr/bin/systemctl"
+	src.systemdTimeout = 3 * time.Second
+	started := make(chan struct{})
+	src.runner = func(ctx context.Context, executable string, args []string) systemctlRunResult {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-ctx.Done()
+		return systemctlRunResult{err: ctx.Err()}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := src.Collect(ctx)
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("systemd runner did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Collect did not return after parent cancel")
+	}
+}
+
+func TestLinuxInternalSystemdTimeoutDistinctFromCallerCancel(t *testing.T) {
+	root := t.TempDir()
+	writeFakePID(t, root, 1, "init", "S", "", "", "", "", 1, 1, 1, 1)
+	src := newTestLinuxSource(t, root)
+	src.systemctlPath = "/usr/bin/systemctl"
+	src.systemdTimeout = 30 * time.Millisecond
+	src.runner = func(ctx context.Context, executable string, args []string) systemctlRunResult {
+		<-ctx.Done()
+		return systemctlRunResult{err: ctx.Err()}
+	}
+	parent, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	snap, err := src.Collect(parent)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("internal timeout must not surface as caller error, got %v", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Fatal("internal timeout must not be context.Canceled")
+	}
+	if snap.SystemdSourceClass != ProcessServiceSourceUnavailable {
+		t.Fatalf("timeout class %s", snap.SystemdSourceClass)
+	}
+	if snap.AssertsHostOrServiceDown() {
+		t.Fatal("timeout is not DOWN")
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("internal timeout not bounded, elapsed=%s", elapsed)
+	}
+	if parent.Err() != nil {
+		t.Fatalf("parent context should remain live, err=%v", parent.Err())
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -64,6 +65,8 @@ type LinuxProcessServiceSource struct {
 	maxDirents     int
 	systemdTimeout time.Duration
 	pageSize       uint64
+	// openProcFile is an optional test seam; production uses readBoundedFile.
+	openProcFile func(path string, limit int) ([]byte, error)
 }
 
 func NewLinuxProcessServiceSource() *LinuxProcessServiceSource {
@@ -97,7 +100,7 @@ func (s *LinuxProcessServiceSource) CollectMatching(ctx context.Context, selecto
 		return ProcessServiceSourceSnapshot{}, err
 	}
 	now := s.now()
-	procClass, entries, truncated, reason, err := s.collectProcesses(ctx, now)
+	procClass, entries, truncated, reason, procQuality, err := s.collectProcesses(ctx, now)
 	if err != nil {
 		return ProcessServiceSourceSnapshot{}, err
 	}
@@ -106,6 +109,9 @@ func (s *LinuxProcessServiceSource) CollectMatching(ctx context.Context, selecto
 		quality = string(procClass)
 	}
 	if truncated && quality == "OBSERVED" {
+		quality = "PARTIAL"
+	}
+	if procQuality.HasLoss() && quality == "OBSERVED" {
 		quality = "PARTIAL"
 	}
 	cat := ProcessServiceDiscoveryCatalogue{
@@ -122,7 +128,14 @@ func (s *LinuxProcessServiceSource) CollectMatching(ctx context.Context, selecto
 		return ProcessServiceSourceSnapshot{}, err
 	}
 
-	svcClass, services, svcTrunc, svcReason := s.collectSystemd(ctx)
+	if err := ctx.Err(); err != nil {
+		return ProcessServiceSourceSnapshot{}, err
+	}
+	svcClass, services, svcTrunc, svcReason, svcQuality, err := s.collectSystemd(ctx)
+	if err != nil {
+		return ProcessServiceSourceSnapshot{}, err
+	}
+	sourceQuality := procQuality.merge(svcQuality)
 	if svcTrunc {
 		cat.Truncated = true
 		if cat.IncompleteReason == "" {
@@ -137,12 +150,21 @@ func (s *LinuxProcessServiceSource) CollectMatching(ctx context.Context, selecto
 			cat.Quality = "PARTIAL"
 		}
 	}
+	if sourceQuality.HasLoss() {
+		if cat.Quality == "OBSERVED" {
+			cat.Quality = "PARTIAL"
+		}
+		if cat.IncompleteReason == "" {
+			cat.IncompleteReason = "categorical source quality loss"
+		}
+	}
 
 	snap := ProcessServiceSourceSnapshot{
 		Catalogue:          cat,
 		Services:           services,
 		ProcessSourceClass: procClass,
 		SystemdSourceClass: svcClass,
+		SourceQuality:      sourceQuality,
 	}
 	if len(selectors) > 0 {
 		snap.Matches = MatchProcessServiceSelectors(cat.Entries, selectors)
@@ -165,7 +187,8 @@ func (s *LinuxProcessServiceSource) CollectMatching(ctx context.Context, selecto
 	return snap, nil
 }
 
-func (s *LinuxProcessServiceSource) collectProcesses(ctx context.Context, now time.Time) (ProcessServiceSourceClass, []ProcessServiceCatalogueEntry, bool, string, error) {
+func (s *LinuxProcessServiceSource) collectProcesses(ctx context.Context, now time.Time) (ProcessServiceSourceClass, []ProcessServiceCatalogueEntry, bool, string, ProcessServiceSourceQualitySummary, error) {
+	var quality ProcessServiceSourceQualitySummary
 	root := s.procRoot
 	if root == "" {
 		root = "/proc"
@@ -181,67 +204,82 @@ func (s *LinuxProcessServiceSource) collectProcesses(ctx context.Context, now ti
 
 	dir, err := os.Open(root)
 	if err != nil {
-		return classifyProcOpenError(err), nil, false, "", nil
+		return classifyProcOpenError(err), nil, false, "", quality, nil
 	}
 	defer dir.Close()
 
 	var (
-		entries   []ProcessServiceCatalogueEntry
-		dirents   int
-		truncated bool
-		reason    string
-		class     = ProcessServiceSourceObserved
+		candidates      []int
+		dirents         int
+		direntTruncated bool
+		reason          string
+		class           = ProcessServiceSourceObserved
 	)
+scan:
 	for {
 		if err := ctx.Err(); err != nil {
-			return ProcessServiceSourceClass(""), nil, false, "", err
+			return ProcessServiceSourceClass(""), nil, false, "", quality, err
 		}
 		batch, readErr := dir.Readdirnames(128)
 		if len(batch) == 0 && readErr != nil {
 			if errors.Is(readErr, io.EOF) {
 				break
 			}
-			return classifyProcOpenError(readErr), entries, truncated, reason, nil
+			return classifyProcOpenError(readErr), nil, direntTruncated, reason, quality, nil
 		}
 		for _, name := range batch {
 			dirents++
 			if dirents > maxDirents {
-				truncated = true
+				direntTruncated = true
 				reason = "proc directory scan bound reached"
 				class = ProcessServiceSourceTruncated
-				return class, entries, truncated, reason, nil
+				break scan
 			}
 			pid, ok := parseProcPIDName(name)
 			if !ok {
 				continue
 			}
-			if err := ctx.Err(); err != nil {
-				return ProcessServiceSourceClass(""), nil, false, "", err
-			}
-			entry, skipped, skipClass := s.inspectPID(ctx, root, pid, now)
-			_ = skipClass
-			if skipped {
-				if skipClass == ProcessServiceSourcePIDRace || skipClass == ProcessServiceSourcePermissionDenied || skipClass == ProcessServiceSourceMalformed {
-					continue
-				}
-				continue
-			}
-			if len(entries) >= maxEntries {
-				truncated = true
-				reason = "process entry safety bound reached"
-				class = ProcessServiceSourceTruncated
-				return class, entries, truncated, reason, nil
-			}
-			entries = append(entries, entry)
+			candidates = append(candidates, pid)
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
 				break
 			}
-			return classifyProcOpenError(readErr), entries, truncated, reason, nil
+			return classifyProcOpenError(readErr), nil, direntTruncated, reason, quality, nil
 		}
 	}
-	return class, entries, truncated, reason, nil
+
+	sort.Ints(candidates)
+
+	var (
+		entries   []ProcessServiceCatalogueEntry
+		truncated = direntTruncated
+	)
+	for _, pid := range candidates {
+		if err := ctx.Err(); err != nil {
+			return ProcessServiceSourceClass(""), nil, false, "", quality, err
+		}
+		entry, skipped, skipClass := s.inspectPID(ctx, root, pid, now)
+		if skipped {
+			quality.noteProcessSkip(skipClass)
+			continue
+		}
+		if len(entries) >= maxEntries {
+			truncated = true
+			if reason == "" {
+				reason = "process entry safety bound reached"
+			}
+			class = ProcessServiceSourceTruncated
+			break
+		}
+		entries = append(entries, entry)
+	}
+	if direntTruncated {
+		truncated = true
+		class = ProcessServiceSourceTruncated
+		reason = "proc directory scan bound reached"
+	}
+	return class, entries, truncated, reason, quality, nil
 }
 
 func parseProcPIDName(name string) (int, bool) {
@@ -265,7 +303,7 @@ func (s *LinuxProcessServiceSource) inspectPID(ctx context.Context, root string,
 	if err != nil {
 		return ProcessServiceCatalogueEntry{}, true, ProcessServiceSourceMalformed
 	}
-	statBytes, err := readBoundedFile(statPath, maxProcFileBytes)
+	statBytes, err := s.openBoundedProcFile(statPath, maxProcFileBytes)
 	if err != nil {
 		return ProcessServiceCatalogueEntry{}, true, classifyProcPIDError(err)
 	}
@@ -615,9 +653,30 @@ func classifyProcPIDError(err error) ProcessServiceSourceClass {
 	return ProcessServiceSourcePIDRace
 }
 
-func (s *LinuxProcessServiceSource) collectSystemd(ctx context.Context) (ProcessServiceSourceClass, []SystemdServiceObservation, bool, string) {
+func (s *LinuxProcessServiceSource) openBoundedProcFile(path string, limit int) ([]byte, error) {
+	if s != nil && s.openProcFile != nil {
+		return s.openProcFile(path, limit)
+	}
+	return readBoundedFile(path, limit)
+}
+
+func callerCanceled(parent context.Context) error {
+	if parent == nil {
+		return nil
+	}
+	if err := parent.Err(); errors.Is(err, context.Canceled) {
+		return err
+	}
+	return nil
+}
+
+func (s *LinuxProcessServiceSource) collectSystemd(ctx context.Context) (ProcessServiceSourceClass, []SystemdServiceObservation, bool, string, ProcessServiceSourceQualitySummary, error) {
+	var quality ProcessServiceSourceQualitySummary
+	if err := callerCanceled(ctx); err != nil {
+		return ProcessServiceSourceClass(""), nil, false, "", quality, err
+	}
 	if s.systemctlPath == "" || !systemctlExecutableAllowed(s.systemctlPath) {
-		return ProcessServiceSourceUnavailable, nil, false, ""
+		return ProcessServiceSourceUnavailable, nil, false, "", quality, nil
 	}
 	timeout := s.systemdTimeout
 	if timeout <= 0 {
@@ -631,12 +690,15 @@ func (s *LinuxProcessServiceSource) collectSystemd(ctx context.Context) (Process
 		runner = execSystemctl
 	}
 	listRes := runner(runCtx, s.systemctlPath, systemdListUnitsArgv())
-	if class, ok := classifySystemctlResult(runCtx, listRes); !ok {
-		return class, nil, false, ""
+	if err := callerCanceled(ctx); err != nil {
+		return ProcessServiceSourceClass(""), nil, false, "", quality, err
+	}
+	if class, ok := classifySystemctlResult(runCtx, ctx, listRes); !ok {
+		return class, nil, false, "", quality, nil
 	}
 	units, listTrunc, err := parseSystemdListUnits(string(listRes.stdout))
 	if err != nil {
-		return ProcessServiceSourceMalformed, nil, false, ""
+		return ProcessServiceSourceMalformed, nil, false, "", quality, nil
 	}
 	truncated := listTrunc || listRes.truncated
 	reason := ""
@@ -645,25 +707,32 @@ func (s *LinuxProcessServiceSource) collectSystemd(ctx context.Context) (Process
 	}
 	if len(units) == 0 {
 		if truncated {
-			return ProcessServiceSourceTruncated, nil, true, reason
+			return ProcessServiceSourceTruncated, nil, true, reason, quality, nil
 		}
-		return ProcessServiceSourceObserved, nil, false, ""
+		return ProcessServiceSourceObserved, nil, false, "", quality, nil
 	}
 	showArgs, err := systemdShowArgv(units)
 	if err != nil {
-		return ProcessServiceSourceMalformed, nil, truncated, reason
+		return ProcessServiceSourceMalformed, nil, truncated, reason, quality, nil
 	}
-	if err := runCtx.Err(); err != nil {
-		return classifyCtxOrTimeout(runCtx), nil, truncated, reason
+	if err := callerCanceled(ctx); err != nil {
+		return ProcessServiceSourceClass(""), nil, truncated, reason, quality, err
+	}
+	if errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		return ProcessServiceSourceUnavailable, nil, truncated, reason, quality, nil
 	}
 	showRes := runner(runCtx, s.systemctlPath, showArgs)
-	if class, ok := classifySystemctlResult(runCtx, showRes); !ok {
-		return class, nil, truncated, reason
+	if err := callerCanceled(ctx); err != nil {
+		return ProcessServiceSourceClass(""), nil, truncated, reason, quality, err
 	}
-	obs, err := parseSystemdShow(string(showRes.stdout))
+	if class, ok := classifySystemctlResult(runCtx, ctx, showRes); !ok {
+		return class, nil, truncated, reason, quality, nil
+	}
+	obs, rejected, err := parseSystemdShow(string(showRes.stdout))
 	if err != nil {
-		return ProcessServiceSourceMalformed, nil, truncated, reason
+		return ProcessServiceSourceMalformed, nil, truncated, reason, quality, nil
 	}
+	quality.SystemdRejectedBlocks = uint32(rejected)
 	if showRes.truncated {
 		truncated = true
 		reason = "systemd stdout truncated"
@@ -671,18 +740,23 @@ func (s *LinuxProcessServiceSource) collectSystemd(ctx context.Context) (Process
 	class := ProcessServiceSourceObserved
 	if truncated {
 		class = ProcessServiceSourceTruncated
+	} else if len(obs) == 0 && rejected > 0 {
+		class = ProcessServiceSourceMalformed
 	}
-	return class, obs, truncated, reason
+	return class, obs, truncated, reason, quality, nil
 }
 
-func classifySystemctlResult(ctx context.Context, res systemctlRunResult) (ProcessServiceSourceClass, bool) {
+func classifySystemctlResult(runCtx, parent context.Context, res systemctlRunResult) (ProcessServiceSourceClass, bool) {
+	if errors.Is(parent.Err(), context.Canceled) {
+		return ProcessServiceSourceUnavailable, false
+	}
 	if res.err == nil {
 		return ProcessServiceSourceObserved, true
 	}
-	if errors.Is(res.err, context.Canceled) {
+	if errors.Is(res.err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		return ProcessServiceSourceUnavailable, false
 	}
-	if errors.Is(res.err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if errors.Is(res.err, context.Canceled) {
 		return ProcessServiceSourceUnavailable, false
 	}
 	if errors.Is(res.err, os.ErrNotExist) || errors.Is(res.err, exec.ErrNotFound) {
@@ -697,13 +771,6 @@ func classifySystemctlResult(ctx context.Context, res systemctlRunResult) (Proce
 		return ProcessServiceSourceUnavailable, false
 	}
 	return ProcessServiceSourceUnavailable, false
-}
-
-func classifyCtxOrTimeout(ctx context.Context) ProcessServiceSourceClass {
-	if errors.Is(ctx.Err(), context.Canceled) {
-		return ProcessServiceSourceUnavailable
-	}
-	return ProcessServiceSourceUnavailable
 }
 
 func execSystemctl(ctx context.Context, executable string, args []string) systemctlRunResult {

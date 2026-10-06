@@ -66,6 +66,9 @@ func validateSystemdUnitID(id string) error {
 	if err := sel.Validate(); err != nil {
 		return err
 	}
+	if strings.HasPrefix(id, "-") {
+		return errors.New("SYSTEMD_UNIT_ID_INVALID: leading hyphen is prohibited")
+	}
 	if strings.ContainsAny(id, "/") {
 		return errors.New("SYSTEMD_UNIT_ID_INVALID: path separators are prohibited")
 	}
@@ -100,6 +103,7 @@ func systemdShowArgv(unitIDs []string) ([]string, error) {
 		"--no-legend",
 		"--no-ask-password",
 		systemdShowPropertyArg(),
+		"--",
 	}
 	for _, id := range unitIDs {
 		if err := validateSystemdUnitID(id); err != nil {
@@ -128,6 +132,23 @@ func assertSystemctlArgvSafe(args []string) error {
 		for _, mut := range systemdMutationVerbs {
 			if a == mut {
 				return fmt.Errorf("SYSTEMD_ARGV_MUTATION_REJECTED: %q", a)
+			}
+		}
+	}
+	if verb == systemdShowVerb {
+		end := -1
+		for i, a := range args {
+			if a == "--" {
+				end = i
+				break
+			}
+		}
+		if end < 0 {
+			return errors.New("SYSTEMD_ARGV_END_OF_OPTIONS_REQUIRED")
+		}
+		for _, a := range args[end+1:] {
+			if strings.HasPrefix(a, "-") {
+				return errors.New("SYSTEMD_ARGV_UNIT_OPTION_CONFUSION")
 			}
 		}
 	}
@@ -169,12 +190,13 @@ func parseSystemdListUnits(stdout string) (units []string, truncated bool, err e
 	return units, truncated, nil
 }
 
-func parseSystemdShow(stdout string) ([]SystemdServiceObservation, error) {
+func parseSystemdShow(stdout string) ([]SystemdServiceObservation, int, error) {
 	if len(stdout) > maxSystemdStdoutBytes {
 		stdout = stdout[:maxSystemdStdoutBytes]
 	}
 	blocks := strings.Split(stdout, "\n\n")
 	out := make([]SystemdServiceObservation, 0, len(blocks))
+	rejected := 0
 	for _, block := range blocks {
 		block = strings.TrimSpace(block)
 		if block == "" {
@@ -182,6 +204,7 @@ func parseSystemdShow(stdout string) ([]SystemdServiceObservation, error) {
 		}
 		obs, ok := parseSystemdShowBlock(block)
 		if !ok {
+			rejected++
 			continue
 		}
 		if len(out) >= maxSystemdUnits {
@@ -189,7 +212,7 @@ func parseSystemdShow(stdout string) ([]SystemdServiceObservation, error) {
 		}
 		out = append(out, obs)
 	}
-	return out, nil
+	return out, rejected, nil
 }
 
 func parseSystemdShowBlock(block string) (SystemdServiceObservation, bool) {

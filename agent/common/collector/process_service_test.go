@@ -449,7 +449,7 @@ func TestProcessServiceSourceErrorsDoNotAssertDown(t *testing.T) {
 			SourceClass: ProcessServiceSourceObserved, Quality: "OBSERVED",
 		}},
 		Matches: []ProcessServiceSelectorMatch{{
-			Selector: ProcessServiceSelector{Kind: SelectorKindProcessName, Value: "missing"},
+			Selector:    ProcessServiceSelector{Kind: SelectorKindProcessName, Value: "missing"},
 			SourceClass: ProcessServiceSourceSelectorUnmatched,
 		}},
 	}
@@ -494,6 +494,24 @@ func TestSystemdArgvIsFixedReadOnlyNoShell(t *testing.T) {
 	if args[0] != "show" {
 		t.Fatalf("show verb %q", args[0])
 	}
+	end := -1
+	for i, a := range args {
+		if a == "--" {
+			end = i
+			break
+		}
+	}
+	if end < 0 {
+		t.Fatalf("show argv missing end-of-options: %v", args)
+	}
+	if strings.Join(args[end+1:], ",") != "nginx.service,sshd.service" {
+		t.Fatalf("units must follow --: %v", args)
+	}
+	for i, a := range args[:end] {
+		if i > 0 && !strings.HasPrefix(a, "-") {
+			t.Fatalf("pre-separator argument %q is not an option", a)
+		}
+	}
 	joined := strings.Join(append(append([]string{}, list...), args...), " ")
 	for _, bad := range []string{"sh -c", "bash -c", "/bin/sh", "/bin/bash"} {
 		if strings.Contains(joined, bad) {
@@ -518,6 +536,55 @@ func TestSystemdArgvIsFixedReadOnlyNoShell(t *testing.T) {
 	}
 }
 
+func TestSystemdShowArgvRejectsOptionLookingUnitIDs(t *testing.T) {
+	if err := (ProcessServiceSelector{Kind: SelectorKindServiceID, Value: "--version.service"}).Validate(); err != nil {
+		t.Fatalf("SERVICE_ID exact validation must still accept literal values: %v", err)
+	}
+	hostile := []string{
+		"--version.service",
+		"-H.service",
+		"--property=Id",
+		"--no-pager.service",
+		"-a.service",
+		"--help",
+	}
+	for _, id := range hostile {
+		if err := validateSystemdUnitID(id); err == nil {
+			t.Fatalf("adapter must reject leading-hyphen unit id %q", id)
+		}
+		if _, err := systemdShowArgv([]string{id}); err == nil {
+			t.Fatalf("systemdShowArgv must reject %q", id)
+		}
+	}
+	if err := assertSystemctlArgvSafe([]string{
+		systemdShowVerb, "--no-pager", systemdShowPropertyArg(), "--version.service",
+	}); err == nil {
+		t.Fatal("show argv without -- and with option-looking unit must be rejected")
+	}
+	if err := assertSystemctlArgvSafe([]string{
+		systemdShowVerb, "--no-pager", "--", "--version.service",
+	}); err == nil {
+		t.Fatal("unit after -- still must not start with hyphen")
+	}
+	safe, err := systemdShowArgv([]string{"nginx.service"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := assertSystemctlArgvSafe(safe); err != nil {
+		t.Fatal(err)
+	}
+	for i, a := range safe {
+		if a == "--" {
+			for _, unit := range safe[i+1:] {
+				if strings.HasPrefix(unit, "-") {
+					t.Fatalf("unit-controlled value %q would alter option parsing", unit)
+				}
+			}
+			break
+		}
+	}
+}
+
 func TestSystemdShowParserFixtures(t *testing.T) {
 	raw := strings.Join([]string{
 		"Id=nginx.service\nActiveState=active\nSubState=running\nResult=success\nNRestarts=0\nMainPID=4242\nExecMainStatus=0",
@@ -528,9 +595,12 @@ func TestSystemdShowParserFixtures(t *testing.T) {
 		"Id=reload.service\nActiveState=reloading\nSubState=reload\nResult=success\nNRestarts=0\nMainPID=7\nExecMainStatus=0",
 		"Id=odd.service\nActiveState=unknown\nSubState=unknown\nResult=unknown\nMainPID=0",
 	}, "\n\n")
-	obs, err := parseSystemdShow(raw)
+	obs, rejected, err := parseSystemdShow(raw)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if rejected != 0 {
+		t.Fatalf("rejected=%d", rejected)
 	}
 	if len(obs) != 7 {
 		t.Fatalf("got %d observations", len(obs))
@@ -560,6 +630,30 @@ func TestSystemdShowParserFixtures(t *testing.T) {
 	}
 	if byID["odd.service"].ActiveState != "unknown" || byID["odd.service"].HasNRestarts {
 		t.Fatalf("unknown fixture %+v", byID["odd.service"])
+	}
+}
+
+func TestSystemdShowParserMixedMalformedCountsRejected(t *testing.T) {
+	raw := strings.Join([]string{
+		"Id=nginx.service\nActiveState=active\nSubState=running\nResult=success\nNRestarts=0\nMainPID=1\nExecMainStatus=0",
+		"this-block-is-not-key-value",
+		"Id=oversized.service\nActiveState=" + strings.Repeat("x", maxSystemdFieldLen+8),
+		"Id=sshd.service\nActiveState=active\nSubState=running\nResult=success\nNRestarts=0\nMainPID=2\nExecMainStatus=0",
+	}, "\n\n")
+	obs, rejected, err := parseSystemdShow(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected != 2 {
+		t.Fatalf("rejected=%d", rejected)
+	}
+	if len(obs) != 2 || obs[0].UnitID != "nginx.service" || obs[1].UnitID != "sshd.service" {
+		t.Fatalf("valid blocks must remain usable: %+v", obs)
+	}
+	for _, o := range obs {
+		if SourceClassAssertsProcessOrHostDown(o.SourceClass) {
+			t.Fatal("malformed systemd block must not infer DOWN")
+		}
 	}
 }
 
