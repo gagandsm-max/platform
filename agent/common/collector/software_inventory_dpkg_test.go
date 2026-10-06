@@ -408,6 +408,254 @@ func TestDPKGSourceFailureNeverCompleteEmpty(t *testing.T) {
 	}
 }
 
+func TestDPKGTargetedNilAndEmptySelectorsFailWithoutSource(t *testing.T) {
+	opened := 0
+	c := newTestCollector(t)
+	c.openDPKG = func(ctx context.Context) (io.ReadCloser, error) {
+		opened++
+		return io.NopCloser(strings.NewReader(installedStanza("bash", "amd64", "1"))), nil
+	}
+	cases := []struct {
+		name string
+		sel  []SoftwareInventorySelector
+	}{
+		{name: "nil", sel: nil},
+		{name: "empty", sel: []SoftwareInventorySelector{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opened = 0
+			snap, err := c.Capture(context.Background(), SoftwareInventoryRequest{
+				SnapshotID:   "snap-dpkg-targeted-zero-" + tc.name,
+				SnapshotMode: SnapshotModeTargeted,
+				SourceType:   InventorySourceTypeDPKG,
+				Selectors:    tc.sel,
+			})
+			if err != nil {
+				t.Fatalf("capture: %v", err)
+			}
+			if opened != 0 {
+				t.Fatal("invalid zero-target TARGETED request must not open DPKG")
+			}
+			if snap.CaptureStatus != CaptureStatusFailed || snap.ItemCount != 0 {
+				t.Fatalf("expected FAILED empty, got status=%s count=%d", snap.CaptureStatus, snap.ItemCount)
+			}
+			if snap.Quality != inventoryQualityFailed {
+				t.Fatalf("quality=%q", snap.Quality)
+			}
+			if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossCallerRequestInvalid) {
+				t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+			}
+		})
+	}
+}
+
+func TestDPKGTargetedAllInvalidSelectorsFailWithoutSource(t *testing.T) {
+	opened := 0
+	c := newTestCollector(t)
+	c.openDPKG = func(ctx context.Context) (io.ReadCloser, error) {
+		opened++
+		return io.NopCloser(strings.NewReader(installedStanza("bash", "amd64", "1"))), nil
+	}
+	snap, err := c.Capture(context.Background(), targetedDPKGRequest(
+		"snap-dpkg-targeted-all-invalid",
+		SoftwareInventorySelector{},
+		SoftwareInventorySelector{ProductName: " \t "},
+	))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if opened != 0 {
+		t.Fatal("all-invalid TARGETED request must not open DPKG")
+	}
+	if snap.CaptureStatus != CaptureStatusFailed || snap.ItemCount != 0 {
+		t.Fatalf("expected FAILED empty, got status=%s count=%d", snap.CaptureStatus, snap.ItemCount)
+	}
+	if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossSelectorInvalid) {
+		t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+	}
+}
+
+func TestDPKGTargetedValidPlusInvalidIsPartialQuality(t *testing.T) {
+	opened := 0
+	c := collectorWithDPKGFile(t, "dpkg_status_complete")
+	orig := c.openDPKG
+	c.openDPKG = func(ctx context.Context) (io.ReadCloser, error) {
+		opened++
+		return orig(ctx)
+	}
+	snap, err := c.Capture(context.Background(), targetedDPKGRequest(
+		"snap-dpkg-targeted-mixed",
+		SoftwareInventorySelector{ProductName: "bash"},
+		SoftwareInventorySelector{},
+	))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if opened == 0 {
+		t.Fatal("mixed valid+invalid TARGETED may enumerate source after request-quality recording")
+	}
+	if snap.CaptureStatus != CaptureStatusPartial || snap.Quality != inventoryQualityPartial {
+		t.Fatalf("mixed selectors must be PARTIAL, got status=%s quality=%s reason=%q", snap.CaptureStatus, snap.Quality, snap.IncompleteOrLossReason)
+	}
+	if snap.ItemCount != 1 || snap.Items[0].ProductName != "bash" {
+		t.Fatalf("expected bash only, got %#v", nativeIDs(snap))
+	}
+	if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossSelectorInvalid) {
+		t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+	}
+}
+
+func TestDPKGFullDoesNotRequireSelectors(t *testing.T) {
+	c := collectorWithDPKGFile(t, "dpkg_status_complete")
+	snap, err := c.Capture(context.Background(), SoftwareInventoryRequest{
+		SnapshotID:   "snap-dpkg-full-no-sel",
+		SnapshotMode: SnapshotModeFull,
+		SourceType:   InventorySourceTypeDPKG,
+		Selectors:    nil,
+	})
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusComplete || snap.ItemCount <= 0 {
+		t.Fatalf("FULL without selectors must capture, got status=%s count=%d", snap.CaptureStatus, snap.ItemCount)
+	}
+}
+
+func TestDPKGDuplicateAuthoritativeFieldsAreMalformed(t *testing.T) {
+	good := installedStanza("keep", "amd64", "1.0")
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "duplicate-package", body: "Package: first\nPackage: second\nStatus: install ok installed\nArchitecture: amd64\nVersion: 9.9.9\n"},
+		{name: "duplicate-status", body: "Package: overwritten-status\nStatus: not-installed\nStatus: install ok installed\nArchitecture: amd64\nVersion: 1.0\n"},
+		{name: "duplicate-version", body: "Package: overwritten-version\nStatus: install ok installed\nArchitecture: amd64\nVersion: 1.0\nVersion: 9.9.9\n"},
+		{name: "duplicate-architecture", body: "Package: overwritten-arch\nStatus: install ok installed\nArchitecture: i386\nArchitecture: amd64\nVersion: 1.0\n"},
+		{name: "duplicate-maintainer", body: "Package: overwritten-maint\nStatus: install ok installed\nArchitecture: amd64\nVersion: 1.0\nMaintainer: First <a@b>\nMaintainer: Last <c@d>\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := collectorWithDPKGData(t, good+"\n"+tc.body)
+			snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-"+tc.name))
+			if err != nil {
+				t.Fatalf("capture: %v", err)
+			}
+			if snap.CaptureStatus != CaptureStatusPartial {
+				t.Fatalf("duplicate fields must be PARTIAL, got %s reason=%q", snap.CaptureStatus, snap.IncompleteOrLossReason)
+			}
+			if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossRecordMalformed) {
+				t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+			}
+			if snap.ItemCount != 1 || snap.Items[0].ProductName != "keep" {
+				t.Fatalf("duplicate stanza must not last-wins overwrite identity, got %#v", snap.Items)
+			}
+			for _, item := range snap.Items {
+				if item.ProductName == "second" || item.ProductName == "first" ||
+					item.ProductName == "overwritten-status" || item.ProductName == "overwritten-version" ||
+					item.ProductName == "overwritten-arch" || item.ProductName == "overwritten-maint" ||
+					item.Version == "9.9.9" || item.Architecture == "i386" ||
+					strings.Contains(item.VendorPublisher, "Last") {
+					t.Fatalf("silently overwritten identity emitted: %#v", item)
+				}
+			}
+		})
+		t.Run(tc.name+"-only", func(t *testing.T) {
+			c := collectorWithDPKGData(t, tc.body)
+			snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-only-"+tc.name))
+			if err != nil {
+				t.Fatalf("capture: %v", err)
+			}
+			if snap.CaptureStatus != CaptureStatusFailed || snap.ItemCount != 0 {
+				t.Fatalf("duplicate-only source must FAIL empty, got status=%s count=%d items=%#v", snap.CaptureStatus, snap.ItemCount, snap.Items)
+			}
+			if snap.Quality == inventoryQualityAuthoritative {
+				t.Fatal("duplicate authoritative fields must never be COMPLETE authoritative")
+			}
+		})
+	}
+}
+
+func TestDPKGMalformedIdentityDelimitersRejected(t *testing.T) {
+	good := installedStanza("keep", "amd64", "1.0")
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "package-equals", body: installedStanza("openssl=evil", "amd64", "1.0")},
+		{name: "package-colon", body: installedStanza("amd64:openssl", "amd64", "1.0")},
+		{name: "package-slash", body: installedStanza("openssl/evil", "amd64", "1.0")},
+		{name: "arch-colon", body: installedStanza("openssl", "amd64:all", "1.0")},
+		{name: "arch-equals", body: installedStanza("openssl", "amd64=all", "1.0")},
+		{name: "arch-uppercase", body: installedStanza("openssl", "AMD64", "1.0")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := collectorWithDPKGData(t, good+"\n"+tc.body)
+			snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-id-"+tc.name))
+			if err != nil {
+				t.Fatalf("capture: %v", err)
+			}
+			if snap.CaptureStatus != CaptureStatusPartial {
+				t.Fatalf("malformed identity must be PARTIAL, got %s reason=%q", snap.CaptureStatus, snap.IncompleteOrLossReason)
+			}
+			if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossIdentityInvalid) {
+				t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+			}
+			if snap.ItemCount != 1 || snap.Items[0].ProductName != "keep" {
+				t.Fatalf("expected only keep, got %#v", nativeIDs(snap))
+			}
+			for _, item := range snap.Items {
+				if strings.Contains(item.NativePackageID, "evil") ||
+					strings.Contains(item.ProductName, ":") ||
+					strings.Contains(item.ProductName, "=") ||
+					strings.Contains(item.Architecture, ":") ||
+					strings.Contains(item.Architecture, "=") {
+					t.Fatalf("malformed identity accepted as valid-looking native ID: %#v", item)
+				}
+			}
+		})
+	}
+}
+
+func TestDPKGNativeIdentityCollisionNegative(t *testing.T) {
+	data := installedStanza("openssl", "amd64", "3.0.13") + "\n" +
+		installedStanza("amd64:openssl", "amd64", "3.0.13") + "\n" +
+		installedStanza("openssl=3.0.13", "amd64", "forged")
+	c := collectorWithDPKGData(t, data)
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-id-collision"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusPartial {
+		t.Fatalf("hostile identities must not COMPLETE, got %s", snap.CaptureStatus)
+	}
+	if snap.ItemCount != 1 || snap.Items[0].NativePackageID != "dpkg:amd64:openssl=3.0.13" {
+		t.Fatalf("expected only unambiguous openssl identity, got %#v", nativeIDs(snap))
+	}
+	if snap.Items[0].Version != "3.0.13" {
+		t.Fatalf("dpkg version must remain native, got %q", snap.Items[0].Version)
+	}
+}
+
+func TestDPKGVersionRemainsNativeSourceValue(t *testing.T) {
+	data := installedStanza("openssl", "amd64", "1:3.0.13-0ubuntu3")
+	c := collectorWithDPKGData(t, data)
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-native-version"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.ItemCount != 1 {
+		t.Fatalf("count=%d", snap.ItemCount)
+	}
+	if snap.Items[0].Version != "1:3.0.13-0ubuntu3" {
+		t.Fatalf("dpkg version rewritten: %q", snap.Items[0].Version)
+	}
+	if snap.Items[0].NativePackageID != "dpkg:amd64:openssl=1:3.0.13-0ubuntu3" {
+		t.Fatalf("native id=%q", snap.Items[0].NativePackageID)
+	}
+}
+
 func TestDPKGNoSoftwareChangeGeneration(t *testing.T) {
 	snap, err := collectorWithDPKGFile(t, "dpkg_status_complete").Capture(context.Background(), fullDPKGRequest("snap-dpkg-no-change"))
 	if err != nil {

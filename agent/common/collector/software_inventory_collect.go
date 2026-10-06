@@ -312,6 +312,12 @@ func (c *LinuxSoftwareInventoryCollector) normalizeSelectors(req SoftwareInvento
 	if req.SnapshotMode != SnapshotModeTargeted {
 		return nil, true
 	}
+	// TARGETED requires at least one selector. Nil and empty slices are
+	// caller-invalid and must fail before native source enumeration.
+	if len(req.Selectors) == 0 {
+		losses.add(inventoryLossCallerRequestInvalid)
+		return nil, false
+	}
 	if len(req.Selectors) > c.bounds.MaxTargetedSelectors {
 		losses.add(inventoryLossSelectorBoundExceeded)
 		return nil, false
@@ -338,7 +344,7 @@ func (c *LinuxSoftwareInventoryCollector) normalizeSelectors(req SoftwareInvento
 		}
 		out = append(out, SoftwareInventorySelector{ProductName: name, NativePackageID: id})
 	}
-	if len(req.Selectors) > 0 && len(out) == 0 {
+	if len(out) == 0 {
 		return nil, false
 	}
 	return out, true

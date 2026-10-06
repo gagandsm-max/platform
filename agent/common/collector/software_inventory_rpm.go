@@ -276,17 +276,14 @@ func rpmLineToItem(line string) (SoftwareInventoryItem, bool, string) {
 	if name == "" || version == "" || release == "" || arch == "" {
 		return SoftwareInventoryItem{}, false, inventoryLossRecordMalformed
 	}
+	if !isRPMNativeSafeName(name) || !isRPMNativeSafeArchitecture(arch) {
+		return SoftwareInventoryItem{}, false, inventoryLossIdentityInvalid
+	}
 	epochNorm, ok := normalizeRPMEpoch(epoch)
 	if !ok {
 		return SoftwareInventoryItem{}, false, inventoryLossRecordMalformed
 	}
 	if err := requireBoundedToken("product_name", name, maxSoftwareInventoryProductNameLen); err != nil {
-		if strings.Contains(err.Error(), "BOUND_EXCEEDED") {
-			return SoftwareInventoryItem{}, false, inventoryLossRecordOversized
-		}
-		return SoftwareInventoryItem{}, false, inventoryLossIdentityInvalid
-	}
-	if err := requireBoundedToken("version", version, maxSoftwareInventoryVersionLen); err != nil {
 		if strings.Contains(err.Error(), "BOUND_EXCEEDED") {
 			return SoftwareInventoryItem{}, false, inventoryLossRecordOversized
 		}
@@ -298,7 +295,8 @@ func rpmLineToItem(line string) (SoftwareInventoryItem, bool, string) {
 		}
 		return SoftwareInventoryItem{}, false, inventoryLossIdentityInvalid
 	}
-	if err := requireBoundedToken("release", release, maxSoftwareInventoryVersionLen); err != nil {
+	typedVersion := formatRPMTypedVersion(epochNorm, version, release)
+	if err := requireBoundedToken("version", typedVersion, maxSoftwareInventoryVersionLen); err != nil {
 		if strings.Contains(err.Error(), "BOUND_EXCEEDED") {
 			return SoftwareInventoryItem{}, false, inventoryLossRecordOversized
 		}
@@ -307,6 +305,9 @@ func rpmLineToItem(line string) (SoftwareInventoryItem, bool, string) {
 
 	native := formatRPMNativePackageID(arch, name, epochNorm, version, release)
 	if err := requireBoundedToken("native_package_id", native, maxSoftwareInventoryNativePackageIDLen); err != nil {
+		if strings.Contains(err.Error(), "BOUND_EXCEEDED") {
+			return SoftwareInventoryItem{}, false, inventoryLossRecordOversized
+		}
 		return SoftwareInventoryItem{}, false, inventoryLossIdentityInvalid
 	}
 
@@ -325,7 +326,7 @@ func rpmLineToItem(line string) (SoftwareInventoryItem, bool, string) {
 	return SoftwareInventoryItem{
 		NativePackageID:                native,
 		ProductName:                    name,
-		Version:                        version,
+		Version:                        typedVersion,
 		VendorPublisher:                vendorOut,
 		Architecture:                   arch,
 		InstallationScope:              InstallationScopeMachine,
@@ -335,6 +336,54 @@ func rpmLineToItem(line string) (SoftwareInventoryItem, bool, string) {
 
 func formatRPMNativePackageID(arch, name, epoch, version, release string) string {
 	return "rpm:" + arch + ":" + name + "=" + epoch + ":" + version + "-" + release
+}
+
+func formatRPMTypedVersion(epoch, version, release string) string {
+	return epoch + ":" + version + "-" + release
+}
+
+// isRPMNativeSafeName keeps rpm:<arch>:<name>=<epoch>:<version>-<release>
+// unambiguous. It is not an RPM spec parser and does not rewrite NEVRA.
+func isRPMNativeSafeName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 {
+			if !isRPMNativeAlnum(r) {
+				return false
+			}
+			continue
+		}
+		if isRPMNativeAlnum(r) || r == '.' || r == '_' || r == '+' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isRPMNativeSafeArchitecture(arch string) bool {
+	if arch == "" {
+		return false
+	}
+	for i, r := range arch {
+		if i == 0 {
+			if !isRPMNativeAlnum(r) {
+				return false
+			}
+			continue
+		}
+		if isRPMNativeAlnum(r) || r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isRPMNativeAlnum(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
 }
 
 func normalizeRPMEpoch(epoch string) (string, bool) {

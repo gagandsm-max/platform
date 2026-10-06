@@ -81,7 +81,14 @@ func TestRPMCompleteFixtureMappingAndNEVRA(t *testing.T) {
 		if item.Architecture == "amd64" {
 			t.Fatal("RPM architecture must not be normalized into DPKG architecture")
 		}
+		eq := strings.Index(item.NativePackageID, "=")
+		if eq < 0 || item.NativePackageID[eq+1:] != item.Version {
+			t.Fatalf("NativePackageID EVR must match typed Version: id=%q version=%q", item.NativePackageID, item.Version)
+		}
 		if item.ProductName == "openssl" && item.Architecture == "x86_64" {
+			if item.Version != "1:3.0.7-18.el9" {
+				t.Fatalf("typed EVR version=%q", item.Version)
+			}
 			if item.VendorPublisher != "Red Hat, Inc." {
 				t.Fatalf("vendor=%q", item.VendorPublisher)
 			}
@@ -89,6 +96,9 @@ func TestRPMCompleteFixtureMappingAndNEVRA(t *testing.T) {
 				t.Fatal("expected provenance-qualified RPM INSTALLTIME")
 			}
 			sawVendor = true
+		}
+		if item.ProductName == "bash" && item.Version != "0:5.1.8-6.el9" {
+			t.Fatalf("bash typed EVR version=%q", item.Version)
 		}
 		if item.ProductName == "glibc" {
 			if item.VendorPublisher != "" {
@@ -120,6 +130,9 @@ func TestRPMNoEpochDeterministic(t *testing.T) {
 	for _, item := range snap.Items {
 		if item.NativePackageID != "rpm:x86_64:zsh=0:5.8-1.el9" {
 			t.Fatalf("no-epoch identity must be explicit zero, got %q", item.NativePackageID)
+		}
+		if item.Version != "0:5.8-1.el9" {
+			t.Fatalf("no-epoch typed Version must preserve EVR, got %q", item.Version)
 		}
 	}
 }
@@ -335,6 +348,247 @@ func TestRPMNotFoundResolverUsesAllowlistOnly(t *testing.T) {
 	}
 	if snap.CaptureStatus != CaptureStatusFailed {
 		t.Fatalf("non-allowlisted resolver path must fail closed, got %s", snap.CaptureStatus)
+	}
+}
+
+func TestRPMTargetedZeroSelectorsNeverInvokeRPM(t *testing.T) {
+	resolved, ran := 0, 0
+	c := newTestCollector(t)
+	c.rpmResolver = func() (string, error) {
+		resolved++
+		return "/usr/bin/rpm", nil
+	}
+	c.rpmRunner = func(ctx context.Context, inv rpmInvocation, stdout, stderr *boundedBuffer) error {
+		ran++
+		return nil
+	}
+	for _, sel := range [][]SoftwareInventorySelector{nil, {}} {
+		resolved, ran = 0, 0
+		snap, err := c.Capture(context.Background(), SoftwareInventoryRequest{
+			SnapshotID:   "snap-rpm-targeted-zero",
+			SnapshotMode: SnapshotModeTargeted,
+			SourceType:   InventorySourceTypeRPM,
+			Selectors:    sel,
+		})
+		if err != nil {
+			t.Fatalf("capture: %v", err)
+		}
+		if resolved != 0 || ran != 0 {
+			t.Fatalf("zero-target TARGETED must not resolve/run RPM (resolved=%d ran=%d)", resolved, ran)
+		}
+		if snap.CaptureStatus != CaptureStatusFailed || snap.ItemCount != 0 {
+			t.Fatalf("status=%s count=%d", snap.CaptureStatus, snap.ItemCount)
+		}
+		if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossCallerRequestInvalid) {
+			t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+		}
+	}
+}
+
+func TestRPMTargetedAllInvalidNeverInvokeRPM(t *testing.T) {
+	ran := 0
+	c := newTestCollector(t)
+	c.rpmResolver = func() (string, error) { return "/usr/bin/rpm", nil }
+	c.rpmRunner = func(ctx context.Context, inv rpmInvocation, stdout, stderr *boundedBuffer) error {
+		ran++
+		return nil
+	}
+	snap, err := c.Capture(context.Background(), SoftwareInventoryRequest{
+		SnapshotID:   "snap-rpm-targeted-all-invalid",
+		SnapshotMode: SnapshotModeTargeted,
+		SourceType:   InventorySourceTypeRPM,
+		Selectors:    []SoftwareInventorySelector{{}, {NativePackageID: ""}},
+	})
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if ran != 0 {
+		t.Fatal("all-invalid TARGETED must not execute RPM")
+	}
+	if snap.CaptureStatus != CaptureStatusFailed {
+		t.Fatalf("status=%s", snap.CaptureStatus)
+	}
+	if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossSelectorInvalid) {
+		t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+	}
+}
+
+func TestRPMTargetedValidPlusInvalidIsPartialQuality(t *testing.T) {
+	raw, err := os.ReadFile(fixtureFile(t, "rpm_qa_complete.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := 0
+	c := collectorWithRPMStdout(t, string(raw), nil, nil)
+	orig := c.rpmRunner
+	c.rpmRunner = func(ctx context.Context, inv rpmInvocation, stdout, stderr *boundedBuffer) error {
+		ran++
+		return orig(ctx, inv, stdout, stderr)
+	}
+	snap, err := c.Capture(context.Background(), SoftwareInventoryRequest{
+		SnapshotID:   "snap-rpm-targeted-mixed",
+		SnapshotMode: SnapshotModeTargeted,
+		SourceType:   InventorySourceTypeRPM,
+		Selectors: []SoftwareInventorySelector{
+			{ProductName: "bash"},
+			{},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran == 0 {
+		t.Fatal("mixed valid+invalid TARGETED may query RPM after recording request quality")
+	}
+	if snap.CaptureStatus != CaptureStatusPartial || snap.Quality != inventoryQualityPartial {
+		t.Fatalf("status=%s quality=%s reason=%q", snap.CaptureStatus, snap.Quality, snap.IncompleteOrLossReason)
+	}
+	if snap.ItemCount != 2 {
+		t.Fatalf("expected bash duplicates, got %d %#v", snap.ItemCount, nativeIDs(snap))
+	}
+	if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossSelectorInvalid) {
+		t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+	}
+}
+
+func TestRPMTypedEVRVersionDifferences(t *testing.T) {
+	line := func(epoch, version, release string) string {
+		return "openssl\t" + epoch + "\t" + version + "\t" + release + "\tx86_64\tRed Hat, Inc.\t1700000000\n"
+	}
+	base := collectorWithRPMStdout(t, line("1", "3.0.7", "18.el9"), nil, nil)
+	baseSnap, err := base.Capture(context.Background(), fullRPMRequest("snap-rpm-evr-base"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseSnap.Items[0].Version != "1:3.0.7-18.el9" || baseSnap.Items[0].NativePackageID != "rpm:x86_64:openssl=1:3.0.7-18.el9" {
+		t.Fatalf("base mapping %#v", baseSnap.Items[0])
+	}
+
+	cases := []struct {
+		id      string
+		epoch   string
+		version string
+		release string
+		wantVer string
+		wantID  string
+	}{
+		{id: "release-only", epoch: "1", version: "3.0.7", release: "19.el9", wantVer: "1:3.0.7-19.el9", wantID: "rpm:x86_64:openssl=1:3.0.7-19.el9"},
+		{id: "epoch-only", epoch: "2", version: "3.0.7", release: "18.el9", wantVer: "2:3.0.7-18.el9", wantID: "rpm:x86_64:openssl=2:3.0.7-18.el9"},
+		{id: "version-only", epoch: "1", version: "3.0.8", release: "18.el9", wantVer: "1:3.0.8-18.el9", wantID: "rpm:x86_64:openssl=1:3.0.8-18.el9"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			c := collectorWithRPMStdout(t, line(tc.epoch, tc.version, tc.release), nil, nil)
+			snap, err := c.Capture(context.Background(), fullRPMRequest("snap-rpm-evr-"+tc.id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snap.ItemCount != 1 {
+				t.Fatalf("count=%d", snap.ItemCount)
+			}
+			if snap.Items[0].Version != tc.wantVer {
+				t.Fatalf("Version=%q want %q", snap.Items[0].Version, tc.wantVer)
+			}
+			if snap.Items[0].NativePackageID != tc.wantID {
+				t.Fatalf("NativePackageID=%q want %q", snap.Items[0].NativePackageID, tc.wantID)
+			}
+			if snap.Items[0].Version == baseSnap.Items[0].Version {
+				t.Fatalf("%s difference must change typed Version", tc.id)
+			}
+			if snap.Items[0].NativePackageID == baseSnap.Items[0].NativePackageID {
+				t.Fatalf("%s difference must change NativePackageID", tc.id)
+			}
+			eq := strings.Index(snap.Items[0].NativePackageID, "=")
+			if snap.Items[0].NativePackageID[eq+1:] != snap.Items[0].Version {
+				t.Fatal("NativePackageID and typed Version EVR must be consistent")
+			}
+		})
+	}
+}
+
+func TestRPMOversizedComposedEVRRejectedNotTruncated(t *testing.T) {
+	ver := strings.Repeat("v", 80)
+	rel := strings.Repeat("r", 80)
+	stdout := "openssl\t1\t" + ver + "\t" + rel + "\tx86_64\tV\t1\ngood\t0\t1\t1.el9\tx86_64\tV\t1\n"
+	c := collectorWithRPMStdout(t, stdout, nil, nil)
+	snap, err := c.Capture(context.Background(), fullRPMRequest("snap-rpm-evr-oversize"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.CaptureStatus != CaptureStatusPartial {
+		t.Fatalf("oversized EVR must be PARTIAL, got %s reason=%q", snap.CaptureStatus, snap.IncompleteOrLossReason)
+	}
+	if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossRecordOversized) {
+		t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+	}
+	if snap.ItemCount != 1 || snap.Items[0].ProductName != "good" {
+		t.Fatalf("expected only good, got %#v", nativeIDs(snap))
+	}
+	composed := "1:" + ver + "-" + rel
+	if len(composed) <= maxSoftwareInventoryVersionLen {
+		t.Fatal("test fixture must exceed version bound")
+	}
+	for _, item := range snap.Items {
+		if len(item.Version) > maxSoftwareInventoryVersionLen {
+			t.Fatal("oversized EVR must not be truncated into Version")
+		}
+		if strings.HasPrefix(item.Version, "1:"+ver[:10]) {
+			t.Fatal("oversized EVR must not be emitted")
+		}
+	}
+}
+
+func TestRPMMalformedNameArchDelimitersRejected(t *testing.T) {
+	good := "keep\t0\t1\t1.el9\tx86_64\tV\t1\n"
+	cases := []struct {
+		name string
+		line string
+	}{
+		{name: "name-colon", line: "amd64:openssl\t1\t3.0.7\t18.el9\tx86_64\tV\t1\n"},
+		{name: "name-equals", line: "openssl=evil\t1\t3.0.7\t18.el9\tx86_64\tV\t1\n"},
+		{name: "name-slash", line: "openssl/evil\t1\t3.0.7\t18.el9\tx86_64\tV\t1\n"},
+		{name: "arch-colon", line: "openssl\t1\t3.0.7\t18.el9\tx86_64:evil\tV\t1\n"},
+		{name: "arch-equals", line: "openssl\t1\t3.0.7\t18.el9\tx86_64=evil\tV\t1\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := collectorWithRPMStdout(t, good+tc.line, nil, nil)
+			snap, err := c.Capture(context.Background(), fullRPMRequest("snap-rpm-id-"+tc.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snap.CaptureStatus != CaptureStatusPartial {
+				t.Fatalf("status=%s reason=%q", snap.CaptureStatus, snap.IncompleteOrLossReason)
+			}
+			if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossIdentityInvalid) {
+				t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+			}
+			if snap.ItemCount != 1 || snap.Items[0].ProductName != "keep" {
+				t.Fatalf("got %#v", nativeIDs(snap))
+			}
+			for _, item := range snap.Items {
+				if strings.Contains(item.NativePackageID, "evil") || strings.Contains(item.ProductName, "=") || strings.Contains(item.ProductName, ":") {
+					t.Fatalf("ambiguous identity accepted: %#v", item)
+				}
+			}
+		})
+	}
+}
+
+func TestRPMNativeIdentityCollisionNegative(t *testing.T) {
+	stdout := "openssl\t1\t3.0.7\t18.el9\tx86_64\tV\t1\n" +
+		"x86_64:openssl\t1\t3.0.7\t18.el9\tx86_64\tV\t1\n" +
+		"openssl=1\t1\t3.0.7\t18.el9\tx86_64\tV\t1\n"
+	c := collectorWithRPMStdout(t, stdout, nil, nil)
+	snap, err := c.Capture(context.Background(), fullRPMRequest("snap-rpm-id-collision"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.CaptureStatus != CaptureStatusPartial || snap.ItemCount != 1 {
+		t.Fatalf("status=%s count=%d ids=%#v", snap.CaptureStatus, snap.ItemCount, nativeIDs(snap))
+	}
+	if snap.Items[0].NativePackageID != "rpm:x86_64:openssl=1:3.0.7-18.el9" || snap.Items[0].Version != "1:3.0.7-18.el9" {
+		t.Fatalf("unexpected mapping %#v", snap.Items[0])
 	}
 }
 

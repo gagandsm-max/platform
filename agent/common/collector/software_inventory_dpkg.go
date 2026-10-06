@@ -16,10 +16,11 @@ type dpkgFieldSet struct {
 	Version      string
 	Architecture string
 	Maintainer   string
-	sawPackage   bool
-	sawStatus    bool
-	sawVersion   bool
-	sawArch      bool
+	sawPackage    bool
+	sawStatus     bool
+	sawVersion    bool
+	sawArch       bool
+	sawMaintainer bool
 }
 
 func (c *LinuxSoftwareInventoryCollector) collectDPKG(ctx context.Context, filter itemEmitFilter) (inventoryParseResult, error) {
@@ -249,6 +250,12 @@ func dpkgStanzaToItem(raw string, truncatedEOF bool) (*SoftwareInventoryItem, bo
 	if !fields.sawVersion || !fields.sawArch {
 		return nil, false, inventoryLossRecordMalformed
 	}
+	if !isDPKGNativeSafePackageName(fields.Package) {
+		return nil, false, inventoryLossIdentityInvalid
+	}
+	if !isDPKGNativeSafeArchitecture(fields.Architecture) {
+		return nil, false, inventoryLossIdentityInvalid
+	}
 	if err := requireBoundedToken("product_name", fields.Package, maxSoftwareInventoryProductNameLen); err != nil {
 		return nil, false, inventoryLossIdentityInvalid
 	}
@@ -287,6 +294,52 @@ func formatDPKGNativePackageID(arch, name, version string) string {
 	return "dpkg:" + arch + ":" + name + "=" + version
 }
 
+// isDPKGNativeSafePackageName is the smallest Debian-native identity charset
+// that keeps dpkg:<arch>:<name>=<version> unambiguous. It is not a policy parser.
+func isDPKGNativeSafePackageName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 {
+			if !isDPKGNativeAlnum(r) {
+				return false
+			}
+			continue
+		}
+		if isDPKGNativeAlnum(r) || r == '+' || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// isDPKGNativeSafeArchitecture rejects architecture tokens that contain
+// native-ID structural delimiters or characters outside dpkg architecture form.
+func isDPKGNativeSafeArchitecture(arch string) bool {
+	if arch == "" {
+		return false
+	}
+	for i, r := range arch {
+		if i == 0 {
+			if !isDPKGNativeAlnum(r) {
+				return false
+			}
+			continue
+		}
+		if isDPKGNativeAlnum(r) || r == '+' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isDPKGNativeAlnum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+}
+
 func parseDpkgStanza(raw string) (dpkgFieldSet, bool) {
 	var fields dpkgFieldSet
 	var current string
@@ -308,23 +361,39 @@ func parseDpkgStanza(raw string) (dpkgFieldSet, bool) {
 		current = key
 		switch key {
 		case "Package":
+			if fields.sawPackage {
+				return dpkgFieldSet{}, false
+			}
 			fields.Package = val
 			fields.sawPackage = true
 			keep = true
 		case "Status":
+			if fields.sawStatus {
+				return dpkgFieldSet{}, false
+			}
 			fields.Status = val
 			fields.sawStatus = true
 			keep = true
 		case "Version":
+			if fields.sawVersion {
+				return dpkgFieldSet{}, false
+			}
 			fields.Version = val
 			fields.sawVersion = true
 			keep = true
 		case "Architecture":
+			if fields.sawArch {
+				return dpkgFieldSet{}, false
+			}
 			fields.Architecture = val
 			fields.sawArch = true
 			keep = true
 		case "Maintainer":
+			if fields.sawMaintainer {
+				return dpkgFieldSet{}, false
+			}
 			fields.Maintainer = val
+			fields.sawMaintainer = true
 			keep = true
 		default:
 			keep = false
