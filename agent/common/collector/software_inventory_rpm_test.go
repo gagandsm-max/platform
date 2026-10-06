@@ -592,6 +592,91 @@ func TestRPMNativeIdentityCollisionNegative(t *testing.T) {
 	}
 }
 
+func TestRPMMalformedWhitespaceAndComponentIdentityRejected(t *testing.T) {
+	good := "openssl\t1\t3.0.7\t18.el9\tx86_64\tV\t1\n"
+	goodID := "rpm:x86_64:openssl=1:3.0.7-18.el9"
+	line := func(name, epoch, version, release, arch string) string {
+		return name + "\t" + epoch + "\t" + version + "\t" + release + "\t" + arch + "\tV\t1\n"
+	}
+	cases := []struct {
+		name string
+		line string
+	}{
+		{name: "name-leading-space", line: line(" openssl", "1", "3.0.7", "18.el9", "x86_64")},
+		{name: "name-trailing-space", line: line("openssl ", "1", "3.0.7", "18.el9", "x86_64")},
+		{name: "arch-leading-trailing-space", line: line("openssl", "1", "3.0.7", "18.el9", " x86_64 ")},
+		{name: "epoch-surrounding-space", line: line("openssl", " 1 ", "3.0.7", "18.el9", "x86_64")},
+		{name: "version-leading-trailing-space", line: line("openssl", "1", " 3.0.7 ", "18.el9", "x86_64")},
+		{name: "release-leading-trailing-space", line: line("openssl", "1", "3.0.7", " 18.el9 ", "x86_64")},
+		{name: "version-colon", line: line("openssl", "1", "3:0.7", "18.el9", "x86_64")},
+		{name: "version-dash", line: line("openssl", "1", "3.0-7", "18.el9", "x86_64")},
+		{name: "release-colon", line: line("openssl", "1", "3.0.7", "18:el9", "x86_64")},
+		{name: "release-dash", line: line("openssl", "1", "3.0.7", "18-el9", "x86_64")},
+		{name: "version-space", line: line("openssl", "1", "3.0 7", "18.el9", "x86_64")},
+		{name: "version-control", line: line("openssl", "1", "3.0\x017", "18.el9", "x86_64")},
+		{name: "release-space", line: line("openssl", "1", "3.0.7", "18 el9", "x86_64")},
+		{name: "release-control", line: line("openssl", "1", "3.0.7", "18\x01el9", "x86_64")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name+"-with-good", func(t *testing.T) {
+			c := collectorWithRPMStdout(t, good+tc.line, nil, nil)
+			snap, err := c.Capture(context.Background(), fullRPMRequest("snap-rpm-ws-"+tc.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snap.CaptureStatus != CaptureStatusPartial {
+				t.Fatalf("status=%s reason=%q", snap.CaptureStatus, snap.IncompleteOrLossReason)
+			}
+			if snap.ItemCount != 1 || snap.Items[0].NativePackageID != goodID {
+				t.Fatalf("expected only good identity, got %#v", nativeIDs(snap))
+			}
+		})
+		t.Run(tc.name+"-only", func(t *testing.T) {
+			c := collectorWithRPMStdout(t, tc.line, nil, nil)
+			snap, err := c.Capture(context.Background(), fullRPMRequest("snap-rpm-ws-only-"+tc.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snap.CaptureStatus != CaptureStatusFailed || snap.ItemCount != 0 {
+				t.Fatalf("malformed-only must FAILED empty, status=%s count=%d ids=%#v", snap.CaptureStatus, snap.ItemCount, nativeIDs(snap))
+			}
+			for _, item := range snap.Items {
+				if item.NativePackageID == goodID {
+					t.Fatal("malformed metadata was normalized into a valid NativePackageID")
+				}
+			}
+		})
+	}
+
+	for _, bad := range []string{"3.0 7", "3.0\t7", "3.0\n7", "3.0\x017", "3:0.7", "3.0-7", " 3.0.7", "3.0.7 "} {
+		if isRPMNativeSafeVersionComponent(bad) {
+			t.Fatalf("VERSION/RELEASE component %q must be rejected", bad)
+		}
+	}
+	if !isRPMNativeSafeVersionComponent("3.0.7") || !isRPMNativeSafeVersionComponent("18.el9") ||
+		!isRPMNativeSafeVersionComponent("1.0~rc1") || !isRPMNativeSafeVersionComponent("1.0^1") {
+		t.Fatal("native-safe VERSION/RELEASE vocabulary must remain accepted")
+	}
+
+	t.Run("trimspace-collision-negative", func(t *testing.T) {
+		stdout := " openssl\t1\t3.0.7\t18.el9\tx86_64\tV\t1\n" + good
+		c := collectorWithRPMStdout(t, stdout, nil, nil)
+		snap, err := c.Capture(context.Background(), fullRPMRequest("snap-rpm-ws-collision"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snap.CaptureStatus != CaptureStatusPartial || snap.ItemCount != 1 {
+			t.Fatalf("status=%s count=%d ids=%#v", snap.CaptureStatus, snap.ItemCount, nativeIDs(snap))
+		}
+		if snap.Items[0].NativePackageID != goodID {
+			t.Fatalf("unexpected mapping %#v", snap.Items[0])
+		}
+		if snap.ItemCount != 1 {
+			t.Fatal("whitespace-malformed record must not emit the same NativePackageID as the valid record")
+		}
+	})
+}
+
 func TestRPMQueryFormatIsPlatformConstant(t *testing.T) {
 	if strings.Contains(rpmQueryFormat, "%{SCRIPT") || strings.Contains(rpmQueryFormat, "%{FILENAMES}") || strings.Contains(rpmQueryFormat, "%{DESCRIPTION}") {
 		t.Fatal("query format must not collect scripts, file lists, or descriptions")

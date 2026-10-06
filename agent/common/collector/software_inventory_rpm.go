@@ -264,12 +264,12 @@ func rpmLineToItem(line string) (SoftwareInventoryItem, bool, string) {
 	if hasControlRunes(name) || hasControlRunes(epoch) || hasControlRunes(version) || hasControlRunes(release) || hasControlRunes(arch) {
 		return SoftwareInventoryItem{}, false, inventoryLossIdentityInvalid
 	}
+	if rpmIdentityHasOuterWhitespace(name) || rpmIdentityHasOuterWhitespace(epoch) ||
+		rpmIdentityHasOuterWhitespace(version) || rpmIdentityHasOuterWhitespace(release) ||
+		rpmIdentityHasOuterWhitespace(arch) {
+		return SoftwareInventoryItem{}, false, inventoryLossIdentityInvalid
+	}
 
-	name = strings.TrimSpace(name)
-	epoch = strings.TrimSpace(epoch)
-	version = strings.TrimSpace(version)
-	release = strings.TrimSpace(release)
-	arch = strings.TrimSpace(arch)
 	vendor = strings.TrimSpace(vendor)
 	installRaw = strings.TrimSpace(installRaw)
 
@@ -277,6 +277,9 @@ func rpmLineToItem(line string) (SoftwareInventoryItem, bool, string) {
 		return SoftwareInventoryItem{}, false, inventoryLossRecordMalformed
 	}
 	if !isRPMNativeSafeName(name) || !isRPMNativeSafeArchitecture(arch) {
+		return SoftwareInventoryItem{}, false, inventoryLossIdentityInvalid
+	}
+	if !isRPMNativeSafeVersionComponent(version) || !isRPMNativeSafeVersionComponent(release) {
 		return SoftwareInventoryItem{}, false, inventoryLossIdentityInvalid
 	}
 	epochNorm, ok := normalizeRPMEpoch(epoch)
@@ -363,6 +366,29 @@ func isRPMNativeSafeName(name string) bool {
 	return true
 }
 
+func rpmIdentityHasOuterWhitespace(v string) bool {
+	if v == "" {
+		return false
+	}
+	return v != strings.TrimSpace(v)
+}
+
+// isRPMNativeSafeVersionComponent is the source-safe RPM VERSION/RELEASE
+// vocabulary for separately queried EVR components. Colon and dash are
+// structural separators and must not appear inside either component.
+func isRPMNativeSafeVersionComponent(v string) bool {
+	if v == "" {
+		return false
+	}
+	for _, r := range v {
+		if isRPMNativeAlnum(r) || r == '.' || r == '_' || r == '+' || r == '~' || r == '^' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func isRPMNativeSafeArchitecture(arch string) bool {
 	if arch == "" {
 		return false
@@ -398,7 +424,7 @@ func normalizeRPMEpoch(epoch string) (string, bool) {
 }
 
 func isRPMNone(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
+	switch strings.ToLower(v) {
 	case "(none)", "none", "(null)", "null":
 		return true
 	default:

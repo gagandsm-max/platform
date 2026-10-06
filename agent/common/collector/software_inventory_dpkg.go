@@ -297,7 +297,7 @@ func formatDPKGNativePackageID(arch, name, version string) string {
 // isDPKGNativeSafePackageName is the smallest Debian-native identity charset
 // that keeps dpkg:<arch>:<name>=<version> unambiguous. It is not a policy parser.
 func isDPKGNativeSafePackageName(name string) bool {
-	if name == "" {
+	if len(name) < 2 {
 		return false
 	}
 	for i, r := range name {

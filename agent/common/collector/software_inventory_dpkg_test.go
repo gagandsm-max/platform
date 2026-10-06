@@ -618,6 +618,53 @@ func TestDPKGMalformedIdentityDelimitersRejected(t *testing.T) {
 	}
 }
 
+func TestDPKGPackageNameMinimumLength(t *testing.T) {
+	good := installedStanza("openssl", "amd64", "3.0.13")
+	cases := []struct {
+		name    string
+		pkg     string
+		accept  bool
+	}{
+		{name: "single-letter", pkg: "a", accept: false},
+		{name: "single-digit", pkg: "1", accept: false},
+		{name: "two-letter", pkg: "ab", accept: true},
+		{name: "letter-digit", pkg: "a1", accept: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isDPKGNativeSafePackageName(tc.pkg); got != tc.accept {
+				t.Fatalf("isDPKGNativeSafePackageName(%q)=%v want %v", tc.pkg, got, tc.accept)
+			}
+			c := collectorWithDPKGData(t, good+"\n"+installedStanza(tc.pkg, "amd64", "1.0"))
+			snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-namelen-"+tc.name))
+			if err != nil {
+				t.Fatalf("capture: %v", err)
+			}
+			ids := nativeIDs(snap)
+			if tc.accept {
+				if snap.ItemCount != 2 {
+					t.Fatalf("expected openssl + %s, got %#v", tc.pkg, ids)
+				}
+				return
+			}
+			if snap.CaptureStatus != CaptureStatusPartial {
+				t.Fatalf("short name must be PARTIAL, got %s reason=%q", snap.CaptureStatus, snap.IncompleteOrLossReason)
+			}
+			if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossIdentityInvalid) {
+				t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+			}
+			if snap.ItemCount != 1 || snap.Items[0].ProductName != "openssl" {
+				t.Fatalf("expected only openssl, got %#v", ids)
+			}
+		})
+	}
+	for _, pkg := range []string{"bash", "libc6", "coreutils", "openssl"} {
+		if !isDPKGNativeSafePackageName(pkg) {
+			t.Fatalf("ordinary package name %q must remain accepted", pkg)
+		}
+	}
+}
+
 func TestDPKGNativeIdentityCollisionNegative(t *testing.T) {
 	data := installedStanza("openssl", "amd64", "3.0.13") + "\n" +
 		installedStanza("amd64:openssl", "amd64", "3.0.13") + "\n" +
