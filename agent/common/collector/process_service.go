@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"platform/agent/common/telemetry"
 )
 
 // Process/service selector and discovery catalogue source contracts
@@ -27,7 +29,31 @@ const (
 	maxProcessServiceCatalogueIDLen      = 128
 	maxProcessServiceInstanceTokenLen    = 256
 	maxProcessServiceIncompleteReasonLen = 512
+	maxProcessServiceStateLen            = 32
+	maxProcessServiceSourceClassLen      = 64
 )
+
+// ProcessServiceSourceClass distinguishes monitoring-source outcomes from
+// operational process/service failure. Source classes never assert host DOWN.
+type ProcessServiceSourceClass string
+
+const (
+	ProcessServiceSourceObserved          ProcessServiceSourceClass = "OBSERVED"
+	ProcessServiceSourceUnavailable       ProcessServiceSourceClass = "SOURCE_UNAVAILABLE"
+	ProcessServiceSourcePermissionDenied  ProcessServiceSourceClass = "PERMISSION_DENIED"
+	ProcessServiceSourceUnsupported       ProcessServiceSourceClass = "UNSUPPORTED"
+	ProcessServiceSourcePIDRace           ProcessServiceSourceClass = "PID_RACE"
+	ProcessServiceSourceMalformed         ProcessServiceSourceClass = "MALFORMED_SOURCE"
+	ProcessServiceSourceTruncated         ProcessServiceSourceClass = "TRUNCATED_ENUMERATION"
+	ProcessServiceSourceSelectorUnmatched ProcessServiceSourceClass = "SELECTOR_NOT_MATCHED"
+)
+
+// SourceClassAssertsProcessOrHostDown is always false. Collection/source
+// quality is not operational DOWN authority (BUILD-070 owns policy).
+func SourceClassAssertsProcessOrHostDown(class ProcessServiceSourceClass) bool {
+	_ = class
+	return false
+}
 
 // SelectorKind enumerates durable process/service monitor selector classes.
 type SelectorKind string
@@ -100,9 +126,20 @@ func (s ProcessServiceSelector) SelectorPrecedenceRank() int {
 // ProcessServiceRuntimeInstance carries ephemeral runtime observations only.
 // PID must never become durable selector/entity authority.
 type ProcessServiceRuntimeInstance struct {
-	PID           int
-	ObservedAt    time.Time
-	InstanceToken string // optional opaque runtime token; not durable entity authority
+	PID            int
+	ObservedAt     time.Time
+	InstanceToken  string // optional opaque runtime token; not durable entity authority
+	State          string // kernel process state letter/token; not alert state
+	StartTimeTicks uint64
+	CPUUserTicks   uint64
+	CPUSystemTicks uint64
+	RSSBytes       uint64
+	IOReadBytes    uint64
+	IOWriteBytes   uint64
+	HasStartTime   bool
+	HasCPU         bool
+	HasRSS         bool
+	HasIO          bool
 }
 
 // ProcessServiceCatalogueEntry distinguishes stable identity from ephemeral PID.
@@ -236,6 +273,9 @@ func (e ProcessServiceCatalogueEntry) validate(index int) error {
 		if err := optionalProcessToken(prefix+".runtime.instance_token", e.Runtime.InstanceToken, maxProcessServiceInstanceTokenLen); err != nil {
 			return err
 		}
+		if err := optionalProcessToken(prefix+".runtime.state", e.Runtime.State, maxProcessServiceStateLen); err != nil {
+			return err
+		}
 		// PID may exist as ephemeral observation but must never validate as durable selector.
 		pidSelector := ProcessServiceSelector{Kind: "PID", Value: strconv.Itoa(e.Runtime.PID)}
 		if err := pidSelector.Validate(); err == nil {
@@ -243,6 +283,169 @@ func (e ProcessServiceCatalogueEntry) validate(index int) error {
 		}
 	}
 	return nil
+}
+
+// MatchesEntry reports exact, deterministic durable-selector equality.
+// PID and instance tokens are ignored. Comparison is literal (no glob/regex).
+func (s ProcessServiceSelector) MatchesEntry(e ProcessServiceCatalogueEntry) bool {
+	if err := s.Validate(); err != nil {
+		return false
+	}
+	switch s.Kind {
+	case SelectorKindServiceID:
+		return e.ServiceID == s.Value
+	case SelectorKindExecutableIdentity:
+		return e.ExecutableIdentity == s.Value
+	case SelectorKindExecutablePath:
+		return e.ExecutablePath == s.Value
+	case SelectorKindProcessName:
+		return e.ProcessFamilyName == s.Value
+	default:
+		return false
+	}
+}
+
+// ProcessServiceSelectorMatch is source-side match evidence for one selector.
+type ProcessServiceSelectorMatch struct {
+	Selector    ProcessServiceSelector
+	Matched     bool
+	SourceClass ProcessServiceSourceClass
+	Entries     []ProcessServiceCatalogueEntry
+	Service     *SystemdServiceObservation
+}
+
+// MatchProcessServiceSelectors applies exact matching. Unmatched selectors are
+// SELECTOR_NOT_MATCHED source evidence, not operational DOWN.
+func MatchProcessServiceSelectors(entries []ProcessServiceCatalogueEntry, selectors []ProcessServiceSelector) []ProcessServiceSelectorMatch {
+	out := make([]ProcessServiceSelectorMatch, 0, len(selectors))
+	for _, sel := range selectors {
+		m := ProcessServiceSelectorMatch{
+			Selector:    sel,
+			SourceClass: ProcessServiceSourceSelectorUnmatched,
+		}
+		if err := sel.Validate(); err != nil {
+			m.SourceClass = ProcessServiceSourceMalformed
+			out = append(out, m)
+			continue
+		}
+		for _, e := range entries {
+			if sel.MatchesEntry(e) {
+				m.Matched = true
+				m.Entries = append(m.Entries, e)
+			}
+		}
+		if m.Matched {
+			m.SourceClass = ProcessServiceSourceObserved
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// EncodeProcessServiceCatalogueAsScalarSamples is the explicit rejection of
+// encoding structured catalogue/runtime evidence as HostCollector scalar labels.
+func EncodeProcessServiceCatalogueAsScalarSamples(_ ProcessServiceDiscoveryCatalogue) ([]telemetry.Sample, error) {
+	return nil, errors.New("PROCESS_SERVICE_SCALAR_ENCODING_REJECTED: structured process/service evidence must not be encoded as scalar Sample labels")
+}
+
+// SystemdServiceObservation is read-only systemd unit source evidence.
+// MainPID is ephemeral runtime evidence only.
+type SystemdServiceObservation struct {
+	UnitID            string
+	ActiveState       string
+	SubState          string
+	Result            string
+	NRestarts         uint64
+	HasNRestarts      bool
+	MainPID           int
+	HasMainPID        bool
+	ExecMainStatus    int
+	HasExecMainStatus bool
+	SourceClass       ProcessServiceSourceClass
+	Quality           string
+}
+
+func (o SystemdServiceObservation) DurableSelector() (ProcessServiceSelector, error) {
+	sel := ProcessServiceSelector{Kind: SelectorKindServiceID, Value: o.UnitID}
+	if err := sel.Validate(); err != nil {
+		return ProcessServiceSelector{}, err
+	}
+	return sel, nil
+}
+
+func (o SystemdServiceObservation) MainPIDIsDurableSelector() bool {
+	if !o.HasMainPID || o.MainPID <= 0 {
+		return false
+	}
+	pidSelector := ProcessServiceSelector{Kind: "PID", Value: strconv.Itoa(o.MainPID)}
+	return pidSelector.Validate() == nil
+}
+
+// ProcessServiceSourceQualitySummary is a bounded categorical counter of
+// source-quality losses. It must not carry OS error strings, PIDs, or
+// durable identity. Mixed valid evidence remains usable; silent loss is not.
+type ProcessServiceSourceQualitySummary struct {
+	PIDRace               uint32
+	PermissionDenied      uint32
+	MalformedProcess      uint32
+	SystemdRejectedBlocks uint32
+}
+
+func (q ProcessServiceSourceQualitySummary) HasLoss() bool {
+	return q.PIDRace > 0 || q.PermissionDenied > 0 || q.MalformedProcess > 0 || q.SystemdRejectedBlocks > 0
+}
+
+func (q *ProcessServiceSourceQualitySummary) noteProcessSkip(class ProcessServiceSourceClass) {
+	if q == nil {
+		return
+	}
+	switch class {
+	case ProcessServiceSourcePIDRace:
+		q.PIDRace++
+	case ProcessServiceSourcePermissionDenied:
+		q.PermissionDenied++
+	case ProcessServiceSourceMalformed:
+		q.MalformedProcess++
+	}
+}
+
+func (q ProcessServiceSourceQualitySummary) merge(other ProcessServiceSourceQualitySummary) ProcessServiceSourceQualitySummary {
+	q.PIDRace += other.PIDRace
+	q.PermissionDenied += other.PermissionDenied
+	q.MalformedProcess += other.MalformedProcess
+	q.SystemdRejectedBlocks += other.SystemdRejectedBlocks
+	return q
+}
+
+// ProcessServiceSourceSnapshot is the local Slice-3 collection result.
+// It is not a HostCollector return, not a transport envelope, and not policy.
+type ProcessServiceSourceSnapshot struct {
+	Catalogue          ProcessServiceDiscoveryCatalogue
+	Services           []SystemdServiceObservation
+	ProcessSourceClass ProcessServiceSourceClass
+	SystemdSourceClass ProcessServiceSourceClass
+	SourceQuality      ProcessServiceSourceQualitySummary
+	Matches            []ProcessServiceSelectorMatch
+}
+
+func (s ProcessServiceSourceSnapshot) AssertsHostOrServiceDown() bool {
+	if SourceClassAssertsProcessOrHostDown(s.ProcessSourceClass) {
+		return true
+	}
+	if SourceClassAssertsProcessOrHostDown(s.SystemdSourceClass) {
+		return true
+	}
+	for _, svc := range s.Services {
+		if SourceClassAssertsProcessOrHostDown(svc.SourceClass) {
+			return true
+		}
+	}
+	for _, m := range s.Matches {
+		if SourceClassAssertsProcessOrHostDown(m.SourceClass) {
+			return true
+		}
+	}
+	return false
 }
 
 func requireProcessToken(field, value string, maxLen int) error {

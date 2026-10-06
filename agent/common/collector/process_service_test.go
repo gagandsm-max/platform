@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -332,6 +333,354 @@ func TestStructuredEvidenceNotHostCollectorOrScalarSample(t *testing.T) {
 	}
 	if _, ok := any(ProcessServiceDiscoveryCatalogue{}).(telemetry.Sample); ok {
 		t.Fatal("catalogue must not convert to Sample")
+	}
+}
+
+func TestProcessServiceExactSelectorMatchingAndPrecedence(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	nginx := ProcessServiceCatalogueEntry{
+		ServiceID:          "nginx.service",
+		ExecutableIdentity: "sha256:abcdef0123456789",
+		ExecutablePath:     "/usr/sbin/nginx",
+		ProcessFamilyName:  "nginx",
+		Runtime:            &ProcessServiceRuntimeInstance{PID: 100, ObservedAt: now, InstanceToken: "100:10"},
+		SourceProvenance:   "proc",
+		Quality:            "OBSERVED",
+	}
+	sshd := ProcessServiceCatalogueEntry{
+		ProcessFamilyName: "sshd",
+		ExecutablePath:    "/usr/sbin/sshd",
+		Runtime:           &ProcessServiceRuntimeInstance{PID: 100, ObservedAt: now, InstanceToken: "100:99"},
+		SourceProvenance:  "proc",
+		Quality:           "OBSERVED",
+	}
+	selService := ProcessServiceSelector{Kind: SelectorKindServiceID, Value: "nginx.service"}
+	selPath := ProcessServiceSelector{Kind: SelectorKindExecutablePath, Value: "/usr/sbin/nginx"}
+	selName := ProcessServiceSelector{Kind: SelectorKindProcessName, Value: "nginx"}
+	selIdent := ProcessServiceSelector{Kind: SelectorKindExecutableIdentity, Value: "sha256:abcdef0123456789"}
+	if !selService.MatchesEntry(nginx) || selService.MatchesEntry(sshd) {
+		t.Fatal("SERVICE_ID matching must be exact")
+	}
+	if selName.MatchesEntry(sshd) {
+		t.Fatal("PROCESS_NAME nginx must not match sshd")
+	}
+	caseName := ProcessServiceSelector{Kind: SelectorKindProcessName, Value: "Nginx"}
+	if caseName.MatchesEntry(nginx) {
+		t.Fatal("matching is case-sensitive exact")
+	}
+	pref, err := nginx.PreferredDurableSelector()
+	if err != nil || pref.Kind != SelectorKindServiceID {
+		t.Fatalf("precedence must prefer SERVICE_ID, got %#v err=%v", pref, err)
+	}
+	pathOnly := ProcessServiceCatalogueEntry{ExecutablePath: "/usr/sbin/nginx", ProcessFamilyName: "nginx"}
+	pref, err = pathOnly.PreferredDurableSelector()
+	if err != nil || pref.Kind != SelectorKindExecutablePath {
+		t.Fatalf("path must outrank name, got %#v", pref)
+	}
+	nameOnly := ProcessServiceCatalogueEntry{ProcessFamilyName: "nginx"}
+	pref, err = nameOnly.PreferredDurableSelector()
+	if err != nil || pref.Kind != SelectorKindProcessName {
+		t.Fatalf("name is last-resort durable selector, got %#v", pref)
+	}
+	weakFS := ProcessServiceCatalogueEntry{
+		ExecutablePath:    "/usr/sbin/nginx",
+		ProcessFamilyName: "nginx",
+	}
+	pref, err = weakFS.PreferredDurableSelector()
+	if err != nil || pref.Kind != SelectorKindExecutablePath || pref.Value != "/usr/sbin/nginx" {
+		t.Fatalf("empty ExecutableIdentity must not invent EXECUTABLE_IDENTITY, got %#v err=%v", pref, err)
+	}
+	matches := MatchProcessServiceSelectors([]ProcessServiceCatalogueEntry{nginx, sshd}, []ProcessServiceSelector{selService, selPath, selIdent, selName})
+	for _, m := range matches {
+		if !m.Matched || m.SourceClass != ProcessServiceSourceObserved || len(m.Entries) != 1 {
+			t.Fatalf("expected observed match %#v", m)
+		}
+	}
+}
+
+func TestProcessServicePIDRejectedAndReuseDoesNotRetarget(t *testing.T) {
+	now := time.Now().UTC()
+	pidSel := ProcessServiceSelector{Kind: "PID", Value: "100"}
+	if err := pidSel.Validate(); err == nil {
+		t.Fatal("PID must not be a durable selector")
+	}
+	first := ProcessServiceCatalogueEntry{
+		ProcessFamilyName: "nginx",
+		Runtime:           &ProcessServiceRuntimeInstance{PID: 100, ObservedAt: now, StartTimeTicks: 10, HasStartTime: true, InstanceToken: "100:10"},
+		SourceProvenance:  "proc",
+		Quality:           "OBSERVED",
+	}
+	reused := ProcessServiceCatalogueEntry{
+		ProcessFamilyName: "sshd",
+		Runtime:           &ProcessServiceRuntimeInstance{PID: 100, ObservedAt: now, StartTimeTicks: 50, HasStartTime: true, InstanceToken: "100:50"},
+		SourceProvenance:  "proc",
+		Quality:           "OBSERVED",
+	}
+	sel := ProcessServiceSelector{Kind: SelectorKindProcessName, Value: "nginx"}
+	if sel.MatchesEntry(reused) {
+		t.Fatal("PID reuse must not retarget PROCESS_NAME selector")
+	}
+	if !sel.MatchesEntry(first) {
+		t.Fatal("original identity must still match")
+	}
+	if first.Runtime.PID != reused.Runtime.PID {
+		t.Fatal("fixture must share ephemeral PID")
+	}
+	if first.Runtime.InstanceToken == reused.Runtime.InstanceToken {
+		t.Fatal("start-time instance token must change on PID reuse")
+	}
+	unmatched := MatchProcessServiceSelectors([]ProcessServiceCatalogueEntry{reused}, []ProcessServiceSelector{sel})
+	if unmatched[0].Matched || unmatched[0].SourceClass != ProcessServiceSourceSelectorUnmatched {
+		t.Fatalf("unmatched selector class: %#v", unmatched[0])
+	}
+	if SourceClassAssertsProcessOrHostDown(unmatched[0].SourceClass) {
+		t.Fatal("unmatched selector must not assert DOWN")
+	}
+}
+
+func TestProcessServiceSourceErrorsDoNotAssertDown(t *testing.T) {
+	classes := []ProcessServiceSourceClass{
+		ProcessServiceSourceObserved,
+		ProcessServiceSourceUnavailable,
+		ProcessServiceSourcePermissionDenied,
+		ProcessServiceSourceUnsupported,
+		ProcessServiceSourcePIDRace,
+		ProcessServiceSourceMalformed,
+		ProcessServiceSourceTruncated,
+		ProcessServiceSourceSelectorUnmatched,
+	}
+	for _, c := range classes {
+		if SourceClassAssertsProcessOrHostDown(c) {
+			t.Fatalf("source class %s must not assert DOWN", c)
+		}
+	}
+	snap := ProcessServiceSourceSnapshot{
+		ProcessSourceClass: ProcessServiceSourceUnavailable,
+		SystemdSourceClass: ProcessServiceSourcePermissionDenied,
+		Services: []SystemdServiceObservation{{
+			UnitID: "sshd.service", ActiveState: "failed", Result: "exit-code",
+			SourceClass: ProcessServiceSourceObserved, Quality: "OBSERVED",
+		}},
+		Matches: []ProcessServiceSelectorMatch{{
+			Selector:    ProcessServiceSelector{Kind: SelectorKindProcessName, Value: "missing"},
+			SourceClass: ProcessServiceSourceSelectorUnmatched,
+		}},
+	}
+	if snap.AssertsHostOrServiceDown() {
+		t.Fatal("snapshot source failures must not assert host/service DOWN")
+	}
+}
+
+func TestEncodeProcessServiceCatalogueAsScalarSamplesRejected(t *testing.T) {
+	cat := ProcessServiceDiscoveryCatalogue{
+		SchemaVersion:    ProcessServiceSchemaVersion,
+		CatalogueID:      "cat-scalar-reject",
+		CollectedAt:      time.Now().UTC(),
+		SourceProvenance: "agent.linux.fixture",
+		Quality:          "OBSERVED",
+		Entries:          []ProcessServiceCatalogueEntry{{ProcessFamilyName: "nginx", SourceProvenance: "proc", Quality: "OBSERVED"}},
+	}
+	samples, err := EncodeProcessServiceCatalogueAsScalarSamples(cat)
+	if err == nil || samples != nil {
+		t.Fatal("structured catalogue must not encode as scalar samples")
+	}
+	if !strings.Contains(err.Error(), "PROCESS_SERVICE_SCALAR_ENCODING_REJECTED") {
+		t.Fatalf("unexpected error %v", err)
+	}
+}
+
+func TestSystemdArgvIsFixedReadOnlyNoShell(t *testing.T) {
+	if !systemctlExecutableAllowed("/usr/bin/systemctl") || !systemctlExecutableAllowed("/bin/systemctl") {
+		t.Fatal("allowlisted systemctl paths")
+	}
+	if systemctlExecutableAllowed("/usr/bin/sh") || systemctlExecutableAllowed("systemctl") {
+		t.Fatal("non-allowlisted executable must be rejected")
+	}
+	list := systemdListUnitsArgv()
+	if list[0] != "list-units" {
+		t.Fatalf("list verb %q", list[0])
+	}
+	args, err := systemdShowArgv([]string{"nginx.service", "sshd.service"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args[0] != "show" {
+		t.Fatalf("show verb %q", args[0])
+	}
+	end := -1
+	for i, a := range args {
+		if a == "--" {
+			end = i
+			break
+		}
+	}
+	if end < 0 {
+		t.Fatalf("show argv missing end-of-options: %v", args)
+	}
+	if strings.Join(args[end+1:], ",") != "nginx.service,sshd.service" {
+		t.Fatalf("units must follow --: %v", args)
+	}
+	for i, a := range args[:end] {
+		if i > 0 && !strings.HasPrefix(a, "-") {
+			t.Fatalf("pre-separator argument %q is not an option", a)
+		}
+	}
+	joined := strings.Join(append(append([]string{}, list...), args...), " ")
+	for _, bad := range []string{"sh -c", "bash -c", "/bin/sh", "/bin/bash"} {
+		if strings.Contains(joined, bad) {
+			t.Fatalf("argv contains shell form %q: %s", bad, joined)
+		}
+	}
+	for _, mut := range systemdMutationVerbs {
+		if err := assertSystemctlArgvSafe([]string{mut}); err == nil {
+			t.Fatalf("mutation verb %q must be rejected", mut)
+		}
+		for _, a := range append(list, args...) {
+			if a == mut {
+				t.Fatalf("read-only argv contains mutation %q", mut)
+			}
+		}
+	}
+	if _, err := systemdShowArgv([]string{"../../etc/passwd"}); err == nil {
+		t.Fatal("path-traversal unit id must be rejected")
+	}
+	if _, err := systemdShowArgv([]string{"evil/unit.service"}); err == nil {
+		t.Fatal("unit id with slash must be rejected")
+	}
+}
+
+func TestSystemdShowArgvRejectsOptionLookingUnitIDs(t *testing.T) {
+	if err := (ProcessServiceSelector{Kind: SelectorKindServiceID, Value: "--version.service"}).Validate(); err != nil {
+		t.Fatalf("SERVICE_ID exact validation must still accept literal values: %v", err)
+	}
+	hostile := []string{
+		"--version.service",
+		"-H.service",
+		"--property=Id",
+		"--no-pager.service",
+		"-a.service",
+		"--help",
+	}
+	for _, id := range hostile {
+		if err := validateSystemdUnitID(id); err == nil {
+			t.Fatalf("adapter must reject leading-hyphen unit id %q", id)
+		}
+		if _, err := systemdShowArgv([]string{id}); err == nil {
+			t.Fatalf("systemdShowArgv must reject %q", id)
+		}
+	}
+	if err := assertSystemctlArgvSafe([]string{
+		systemdShowVerb, "--no-pager", systemdShowPropertyArg(), "--version.service",
+	}); err == nil {
+		t.Fatal("show argv without -- and with option-looking unit must be rejected")
+	}
+	if err := assertSystemctlArgvSafe([]string{
+		systemdShowVerb, "--no-pager", "--", "--version.service",
+	}); err == nil {
+		t.Fatal("unit after -- still must not start with hyphen")
+	}
+	safe, err := systemdShowArgv([]string{"nginx.service"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := assertSystemctlArgvSafe(safe); err != nil {
+		t.Fatal(err)
+	}
+	for i, a := range safe {
+		if a == "--" {
+			for _, unit := range safe[i+1:] {
+				if strings.HasPrefix(unit, "-") {
+					t.Fatalf("unit-controlled value %q would alter option parsing", unit)
+				}
+			}
+			break
+		}
+	}
+}
+
+func TestSystemdShowParserFixtures(t *testing.T) {
+	raw := strings.Join([]string{
+		"Id=nginx.service\nActiveState=active\nSubState=running\nResult=success\nNRestarts=0\nMainPID=4242\nExecMainStatus=0",
+		"Id=idle.service\nActiveState=inactive\nSubState=dead\nResult=success\nNRestarts=0\nMainPID=0\nExecMainStatus=0",
+		"Id=broken.service\nActiveState=failed\nSubState=failed\nResult=exit-code\nNRestarts=12\nMainPID=0\nExecMainStatus=1",
+		"Id=boot.service\nActiveState=activating\nSubState=start\nResult=success\nNRestarts=1\nMainPID=9\nExecMainStatus=0",
+		"Id=stop.service\nActiveState=deactivating\nSubState=stop\nResult=success\nNRestarts=0\nMainPID=8\nExecMainStatus=0",
+		"Id=reload.service\nActiveState=reloading\nSubState=reload\nResult=success\nNRestarts=0\nMainPID=7\nExecMainStatus=0",
+		"Id=odd.service\nActiveState=unknown\nSubState=unknown\nResult=unknown\nMainPID=0",
+	}, "\n\n")
+	obs, rejected, err := parseSystemdShow(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected != 0 {
+		t.Fatalf("rejected=%d", rejected)
+	}
+	if len(obs) != 7 {
+		t.Fatalf("got %d observations", len(obs))
+	}
+	byID := map[string]SystemdServiceObservation{}
+	for _, o := range obs {
+		byID[o.UnitID] = o
+		if o.MainPIDIsDurableSelector() {
+			t.Fatalf("MainPID must remain ephemeral for %s", o.UnitID)
+		}
+		sel, err := o.DurableSelector()
+		if err != nil || sel.Kind != SelectorKindServiceID {
+			t.Fatalf("durable selector %s: %#v %v", o.UnitID, sel, err)
+		}
+	}
+	if byID["nginx.service"].ActiveState != "active" || byID["nginx.service"].MainPID != 4242 || !byID["nginx.service"].HasMainPID {
+		t.Fatalf("active fixture %+v", byID["nginx.service"])
+	}
+	if byID["idle.service"].ActiveState != "inactive" || byID["idle.service"].HasMainPID {
+		t.Fatalf("inactive fixture %+v", byID["idle.service"])
+	}
+	if byID["broken.service"].ActiveState != "failed" || byID["broken.service"].Result != "exit-code" || byID["broken.service"].NRestarts != 12 || byID["broken.service"].ExecMainStatus != 1 {
+		t.Fatalf("failed fixture %+v", byID["broken.service"])
+	}
+	if byID["boot.service"].ActiveState != "activating" || byID["stop.service"].ActiveState != "deactivating" || byID["reload.service"].ActiveState != "reloading" {
+		t.Fatal("transitional states")
+	}
+	if byID["odd.service"].ActiveState != "unknown" || byID["odd.service"].HasNRestarts {
+		t.Fatalf("unknown fixture %+v", byID["odd.service"])
+	}
+}
+
+func TestSystemdShowParserMixedMalformedCountsRejected(t *testing.T) {
+	raw := strings.Join([]string{
+		"Id=nginx.service\nActiveState=active\nSubState=running\nResult=success\nNRestarts=0\nMainPID=1\nExecMainStatus=0",
+		"this-block-is-not-key-value",
+		"Id=oversized.service\nActiveState=" + strings.Repeat("x", maxSystemdFieldLen+8),
+		"Id=sshd.service\nActiveState=active\nSubState=running\nResult=success\nNRestarts=0\nMainPID=2\nExecMainStatus=0",
+	}, "\n\n")
+	obs, rejected, err := parseSystemdShow(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected != 2 {
+		t.Fatalf("rejected=%d", rejected)
+	}
+	if len(obs) != 2 || obs[0].UnitID != "nginx.service" || obs[1].UnitID != "sshd.service" {
+		t.Fatalf("valid blocks must remain usable: %+v", obs)
+	}
+	for _, o := range obs {
+		if SourceClassAssertsProcessOrHostDown(o.SourceClass) {
+			t.Fatal("malformed systemd block must not infer DOWN")
+		}
+	}
+}
+
+func TestSystemdListUnitsParserTruncation(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < maxSystemdUnits+3; i++ {
+		fmt.Fprintf(&b, "svc-%d.service loaded active running dummy\n", i)
+	}
+	units, truncated, err := parseSystemdListUnits(b.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(units) != maxSystemdUnits {
+		t.Fatalf("truncated=%v len=%d", truncated, len(units))
 	}
 }
 

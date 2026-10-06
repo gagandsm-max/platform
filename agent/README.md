@@ -29,6 +29,8 @@ Default registered collectors (`cpu`, `memory`, `filesystem`, `pressure`, `diski
 - bounded NIC counters from `/proc/net/dev` (hard ceiling 64 interfaces; loopback excluded) plus operstate vocabulary label (`up|down|unknown|dormant|lowerlayerdown|testing|notpresent|other`);
 - OS scalar facts: boot time (epoch seconds), processes running, processes blocked.
 
+BUILD-011 Slice 3 adds a **local, unwired** Linux process/service source (`LinuxProcessServiceSource`) that reads bounded `/proc` identity/runtime facts and optional read-only systemd unit evidence. It reuses the Slice-1 selector/catalogue contracts, never registers as a `HostCollector`, never encodes the catalogue into scalar metric labels, and does not claim Agent→Sensor structured delivery (BUILD-016/062). Customer alert/policy evaluation remains BUILD-070.
+
 This checkpoint does not collect process command lines, environment variables, packet contents, arbitrary command output, application traces, or unrestricted process data. Collector failure is monitoring-health/degraded evidence, never authoritative host DOWN.
 
 ## Durable local buffer
