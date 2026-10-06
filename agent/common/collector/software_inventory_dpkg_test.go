@@ -1,0 +1,440 @@
+package collector
+
+import (
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func testNow() time.Time {
+	return time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+}
+
+func fixtureFile(t *testing.T, name string) string {
+	t.Helper()
+	return filepath.Join("testdata", "software_inventory", name)
+}
+
+func newTestCollector(t *testing.T) *LinuxSoftwareInventoryCollector {
+	t.Helper()
+	c := NewLinuxSoftwareInventoryCollector()
+	c.now = testNow
+	c.sink = &LocalRecordingStructuredEvidenceSink{}
+	return c
+}
+
+func collectorWithDPKGFile(t *testing.T, name string) *LinuxSoftwareInventoryCollector {
+	t.Helper()
+	c := newTestCollector(t)
+	c.dpkgPath = fixtureFile(t, name)
+	c.openDPKG = c.openDefaultDPKG
+	return c
+}
+
+func collectorWithDPKGData(t *testing.T, data string) *LinuxSoftwareInventoryCollector {
+	t.Helper()
+	c := newTestCollector(t)
+	c.openDPKG = func(ctx context.Context) (io.ReadCloser, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return io.NopCloser(strings.NewReader(data)), nil
+	}
+	return c
+}
+
+func collectorWithDPKGOpenError(t *testing.T, err error) *LinuxSoftwareInventoryCollector {
+	t.Helper()
+	c := newTestCollector(t)
+	c.openDPKG = func(ctx context.Context) (io.ReadCloser, error) {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, err
+	}
+	return c
+}
+
+func fullDPKGRequest(id string) SoftwareInventoryRequest {
+	return SoftwareInventoryRequest{
+		SnapshotID:   id,
+		SnapshotMode: SnapshotModeFull,
+		SourceType:   InventorySourceTypeDPKG,
+	}
+}
+
+func targetedDPKGRequest(id string, selectors ...SoftwareInventorySelector) SoftwareInventoryRequest {
+	return SoftwareInventoryRequest{
+		SnapshotID:   id,
+		SnapshotMode: SnapshotModeTargeted,
+		SourceType:   InventorySourceTypeDPKG,
+		Selectors:    selectors,
+	}
+}
+
+func installedStanza(name, arch, version string) string {
+	return "Package: " + name + "\nStatus: install ok installed\nArchitecture: " + arch + "\nVersion: " + version + "\n"
+}
+
+func TestDPKGCompleteFullValidFixture(t *testing.T) {
+	c := collectorWithDPKGFile(t, "dpkg_status_complete")
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-full-001"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if err := snap.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusComplete || snap.Truncated {
+		t.Fatalf("expected COMPLETE non-truncated, got status=%s truncated=%v reason=%q", snap.CaptureStatus, snap.Truncated, snap.IncompleteOrLossReason)
+	}
+	if snap.ItemCount != 4 {
+		t.Fatalf("expected 4 installed items, got %d: %#v", snap.ItemCount, nativeIDs(snap))
+	}
+	if snap.RemovalInferencePermitted() {
+		t.Fatal("BUILD-011 must not permit removal inference")
+	}
+	if snap.SourceType != InventorySourceTypeDPKG || snap.SourceMode != InventorySourceModeAgent {
+		t.Fatal("source metadata mismatch")
+	}
+	if snap.InventoryScope != linuxDPKGInventoryScope {
+		t.Fatalf("inventory_scope=%q", snap.InventoryScope)
+	}
+}
+
+func TestDPKGOnlyInstallOkInstalledEmitted(t *testing.T) {
+	c := collectorWithDPKGFile(t, "dpkg_status_complete")
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-status-filter"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	forbidden := []string{"leftover-config", "uninstalled-pkg", "purged-pkg", "unpacked-pkg", "hold-pkg"}
+	for _, item := range snap.Items {
+		for _, name := range forbidden {
+			if item.ProductName == name {
+				t.Fatalf("non-installed status %q was emitted", name)
+			}
+		}
+		if item.InstallationScope != InstallationScopeMachine {
+			t.Fatal("dpkg installation scope must be MACHINE")
+		}
+		if item.AuthoritativeInstallOrUpdateAt != nil {
+			t.Fatal("dpkg must not fabricate install/update time")
+		}
+		if item.NormalizedProductID != "" {
+			t.Fatal("Slice 4 must not populate NormalizedProductID")
+		}
+	}
+}
+
+func TestDPKGConfigFilesAndUninstalledExcluded(t *testing.T) {
+	data := installedStanza("keep", "amd64", "1") + "\n" +
+		"Package: cfg\nStatus: deinstall ok config-files\nArchitecture: amd64\nVersion: 1\n\n" +
+		"Package: gone\nStatus: not-installed\nArchitecture: amd64\nVersion: 1\n"
+	c := collectorWithDPKGData(t, data)
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-exclude"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.ItemCount != 1 || snap.Items[0].ProductName != "keep" {
+		t.Fatalf("expected only keep, got %#v", nativeIDs(snap))
+	}
+}
+
+func TestDPKGNativeIdentityExactnessAndMultiarch(t *testing.T) {
+	c := collectorWithDPKGFile(t, "dpkg_status_complete")
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-identity"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	want := map[string]SoftwareInventoryItem{
+		"dpkg:amd64:openssl=3.0.13-0ubuntu3": {ProductName: "openssl", Version: "3.0.13-0ubuntu3", Architecture: "amd64"},
+		"dpkg:i386:openssl=3.0.13-0ubuntu3":  {ProductName: "openssl", Version: "3.0.13-0ubuntu3", Architecture: "i386"},
+		"dpkg:amd64:bash=5.1-6ubuntu1":       {ProductName: "bash", Version: "5.1-6ubuntu1", Architecture: "amd64"},
+	}
+	seen := map[string]int{}
+	for _, item := range snap.Items {
+		seen[item.NativePackageID]++
+		exp, ok := want[item.NativePackageID]
+		if !ok {
+			t.Fatalf("unexpected identity %q", item.NativePackageID)
+		}
+		if item.ProductName != exp.ProductName || item.Version != exp.Version || item.Architecture != exp.Architecture {
+			t.Fatalf("identity mapping mismatch for %q: %#v", item.NativePackageID, item)
+		}
+	}
+	if seen["dpkg:amd64:openssl=3.0.13-0ubuntu3"] != 2 {
+		t.Fatalf("duplicate native identities must be preserved, got %d", seen["dpkg:amd64:openssl=3.0.13-0ubuntu3"])
+	}
+	if seen["dpkg:i386:openssl=3.0.13-0ubuntu3"] != 1 {
+		t.Fatal("multiarch packages must remain distinct")
+	}
+}
+
+func TestDPKGOptionalMaintainerAndIgnoredFields(t *testing.T) {
+	c := collectorWithDPKGFile(t, "dpkg_status_complete")
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-fields"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	foundVendor := false
+	for _, item := range snap.Items {
+		if strings.Contains(strings.ToLower(item.ProductName), "depends") ||
+			strings.Contains(strings.ToLower(item.Version), "libc6") ||
+			strings.Contains(item.VendorPublisher, "Secure Sockets") ||
+			strings.Contains(item.NativePackageID, "Conffiles") {
+			t.Fatalf("ignored dpkg fields leaked into inventory: %#v", item)
+		}
+		if item.ProductName == "openssl" && item.Architecture == "amd64" {
+			if item.VendorPublisher != "Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>" {
+				t.Fatalf("maintainer mapping: %q", item.VendorPublisher)
+			}
+			foundVendor = true
+		}
+	}
+	if !foundVendor {
+		t.Fatal("expected openssl maintainer mapping")
+	}
+}
+
+func TestDPKGMalformedAndTruncatedStanzaPartial(t *testing.T) {
+	c := collectorWithDPKGFile(t, "dpkg_status_malformed")
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-malformed"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusPartial {
+		t.Fatalf("mixed valid+malformed must be PARTIAL, got %s reason=%q", snap.CaptureStatus, snap.IncompleteOrLossReason)
+	}
+	if snap.ItemCount != 2 {
+		t.Fatalf("expected 2 usable items, got %d", snap.ItemCount)
+	}
+	if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossRecordMalformed) {
+		t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+	}
+
+	c = collectorWithDPKGFile(t, "dpkg_status_truncated_stanza")
+	snap, err = c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-trunc-stanza"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusFailed && snap.CaptureStatus != CaptureStatusPartial {
+		t.Fatalf("truncated last stanza must not be COMPLETE, got %s", snap.CaptureStatus)
+	}
+	if snap.CaptureStatus == CaptureStatusComplete {
+		t.Fatal("truncated last stanza COMPLETE forbidden")
+	}
+	if strings.TrimSpace(snap.IncompleteOrLossReason) == "" {
+		t.Fatal("truncated last stanza requires categorical reason")
+	}
+}
+
+func TestDPKGOversizedStanzaAndField(t *testing.T) {
+	c := collectorWithDPKGData(t, installedStanza("ok", "amd64", "1")+"\nPackage: big\nStatus: install ok installed\nArchitecture: amd64\nVersion: 1\n"+strings.Repeat("X: "+strings.Repeat("y", 80)+"\n", 20)+"\n"+installedStanza("tail", "amd64", "1"))
+	c.bounds.MaxDpkgStanzaBytes = 200
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-oversize-stanza"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusPartial {
+		t.Fatalf("oversized stanza must be PARTIAL, got %s", snap.CaptureStatus)
+	}
+
+	c = collectorWithDPKGData(t, "Package: "+strings.Repeat("p", maxSoftwareInventoryProductNameLen+8)+"\nStatus: install ok installed\nArchitecture: amd64\nVersion: 1.0\n")
+	snap, err = c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-oversize-field"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusFailed && snap.CaptureStatus != CaptureStatusPartial {
+		t.Fatalf("oversized identity must not COMPLETE, got %s", snap.CaptureStatus)
+	}
+	if snap.ItemCount != 0 {
+		t.Fatal("oversized authoritative identity must be skipped, not truncated into another identity")
+	}
+}
+
+func TestDPKGControlCharactersSkipped(t *testing.T) {
+	data := "Package: bad\x00pkg\nStatus: install ok installed\nArchitecture: amd64\nVersion: 1\n\n" + installedStanza("good", "amd64", "1")
+	c := collectorWithDPKGData(t, data)
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-control"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusPartial {
+		t.Fatalf("control characters must yield PARTIAL, got %s", snap.CaptureStatus)
+	}
+	if snap.ItemCount != 1 || snap.Items[0].ProductName != "good" {
+		t.Fatalf("expected only good, got %#v", nativeIDs(snap))
+	}
+}
+
+func TestDPKGMaxItemCountAndInputByteCeiling(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 5; i++ {
+		b.WriteString(installedStanza("pkg"+intString(i), "amd64", "1"))
+		b.WriteByte('\n')
+	}
+	c := collectorWithDPKGData(t, b.String())
+	c.bounds.MaxItems = 3
+	snap, err := c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-item-bound"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusPartial || !snap.Truncated || snap.ItemCount != 3 {
+		t.Fatalf("item bound: status=%s truncated=%v count=%d", snap.CaptureStatus, snap.Truncated, snap.ItemCount)
+	}
+	if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossItemBoundReached) {
+		t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+	}
+
+	c = collectorWithDPKGData(t, strings.Repeat(installedStanza("x", "amd64", "1")+"\n", 8))
+	c.bounds.MaxDpkgBytes = 40
+	snap, err = c.Capture(context.Background(), fullDPKGRequest("snap-dpkg-byte-ceiling"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus == CaptureStatusComplete {
+		t.Fatal("input byte ceiling must not COMPLETE")
+	}
+	if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossSourceTruncated) && !snap.Truncated {
+		t.Fatalf("expected truncation evidence, got status=%s reason=%q", snap.CaptureStatus, snap.IncompleteOrLossReason)
+	}
+}
+
+func TestDPKGTargetedExactMatchAndAbsent(t *testing.T) {
+	c := collectorWithDPKGFile(t, "dpkg_status_complete")
+	snap, err := c.Capture(context.Background(), targetedDPKGRequest("snap-dpkg-targeted", SoftwareInventorySelector{ProductName: "bash"}))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.SnapshotMode != SnapshotModeTargeted || snap.ItemCount != 1 || snap.Items[0].ProductName != "bash" {
+		t.Fatalf("targeted bash mismatch: %#v", nativeIDs(snap))
+	}
+	if snap.RemovalInferencePermitted() {
+		t.Fatal("TARGETED must not permit removal inference")
+	}
+
+	snap, err = c.Capture(context.Background(), targetedDPKGRequest("snap-dpkg-absent", SoftwareInventorySelector{ProductName: "definitely-not-installed"}))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusComplete {
+		t.Fatalf("absent TARGETED package is not source failure, got %s", snap.CaptureStatus)
+	}
+	if snap.ItemCount != 0 {
+		t.Fatal("absent TARGETED package must not invent an item")
+	}
+	if strings.Contains(snap.IncompleteOrLossReason, "SOFTWARE_REMOVED") {
+		t.Fatal("absent TARGETED package must not imply SOFTWARE_REMOVED")
+	}
+}
+
+func TestDPKGTargetedDoesNotImplyUnrelatedRemoval(t *testing.T) {
+	c := collectorWithDPKGFile(t, "dpkg_status_complete")
+	snap, err := c.Capture(context.Background(), targetedDPKGRequest("snap-dpkg-targeted-scope", SoftwareInventorySelector{ProductName: "bash"}))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	for _, item := range snap.Items {
+		if item.ProductName == "openssl" {
+			t.Fatal("unrequested packages must not appear in TARGETED results")
+		}
+	}
+	if hasSoftwareChangeToken(snap) {
+		t.Fatal("TARGETED capture must not generate SOFTWARE_* tokens")
+	}
+}
+
+func TestDPKGCallerCancellationAndDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := collectorWithDPKGFile(t, "dpkg_status_complete")
+	c.openDPKG = func(ctx context.Context) (io.ReadCloser, error) {
+		cancel()
+		return io.NopCloser(strings.NewReader(installedStanza("x", "amd64", "1"))), nil
+	}
+	_, err := c.Capture(ctx, fullDPKGRequest("snap-dpkg-cancel"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+
+	deadline, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+	_, err = collectorWithDPKGFile(t, "dpkg_status_complete").Capture(deadline, fullDPKGRequest("snap-dpkg-deadline"))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+	}
+}
+
+func TestDPKGPermissionDeniedAndSourceMissing(t *testing.T) {
+	snap, err := collectorWithDPKGOpenError(t, os.ErrPermission).Capture(context.Background(), fullDPKGRequest("snap-dpkg-eacces"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusFailed || snap.ItemCount != 0 {
+		t.Fatalf("permission denied must be FAILED empty, got %s count=%d", snap.CaptureStatus, snap.ItemCount)
+	}
+	if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossSourcePermissionDenied) {
+		t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+	}
+
+	snap, err = collectorWithDPKGOpenError(t, os.ErrNotExist).Capture(context.Background(), fullDPKGRequest("snap-dpkg-missing"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus != CaptureStatusFailed || snap.CaptureStatus == CaptureStatusComplete {
+		t.Fatalf("missing source must be FAILED, got %s", snap.CaptureStatus)
+	}
+	if !strings.Contains(snap.IncompleteOrLossReason, inventoryLossSourceMissing) {
+		t.Fatalf("reason=%q", snap.IncompleteOrLossReason)
+	}
+}
+
+func TestDPKGSourceFailureNeverCompleteEmpty(t *testing.T) {
+	snap, err := collectorWithDPKGOpenError(t, os.ErrPermission).Capture(context.Background(), fullDPKGRequest("snap-dpkg-no-complete-empty"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if snap.CaptureStatus == CaptureStatusComplete {
+		t.Fatal("source failure must never emit COMPLETE empty")
+	}
+	if snap.ItemCount == 0 && snap.CaptureStatus != CaptureStatusFailed {
+		t.Fatalf("empty failed source must be FAILED, got %s", snap.CaptureStatus)
+	}
+}
+
+func TestDPKGNoSoftwareChangeGeneration(t *testing.T) {
+	snap, err := collectorWithDPKGFile(t, "dpkg_status_complete").Capture(context.Background(), fullDPKGRequest("snap-dpkg-no-change"))
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if hasSoftwareChangeToken(snap) {
+		t.Fatal("BUILD-011 must not generate SOFTWARE_* change evidence")
+	}
+}
+
+func nativeIDs(snap SoftwareInventorySnapshot) []string {
+	out := make([]string, 0, len(snap.Items))
+	for _, item := range snap.Items {
+		out = append(out, item.NativePackageID)
+	}
+	return out
+}
+
+func hasSoftwareChangeToken(snap SoftwareInventorySnapshot) bool {
+	blob := string(snap.CaptureStatus) + snap.Quality + snap.IncompleteOrLossReason + snap.SourceProvenance
+	for _, item := range snap.Items {
+		blob += item.NativePackageID + item.ProductName + item.Version + item.VendorPublisher
+	}
+	for _, tok := range []string{"SOFTWARE_INSTALLED", "SOFTWARE_REMOVED", "SOFTWARE_VERSION_CHANGED"} {
+		if strings.Contains(blob, tok) {
+			return true
+		}
+	}
+	return false
+}
