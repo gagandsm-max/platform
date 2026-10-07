@@ -120,8 +120,8 @@
     },
     "testProfile": {
       "type": "string",
-      "enum": ["capability-pack", "agent", "static-contracts"],
-      "description": "Required for TEST_PROFILE only. Never a shell command."
+      "enum": ["capability-pack", "capability-pack-unittest", "static-contracts"],
+      "description": "Required for TEST_PROFILE only. Planning/dry-run argv preview in v1; live execution UNSUPPORTED. Never a shell command. Names must match the exact suite (no Agent Go/build implication)."
     }
   },
   "not": {

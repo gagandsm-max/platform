@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 from .models import (
+    ALLOWED_MANIFEST_KEYS,
     APPROVED_CONTROL_ROOT,
     APPROVED_REPO_EXACT,
     APPROVED_REPO_PREFIX,
@@ -139,18 +140,41 @@ def validate_sha(value: str, key: str) -> str:
     return value
 
 
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Fail closed on duplicate JSON object keys (json.loads otherwise keeps last)."""
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise BridgeError(f"duplicate JSON key rejected: {key}")
+        out[key] = value
+    return out
+
+
 def load_json_object(path: Path) -> dict[str, Any]:
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise BridgeError(f"cannot read manifest: {exc}") from exc
     try:
-        data = json.loads(raw)
+        data = json.loads(raw, object_pairs_hook=_reject_duplicate_json_keys)
+    except BridgeError:
+        raise
     except json.JSONDecodeError as exc:
         raise BridgeError(f"invalid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise BridgeError("manifest must be a JSON object")
     return data
+
+
+def validate_manifest_keys(data: Mapping[str, Any]) -> None:
+    """Reject forbidden command fields and every unknown key (schema additionalProperties:false)."""
+    unknown = sorted(k for k in data.keys() if k not in ALLOWED_MANIFEST_KEYS)
+    for key in data:
+        if key in FORBIDDEN_MANIFEST_KEYS:
+            raise BridgeError(f"arbitrary command field rejected: {key}")
+    if unknown:
+        # Prefer specific forbidden-field messages already raised; remaining are unknown.
+        raise BridgeError(f"unknown manifest field(s) rejected: {', '.join(unknown)}")
 
 
 def validate_manifest_dict(
@@ -159,9 +183,7 @@ def validate_manifest_dict(
     policy: PathPolicy,
     require_paths_exist: bool = True,
 ) -> TaskManifest:
-    for key in data:
-        if key in FORBIDDEN_MANIFEST_KEYS:
-            raise BridgeError(f"arbitrary command field rejected: {key}")
+    validate_manifest_keys(data)
 
     schema_version = _as_str(_require(data, "schemaVersion"), "schemaVersion")
     if schema_version != SCHEMA_VERSION:

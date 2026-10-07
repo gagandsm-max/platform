@@ -260,3 +260,90 @@ def inspect_lock(locks_dir: Path, worktree: Path) -> dict[str, Any]:
     result["inspectedAt"] = utc_now_iso()
     result["mtime"] = time.ctime(path.stat().st_mtime)
     return result
+
+
+def task_id_lock_name(task_id: str) -> str:
+    digest = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:16]
+    safe = re_safe(task_id)
+    return f"taskid-{safe}-{digest}.lock"
+
+
+class TaskIdLock:
+    """Process-wide exclusive admission lock for a taskId (cross-worktree)."""
+
+    def __init__(self, locks_dir: Path, task_id: str):
+        if fcntl is None:
+            raise BridgeError("fcntl.flock unavailable; Linux required", disposition=Disposition.FAILED)
+        self.locks_dir = locks_dir
+        self.task_id = task_id
+        self.path = locks_dir / task_id_lock_name(task_id)
+        self._fh: Any = None
+        self.acquired = False
+
+    def acquire(self) -> None:
+        from .models import FILE_MODE
+        import stat as _stat
+
+        if self.locks_dir.is_symlink():
+            raise BridgeError(
+                f"locks directory must not be a symlink: {self.locks_dir}",
+                disposition=Disposition.FAILED,
+            )
+        if self.path.is_symlink():
+            raise BridgeError(
+                f"task-id lock must not be a symlink: {self.path}",
+                disposition=Disposition.FAILED,
+            )
+        self.locks_dir.mkdir(parents=True, exist_ok=True)
+        flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW
+        fd = os.open(str(self.path), flags, FILE_MODE)
+        try:
+            os.fchmod(fd, FILE_MODE)
+            st = os.fstat(fd)
+            if not _stat.S_ISREG(st.st_mode):
+                os.close(fd)
+                raise BridgeError(
+                    f"task-id lock is not a regular file: {self.path}",
+                    disposition=Disposition.FAILED,
+                )
+            self._fh = os.fdopen(fd, "a+", encoding="utf-8")
+        except BridgeError:
+            raise
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            raise
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            self._fh.close()
+            self._fh = None
+            raise BridgeError(
+                f"live task-id lock held for {self.task_id}",
+                disposition=Disposition.LOCKED,
+            ) from exc
+        self.acquired = True
+        self._fh.seek(0)
+        self._fh.truncate()
+        self._fh.write(
+            json.dumps(
+                {"taskId": self.task_id, "bridgePid": os.getpid(), "at": utc_now_iso()},
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        self._fh.flush()
+        os.fsync(self._fh.fileno())
+
+    def release(self) -> None:
+        if self._fh is None:
+            return
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._fh.close()
+            self._fh = None
+            self.acquired = False

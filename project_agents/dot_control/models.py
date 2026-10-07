@@ -57,6 +57,11 @@ LIVE_WRITER_UNSUPPORTED_REASON = (
 LIVE_ANTIGRAVITY_UNSUPPORTED_REASON = (
     "v1 live ANTIGRAVITY_AUDIT disabled until independent read-only boundary is proven"
 )
+LIVE_TEST_PROFILE_UNSUPPORTED_REASON = (
+    "v1 live TEST_PROFILE disabled: repository-controlled Python/Make targets must "
+    "not execute on the founder laptop from a writer-branchable tree; dry-run argv "
+    "preview only"
+)
 
 FORBIDDEN_MANIFEST_KEYS = frozenset(
     {
@@ -75,6 +80,38 @@ FORBIDDEN_MANIFEST_KEYS = frozenset(
         "eval",
     }
 )
+
+# Exact allowlist matching task.schema.json additionalProperties:false.
+ALLOWED_MANIFEST_KEYS = frozenset(
+    {
+        "schemaVersion",
+        "taskId",
+        "governingIssue",
+        "action",
+        "writerTool",
+        "verifierTool",
+        "repository",
+        "worktree",
+        "branch",
+        "authoritativeBase",
+        "expectedHead",
+        "allowedFiles",
+        "forbiddenFiles",
+        "promptFile",
+        "timeoutSeconds",
+        "allowCommit",
+        "allowPush",
+        "allowPullRequest",
+        "createdAt",
+        "requestedBy",
+        "commitMessage",
+        "testProfile",
+    }
+)
+
+# Overlap retained across pipe chunks so secrets cannot straddle redaction windows.
+REDACTION_OVERLAP_BYTES = 512
+TRUNCATION_MARK = b"\n[TRUNCATED: log byte bound reached]\n"
 
 
 class Action(str, Enum):
@@ -110,10 +147,11 @@ class Disposition(str, Enum):
     CRASH_RECOVERY = "CRASH_RECOVERY"
 
 
-# Hard-coded test profiles — manifest supplies a name only.
+# Hard-coded test profiles — planning/dry-run argv only in v1 (live UNSUPPORTED).
+# Profile names must describe the exact suite; never imply Agent Go/build gates.
 TEST_PROFILES: Mapping[str, Sequence[str]] = {
     "capability-pack": ("python3", "project_agents/tools/validate_agents.py"),
-    "agent": (
+    "capability-pack-unittest": (
         "python3",
         "-m",
         "unittest",

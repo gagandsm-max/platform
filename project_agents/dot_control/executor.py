@@ -19,7 +19,9 @@ from urllib.parse import unquote, urlparse
 from .evidence import open_log_files, redact_argv, redact_text
 from .models import (
     APPROVED_REPOSITORY,
+    DIR_MODE,
     LIVE_ANTIGRAVITY_UNSUPPORTED_REASON,
+    LIVE_TEST_PROFILE_UNSUPPORTED_REASON,
     LIVE_WRITER_UNSUPPORTED_REASON,
     PROCESS_KILL_GRACE_SECONDS,
     Action,
@@ -44,6 +46,85 @@ _GITHUB_SSH_ALT_RE = re.compile(
 )
 
 
+def _git_isolated_env() -> dict[str, str]:
+    """Controlled Git environment for bridge-native commit operations."""
+    keep = (
+        "PATH",
+        "USER",
+        "LOGNAME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "TMPDIR",
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "GIT_AUTHOR_DATE",
+        "GIT_COMMITTER_DATE",
+    )
+    out = {k: os.environ[k] for k in keep if k in os.environ}
+    out["GIT_CONFIG_NOSYSTEM"] = "1"
+    out["GIT_CONFIG_GLOBAL"] = os.devnull
+    out["GIT_TERMINAL_PROMPT"] = "0"
+    out["GIT_ASKPASS"] = "/bin/false"
+    out["GCM_INTERACTIVE"] = "never"
+    out["GIT_EDITOR"] = ":"
+    out["EDITOR"] = ":"
+    out["VISUAL"] = ":"
+    out["GIT_SEQUENCE_EDITOR"] = ":"
+    # Explicitly drop credential / SSH side channels.
+    for drop in (
+        "SSH_AUTH_SOCK",
+        "SSH_AGENT_PID",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GIT_CONFIG_SYSTEM",
+    ):
+        out.pop(drop, None)
+    return out
+
+
+def _git_safe_config_args(hooks_path: Path) -> list[str]:
+    """Per-invocation overrides that disable hooks, signing, filters side channels."""
+    false_bin = "/bin/false"
+    return [
+        "-c",
+        f"core.hooksPath={hooks_path}",
+        "-c",
+        "core.fsmonitor=",
+        "-c",
+        "core.fsmonitorHook=",
+        "-c",
+        "core.useBuiltinFSMonitor=false",
+        "-c",
+        "core.editor=:",
+        "-c",
+        "sequence.editor=:",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "tag.gpgsign=false",
+        "-c",
+        f"gpg.program={false_bin}",
+        "-c",
+        f"gpg.ssh.program={false_bin}",
+        "-c",
+        "credential.helper=",
+        "-c",
+        "diff.external=",
+        "-c",
+        "interactive.diffFilter=",
+        "-c",
+        "merge.tool=",
+        "-c",
+        "i18n.commitEncoding=utf-8",
+    ]
+
+
 def _run_git(
     args: Sequence[str],
     cwd: Path,
@@ -51,15 +132,32 @@ def _run_git(
     check: bool = False,
     timeout: int = 60,
     text: bool = True,
+    env: Optional[Mapping[str, str]] = None,
+    isolated: bool = False,
+    hooks_path: Optional[Path] = None,
 ) -> subprocess.CompletedProcess:
+    git_argv: list[str] = ["git"]
+    run_env: Optional[dict[str, str]] = None
+    if isolated:
+        run_env = _git_isolated_env()
+        if env:
+            run_env.update({k: v for k, v in env.items() if v is not None})
+        hp = hooks_path
+        if hp is None:
+            raise BridgeError("isolated git requires hooks_path")
+        git_argv.extend(_git_safe_config_args(hp))
+    elif env is not None:
+        run_env = dict(env)
+    git_argv.extend(args)
     return subprocess.run(
-        ["git", *args],
+        git_argv,
         cwd=str(cwd),
         capture_output=True,
         text=text,
         shell=False,
         check=check,
         timeout=timeout,
+        env=run_env,
     )
 
 
@@ -422,19 +520,21 @@ def verify_git_preconditions(manifest: TaskManifest) -> dict[str, Any]:
 
 
 def live_writer_unsupported(action: Action) -> Optional[str]:
-    """v1: do not launch Cursor/Codex/Antigravity until isolation is proven."""
+    """v1: do not launch Cursor/Codex/Antigravity/TEST_PROFILE child processes."""
     if action in {Action.CURSOR_TASK, Action.CODEX_TASK}:
         return LIVE_WRITER_UNSUPPORTED_REASON
     if action == Action.ANTIGRAVITY_AUDIT:
         return LIVE_ANTIGRAVITY_UNSUPPORTED_REASON
+    if action == Action.TEST_PROFILE:
+        return LIVE_TEST_PROFILE_UNSUPPORTED_REASON
     return None
 
 
 def build_action_argv(manifest: TaskManifest) -> tuple[list[str], dict[str, Any]]:
     """Construct allowlisted argv. Never accepts free-form command from manifest.
 
-    For CURSOR_TASK/CODEX_TASK/ANTIGRAVITY_AUDIT this remains planning evidence only
-    in v1 — live launch is blocked by live_writer_unsupported().
+    For CURSOR_TASK/CODEX_TASK/ANTIGRAVITY_AUDIT/TEST_PROFILE this remains planning
+    evidence only in v1 — live launch is blocked by live_writer_unsupported().
     """
     meta: dict[str, Any] = {"unsupported": False, "reason": None, "stdin": None}
 
@@ -489,6 +589,7 @@ def build_action_argv(manifest: TaskManifest) -> tuple[list[str], dict[str, Any]
 
     if manifest.action == Action.TEST_PROFILE:
         assert manifest.test_profile is not None
+        # Planning preview only — live child launch is UNSUPPORTED in v1.
         profile_argv = list(TEST_PROFILES[manifest.test_profile])
         return profile_argv, meta
 
@@ -730,7 +831,89 @@ def execute_repo_probe(manifest: TaskManifest) -> tuple[CommandEvidence, dict[st
     return evidence, probe, disposition
 
 
+def _prepare_empty_hooks_dir(worktree: Path) -> Path:
+    """Create an empty hooks directory inside .git for core.hooksPath override."""
+    git_dir = _run_git(["rev-parse", "--git-dir"], worktree, check=True)
+    git_path = Path(git_dir.stdout.strip())
+    if not git_path.is_absolute():
+        git_path = (worktree / git_path).resolve()
+    hooks = git_path / "dot-control-empty-hooks"
+    hooks.mkdir(mode=DIR_MODE, exist_ok=True)
+    try:
+        os.chmod(hooks, DIR_MODE)
+    except OSError:
+        pass
+    # Ensure directory is empty — any executable hook file would be a hazard.
+    for child in hooks.iterdir():
+        raise BridgeError(
+            f"safe hooksPath is not empty: {child.name}; refusing GIT_COMMIT_PROOF"
+        )
+    return hooks
+
+
+def _reject_unsafe_commit_attributes(worktree: Path, path: str, *, hooks_path: Path) -> None:
+    """Reject clean/smudge/filter attributes that would invoke external programs."""
+    attr = _run_git(
+        ["check-attr", "-a", "--", path],
+        worktree,
+        check=False,
+        isolated=True,
+        hooks_path=hooks_path,
+    )
+    if attr.returncode != 0:
+        raise BridgeError(
+            f"git check-attr failed: {redact_text(attr.stderr.strip())}"
+        )
+    dangerous = ("filter", "clean", "smudge", "working-tree-encoding")
+    for line in (attr.stdout or "").splitlines():
+        # format: path: attr: value
+        parts = [p.strip() for p in line.split(":", 2)]
+        if len(parts) < 3:
+            continue
+        _file, name, value = parts[0], parts[1], parts[2]
+        if name in dangerous and value not in {"unspecified", "unset"}:
+            raise BridgeError(
+                f"GIT_COMMIT_PROOF refused: path {path} has attribute "
+                f"{name}={value} that may invoke filters"
+            )
+
+
+def _reject_local_filter_config(worktree: Path, *, hooks_path: Path) -> None:
+    """Reject local filter.*.clean/smudge definitions that cannot be trusted."""
+    conf = _run_git(
+        ["config", "--local", "--get-regexp", r"^filter\..*\.(clean|smudge)$"],
+        worktree,
+        check=False,
+        isolated=True,
+        hooks_path=hooks_path,
+    )
+    # exit 1 = no matches (safe); exit 0 = matches present (unsafe)
+    if conf.returncode == 0 and (conf.stdout or "").strip():
+        raise BridgeError(
+            "GIT_COMMIT_PROOF refused: local filter clean/smudge config present"
+        )
+    fsmonitor = _run_git(
+        ["config", "--local", "--get", "core.fsmonitor"],
+        worktree,
+        check=False,
+        isolated=True,
+        hooks_path=hooks_path,
+    )
+    if fsmonitor.returncode == 0 and (fsmonitor.stdout or "").strip():
+        # Overridable via -c, but still reject if a custom hook path-like value looks external.
+        value = fsmonitor.stdout.strip()
+        if value not in {"", "false", "true"}:
+            raise BridgeError(
+                f"GIT_COMMIT_PROOF refused: core.fsmonitor={redact_text(value)}"
+            )
+
+
 def execute_git_commit_proof(manifest: TaskManifest) -> tuple[CommandEvidence, dict[str, Any]]:
+    """Bridge-internal one-file commit with hooks/signing/filters disabled.
+
+    Uses a controlled Git environment and rejects paths/config that would invoke
+    external hooks, clean/smudge filters, fsmonitor hooks, or commit signing.
+    """
     worktree = manifest.worktree
     allowed = manifest.allowed_files[0]
     validate_repo_relative_path(allowed, worktree)
@@ -742,33 +925,77 @@ def execute_git_commit_proof(manifest: TaskManifest) -> tuple[CommandEvidence, d
     if not allowed_path.is_file():
         raise BridgeError(f"allowed file missing: {allowed}")
 
-    add = _run_git(["add", "--", allowed], worktree, check=False)
+    hooks_path = _prepare_empty_hooks_dir(worktree)
+    _reject_unsafe_commit_attributes(worktree, allowed, hooks_path=hooks_path)
+    _reject_local_filter_config(worktree, hooks_path=hooks_path)
+
+    add = _run_git(
+        ["add", "--", allowed],
+        worktree,
+        check=False,
+        isolated=True,
+        hooks_path=hooks_path,
+    )
     if add.returncode != 0:
         raise BridgeError(f"git add failed: {redact_text(add.stderr.strip())}")
 
-    staged = git_nul_name_only(["diff", "--cached", "--name-only", "-z"], worktree)
+    staged_proc = _run_git(
+        ["diff", "--cached", "--name-only", "-z"],
+        worktree,
+        check=False,
+        text=False,
+        isolated=True,
+        hooks_path=hooks_path,
+    )
+    if staged_proc.returncode != 0:
+        err = (staged_proc.stderr or b"").decode("utf-8", errors="replace").strip()
+        raise BridgeError(f"git diff --cached --name-only failed: {redact_text(err)}")
+    staged = _nul_split_paths(staged_proc.stdout or b"")
     for forbidden in manifest.forbidden_files:
         if forbidden in staged:
             raise BridgeError(f"commit stages forbidden file: {forbidden}")
     if staged != [allowed]:
         raise BridgeError(f"staged files mismatch: {staged}")
 
-    check = _run_git(["diff", "--cached", "--check"], worktree, check=False)
+    check = _run_git(
+        ["diff", "--cached", "--check"],
+        worktree,
+        check=False,
+        isolated=True,
+        hooks_path=hooks_path,
+    )
     if check.returncode != 0:
         raise BridgeError(
             f"git diff --cached --check failed: {redact_text(check.stdout + check.stderr)}"
         )
 
     message = manifest.commit_message or ""
-    commit = _run_git(["commit", "-m", message], worktree, check=False)
+    # --no-verify is belt-and-suspenders; empty hooksPath is the primary control.
+    # --no-gpg-sign disables signing even if local config requests it.
+    commit = _run_git(
+        ["commit", "--no-verify", "--no-gpg-sign", "-m", message],
+        worktree,
+        check=False,
+        isolated=True,
+        hooks_path=hooks_path,
+    )
     if commit.returncode != 0:
         raise BridgeError(f"git commit failed: {redact_text(commit.stderr.strip())}")
 
-    sha = git_head(worktree)
+    sha_proc = _run_git(
+        ["rev-parse", "HEAD"],
+        worktree,
+        check=True,
+        isolated=True,
+        hooks_path=hooks_path,
+    )
+    sha = sha_proc.stdout.strip()
     evidence = CommandEvidence(
         argv=redact_argv(
             [
                 "git",
+                "-c",
+                "core.hooksPath=<empty>",
                 "add",
                 "--",
                 allowed,
@@ -778,6 +1005,8 @@ def execute_git_commit_proof(manifest: TaskManifest) -> tuple[CommandEvidence, d
                 "--check",
                 "git",
                 "commit",
+                "--no-verify",
+                "--no-gpg-sign",
                 "-m",
                 message,
             ]
@@ -790,6 +1019,8 @@ def execute_git_commit_proof(manifest: TaskManifest) -> tuple[CommandEvidence, d
         "committedFiles": [allowed],
         "pushStatus": "NOT_ATTEMPTED",
         "prStatus": "NOT_ATTEMPTED",
+        "hooksDisabled": True,
+        "signingDisabled": True,
     }
     return evidence, details
 

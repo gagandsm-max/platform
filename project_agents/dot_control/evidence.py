@@ -15,6 +15,8 @@ from .models import (
     MAX_BRIDGE_LOG_BYTES,
     MAX_STDERR_LOG_BYTES,
     MAX_STDOUT_LOG_BYTES,
+    REDACTION_OVERLAP_BYTES,
+    TRUNCATION_MARK,
     TaskResult,
 )
 
@@ -30,7 +32,6 @@ _PEM_RE = re.compile(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
     re.DOTALL,
 )
-_TRUNCATION_MARK = b"\n[TRUNCATED: log byte bound reached]\n"
 
 
 def redact_text(text: str) -> str:
@@ -116,10 +117,6 @@ def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     if parent.is_symlink():
         raise OSError(f"refusing write under symlink directory: {parent}")
     parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(parent, DIR_MODE)
-    except OSError:
-        pass
     if path.is_symlink():
         raise OSError(f"refusing to overwrite symlink result: {path}")
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -169,42 +166,68 @@ def write_state(state_dir: Path, task_id: str, state: Mapping[str, Any]) -> Path
 
 
 class BoundedRedactingWriter:
-    """Capture child output with hard byte bounds and redaction before durable write."""
+    """Capture child output with hard byte bounds and cross-chunk redaction.
 
-    def __init__(self, path: Path, *, max_bytes: int):
+    Raw input is retained in a bounded memory buffer (max_bytes + overlap) so
+    secrets split across pipe reads are redacted against the full window before
+    any durable write. The durable file size, including the truncation marker,
+    never exceeds ``max_bytes``.
+    """
+
+    def __init__(self, path: Path, *, max_bytes: int, overlap: int = REDACTION_OVERLAP_BYTES):
         if path.parent.is_symlink():
             raise OSError(f"log directory must not be a symlink: {path.parent}")
         path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            os.chmod(path.parent, DIR_MODE)
-        except OSError:
-            pass
         if path.is_symlink():
             raise OSError(f"refusing symlink log path: {path}")
         self.path = path
         self.max_bytes = max_bytes
+        self.overlap = max(0, min(overlap, max(64, max_bytes // 4) if max_bytes else 0))
         self.bytes_captured = 0
         self.truncated = False
+        self._raw = bytearray()
+        self._raw_cap = max_bytes + self.overlap
         self._fh = open_exclusive_file(path, mode="wb", file_mode=FILE_MODE)
         self._closed = False
+        self._durable_flushed = False
 
     def write(self, data: bytes) -> int:
         if self._closed or self.truncated:
             return len(data)
-        remaining = self.max_bytes - self.bytes_captured
-        if remaining <= 0:
+        if not data:
+            return 0
+        room = self._raw_cap - len(self._raw)
+        if room <= 0:
             self.truncated = True
             return len(data)
-        chunk = data[:remaining]
-        redacted = redact_bytes(chunk)
-        self._fh.write(redacted)
-        self._fh.flush()
-        self.bytes_captured += len(chunk)
-        if len(data) > remaining:
+        self._raw.extend(data[:room])
+        if len(data) > room:
             self.truncated = True
-            self._fh.write(_TRUNCATION_MARK)
-            self._fh.flush()
         return len(data)
+
+    def _emit_durable(self) -> None:
+        """Redact the full raw window and write a bounded durable representation."""
+        if self._durable_flushed:
+            return
+        self._durable_flushed = True
+        redacted = redact_bytes(bytes(self._raw))
+        self._raw.clear()
+        mark = TRUNCATION_MARK
+        if self.truncated or len(redacted) > self.max_bytes:
+            self.truncated = True
+            if len(mark) >= self.max_bytes:
+                out = mark[: self.max_bytes]
+            else:
+                body = redacted[: self.max_bytes - len(mark)]
+                out = body + mark
+        else:
+            out = redacted
+        if len(out) > self.max_bytes:
+            out = out[: self.max_bytes]
+            self.truncated = True
+        self._fh.write(out)
+        self._fh.flush()
+        self.bytes_captured = len(out)
 
     def fileno(self) -> int:
         return self._fh.fileno()
@@ -212,9 +235,7 @@ class BoundedRedactingWriter:
     def close(self) -> None:
         if not self._closed:
             try:
-                if self.truncated:
-                    # Ensure truncation mark present even if filled exactly at bound.
-                    pass
+                self._emit_durable()
                 self._fh.flush()
                 os.fsync(self._fh.fileno())
             finally:
@@ -222,6 +243,14 @@ class BoundedRedactingWriter:
                 self._closed = True
             try:
                 os.chmod(self.path, FILE_MODE)
+            except OSError:
+                pass
+            try:
+                if self.path.stat().st_size > self.max_bytes:
+                    with open(self.path, "r+b") as fh:
+                        fh.truncate(self.max_bytes)
+                    self.bytes_captured = min(self.bytes_captured, self.max_bytes)
+                    self.truncated = True
             except OSError:
                 pass
 
@@ -242,10 +271,6 @@ def open_log_files(
     if logs_dir.is_symlink():
         raise OSError(f"logs directory must not be a symlink: {logs_dir}")
     logs_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(logs_dir, DIR_MODE)
-    except OSError:
-        pass
     stdout_path = logs_dir / f"{task_id}.stdout.log"
     stderr_path = logs_dir / f"{task_id}.stderr.log"
     stdout_w = BoundedRedactingWriter(stdout_path, max_bytes=max_stdout)
@@ -264,10 +289,6 @@ def append_bridge_log(
     if logs_dir.is_symlink():
         raise OSError(f"logs directory must not be a symlink: {logs_dir}")
     logs_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(logs_dir, DIR_MODE)
-    except OSError:
-        pass
     path = logs_dir / f"{task_id}.bridge.log"
     if path.is_symlink():
         raise OSError(f"refusing symlink bridge log: {path}")
@@ -286,9 +307,19 @@ def append_bridge_log(
                 encoded = red.encode("utf-8")
                 if written + len(encoded) > max_bytes:
                     remain = max_bytes - written
-                    if remain > 0:
-                        fh.write(encoded[:remain].decode("utf-8", errors="ignore"))
-                    fh.write("[TRUNCATED: bridge log byte bound reached]\n")
+                    mark = "[TRUNCATED: bridge log byte bound reached]\n"
+                    mark_b = mark.encode("utf-8")
+                    # Ensure marker fits within bound when possible.
+                    if remain >= len(mark_b):
+                        payload_space = remain - len(mark_b)
+                        if payload_space > 0:
+                            fh.write(encoded[:payload_space].decode("utf-8", errors="ignore"))
+                            written += payload_space
+                        fh.write(mark)
+                        written += len(mark_b)
+                    elif remain > 0:
+                        fh.write(mark_b[:remain].decode("utf-8", errors="ignore"))
+                        written += remain
                     truncated = True
                     break
                 fh.write(red)
@@ -309,5 +340,16 @@ def append_bridge_log(
 
 
 def safe_read_text(path: Path, *, max_bytes: int = 1_000_000) -> str:
-    raw = path.read_bytes()[:max_bytes]
+    """Read at most ``max_bytes`` from a regular file without loading the whole file."""
+    if path.is_symlink():
+        raise OSError(f"refusing to read symlink: {path}")
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    fd = os.open(str(path), flags)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise OSError(f"refusing non-regular file: {path}")
+        raw = os.read(fd, max_bytes)
+    finally:
+        os.close(fd)
     return redact_text(raw.decode("utf-8", errors="replace"))

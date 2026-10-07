@@ -52,8 +52,8 @@ This schema is **not** a hosted SaaS endpoint.
 | Action | Purpose | Live execution |
 |--------|---------|----------------|
 | `REPO_PROBE` | Fixed read-only git evidence (no fetch) | Yes — honest SUCCESS/PARTIAL/FAILED |
-| `GIT_COMMIT_PROOF` | Gate 3 proof: one-file local commit on non-main branch | Yes |
-| `TEST_PROFILE` | Hard-coded profile IDs only | Yes (safe profiles) |
+| `GIT_COMMIT_PROOF` | Gate 3 proof: one-file local commit on non-main branch | Yes — isolated Git env; hooks/signing/filters disabled or refused |
+| `TEST_PROFILE` | Hard-coded profile IDs (planning argv only) | **UNSUPPORTED** — no child process; no false suite evidence |
 | `CURSOR_TASK` | Argv construction / dry-run only | **UNSUPPORTED** until credential isolation proven |
 | `CODEX_TASK` | Argv construction / dry-run only | **UNSUPPORTED** until credential isolation proven |
 | `ANTIGRAVITY_AUDIT` | Argv construction / dry-run only | **UNSUPPORTED** until read-only boundary proven |
@@ -61,8 +61,10 @@ This schema is **not** a hosted SaaS endpoint.
 ## Unsupported actions (v1)
 
 - Live Cursor/Codex/Antigravity child launch (false push/PR flags are not enforcement)
+- Live `TEST_PROFILE` child launch (repository-controlled Python/Make is not a sandbox)
 - Arbitrary shell / `sh -c` / `bash -c` / `eval` / `shell=True`
 - Free-form `command` / `argv` / `sudo` fields in manifests
+- Unknown manifest fields (runtime matches `additionalProperties: false`)
 - Push, pull-request creation, merge, certification
 - Direct writes to `main` / `master` / `origin/main`
 - `danger-full-access` Codex sandbox
@@ -102,8 +104,10 @@ unrelated repos, relative traversal, symlink worktree/control roots/subdirs,
 paths outside approved roots (`Path.resolve()` containment).
 
 Control root/subdirs use mode `0700`; manifests/results/state/log/lock files use
-`0600`. Symlink `logs`/`results`/`state`/`locks` and result/lock symlinks are
-rejected. Durable opens use `O_NOFOLLOW` where practical.
+`0600`. Owner UID must match the bridge user. Symlink `logs`/`results`/`state`/
+`locks` and result/lock symlinks are rejected. Durable opens use `O_NOFOLLOW`
+where practical. **Explicit `init` may create/repair modes; normal oneshot/daemon
+operation rejects unsafe modes without repairing.**
 
 ## Branch / SHA / base security
 
@@ -141,7 +145,12 @@ One exclusive `fcntl.flock` lock per canonical worktree. Lock records include
 - Cursor and Codex cannot own the same worktree concurrently.
 - Live locks are never auto-deleted.
 - Stale locks require PID + worktree-state inspection before reclaim.
-- Lock release occurs only after child termination and evidence finalization.
+- Lock release occurs only after durable provisional result/state exist.
+- Result is then updated with the final released-lock lifecycle.
+- Evidence-write failure keeps non-success forensic state; lock is not silently
+  released with missing evidence.
+- Inbox/processing filenames must be exactly `<taskId>.json`.
+- A process-wide task-id flock prevents concurrent duplicate admission.
 
 ## Process / timeout / logging
 
@@ -151,13 +160,19 @@ timeout. On timeout: `SIGTERM` process group → grace → `SIGKILL`.
 Durable stdout/stderr/bridge logs:
 
 - hard byte bounds (`MAX_STDOUT_LOG_BYTES`, `MAX_STDERR_LOG_BYTES`, `MAX_BRIDGE_LOG_BYTES`)
-- credential redaction before durable storage
+- raw capture retained at most bound + small redaction overlap, then redacted
+- credential redaction across chunk boundaries before durable storage
+- final durable file size (including truncation marker) never exceeds the bound
 - truncation marked in `TaskResult`
 - captured byte counts recorded
 - file mode `0600`
 - no environment dumps
+- `safe_read_text` uses a bounded `os.read`, never `read_bytes()[:n]` of a huge file
 
 Child env omits `HOME` / `SSH_AUTH_SOCK` and forces `GIT_TERMINAL_PROMPT=0`.
+`GIT_COMMIT_PROOF` uses an isolated Git config (no system/global config, empty
+`core.hooksPath`, signing disabled, no credential helper) and refuses
+clean/smudge/filter attributes.
 
 ## Evidence model
 
@@ -244,11 +259,13 @@ evidence constraints.
 
 ## Known limitations
 
-- Live Cursor/Codex/Antigravity are UNSUPPORTED in v1 (argv dry-run only).
+- Live Cursor/Codex/Antigravity/TEST_PROFILE are UNSUPPORTED in v1 (argv dry-run only).
 - v1 does not perform push/PR/merge/certification.
 - Manifest `allowPush`/`allowPullRequest` must be false, but that alone is not
   technical push prevention — credential isolation is deferred to v1.1.
-- v1 test profiles are narrow (`capability-pack`, `agent`, `static-contracts`).
+- Test profile names are truthful suite IDs only
+  (`capability-pack`, `capability-pack-unittest`, `static-contracts`) — never
+  implying Agent Go/build gates — and live execution remains disabled.
 - Bridge does not supervise Docker or GitHub Actions runners.
 - Production control-root init is operator-driven, not automatic from tests.
 

@@ -34,18 +34,22 @@ from .executor import (
     run_process,
     verify_git_preconditions,
 )
-from .locks import WorktreeLock, inspect_lock
+from .locks import TaskIdLock, WorktreeLock, inspect_lock
 from .models import (
-    CONTROL_SUBDIRS,
     DAEMON_POLL_SECONDS,
     DEFAULT_CONTROL_ROOT,
+    FILE_MODE,
     Action,
     BridgeError,
     Disposition,
     TaskManifest,
     TaskResult,
 )
-from .paths import init_control_root, validate_control_root_layout
+from .paths import (
+    assert_durable_file_mode,
+    init_control_root,
+    validate_control_root_layout,
+)
 from .validator import (
     PathPolicy,
     load_json_object,
@@ -108,10 +112,15 @@ class DotControlBridge:
     def list_inbox_ready(self) -> list[Path]:
         if not self.inbox.is_dir() or self.inbox.is_symlink():
             return []
-        return sorted(p for p in self.inbox.glob("*.json") if p.is_file() and not p.is_symlink())
+        return sorted(
+            p
+            for p in self.inbox.glob("*.json")
+            if p.is_file() and not p.is_symlink() and not p.name.endswith(".tmp")
+        )
 
     def task_id_known(self, task_id: str) -> bool:
         candidates = [
+            self.inbox / f"{task_id}.json",
             self.processing / f"{task_id}.json",
             self.results / f"{task_id}.result.json",
             self.state / f"{task_id}.json",
@@ -129,16 +138,41 @@ class DotControlBridge:
         os.replace(path, dest)
         meta = dest.with_suffix(dest.suffix + ".reason.json")
         atomic_write_json(meta, {"reason": reason, "at": utc_now_iso(), "source": str(path)})
+        try:
+            assert_durable_file_mode(meta, "quarantine reason")
+        except BridgeError:
+            pass
         return dest
 
-    def claim_manifest(self, inbox_path: Path) -> Path:
+    def claim_manifest(self, inbox_path: Path, task_id: str) -> Path:
+        """Atomically claim inbox/<taskId>.json → processing/<taskId>.json without overwrite."""
         if self.processing.is_symlink():
             raise BridgeError(f"processing must not be a symlink: {self.processing}")
+        expected_name = f"{task_id}.json"
+        if inbox_path.name != expected_name:
+            raise BridgeError(
+                f"inbox filename must be exactly {expected_name}; got {inbox_path.name}"
+            )
         self.processing.mkdir(parents=True, exist_ok=True)
-        dest = self.processing / inbox_path.name
+        dest = self.processing / expected_name
         if dest.exists():
             raise BridgeError(f"duplicate processing entry: {dest.name}")
-        os.replace(inbox_path, dest)
+        # Exclusive create of destination before rename to prevent overwrite races.
+        flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+        try:
+            fd = os.open(str(dest), flags, FILE_MODE)
+            os.close(fd)
+        except FileExistsError as exc:
+            raise BridgeError(f"duplicate processing entry: {dest.name}") from exc
+        try:
+            os.replace(inbox_path, dest)
+        except Exception:
+            try:
+                dest.unlink(missing_ok=True)  # type: ignore[call-arg]
+            except TypeError:
+                if dest.exists():
+                    dest.unlink()
+            raise
         return dest
 
     def validate_only(self, manifest_path: Path) -> dict[str, Any]:
@@ -153,10 +187,14 @@ class DotControlBridge:
             plan["constructedArgvPreview"] = redact_argv(
                 plan.get("constructedArgvPreview") or []
             )
+            plan["notes"] = [
+                "child process not launched",
+                "dry-run / planning preview only",
+            ]
         return plan
 
     def process_one(self, manifest_path: Optional[Path] = None) -> TaskResult:
-        validate_control_root_layout(self.control_root, require_subdirs=False)
+        validate_control_root_layout(self.control_root, require_subdirs=True, check_modes=True)
         if manifest_path is None:
             ready = self.list_inbox_ready()
             if not ready:
@@ -166,30 +204,67 @@ class DotControlBridge:
         manifest_path = Path(manifest_path)
         if manifest_path.suffix != ".json":
             raise BridgeError("partial manifest ignored until atomic rename to .json")
+        if manifest_path.name.endswith(".tmp"):
+            raise BridgeError("partial .tmp manifest ignored")
 
         processing_path: Optional[Path] = None
+        task_id_lock: Optional[TaskIdLock] = None
         try:
             data = load_json_object(manifest_path)
             task_id_preview = data.get("taskId")
-            if isinstance(task_id_preview, str) and self.task_id_known(task_id_preview):
-                if manifest_path.parent.resolve() == self.inbox.resolve():
-                    self.quarantine_manifest(manifest_path, f"duplicate taskId: {task_id_preview}")
-                raise BridgeError(f"duplicate taskId: {task_id_preview}")
+            if not isinstance(task_id_preview, str) or not task_id_preview.strip():
+                raise BridgeError("missing or invalid taskId before admission")
+
+            expected_name = f"{task_id_preview}.json"
+            if manifest_path.name != expected_name:
+                raise BridgeError(
+                    f"inbox/processing filename must equal taskId.json "
+                    f"({expected_name}); got {manifest_path.name}"
+                )
+
+            # Cross-process exclusive admission for this taskId.
+            task_id_lock = TaskIdLock(self.locks, task_id_preview)
+            task_id_lock.acquire()
+
+            # Re-check uniqueness under the task-id lock (exclude the file we are claiming).
+            for label, path in (
+                ("processing", self.processing / expected_name),
+                ("results", self.results / f"{task_id_preview}.result.json"),
+                ("state", self.state / f"{task_id_preview}.json"),
+                ("quarantine", self.quarantine / expected_name),
+            ):
+                if path.exists() and path.resolve() != manifest_path.resolve():
+                    raise BridgeError(f"duplicate taskId in {label}: {task_id_preview}")
+            # Another inbox copy with same taskId but different path name is already blocked
+            # by filename==taskId.json; same-name second submission while first is in inbox
+            # cannot coexist on the same path.
 
             if manifest_path.parent.resolve() == self.inbox.resolve():
-                processing_path = self.claim_manifest(manifest_path)
+                processing_path = self.claim_manifest(manifest_path, task_id_preview)
             else:
                 processing_path = manifest_path
+                if processing_path.name != expected_name:
+                    raise BridgeError(
+                        f"processing filename must equal {expected_name}"
+                    )
 
             manifest = validate_manifest_dict(data, policy=self.policy, require_paths_exist=True)
+            if manifest.task_id != task_id_preview:
+                raise BridgeError("taskId mutated between admission and validation")
         except BridgeError as exc:
             if processing_path is not None and processing_path.exists():
                 self.quarantine_manifest(processing_path, str(exc))
             elif manifest_path.exists() and manifest_path.parent.resolve() == self.inbox.resolve():
                 self.quarantine_manifest(manifest_path, str(exc))
+            if task_id_lock is not None and task_id_lock.acquired:
+                task_id_lock.release()
             raise
 
-        return self._execute_manifest(manifest, processing_path)
+        try:
+            return self._execute_manifest(manifest, processing_path)
+        finally:
+            if task_id_lock is not None and task_id_lock.acquired:
+                task_id_lock.release()
 
     def _execute_manifest(self, manifest: TaskManifest, processing_path: Path) -> TaskResult:
         started = utc_now_iso()
@@ -222,6 +297,9 @@ class DotControlBridge:
             selected_tool = manifest.verifier_tool.value
         elif manifest.action in {Action.REPO_PROBE, Action.GIT_COMMIT_PROOF, Action.TEST_PROFILE}:
             selected_tool = "bridge"
+
+        evidence_written = False
+        result: Optional[TaskResult] = None
 
         try:
             lock.acquire(
@@ -277,6 +355,11 @@ class DotControlBridge:
                     error = live_block
                     notes.append(f"UNSUPPORTED: {error}")
                     notes.append("child process not launched")
+                    if manifest.action == Action.TEST_PROFILE:
+                        notes.append(
+                            "TEST_PROFILE dry-run preview only; no capability-pack/"
+                            "agent/static-contract evidence was executed"
+                        )
                     exit_code = None
                 elif meta.get("unsupported"):
                     disposition = Disposition.UNSUPPORTED
@@ -284,44 +367,23 @@ class DotControlBridge:
                     command_argv = []
                     notes.append(f"UNSUPPORTED: {error}")
                 else:
+                    # No live child path remains authorized in v1 for these actions.
                     command_argv = redact_argv(argv)
-                    stdin_path = Path(meta["stdin_path"]) if meta.get("stdin_path") else None
+                    disposition = Disposition.UNSUPPORTED
+                    error = "v1 live child execution path disabled"
+                    notes.append("child process not launched")
+                    exit_code = None
 
-                    def _on_start(pid: int) -> None:
-                        lock.update_child_pid(pid)
-
-                    evidence = run_process(
-                        argv,
-                        cwd=manifest.worktree,
-                        timeout_seconds=manifest.timeout_seconds,
-                        logs_dir=self.logs,
-                        task_id=manifest.task_id,
-                        stdin_path=stdin_path,
-                        on_start=_on_start,
-                    )
-                    exit_code = evidence.exit_code
-                    timed_out = evidence.timed_out
-                    stdout_log = evidence.stdout_log
-                    stderr_log = evidence.stderr_log
-                    stdout_bytes = evidence.stdout_bytes_captured
-                    stderr_bytes = evidence.stderr_bytes_captured
-                    stdout_truncated = evidence.stdout_truncated
-                    stderr_truncated = evidence.stderr_truncated
-                    lock.update_child_pid(None)
-                    if timed_out:
-                        disposition = Disposition.TIMEOUT
-                        error = "process timed out; SIGTERM/SIGKILL applied to process group"
-                    elif exit_code == 0:
-                        disposition = Disposition.SUCCESS
-                    else:
-                        disposition = Disposition.FAILED
-                        error = f"child exited {exit_code}"
-
-                    if manifest.action in {Action.CURSOR_TASK, Action.CODEX_TASK}:
-                        ending_head = git_head(manifest.worktree)
+                if manifest.action in {Action.CURSOR_TASK, Action.CODEX_TASK}:
+                    ending_head = git_head(manifest.worktree)
+                    try:
                         changed = enforce_change_scope(
                             manifest, starting_head, ending_head
                         )
+                    except BridgeError as scope_exc:
+                        disposition = Disposition.FAILED
+                        error = str(scope_exc)
+                        notes.append("scope enforcement failed after UNSUPPORTED writer action")
             else:
                 raise BridgeError(f"unknown action: {manifest.action}")
 
@@ -330,7 +392,6 @@ class DotControlBridge:
             # Scope accounting for writer actions even when UNSUPPORTED (HEAD must not move).
             if manifest.action in {Action.CURSOR_TASK, Action.CODEX_TASK}:
                 if disposition == Disposition.UNSUPPORTED:
-                    # Still prove allowCommit semantics against any accidental mutation.
                     try:
                         changed = enforce_change_scope(
                             manifest, starting_head, ending_head
@@ -359,13 +420,13 @@ class DotControlBridge:
                 ending_head = git_head(manifest.worktree)
             except Exception:
                 ending_head = starting_head
-        finally:
-            lock_lifecycle = dict(lock.lifecycle)
-            if lock.acquired:
-                lock.release()
-                lock_lifecycle = dict(lock.lifecycle)
 
+        # --- Evidence finalization WHILE lock is held (P1-3) ---------------
         ended = utc_now_iso()
+        lock_lifecycle = dict(lock.lifecycle)
+        lock_lifecycle["evidencePending"] = True
+        lock_lifecycle["released"] = False
+
         result = TaskResult(
             task_id=manifest.task_id,
             action=manifest.action.value,
@@ -398,27 +459,132 @@ class DotControlBridge:
             stderr_truncated=stderr_truncated,
             bridge_log_truncated=bridge_log_truncated,
         )
-        write_result(self.results, result)
-        write_state(
-            self.state,
-            manifest.task_id,
-            {
-                "taskId": manifest.task_id,
-                "disposition": disposition.value,
-                "endedAt": ended,
-                "endingHead": ending_head,
-                "resultPath": str(self.results / f"{manifest.task_id}.result.json"),
-            },
-        )
+
+        try:
+            write_result(self.results, result)
+            write_state(
+                self.state,
+                manifest.task_id,
+                {
+                    "taskId": manifest.task_id,
+                    "disposition": disposition.value,
+                    "endedAt": ended,
+                    "endingHead": ending_head,
+                    "resultPath": str(self.results / f"{manifest.task_id}.result.json"),
+                    "lockHeld": True,
+                    "evidencePending": True,
+                },
+            )
+            evidence_written = True
+            lock_lifecycle["evidencePending"] = False
+            lock_lifecycle["evidenceDurable"] = True
+        except Exception as write_exc:
+            # Fail closed: do not appear successful; keep lock held for forensics.
+            disposition = Disposition.CRASH_RECOVERY
+            error = f"evidence write failed while lock held: {write_exc}"
+            notes.append("evidence-write failure; lock retained for forensics")
+            result.disposition = disposition.value
+            result.error = error
+            result.notes = notes
+            try:
+                write_result(self.results, result)
+                write_state(
+                    self.state,
+                    manifest.task_id,
+                    {
+                        "taskId": manifest.task_id,
+                        "disposition": disposition.value,
+                        "endedAt": ended,
+                        "endingHead": ending_head,
+                        "resultPath": str(self.results / f"{manifest.task_id}.result.json"),
+                        "lockHeld": True,
+                        "evidenceWriteFailed": True,
+                    },
+                )
+                evidence_written = True
+            except Exception as forensic_exc:
+                notes.append(f"forensic evidence write also failed: {forensic_exc}")
+                result.notes = notes
+                result.lock_lifecycle = dict(lock.lifecycle)
+                result.lock_lifecycle["released"] = False
+                result.lock_lifecycle["retainedForForensics"] = True
+                # Keep the lock object alive so the flock fd is not GC-closed.
+                if not hasattr(self, "_forensic_locks"):
+                    self._forensic_locks: list[WorktreeLock] = []
+                self._forensic_locks.append(lock)
+                # Do not release lock — second task must not acquire.
+                try:
+                    append_bridge_log(
+                        self.logs,
+                        manifest.task_id,
+                        [f"{utc_now_iso()} FATAL evidence failure; lock retained: {forensic_exc}"],
+                    )
+                except Exception:
+                    pass
+                if processing_path.exists():
+                    try:
+                        processing_path.unlink()
+                    except OSError:
+                        pass
+                # Intentionally leave worktree lock acquired for forensics.
+                return result
+
+        # Release lock only after durable provisional evidence exists.
+        if evidence_written and lock.acquired:
+            lock.release()
+            lock_lifecycle = dict(lock.lifecycle)
+            lock_lifecycle["evidenceDurable"] = True
+            lock_lifecycle["released"] = True
+            result.lock_lifecycle = lock_lifecycle
+            # Atomically update result/state with final released-lock lifecycle.
+            try:
+                write_result(self.results, result)
+                write_state(
+                    self.state,
+                    manifest.task_id,
+                    {
+                        "taskId": manifest.task_id,
+                        "disposition": result.disposition,
+                        "endedAt": ended,
+                        "endingHead": ending_head,
+                        "resultPath": str(self.results / f"{manifest.task_id}.result.json"),
+                        "lockHeld": False,
+                        "evidencePending": False,
+                        "lockReleased": True,
+                    },
+                )
+            except Exception as final_exc:
+                notes.append(f"post-release lifecycle update failed: {final_exc}")
+                result.notes = notes
+                # Provisional evidence already exists; do not flip to success incorrectly.
+                if result.disposition == Disposition.SUCCESS.value:
+                    result.disposition = Disposition.PARTIAL.value
+                    result.error = (
+                        (result.error + "; " if result.error else "")
+                        + f"post-release evidence update failed: {final_exc}"
+                    )
+                    try:
+                        write_result(self.results, result)
+                    except Exception:
+                        pass
+        elif lock.acquired and not evidence_written:
+            # Retain lock; task must not appear successful.
+            result.disposition = Disposition.CRASH_RECOVERY.value
+            result.error = error or "evidence missing; lock retained"
+            notes.append("lock retained because evidence was not durable")
+            result.notes = notes
+
         if processing_path.exists():
             try:
                 processing_path.unlink()
             except OSError:
                 notes.append("processing cleanup failed")
+                result.notes = notes
         return result
 
     def run_daemon(self, *, once: bool = False, poll_seconds: float = DAEMON_POLL_SECONDS) -> int:
-        self.init_control_root()
+        # Normal operation validates; does not repair modes (explicit init only).
+        validate_control_root_layout(self.control_root, require_subdirs=True, check_modes=True)
         processed = 0
         while True:
             ready = self.list_inbox_ready()
@@ -490,7 +656,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 0
 
         if args.command == "oneshot":
-            bridge.init_control_root()
+            # Require prior explicit init; do not silently repair modes.
+            validate_control_root_layout(
+                bridge.control_root, require_subdirs=True, check_modes=True
+            )
             result = bridge.process_one(args.manifest)
             print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
             return 0 if result.disposition == Disposition.SUCCESS.value else 1
