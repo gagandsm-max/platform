@@ -472,17 +472,24 @@ func durableWorkloadFromEvent(e ProcessNetworkSyntheticEvent) (ProcessNetworkWor
 }
 
 func (w ProcessNetworkWorkloadIdentity) aggregationKey() string {
+	// Length-prefixed fields: literal '|' inside Value/ContainerID must not collide keys.
 	var b strings.Builder
-	b.WriteString(string(w.Kind))
-	b.WriteByte('|')
-	b.WriteString(w.Value)
-	b.WriteByte('|')
-	b.WriteString(w.ContainerID)
-	b.WriteByte('|')
+	writeLenPrefixed(&b, string(w.Kind))
+	writeLenPrefixed(&b, w.Value)
+	writeLenPrefixed(&b, w.ContainerID)
 	if w.NetworkNamespace != nil {
+		b.WriteByte('1')
 		fmt.Fprintf(&b, "%d", *w.NetworkNamespace)
+	} else {
+		// Preserve absent-versus-zero namespace distinction.
+		b.WriteByte('0')
 	}
 	return b.String()
+}
+
+func writeLenPrefixed(b *strings.Builder, s string) {
+	fmt.Fprintf(b, "%d:", len(s))
+	b.WriteString(s)
 }
 
 func destinationKey(addr netip.Addr, port uint16, proto ProcessNetworkProtocol) string {

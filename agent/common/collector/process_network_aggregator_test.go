@@ -800,3 +800,285 @@ func overflowSummary(acc []ProcessNetworkWindowAccounting, proto ProcessNetworkP
 	}
 	return nil
 }
+
+// F1: pipe-delimited keys must not collide distinct ProcessName/ContainerID pairs.
+func TestProcessNetworkWorkloadKeyDelimiterCollision(t *testing.T) {
+	sink := &LocalRecordingStructuredEvidenceSink{}
+	agg := mustAgg(t, sink)
+
+	a := baseEvent("a|b", "192.0.2.10", 80, ProcessNetworkProtocolTCP)
+	a.ContainerID = "c"
+	txA := uint64(7)
+	a.BytesTx = &txA
+
+	b := baseEvent("a", "192.0.2.20", 443, ProcessNetworkProtocolTCP)
+	b.ContainerID = "b|c"
+	txB := uint64(11)
+	b.BytesTx = &txB
+
+	same := baseEvent("a|b", "192.0.2.10", 80, ProcessNetworkProtocolTCP)
+	same.ContainerID = "c"
+	txSame := uint64(3)
+	same.BytesTx = &txSame
+
+	ns1, ns2 := uint64(1), uint64(2)
+	nsA := baseEvent("shared", "198.51.100.1", 80, ProcessNetworkProtocolTCP)
+	nsA.NetworkNamespace = &ns1
+	nsB := baseEvent("shared", "198.51.100.2", 80, ProcessNetworkProtocolTCP)
+	nsB.NetworkNamespace = &ns2
+
+	if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{a, b, same, nsA, nsB}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := agg.FlushAll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Evidence) != 4 {
+		t.Fatalf("collision pair + same-key merge + netns split want 4 records, got %d", len(out.Evidence))
+	}
+
+	recA, ok := findIP(out.Evidence, "192.0.2.10")
+	if !ok {
+		t.Fatal("missing ProcessName=a|b / ContainerID=c record")
+	}
+	if recA.Workload.Value != "a|b" || recA.Workload.ContainerID != "c" {
+		t.Fatalf("identity corrupted for a|b/c: %+v", recA.Workload)
+	}
+	if recA.BytesTx == nil || *recA.BytesTx != 10 {
+		t.Fatalf("same-key merge for a|b/c failed: %+v", recA)
+	}
+
+	recB, ok := findIP(out.Evidence, "192.0.2.20")
+	if !ok {
+		t.Fatal("missing ProcessName=a / ContainerID=b|c record")
+	}
+	if recB.Workload.Value != "a" || recB.Workload.ContainerID != "b|c" {
+		t.Fatalf("identity corrupted for a/b|c: %+v", recB.Workload)
+	}
+	if recB.BytesTx == nil || *recB.BytesTx != 11 {
+		t.Fatalf("distinct workload bytes wrong: %+v", recB)
+	}
+
+	nsRecs := 0
+	for _, r := range out.Evidence {
+		if r.RemoteIP.String() == "198.51.100.1" || r.RemoteIP.String() == "198.51.100.2" {
+			nsRecs++
+			if r.Workload.NetworkNamespace == nil {
+				t.Fatalf("namespace must remain present: %+v", r.Workload)
+			}
+		}
+	}
+	if nsRecs != 2 {
+		t.Fatalf("namespace separation lost: %d", nsRecs)
+	}
+}
+
+// F2: missing-first optional PID/local endpoint must not become order-dependent common identity.
+func TestProcessNetworkOptionalIdentityOrderIndependent(t *testing.T) {
+	type step struct {
+		pid   *uint32
+		lip   string
+		lport *uint16
+	}
+	pid := uint32(42)
+	port := uint16(40000)
+	cases := []struct {
+		name   string
+		steps  []step
+		wantPID bool
+		wantIP  bool
+		wantPort bool
+	}{
+		{name: "missing_then_present", steps: []step{{}, {pid: &pid, lip: "10.0.0.1", lport: &port}}},
+		{name: "present_then_missing", steps: []step{{pid: &pid, lip: "10.0.0.1", lport: &port}, {}}},
+		{name: "missing_present_same", steps: []step{{}, {pid: &pid, lip: "10.0.0.1", lport: &port}, {pid: &pid, lip: "10.0.0.1", lport: &port}}},
+		{name: "all_missing", steps: []step{{}, {}}},
+		{name: "all_equal_present", steps: []step{
+			{pid: &pid, lip: "10.0.0.1", lport: &port},
+			{pid: &pid, lip: "10.0.0.1", lport: &port},
+		}, wantPID: true, wantIP: true, wantPort: true},
+		{name: "differing_present", steps: []step{
+			{pid: &pid, lip: "10.0.0.1", lport: &port},
+			{pid: uint32Ptr(99), lip: "10.0.0.2", lport: uint16Ptr(40001)},
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name+"_single_ingest", func(t *testing.T) {
+			agg := mustAgg(t, &LocalRecordingStructuredEvidenceSink{})
+			events := make([]ProcessNetworkSyntheticEvent, len(tc.steps))
+			for i, s := range tc.steps {
+				e := baseEvent("nginx", "192.0.2.1", 80, ProcessNetworkProtocolTCP)
+				e.PID = s.pid
+				e.LocalIP = s.lip
+				e.LocalPort = s.lport
+				events[i] = e
+			}
+			if err := agg.Ingest(context.Background(), events); err != nil {
+				t.Fatal(err)
+			}
+			assertOptionalIdentity(t, agg, tc.wantPID, tc.wantIP, tc.wantPort, pid, "10.0.0.1", port)
+		})
+		t.Run(tc.name+"_separate_ingest", func(t *testing.T) {
+			agg := mustAgg(t, &LocalRecordingStructuredEvidenceSink{})
+			for _, s := range tc.steps {
+				e := baseEvent("nginx", "192.0.2.1", 80, ProcessNetworkProtocolTCP)
+				e.PID = s.pid
+				e.LocalIP = s.lip
+				e.LocalPort = s.lport
+				if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{e}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertOptionalIdentity(t, agg, tc.wantPID, tc.wantIP, tc.wantPort, pid, "10.0.0.1", port)
+		})
+	}
+}
+
+func assertOptionalIdentity(t *testing.T, agg *ProcessNetworkAggregator, wantPID, wantIP, wantPort bool, pid uint32, lip string, port uint16) {
+	t.Helper()
+	out, err := agg.FlushAll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Evidence) != 1 {
+		t.Fatalf("want 1 record, got %d", len(out.Evidence))
+	}
+	rec := out.Evidence[0]
+	if wantPID {
+		if rec.PID == nil || *rec.PID != pid {
+			t.Fatalf("want common PID %d, got %+v", pid, rec.PID)
+		}
+	} else if rec.PID != nil {
+		t.Fatalf("PID must be omitted, got %d", *rec.PID)
+	}
+	if wantIP {
+		if rec.LocalIP == nil || rec.LocalIP.String() != lip {
+			t.Fatalf("want common local IP %s, got %+v", lip, rec.LocalIP)
+		}
+	} else if rec.LocalIP != nil {
+		t.Fatalf("local IP must be omitted, got %s", rec.LocalIP)
+	}
+	if wantPort {
+		if rec.LocalPort == nil || *rec.LocalPort != port {
+			t.Fatalf("want common local port %d, got %+v", port, rec.LocalPort)
+		}
+	} else if rec.LocalPort != nil {
+		t.Fatalf("local port must be omitted, got %d", *rec.LocalPort)
+	}
+}
+
+// F3: workload accounting must emit non-key metadata only when common across all represented events.
+func TestProcessNetworkWorkloadAccountingCommonOnlyMetadata(t *testing.T) {
+	t.Run("mixed_metadata_ordinary", func(t *testing.T) {
+		for _, reverse := range []bool{false, true} {
+			name := "order_ab"
+			if reverse {
+				name = "order_ba"
+			}
+			t.Run(name, func(t *testing.T) {
+				agg := mustAgg(t, &LocalRecordingStructuredEvidenceSink{})
+				a := baseEvent("worker", "192.0.2.1", 80, ProcessNetworkProtocolTCP)
+				a.ServiceID = "app.service"
+				a.ExecutableIdentity = "exe-a"
+				a.ExecutablePath = "/usr/bin/a"
+				a.CgroupPath = "/sys/fs/cgroup/a"
+				b := baseEvent("worker", "192.0.2.2", 80, ProcessNetworkProtocolTCP)
+				b.ServiceID = "app.service"
+				b.ExecutableIdentity = "exe-b"
+				b.ExecutablePath = "/usr/bin/b"
+				b.CgroupPath = "/sys/fs/cgroup/b"
+				events := []ProcessNetworkSyntheticEvent{a, b}
+				if reverse {
+					events[0], events[1] = events[1], events[0]
+				}
+				if err := agg.Ingest(context.Background(), events); err != nil {
+					t.Fatal(err)
+				}
+				out, err := agg.FlushAll(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				wlAcc := workloadAccounting(out.Accounting)
+				if wlAcc == nil || wlAcc.Workload == nil {
+					t.Fatalf("missing workload accounting: %+v", out.Accounting)
+				}
+				id := wlAcc.Workload
+				if id.ServiceID != "app.service" {
+					t.Fatalf("common ServiceID lost: %+v", id)
+				}
+				if id.ExecutableIdentity != "" || id.ExecutablePath != "" || id.CgroupPath != "" {
+					t.Fatalf("mixed non-key metadata must be omitted: %+v", id)
+				}
+				if id.Kind != SelectorKindServiceID || id.Value != "app.service" {
+					t.Fatalf("key identity must remain: %+v", id)
+				}
+			})
+		}
+	})
+
+	t.Run("mixed_metadata_with_overflow", func(t *testing.T) {
+		agg := mustAgg(t, &LocalRecordingStructuredEvidenceSink{}, withKeys(64, 1))
+		a := baseEvent("worker", "192.0.2.1", 80, ProcessNetworkProtocolTCP)
+		a.ServiceID = "app.service"
+		a.ExecutablePath = "/usr/bin/a"
+		b := baseEvent("worker", "192.0.2.2", 80, ProcessNetworkProtocolTCP)
+		b.ServiceID = "app.service"
+		b.ExecutablePath = "/usr/bin/b"
+		if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{a, b}); err != nil {
+			t.Fatal(err)
+		}
+		out, err := agg.FlushAll(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		wlAcc := workloadAccounting(out.Accounting)
+		if wlAcc == nil || wlAcc.Workload == nil {
+			t.Fatalf("missing workload accounting: %+v", out.Accounting)
+		}
+		if wlAcc.EvictedCandidateCount == 0 && wlAcc.OverflowedRecordsCount == 0 && len(wlAcc.Overflows) == 0 {
+			t.Fatalf("expected overflow/eviction evidence: %+v", wlAcc)
+		}
+		if wlAcc.Workload.ExecutablePath != "" {
+			t.Fatalf("overflow-mixed path must not publish first worker path: %+v", wlAcc.Workload)
+		}
+		if wlAcc.Workload.ServiceID != "app.service" {
+			t.Fatalf("common ServiceID must remain: %+v", wlAcc.Workload)
+		}
+	})
+
+	t.Run("genuinely_common_retained", func(t *testing.T) {
+		agg := mustAgg(t, &LocalRecordingStructuredEvidenceSink{})
+		a := baseEvent("worker", "192.0.2.1", 80, ProcessNetworkProtocolTCP)
+		a.ServiceID = "app.service"
+		a.ExecutablePath = "/usr/bin/shared"
+		a.CgroupPath = "/sys/fs/cgroup/shared"
+		b := a
+		b.RemoteIP = "192.0.2.2"
+		if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{a, b}); err != nil {
+			t.Fatal(err)
+		}
+		out, err := agg.FlushAll(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		wlAcc := workloadAccounting(out.Accounting)
+		if wlAcc == nil || wlAcc.Workload == nil {
+			t.Fatal("missing workload accounting")
+		}
+		id := wlAcc.Workload
+		if id.ExecutablePath != "/usr/bin/shared" || id.CgroupPath != "/sys/fs/cgroup/shared" || id.ServiceID != "app.service" {
+			t.Fatalf("common metadata must be retained: %+v", id)
+		}
+	})
+}
+
+func workloadAccounting(acc []ProcessNetworkWindowAccounting) *ProcessNetworkWindowAccounting {
+	for i := range acc {
+		if acc[i].Workload != nil {
+			return &acc[i]
+		}
+	}
+	return nil
+}

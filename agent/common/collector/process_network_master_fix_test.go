@@ -173,11 +173,12 @@ func TestProcessNetworkLateAfterStubEvictionNeverBecomesOtherBucket(t *testing.T
 
 func TestProcessNetworkRetentionShedTiedToRequestedBucket(t *testing.T) {
 	sink := &LocalRecordingStructuredEvidenceSink{}
+	// Combined live+closed capacity must leave at least one live slot (MaxRetainedWindows > MaxClosedWindows).
 	cfg := ProcessNetworkAggregatorConfig{
 		SourceProvenance:     ProcessNetworkSyntheticSourceProvenance,
 		Window:               time.Minute,
 		TestAllowShortWindow: true,
-		MaxRetainedWindows:   1,
+		MaxRetainedWindows:   2,
 		MaxClosedWindows:     1,
 		MaxAccountingStubs:   4,
 	}
@@ -194,17 +195,24 @@ func TestProcessNetworkRetentionShedTiedToRequestedBucket(t *testing.T) {
 		t.Fatal(err)
 	}
 	closedBucket := out1.Evidence[0].BucketStartAt
-	t1 := t0.Truncate(time.Minute).Add(time.Minute + time.Second)
-	wantShedBucket := alignUTC(t1, time.Minute)
-	if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{baseAt("nginx", "192.0.2.8", 80, t1)}); err != nil {
+	// Occupy remaining live headroom so combined live+closed == MaxRetainedWindows.
+	tLive := t0.Truncate(time.Minute).Add(time.Minute + time.Second)
+	if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{baseAt("nginx", "192.0.2.7", 80, tLive)}); err != nil {
+		t.Fatal(err)
+	}
+	tShed := t0.Truncate(time.Minute).Add(2*time.Minute + time.Second)
+	wantShedBucket := alignUTC(tShed, time.Minute)
+	if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{baseAt("nginx", "192.0.2.8", 80, tShed)}); err != nil {
 		t.Fatal(err)
 	}
 	out2, err := agg.FlushAll(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out2.Evidence) != 0 {
-		t.Fatalf("shed event must not create dest evidence: %+v", out2.Evidence)
+	for _, rec := range out2.Evidence {
+		if rec.RemoteIP.String() == "192.0.2.8" {
+			t.Fatalf("shed event must not create dest evidence: %+v", rec)
+		}
 	}
 	saw := false
 	for _, acc := range out2.Accounting {
@@ -262,7 +270,7 @@ func TestProcessNetworkAccountingStubAttackRemainsBounded(t *testing.T) {
 		SourceProvenance:     ProcessNetworkSyntheticSourceProvenance,
 		Window:               time.Minute,
 		TestAllowShortWindow: true,
-		MaxRetainedWindows:   1,
+		MaxRetainedWindows:   2,
 		MaxClosedWindows:     1,
 		MaxAccountingStubs:   3,
 	}
@@ -313,6 +321,98 @@ func TestProcessNetworkConfigRejectsOverridesAboveHardCeilings(t *testing.T) {
 		cfg.TestAllowShortWindow = true
 		if _, err := NewProcessNetworkAggregator(cfg, nil); err == nil || !strings.Contains(err.Error(), "PROCESS_NETWORK_BOUND_INVALID") {
 			t.Fatalf("case %d: unsafe override accepted: %v", i, err)
+		}
+	}
+}
+
+// F4: retention configs with no live-window headroom must be rejected; valid configs must recover.
+func TestProcessNetworkRetentionRejectsNoLiveHeadroom(t *testing.T) {
+	invalid := []struct {
+		retained int
+		closed   int
+	}{
+		{1, 1},
+		{2, 2},
+	}
+	for i, tc := range invalid {
+		_, err := NewProcessNetworkAggregator(ProcessNetworkAggregatorConfig{
+			SourceProvenance:     ProcessNetworkSyntheticSourceProvenance,
+			Window:               time.Minute,
+			TestAllowShortWindow: true,
+			MaxRetainedWindows:   tc.retained,
+			MaxClosedWindows:     tc.closed,
+		}, nil)
+		if err == nil || !strings.Contains(err.Error(), "PROCESS_NETWORK_BOUND_INVALID") {
+			t.Fatalf("case %d (%d/%d): no-live-headroom config accepted: %v", i, tc.retained, tc.closed, err)
+		}
+	}
+
+	valid := []ProcessNetworkAggregatorConfig{
+		{MaxRetainedWindows: 2, MaxClosedWindows: 1},
+		{MaxRetainedWindows: maxProcessNetworkRetainedWindows, MaxClosedWindows: maxProcessNetworkClosedWindows},
+		{}, // defaults 4/2
+	}
+	for i, cfg := range valid {
+		cfg.SourceProvenance = ProcessNetworkSyntheticSourceProvenance
+		cfg.Window = time.Minute
+		cfg.TestAllowShortWindow = true
+		if _, err := NewProcessNetworkAggregator(cfg, nil); err != nil {
+			t.Fatalf("valid case %d rejected: %v", i, err)
+		}
+	}
+}
+
+func TestProcessNetworkRetentionRecoversAfterPressure(t *testing.T) {
+	for _, cfg := range []ProcessNetworkAggregatorConfig{
+		{MaxRetainedWindows: 2, MaxClosedWindows: 1, MaxAccountingStubs: 4},
+		{MaxRetainedWindows: maxProcessNetworkRetainedWindows, MaxClosedWindows: maxProcessNetworkClosedWindows, MaxAccountingStubs: 4},
+	} {
+		cfg.SourceProvenance = ProcessNetworkSyntheticSourceProvenance
+		cfg.Window = time.Minute
+		cfg.TestAllowShortWindow = true
+		agg, err := NewProcessNetworkAggregator(cfg, &LocalRecordingStructuredEvidenceSink{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		base := time.Date(2026, 10, 6, 12, 0, 10, 0, time.UTC)
+		// Fill combined live+closed capacity, then force shed.
+		if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{baseAt("nginx", "192.0.2.1", 80, base)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := agg.FlushDue(context.Background(), base.Truncate(time.Minute).Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		for i := 1; i < cfg.MaxRetainedWindows; i++ {
+			ts := base.Add(time.Duration(i) * time.Minute)
+			if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{baseAt("nginx", fmt.Sprintf("192.0.2.%d", i+1), 80, ts)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		shedTS := base.Add(time.Duration(cfg.MaxRetainedWindows) * time.Minute)
+		if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{baseAt("nginx", "198.51.100.1", 80, shedTS)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := agg.FlushAll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		// After flush, live capacity must recover for ordinary aggregation.
+		recoverTS := shedTS.Add(time.Minute)
+		if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{baseAt("nginx", "203.0.113.9", 80, recoverTS)}); err != nil {
+			t.Fatal(err)
+		}
+		out, err := agg.FlushAll(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, rec := range out.Evidence {
+			if rec.RemoteIP.String() == "203.0.113.9" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("normal aggregation did not recover after retention pressure (cfg retained=%d closed=%d): %+v",
+				cfg.MaxRetainedWindows, cfg.MaxClosedWindows, out)
 		}
 	}
 }

@@ -72,6 +72,10 @@ func (c ProcessNetworkAggregatorConfig) normalized() (ProcessNetworkAggregatorCo
 	if c.MaxKeysPerWorkload > c.MaxGlobalKeys {
 		c.MaxKeysPerWorkload = c.MaxGlobalKeys
 	}
+	// Combined live+closed retention must leave headroom for at least one live window.
+	if c.MaxRetainedWindows <= c.MaxClosedWindows {
+		return c, errors.New("PROCESS_NETWORK_BOUND_INVALID: MaxRetainedWindows must exceed MaxClosedWindows for live-window headroom")
+	}
 	if err := validateProcessNetworkProvenance(c.SourceProvenance); err != nil {
 		return c, err
 	}
@@ -128,9 +132,14 @@ type pnClosedStub struct {
 }
 
 type pnWorkload struct {
-	identity   ProcessNetworkWorkloadIdentity
+	identity   ProcessNetworkWorkloadIdentity // key fields only; non-key metadata via mixes below
 	candidates map[string]*pnCandidate
 	overflow   map[ProcessNetworkProtocol]*pnOverflow
+	svc        mixString
+	exeID      mixString
+	exePath    mixString
+	name       mixString
+	cgroup     mixString
 	quality    ProcessNetworkQualityState
 	partial    bool
 	sampledF   bool
@@ -203,18 +212,21 @@ type mixString struct {
 }
 
 type mixUint32 struct {
+	seen  bool // true after any observation, including absence
 	set   bool
 	mixed bool
 	value uint32
 }
 
 type mixUint16 struct {
+	seen  bool
 	set   bool
 	mixed bool
 	value uint16
 }
 
 type mixAddr struct {
+	seen  bool
 	set   bool
 	mixed bool
 	value netip.Addr
@@ -236,19 +248,28 @@ func (m *mixString) observe(v string) {
 }
 
 func (m *mixUint32) observePtr(p *uint32) {
+	if m.mixed {
+		return
+	}
 	if p == nil {
+		if !m.seen {
+			m.seen = true
+			return
+		}
 		if m.set {
 			m.mixed = true
 			m.set = false
 		}
 		return
 	}
-	if m.mixed {
+	if !m.seen {
+		m.seen = true
+		m.set = true
+		m.value = *p
 		return
 	}
 	if !m.set {
-		m.set = true
-		m.value = *p
+		m.mixed = true
 		return
 	}
 	if m.value != *p {
@@ -258,19 +279,28 @@ func (m *mixUint32) observePtr(p *uint32) {
 }
 
 func (m *mixUint16) observePtr(p *uint16) {
+	if m.mixed {
+		return
+	}
 	if p == nil {
+		if !m.seen {
+			m.seen = true
+			return
+		}
 		if m.set {
 			m.mixed = true
 			m.set = false
 		}
 		return
 	}
-	if m.mixed {
+	if !m.seen {
+		m.seen = true
+		m.set = true
+		m.value = *p
 		return
 	}
 	if !m.set {
-		m.set = true
-		m.value = *p
+		m.mixed = true
 		return
 	}
 	if m.value != *p {
@@ -280,7 +310,14 @@ func (m *mixUint16) observePtr(p *uint16) {
 }
 
 func (m *mixAddr) observe(raw string) {
+	if m.mixed {
+		return
+	}
 	if raw == "" {
+		if !m.seen {
+			m.seen = true
+			return
+		}
 		if m.set {
 			m.mixed = true
 			m.set = false
@@ -289,17 +326,20 @@ func (m *mixAddr) observe(raw string) {
 	}
 	addr, err := netip.ParseAddr(raw)
 	if err != nil {
+		m.seen = true
 		m.mixed = true
 		m.set = false
 		return
 	}
 	addr = addr.Unmap()
-	if m.mixed {
+	if !m.seen {
+		m.seen = true
+		m.set = true
+		m.value = addr
 		return
 	}
 	if !m.set {
-		m.set = true
-		m.value = addr
+		m.mixed = true
 		return
 	}
 	if m.value != addr {
@@ -422,13 +462,19 @@ func (a *ProcessNetworkAggregator) ingestOne(e ProcessNetworkSyntheticEvent) err
 			return nil
 		}
 		wl = &pnWorkload{
-			identity:   id,
+			identity: ProcessNetworkWorkloadIdentity{
+				Kind:             id.Kind,
+				Value:            id.Value,
+				ContainerID:      id.ContainerID,
+				NetworkNamespace: id.NetworkNamespace,
+			},
 			candidates: make(map[string]*pnCandidate),
 			overflow:   make(map[ProcessNetworkProtocol]*pnOverflow),
 			quality:    ProcessNetworkQualityValid,
 		}
 		w.workloads[wk] = wl
 	}
+	observeWorkloadMeta(wl, e)
 	if e.Sampled {
 		if satIncU32(&wl.sampled) {
 			markResourcePartial(wl)
@@ -1321,7 +1367,7 @@ func (a *ProcessNetworkAggregator) emitWindow(w *pnWindow) ProcessNetworkFlushOu
 				ovSat = true
 			}
 		}
-		idCopy := wl.identity
+		idCopy := emitAccountingWorkload(wl)
 		accQ := mergeQuality(wl.quality, w.quality)
 		if len(summaries) > 0 || wl.shed > 0 || wl.dropped > 0 {
 			accQ = mergeQuality(accQ, ProcessNetworkQualityPartial)
@@ -1394,6 +1440,39 @@ func (a *ProcessNetworkAggregator) emitWindow(w *pnWindow) ProcessNetworkFlushOu
 
 func (a *ProcessNetworkAggregator) needsWindowAcc(w *pnWindow) bool {
 	return w.unattributedDrops > 0 || w.shed > 0 || w.sampled > 0 || w.late > 0 || w.partial || w.guarded
+}
+
+func observeWorkloadMeta(wl *pnWorkload, e ProcessNetworkSyntheticEvent) {
+	wl.svc.observe(e.ServiceID)
+	wl.exeID.observe(e.ExecutableIdentity)
+	wl.exePath.observe(e.ExecutablePath)
+	wl.name.observe(e.ProcessName)
+	wl.cgroup.observe(e.CgroupPath)
+}
+
+func emitAccountingWorkload(wl *pnWorkload) ProcessNetworkWorkloadIdentity {
+	out := ProcessNetworkWorkloadIdentity{
+		Kind:             wl.identity.Kind,
+		Value:            wl.identity.Value,
+		ContainerID:      wl.identity.ContainerID,
+		NetworkNamespace: wl.identity.NetworkNamespace,
+	}
+	if wl.svc.set && !wl.svc.mixed {
+		out.ServiceID = wl.svc.value
+	}
+	if wl.exeID.set && !wl.exeID.mixed {
+		out.ExecutableIdentity = wl.exeID.value
+	}
+	if wl.exePath.set && !wl.exePath.mixed {
+		out.ExecutablePath = wl.exePath.value
+	}
+	if wl.name.set && !wl.name.mixed {
+		out.ProcessName = wl.name.value
+	}
+	if wl.cgroup.set && !wl.cgroup.mixed {
+		out.CgroupPath = wl.cgroup.value
+	}
+	return out
 }
 
 func emitWorkload(base ProcessNetworkWorkloadIdentity, c *pnCandidate) ProcessNetworkWorkloadIdentity {
