@@ -3,7 +3,7 @@
 Repository-owned, host-visible, user-space control bridge that runs as Linux
 user `gagan` and executes **only** strictly validated AmrudAi task manifests.
 
-Governing issue: `#185` — Dot Master Takeover v2  
+Governing issue: `#185` — Dot Master Takeover v2
 Architecture comment: Issue `#185` comment `6036350515`
 
 Disposition target after implementation:
@@ -114,11 +114,11 @@ Never logged: tokens, private keys, credential-bearing URLs, environment dumps.
 
 ## Dot submission workflow
 
-1. Dot creates a local Codex task scoped only to  
+1. Dot creates a local Codex task scoped only to
    `/home/gagan/nms-dot-control/tasks/<taskId>/`
 2. That task writes the prompt file and `manifest.tmp`
-3. After local validation it renames to  
-   `/home/gagan/nms-dot-control/inbox/<taskId>.json`  
+3. After local validation it renames to
+   `/home/gagan/nms-dot-control/inbox/<taskId>.json`
    (write `.tmp` → fsync/close → rename to `.json`)
 4. Host bridge processes outside the managed Dot sandbox
 5. Dot reads `/home/gagan/nms-dot-control/results/<taskId>.result.json`
@@ -159,7 +159,7 @@ Also: `python3 project_agents/dot_control/bridge.py <subcommand>`.
 
 ## systemd user service
 
-Template only: `systemd/amrudai-dot-control.service`  
+Template only: `systemd/amrudai-dot-control.service`
 Do **not** install or enable during implementation. User-space only (no sudo).
 
 ## Recovery

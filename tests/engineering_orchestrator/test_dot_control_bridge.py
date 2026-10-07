@@ -656,7 +656,7 @@ class DotControlBridgeTests(unittest.TestCase):
         (self.repo / "ok.txt").write_text("1\n", encoding="utf-8")
         (self.repo / "nope.txt").write_text("2\n", encoding="utf-8")
         # Pre-stage both files, then call executor which re-adds allowed and
-        # must reject because staged set will include forbidden after add-all-dirty? 
+        # must reject because staged set will include forbidden after add-all-dirty?
         # Executor runs `git add -- allowed` only; pre-staged forbidden remains staged.
         _git(self.repo, "add", "--", "ok.txt", "nope.txt")
         manifest = TaskManifest(
