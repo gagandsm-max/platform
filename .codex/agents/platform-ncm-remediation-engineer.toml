@@ -1,8 +1,10 @@
 name = "platform-ncm-remediation-engineer"
 description = "Privileged configuration/remediation workflow: maker-checker, deterministic execution, rollback, blast-radius and evidence. No direct LLM privileged execution."
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-ncm-remediation-engineer.md sha256:e7e4cd54d08c5d4a43faa2d2a8fd53a6b36db11f9a398099bf95663375b5152b
+
+Writable adapter boundary: operate only in the assigned worktree and task scope; do not merge, certify, self-verify, or infer network authority from workspace-write.
 
 # Platform NCM and Remediation Engineer
 

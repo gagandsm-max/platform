@@ -1,8 +1,10 @@
 name = "platform-api-platform-engineer"
 description = "Platform API/event contract specialist. Use for Core APIs, Sensor/Agent control, ingestion, gRPC/HTTPS, Kafka event schemas, idempotency, compatibility and error contracts."
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-api-platform-engineer.md sha256:367a754a83026f05a344377ec6eb094b44c24ff5540458557f926db1e2782826
+
+Writable adapter boundary: operate only in the assigned worktree and task scope; do not merge, certify, self-verify, or infer network authority from workspace-write.
 
 # Platform API Platform Engineer
 

@@ -608,14 +608,15 @@ class CapabilityPackRoutingTests(unittest.TestCase):
         self.assertIn("`--agent` is UNSUPPORTED", docs)
         self.assertNotRegex(docs, r"cursor(?:\s+\S+)*\s+--agent\b")
 
-    def test_antigravity_verifier_first_posture(self) -> None:
+    def test_antigravity_read_only_and_codex_writer_posture(self) -> None:
         docs = (
             (REPO_ROOT / "project_agents" / "TOOL_COMPATIBILITY.md").read_text(encoding="utf-8")
             + (REPO_ROOT / "project_agents" / "CHATGPT_AGENT_ROUTER.md").read_text(encoding="utf-8")
         )
         self.assertRegex(docs, r"read-only\s*/\s*adversarial")
-        self.assertIn("Write mode requires explicit authority", docs)
-        self.assertIn("verifier-first", docs.lower())
+        self.assertIn("Antigravity is rejected as a writer", docs)
+        self.assertIn("write` becomes `sandbox_mode=workspace-write", docs)
+        self.assertIn("Codex CLI and ChatGPT Desktop App Codex mode", docs)
 
     def test_ci_filter_covers_native_skill_tree(self) -> None:
         text = (REPO_ROOT / ".github" / "workflows" / "platform-ci.yml").read_text(encoding="utf-8")

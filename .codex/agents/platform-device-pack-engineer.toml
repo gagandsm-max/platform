@@ -1,8 +1,10 @@
 name = "platform-device-pack-engineer"
 description = "Device Pack schema, identification, mappings, versioning, certification/provenance and test-lab semantics."
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-device-pack-engineer.md sha256:547bebc150e6097e999faf2295da85e707210458ba10397d9376a2219ddce967
+
+Writable adapter boundary: operate only in the assigned worktree and task scope; do not merge, certify, self-verify, or infer network authority from workspace-write.
 
 # Platform Device Pack Engineer
 

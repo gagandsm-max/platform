@@ -164,15 +164,22 @@ def render_antigravity(entry: dict[str, Any], body: str, sha: str, canonical: Pa
 
 def render_codex(entry: dict[str, Any], body: str, sha: str, canonical: Path, repo: Path) -> str:
     escaped_body = body.replace('"""', '\\"\\"\\"')
-    # Codex defaults to exact-SHA read-only audit. Do NOT map canonical write mode
-    # to workspace-write.
-    sandbox = "read-only"
+    # Canonical read agents stay read-only. Canonical write agents receive only
+    # workspace-scoped writes: never unrestricted host access or implied network.
+    sandbox = "workspace-write" if entry.get("mode") == "write" else "read-only"
+    write_boundary = (
+        "Writable adapter boundary: operate only in the assigned worktree and task scope; "
+        "do not merge, certify, self-verify, or infer network authority from workspace-write.\n\n"
+        if entry.get("mode") == "write"
+        else ""
+    )
     return (
         f"name = {json.dumps(entry['name'])}\n"
         f"description = {json.dumps(entry['description'])}\n"
         f"sandbox_mode = {json.dumps(sandbox)}\n"
         'developer_instructions = """\n'
         f"Generated from project_agents/{source_ref(repo, canonical)} sha256:{sha}\n\n"
+        f"{write_boundary}"
         f"{escaped_body}\n"
         '"""\n'
     )
@@ -909,17 +916,18 @@ def validate_agent_pack(repo: Path) -> list[str]:
             errors.append(
                 "tool_authority.json must not list cursor-cloud or github-copilot as authorized writers"
             )
-        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder", "codex"):
+        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder"):
             if never not in set(legal["neverWriterTools"]):
                 errors.append(f"tool_authority.json neverWriterTools must include {never}")
-        if set(legal["exceptionalWriterTools"]) != {"antigravity"}:
-            errors.append(
-                "tool_authority.json exceptionalWriterTools must be exactly {antigravity}"
-            )
+        if legal["exceptionalWriterTools"]:
+            errors.append("tool_authority.json exceptionalWriterTools must be empty")
+        if set(legal["writerTools"]) != {"cursor-cli", "codex"}:
+            errors.append("tool_authority.json writerTools must be exactly {cursor-cli, codex}")
+        if "antigravity" in set(legal["writerTools"]):
+            errors.append("antigravity must not be an authorized writerTool")
         if tools.get("antigravity", {}).get("mayWriteProductCode") is not False:
             errors.append(
-                "antigravity must keep mayWriteProductCode=false; "
-                "write is task-scoped via writerElevation only"
+                "antigravity must keep mayWriteProductCode=false"
             )
         if tools.get("antigravity", {}).get("defaultGeneratedCapability") != "read-only":
             errors.append("antigravity defaultGeneratedCapability must remain read-only")
@@ -928,29 +936,38 @@ def validate_agent_pack(repo: Path) -> list[str]:
                 "antigravity mayCertify must remain false "
                 "(supplies certification-gate evidence; ChatGPT + GitHub certifies)"
             )
-        if tools.get("codex", {}).get("status") != "suspended":
-            errors.append("codex status must be suspended under current Founder policy")
-        if "codex" in set(legal["writerTools"]) or "codex" in set(legal["exceptionalWriterTools"]):
-            errors.append("codex must not be an authorized writerTool while suspended")
+        if tools.get("codex", {}).get("status") != "authorized":
+            errors.append("codex status must be authorized under the 2026-10-07 Founder decision")
+        if "codex" not in set(legal["writerTools"]):
+            errors.append("codex must be an authorized writerTool")
+        if "codex" in set(legal["exceptionalWriterTools"]):
+            errors.append("codex must not require exceptional writer elevation")
         if "codex" in set(legal["verifierTools"]):
-            errors.append("codex must not be an authorized verifierTool while suspended")
-        if "codex" not in set(legal.get("prohibitedWriterTools") or []):
-            errors.append("codex must be listed in prohibitedWriterTools while suspended")
+            errors.append("codex must not be an authorized verifierTool")
+        if "codex" in set(legal.get("prohibitedWriterTools") or []):
+            errors.append("codex must not be listed in prohibitedWriterTools")
         if "codex" not in set(legal.get("prohibitedVerifierTools") or []):
-            errors.append("codex must be listed in prohibitedVerifierTools while suspended")
-        if tools.get("codex", {}).get("mayWriteProductCode") is not False:
-            errors.append("codex mayWriteProductCode must remain false while suspended")
+            errors.append("codex must be listed in prohibitedVerifierTools")
+        if tools.get("codex", {}).get("mayWriteProductCode") is not True:
+            errors.append("codex mayWriteProductCode must be true")
         if tools.get("codex", {}).get("mayCertify") is not False:
-            errors.append("codex mayCertify must remain false while suspended")
-        if tools.get("codex", {}).get("defaultSandboxMode") != "read-only":
-            errors.append("codex defaultSandboxMode must remain read-only")
+            errors.append("codex mayCertify must remain false")
+        if tools.get("codex", {}).get("readAgentSandboxMode") != "read-only":
+            errors.append("codex readAgentSandboxMode must be read-only")
+        if tools.get("codex", {}).get("writeAgentSandboxMode") != "workspace-write":
+            errors.append("codex writeAgentSandboxMode must be workspace-write")
+        if set(tools.get("codex", {}).get("clientInterfaces") or []) != {
+            "codex-cli",
+            "chatgpt-desktop-codex-mode",
+        }:
+            errors.append("codex clientInterfaces must declare CLI and Desktop Codex mode")
         if tools.get("codex", {}).get("defaultWriter") is not False:
-            errors.append("codex defaultWriter must remain false while suspended")
+            errors.append("codex defaultWriter must remain false")
     except (OSError, json.JSONDecodeError, ControlPlaneError) as exc:
         errors.append(f"tool authority validation failed: {exc}")
 
-    # Generated Antigravity adapters stay read-only; Codex compatibility adapters
-    # may remain and must stay sandbox_mode=read-only (presence ≠ operational authority).
+    # Generated Antigravity adapters stay read-only. Codex sandbox mode follows
+    # canonical agent mode without granting unrestricted host or network access.
     for entry in manifest:
         name = entry.get("name")
         if not name:
@@ -970,13 +987,15 @@ def validate_agent_pack(repo: Path) -> list[str]:
             errors.append(f"missing Codex adapter: .codex/agents/{name}.toml")
         else:
             text = codex.read_text(encoding="utf-8")
-            if 'sandbox_mode = "workspace-write"' in text or "sandbox_mode = 'workspace-write'" in text:
+            expected_sandbox = "workspace-write" if entry.get("mode") == "write" else "read-only"
+            if f'sandbox_mode = "{expected_sandbox}"' not in text:
                 errors.append(
-                    f"Codex adapter must default sandbox_mode=read-only: .codex/agents/{name}.toml"
+                    f"Codex adapter sandbox mismatch for canonical mode {entry.get('mode')}: "
+                    f".codex/agents/{name}.toml"
                 )
-            if 'sandbox_mode = "read-only"' not in text and "sandbox_mode = 'read-only'" not in text:
+            if "danger-full-access" in text:
                 errors.append(
-                    f"Codex adapter missing sandbox_mode=read-only: .codex/agents/{name}.toml"
+                    f"Codex adapter must not grant unrestricted host access: .codex/agents/{name}.toml"
                 )
 
     agents_md = repo / "AGENTS.md"

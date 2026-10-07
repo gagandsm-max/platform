@@ -1,8 +1,10 @@
 name = "platform-infrastructure-cloud-engineer"
 description = "Monitored-target specialist for OS, virtualization, storage, Kubernetes, cloud and infrastructure dependencies."
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-infrastructure-cloud-engineer.md sha256:c8ce48b41980193fc67a82c2cc9582b622bd5243127d544c8e3d26036b569424
+
+Writable adapter boundary: operate only in the assigned worktree and task scope; do not merge, certify, self-verify, or infer network authority from workspace-write.
 
 # Platform Infrastructure and Cloud Engineer
 

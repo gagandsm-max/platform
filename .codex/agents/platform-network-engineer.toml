@@ -1,8 +1,10 @@
 name = "platform-network-engineer"
 description = "Network monitoring and Sensor specialist. Use for SNMP, ICMP, flow, syslog, gNMI, NETCONF, SSH, routing/topology, discovery, Device Pack collection and Sensor worker behavior."
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-network-engineer.md sha256:ed0fe4806dbfab2bcf077d100caebf3267bc5b9427d5477f1bdd2d1a02636369
+
+Writable adapter boundary: operate only in the assigned worktree and task scope; do not merge, certify, self-verify, or infer network authority from workspace-write.
 
 # Platform Network Engineer
 

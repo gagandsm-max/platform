@@ -54,14 +54,14 @@
     "stopConditions": {"type": "array", "items": {"type": "string"}},
     "writerTool": {
       "type": "string",
-      "enum": ["cursor-cli", "antigravity"],
-      "description": "Product writer. Default is cursor-cli (no elevation). antigravity requires writerElevation on an isolated workspace. never-writers and suspended tools (cursor-cloud, github-copilot, chatgpt-github, founder, codex) cannot be selected. Derived from project_agents/tool_authority.json."
+      "enum": ["cursor-cli", "codex"],
+      "description": "Bounded product writer. Cursor CLI is the default; Codex is an authorized non-default writer. Both require one-writer-per-worktree isolation and cannot self-verify, self-certify or merge. Derived from project_agents/tool_authority.json."
     },
     "writerElevation": {
       "type": "object",
       "additionalProperties": false,
       "required": ["authorizedBy", "reason", "isolatedWorkspace"],
-      "description": "Required only when writerTool is the exceptional writer (antigravity). Forbidden for cursor-cli. Cannot authorize never-writers or suspended Codex.",
+      "description": "Reserved for a future explicitly governed exceptional writer. No current writer uses elevation; it is forbidden for cursor-cli and codex, and cannot authorize Antigravity or never-writers.",
       "properties": {
         "authorizedBy": {
           "type": "string",
@@ -80,7 +80,7 @@
     "verifierTool": {
       "type": "string",
       "enum": ["chatgpt-github", "antigravity"],
-      "description": "Independent verifier/auditor. Must differ from writerTool. Codex is suspended and cannot be selected. Derived from project_agents/tool_authority.json."
+      "description": "Independent verifier/auditor. Must differ from writerTool. Codex and Cursor CLI cannot be selected. Derived from project_agents/tool_authority.json."
     },
     "gatekeeper": {
       "type": "string",
@@ -124,11 +124,11 @@
     },
     {
       "if": {
-        "properties": {"writerTool": {"const": "antigravity"}},
+        "properties": {"writerTool": {"const": "codex"}},
         "required": ["writerTool"]
       },
       "then": {
-        "required": ["writerElevation"]
+        "not": {"required": ["writerElevation"]}
       }
     }
   ]
