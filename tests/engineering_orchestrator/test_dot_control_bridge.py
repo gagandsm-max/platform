@@ -39,6 +39,7 @@ from dot_control.executor import (  # noqa: E402
     execute_repo_probe,
     live_writer_unsupported,
     parse_github_owner_repo,
+    resolve_contained_git_dirs,
     run_process,
     sanitize_remote_url,
     validate_repo_relative_path,
@@ -46,7 +47,14 @@ from dot_control.executor import (  # noqa: E402
     verify_git_preconditions,
     verify_repository_binding,
 )
-from dot_control.locks import TaskIdLock, WorktreeLock, inspect_lock, pid_alive  # noqa: E402
+from dot_control.locks import (  # noqa: E402
+    FinalizationBarrier,
+    TaskIdLock,
+    WorktreeLock,
+    inspect_lock,
+    pid_alive,
+    recover_finalization_barrier,
+)
 from dot_control.models import (  # noqa: E402
     ALLOWED_MANIFEST_KEYS,
     APPROVED_REPOSITORY,
@@ -156,8 +164,10 @@ def _base_manifest(
 def _write_prompt(control: Path, task_id: str, text: str = "audit please") -> Path:
     d = control / "tasks" / task_id
     d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d, DIR_MODE)
     path = d / "prompt.md"
     path.write_text(text, encoding="utf-8")
+    os.chmod(path, FILE_MODE)
     return path
 
 
@@ -166,10 +176,12 @@ def _submit(bridge: DotControlBridge, payload: dict) -> Path:
     tmp = bridge.inbox / f"{task_id}.tmp"
     final = bridge.inbox / f"{task_id}.json"
     tmp.write_text(json.dumps(payload), encoding="utf-8")
+    os.chmod(tmp, FILE_MODE)
     with open(tmp, "a", encoding="utf-8") as fh:
         fh.flush()
         os.fsync(fh.fileno())
     os.replace(tmp, final)
+    os.chmod(final, FILE_MODE)
     return final
 
 
@@ -442,6 +454,7 @@ class DotControlBridgeTests(_BridgeFixture):
     def test_invalid_json_quarantine(self) -> None:
         bad = self.bridge.inbox / "BADJSON.json"
         bad.write_text("{not-json", encoding="utf-8")
+        os.chmod(bad, FILE_MODE)
         with self.assertRaises(BridgeError):
             self.bridge.process_one(bad)
         self.assertTrue(any(self.bridge.quarantine.glob("BADJSON*")))
@@ -634,6 +647,7 @@ class DotControlBridgeTests(_BridgeFixture):
         )
         self.assertFalse(pid_alive(dead.bridge_pid))
         path.write_text(json.dumps(dead.to_wire()), encoding="utf-8")
+        os.chmod(path, FILE_MODE)
         lock.acquire(
             task_id="NEW",
             action="REPO_PROBE",
@@ -1584,37 +1598,16 @@ class Hold2LockEvidenceLifecycleTests(_BridgeFixture):
         self.assertTrue((self.bridge.state / "LOCK-EV.json").is_file())
         self.assertTrue(result.lock_lifecycle.get("released"))
         self.assertTrue(result.lock_lifecycle.get("evidenceDurable"))
+        self.assertTrue(result.lock_lifecycle.get("finalizationBarrierCleared"))
         state = json.loads((self.bridge.state / "LOCK-EV.json").read_text(encoding="utf-8"))
         self.assertTrue(state.get("lockReleased"))
+        from dot_control.locks import FinalizationBarrier
+
+        self.assertFalse(FinalizationBarrier(self.bridge.locks, self.repo).exists())
 
     def test_evidence_write_failure_blocks_second_acquire(self) -> None:
-        payload = _base_manifest(
-            control=self.control,
-            worktree=self.repo,
-            task_id="LOCK-FAIL",
-            action="REPO_PROBE",
-            branch=self.branch,
-            head=self.head,
-        )
-        _submit(self.bridge, payload)
-        real_write_result = __import__(
-            "dot_control.evidence", fromlist=["write_result"]
-        ).write_result
+        from dot_control.locks import FinalizationBarrier
 
-        calls = {"n": 0}
-
-        def boom_write(results_dir, result_obj):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise OSError("simulated evidence write failure")
-            return real_write_result(results_dir, result_obj)
-
-        with mock.patch("dot_control.bridge.write_result", side_effect=boom_write):
-            result = self.bridge.process_one()
-        self.assertNotEqual(result.disposition, Disposition.SUCCESS.value)
-        # Lock retained after first write failure path that also fails forensic? —
-        # first failure triggers forensic rewrite which succeeds via boom_write 2nd call.
-        # Force both writes to fail and prove lock retained.
         payload2 = _base_manifest(
             control=self.control,
             worktree=self.repo,
@@ -1632,8 +1625,8 @@ class Hold2LockEvidenceLifecycleTests(_BridgeFixture):
             with mock.patch("dot_control.bridge.write_state", side_effect=always_boom):
                 result2 = self.bridge.process_one()
         self.assertEqual(result2.disposition, Disposition.CRASH_RECOVERY.value)
-        self.assertFalse(result2.lock_lifecycle.get("released", False))
-        # Second task on same worktree cannot acquire while lock retained.
+        # Durable barrier remains after flock release; one-shot exit cannot bypass it.
+        self.assertTrue(FinalizationBarrier(self.bridge.locks, self.repo).exists())
         lock_b = WorktreeLock(self.bridge.locks, self.repo)
         with self.assertRaises(BridgeError) as ctx:
             lock_b.acquire(
@@ -1642,9 +1635,10 @@ class Hold2LockEvidenceLifecycleTests(_BridgeFixture):
                 writer_tool="none",
                 branch=self.branch,
                 expected_head=_sha(self.repo),
-                allow_stale_reclaim=False,
+                allow_stale_reclaim=True,
             )
         self.assertEqual(ctx.exception.disposition, Disposition.LOCKED)
+        self.assertIn("finalization barrier", str(ctx.exception).lower())
 
 
 class Hold2ControlRootModeTests(unittest.TestCase):
@@ -1869,6 +1863,7 @@ class Hold2UnknownFieldTests(_BridgeFixture):
             '"createdAt":"2026-10-07T00:00:00Z","requestedBy":"t"}'
         ) % (APPROVED_REPOSITORY, self.repo, self.branch, self.head, self.head)
         path.write_text(raw, encoding="utf-8")
+        os.chmod(path, FILE_MODE)
         with self.assertRaises(BridgeError) as ctx:
             load_json_object(path)
         self.assertIn("duplicate json key", str(ctx.exception).lower())
@@ -1891,9 +1886,11 @@ class Hold2TaskIdConcurrencyTests(_BridgeFixture):
         )
         bad = self.bridge.inbox / "not-the-id.json"
         bad.write_text(json.dumps(payload), encoding="utf-8")
+        os.chmod(bad, FILE_MODE)
         with self.assertRaises(BridgeError) as ctx:
             self.bridge.process_one(bad)
-        self.assertIn("taskid.json", str(ctx.exception).lower())
+        msg = str(ctx.exception).lower()
+        self.assertTrue("taskid" in msg or "filename" in msg)
 
     def test_partial_tmp_ignored(self) -> None:
         payload = _base_manifest(
@@ -1985,6 +1982,603 @@ class Hold2TaskIdConcurrencyTests(_BridgeFixture):
             )
         finally:
             lock.release()
+
+
+class Hold3FinalizationBarrierTests(_BridgeFixture):
+    def test_successful_finalization_removes_barrier(self) -> None:
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="BAR-OK",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        _submit(self.bridge, payload)
+        result = self.bridge.process_one()
+        self.assertTrue(result.lock_lifecycle.get("released"))
+        self.assertTrue(result.lock_lifecycle.get("finalizationBarrierCleared"))
+        self.assertFalse(FinalizationBarrier(self.bridge.locks, self.repo).exists())
+
+    def test_crash_after_release_before_final_blocks_next(self) -> None:
+        """Simulate crash: barrier left after flock free → next task blocked."""
+        barrier = FinalizationBarrier(self.bridge.locks, self.repo)
+        barrier.write(
+            task_id="PRED-1",
+            expected_head=self.head,
+            ending_head=self.head,
+            evidence_status="pending",
+            recovery_required=True,
+            bridge_pid=0,
+        )
+        lock = WorktreeLock(self.bridge.locks, self.repo)
+        with self.assertRaises(BridgeError) as ctx:
+            lock.acquire(
+                task_id="NEXT-1",
+                action="REPO_PROBE",
+                writer_tool="none",
+                branch=self.branch,
+                expected_head=self.head,
+            )
+        self.assertEqual(ctx.exception.disposition, Disposition.LOCKED)
+        self.assertIn("finalization barrier", str(ctx.exception).lower())
+
+    def test_final_evidence_failure_blocks_next_task(self) -> None:
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="BAR-FIN",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        _submit(self.bridge, payload)
+        real_write_result = __import__(
+            "dot_control.evidence", fromlist=["write_result"]
+        ).write_result
+        calls = {"n": 0}
+
+        def boom_after_provisional(results_dir, result_obj):
+            calls["n"] += 1
+            # First write (provisional) succeeds; subsequent final writes fail.
+            if calls["n"] == 1:
+                return real_write_result(results_dir, result_obj)
+            raise OSError("final evidence failure")
+
+        with mock.patch("dot_control.bridge.write_result", side_effect=boom_after_provisional):
+            # write_state: provisional ok, final fails
+            real_write_state = __import__(
+                "dot_control.evidence", fromlist=["write_state"]
+            ).write_state
+            state_calls = {"n": 0}
+
+            def boom_state(state_dir, task_id, state):
+                state_calls["n"] += 1
+                if state_calls["n"] == 1:
+                    return real_write_state(state_dir, task_id, state)
+                raise OSError("final state failure")
+
+            with mock.patch("dot_control.bridge.write_state", side_effect=boom_state):
+                result = self.bridge.process_one()
+        self.assertNotEqual(result.disposition, Disposition.SUCCESS.value)
+        self.assertTrue(FinalizationBarrier(self.bridge.locks, self.repo).exists())
+        with self.assertRaises(BridgeError) as ctx:
+            WorktreeLock(self.bridge.locks, self.repo).acquire(
+                task_id="BLOCKED",
+                action="REPO_PROBE",
+                writer_tool="none",
+                branch=self.branch,
+                expected_head=_sha(self.repo),
+            )
+        self.assertEqual(ctx.exception.disposition, Disposition.LOCKED)
+
+    def test_oneshot_exit_does_not_bypass_barrier(self) -> None:
+        barrier = FinalizationBarrier(self.bridge.locks, self.repo)
+        barrier.write(
+            task_id="ONESHOT-PRED",
+            expected_head=self.head,
+            ending_head=self.head,
+            evidence_status="lock held evidence pending",
+            recovery_required=True,
+            bridge_pid=0,
+        )
+        # Child process (simulating next oneshot) cannot acquire.
+        child = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; from pathlib import Path; "
+                    f"sys.path.insert(0, {str(PROJECT_AGENTS)!r}); "
+                    "from dot_control.locks import WorktreeLock; "
+                    "from dot_control.models import BridgeError, Disposition; "
+                    f"lock = WorktreeLock(Path({str(self.bridge.locks)!r}), Path({str(self.repo)!r})); "
+                    "\ntry:\n"
+                    f"    lock.acquire(task_id='CHILD', action='REPO_PROBE', writer_tool='none', "
+                    f"branch={self.branch!r}, expected_head={self.head!r})\n"
+                    "    print('UNEXPECTED_ACQUIRE')\n"
+                    "except BridgeError as e:\n"
+                    "    print(e.disposition.value + ':' + str(e))\n"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        out = (child.stdout or "") + (child.stderr or "")
+        self.assertNotIn("UNEXPECTED_ACQUIRE", out)
+        self.assertIn("LOCKED", out)
+
+    def test_recovery_clears_barrier_after_inspection(self) -> None:
+        barrier = FinalizationBarrier(self.bridge.locks, self.repo)
+        barrier.write(
+            task_id="REC-1",
+            expected_head=self.head,
+            ending_head=self.head,
+            evidence_status="pending",
+            recovery_required=True,
+            bridge_pid=0,
+        )
+        out = self.bridge.recover_worktree_finalization(
+            self.repo, confirm_task_id="REC-1", action="clear"
+        )
+        self.assertTrue(out["cleared"])
+        self.assertFalse(barrier.exists())
+
+
+class Hold3TaskIdLockLoserTests(_BridgeFixture):
+    def test_process_race_loser_locked_no_manifest_mutation(self) -> None:
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="RACE-MAN",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        inbox_path = _submit(self.bridge, payload)
+        before = inbox_path.read_bytes()
+        before_mode = stat.S_IMODE(inbox_path.stat().st_mode)
+        lock = TaskIdLock(self.bridge.locks, "RACE-MAN")
+        lock.acquire()
+        try:
+            child = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import sys, json; from pathlib import Path; "
+                        f"sys.path.insert(0, {str(PROJECT_AGENTS)!r}); "
+                        "from dot_control.bridge import DotControlBridge; "
+                        "from dot_control.validator import PathPolicy; "
+                        "from dot_control.models import Disposition; "
+                        f"policy = PathPolicy(home=Path({str(self.tmp / 'home')!r}), "
+                        f"control_root=Path({str(self.control)!r}), "
+                        f"approved_repo_exact=Path({str(self.repo)!r}), "
+                        f"approved_repo_prefix={str(self.tmp / 'nms-')!r}, "
+                        f"allow_test_roots=[Path({str(self.tmp)!r})]); "
+                        f"b = DotControlBridge(Path({str(self.control)!r}), policy=policy); "
+                        "\ntry:\n"
+                        "    b.process_one()\n"
+                        "    print('UNEXPECTED_SUCCESS')\n"
+                        "except Exception as e:\n"
+                        "    disp = getattr(e, 'disposition', None)\n"
+                        "    print(('DISP:' + disp.value) if disp is not None else type(e).__name__)\n"
+                        "    print('ERR:' + str(e))\n"
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(REPO_ROOT),
+                timeout=30,
+            )
+            out = (child.stdout or "") + (child.stderr or "")
+            self.assertNotIn("UNEXPECTED_SUCCESS", out)
+            self.assertTrue("LOCKED" in out or "DISP:LOCKED" in out, msg=out)
+            # Loser must not move/quarantine/delete/rename the manifest.
+            self.assertTrue(inbox_path.is_file())
+            self.assertEqual(inbox_path.read_bytes(), before)
+            self.assertEqual(stat.S_IMODE(inbox_path.stat().st_mode), before_mode)
+            self.assertFalse((self.bridge.quarantine / "RACE-MAN.json").exists())
+            self.assertFalse((self.bridge.processing / "RACE-MAN.json").exists())
+            self.assertFalse((self.bridge.results / "RACE-MAN.result.json").exists())
+        finally:
+            lock.release()
+        # Winner (this process) can still claim and complete.
+        result = self.bridge.process_one()
+        self.assertIn(
+            result.disposition,
+            {Disposition.SUCCESS.value, Disposition.PARTIAL.value},
+        )
+        self.assertFalse(inbox_path.exists())
+        self.assertTrue((self.bridge.results / "RACE-MAN.result.json").is_file())
+        self.assertEqual(
+            len(list(self.bridge.results.glob("RACE-MAN.result.json"))),
+            1,
+        )
+
+
+class Hold3SafeGitReadTests(_BridgeFixture):
+    def test_repo_fsmonitor_creates_no_marker(self) -> None:
+        marker = self.tmp / "fsmonitor-read-ran"
+        fsmon = self.tmp / "evil-fsmonitor-read"
+        fsmon.write_text(f"#!/bin/sh\necho ran > '{marker}'\nexit 0\n", encoding="utf-8")
+        os.chmod(fsmon, 0o755)
+        _git(self.repo, "config", "core.fsmonitor", str(fsmon))
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="FSM-READ",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        _submit(self.bridge, payload)
+        result = self.bridge.process_one()
+        self.assertFalse(marker.exists(), "repo core.fsmonitor must not execute on reads")
+        self.assertIn(result.disposition, {Disposition.SUCCESS.value, Disposition.PARTIAL.value})
+
+    def test_global_fsmonitor_creates_no_marker(self) -> None:
+        marker = self.tmp / "global-fsmonitor-ran"
+        fsmon = self.tmp / "evil-global-fsmonitor"
+        fsmon.write_text(f"#!/bin/sh\necho ran > '{marker}'\nexit 0\n", encoding="utf-8")
+        os.chmod(fsmon, 0o755)
+        # Poison process environment global config; bridge must ignore it.
+        evil_cfg = self.tmp / "evil-global-gitconfig"
+        evil_cfg.write_text(f"[core]\n\tfsmonitor = {fsmon}\n", encoding="utf-8")
+        env = os.environ.copy()
+        env["GIT_CONFIG_GLOBAL"] = str(evil_cfg)
+        child = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import os, sys; from pathlib import Path; "
+                    f"sys.path.insert(0, {str(PROJECT_AGENTS)!r}); "
+                    "from dot_control.executor import git_dirty, git_head, execute_repo_probe; "
+                    "from dot_control.validator import validate_manifest_dict, PathPolicy; "
+                    f"repo = Path({str(self.repo)!r}); "
+                    "print(git_head(repo)); "
+                    "print('dirty', git_dirty(repo)); "
+                    f"marker = Path({str(marker)!r}); "
+                    "print('marker', marker.exists())\n"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertFalse(marker.exists())
+        self.assertIn("marker False", child.stdout)
+
+    def test_external_diff_and_credential_helper_no_marker(self) -> None:
+        diff_marker = self.tmp / "diff-ran"
+        cred_marker = self.tmp / "cred-ran"
+        diff = self.tmp / "evil-diff"
+        cred = self.tmp / "evil-cred"
+        diff.write_text(f"#!/bin/sh\necho ran > '{diff_marker}'\nexit 0\n", encoding="utf-8")
+        cred.write_text(f"#!/bin/sh\necho ran > '{cred_marker}'\nexit 0\n", encoding="utf-8")
+        os.chmod(diff, 0o755)
+        os.chmod(cred, 0o755)
+        _git(self.repo, "config", "diff.external", str(diff))
+        _git(self.repo, "config", "credential.helper", str(cred))
+        from dot_control.executor import git_dirty, collect_change_scope
+
+        collect_change_scope(self.repo, self.head, self.head)
+        git_dirty(self.repo)
+        self.assertFalse(diff_marker.exists())
+        self.assertFalse(cred_marker.exists())
+
+    def test_hooks_on_status_create_no_marker(self) -> None:
+        marker = self.tmp / "post-checkout-ran"
+        hooks = self.repo / ".git" / "hooks"
+        hooks.mkdir(parents=True, exist_ok=True)
+        hook = hooks / "fsmonitor-watchman"
+        hook.write_text(f"#!/bin/sh\necho ran > '{marker}'\nexit 0\n", encoding="utf-8")
+        os.chmod(hook, 0o755)
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="HOOK-READ",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        _submit(self.bridge, payload)
+        self.bridge.process_one()
+        self.assertFalse(marker.exists())
+
+
+class Hold3GitDirContainmentTests(_BridgeFixture):
+    def test_legitimate_standalone_repo_accepted(self) -> None:
+        git_dir, common_dir = resolve_contained_git_dirs(self.repo)
+        self.assertTrue(git_dir.is_dir())
+        self.assertTrue(common_dir.is_dir())
+        self.assertEqual(git_dir.resolve(), (self.repo / ".git").resolve())
+
+    def test_legitimate_linked_worktree_accepted(self) -> None:
+        main = self.tmp / "nms-main"
+        main.mkdir()
+        _init_repo(main, branch="feature/wt")
+        wt = self.tmp / "nms-linked"
+        # Branch is checked out in main; add linked worktree in detached HEAD.
+        _git(main, "worktree", "add", "--detach", str(wt))
+        git_dir, common_dir = resolve_contained_git_dirs(wt)
+        self.assertIn("worktrees", str(git_dir))
+        self.assertEqual(common_dir.resolve(), (main / ".git").resolve())
+
+    def test_git_file_points_outside_rejected(self) -> None:
+        outside = self.tmp / "outside-git"
+        outside.mkdir()
+        (outside / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        craft = self.tmp / "crafted"
+        craft.mkdir()
+        _git(craft, "init")
+        # Replace .git with a file pointing outside approved roots.
+        git_path = craft / ".git"
+        if git_path.is_dir():
+            import shutil
+
+            shutil.rmtree(git_path)
+        git_path.write_text(f"gitdir: {outside}\n", encoding="utf-8")
+        with self.assertRaises(BridgeError) as ctx:
+            resolve_contained_git_dirs(craft)
+        msg = str(ctx.exception).lower()
+        self.assertTrue(
+            "approved" in msg or "not a git repository" in msg or "escapes" in msg,
+            msg=msg,
+        )
+
+    def test_symlinked_git_dir_component_rejected(self) -> None:
+        real_git = self.repo / ".git"
+        alt = self.tmp / "alt-repo"
+        alt.mkdir()
+        _init_repo(alt, branch="feature/alt")
+        # Symlink a path component used as git-dir target.
+        link_parent = self.tmp / "link-parent"
+        link_parent.mkdir()
+        link = link_parent / "git-link"
+        link.symlink_to(real_git)
+        # Craft worktree whose absolute-git-dir resolves through a symlink component
+        # by replacing .git with a symlink.
+        craft = self.tmp / "symlink-git-repo"
+        craft.mkdir()
+        _init_repo(craft, branch="feature/sg")
+        import shutil
+
+        shutil.rmtree(craft / ".git")
+        (craft / ".git").symlink_to(real_git)
+        with self.assertRaises(BridgeError) as ctx:
+            resolve_contained_git_dirs(craft)
+        self.assertIn("symlink", str(ctx.exception).lower())
+
+    def test_symlinked_empty_hooks_rejected(self) -> None:
+        from dot_control.executor import _prepare_empty_hooks_dir
+
+        git_dir = self.repo / ".git"
+        hooks = git_dir / "dot-control-empty-hooks"
+        outside = self.tmp / "outside-hooks"
+        outside.mkdir()
+        marker = outside / "keep"
+        marker.write_text("safe\n", encoding="utf-8")
+        if hooks.exists():
+            import shutil
+
+            shutil.rmtree(hooks)
+        hooks.symlink_to(outside)
+        with self.assertRaises(BridgeError) as ctx:
+            _prepare_empty_hooks_dir(self.repo)
+        self.assertIn("symlink", str(ctx.exception).lower())
+        self.assertEqual(marker.read_text(encoding="utf-8"), "safe\n")
+
+
+class Hold3DurableFileModeTests(_BridgeFixture):
+    def test_0644_manifest_rejected(self) -> None:
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="MODE-644",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        path = _submit(self.bridge, payload)
+        os.chmod(path, 0o644)
+        with self.assertRaises(BridgeError) as ctx:
+            self.bridge.process_one(path)
+        self.assertIn("0o600", str(ctx.exception))
+
+    def test_symlink_manifest_rejected(self) -> None:
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="MODE-SYM",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        real = self.tmp / "external-manifest.json"
+        real.write_text(json.dumps(payload), encoding="utf-8")
+        os.chmod(real, FILE_MODE)
+        link = self.bridge.inbox / "MODE-SYM.json"
+        link.symlink_to(real)
+        with self.assertRaises(BridgeError):
+            self.bridge.process_one(link)
+        self.assertTrue(real.exists())
+
+    def test_0644_prompt_rejected(self) -> None:
+        path = _write_prompt(self.control, "MODE-PR", "hello")
+        os.chmod(path, 0o644)
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="MODE-PR",
+            action="CURSOR_TASK",
+            branch=self.branch,
+            head=self.head,
+            writer="cursor-cli",
+            prompt=str(path),
+        )
+        with self.assertRaises(BridgeError) as ctx:
+            validate_manifest_dict(payload, policy=self.policy)
+        self.assertIn("0o600", str(ctx.exception))
+
+    def test_claimed_processing_manifest_remains_0600(self) -> None:
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="MODE-CL",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        _submit(self.bridge, payload)
+        # Intercept after claim by patching validate to snapshot mode.
+        modes: list[int] = []
+        real_validate = validate_manifest_dict
+
+        def wrap(data, **kwargs):
+            proc = self.bridge.processing / "MODE-CL.json"
+            if proc.exists():
+                modes.append(stat.S_IMODE(proc.stat().st_mode))
+            return real_validate(data, **kwargs)
+
+        with mock.patch("dot_control.bridge.validate_manifest_dict", side_effect=wrap):
+            self.bridge.process_one()
+        self.assertTrue(modes)
+        self.assertTrue(all(m == FILE_MODE for m in modes))
+
+    def test_unsafe_preexisting_lock_rejected_not_repaired(self) -> None:
+        from dot_control.locks import worktree_lock_name
+
+        path = self.bridge.locks / worktree_lock_name(self.repo.resolve())
+        path.write_text("{}\n", encoding="utf-8")
+        os.chmod(path, 0o644)
+        lock = WorktreeLock(self.bridge.locks, self.repo)
+        with self.assertRaises(BridgeError) as ctx:
+            lock.acquire(
+                task_id="L",
+                action="REPO_PROBE",
+                writer_tool="none",
+                branch=self.branch,
+                expected_head=self.head,
+            )
+        self.assertIn("no silent repair", str(ctx.exception).lower())
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+
+    def test_unsafe_preexisting_bridge_log_rejected(self) -> None:
+        from dot_control.evidence import append_bridge_log
+
+        path = self.bridge.logs / "UNSAFE.bridge.log"
+        path.write_text("old\n", encoding="utf-8")
+        os.chmod(path, 0o666)
+        with self.assertRaises(BridgeError) as ctx:
+            append_bridge_log(self.bridge.logs, "UNSAFE", ["x"])
+        self.assertIn("no silent repair", str(ctx.exception).lower())
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o666)
+
+
+class Hold3ExplicitManifestPathTests(_BridgeFixture):
+    def test_external_manifest_path_rejected(self) -> None:
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="EXT-1",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        external = self.tmp / "EXT-1.json"
+        external.write_text(json.dumps(payload), encoding="utf-8")
+        os.chmod(external, FILE_MODE)
+        with self.assertRaises(BridgeError) as ctx:
+            self.bridge.process_one(external)
+        self.assertIn("inbox or processing", str(ctx.exception).lower())
+
+    def test_processing_path_accepted(self) -> None:
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="PROC-1",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        proc = self.bridge.processing / "PROC-1.json"
+        proc.write_text(json.dumps(payload), encoding="utf-8")
+        os.chmod(proc, FILE_MODE)
+        result = self.bridge.process_one(proc)
+        self.assertIn(
+            result.disposition,
+            {Disposition.SUCCESS.value, Disposition.PARTIAL.value},
+        )
+
+
+class Hold3TruncationBoundaryRedactionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="dot-trunc-")
+        self.tmp = Path(self._tmpdir.name)
+        self.logs = self.tmp / "logs"
+        self.logs.mkdir()
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def _emit(self, name: str, raw: bytes, *, limit: int, overlap: int) -> bytes:
+        from dot_control.evidence import BoundedRedactingWriter
+
+        path = self.logs / name
+        w = BoundedRedactingWriter(path, max_bytes=limit, overlap=overlap)
+        # Fill to raw_cap then one more byte to force truncation with secret in overlap.
+        w.write(raw)
+        if len(raw) <= limit + overlap:
+            w.write(b"X" * (limit + overlap - len(raw) + 8))
+        w.close()
+        data = path.read_bytes()
+        self.assertLessEqual(len(data), limit)
+        self.assertIn(b"TRUNCATED", data)
+        return data
+
+    def test_pem_begins_in_overlap_end_beyond_cap(self) -> None:
+        limit = 256
+        overlap = 64
+        begin = b"-----BEGIN RSA PRIVATE KEY-----\n"
+        secret = b"MIIEvSECRETKEYMATERIALSHOULDNOTLEAKXXXX\n"
+        # Place BEGIN near end of retained window so END lies beyond cap.
+        prefix = b"A" * (limit + overlap - len(begin) - 10)
+        raw = prefix + begin + secret
+        out = self._emit("pem-bound.log", raw, limit=limit, overlap=overlap)
+        self.assertNotIn(b"MIIEvSECRETKEYMATERIALSHOULDNOTLEAKXXXX", out)
+        self.assertIn(b"truncation-boundary indeterminate", out)
+
+    def test_token_prefix_in_overlap_incomplete(self) -> None:
+        limit = 200
+        overlap = 64
+        token = b"ghp_ABCDEFGHIJKLMNOPQRSTUVWX"
+        # Put only prefix+few chars in final overlap; rest beyond cap.
+        prefix = b"B" * (limit + overlap - 12)
+        raw = prefix + b"ghp_ABCD"
+        out = self._emit("tok-bound.log", raw, limit=limit, overlap=overlap)
+        self.assertNotIn(b"ghp_ABCD", out)
+        self.assertNotIn(token, out)
+
+    def test_credential_url_lacks_at_before_cap(self) -> None:
+        limit = 220
+        overlap = 80
+        prefix = b"C" * (limit + overlap - 40)
+        raw = prefix + b"https://user:sekritpass"
+        out = self._emit("url-bound.log", raw, limit=limit, overlap=overlap)
+        self.assertNotIn(b"sekritpass", out)
+
+    def test_bearer_partial_at_boundary(self) -> None:
+        limit = 180
+        overlap = 64
+        prefix = b"D" * (limit + overlap - 30)
+        raw = prefix + b"Authorization: Bearer ab"
+        out = self._emit("bearer-bound.log", raw, limit=limit, overlap=overlap)
+        self.assertNotIn(b"Bearer ab", out)
 
 
 if __name__ == "__main__":

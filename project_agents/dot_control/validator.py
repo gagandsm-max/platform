@@ -423,13 +423,23 @@ def _validate_action_tools(
 
 
 def validate_prompt_file(prompt_file: Path, *, task_id: str, policy: PathPolicy) -> Path:
-    if prompt_file.is_symlink():
+    import os
+    import stat as _stat
+
+    from .paths import assert_durable_file_mode
+
+    if prompt_file.is_symlink() or os.path.islink(prompt_file):
         raise BridgeError(f"symlink prompt rejected: {prompt_file}")
     if not prompt_file.is_file():
         raise BridgeError(f"promptFile is not a regular file: {prompt_file}")
+    st = prompt_file.stat()
+    if not _stat.S_ISREG(st.st_mode):
+        raise BridgeError(f"promptFile is not a regular file: {prompt_file}")
     task_root = (policy.control_root / "tasks" / task_id).resolve(strict=False)
     resolved = policy.assert_under(prompt_file, task_root, "promptFile")
-    size = prompt_file.stat().st_size
+    # Require mode 0600 and bridge-user owner; do not silently repair.
+    assert_durable_file_mode(prompt_file, "promptFile")
+    size = st.st_size
     if size > MAX_PROMPT_BYTES:
         raise BridgeError(f"oversized prompt ({size} > {MAX_PROMPT_BYTES})")
     raw = prompt_file.read_bytes()

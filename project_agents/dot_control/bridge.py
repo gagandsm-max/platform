@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -30,11 +31,18 @@ from .executor import (
     execute_git_commit_proof,
     execute_repo_probe,
     git_head,
+    git_inspect_for_recovery,
     live_writer_unsupported,
     run_process,
     verify_git_preconditions,
 )
-from .locks import TaskIdLock, WorktreeLock, inspect_lock
+from .locks import (
+    FinalizationBarrier,
+    TaskIdLock,
+    WorktreeLock,
+    inspect_lock,
+    recover_finalization_barrier,
+)
 from .models import (
     DAEMON_POLL_SECONDS,
     DEFAULT_CONTROL_ROOT,
@@ -56,6 +64,8 @@ from .validator import (
     normalize_plan,
     validate_manifest_dict,
 )
+
+_TASK_ID_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.json$")
 
 
 class DotControlBridge:
@@ -107,6 +117,27 @@ class DotControlBridge:
         """Explicit init — creates required subdirectories with hardened modes."""
         return init_control_root(self.control_root)
 
+    def assert_approved_manifest_path(self, manifest_path: Path) -> Path:
+        """Accept only exact control-root inbox or processing paths."""
+        path = Path(manifest_path)
+        if path.is_symlink() or os.path.islink(path):
+            raise BridgeError(f"manifest must not be a symlink: {path}")
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            raise BridgeError(f"manifest path unreadable: {path}: {exc}") from exc
+        inbox_r = self.inbox.resolve(strict=False)
+        processing_r = self.processing.resolve(strict=False)
+        parent = resolved.parent
+        if parent != inbox_r and parent != processing_r:
+            raise BridgeError(
+                f"manifest path must be under exact control-root inbox or processing; "
+                f"got {path} (parent={parent})"
+            )
+        if not _TASK_ID_FILE_RE.match(resolved.name):
+            raise BridgeError(f"manifest filename must be <taskId>.json; got {resolved.name}")
+        return resolved
+
     # --- lifecycle ----------------------------------------------------------
 
     def list_inbox_ready(self) -> list[Path]:
@@ -136,12 +167,14 @@ class DotControlBridge:
         if dest.exists():
             dest = self.quarantine / f"{path.stem}.{int(time.time())}.json"
         os.replace(path, dest)
+        try:
+            os.chmod(dest, FILE_MODE)
+        except OSError:
+            pass
+        assert_durable_file_mode(dest, "quarantined manifest")
         meta = dest.with_suffix(dest.suffix + ".reason.json")
         atomic_write_json(meta, {"reason": reason, "at": utc_now_iso(), "source": str(path)})
-        try:
-            assert_durable_file_mode(meta, "quarantine reason")
-        except BridgeError:
-            pass
+        assert_durable_file_mode(meta, "quarantine reason")
         return dest
 
     def claim_manifest(self, inbox_path: Path, task_id: str) -> Path:
@@ -153,6 +186,9 @@ class DotControlBridge:
             raise BridgeError(
                 f"inbox filename must be exactly {expected_name}; got {inbox_path.name}"
             )
+        assert_durable_file_mode(inbox_path, "inbox manifest")
+        if inbox_path.parent.resolve() != self.inbox.resolve():
+            raise BridgeError("claim requires exact inbox parent")
         self.processing.mkdir(parents=True, exist_ok=True)
         dest = self.processing / expected_name
         if dest.exists():
@@ -173,6 +209,8 @@ class DotControlBridge:
                 if dest.exists():
                     dest.unlink()
             raise
+            # Revalidate after atomic claim (no silent mode repair).
+        assert_durable_file_mode(dest, "processing manifest")
         return dest
 
     def validate_only(self, manifest_path: Path) -> dict[str, Any]:
@@ -201,7 +239,7 @@ class DotControlBridge:
                 raise BridgeError("inbox empty", disposition=Disposition.REJECTED)
             manifest_path = ready[0]
 
-        manifest_path = Path(manifest_path)
+        manifest_path = self.assert_approved_manifest_path(Path(manifest_path))
         if manifest_path.suffix != ".json":
             raise BridgeError("partial manifest ignored until atomic rename to .json")
         if manifest_path.name.endswith(".tmp"):
@@ -209,24 +247,42 @@ class DotControlBridge:
 
         processing_path: Optional[Path] = None
         task_id_lock: Optional[TaskIdLock] = None
-        try:
-            data = load_json_object(manifest_path)
-            task_id_preview = data.get("taskId")
-            if not isinstance(task_id_preview, str) or not task_id_preview.strip():
-                raise BridgeError("missing or invalid taskId before admission")
+        owns_task_id_lock = False
+        task_id_preview = manifest_path.stem
 
-            expected_name = f"{task_id_preview}.json"
-            if manifest_path.name != expected_name:
+        try:
+            # Admit by filename before any mutation; TaskIdLock losers must not touch the file.
+            if not _TASK_ID_FILE_RE.match(manifest_path.name):
+                raise BridgeError(f"invalid manifest filename: {manifest_path.name}")
+
+            task_id_lock = TaskIdLock(self.locks, task_id_preview)
+            try:
+                task_id_lock.acquire()
+            except BridgeError as lock_exc:
+                if lock_exc.disposition == Disposition.LOCKED:
+                    # Loser: LOCKED/retry evidence only — never mutate the manifest.
+                    raise
+                raise
+            owns_task_id_lock = True
+
+            # Revalidate path/filename/taskId under the lock before claim.
+            manifest_path = self.assert_approved_manifest_path(manifest_path)
+            if manifest_path.stem != task_id_preview or manifest_path.name != f"{task_id_preview}.json":
+                raise BridgeError("taskId/filename revalidation failed after TaskIdLock")
+
+            assert_durable_file_mode(manifest_path, "admission manifest")
+
+            data = load_json_object(manifest_path)
+            body_task_id = data.get("taskId")
+            if not isinstance(body_task_id, str) or not body_task_id.strip():
+                raise BridgeError("missing or invalid taskId before admission")
+            if body_task_id != task_id_preview:
                 raise BridgeError(
                     f"inbox/processing filename must equal taskId.json "
-                    f"({expected_name}); got {manifest_path.name}"
+                    f"({task_id_preview}.json); body taskId={body_task_id}"
                 )
 
-            # Cross-process exclusive admission for this taskId.
-            task_id_lock = TaskIdLock(self.locks, task_id_preview)
-            task_id_lock.acquire()
-
-            # Re-check uniqueness under the task-id lock (exclude the file we are claiming).
+            expected_name = f"{task_id_preview}.json"
             for label, path in (
                 ("processing", self.processing / expected_name),
                 ("results", self.results / f"{task_id_preview}.result.json"),
@@ -235,9 +291,6 @@ class DotControlBridge:
             ):
                 if path.exists() and path.resolve() != manifest_path.resolve():
                     raise BridgeError(f"duplicate taskId in {label}: {task_id_preview}")
-            # Another inbox copy with same taskId but different path name is already blocked
-            # by filename==taskId.json; same-name second submission while first is in inbox
-            # cannot coexist on the same path.
 
             if manifest_path.parent.resolve() == self.inbox.resolve():
                 processing_path = self.claim_manifest(manifest_path, task_id_preview)
@@ -247,15 +300,24 @@ class DotControlBridge:
                     raise BridgeError(
                         f"processing filename must equal {expected_name}"
                     )
+                assert_durable_file_mode(processing_path, "processing manifest")
 
             manifest = validate_manifest_dict(data, policy=self.policy, require_paths_exist=True)
             if manifest.task_id != task_id_preview:
                 raise BridgeError("taskId mutated between admission and validation")
         except BridgeError as exc:
-            if processing_path is not None and processing_path.exists():
-                self.quarantine_manifest(processing_path, str(exc))
-            elif manifest_path.exists() and manifest_path.parent.resolve() == self.inbox.resolve():
-                self.quarantine_manifest(manifest_path, str(exc))
+            # Only the TaskIdLock owner may claim/quarantine/mutate the manifest.
+            if owns_task_id_lock:
+                try:
+                    if processing_path is not None and processing_path.exists():
+                        self.quarantine_manifest(processing_path, str(exc))
+                    elif (
+                        manifest_path.exists()
+                        and manifest_path.parent.resolve() == self.inbox.resolve()
+                    ):
+                        self.quarantine_manifest(manifest_path, str(exc))
+                except BridgeError:
+                    pass
             if task_id_lock is not None and task_id_lock.acquired:
                 task_id_lock.release()
             raise
@@ -269,6 +331,7 @@ class DotControlBridge:
     def _execute_manifest(self, manifest: TaskManifest, processing_path: Path) -> TaskResult:
         started = utc_now_iso()
         lock = WorktreeLock(self.locks, manifest.worktree)
+        barrier = FinalizationBarrier(self.locks, manifest.worktree)
         lock_lifecycle: dict[str, Any] = {}
         starting_head = ""
         ending_head = ""
@@ -298,7 +361,8 @@ class DotControlBridge:
         elif manifest.action in {Action.REPO_PROBE, Action.GIT_COMMIT_PROOF, Action.TEST_PROFILE}:
             selected_tool = "bridge"
 
-        evidence_written = False
+        provisional_written = False
+        barrier_written = False
         result: Optional[TaskResult] = None
 
         try:
@@ -349,7 +413,6 @@ class DotControlBridge:
                 argv, meta = build_action_argv(manifest)
                 live_block = live_writer_unsupported(manifest.action)
                 if live_block:
-                    # Construct argv for planning evidence; do not launch child.
                     command_argv = redact_argv(argv) if argv else []
                     disposition = Disposition.UNSUPPORTED
                     error = live_block
@@ -367,7 +430,6 @@ class DotControlBridge:
                     command_argv = []
                     notes.append(f"UNSUPPORTED: {error}")
                 else:
-                    # No live child path remains authorized in v1 for these actions.
                     command_argv = redact_argv(argv)
                     disposition = Disposition.UNSUPPORTED
                     error = "v1 live child execution path disabled"
@@ -389,7 +451,6 @@ class DotControlBridge:
 
             ending_head = git_head(manifest.worktree)
 
-            # Scope accounting for writer actions even when UNSUPPORTED (HEAD must not move).
             if manifest.action in {Action.CURSOR_TASK, Action.CODEX_TASK}:
                 if disposition == Disposition.UNSUPPORTED:
                     try:
@@ -421,11 +482,14 @@ class DotControlBridge:
             except Exception:
                 ending_head = starting_head
 
-        # --- Evidence finalization WHILE lock is held (P1-3) ---------------
+        # --- Durable finalization barrier lifecycle ------------------------
+        # acquire flock → execute → provisional result/state → barrier →
+        # release flock → final released result/state → remove barrier
         ended = utc_now_iso()
         lock_lifecycle = dict(lock.lifecycle)
         lock_lifecycle["evidencePending"] = True
         lock_lifecycle["released"] = False
+        lock_lifecycle["finalizationBarrier"] = str(barrier.path)
 
         result = TaskResult(
             task_id=manifest.task_id,
@@ -460,6 +524,21 @@ class DotControlBridge:
             bridge_log_truncated=bridge_log_truncated,
         )
 
+        def _write_barrier(evidence_status: str, *, recovery_required: bool) -> None:
+            nonlocal barrier_written
+            barrier.write(
+                task_id=manifest.task_id,
+                expected_head=manifest.expected_head,
+                ending_head=ending_head or starting_head or manifest.expected_head,
+                evidence_status=evidence_status,
+                recovery_required=recovery_required,
+                bridge_pid=os.getpid(),
+            )
+            barrier_written = True
+            lock_lifecycle["finalizationBarrierWritten"] = True
+            lock_lifecycle["evidenceStatus"] = evidence_status
+
+        # 1) Provisional result/state while flock held.
         try:
             write_result(self.results, result)
             write_state(
@@ -473,106 +552,165 @@ class DotControlBridge:
                     "resultPath": str(self.results / f"{manifest.task_id}.result.json"),
                     "lockHeld": True,
                     "evidencePending": True,
+                    "finalizationBarrier": str(barrier.path),
                 },
             )
-            evidence_written = True
-            lock_lifecycle["evidencePending"] = False
-            lock_lifecycle["evidenceDurable"] = True
+            provisional_written = True
+            lock_lifecycle["evidencePending"] = True
+            lock_lifecycle["provisionalDurable"] = True
         except Exception as write_exc:
-            # Fail closed: do not appear successful; keep lock held for forensics.
             disposition = Disposition.CRASH_RECOVERY
-            error = f"evidence write failed while lock held: {write_exc}"
-            notes.append("evidence-write failure; lock retained for forensics")
+            error = f"provisional evidence write failed while lock held: {write_exc}"
+            notes.append("provisional evidence-write failure")
             result.disposition = disposition.value
             result.error = error
             result.notes = notes
+            # Fail closed: durable barrier before any flock release.
             try:
-                write_result(self.results, result)
-                write_state(
-                    self.state,
-                    manifest.task_id,
-                    {
-                        "taskId": manifest.task_id,
-                        "disposition": disposition.value,
-                        "endedAt": ended,
-                        "endingHead": ending_head,
-                        "resultPath": str(self.results / f"{manifest.task_id}.result.json"),
-                        "lockHeld": True,
-                        "evidenceWriteFailed": True,
-                    },
-                )
-                evidence_written = True
-            except Exception as forensic_exc:
-                notes.append(f"forensic evidence write also failed: {forensic_exc}")
+                _write_barrier("provisional_write_failed", recovery_required=True)
+            except Exception as barrier_exc:
+                notes.append(f"finalization barrier write also failed: {barrier_exc}")
                 result.notes = notes
-                result.lock_lifecycle = dict(lock.lifecycle)
-                result.lock_lifecycle["released"] = False
-                result.lock_lifecycle["retainedForForensics"] = True
-                # Keep the lock object alive so the flock fd is not GC-closed.
-                if not hasattr(self, "_forensic_locks"):
-                    self._forensic_locks: list[WorktreeLock] = []
-                self._forensic_locks.append(lock)
-                # Do not release lock — second task must not acquire.
-                try:
-                    append_bridge_log(
-                        self.logs,
-                        manifest.task_id,
-                        [f"{utc_now_iso()} FATAL evidence failure; lock retained: {forensic_exc}"],
-                    )
-                except Exception:
-                    pass
+                # Last resort: keep flock if still held (one-shot exit still frees OS flock;
+                # barrier is the durable mechanism — residual if both fail).
+                lock_lifecycle["released"] = False
+                lock_lifecycle["retainedForForensics"] = True
+                result.lock_lifecycle = dict(lock_lifecycle)
                 if processing_path.exists():
                     try:
                         processing_path.unlink()
                     except OSError:
                         pass
-                # Intentionally leave worktree lock acquired for forensics.
                 return result
 
-        # Release lock only after durable provisional evidence exists.
-        if evidence_written and lock.acquired:
+        # 2) Write/fsync finalization barrier while flock still held.
+        if not barrier_written:
+            try:
+                _write_barrier("provisional_durable", recovery_required=True)
+            except Exception as barrier_exc:
+                disposition = Disposition.CRASH_RECOVERY
+                error = f"finalization barrier write failed: {barrier_exc}"
+                notes.append(str(error))
+                result.disposition = disposition.value
+                result.error = error
+                result.notes = notes
+                result.lock_lifecycle = dict(lock_lifecycle)
+                if processing_path.exists():
+                    try:
+                        processing_path.unlink()
+                    except OSError:
+                        pass
+                return result
+
+        # 3) Release flock only after provisional evidence + barrier are durable.
+        if lock.acquired:
             lock.release()
             lock_lifecycle = dict(lock.lifecycle)
+            lock_lifecycle["finalizationBarrier"] = str(barrier.path)
+            lock_lifecycle["finalizationBarrierWritten"] = True
+            lock_lifecycle["provisionalDurable"] = provisional_written
+            lock_lifecycle["released"] = True
+            lock_lifecycle["evidencePending"] = True
+            result.lock_lifecycle = lock_lifecycle
+
+        # 4) Publish final released result/state; on failure leave barrier in place.
+        final_ok = False
+        try:
+            lock_lifecycle["evidencePending"] = False
             lock_lifecycle["evidenceDurable"] = True
             lock_lifecycle["released"] = True
             result.lock_lifecycle = lock_lifecycle
-            # Atomically update result/state with final released-lock lifecycle.
+            if result.disposition == Disposition.SUCCESS.value and not provisional_written:
+                result.disposition = Disposition.CRASH_RECOVERY.value
+            write_result(self.results, result)
+            write_state(
+                self.state,
+                manifest.task_id,
+                {
+                    "taskId": manifest.task_id,
+                    "disposition": result.disposition,
+                    "endedAt": ended,
+                    "endingHead": ending_head,
+                    "resultPath": str(self.results / f"{manifest.task_id}.result.json"),
+                    "lockHeld": False,
+                    "evidencePending": False,
+                    "lockReleased": True,
+                    "finalizationBarrier": str(barrier.path),
+                },
+            )
+            final_ok = True
+        except Exception as final_exc:
+            notes.append(f"final evidence write failed after lock release: {final_exc}")
+            result.notes = notes
+            if result.disposition == Disposition.SUCCESS.value:
+                result.disposition = Disposition.PARTIAL.value
+            else:
+                result.disposition = Disposition.CRASH_RECOVERY.value
+            result.error = (
+                (result.error + "; " if result.error else "")
+                + f"final evidence update failed: {final_exc}"
+            )
             try:
                 write_result(self.results, result)
-                write_state(
-                    self.state,
-                    manifest.task_id,
-                    {
-                        "taskId": manifest.task_id,
-                        "disposition": result.disposition,
-                        "endedAt": ended,
-                        "endingHead": ending_head,
-                        "resultPath": str(self.results / f"{manifest.task_id}.result.json"),
-                        "lockHeld": False,
-                        "evidencePending": False,
-                        "lockReleased": True,
-                    },
-                )
-            except Exception as final_exc:
-                notes.append(f"post-release lifecycle update failed: {final_exc}")
+            except Exception:
+                pass
+            # Leave barrier in place — next task blocked; manual recovery required.
+            lock_lifecycle["evidenceDurable"] = False
+            lock_lifecycle["finalEvidenceFailed"] = True
+            result.lock_lifecycle = lock_lifecycle
+            if processing_path.exists():
+                try:
+                    processing_path.unlink()
+                except OSError:
+                    notes.append("processing cleanup failed")
+                    result.notes = notes
+            return result
+
+        # 5) Remove finalization barrier atomically only after final evidence success.
+        if final_ok:
+            try:
+                barrier.remove_atomic()
+                lock_lifecycle["finalizationBarrierCleared"] = True
+                lock_lifecycle["evidencePending"] = False
+                result.lock_lifecycle = lock_lifecycle
+                # Refresh result/state with cleared-barrier truth (best effort).
+                try:
+                    write_result(self.results, result)
+                    write_state(
+                        self.state,
+                        manifest.task_id,
+                        {
+                            "taskId": manifest.task_id,
+                            "disposition": result.disposition,
+                            "endedAt": ended,
+                            "endingHead": ending_head,
+                            "resultPath": str(
+                                self.results / f"{manifest.task_id}.result.json"
+                            ),
+                            "lockHeld": False,
+                            "evidencePending": False,
+                            "lockReleased": True,
+                            "finalizationBarrierCleared": True,
+                        },
+                    )
+                except Exception as refresh_exc:
+                    # Barrier already cleared; provisional+final evidence exist.
+                    notes.append(f"post-clear lifecycle refresh failed: {refresh_exc}")
+                    result.notes = notes
+            except Exception as clear_exc:
+                notes.append(f"barrier clear failed: {clear_exc}")
                 result.notes = notes
-                # Provisional evidence already exists; do not flip to success incorrectly.
                 if result.disposition == Disposition.SUCCESS.value:
                     result.disposition = Disposition.PARTIAL.value
-                    result.error = (
-                        (result.error + "; " if result.error else "")
-                        + f"post-release evidence update failed: {final_exc}"
-                    )
-                    try:
-                        write_result(self.results, result)
-                    except Exception:
-                        pass
-        elif lock.acquired and not evidence_written:
-            # Retain lock; task must not appear successful.
-            result.disposition = Disposition.CRASH_RECOVERY.value
-            result.error = error or "evidence missing; lock retained"
-            notes.append("lock retained because evidence was not durable")
-            result.notes = notes
+                result.error = (
+                    (result.error + "; " if result.error else "")
+                    + f"finalization barrier clear failed: {clear_exc}"
+                )
+                # Barrier still present → blocks next task (fail closed).
+                try:
+                    write_result(self.results, result)
+                except Exception:
+                    pass
 
         if processing_path.exists():
             try:
@@ -581,6 +719,24 @@ class DotControlBridge:
                 notes.append("processing cleanup failed")
                 result.notes = notes
         return result
+
+    def recover_worktree_finalization(
+        self,
+        worktree: Path,
+        *,
+        confirm_task_id: str,
+        action: str = "clear",
+    ) -> dict[str, Any]:
+        """Explicit recovery: clear finalization barrier after inspection gates."""
+        validate_control_root_layout(self.control_root, require_subdirs=True, check_modes=True)
+        git_inspect = git_inspect_for_recovery(Path(worktree))
+        return recover_finalization_barrier(
+            self.locks,
+            Path(worktree),
+            action=action,
+            confirm_task_id=confirm_task_id,
+            git_inspect=git_inspect,
+        )
 
     def run_daemon(self, *, once: bool = False, poll_seconds: float = DAEMON_POLL_SECONDS) -> int:
         # Normal operation validates; does not repair modes (explicit init only).
@@ -593,10 +749,11 @@ class DotControlBridge:
                     self.process_one(ready[0])
                     processed += 1
                 except BridgeError as exc:
+                    # LOCKED losers must not mutate; log only.
                     append_bridge_log(
                         self.logs,
                         "_daemon",
-                        [f"{utc_now_iso()} rejected: {exc}"],
+                        [f"{utc_now_iso()} rejected: {exc} disposition={exc.disposition.value}"],
                     )
             if once:
                 break
@@ -620,7 +777,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="create control-root subdirectories")
 
     p_one = sub.add_parser("oneshot", help="process exactly one inbox manifest and exit")
-    p_one.add_argument("--manifest", type=Path, help="optional explicit processing/inbox path")
+    p_one.add_argument(
+        "--manifest",
+        type=Path,
+        help="optional explicit path under control-root inbox/ or processing/",
+    )
 
     p_daemon = sub.add_parser("daemon", help="poll inbox with bounded sleep")
     p_daemon.add_argument("--poll", type=float, default=DAEMON_POLL_SECONDS)
@@ -629,8 +790,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_val = sub.add_parser("validate", help="validate manifest and print dry-run plan")
     p_val.add_argument("manifest", type=Path)
 
-    p_lock = sub.add_parser("inspect-lock", help="inspect lock record for a worktree")
+    p_lock = sub.add_parser("inspect-lock", help="inspect lock/barrier record for a worktree")
     p_lock.add_argument("worktree", type=Path)
+
+    p_rec = sub.add_parser(
+        "recover-finalization",
+        help="explicit operator clear of a durable worktree finalization barrier",
+    )
+    p_rec.add_argument("worktree", type=Path)
+    p_rec.add_argument(
+        "--confirm-task-id",
+        required=True,
+        help="predecessor taskId recorded in the barrier (explicit confirmation)",
+    )
+    p_rec.add_argument(
+        "--action",
+        default="clear",
+        choices=["clear"],
+        help="recovery action (only clear is supported)",
+    )
 
     return parser
 
@@ -655,6 +833,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(json.dumps(inspect_lock(bridge.locks, args.worktree), indent=2, sort_keys=True))
             return 0
 
+        if args.command == "recover-finalization":
+            out = bridge.recover_worktree_finalization(
+                args.worktree,
+                confirm_task_id=args.confirm_task_id,
+                action=args.action,
+            )
+            print(json.dumps(out, indent=2, sort_keys=True))
+            return 0 if out.get("cleared") else 1
+
         if args.command == "oneshot":
             # Require prior explicit init; do not silently repair modes.
             validate_control_root_layout(
@@ -671,7 +858,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error(f"unknown command {args.command}")
         return 2
     except BridgeError as exc:
-        print(json.dumps({"error": str(exc), "disposition": exc.disposition.value}), file=sys.stderr)
+        print(
+            json.dumps(
+                {
+                    "error": str(exc),
+                    "disposition": exc.disposition.value,
+                }
+            ),
+            file=sys.stderr,
+        )
         return 1
 
 

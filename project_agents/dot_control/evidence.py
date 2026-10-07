@@ -7,16 +7,17 @@ import os
 import re
 import stat
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Sequence, TextIO
+from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from .models import (
-    DIR_MODE,
     FILE_MODE,
     MAX_BRIDGE_LOG_BYTES,
     MAX_STDERR_LOG_BYTES,
     MAX_STDOUT_LOG_BYTES,
     REDACTION_OVERLAP_BYTES,
     TRUNCATION_MARK,
+    BridgeError,
+    Disposition,
     TaskResult,
 )
 
@@ -32,6 +33,16 @@ _PEM_RE = re.compile(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
     re.DOTALL,
 )
+_PEM_BEGIN_RE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+_PARTIAL_TOKEN_PREFIX_RE = re.compile(
+    r"(?i)\b(ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|sk-|xox[baprs]-|AKIA)[A-Za-z0-9_\-./+=]{0,7}$"
+)
+_PARTIAL_URL_USERINFO_RE = re.compile(
+    r"(?i)\b([a-z][a-z0-9+.-]*://)([^/\s:@]+)(?::([^/\s@]*))?$"
+)
+_PARTIAL_BEARER_RE = re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)\S*$")
+
+TRUNCATION_BOUNDARY_MARK = b"\n[REDACTED: truncation-boundary indeterminate]\n"
 
 
 def redact_text(text: str) -> str:
@@ -45,8 +56,53 @@ def redact_text(text: str) -> str:
     return out
 
 
+def redact_unterminated_at_boundary(text: str) -> str:
+    """Fail-closed scrub of secrets that lack a terminator before end-of-buffer."""
+    if not text:
+        return text
+    # Unterminated PEM: redact from last BEGIN with no matching END after it.
+    begin_matches = list(_PEM_BEGIN_RE.finditer(text))
+    if begin_matches:
+        last = begin_matches[-1]
+        after = text[last.start() :]
+        if "-----END " not in after or "PRIVATE KEY-----" not in after.split("-----END ", 1)[-1][:80]:
+            # No complete END after this BEGIN — redact through EOF.
+            if "-----END " not in after or not re.search(
+                r"-----END [A-Z ]*PRIVATE KEY-----", after
+            ):
+                text = text[: last.start()] + "[REDACTED: unterminated private key]"
+
+    # Partial credential URL without trailing @ (userinfo incomplete at boundary).
+    m = _PARTIAL_URL_USERINFO_RE.search(text)
+    if m and "@" not in text[m.start() :]:
+        text = text[: m.start()] + m.group(1) + "[REDACTED: partial credential URL]"
+
+    # Partial token prefix with fewer than required token characters at EOF.
+    m = _PARTIAL_TOKEN_PREFIX_RE.search(text)
+    if m:
+        text = text[: m.start()] + "[REDACTED_TOKEN]"
+
+    # Partial bearer at EOF.
+    m = _PARTIAL_BEARER_RE.search(text)
+    if m:
+        # Only scrub if this didn't already get a full bearer redact with trailing content.
+        tail = text[m.end() :]
+        if not tail.strip() or m.end() == len(text):
+            text = text[: m.start()] + m.group(1) + "[REDACTED]"
+
+    return text
+
+
 def redact_bytes(data: bytes) -> bytes:
     return redact_text(data.decode("utf-8", errors="replace")).encode("utf-8")
+
+
+def redact_bytes_fail_closed(data: bytes, *, truncated: bool) -> bytes:
+    text = data.decode("utf-8", errors="replace")
+    text = redact_text(text)
+    if truncated:
+        text = redact_unterminated_at_boundary(text)
+    return text.encode("utf-8")
 
 
 def redact_argv(argv: Sequence[str]) -> list[str]:
@@ -75,14 +131,37 @@ def open_exclusive_file(
     mode: str = "wb",
     file_mode: int = FILE_MODE,
     append: bool = False,
+    allow_existing: bool = True,
 ) -> Any:
-    """Open a regular file without following symlinks (O_NOFOLLOW on Linux)."""
+    """Open a regular file without following symlinks (O_NOFOLLOW on Linux).
+
+    Pre-existing files with unsafe modes are rejected (no silent repair).
+    Newly created files receive ``file_mode``.
+    """
     if path.is_symlink():
         raise OSError(f"refusing to open symlink: {path}")
+    existed = os.path.lexists(path)
+    if existed:
+        if not allow_existing:
+            raise OSError(f"refusing to open existing file: {path}")
+        if not path.is_file():
+            raise OSError(f"refusing non-regular file: {path}")
+        st_exist = path.stat()
+        if not stat.S_ISREG(st_exist.st_mode):
+            raise OSError(f"refusing non-regular file: {path}")
+        existing_mode = stat.S_IMODE(st_exist.st_mode)
+        if existing_mode != file_mode:
+            raise BridgeError(
+                f"durable file mode {oct(existing_mode)} != required {oct(file_mode)}: {path}; "
+                "explicit recovery required (no silent repair)",
+                disposition=Disposition.FAILED,
+            )
+        if st_exist.st_uid != os.geteuid():
+            raise BridgeError(
+                f"durable file owner uid {st_exist.st_uid} != bridge uid {os.geteuid()}: {path}",
+                disposition=Disposition.FAILED,
+            )
     flags = os.O_CLOEXEC | os.O_NOFOLLOW
-    if "b" not in mode:
-        # Text mode wrappers still open via binary fd then wrap.
-        pass
     if append:
         flags |= os.O_RDWR | os.O_CREAT | os.O_APPEND
     elif "w" in mode:
@@ -91,7 +170,6 @@ def open_exclusive_file(
         flags |= os.O_RDONLY
     fd = os.open(str(path), flags, file_mode)
     try:
-        os.fchmod(fd, file_mode)
         st = os.fstat(fd)
         if stat.S_ISLNK(st.st_mode):
             os.close(fd)
@@ -99,9 +177,19 @@ def open_exclusive_file(
         if not stat.S_ISREG(st.st_mode):
             os.close(fd)
             raise OSError(f"refusing non-regular file: {path}")
+        if not existed:
+            os.fchmod(fd, file_mode)
+        else:
+            # Never silently repair pre-existing modes.
+            if stat.S_IMODE(st.st_mode) != file_mode:
+                os.close(fd)
+                raise BridgeError(
+                    f"durable file mode {oct(stat.S_IMODE(st.st_mode))} != required "
+                    f"{oct(file_mode)}: {path}; explicit recovery required (no silent repair)",
+                    disposition=Disposition.FAILED,
+                )
         if "b" in mode:
             return os.fdopen(fd, mode)
-        # Binary capture then TextIO wrapper is unnecessary; open text via fd.
         return os.fdopen(fd, mode, encoding="utf-8")
     except Exception:
         try:
@@ -139,10 +227,13 @@ def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
             pass
         raise
     os.replace(tmp, path)
-    try:
-        os.chmod(path, FILE_MODE)
-    except OSError:
-        pass
+    # Destination was just created/replaced by us at FILE_MODE; verify without repair loops.
+    st = path.stat()
+    if stat.S_IMODE(st.st_mode) != FILE_MODE:
+        try:
+            os.chmod(path, FILE_MODE)
+        except OSError as exc:
+            raise OSError(f"result mode not 0600 after write: {path}") from exc
 
 
 def write_result(results_dir: Path, result: TaskResult) -> Path:
@@ -166,12 +257,12 @@ def write_state(state_dir: Path, task_id: str, state: Mapping[str, Any]) -> Path
 
 
 class BoundedRedactingWriter:
-    """Capture child output with hard byte bounds and cross-chunk redaction.
+    """Capture child output with hard byte bounds and fail-closed truncation redaction.
 
-    Raw input is retained in a bounded memory buffer (max_bytes + overlap) so
-    secrets split across pipe reads are redacted against the full window before
-    any durable write. The durable file size, including the truncation marker,
-    never exceeds ``max_bytes``.
+    Raw input is retained in a bounded memory buffer (max_bytes + overlap). When
+    capture truncates, the final overlap is treated as sensitive/indeterminate and
+    is never emitted raw; unterminated secrets at the boundary are scrubbed.
+    The durable file size, including markers, never exceeds ``max_bytes``.
     """
 
     def __init__(self, path: Path, *, max_bytes: int, overlap: int = REDACTION_OVERLAP_BYTES):
@@ -206,22 +297,61 @@ class BoundedRedactingWriter:
         return len(data)
 
     def _emit_durable(self) -> None:
-        """Redact the full raw window and write a bounded durable representation."""
+        """Redact the raw window; on truncation, discard final overlap fail-closed."""
         if self._durable_flushed:
             return
         self._durable_flushed = True
-        redacted = redact_bytes(bytes(self._raw))
+        raw = bytes(self._raw)
         self._raw.clear()
         mark = TRUNCATION_MARK
-        if self.truncated or len(redacted) > self.max_bytes:
+        boundary = TRUNCATION_BOUNDARY_MARK
+
+        if self.truncated:
+            # Never emit the raw final overlap/tail directly.
+            if self.overlap > 0 and len(raw) > self.overlap:
+                head = raw[: -self.overlap]
+            else:
+                head = b""
+            redacted = redact_bytes_fail_closed(head, truncated=True)
+            # Explicit indeterminate-zone marker replaces discarded overlap.
+            body = redacted + boundary + mark
+            self.truncated = True
+        else:
+            redacted = redact_bytes_fail_closed(raw, truncated=False)
+            # Still scrub unterminated PEM that ends mid-stream without truncation.
+            redacted = redact_unterminated_at_boundary(
+                redacted.decode("utf-8", errors="replace")
+            ).encode("utf-8")
+            if len(redacted) > self.max_bytes:
+                self.truncated = True
+                # Treat overflow like truncation: drop final overlap of redacted window.
+                if self.overlap > 0 and len(redacted) > self.overlap:
+                    head = redacted[: -self.overlap]
+                else:
+                    head = b""
+                body = head + boundary + mark
+            else:
+                body = redacted
+
+        if len(body) > self.max_bytes:
             self.truncated = True
             if len(mark) >= self.max_bytes:
                 out = mark[: self.max_bytes]
             else:
-                body = redacted[: self.max_bytes - len(mark)]
-                out = body + mark
+                # Prefer keeping truncation markers; drop from front of body if needed.
+                keep_tail = boundary + mark if self.truncated else mark
+                if len(keep_tail) >= self.max_bytes:
+                    out = keep_tail[-self.max_bytes :]
+                else:
+                    prefix_budget = self.max_bytes - len(keep_tail)
+                    # body may already include markers; take safe prefix only.
+                    prefix = body[:prefix_budget]
+                    out = prefix + keep_tail
+                    if len(out) > self.max_bytes:
+                        out = out[: self.max_bytes]
         else:
-            out = redacted
+            out = body
+
         if len(out) > self.max_bytes:
             out = out[: self.max_bytes]
             self.truncated = True
@@ -241,10 +371,6 @@ class BoundedRedactingWriter:
             finally:
                 self._fh.close()
                 self._closed = True
-            try:
-                os.chmod(self.path, FILE_MODE)
-            except OSError:
-                pass
             try:
                 if self.path.stat().st_size > self.max_bytes:
                     with open(self.path, "r+b") as fh:
@@ -285,7 +411,10 @@ def append_bridge_log(
     *,
     max_bytes: int = MAX_BRIDGE_LOG_BYTES,
 ) -> tuple[Path, bool]:
-    """Append redacted bridge log lines; truncate when bound reached."""
+    """Append redacted bridge log lines; truncate when bound reached.
+
+    Pre-existing unsafe modes are rejected (no silent repair).
+    """
     if logs_dir.is_symlink():
         raise OSError(f"logs directory must not be a symlink: {logs_dir}")
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -293,13 +422,39 @@ def append_bridge_log(
     if path.is_symlink():
         raise OSError(f"refusing symlink bridge log: {path}")
     truncated = False
-    existing = path.stat().st_size if path.exists() and path.is_file() else 0
+    existed = os.path.lexists(path)
+    if existed:
+        if not path.is_file():
+            raise OSError(f"bridge log is not a regular file: {path}")
+        st_exist = path.stat()
+        mode = stat.S_IMODE(st_exist.st_mode)
+        if mode != FILE_MODE:
+            raise BridgeError(
+                f"bridge log mode {oct(mode)} != required {oct(FILE_MODE)}; "
+                "explicit recovery required (no silent repair)",
+                disposition=Disposition.FAILED,
+            )
+        if st_exist.st_uid != os.geteuid():
+            raise BridgeError(
+                f"bridge log owner uid {st_exist.st_uid} != bridge uid {os.geteuid()}",
+                disposition=Disposition.FAILED,
+            )
+    existing = path.stat().st_size if existed and path.is_file() else 0
     if existing >= max_bytes:
         return path, True
     flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_CLOEXEC | os.O_NOFOLLOW
     fd = os.open(str(path), flags, FILE_MODE)
     try:
-        os.fchmod(fd, FILE_MODE)
+        st = os.fstat(fd)
+        if not existed:
+            os.fchmod(fd, FILE_MODE)
+        elif stat.S_IMODE(st.st_mode) != FILE_MODE:
+            os.close(fd)
+            raise BridgeError(
+                f"bridge log mode {oct(stat.S_IMODE(st.st_mode))} != required {oct(FILE_MODE)}; "
+                "explicit recovery required (no silent repair)",
+                disposition=Disposition.FAILED,
+            )
         with os.fdopen(fd, "a", encoding="utf-8") as fh:
             written = existing
             for line in lines:
@@ -309,7 +464,6 @@ def append_bridge_log(
                     remain = max_bytes - written
                     mark = "[TRUNCATED: bridge log byte bound reached]\n"
                     mark_b = mark.encode("utf-8")
-                    # Ensure marker fits within bound when possible.
                     if remain >= len(mark_b):
                         payload_space = remain - len(mark_b)
                         if payload_space > 0:
@@ -326,16 +480,14 @@ def append_bridge_log(
                 written += len(encoded)
             fh.flush()
             os.fsync(fh.fileno())
+    except BridgeError:
+        raise
     except Exception:
         try:
             os.close(fd)
         except OSError:
             pass
         raise
-    try:
-        os.chmod(path, FILE_MODE)
-    except OSError:
-        pass
     return path, truncated
 
 

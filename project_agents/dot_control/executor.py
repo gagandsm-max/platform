@@ -10,7 +10,9 @@ import os
 import re
 import select
 import signal
+import stat
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
@@ -18,8 +20,11 @@ from urllib.parse import unquote, urlparse
 
 from .evidence import open_log_files, redact_argv, redact_text
 from .models import (
+    APPROVED_REPO_EXACT,
+    APPROVED_REPO_PREFIX,
     APPROVED_REPOSITORY,
     DIR_MODE,
+    FILE_MODE,
     LIVE_ANTIGRAVITY_UNSUPPORTED_REASON,
     LIVE_TEST_PROFILE_UNSUPPORTED_REASON,
     LIVE_WRITER_UNSUPPORTED_REASON,
@@ -45,9 +50,44 @@ _GITHUB_SSH_ALT_RE = re.compile(
     r"(?i)^ssh://(?:[^/@]+@)?github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$"
 )
 
+_SAFE_EMPTY_HOOKS: Optional[Path] = None
+_ISOLATED_GITCONFIG: Optional[Path] = None
+
+
+def _isolated_global_config_path() -> Path:
+    """Safe empty global gitconfig (not system/user config; no credential helpers)."""
+    global _ISOLATED_GITCONFIG
+    if _ISOLATED_GITCONFIG is not None and _ISOLATED_GITCONFIG.is_file():
+        return _ISOLATED_GITCONFIG
+    d = Path(tempfile.mkdtemp(prefix="dot-control-gitconfig-"))
+    os.chmod(d, DIR_MODE)
+    path = d / "config"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
+    fd = os.open(str(path), flags, FILE_MODE)
+    try:
+        os.fchmod(fd, FILE_MODE)
+        os.write(fd, b"# amrudai-dot-control isolated global config\n")
+    finally:
+        os.close(fd)
+    _ISOLATED_GITCONFIG = path
+    return path
+
+
+def _process_empty_hooks_dir() -> Path:
+    """Process-local empty hooks directory for safe read-only Git invocations."""
+    global _SAFE_EMPTY_HOOKS
+    if _SAFE_EMPTY_HOOKS is not None and _SAFE_EMPTY_HOOKS.is_dir() and not _SAFE_EMPTY_HOOKS.is_symlink():
+        for child in _SAFE_EMPTY_HOOKS.iterdir():
+            raise BridgeError(f"safe empty hooks dir contaminated: {child}")
+        return _SAFE_EMPTY_HOOKS
+    d = Path(tempfile.mkdtemp(prefix="dot-control-empty-hooks-"))
+    os.chmod(d, DIR_MODE)
+    _SAFE_EMPTY_HOOKS = d
+    return d
+
 
 def _git_isolated_env() -> dict[str, str]:
-    """Controlled Git environment for bridge-native commit operations."""
+    """Controlled Git environment for all bridge Git reads and commit operations."""
     keep = (
         "PATH",
         "USER",
@@ -66,7 +106,7 @@ def _git_isolated_env() -> dict[str, str]:
     )
     out = {k: os.environ[k] for k in keep if k in os.environ}
     out["GIT_CONFIG_NOSYSTEM"] = "1"
-    out["GIT_CONFIG_GLOBAL"] = os.devnull
+    out["GIT_CONFIG_GLOBAL"] = str(_isolated_global_config_path())
     out["GIT_TERMINAL_PROMPT"] = "0"
     out["GIT_ASKPASS"] = "/bin/false"
     out["GCM_INTERACTIVE"] = "never"
@@ -74,6 +114,8 @@ def _git_isolated_env() -> dict[str, str]:
     out["EDITOR"] = ":"
     out["VISUAL"] = ":"
     out["GIT_SEQUENCE_EDITOR"] = ":"
+    out["GIT_PAGER"] = "cat"
+    out["PAGER"] = "cat"
     # Explicitly drop credential / SSH side channels.
     for drop in (
         "SSH_AUTH_SOCK",
@@ -89,7 +131,7 @@ def _git_isolated_env() -> dict[str, str]:
 
 
 def _git_safe_config_args(hooks_path: Path) -> list[str]:
-    """Per-invocation overrides that disable hooks, signing, filters side channels."""
+    """Per-invocation overrides that disable hooks, fsmonitor, diff, pager, credentials."""
     false_bin = "/bin/false"
     return [
         "-c",
@@ -104,6 +146,8 @@ def _git_safe_config_args(hooks_path: Path) -> list[str]:
         "core.editor=:",
         "-c",
         "sequence.editor=:",
+        "-c",
+        "core.pager=cat",
         "-c",
         "commit.gpgsign=false",
         "-c",
@@ -133,21 +177,31 @@ def _run_git(
     timeout: int = 60,
     text: bool = True,
     env: Optional[Mapping[str, str]] = None,
-    isolated: bool = False,
+    isolated: bool = True,
     hooks_path: Optional[Path] = None,
 ) -> subprocess.CompletedProcess:
+    """Run git with the safe read/commit environment by default (shell=False).
+
+    Repository-local remote/branch/ref data is preserved; system/global config,
+    fsmonitor, external diff, pager, hooks, credential helpers, and SSH/token
+    side channels are disabled.
+    """
     git_argv: list[str] = ["git"]
-    run_env: Optional[dict[str, str]] = None
+    run_env = _git_isolated_env()
+    if env:
+        blocked = {
+            "SSH_AUTH_SOCK",
+            "SSH_AGENT_PID",
+            "GIT_SSH",
+            "GIT_SSH_COMMAND",
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "GIT_CONFIG_SYSTEM",
+        }
+        run_env.update({k: v for k, v in env.items() if v is not None and k not in blocked})
+    hp = hooks_path if hooks_path is not None else _process_empty_hooks_dir()
     if isolated:
-        run_env = _git_isolated_env()
-        if env:
-            run_env.update({k: v for k, v in env.items() if v is not None})
-        hp = hooks_path
-        if hp is None:
-            raise BridgeError("isolated git requires hooks_path")
         git_argv.extend(_git_safe_config_args(hp))
-    elif env is not None:
-        run_env = dict(env)
     git_argv.extend(args)
     return subprocess.run(
         git_argv,
@@ -183,6 +237,22 @@ def git_detached(worktree: Path) -> bool:
 def git_dirty(worktree: Path) -> bool:
     proc = _run_git(["status", "--porcelain", "-z"], worktree, check=True, text=False)
     return bool(proc.stdout)
+
+
+def git_inspect_for_recovery(worktree: Path) -> dict[str, Any]:
+    """Bounded worktree inspection for finalization-barrier recovery."""
+    from .evidence import utc_now_iso
+
+    head = git_head(worktree) if git_is_repo(worktree) else ""
+    branch = git_branch(worktree) if head else ""
+    dirty = git_dirty(worktree) if head else True
+    return {
+        "branch": branch or "(detached)",
+        "head": head,
+        "dirty": dirty,
+        "inspectedAt": utc_now_iso(),
+        "worktree": str(worktree.resolve()),
+    }
 
 
 def validate_repo_relative_path(path: str, worktree: Path) -> str:
@@ -831,19 +901,198 @@ def execute_repo_probe(manifest: TaskManifest) -> tuple[CommandEvidence, dict[st
     return evidence, probe, disposition
 
 
-def _prepare_empty_hooks_dir(worktree: Path) -> Path:
-    """Create an empty hooks directory inside .git for core.hooksPath override."""
-    git_dir = _run_git(["rev-parse", "--git-dir"], worktree, check=True)
-    git_path = Path(git_dir.stdout.strip())
-    if not git_path.is_absolute():
-        git_path = (worktree / git_path).resolve()
-    hooks = git_path / "dot-control-empty-hooks"
-    hooks.mkdir(mode=DIR_MODE, exist_ok=True)
+def _path_has_symlink_component(path: Path) -> bool:
+    """True if any path component is a symlink (no-follow walk from root)."""
+    parts = path.parts
+    if not parts:
+        return False
+    if path.is_absolute():
+        cursor = Path(parts[0])
+        rest = parts[1:]
+    else:
+        cursor = Path(parts[0])
+        rest = parts[1:]
+        if cursor.is_symlink():
+            return True
+    for part in rest:
+        cursor = cursor / part
+        if os.path.lexists(cursor) and os.path.islink(cursor):
+            return True
+    return False
+
+
+def _assert_real_owned_dir(path: Path, label: str) -> Path:
+    if not path.is_absolute():
+        raise BridgeError(f"{label} must be absolute: {path}")
+    if not path.exists():
+        raise BridgeError(f"{label} does not exist: {path}")
+    if path.is_symlink() or os.path.islink(path):
+        raise BridgeError(f"{label} must not be a symlink: {path}")
+    if _path_has_symlink_component(path):
+        raise BridgeError(f"{label} has symlink component: {path}")
+    if not path.is_dir():
+        raise BridgeError(f"{label} is not a directory: {path}")
+    st = path.stat()
+    if not stat.S_ISDIR(st.st_mode):
+        raise BridgeError(f"{label} is not a directory: {path}")
+    if st.st_uid != os.geteuid():
+        raise BridgeError(
+            f"{label} owner uid {st.st_uid} != bridge uid {os.geteuid()}: {path}"
+        )
+    return path
+
+
+def _path_under_root(path: Path, root: Path) -> bool:
     try:
-        os.chmod(hooks, DIR_MODE)
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _is_approved_main_repo_root(
+    main_root: Path,
+    worktree: Path,
+    *,
+    allow_linked_sibling: bool,
+) -> bool:
+    """True when main_root is an approved AmrudAi repository (standalone or linked)."""
+    try:
+        main_r = main_root.resolve(strict=False)
+        wt_r = worktree.resolve(strict=False)
     except OSError:
-        pass
-    # Ensure directory is empty — any executable hook file would be a hazard.
+        main_r = main_root
+        wt_r = worktree
+    main_s = str(main_r)
+    wt_s = str(wt_r)
+    if main_s == wt_s or wt_s.startswith(main_s + "/"):
+        return True
+    prod = str(APPROVED_REPO_EXACT.resolve(strict=False))
+    if main_s == prod or main_s.startswith(prod + "/"):
+        return True
+    if main_s.startswith(APPROVED_REPO_PREFIX):
+        return True
+    if wt_s.startswith(APPROVED_REPO_PREFIX) and (
+        main_s == prod or main_s.startswith(prod + "/")
+    ):
+        # Production linked worktree under /home/gagan/nms with worktree /home/gagan/nms-*
+        return True
+    # Test/dev linked worktree sibling layout: .../nms-main and .../nms-linked.
+    # Only when common-dir was a real `<main>/.git` (allow_linked_sibling).
+    if allow_linked_sibling and main_r.parent == wt_r.parent:
+        return True
+    return False
+
+
+def _under_approved_amrudai_root(
+    path: Path,
+    worktree: Path,
+    *,
+    main_root: Path,
+    allow_linked_sibling: bool,
+) -> bool:
+    """Git dir/common-dir must sit under an approved AmrudAi repository root."""
+    if not _path_under_root(path, main_root):
+        return False
+    return _is_approved_main_repo_root(
+        main_root, worktree, allow_linked_sibling=allow_linked_sibling
+    )
+
+
+def _mkdir_nofollow(path: Path, mode: int = DIR_MODE) -> None:
+    """Create a directory without following a final-component symlink."""
+    if os.path.lexists(path) and os.path.islink(path):
+        raise BridgeError(f"refusing symlink empty-hooks directory: {path}")
+    if path.exists():
+        if path.is_symlink() or not path.is_dir():
+            raise BridgeError(f"empty-hooks path unsafe: {path}")
+        if _path_has_symlink_component(path):
+            raise BridgeError(f"empty-hooks path has symlink component: {path}")
+        os.chmod(path, mode)
+        return
+    parent = path.parent
+    _assert_real_owned_dir(parent, "empty-hooks parent")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    dir_fd = os.open(str(parent), flags)
+    try:
+        os.mkdir(path.name, mode, dir_fd=dir_fd)
+        os.chmod(path.name, mode, dir_fd=dir_fd)
+    except FileExistsError:
+        # Recheck without following.
+        if os.path.islink(path) or not path.is_dir():
+            raise BridgeError(f"empty-hooks path unsafe after race: {path}")
+    finally:
+        os.close(dir_fd)
+
+
+def resolve_contained_git_dirs(worktree: Path) -> tuple[Path, Path]:
+    """Resolve absolute-git-dir and git-common-dir with containment checks."""
+    abs_proc = _run_git(["rev-parse", "--absolute-git-dir"], worktree, check=False)
+    if abs_proc.returncode != 0:
+        raise BridgeError(
+            f"cannot resolve absolute-git-dir: {redact_text(abs_proc.stderr.strip())}"
+        )
+    common_proc = _run_git(["rev-parse", "--git-common-dir"], worktree, check=False)
+    if common_proc.returncode != 0:
+        raise BridgeError(
+            f"cannot resolve git-common-dir: {redact_text(common_proc.stderr.strip())}"
+        )
+    git_dir = Path(abs_proc.stdout.strip())
+    common_raw = Path(common_proc.stdout.strip())
+    if not common_raw.is_absolute():
+        common_dir = Path(os.path.abspath(str(worktree / common_raw)))
+    else:
+        common_dir = common_raw
+
+    for label, path in (("absolute-git-dir", git_dir), ("git-common-dir", common_dir)):
+        _assert_real_owned_dir(path, label)
+
+    # Main repository root is the parent of the common .git directory.
+    if common_dir.name == ".git":
+        main_root = common_dir.parent
+        allow_linked_sibling = True
+    else:
+        # Unusual layouts (e.g. crafted gitdir: file): no sibling shortcut.
+        main_root = common_dir
+        allow_linked_sibling = False
+
+    for label, path in (("absolute-git-dir", git_dir), ("git-common-dir", common_dir)):
+        if not _under_approved_amrudai_root(
+            path,
+            worktree,
+            main_root=main_root,
+            allow_linked_sibling=allow_linked_sibling,
+        ):
+            raise BridgeError(
+                f"{label} escapes approved AmrudAi repository roots: {path}"
+            )
+    return git_dir, common_dir
+
+
+def _prepare_empty_hooks_dir(worktree: Path) -> Path:
+    """Create an empty hooks directory inside a containment-validated git dir."""
+    git_dir, common_dir = resolve_contained_git_dirs(worktree)
+    if common_dir.name == ".git":
+        main_root = common_dir.parent
+        allow_linked_sibling = True
+    else:
+        main_root = common_dir
+        allow_linked_sibling = False
+    hooks = git_dir / "dot-control-empty-hooks"
+    if os.path.lexists(hooks) and os.path.islink(hooks):
+        raise BridgeError(f"symlinked empty-hooks directory rejected: {hooks}")
+    _mkdir_nofollow(hooks, DIR_MODE)
+    _assert_real_owned_dir(hooks, "empty-hooks directory")
+    if not _under_approved_amrudai_root(
+        hooks,
+        worktree,
+        main_root=main_root,
+        allow_linked_sibling=allow_linked_sibling,
+    ):
+        raise BridgeError(f"empty-hooks escapes approved roots: {hooks}")
+    mode = stat.S_IMODE(hooks.stat().st_mode)
+    if mode != DIR_MODE:
+        os.chmod(hooks, DIR_MODE)
     for child in hooks.iterdir():
         raise BridgeError(
             f"safe hooksPath is not empty: {child.name}; refusing GIT_COMMIT_PROOF"
