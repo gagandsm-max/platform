@@ -1118,5 +1118,20 @@
     "name": "inclusive_keyboard_semantics",
     "disposition": "MERGE_INTO:accessibility_inclusive_design",
     "notes": "UI amendment MERGE_INTO; keyboard/focus/semantic/inclusive design"
+  },
+  {
+    "name": "ncm_configuration_assurance",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.3 skill"
+  },
+  {
+    "name": "redfish_hardware_monitoring",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.3 skill"
+  },
+  {
+    "name": "database_monitoring",
+    "disposition": "IMPLEMENT_NOW",
+    "notes": "canonical v1.3 skill"
   }
 ]

@@ -1,0 +1,10 @@
+{
+  "case": "incomplete_binding",
+  "changePlanId": "cp-1",
+  "planVersion": null,
+  "targets": [
+    "ent-1"
+  ],
+  "approval": null,
+  "expected": "FAIL_CLOSED"
+}

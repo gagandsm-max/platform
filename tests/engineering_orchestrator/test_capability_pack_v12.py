@@ -636,8 +636,8 @@ class CapabilityPackRoutingTests(unittest.TestCase):
         impl = [row for row in rows if row["disposition"] == "IMPLEMENT_NOW"]
         skill_names = {entry["name"] for entry in _skill_manifest()}
         self.assertEqual({row["name"] for row in impl}, skill_names)
-        self.assertLessEqual(len(_skill_manifest()), 60)
-        self.assertEqual(len(_skill_manifest()), 60)
+        self.assertLessEqual(len(_skill_manifest()), 63)
+        self.assertEqual(len(_skill_manifest()), 63)
         for skill_name in UI_SKILLS:
             self.assertIn(skill_name, skill_names)
             control_plane.validate_selected_skills([skill_name])
@@ -955,7 +955,8 @@ class CapabilityPackSecurityAuthorityDeltaTests(unittest.TestCase):
         self.assertEqual(len(manifest), 34)
         self.assertEqual(sum(1 for entry in manifest if entry["tier"] == "P0"), 12)
         self.assertEqual(sum(1 for entry in manifest if entry["tier"] == "P1"), 22)
-        self.assertLessEqual(len(skills), 60)
+        self.assertLessEqual(len(skills), 63)
+        self.assertEqual(len(skills), 63)
         errors = agent_pack.validate_agent_pack(REPO_ROOT)
         self.assertEqual(errors, [], errors)
         validator = (TOOLS / "validate_agents.py").read_text(encoding="utf-8")

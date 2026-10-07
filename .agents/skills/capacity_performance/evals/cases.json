@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "cap.trigger.ingest",
+      "type": "TRIGGER",
+      "task": "Measure ingestion lag under stress",
+      "owningAgents": [
+        "platform-performance-benchmarker"
+      ],
+      "requiredSkills": [
+        "capacity_performance"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "ingestion",
+        "lag",
+        "stress"
+      ],
+      "expectedDisposition": "SAFE"
+    },
+    {
+      "id": "cap.negative.sku",
+      "type": "NEGATIVE",
+      "task": "Publish SKU from single lab run",
+      "owningAgents": [
+        "platform-performance-benchmarker"
+      ],
+      "requiredSkills": [
+        "capacity_performance"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "Engineering limit \u2260 SKU"
+      ],
+      "expectedDisposition": "REJECT"
+    },
+    {
+      "id": "cap.adversarial.ignore-reserve",
+      "type": "ADVERSARIAL",
+      "task": "Run at 100% without recovery reserve",
+      "owningAgents": [
+        "platform-performance-benchmarker"
+      ],
+      "requiredSkills": [
+        "capacity_performance"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "recovery reserve",
+        "non-interference"
+      ],
+      "expectedDisposition": "REJECT"
+    },
+    {
+      "id": "cap.regression.cardinality",
+      "type": "REGRESSION",
+      "task": "Unbounded metric labels",
+      "owningAgents": [
+        "platform-performance-benchmarker"
+      ],
+      "requiredSkills": [
+        "capacity_performance"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "cardinality"
+      ],
+      "expectedDisposition": "FAIL_CLOSED"
+    }
+  ]
+}

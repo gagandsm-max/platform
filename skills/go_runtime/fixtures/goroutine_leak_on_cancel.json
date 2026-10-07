@@ -1,0 +1,4 @@
+{
+  "case": "cancel_without_stop",
+  "expect": "FAIL"
+}

@@ -88,6 +88,9 @@ Own monitored-target implementation across OS, virtualization, storage, Kubernet
 - `capacity_performance`
 - `pki_mtls`
 - `tenant_isolation`
+- `redfish_hardware_monitoring`
+- `database_monitoring`
+
 
 ## Handoff
 Agent identity collisions to identity-access / onboarding path. Streaming after accept to telemetry-pipeline-engineer. Pack identification to device-pack-engineer.

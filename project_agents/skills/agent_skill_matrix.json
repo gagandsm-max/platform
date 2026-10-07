@@ -485,9 +485,11 @@
     "conditionalSkills": [
       "capacity_performance",
       "pki_mtls",
-      "tenant_isolation"
+      "tenant_isolation",
+      "redfish_hardware_monitoring",
+      "database_monitoring"
     ],
-    "typicalTriggers": "Linux/Windows host monitoring, hypervisor/storage targets, Kubernetes/container targets, cloud-account monitoring, or OpenTelemetry import boundaries.",
+    "typicalTriggers": "Linux/Windows host monitoring, hypervisor/storage targets, Kubernetes/container targets, cloud-account monitoring, OpenTelemetry import boundaries, Redfish/BMC/OOB hardware, or customer PostgreSQL/MSSQL database targets.",
     "forbiddenOwnershipAssumptions": "Platform Core/Sensor HA design remains exactly two Cores; this agent does not move Platform onto Kubernetes as its control plane.; Agent enrollment identity reconciliation belongs with identity/onboarding owners.; Network protocol collectors belong to platform-network-engineer.; Does not select unapproved cloud SDKs."
   },
   "platform-telemetry-pipeline-engineer": {
@@ -524,9 +526,10 @@
       "snmp_mib",
       "device_control_protocols",
       "sbom_provenance",
-      "migration_safety"
+      "migration_safety",
+      "redfish_hardware_monitoring"
     ],
-    "typicalTriggers": "Device Pack schema, vendor identification, metric/command mappings, pack versioning, certification, or test-lab fixtures.",
+    "typicalTriggers": "Device Pack schema, vendor identification, metric/command mappings, pack versioning, certification, test-lab fixtures, or Redfish/BMC hardware pack collaboration.",
     "forbiddenOwnershipAssumptions": "SNMP/CLI/NETCONF/gNMI protocol engines belong to platform-network-engineer.; NCM privileged execution belongs to platform-ncm-remediation-engineer.; Does not add unapproved vendor SDKs."
   },
   "platform-ncm-remediation-engineer": {
@@ -537,14 +540,15 @@
       "root_cause_first",
       "bounded_implementation",
       "remediation_safety",
-      "device_control_protocols"
+      "device_control_protocols",
+      "ncm_configuration_assurance"
     ],
     "conditionalSkills": [
       "threat_modelling",
       "secrets_handling",
       "change_intelligence"
     ],
-    "typicalTriggers": "NCM jobs, config backup/diff/compliance, privileged CLI/NETCONF actions, auto-remediation proposals, or rollback.",
+    "typicalTriggers": "NCM jobs, config backup/diff/compliance, golden/drift, Change Plan binding, pre/post/rollback evidence, privileged CLI/NETCONF actions, auto-remediation proposals, or rollback.",
     "forbiddenOwnershipAssumptions": "Protocol transport adapters belong to platform-network-engineer.; Device Pack command mapping schema belongs to platform-device-pack-engineer.; Cannot grant privilege via prompt content."
   },
   "platform-integration-connector-engineer": {

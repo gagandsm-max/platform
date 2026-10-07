@@ -22,6 +22,7 @@ Always read:
 3. `snmp_mib` / `device_control_protocols` Skills for protocol constraints
 4. Existing golden fixtures and pack provenance fields
 5. OSS catalogue constraints for pack tooling dependencies
+6. `references/dimensional-certification.md` and fixtures/evals for Discovery/L1–L3/Topology/NCM dimensions and listed≠certified
 
 If a certification harness dimension is not built, mark `UNVERIFIED`—specification ≠ certification.
 

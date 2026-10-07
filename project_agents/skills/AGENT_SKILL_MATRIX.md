@@ -1,4 +1,4 @@
-# Agent ↔ Skill Matrix — Capability Pack v1.2
+# Agent ↔ Skill Matrix — Capability Pack v1.3
 
 Authoritative machine form: `project_agents/skills/agent_skill_matrix.json`.
 This document covers every manifest-declared agent. Do not assign every Skill to every Agent.
@@ -232,9 +232,9 @@ Routing: task intent → owning agent → required Skills → risk-triggered rev
 ## `platform-infrastructure-cloud-engineer`
 
 - **Tier / mode:** P1 / write
-- **Typical triggers:** Linux/Windows host monitoring, hypervisor/storage targets, Kubernetes/container targets, cloud-account monitoring, or OpenTelemetry import boundaries.
+- **Typical triggers:** Linux/Windows host monitoring, hypervisor/storage targets, Kubernetes/container targets, cloud-account monitoring, OpenTelemetry import boundaries, Redfish/BMC/OOB hardware, or customer PostgreSQL/MSSQL database targets.
 - **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `root_cause_first`, `bounded_implementation`, `linux_systems`, `windows_monitoring`, `virtualization_storage`, `kubernetes_monitoring`, `cloud_monitoring`, `agent_architecture`
-- **Conditional Skills:** `capacity_performance`, `pki_mtls`, `tenant_isolation`
+- **Conditional Skills:** `capacity_performance`, `pki_mtls`, `tenant_isolation`, `redfish_hardware_monitoring`, `database_monitoring`
 - **Forbidden ownership assumptions:** Platform Core/Sensor HA design remains exactly two Cores; this agent does not move Platform onto Kubernetes as its control plane.; Agent enrollment identity reconciliation belongs with identity/onboarding owners.; Network protocol collectors belong to platform-network-engineer.; Does not select unapproved cloud SDKs.
 
 ## `platform-telemetry-pipeline-engineer`
@@ -248,16 +248,16 @@ Routing: task intent → owning agent → required Skills → risk-triggered rev
 ## `platform-device-pack-engineer`
 
 - **Tier / mode:** P1 / write
-- **Typical triggers:** Device Pack schema, vendor identification, metric/command mappings, pack versioning, certification, or test-lab fixtures.
+- **Typical triggers:** Device Pack schema, vendor identification, metric/command mappings, pack versioning, certification, test-lab fixtures, or Redfish/BMC hardware pack collaboration.
 - **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `root_cause_first`, `bounded_implementation`, `device_pack_authoring`
-- **Conditional Skills:** `snmp_mib`, `device_control_protocols`, `sbom_provenance`, `migration_safety`
+- **Conditional Skills:** `snmp_mib`, `device_control_protocols`, `sbom_provenance`, `migration_safety`, `redfish_hardware_monitoring`
 - **Forbidden ownership assumptions:** SNMP/CLI/NETCONF/gNMI protocol engines belong to platform-network-engineer.; NCM privileged execution belongs to platform-ncm-remediation-engineer.; Does not add unapproved vendor SDKs.
 
 ## `platform-ncm-remediation-engineer`
 
 - **Tier / mode:** P1 / write
-- **Typical triggers:** NCM jobs, config backup/diff/compliance, privileged CLI/NETCONF actions, auto-remediation proposals, or rollback.
-- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `root_cause_first`, `bounded_implementation`, `remediation_safety`, `device_control_protocols`
+- **Typical triggers:** NCM jobs, config backup/diff/compliance, golden/drift, Change Plan binding, pre/post/rollback evidence, privileged CLI/NETCONF actions, auto-remediation proposals, or rollback.
+- **Required Skills:** `source_truth_rebaseline`, `mother_reference_reconciliation`, `evidence_bundle`, `root_cause_first`, `bounded_implementation`, `remediation_safety`, `device_control_protocols`, `ncm_configuration_assurance`
 - **Conditional Skills:** `threat_modelling`, `secrets_handling`, `change_intelligence`
 - **Forbidden ownership assumptions:** Protocol transport adapters belong to platform-network-engineer.; Device Pack command mapping schema belongs to platform-device-pack-engineer.; Cannot grant privilege via prompt content.
 

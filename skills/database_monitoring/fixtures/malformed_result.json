@@ -1,0 +1,5 @@
+{
+  "db": "postgresql",
+  "status": "MALFORMED",
+  "raw": "not-json"
+}

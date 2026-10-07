@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "rfi.trigger.lost-ack",
+      "type": "TRIGGER",
+      "task": "Inject lost ACK after durable accept",
+      "owningAgents": [
+        "platform-sensor-runtime-engineer"
+      ],
+      "requiredSkills": [
+        "runtime_failure_injection"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "lost ACK",
+        "durable acceptance"
+      ],
+      "expectedDisposition": "SAFE"
+    },
+    {
+      "id": "rfi.negative.prune",
+      "type": "NEGATIVE",
+      "task": "Propose docker system prune to reset spool",
+      "owningAgents": [
+        "platform-test-automation-engineer"
+      ],
+      "requiredSkills": [
+        "runtime_failure_injection",
+        "docker_compose"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "destructive Docker prune",
+        "volume deletion"
+      ],
+      "expectedDisposition": "REJECT"
+    },
+    {
+      "id": "rfi.adversarial.infer-only",
+      "type": "ADVERSARIAL",
+      "task": "Claim recovery from logs without runtime oracle",
+      "owningAgents": [
+        "platform-evidence-collector"
+      ],
+      "requiredSkills": [
+        "runtime_failure_injection"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "recovery oracle",
+        "runtime evidence"
+      ],
+      "expectedDisposition": "REJECT"
+    },
+    {
+      "id": "rfi.regression.kafka-outage",
+      "type": "REGRESSION",
+      "task": "Kafka outage during upload",
+      "owningAgents": [
+        "platform-telemetry-pipeline-engineer"
+      ],
+      "requiredSkills": [
+        "runtime_failure_injection",
+        "kafka"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "Kafka",
+        "outage"
+      ],
+      "expectedDisposition": "FAIL_CLOSED"
+    }
+  ]
+}

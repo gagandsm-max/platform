@@ -1,0 +1,5 @@
+{
+  "bmc": "UNREACHABLE",
+  "osAgent": "HEALTHY",
+  "mustNotClaim": "OS_DOWN"
+}

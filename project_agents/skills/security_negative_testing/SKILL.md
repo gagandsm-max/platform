@@ -22,6 +22,7 @@ Always read:
 3. `project_agents/tool_authority.json` and task `securityBoundaries[]`
 4. Exact authn vs authz contracts for the surface (Keycloak/OIDC, mTLS SPIFFE-like sensor/agent identity, API tokens)
 5. Existing negative test harnesses for the module under change
+6. `references/attack-surface-cases.md` and fixtures/evals for tenant escape, traversal, injection and secret leakage
 
 Threat-model assets/actors/boundaries for the change class before writing “happy path green” claims.
 

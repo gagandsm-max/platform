@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "pack": "capability-pack-v1.3",
+  "tranche": 1,
+  "description": "Smallest machine-readable policy for Skills that require commercial-depth references/fixtures/evals. Does not force every Skill into arbitrary directories.",
+  "defaults": {
+    "requireReferences": true,
+    "requireFixtures": false,
+    "requireEvals": true,
+    "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+  },
+  "skills": {
+    "ncm_configuration_assurance": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "requiredReferenceFiles": [
+        "references/config-acquisition-normalization.md",
+        "references/change-plan-approval-binding.md",
+        "references/pre-post-validation-rollback.md"
+      ],
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "redfish_hardware_monitoring": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "requiredReferenceFiles": [
+        "references/redfish-identity-health.md",
+        "references/oem-version-compatibility.md"
+      ],
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "database_monitoring": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "requiredReferenceFiles": [
+        "references/postgresql-target.md",
+        "references/mssql-target.md"
+      ],
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "go_runtime": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "linux_systems": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "windows_monitoring": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "virtualization_storage": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "runtime_failure_injection": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "capacity_performance": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "install_upgrade": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "security_negative_testing": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    },
+    "device_pack_authoring": {
+      "requireReferences": true,
+      "requireFixtures": true,
+      "requireEvals": true,
+      "minimumEvalTypes": ["TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"]
+    }
+  }
+}

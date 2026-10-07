@@ -1,0 +1,4 @@
+{
+  "path": "../../etc/passwd",
+  "expect": "REJECT"
+}

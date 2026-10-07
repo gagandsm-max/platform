@@ -11,7 +11,7 @@ model: inherit
 commandExecutionPolicy: sandbox
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-device-pack-engineer.md sha256:86cc30e8aaab8469b7ca26cf6fe0301d813d39402ea4cc8c73aa768eb2e99b23 -->
+<!-- generated from project_agents/canonical/p1/platform-device-pack-engineer.md sha256:547bebc150e6097e999faf2295da85e707210458ba10397d9376a2219ddce967 -->
 
 # Platform Device Pack Engineer
 
@@ -98,6 +98,8 @@ Own Device Pack schema, identification, mappings, versioning, certification/prov
 - `device_control_protocols`
 - `sbom_provenance`
 - `migration_safety`
+- `redfish_hardware_monitoring`
+
 
 ## Handoff
 Protocol decode issues to network-engineer. Runtime collection issues to sensor-runtime-engineer. Privileged commands to ncm-remediation-engineer.

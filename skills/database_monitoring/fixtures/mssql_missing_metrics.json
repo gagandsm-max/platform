@@ -1,0 +1,7 @@
+{
+  "db": "mssql",
+  "status": "PARTIAL",
+  "missing": [
+    "filegroup_free"
+  ]
+}

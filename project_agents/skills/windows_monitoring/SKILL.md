@@ -22,6 +22,7 @@ Always read:
 3. Privacy-bounded collection rules (`Platform_20` / Agent privacy)
 4. Credential Profile guidance for remote Windows methods if used
 5. Tested Windows version matrix (do not assume all SKUs)
+6. `references/agent-vs-winrm-wmi.md` and fixtures/evals for WinRM/WMI auth, firewall and SCM recovery
 
 If WinRM remote-only, WMI, or specific Event Log channels are unimplemented, mark `UNVERIFIED`.
 

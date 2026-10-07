@@ -238,5 +238,17 @@
   {
     "name": "accessibility_inclusive_design",
     "description": "Accessible Platform operational UI: keyboard/focus, semantic HTML, screen-reader intent, non-colour status, contrast, reduced motion and inclusive resilient design."
+  },
+  {
+    "name": "ncm_configuration_assurance",
+    "description": "NCM configuration acquisition, history, diff, drift, compliance, Change Plan binding and pre/post/rollback evidence\u2014without treating AI text as authorization."
+  },
+  {
+    "name": "redfish_hardware_monitoring",
+    "description": "BUILD-032 Redfish/BMC/OOB hardware monitoring: identity, inventory, power/thermal/storage health and OEM compatibility without collapsing BMC and OS health."
+  },
+  {
+    "name": "database_monitoring",
+    "description": "BUILD-035 customer monitored-target database evidence for PostgreSQL and Microsoft SQL Server\u2014distinct from Platform control-plane postgresql Skill."
   }
 ]

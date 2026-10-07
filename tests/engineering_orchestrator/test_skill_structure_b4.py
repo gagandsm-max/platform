@@ -51,11 +51,11 @@ class SkillStructureUnitTests(unittest.TestCase):
             parts.append(f"## {heading}\n\n{sections[heading]}\n")
         return "\n".join(parts)
 
-    def test_canonical_skill_count_is_60(self) -> None:
+    def test_canonical_skill_count_is_63(self) -> None:
         skills = json.loads((REPO_ROOT / "project_agents" / "skills" / "manifest.json").read_text())
-        self.assertEqual(len(skills), 60)
+        self.assertEqual(len(skills), 63)
 
-    def test_all_60_skills_strict_structural_ok(self) -> None:
+    def test_all_63_skills_strict_structural_ok(self) -> None:
         skills = json.loads((REPO_ROOT / "project_agents" / "skills" / "manifest.json").read_text())
         for entry in skills:
             name = entry["name"]
@@ -387,8 +387,8 @@ class SkillDepthBatchRegressionTests(unittest.TestCase):
         self.assertEqual(counts["P0"], 0)
         self.assertEqual(counts["P1"], 0)
         self.assertEqual(counts["P2"], 0)
-        self.assertEqual(counts["OK"], 60)
-        self.assertEqual(counts["STRUCTURAL_OK"], 60)
+        self.assertEqual(counts["OK"], 63)
+        self.assertEqual(counts["STRUCTURAL_OK"], 63)
 
     def test_agent_architecture_still_critical(self) -> None:
         self.assertIn("agent_architecture", self.sdr.OPERATIONAL_CRITICAL_SKILLS)

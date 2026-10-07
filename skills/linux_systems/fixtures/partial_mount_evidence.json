@@ -1,0 +1,9 @@
+{
+  "status": "PARTIAL",
+  "mounts": [
+    "/"
+  ],
+  "missing": [
+    "/var/lib"
+  ]
+}

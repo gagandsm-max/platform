@@ -22,6 +22,8 @@ Always read:
 3. `sensor_edge`, `replay_idempotency`, `pki_mtls` when transport/spool touched
 4. Error-code / structured logging conventions in-tree
 5. Task stopConditions for unsupported OS APIs
+6. `references/context-concurrency-race.md` and `evals/cases.json` for commercial-depth BUILD/TEST/DEBUG checks
+7. Remember: microbenchmark evidence is not production capacity certification (`capacity_performance`)
 
 ## Invariants
 

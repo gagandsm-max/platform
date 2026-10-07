@@ -21,7 +21,13 @@ from control_plane import (
     assert_schema_tool_enums_match_authority,
     load_tool_authority,
 )
+from skill_evals import SkillEvalError, load_commercial_depth_policy, validate_skill_evals
+from skill_resources import sync_skill_resources, validate_skill_resources
 from skill_structure import format_structure_errors, validate_skill_structure
+
+# Active Capability Pack inventory ceiling (bounded; not unlimited growth).
+ACTIVE_SKILL_INVENTORY = 63
+ACTIVE_AGENT_INVENTORY = 34
 
 AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 SKILL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -377,7 +383,46 @@ def prune_retired_skill_mirrors(generated_root: Path, declared: set[str], repo: 
             skipped.append(f"unowned root skill requires review (symlink not deleted): {rel}")
             continue
         if skill_md.is_file() and has_generated_skill_marker(skill_md):
-            extras = [item for item in directory.iterdir() if item.name != "SKILL.md" and not item.name.endswith(TMP_SUFFIX)]
+            # Safe prune of projected resource trees only (references/fixtures/evals).
+            from skill_resources import ALLOWED_RESOURCE_DIRS
+
+            for dirname in sorted(ALLOWED_RESOURCE_DIRS):
+                resource_root = directory / dirname
+                if not resource_root.exists():
+                    continue
+                if resource_root.is_symlink():
+                    skipped.append(
+                        f"unowned root skill requires review (symlink not deleted): "
+                        f"{resource_root.relative_to(repo).as_posix()}"
+                    )
+                    continue
+                for path in sorted(resource_root.rglob("*"), reverse=True):
+                    if path.is_symlink():
+                        skipped.append(
+                            f"unowned root skill requires review (symlink not deleted): "
+                            f"{path.relative_to(repo).as_posix()}"
+                        )
+                        continue
+                    if path.is_file():
+                        safe_unlink(path, generated_root, repo)
+                    elif path.is_dir():
+                        try:
+                            path.rmdir()
+                        except OSError:
+                            pass
+                if resource_root.exists():
+                    try:
+                        resource_root.rmdir()
+                    except OSError:
+                        skipped.append(
+                            f"generated root skill resource dir not empty after prune: "
+                            f"{resource_root.relative_to(repo).as_posix()}"
+                        )
+            extras = [
+                item
+                for item in directory.iterdir()
+                if item.name != "SKILL.md" and not item.name.endswith(TMP_SUFFIX)
+            ]
             if extras:
                 skipped.append(
                     f"generated root skill leftover has extra files; not recursively deleted: {rel}"
@@ -415,18 +460,31 @@ def sync_agent_pack(repo: Path) -> str:
     declared_names = [str(entry["name"]) for entry in skill_manifest]
     if len(declared_names) != len(set(declared_names)):
         raise AgentPackError("duplicate skill names in project_agents/skills/manifest.json")
+    # Exact ACTIVE_* inventory ceilings are enforced by validate_agent_pack against
+    # the real repository. Sync remains usable for smaller fixture trees in tests.
     generated_roots = [repo / "skills", repo / ".agents" / "skills"]
     for generated_root in generated_roots:
         generated_root.mkdir(parents=True, exist_ok=True)
+    review: list[str] = []
     for skill in skill_manifest:
         name = assert_safe_name(str(skill.get("name", "")), SKILL_NAME_RE, "skill")
         canonical_skill = pa / "skills" / name / "SKILL.md"
+        canonical_dir = canonical_skill.parent
         if not canonical_skill.is_file() or canonical_skill.is_symlink():
             raise AgentPackError(f"missing canonical skill: {canonical_skill.relative_to(repo)}")
         rendered = render_generated_skill(name, canonical_skill.read_text(encoding="utf-8"))
         for generated_root in generated_roots:
             destination = owned_path(generated_root, name, SKILL_NAME_RE, "skill") / "SKILL.md"
             atomic_write(destination, rendered, repo)
+        review.extend(
+            sync_skill_resources(
+                name,
+                canonical_dir,
+                generated_roots,
+                repo,
+                skill_name_re=SKILL_NAME_RE,
+            )
+        )
 
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
@@ -435,7 +493,6 @@ def sync_agent_pack(repo: Path) -> str:
         repo / ".agents" / "agents": {f"{entry['name']}.md" for entry in manifest},
         repo / ".codex" / "agents": {f"{entry['name']}.toml" for entry in manifest},
     }
-    review: list[str] = []
     for directory, expected_names in expected_adapter_names.items():
         review.extend(prune_retired_adapters(directory, expected_names, repo))
         clean_tmp_files(directory, repo)
@@ -564,6 +621,16 @@ def validate_agent_pack(repo: Path) -> list[str]:
         if len(set(skill_names)) != len(skill_names):
             duplicates = sorted(str(name) for name, count in Counter(skill_names).items() if count > 1)
             errors.append(f"duplicate skill names: {', '.join(duplicates)}")
+        # Bounded inventory ceiling (not unlimited growth). Exact active-pack
+        # equality for the real repository is asserted by engineering_orchestrator tests.
+        if len(skill_names) > ACTIVE_SKILL_INVENTORY:
+            errors.append(
+                f"active skill inventory exceeds bounded ceiling {ACTIVE_SKILL_INVENTORY}, found {len(skill_names)}"
+            )
+        if len(manifest) > ACTIVE_AGENT_INVENTORY:
+            errors.append(
+                f"active agent inventory exceeds bounded ceiling {ACTIVE_AGENT_INVENTORY}, found {len(manifest)}"
+            )
         for name in skill_names:
             if name and not SKILL_NAME_RE.match(str(name)):
                 errors.append(f"unsafe skill name {name!r}")
@@ -648,7 +715,82 @@ def validate_agent_pack(repo: Path) -> list[str]:
                 if generated_text != expected:
                     errors.append(f"generated skill drift: {rel}")
 
+        # Resource projection + optional commercial-depth eval coverage.
+        # Fixture mini-repos may omit commercial_depth_policy.json; the real pack must include it.
+        depth_policy_path = pa / "skills" / "commercial_depth_policy.json"
+        depth_policy: dict[str, Any] = {}
+        if depth_policy_path.is_file() and not depth_policy_path.is_symlink():
+            try:
+                depth_policy = load_commercial_depth_policy(depth_policy_path)
+            except SkillEvalError as exc:
+                errors.append(str(exc))
+        elif len(declared) >= ACTIVE_SKILL_INVENTORY:
+            errors.append(f"missing commercial depth policy: {depth_policy_path}")
+        governed = depth_policy.get("skills") if isinstance(depth_policy.get("skills"), dict) else {}
+        defaults = depth_policy.get("defaults") if isinstance(depth_policy.get("defaults"), dict) else {}
         matrix_path = pa / "skills" / "agent_skill_matrix.json"
+        matrix_for_evals: dict[str, Any] = {}
+        if matrix_path.is_file():
+            try:
+                loaded_matrix = load_json(matrix_path)
+                if isinstance(loaded_matrix, dict):
+                    matrix_for_evals = loaded_matrix
+            except (OSError, json.JSONDecodeError):
+                pass
+        agent_names_for_evals = {str(entry.get("name")) for entry in manifest if entry.get("name")}
+        global_eval_ids: set[str] = set()
+        for name in sorted(declared):
+            canonical_dir = pa / "skills" / name
+            errors.extend(
+                validate_skill_resources(
+                    name,
+                    canonical_dir,
+                    (repo / "skills", repo / ".agents" / "skills"),
+                    repo,
+                )
+            )
+            policy = governed.get(name) if isinstance(governed.get(name), dict) else None
+            if policy is None:
+                # Ungoverned skills may still ship optional resources; validate evals if present.
+                errors.extend(
+                    validate_skill_evals(
+                        skill_name=name,
+                        skill_dir=canonical_dir,
+                        known_agents=agent_names_for_evals,
+                        known_skills=declared,
+                        agent_matrix=matrix_for_evals,
+                        require_evals=False,
+                        global_seen_ids=global_eval_ids,
+                    )
+                )
+                continue
+            require_refs = bool(policy.get("requireReferences", defaults.get("requireReferences", False)))
+            require_fixtures = bool(policy.get("requireFixtures", defaults.get("requireFixtures", False)))
+            require_evals = bool(policy.get("requireEvals", defaults.get("requireEvals", False)))
+            min_types = set(policy.get("minimumEvalTypes") or defaults.get("minimumEvalTypes") or [])
+            if require_refs and not (canonical_dir / "references").is_dir():
+                errors.append(f"{name}: missing required references/ directory")
+            if require_fixtures and not (canonical_dir / "fixtures").is_dir():
+                errors.append(f"{name}: missing required fixtures/ directory")
+            for required_file in policy.get("requiredReferenceFiles") or []:
+                if not isinstance(required_file, str):
+                    errors.append(f"{name}: requiredReferenceFiles entries must be strings")
+                    continue
+                if not (canonical_dir / required_file).is_file():
+                    errors.append(f"{name}: missing required depth resource {required_file}")
+            errors.extend(
+                validate_skill_evals(
+                    skill_name=name,
+                    skill_dir=canonical_dir,
+                    known_agents=agent_names_for_evals,
+                    known_skills=declared,
+                    agent_matrix=matrix_for_evals,
+                    require_evals=require_evals,
+                    required_types=min_types if require_evals else None,
+                    global_seen_ids=global_eval_ids,
+                )
+            )
+
         if matrix_path.is_file():
             try:
                 matrix = load_json(matrix_path)

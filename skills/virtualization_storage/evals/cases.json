@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "virt.trigger.datastore",
+      "type": "TRIGGER",
+      "task": "Collect vCenter datastore capacity",
+      "owningAgents": [
+        "platform-infrastructure-cloud-engineer"
+      ],
+      "requiredSkills": [
+        "virtualization_storage"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "vCenter",
+        "datastore"
+      ],
+      "expectedDisposition": "SAFE"
+    },
+    {
+      "id": "virt.negative.vcenter-down",
+      "type": "NEGATIVE",
+      "task": "vCenter unreachable",
+      "owningAgents": [
+        "platform-infrastructure-cloud-engineer"
+      ],
+      "requiredSkills": [
+        "virtualization_storage"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "vCenter unavailable \u2260 all VMs DOWN"
+      ],
+      "expectedDisposition": "FAIL_CLOSED",
+      "fixtures": [
+        "fixtures/vcenter_unavailable.json"
+      ]
+    },
+    {
+      "id": "virt.adversarial.hyperv-equiv",
+      "type": "ADVERSARIAL",
+      "task": "Claim Hyper-V equal to VMware first-GA depth",
+      "owningAgents": [
+        "platform-infrastructure-cloud-engineer"
+      ],
+      "requiredSkills": [
+        "virtualization_storage"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "Hyper-V",
+        "certification"
+      ],
+      "expectedDisposition": "REJECT"
+    },
+    {
+      "id": "virt.regression.stale",
+      "type": "REGRESSION",
+      "task": "Stale inventory treated as live topology",
+      "owningAgents": [
+        "platform-infrastructure-cloud-engineer"
+      ],
+      "requiredSkills": [
+        "virtualization_storage"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "stale inventory",
+        "eventual consistency"
+      ],
+      "expectedDisposition": "INCONCLUSIVE"
+    }
+  ]
+}

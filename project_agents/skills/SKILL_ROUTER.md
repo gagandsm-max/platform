@@ -1,4 +1,4 @@
-# Skill Router — Capability Pack v1.2
+# Skill Router — Capability Pack v1.3
 
 Canonical skills live only under `project_agents/skills/`. Generated copies under
 `.agents/skills/` (Cursor + Antigravity) and `skills/` (legacy mirror) are not a
@@ -64,6 +64,9 @@ Do not load every Skill body into context. Resolve names from this router and
 | PKI / mTLS | `pki_mtls` |
 | Secrets / credentials | `secrets_handling` |
 | Privileged NCM / remediation | `remediation_safety` |
+| NCM config acquisition/diff/drift/Change Plan evidence | `ncm_configuration_assurance` |
+| Redfish/BMC/OOB hardware | `redfish_hardware_monitoring` |
+| Customer PostgreSQL/MSSQL monitoring targets | `database_monitoring` |
 | Docker Compose | `docker_compose` |
 | CI/CD | `ci_cd` |
 | SBOM / provenance | `sbom_provenance` |
