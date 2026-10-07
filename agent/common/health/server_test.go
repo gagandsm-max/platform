@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"platform/agent/common/client"
+	"platform/agent/common/collector"
 	"platform/agent/common/delivery"
 	"platform/agent/common/queue"
 )
@@ -19,26 +20,27 @@ import (
 type mockStatsProvider struct {
 	mu sync.Mutex
 
-	lifecycle            string
-	schedulerRunning     bool
-	enabledCollectors    int
-	collectors           []CollectorSnapshot
-	collectorRunErrors   int
-	collectorLastRun     time.Time
-	receiverAvailable    bool
-	atCapacity           bool
-	quarantineAtCapacity bool
-	quarantine           int
-	activeCount          int
-	lastErrorCode        string
-	lastFailureClass     client.FailureClass
-	deliveryBlocked      bool
-	unknownSequence      bool
-	locationUncertain    bool
-	metaUncertain        bool
-	sequenceGap          bool
-	sequenceConflict     bool
-	ackRecoveryConflict  bool
+	lifecycle                string
+	schedulerRunning         bool
+	enabledCollectors        int
+	collectors               []CollectorSnapshot
+	collectorRunErrors       int
+	collectorLastRun         time.Time
+	receiverAvailable        bool
+	atCapacity               bool
+	quarantineAtCapacity     bool
+	quarantine               int
+	activeCount              int
+	lastErrorCode            string
+	lastFailureClass         client.FailureClass
+	deliveryBlocked          bool
+	unknownSequence          bool
+	locationUncertain        bool
+	metaUncertain            bool
+	sequenceGap              bool
+	sequenceConflict         bool
+	ackRecoveryConflict      bool
+	processNetworkCapability collector.ProcessNetworkCapabilitySnapshot
 }
 
 func healthyProvider() *mockStatsProvider {
@@ -94,6 +96,7 @@ func (m *mockStatsProvider) RuntimeSnapshot() RuntimeSnapshot {
 			LastErrorCode:     m.lastErrorCode,
 			LastFailureClass:  m.lastFailureClass,
 		},
+		ProcessNetworkCapability: m.processNetworkCapability.Copy(),
 	}
 }
 
@@ -477,6 +480,124 @@ func TestNoSecretOrPayloadLeakage(t *testing.T) {
 			t.Fatalf("health leaked %q: %s", banned, body)
 		}
 	}
+}
+
+func TestOptionalEBPFCapabilityEvidenceDoesNotAffectLiveOrReady(t *testing.T) {
+	for _, state := range []collector.ProcessNetworkCapabilityState{
+		collector.ProcessNetworkCapabilityUnsupported,
+		collector.ProcessNetworkCapabilityUnavailable,
+		collector.ProcessNetworkCapabilityPrivilegeDenied,
+		collector.ProcessNetworkCapabilityKernelIncompatible,
+		collector.ProcessNetworkCapabilityResourceGuarded,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			prov := healthyProvider()
+			prov.processNetworkCapability = collector.ProcessNetworkCapabilitySnapshot{
+				State:             state,
+				ReasonCodes:       []collector.ProcessNetworkCapabilityReason{collector.ReasonBackendNotImplemented},
+				ObservedAt:        time.Now().UTC(),
+				TransitionAt:      time.Now().UTC(),
+				ValidUntil:        time.Now().UTC().Add(time.Hour),
+				NextRecheckAt:     time.Now().UTC().Add(time.Hour),
+				AttemptCount:      1,
+				OS:                "linux",
+				Arch:              "amd64",
+				KernelRelease:     "6.8.0-fixture",
+				BootIDDigest:      strings.Repeat("a", 64),
+				KernelFingerprint: strings.Repeat("b", 64),
+				SourceQuality:     "FIXTURE",
+			}
+			s, err := NewServer("127.0.0.1:0", prov, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertReady(t, s, http.StatusOK, "UP", true, "")
+			assertLiveOK(t, s)
+			body := assertHealth(t, s, http.StatusOK, "UP", "")
+			if _, exists := body["optional_capabilities"]; exists {
+				t.Fatalf("/health must remain within SUPPORT_EVIDENCE schema: %v", body)
+			}
+			ebpfEvidence := assertProcessNetworkCapability(t, s)
+			if ebpfEvidence["state"] != string(state) {
+				t.Fatalf("eBPF evidence mismatch: %v", ebpfEvidence)
+			}
+			raw := wJSON(t, ebpfEvidence)
+			for _, banned := range []string{"cmdline", "environ", "password", "token", "payload", "/proc/", "/sys/"} {
+				if strings.Contains(strings.ToLower(raw), banned) {
+					t.Fatalf("optional support evidence leaked %q: %s", banned, raw)
+				}
+			}
+		})
+	}
+}
+
+func TestStaleOptionalEBPFEvidenceBecomesUnavailableWithoutAffectingReadiness(t *testing.T) {
+	prov := healthyProvider()
+	prov.processNetworkCapability = collector.ProcessNetworkCapabilitySnapshot{
+		State:         collector.ProcessNetworkCapabilityKernelIncompatible,
+		ReasonCodes:   []collector.ProcessNetworkCapabilityReason{collector.ReasonBTFMissing},
+		ObservedAt:    time.Now().UTC().Add(-2 * time.Hour),
+		TransitionAt:  time.Now().UTC().Add(-2 * time.Hour),
+		ValidUntil:    time.Now().UTC().Add(-time.Hour),
+		NextRecheckAt: time.Now().UTC().Add(-time.Hour),
+		AttemptCount:  1,
+		SourceQuality: "FIXTURE",
+	}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReady(t, s, http.StatusOK, "UP", true, "")
+	assertHealth(t, s, http.StatusOK, "UP", "")
+	evidence := assertProcessNetworkCapability(t, s)
+	if evidence["state"] != string(collector.ProcessNetworkCapabilityUnavailable) {
+		t.Fatalf("stale state=%v", evidence["state"])
+	}
+	reasons := evidence["reason_codes"].([]any)
+	if len(reasons) != 1 || reasons[0] != string(collector.ReasonEvidenceStale) {
+		t.Fatalf("stale reasons=%v", reasons)
+	}
+}
+
+func TestMissingOptionalEBPFEvidenceIsBoundedUnavailable(t *testing.T) {
+	s, err := NewServer("127.0.0.1:0", healthyProvider(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := assertProcessNetworkCapability(t, s)
+	if evidence["state"] != string(collector.ProcessNetworkCapabilityUnavailable) {
+		t.Fatalf("missing state=%v", evidence["state"])
+	}
+	reasons := evidence["reason_codes"].([]any)
+	if len(reasons) != 1 || reasons[0] != string(collector.ReasonSourceUnavailable) {
+		t.Fatalf("missing reasons=%v", reasons)
+	}
+}
+
+func assertProcessNetworkCapability(t *testing.T, s *Server) map[string]any {
+	t.Helper()
+	w := httptest.NewRecorder()
+	s.handleProcessNetworkCapability(w, httptest.NewRequest(http.MethodGet, "/capabilities/process-network-ebpf", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("capability status=%d body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["document_type"] != "CAPABILITY_EVIDENCE" || body["capability"] != "process_network_ebpf" {
+		t.Fatalf("unexpected capability evidence: %v", body)
+	}
+	return body
+}
+
+func wJSON(t *testing.T, value any) string {
+	t.Helper()
+	b, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func TestDeterministicReasonOrdering(t *testing.T) {

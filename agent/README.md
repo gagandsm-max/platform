@@ -31,6 +31,10 @@ Default registered collectors (`cpu`, `memory`, `filesystem`, `pressure`, `diski
 
 BUILD-011 Slice 3 adds a **local, unwired** Linux process/service source (`LinuxProcessServiceSource`) that reads bounded `/proc` identity/runtime facts and optional read-only systemd unit evidence. It reuses the Slice-1 selector/catalogue contracts, never registers as a `HostCollector`, never encodes the catalogue into scalar metric labels, and does not claim Agent→Sensor structured delivery (BUILD-016/062). Customer alert/policy evaluation remains BUILD-070.
 
+The next BUILD-011 checkpoint adds a standard-library-only, non-loading Linux eBPF capability preflight. It uses fixed, bounded, read-only sources (`/proc/sys/kernel/osrelease`, `/proc/sys/kernel/random/boot_id`, `/proc/self/status`, optional coarse `/proc/self/attr/current`, and `/sys/kernel/btf/vmlinux` metadata/readability plus a bounded digest prefix). It parses `CapEff`, `CapPrm`, `CapBnd`, and `CapAmb` explicitly for `CAP_BPF` and `CAP_PERFMON`; UID/root is never treated as capability evidence. The public state vocabulary is exactly `ACTIVE`, `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, and `RESOURCE_GUARDED`.
+
+This remains a preflight boundary, not a kernel backend. No BPF dependency, bytecode, object, loader, attach point, map, ring/perf buffer, subprocess, systemd capability change, or continuous reader exists. Even when compatibility checks pass, the truthful state is `UNAVAILABLE` with `BACKEND_NOT_IMPLEMENTED`. Optional capability evidence is exposed separately at `/capabilities/process-network-ebpf` on the same loopback-only health server so the governed `/health` support-evidence schema remains unchanged. It never changes `/live`, `/ready`, scheduler operation, scalar collection, durable queue/delivery, or monitored host/process/service/network state.
+
 This checkpoint does not collect process command lines, environment variables, packet contents, arbitrary command output, application traces, or unrestricted process data. Collector failure is monitoring-health/degraded evidence, never authoritative host DOWN.
 
 ## Durable local buffer
@@ -84,6 +88,10 @@ Optional governed inputs:
 - `PLATFORM_AGENT_RETRY_BASE`
 - `PLATFORM_AGENT_RETRY_MAX`
 - `PLATFORM_AGENT_DELIVERY_TIMEOUT`
+- `PLATFORM_AGENT_EBPF_ENABLED` (default `false`; preflight evidence only)
+- `PLATFORM_AGENT_EBPF_PREFLIGHT_TIMEOUT` (default `2s`, bounded `100ms..10s`)
+- `PLATFORM_AGENT_EBPF_RECHECK_MIN` (default `5m`, bounded `1m..24h`)
+- `PLATFORM_AGENT_EBPF_RECHECK_MAX` (default `1h`, bounded `1m..24h` and not below the minimum)
 - `PLATFORM_LOG_LEVEL`
 
 TLS material is validated before network/spool activation. Private keys must be regular, non-symlink files without group/world permissions. Errors/logs do not print secret material.

@@ -1,0 +1,5 @@
+Name:	platform-agent
+CapPrm:	000000c000000000
+CapEff:	not-hex
+CapBnd:	000000c000000000
+CapAmb:	0000000000000000
