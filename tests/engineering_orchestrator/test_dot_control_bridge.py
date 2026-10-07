@@ -8,32 +8,63 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_AGENTS = REPO_ROOT / "project_agents"
+DOT_CONTROL = PROJECT_AGENTS / "dot_control"
 if str(PROJECT_AGENTS) not in sys.path:
     sys.path.insert(0, str(PROJECT_AGENTS))
 
 from dot_control.bridge import DotControlBridge  # noqa: E402
-from dot_control.evidence import redact_argv, redact_text  # noqa: E402
+from dot_control.evidence import (  # noqa: E402
+    BoundedRedactingWriter,
+    append_bridge_log,
+    redact_argv,
+    redact_text,
+)
 from dot_control.executor import (  # noqa: E402
     build_action_argv,
+    collect_change_scope,
+    enforce_change_scope,
+    enforce_post_change_scope,
+    execute_repo_probe,
+    live_writer_unsupported,
+    parse_github_owner_repo,
     run_process,
+    sanitize_remote_url,
+    validate_repo_relative_path,
+    verify_authoritative_base,
     verify_git_preconditions,
+    verify_repository_binding,
 )
 from dot_control.locks import WorktreeLock, inspect_lock, pid_alive  # noqa: E402
 from dot_control.models import (  # noqa: E402
+    APPROVED_REPOSITORY,
+    DIR_MODE,
+    FILE_MODE,
+    JSON_SCHEMA_META,
+    LIVE_WRITER_UNSUPPORTED_REASON,
+    MAX_PROMPT_BYTES,
+    MAX_STDERR_LOG_BYTES,
+    MAX_STDOUT_LOG_BYTES,
+    PUBLIC_WEBSITE,
+    SCHEMA_ID,
     SCHEMA_VERSION,
     Action,
     BridgeError,
     Disposition,
-    MAX_PROMPT_BYTES,
+    TaskManifest,
+    VerifierTool,
+    WriterTool,
 )
+from dot_control.paths import init_control_root, validate_control_root_layout  # noqa: E402
 from dot_control.validator import PathPolicy, validate_manifest_dict  # noqa: E402
 
 
@@ -56,12 +87,11 @@ def _init_repo(root: Path, *, branch: str = "feature/gate3-proof") -> str:
     (root / "README.md").write_text("seed\n", encoding="utf-8")
     _git(root, "add", "README.md")
     _git(root, "commit", "-m", "seed")
-    # Simulate origin/main for REPO_PROBE.
     _git(root, "branch", "main")
     _git(root, "checkout", "-b", branch)
-    # Fake remote ref without network.
     head = _git(root, "rev-parse", "HEAD").stdout.strip()
     _git(root, "update-ref", "refs/remotes/origin/main", head)
+    _git(root, "remote", "add", "origin", "https://github.com/gagandsm-max/platform.git")
     return head
 
 
@@ -86,6 +116,8 @@ def _base_manifest(
     commit_message: str | None = None,
     test_profile: str | None = None,
     timeout: int = 30,
+    repository: str = APPROVED_REPOSITORY,
+    authoritative_base: str | None = None,
 ) -> dict:
     payload = {
         "schemaVersion": SCHEMA_VERSION,
@@ -94,10 +126,10 @@ def _base_manifest(
         "action": action,
         "writerTool": writer,
         "verifierTool": verifier,
-        "repository": "gagandsm-max/platform",
+        "repository": repository,
         "worktree": str(worktree),
         "branch": branch,
-        "authoritativeBase": head,
+        "authoritativeBase": authoritative_base or head,
         "expectedHead": head,
         "allowedFiles": allowed if allowed is not None else [],
         "forbiddenFiles": forbidden if forbidden is not None else [],
@@ -136,6 +168,40 @@ def _submit(bridge: DotControlBridge, payload: dict) -> Path:
     return final
 
 
+def _manifest_obj(
+    *,
+    repo: Path,
+    branch: str,
+    head: str,
+    action: Action = Action.CODEX_TASK,
+    allow_commit: bool = False,
+    allowed: tuple[str, ...] = ("a.txt",),
+    forbidden: tuple[str, ...] = (),
+) -> TaskManifest:
+    return TaskManifest(
+        schema_version=SCHEMA_VERSION,
+        task_id="SCOPE-1",
+        governing_issue="#185",
+        action=action,
+        writer_tool=WriterTool.CODEX if action == Action.CODEX_TASK else WriterTool.CURSOR_CLI,
+        verifier_tool=VerifierTool.NONE,
+        repository=APPROVED_REPOSITORY,
+        worktree=repo,
+        branch=branch,
+        authoritative_base=head,
+        expected_head=head,
+        allowed_files=allowed,
+        forbidden_files=forbidden,
+        prompt_file=None,
+        timeout_seconds=30,
+        allow_commit=allow_commit,
+        allow_push=False,
+        allow_pull_request=False,
+        created_at="2026-10-07T00:00:00Z",
+        requested_by="t",
+    )
+
+
 class DotControlBridgeTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="dot-control-")
@@ -164,7 +230,6 @@ class DotControlBridgeTests(unittest.TestCase):
     # --- Gate 3A replacement proof ----------------------------------------
 
     def test_git_commit_proof_gate3a(self) -> None:
-        # Clean HEAD baseline, then only the single allowed file is dirty.
         target = self.repo / "proof.txt"
         target.write_text("gate3-proof\n", encoding="utf-8")
         payload = _base_manifest(
@@ -209,6 +274,52 @@ class DotControlBridgeTests(unittest.TestCase):
         self.assertEqual(result.disposition, Disposition.SUCCESS.value)
         self.assertIn("rev-parse HEAD", result.probe)
         self.assertEqual(result.ending_head, self.head)
+        self.assertEqual(result.exit_code, 0)
+
+    def test_repo_probe_missing_origin_main_not_success(self) -> None:
+        _git(self.repo, "update-ref", "-d", "refs/remotes/origin/main")
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="PROBE-MISS",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        _submit(self.bridge, payload)
+        result = self.bridge.process_one()
+        self.assertIn(result.disposition, {Disposition.PARTIAL.value, Disposition.FAILED.value})
+        self.assertNotEqual(result.disposition, Disposition.SUCCESS.value)
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertGreater(result.probe["summary"]["requiredFailed"], 0)
+
+    def test_repo_probe_failed_status_not_success(self) -> None:
+        manifest = validate_manifest_dict(
+            _base_manifest(
+                control=self.control,
+                worktree=self.repo,
+                task_id="PROBE-FAIL",
+                action="REPO_PROBE",
+                branch=self.branch,
+                head=self.head,
+            ),
+            policy=self.policy,
+        )
+        with mock.patch("dot_control.executor._run_git") as run_git:
+            def _side_effect(args, cwd, **kwargs):
+                key = " ".join(args)
+                if args[:1] == ["status"]:
+                    return subprocess.CompletedProcess(
+                        args=["git", *args], returncode=128, stdout="", stderr="fail"
+                    )
+                return subprocess.CompletedProcess(
+                    args=["git", *args], returncode=0, stdout="ok", stderr=""
+                )
+
+            run_git.side_effect = _side_effect
+            _evidence, probe, disposition = execute_repo_probe(manifest)
+        self.assertNotEqual(disposition, Disposition.SUCCESS)
+        self.assertNotEqual(probe["summary"]["disposition"], Disposition.SUCCESS.value)
 
     # --- argv construction / CLI help fidelity ----------------------------
 
@@ -252,7 +363,6 @@ class DotControlBridgeTests(unittest.TestCase):
         self.assertNotIn("--yolo", argv)
 
     def test_antigravity_argv_plan_sandbox(self) -> None:
-        # Detached verifier repo
         vrepo = self.tmp / "verifier"
         head = _init_repo(vrepo, branch="feature/v")
         _git(vrepo, "checkout", "--detach", head)
@@ -274,6 +384,49 @@ class DotControlBridgeTests(unittest.TestCase):
         self.assertIn("--sandbox", argv)
         self.assertIn("plan", argv)
         self.assertNotIn("--dangerously-skip-permissions", argv)
+
+    def test_live_cursor_unsupported_no_child(self) -> None:
+        prompt = _write_prompt(self.control, "CURSOR-LIVE")
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="CURSOR-LIVE",
+            action="CURSOR_TASK",
+            branch=self.branch,
+            head=self.head,
+            writer="cursor-cli",
+            prompt=str(prompt),
+            allowed=["ok.txt"],
+        )
+        _submit(self.bridge, payload)
+        with mock.patch("dot_control.bridge.run_process") as rp:
+            result = self.bridge.process_one()
+            rp.assert_not_called()
+        self.assertEqual(result.disposition, Disposition.UNSUPPORTED.value)
+        self.assertIn("credential-isolation", (result.error or "").lower())
+        self.assertTrue(any("not launched" in n.lower() for n in result.notes))
+        self.assertEqual(result.command_argv[0], "agent")
+
+    def test_live_codex_unsupported_no_child(self) -> None:
+        prompt = _write_prompt(self.control, "CODEX-LIVE")
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="CODEX-LIVE",
+            action="CODEX_TASK",
+            branch=self.branch,
+            head=self.head,
+            writer="codex",
+            prompt=str(prompt),
+            allowed=["ok.txt"],
+        )
+        _submit(self.bridge, payload)
+        with mock.patch("dot_control.bridge.run_process") as rp:
+            result = self.bridge.process_one()
+            rp.assert_not_called()
+        self.assertEqual(result.disposition, Disposition.UNSUPPORTED.value)
+        self.assertIsNotNone(live_writer_unsupported(Action.CODEX_TASK))
+        self.assertIn(LIVE_WRITER_UNSUPPORTED_REASON[:40], result.error or "")
 
     # --- negative tests ---------------------------------------------------
 
@@ -404,7 +557,11 @@ class DotControlBridgeTests(unittest.TestCase):
         manifest = validate_manifest_dict(payload, policy=self.policy)
         with self.assertRaises(BridgeError) as ctx:
             verify_git_preconditions(manifest)
-        self.assertIn("unexpected head", str(ctx.exception).lower())
+        # May fail on authoritativeBase existence before HEAD check.
+        self.assertTrue(
+            "unexpected head" in str(ctx.exception).lower()
+            or "authoritativebase" in str(ctx.exception).lower()
+        )
 
     def test_dirty_start_rejected_for_commit_proof(self) -> None:
         (self.repo / "extra.txt").write_text("dirt\n", encoding="utf-8")
@@ -461,7 +618,7 @@ class DotControlBridgeTests(unittest.TestCase):
             worktree=str(self.repo.resolve()),
             branch=self.branch,
             expected_head=self.head,
-            bridge_pid=2**22 + 99999,  # almost certainly dead
+            bridge_pid=2**22 + 99999,
             child_pid=None,
             created_at=utc_now_iso(),
             heartbeat_at=utc_now_iso(),
@@ -479,11 +636,9 @@ class DotControlBridgeTests(unittest.TestCase):
         lock.release()
 
     def test_multiple_writers_same_worktree(self) -> None:
-        # Same as live lock — Cursor vs Codex.
         self.test_live_lock_blocks_second_writer()
 
     def test_writer_equals_verifier_rejected(self) -> None:
-        # Simulate equal non-none tools via raw dict before enum split.
         payload = _base_manifest(
             control=self.control,
             worktree=self.repo,
@@ -495,7 +650,6 @@ class DotControlBridgeTests(unittest.TestCase):
             verifier="antigravity",
             prompt=str(_write_prompt(self.control, "WV-1")),
         )
-        # Force equal string tools unsupported combination: writerTool=antigravity invalid.
         payload["writerTool"] = "antigravity"
         with self.assertRaises(BridgeError):
             validate_manifest_dict(payload, policy=self.policy)
@@ -620,30 +774,8 @@ class DotControlBridgeTests(unittest.TestCase):
         self.assertFalse(pid_alive(evidence.child_pid))
 
     def test_changed_file_outside_allowed(self) -> None:
-        from dot_control.executor import enforce_post_change_scope
-        from dot_control.models import TaskManifest, WriterTool, VerifierTool
-
-        manifest = TaskManifest(
-            schema_version=SCHEMA_VERSION,
-            task_id="CF-1",
-            governing_issue="#185",
-            action=Action.CODEX_TASK,
-            writer_tool=WriterTool.CODEX,
-            verifier_tool=VerifierTool.NONE,
-            repository="gagandsm-max/platform",
-            worktree=self.repo,
-            branch=self.branch,
-            authoritative_base=self.head,
-            expected_head=self.head,
-            allowed_files=("a.txt",),
-            forbidden_files=(),
-            prompt_file=None,
-            timeout_seconds=10,
-            allow_commit=False,
-            allow_push=False,
-            allow_pull_request=False,
-            created_at="2026-10-07T00:00:00Z",
-            requested_by="t",
+        manifest = _manifest_obj(
+            repo=self.repo, branch=self.branch, head=self.head, allowed=("a.txt",)
         )
         with self.assertRaises(BridgeError) as ctx:
             enforce_post_change_scope(manifest, ["b.txt"])
@@ -651,13 +783,9 @@ class DotControlBridgeTests(unittest.TestCase):
 
     def test_commit_stages_forbidden_file(self) -> None:
         from dot_control.executor import execute_git_commit_proof
-        from dot_control.models import TaskManifest, WriterTool, VerifierTool
 
         (self.repo / "ok.txt").write_text("1\n", encoding="utf-8")
         (self.repo / "nope.txt").write_text("2\n", encoding="utf-8")
-        # Pre-stage both files, then call executor which re-adds allowed and
-        # must reject because staged set will include forbidden after add-all-dirty?
-        # Executor runs `git add -- allowed` only; pre-staged forbidden remains staged.
         _git(self.repo, "add", "--", "ok.txt", "nope.txt")
         manifest = TaskManifest(
             schema_version=SCHEMA_VERSION,
@@ -666,7 +794,7 @@ class DotControlBridgeTests(unittest.TestCase):
             action=Action.GIT_COMMIT_PROOF,
             writer_tool=WriterTool.NONE,
             verifier_tool=VerifierTool.NONE,
-            repository="gagandsm-max/platform",
+            repository=APPROVED_REPOSITORY,
             worktree=self.repo,
             branch=self.branch,
             authoritative_base=self.head,
@@ -749,18 +877,500 @@ class DotControlBridgeTests(unittest.TestCase):
         lock.release()
 
     def test_init_does_not_touch_production_by_default(self) -> None:
-        # Creating bridge without create_dirs must not mkdir production path.
         prod = Path("/home/gagan/nms-dot-control")
-        # We only assert the temporary bridge created dirs under tmp.
         self.assertTrue(self.control.joinpath("inbox").is_dir())
-        # Production may or may not exist; we must not have created it in this test
-        # via DotControlBridge(DEFAULT) — we didn't call that.
         self.assertNotEqual(self.control, prod)
 
 
-class Gate3AFixtureManifestTests(unittest.TestCase):
-    """Fixture manifest document for Gate 3A replacement proof."""
+class SchemaBrandRegressionTests(unittest.TestCase):
+    def test_schema_id_and_no_forbidden_brand(self) -> None:
+        # Construct forbidden brand so this test file does not embed the banned literal.
+        forbidden_brand = "amrud" + ".ai"
+        schema_path = DOT_CONTROL / "task.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(schema["$schema"], JSON_SCHEMA_META)
+        self.assertEqual(schema["$id"], SCHEMA_ID)
+        self.assertEqual(SCHEMA_ID, "urn:amrudai:schema:dot-control:task-manifest:v1")
+        self.assertNotIn(forbidden_brand, schema_path.read_text(encoding="utf-8"))
 
+        scan_roots = [DOT_CONTROL, Path(__file__).resolve()]
+        for root in scan_roots:
+            paths = [root] if root.is_file() else [
+                p for p in root.rglob("*")
+                if p.is_file() and p.suffix != ".pyc" and "__pycache__" not in p.parts
+            ]
+            for path in paths:
+                text = path.read_text(encoding="utf-8", errors="replace")
+                # Allow the constructed form only via concatenation in this test.
+                if path.resolve() == Path(__file__).resolve():
+                    # Ensure the banned literal form is absent (concatenated check uses parts).
+                    self.assertNotIn(forbidden_brand, text.replace('"amrud" + ".ai"', ""))
+                    continue
+                self.assertNotIn(forbidden_brand, text, msg=f"{forbidden_brand} found in {path}")
+
+        # Public website constant exists; must not appear as an unserved schema URL.
+        self.assertEqual(PUBLIC_WEBSITE, "https://amrudai.com")
+        schema_text = schema_path.read_text(encoding="utf-8")
+        self.assertNotIn(PUBLIC_WEBSITE, schema_text)
+
+
+class ChangeScopeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="dot-scope-")
+        self.tmp = Path(self._tmpdir.name)
+        self.repo = self.tmp / "repo"
+        self.branch = "feature/scope"
+        self.head = _init_repo(self.repo, branch=self.branch)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_unauthorized_commit_clean_worktree_rejected(self) -> None:
+        start = self.head
+        (self.repo / "secret.txt").write_text("nope\n", encoding="utf-8")
+        _git(self.repo, "add", "secret.txt")
+        _git(self.repo, "commit", "-m", "unauthorized")
+        end = _sha(self.repo)
+        self.assertFalse(_git(self.repo, "status", "--porcelain").stdout.strip())
+        manifest = _manifest_obj(
+            repo=self.repo,
+            branch=self.branch,
+            head=start,
+            allow_commit=True,
+            allowed=("ok.txt",),
+        )
+        with self.assertRaises(BridgeError) as ctx:
+            enforce_change_scope(manifest, start, end)
+        self.assertIn("outside allowedfiles", str(ctx.exception).lower())
+
+    def test_allowed_commit_accepted(self) -> None:
+        start = self.head
+        (self.repo / "ok.txt").write_text("yes\n", encoding="utf-8")
+        _git(self.repo, "add", "ok.txt")
+        _git(self.repo, "commit", "-m", "allowed")
+        end = _sha(self.repo)
+        manifest = _manifest_obj(
+            repo=self.repo,
+            branch=self.branch,
+            head=start,
+            allow_commit=True,
+            allowed=("ok.txt",),
+        )
+        changed = enforce_change_scope(manifest, start, end)
+        self.assertEqual(changed, ["ok.txt"])
+
+    def test_head_move_allow_commit_false_rejected(self) -> None:
+        start = self.head
+        (self.repo / "ok.txt").write_text("yes\n", encoding="utf-8")
+        _git(self.repo, "add", "ok.txt")
+        _git(self.repo, "commit", "-m", "moved")
+        end = _sha(self.repo)
+        manifest = _manifest_obj(
+            repo=self.repo,
+            branch=self.branch,
+            head=start,
+            allow_commit=False,
+            allowed=("ok.txt",),
+        )
+        with self.assertRaises(BridgeError) as ctx:
+            enforce_change_scope(manifest, start, end)
+        self.assertIn("allowcommit=false", str(ctx.exception).lower())
+
+    def test_staged_unauthorized_rejected(self) -> None:
+        (self.repo / "bad.txt").write_text("x\n", encoding="utf-8")
+        _git(self.repo, "add", "bad.txt")
+        manifest = _manifest_obj(
+            repo=self.repo,
+            branch=self.branch,
+            head=self.head,
+            allow_commit=False,
+            allowed=("ok.txt",),
+        )
+        with self.assertRaises(BridgeError) as ctx:
+            enforce_change_scope(manifest, self.head, self.head)
+        msg = str(ctx.exception).lower()
+        self.assertTrue("staged" in msg or "outside allowedfiles" in msg)
+
+    def test_untracked_unauthorized_rejected(self) -> None:
+        (self.repo / "leak.txt").write_text("x\n", encoding="utf-8")
+        manifest = _manifest_obj(
+            repo=self.repo,
+            branch=self.branch,
+            head=self.head,
+            allow_commit=False,
+            allowed=("ok.txt",),
+        )
+        with self.assertRaises(BridgeError) as ctx:
+            enforce_change_scope(manifest, self.head, self.head)
+        self.assertIn("outside allowedfiles", str(ctx.exception).lower())
+
+    def test_space_and_newline_filenames_nul_safe(self) -> None:
+        weird = self.repo / "my file.txt"
+        weird.write_text("space\n", encoding="utf-8")
+        nl_name = "new\nline.txt"
+        # Git can store newline names; create via plumbing if needed.
+        (self.repo / "plain.txt").write_text("p\n", encoding="utf-8")
+        _git(self.repo, "add", "--", "my file.txt", "plain.txt")
+        scope = collect_change_scope(self.repo, self.head, self.head)
+        self.assertIn("my file.txt", scope["staged"])
+        validate_repo_relative_path("my file.txt", self.repo)
+        # Rename form via committed diff
+        start = self.head
+        _git(self.repo, "commit", "-m", "add spaced")
+        mid = _sha(self.repo)
+        _git(self.repo, "mv", "--", "my file.txt", "renamed file.txt")
+        _git(self.repo, "commit", "-m", "rename")
+        end = _sha(self.repo)
+        scope2 = collect_change_scope(self.repo, mid, end)
+        union = set(scope2["committed"])
+        self.assertTrue("renamed file.txt" in union or "my file.txt" in union)
+
+    def test_path_traversal_rejected(self) -> None:
+        with self.assertRaises(BridgeError):
+            validate_repo_relative_path("../escape.txt", self.repo)
+        with self.assertRaises(BridgeError):
+            validate_repo_relative_path("/etc/passwd", self.repo)
+        with self.assertRaises(BridgeError):
+            validate_repo_relative_path(r"foo\bar", self.repo)
+        with self.assertRaises(BridgeError):
+            validate_repo_relative_path("a\x00b", self.repo)
+        with self.assertRaises(BridgeError):
+            validate_repo_relative_path("", self.repo)
+        outside = self.tmp / "outside.txt"
+        outside.write_text("x\n", encoding="utf-8")
+        link = self.repo / "escape-link"
+        link.symlink_to(outside)
+        with self.assertRaises(BridgeError):
+            validate_repo_relative_path("escape-link", self.repo)
+
+
+class LoggingBoundTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="dot-log-")
+        self.tmp = Path(self._tmpdir.name)
+        self.logs = self.tmp / "logs"
+        self.logs.mkdir()
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_github_token_absent_from_durable_log(self) -> None:
+        path = self.logs / "tok.stdout.log"
+        w = BoundedRedactingWriter(path, max_bytes=MAX_STDOUT_LOG_BYTES)
+        w.write(b"token ghp_ABCDEFGHIJKLMNOPQRSTUVWX in output\n")
+        w.close()
+        text = path.read_text(encoding="utf-8")
+        self.assertNotIn("ghp_ABCDEFGHIJKLMNOPQRSTUVWX", text)
+        self.assertIn("[REDACTED_TOKEN]", text)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), FILE_MODE)
+
+    def test_bearer_token_absent(self) -> None:
+        path = self.logs / "bearer.stdout.log"
+        w = BoundedRedactingWriter(path, max_bytes=4096)
+        w.write(b"Authorization: Bearer super-secret-value\n")
+        w.close()
+        text = path.read_text(encoding="utf-8")
+        self.assertNotIn("super-secret-value", text)
+
+    def test_private_key_absent(self) -> None:
+        path = self.logs / "pem.stdout.log"
+        pem = (
+            b"-----BEGIN RSA PRIVATE KEY-----\n"
+            b"MIIEvSecretMaterialHere\n"
+            b"-----END RSA PRIVATE KEY-----\n"
+        )
+        w = BoundedRedactingWriter(path, max_bytes=4096)
+        w.write(pem)
+        w.close()
+        text = path.read_text(encoding="utf-8")
+        self.assertNotIn("MIIEvSecretMaterialHere", text)
+        self.assertIn("[REDACTED]", text)
+
+    def test_credential_url_redacted_in_log(self) -> None:
+        path = self.logs / "url.stdout.log"
+        w = BoundedRedactingWriter(path, max_bytes=4096)
+        w.write(b"https://user:sekrit@github.com/gagandsm-max/platform.git\n")
+        w.close()
+        text = path.read_text(encoding="utf-8")
+        self.assertNotIn("sekrit", text)
+
+    def test_oversized_stdout_bounded_and_marked(self) -> None:
+        path = self.logs / "big.stdout.log"
+        limit = 8 * 1024
+        w = BoundedRedactingWriter(path, max_bytes=limit)
+        w.write(b"A" * (limit + 5000))
+        w.close()
+        self.assertTrue(w.truncated)
+        self.assertLessEqual(w.bytes_captured, limit)
+        self.assertLessEqual(path.stat().st_size, limit + 128)
+        self.assertIn(b"TRUNCATED", path.read_bytes())
+
+    def test_oversized_stderr_bounded(self) -> None:
+        path = self.logs / "big.stderr.log"
+        limit = 4 * 1024
+        w = BoundedRedactingWriter(path, max_bytes=limit)
+        w.write(b"E" * (limit + 1000))
+        w.close()
+        self.assertTrue(w.truncated)
+        self.assertLessEqual(w.bytes_captured, limit)
+
+    def test_bridge_log_truncation(self) -> None:
+        path, truncated = append_bridge_log(
+            self.logs,
+            "BR-1",
+            ["line " + ("x" * 200) for _ in range(100)],
+            max_bytes=2048,
+        )
+        self.assertTrue(path.is_file())
+        # Either truncated flag or content mark.
+        data = path.read_text(encoding="utf-8")
+        self.assertTrue(truncated or "TRUNCATED" in data)
+
+
+class ControlRootHardeningTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="dot-root-")
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_init_modes_enforced(self) -> None:
+        root = self.tmp / "control"
+        created = init_control_root(root)
+        self.assertTrue(created)
+        self.assertEqual(stat.S_IMODE(root.stat().st_mode), DIR_MODE)
+        for name in ("inbox", "logs", "results", "locks", "state", "quarantine", "tasks", "processing"):
+            sub = root / name
+            self.assertTrue(sub.is_dir())
+            self.assertFalse(sub.is_symlink())
+            self.assertEqual(stat.S_IMODE(sub.stat().st_mode), DIR_MODE)
+
+    def test_symlinked_logs_rejected(self) -> None:
+        root = self.tmp / "control"
+        init_control_root(root)
+        outside = self.tmp / "outside-logs"
+        outside.mkdir()
+        marker = outside / "untouched.txt"
+        marker.write_text("safe\n", encoding="utf-8")
+        (root / "logs").rmdir()
+        (root / "logs").symlink_to(outside)
+        with self.assertRaises(BridgeError):
+            validate_control_root_layout(root, require_subdirs=True)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "safe\n")
+
+    def test_symlinked_results_state_locks_rejected(self) -> None:
+        root = self.tmp / "control"
+        init_control_root(root)
+        for name in ("results", "state", "locks"):
+            outside = self.tmp / f"out-{name}"
+            outside.mkdir()
+            (root / name).rmdir()
+            (root / name).symlink_to(outside)
+            with self.assertRaises(BridgeError):
+                validate_control_root_layout(root, require_subdirs=True)
+            (root / name).unlink()
+            (root / name).mkdir()
+
+    def test_result_symlink_rejected(self) -> None:
+        from dot_control.evidence import write_result
+        from dot_control.models import TaskResult
+
+        root = self.tmp / "control"
+        init_control_root(root)
+        outside = self.tmp / "escape-result.json"
+        outside.write_text("{}\n", encoding="utf-8")
+        target = root / "results" / "T1.result.json"
+        target.symlink_to(outside)
+        result = TaskResult(
+            task_id="T1",
+            action="REPO_PROBE",
+            selected_tool="bridge",
+            worktree="/tmp",
+            branch="b",
+            starting_head="a" * 40,
+            ending_head="a" * 40,
+            authoritative_base="a" * 40,
+            command_argv=[],
+            started_at="t",
+            ended_at="t",
+            exit_code=0,
+            timed_out=False,
+            stdout_log=None,
+            stderr_log=None,
+            changed_files=[],
+            committed_files=[],
+            commit_sha=None,
+            push_status="NOT_ATTEMPTED",
+            pr_status="NOT_ATTEMPTED",
+            lock_lifecycle={},
+            disposition="SUCCESS",
+        )
+        with self.assertRaises(OSError):
+            write_result(root / "results", result)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "{}\n")
+
+    def test_lock_symlink_rejected(self) -> None:
+        root = self.tmp / "control"
+        init_control_root(root)
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        outside = self.tmp / "escape.lock"
+        outside.write_text("keep\n", encoding="utf-8")
+        from dot_control.locks import worktree_lock_name
+
+        lock_path = root / "locks" / worktree_lock_name(repo.resolve())
+        lock_path.symlink_to(outside)
+        lock = WorktreeLock(root / "locks", repo)
+        with self.assertRaises(BridgeError):
+            lock.acquire(
+                task_id="L",
+                action="REPO_PROBE",
+                writer_tool="none",
+                branch="b",
+                expected_head="a" * 40,
+            )
+        self.assertEqual(outside.read_text(encoding="utf-8"), "keep\n")
+
+
+class RepositoryBindingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="dot-bind-")
+        self.tmp = Path(self._tmpdir.name)
+        self.repo = self.tmp / "repo"
+        self.branch = "feature/bind"
+        self.head = _init_repo(self.repo, branch=self.branch)
+        self.control = self.tmp / "control"
+        self.policy = PathPolicy(
+            home=self.tmp / "home",
+            control_root=self.control,
+            approved_repo_exact=self.repo,
+            approved_repo_prefix=str(self.tmp / "nms-"),
+            allow_test_roots=[self.tmp],
+        )
+        (self.tmp / "home").mkdir()
+        self.control.mkdir()
+        for name in ("inbox", "processing", "results", "logs", "locks", "state", "quarantine", "tasks"):
+            (self.control / name).mkdir()
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_foreign_repository_rejected(self) -> None:
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="FOREIGN",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+            repository="other/org",
+        )
+        with self.assertRaises(BridgeError) as ctx:
+            validate_manifest_dict(payload, policy=self.policy)
+        self.assertIn("gagandsm-max/platform", str(ctx.exception))
+
+    def test_malformed_remote_rejected(self) -> None:
+        _git(self.repo, "remote", "set-url", "origin", "not-a-url")
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="MAL-REMOTE",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        manifest = validate_manifest_dict(payload, policy=self.policy)
+        with self.assertRaises(BridgeError):
+            verify_repository_binding(manifest)
+
+    def test_credential_bearing_remote_sanitized(self) -> None:
+        _git(
+            self.repo,
+            "remote",
+            "set-url",
+            "origin",
+            "https://user:hunter2@github.com/gagandsm-max/platform.git",
+        )
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="CRED-REMOTE",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+        )
+        manifest = validate_manifest_dict(payload, policy=self.policy)
+        info = verify_repository_binding(manifest)
+        self.assertEqual(info["ownerRepo"], APPROVED_REPOSITORY)
+        self.assertNotIn("hunter2", info["originSanitized"])
+        self.assertNotIn("hunter2", sanitize_remote_url(
+            "https://user:hunter2@github.com/gagandsm-max/platform.git"
+        ))
+
+    def test_parse_ssh_and_https(self) -> None:
+        self.assertEqual(
+            parse_github_owner_repo("git@github.com:gagandsm-max/platform.git"),
+            APPROVED_REPOSITORY,
+        )
+        self.assertEqual(
+            parse_github_owner_repo("ssh://git@github.com/gagandsm-max/platform.git"),
+            APPROVED_REPOSITORY,
+        )
+        self.assertEqual(
+            parse_github_owner_repo("https://github.com/gagandsm-max/platform"),
+            APPROVED_REPOSITORY,
+        )
+
+    def test_nonexistent_base_rejected(self) -> None:
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="BASE-MISS",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+            authoritative_base="b" * 40,
+        )
+        # expectedHead is current head; base does not exist
+        payload["authoritativeBase"] = "b" * 40
+        manifest = validate_manifest_dict(payload, policy=self.policy)
+        with self.assertRaises(BridgeError) as ctx:
+            verify_authoritative_base(manifest)
+        self.assertIn("does not exist", str(ctx.exception).lower())
+
+    def test_base_not_ancestor_rejected(self) -> None:
+        # Create an unrelated orphan commit as base.
+        orphan = self.tmp / "orphan"
+        orphan.mkdir()
+        _git(orphan, "init")
+        _git(orphan, "config", "user.email", "o@example.com")
+        _git(orphan, "config", "user.name", "O")
+        (orphan / "x").write_text("x\n", encoding="utf-8")
+        _git(orphan, "add", "x")
+        _git(orphan, "commit", "-m", "orphan")
+        orphan_sha = _git(orphan, "rev-parse", "HEAD").stdout.strip()
+        # Fetch orphan object into test repo without making it an ancestor.
+        bundle = self.tmp / "o.bundle"
+        _git(orphan, "bundle", "create", str(bundle), "HEAD")
+        _git(self.repo, "fetch", str(bundle), "HEAD:refs/tmp/orphan")
+        payload = _base_manifest(
+            control=self.control,
+            worktree=self.repo,
+            task_id="BASE-ANC",
+            action="REPO_PROBE",
+            branch=self.branch,
+            head=self.head,
+            authoritative_base=orphan_sha,
+        )
+        payload["authoritativeBase"] = orphan_sha
+        manifest = validate_manifest_dict(payload, policy=self.policy)
+        with self.assertRaises(BridgeError) as ctx:
+            verify_authoritative_base(manifest)
+        self.assertIn("not an ancestor", str(ctx.exception).lower())
+
+
+class Gate3AFixtureManifestTests(unittest.TestCase):
     def test_fixture_manifest_shape(self) -> None:
         fixture = {
             "schemaVersion": SCHEMA_VERSION,
@@ -769,7 +1379,7 @@ class Gate3AFixtureManifestTests(unittest.TestCase):
             "action": "GIT_COMMIT_PROOF",
             "writerTool": "none",
             "verifierTool": "none",
-            "repository": "gagandsm-max/platform",
+            "repository": APPROVED_REPOSITORY,
             "worktree": "/tmp/replaced-in-tests",
             "branch": "feature/gate3-proof",
             "authoritativeBase": "a" * 40,

@@ -26,11 +26,11 @@ from .evidence import (
 )
 from .executor import (
     build_action_argv,
-    enforce_post_change_scope,
+    enforce_change_scope,
     execute_git_commit_proof,
     execute_repo_probe,
-    git_changed_files,
     git_head,
+    live_writer_unsupported,
     run_process,
     verify_git_preconditions,
 )
@@ -45,6 +45,7 @@ from .models import (
     TaskManifest,
     TaskResult,
 )
+from .paths import init_control_root, validate_control_root_layout
 from .validator import (
     PathPolicy,
     load_json_object,
@@ -65,6 +66,8 @@ class DotControlBridge:
         self.policy = policy or PathPolicy(control_root=self.control_root)
         if create_dirs:
             self.init_control_root()
+        elif self.control_root.exists():
+            validate_control_root_layout(self.control_root, require_subdirs=False)
 
     # --- layout -------------------------------------------------------------
 
@@ -97,24 +100,14 @@ class DotControlBridge:
         return self.control_root / "quarantine"
 
     def init_control_root(self) -> list[str]:
-        """Explicit init — creates required subdirectories. Not called by tests
-        against the production path unless requested."""
-        if self.control_root.exists() and self.control_root.is_symlink():
-            raise BridgeError(f"control root must not be a symlink: {self.control_root}")
-        created: list[str] = []
-        self.control_root.mkdir(parents=True, exist_ok=True)
-        for name in CONTROL_SUBDIRS:
-            path = self.control_root / name
-            path.mkdir(parents=True, exist_ok=True)
-            created.append(str(path))
-        return created
+        """Explicit init — creates required subdirectories with hardened modes."""
+        return init_control_root(self.control_root)
 
     # --- lifecycle ----------------------------------------------------------
 
     def list_inbox_ready(self) -> list[Path]:
-        if not self.inbox.is_dir():
+        if not self.inbox.is_dir() or self.inbox.is_symlink():
             return []
-        # Ignore partial .tmp submissions until atomic rename to .json.
         return sorted(p for p in self.inbox.glob("*.json") if p.is_file() and not p.is_symlink())
 
     def task_id_known(self, task_id: str) -> bool:
@@ -127,6 +120,8 @@ class DotControlBridge:
         return any(p.exists() for p in candidates)
 
     def quarantine_manifest(self, path: Path, reason: str) -> Path:
+        if self.quarantine.is_symlink():
+            raise BridgeError(f"quarantine must not be a symlink: {self.quarantine}")
         self.quarantine.mkdir(parents=True, exist_ok=True)
         dest = self.quarantine / path.name
         if dest.exists():
@@ -137,6 +132,8 @@ class DotControlBridge:
         return dest
 
     def claim_manifest(self, inbox_path: Path) -> Path:
+        if self.processing.is_symlink():
+            raise BridgeError(f"processing must not be a symlink: {self.processing}")
         self.processing.mkdir(parents=True, exist_ok=True)
         dest = self.processing / inbox_path.name
         if dest.exists():
@@ -149,9 +146,17 @@ class DotControlBridge:
         manifest = validate_manifest_dict(data, policy=self.policy, require_paths_exist=True)
         plan = normalize_plan(manifest)
         plan["disposition"] = Disposition.DRY_RUN.value
+        unsupported = live_writer_unsupported(manifest.action)
+        if unsupported:
+            plan["liveExecution"] = "UNSUPPORTED"
+            plan["liveExecutionReason"] = unsupported
+            plan["constructedArgvPreview"] = redact_argv(
+                plan.get("constructedArgvPreview") or []
+            )
         return plan
 
     def process_one(self, manifest_path: Optional[Path] = None) -> TaskResult:
+        validate_control_root_layout(self.control_root, require_subdirs=False)
         if manifest_path is None:
             ready = self.list_inbox_ready()
             if not ready:
@@ -165,7 +170,6 @@ class DotControlBridge:
         processing_path: Optional[Path] = None
         try:
             data = load_json_object(manifest_path)
-            # Duplicate task id check before claim when coming from inbox.
             task_id_preview = data.get("taskId")
             if isinstance(task_id_preview, str) and self.task_id_known(task_id_preview):
                 if manifest_path.parent.resolve() == self.inbox.resolve():
@@ -208,6 +212,11 @@ class DotControlBridge:
         notes: list[str] = []
         error: Optional[str] = None
         disposition = Disposition.FAILED
+        stdout_bytes = 0
+        stderr_bytes = 0
+        stdout_truncated = False
+        stderr_truncated = False
+        bridge_log_truncated = False
         selected_tool = manifest.writer_tool.value
         if manifest.action == Action.ANTIGRAVITY_AUDIT:
             selected_tool = manifest.verifier_tool.value
@@ -227,17 +236,21 @@ class DotControlBridge:
             pre = verify_git_preconditions(manifest)
             starting_head = pre["head"]
             branch_observed = pre["branch"]
-            append_bridge_log(
+            _, bridge_log_truncated = append_bridge_log(
                 self.logs,
                 manifest.task_id,
                 [f"{utc_now_iso()} preconditions ok head={starting_head} branch={branch_observed}"],
             )
 
             if manifest.action == Action.REPO_PROBE:
-                evidence, probe = execute_repo_probe(manifest)
+                evidence, probe, disposition = execute_repo_probe(manifest)
                 command_argv = evidence.argv
                 exit_code = evidence.exit_code
-                disposition = Disposition.SUCCESS
+                if disposition != Disposition.SUCCESS:
+                    error = (
+                        f"REPO_PROBE evidence incomplete: "
+                        f"{probe.get('summary', {})}"
+                    )
 
             elif manifest.action == Action.GIT_COMMIT_PROOF:
                 evidence, details = execute_git_commit_proof(manifest)
@@ -256,7 +269,16 @@ class DotControlBridge:
                 Action.TEST_PROFILE,
             }:
                 argv, meta = build_action_argv(manifest)
-                if meta.get("unsupported"):
+                live_block = live_writer_unsupported(manifest.action)
+                if live_block:
+                    # Construct argv for planning evidence; do not launch child.
+                    command_argv = redact_argv(argv) if argv else []
+                    disposition = Disposition.UNSUPPORTED
+                    error = live_block
+                    notes.append(f"UNSUPPORTED: {error}")
+                    notes.append("child process not launched")
+                    exit_code = None
+                elif meta.get("unsupported"):
                     disposition = Disposition.UNSUPPORTED
                     error = meta.get("reason")
                     command_argv = []
@@ -281,6 +303,10 @@ class DotControlBridge:
                     timed_out = evidence.timed_out
                     stdout_log = evidence.stdout_log
                     stderr_log = evidence.stderr_log
+                    stdout_bytes = evidence.stdout_bytes_captured
+                    stderr_bytes = evidence.stderr_bytes_captured
+                    stdout_truncated = evidence.stdout_truncated
+                    stderr_truncated = evidence.stderr_truncated
                     lock.update_child_pid(None)
                     if timed_out:
                         disposition = Disposition.TIMEOUT
@@ -292,13 +318,27 @@ class DotControlBridge:
                         error = f"child exited {exit_code}"
 
                     if manifest.action in {Action.CURSOR_TASK, Action.CODEX_TASK}:
-                        changed = git_changed_files(manifest.worktree)
-                        if changed and manifest.allowed_files:
-                            enforce_post_change_scope(manifest, changed)
+                        ending_head = git_head(manifest.worktree)
+                        changed = enforce_change_scope(
+                            manifest, starting_head, ending_head
+                        )
             else:
                 raise BridgeError(f"unknown action: {manifest.action}")
 
             ending_head = git_head(manifest.worktree)
+
+            # Scope accounting for writer actions even when UNSUPPORTED (HEAD must not move).
+            if manifest.action in {Action.CURSOR_TASK, Action.CODEX_TASK}:
+                if disposition == Disposition.UNSUPPORTED:
+                    # Still prove allowCommit semantics against any accidental mutation.
+                    try:
+                        changed = enforce_change_scope(
+                            manifest, starting_head, ending_head
+                        )
+                    except BridgeError as scope_exc:
+                        disposition = Disposition.FAILED
+                        error = str(scope_exc)
+                        notes.append("scope enforcement failed after UNSUPPORTED writer action")
 
         except BridgeError as exc:
             error = str(exc)
@@ -310,7 +350,7 @@ class DotControlBridge:
         except Exception as exc:  # pragma: no cover - defensive
             error = f"internal error: {exc}"
             disposition = Disposition.CRASH_RECOVERY
-            append_bridge_log(
+            _, bridge_log_truncated = append_bridge_log(
                 self.logs,
                 manifest.task_id,
                 [traceback.format_exc()],
@@ -352,6 +392,11 @@ class DotControlBridge:
             error=error,
             probe=probe,
             notes=notes,
+            stdout_bytes_captured=stdout_bytes,
+            stderr_bytes_captured=stderr_bytes,
+            stdout_truncated=stdout_truncated,
+            stderr_truncated=stderr_truncated,
+            bridge_log_truncated=bridge_log_truncated,
         )
         write_result(self.results, result)
         write_state(
@@ -365,7 +410,6 @@ class DotControlBridge:
                 "resultPath": str(self.results / f"{manifest.task_id}.result.json"),
             },
         )
-        # Remove processing copy after finalization.
         if processing_path.exists():
             try:
                 processing_path.unlink()
@@ -383,7 +427,6 @@ class DotControlBridge:
                     self.process_one(ready[0])
                     processed += 1
                 except BridgeError as exc:
-                    # Quarantine already handled inside process_one when possible.
                     append_bridge_log(
                         self.logs,
                         "_daemon",
@@ -464,7 +507,6 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    # Allow `python3 project_agents/dot_control/bridge.py` via path bootstrap.
     if __package__ is None or __package__ == "":
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         __package__ = "dot_control"

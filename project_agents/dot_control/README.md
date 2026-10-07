@@ -4,7 +4,7 @@ Repository-owned, host-visible, user-space control bridge that runs as Linux
 user `gagan` and executes **only** strictly validated AmrudAi task manifests.
 
 Governing issue: `#185` — Dot Master Takeover v2
-Architecture comment: Issue `#185` comment `6036350515`
+Architecture / Master hold: Issue `#185` comment `6036944290`
 
 Disposition target after implementation:
 
@@ -28,29 +28,39 @@ Dot reads results/<taskId>.result.json
 The bridge never accepts a free-form command string. Every `argv` is constructed
 internally from allowlisted action types and validated fields.
 
+## Brand / schema identity
+
+- Internal schema `$id`: `urn:amrudai:schema:dot-control:task-manifest:v1`
+- JSON Schema meta: `https://json-schema.org/draft/2020-12/schema` (unchanged)
+- Public website (when a resource is actually publicly hosted): `https://amrudai.com`
+- Forbidden: the legacy mistyped brand domain and unserved SaaS-style public schema URLs
+
+This schema is **not** a hosted SaaS endpoint.
+
 ## Trust boundaries
 
 | Zone | Authority |
 |------|-----------|
 | Dot managed Work/Codex sandbox | May write prompt + manifest under `tasks/<taskId>/` and inbox rename only |
-| Host bridge | May run allowlisted git/CLI/test actions inside approved worktrees |
-| Cursor CLI / Codex | Sole writers for an isolated worktree (never Dot) |
-| Antigravity | Read-only audit on a **separate detached** worktree |
+| Host bridge | May run allowlisted git/test actions inside approved worktrees |
+| Cursor CLI / Codex | Sole writers for an isolated worktree (never Dot) — **live launch UNSUPPORTED in v1** |
+| Antigravity | Read-only audit on a **separate detached** worktree — **live launch UNSUPPORTED in v1** until proven |
 | Master + GitHub | Merge and certification gates (bridge never merges or certifies) |
 
 ## Supported actions (v1)
 
-| Action | Purpose |
-|--------|---------|
-| `REPO_PROBE` | Fixed read-only git evidence (no fetch) |
-| `GIT_COMMIT_PROOF` | Gate 3 proof: one-file local commit on non-main branch |
-| `CURSOR_TASK` | Launch Cursor CLI (`agent --print --trust --workspace …`) |
-| `CODEX_TASK` | Launch Codex (`codex exec --sandbox workspace-write --approve-for-me`) |
-| `ANTIGRAVITY_AUDIT` | Launch `agy --print --sandbox --mode plan` on detached clean HEAD |
-| `TEST_PROFILE` | Run hard-coded profile IDs only |
+| Action | Purpose | Live execution |
+|--------|---------|----------------|
+| `REPO_PROBE` | Fixed read-only git evidence (no fetch) | Yes — honest SUCCESS/PARTIAL/FAILED |
+| `GIT_COMMIT_PROOF` | Gate 3 proof: one-file local commit on non-main branch | Yes |
+| `TEST_PROFILE` | Hard-coded profile IDs only | Yes (safe profiles) |
+| `CURSOR_TASK` | Argv construction / dry-run only | **UNSUPPORTED** until credential isolation proven |
+| `CODEX_TASK` | Argv construction / dry-run only | **UNSUPPORTED** until credential isolation proven |
+| `ANTIGRAVITY_AUDIT` | Argv construction / dry-run only | **UNSUPPORTED** until read-only boundary proven |
 
 ## Unsupported actions (v1)
 
+- Live Cursor/Codex/Antigravity child launch (false push/PR flags are not enforcement)
 - Arbitrary shell / `sh -c` / `bash -c` / `eval` / `shell=True`
 - Free-form `command` / `argv` / `sudo` fields in manifests
 - Push, pull-request creation, merge, certification
@@ -61,6 +71,18 @@ internally from allowlisted action types and validated fields.
 - Docker socket, systemd privileged operations, GitHub Actions host namespace control
 - Product runtime mutation via this bridge
 - Dynamic Python imports from task data
+
+## v1.1 credential-isolation requirements (not implemented here)
+
+Before live CURSOR_TASK/CODEX_TASK may be enabled:
+
+- isolated HOME / tool config
+- no GitHub/Git credential helper
+- no SSH agent (`SSH_AUTH_SOCK` absent)
+- `GIT_TERMINAL_PROMPT=0`
+- `GIT_ASKPASS` disabled
+- proven failed push/PR attempts under isolation
+- required tool authentication without granting repository credentials
 
 ## Path security
 
@@ -73,18 +95,42 @@ Approved control root:
 
 - `/home/gagan/nms-dot-control`
 
+Bound repository identity: `gagandsm-max/platform` (manifest + origin remote).
+
 Rejected: `.ssh`, `.gnupg`, browser profiles, password stores, personal documents,
-unrelated repos, relative traversal, symlink worktree/control roots, paths outside
-approved roots (`Path.resolve()` containment).
+unrelated repos, relative traversal, symlink worktree/control roots/subdirs,
+paths outside approved roots (`Path.resolve()` containment).
 
-## Branch / SHA security
+Control root/subdirs use mode `0700`; manifests/results/state/log/lock files use
+`0600`. Symlink `logs`/`results`/`state`/`locks` and result/lock symlinks are
+rejected. Durable opens use `O_NOFOLLOW` where practical.
 
-Before every action the bridge verifies git repository state, branch or detached
-HEAD rules, exact `expectedHead`, `authoritativeBase` (40-char hex), and
-clean/dirty requirements. Drift stops execution.
+## Branch / SHA / base security
 
-- Writers must not use detached HEAD.
-- Antigravity must use detached HEAD on a verifier worktree (never the writer tree).
+Before every action the bridge verifies:
+
+- git repository state
+- branch or detached HEAD rules
+- exact `expectedHead`
+- `authoritativeBase` exists (`git cat-file -e <base>^{commit}`)
+- `authoritativeBase` is an ancestor of `expectedHead`
+- origin remote normalizes to `gagandsm-max/platform` (credentials sanitized, never logged)
+- clean/dirty requirements
+
+Governed historical bases are allowed; `authoritativeBase` need not equal
+`origin/main`, but missing `origin/main` makes `REPO_PROBE` non-SUCCESS.
+
+## Change scope (CURSOR_TASK / CODEX_TASK)
+
+After a writer action the bridge unions (NUL-safe Git output):
+
+1. committed paths in `startingHead..endingHead`
+2. staged
+3. unstaged
+4. untracked
+
+Every path is validated as a safe repository-relative path. Applied against
+`allowedFiles` / `forbiddenFiles` with explicit `allowCommit` semantics.
 
 ## Locking
 
@@ -97,18 +143,29 @@ One exclusive `fcntl.flock` lock per canonical worktree. Lock records include
 - Stale locks require PID + worktree-state inspection before reclaim.
 - Lock release occurs only after child termination and evidence finalization.
 
-## Process / timeout handling
+## Process / timeout / logging
 
-`subprocess` with argv arrays and `shell=False`, new process group, stdout/stderr
-to files, bounded timeout. On timeout: `SIGTERM` process group → grace →
-`SIGKILL`. Child PID recorded. Minimal sanitized environment (no env dumps).
+`subprocess` with argv arrays and `shell=False`, new process group, bounded
+timeout. On timeout: `SIGTERM` process group → grace → `SIGKILL`.
+
+Durable stdout/stderr/bridge logs:
+
+- hard byte bounds (`MAX_STDOUT_LOG_BYTES`, `MAX_STDERR_LOG_BYTES`, `MAX_BRIDGE_LOG_BYTES`)
+- credential redaction before durable storage
+- truncation marked in `TaskResult`
+- captured byte counts recorded
+- file mode `0600`
+- no environment dumps
+
+Child env omits `HOME` / `SSH_AUTH_SOCK` and forces `GIT_TERMINAL_PROMPT=0`.
 
 ## Evidence model
 
 Every `results/<taskId>.result.json` includes task identity, tools, worktree,
 branch, starting/ending HEAD, authoritative base, redacted argv, timestamps,
 exit code, timeout state, log paths, changed/committed files, commit SHA,
-push/PR status (`NOT_ATTEMPTED` in v1), lock lifecycle, and disposition.
+push/PR status (`NOT_ATTEMPTED` in v1), lock lifecycle, truncation flags, and
+disposition.
 
 Never logged: tokens, private keys, credential-bearing URLs, environment dumps.
 
@@ -135,7 +192,7 @@ PYTHONPATH=project_agents python3 -m dot_control \
 ```
 
 Creates: `inbox/`, `processing/`, `results/`, `logs/`, `locks/`, `state/`,
-`quarantine/`, `tasks/`.
+`quarantine/`, `tasks/` at mode `0700`.
 
 Tests must not create the production control root; they use temporary roots.
 
@@ -187,9 +244,10 @@ evidence constraints.
 
 ## Known limitations
 
-- Live Cursor/Codex/Antigravity runs require local auth and may still hit tool
-  approval UX; bridge omits `--force`/`--yolo`/`danger-full-access` by design.
+- Live Cursor/Codex/Antigravity are UNSUPPORTED in v1 (argv dry-run only).
 - v1 does not perform push/PR/merge/certification.
+- Manifest `allowPush`/`allowPullRequest` must be false, but that alone is not
+  technical push prevention — credential isolation is deferred to v1.1.
 - v1 test profiles are narrow (`capability-pack`, `agent`, `static-contracts`).
 - Bridge does not supervise Docker or GitHub Actions runners.
 - Production control-root init is operator-driven, not automatic from tests.

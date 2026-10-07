@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://amrud.ai/schemas/dot-control/task.schema.json",
+  "$id": "urn:amrudai:schema:dot-control:task-manifest:v1",
   "title": "AmrudAi Dot Host-Control Bridge Task Manifest",
   "type": "object",
   "additionalProperties": false,

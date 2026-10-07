@@ -70,8 +70,47 @@ class WorktreeLock:
         expected_head: str,
         allow_stale_reclaim: bool = True,
     ) -> LockRecord:
+        if self.locks_dir.is_symlink() or (
+            self.locks_dir.exists() and self.locks_dir.is_symlink()
+        ):
+            raise BridgeError(
+                f"locks directory must not be a symlink: {self.locks_dir}",
+                disposition=Disposition.FAILED,
+            )
+        if self.path.is_symlink():
+            raise BridgeError(
+                f"lock file must not be a symlink: {self.path}",
+                disposition=Disposition.FAILED,
+            )
         self.locks_dir.mkdir(parents=True, exist_ok=True)
-        self._fh = open(self.path, "a+", encoding="utf-8")
+        import stat as _stat
+
+        from .models import DIR_MODE, FILE_MODE
+
+        try:
+            os.chmod(self.locks_dir, DIR_MODE)
+        except OSError:
+            pass
+        flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW
+        fd = os.open(str(self.path), flags, FILE_MODE)
+        try:
+            os.fchmod(fd, FILE_MODE)
+            st = os.fstat(fd)
+            if not _stat.S_ISREG(st.st_mode):
+                os.close(fd)
+                raise BridgeError(
+                    f"lock path is not a regular file: {self.path}",
+                    disposition=Disposition.FAILED,
+                )
+            self._fh = os.fdopen(fd, "a+", encoding="utf-8")
+        except BridgeError:
+            raise
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            raise
         try:
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:

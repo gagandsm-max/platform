@@ -9,12 +9,16 @@ from typing import Any, Mapping, Optional, Sequence
 
 
 SCHEMA_VERSION = "dot-control-v1"
+SCHEMA_ID = "urn:amrudai:schema:dot-control:task-manifest:v1"
+JSON_SCHEMA_META = "https://json-schema.org/draft/2020-12/schema"
+PUBLIC_WEBSITE = "https://amrudai.com"
 
 DEFAULT_CONTROL_ROOT = Path("/home/gagan/nms-dot-control")
 DEFAULT_HOME = Path("/home/gagan")
 APPROVED_REPO_EXACT = Path("/home/gagan/nms")
 APPROVED_REPO_PREFIX = "/home/gagan/nms-"
 APPROVED_CONTROL_ROOT = Path("/home/gagan/nms-dot-control")
+APPROVED_REPOSITORY = "gagandsm-max/platform"
 
 CONTROL_SUBDIRS = (
     "inbox",
@@ -27,6 +31,9 @@ CONTROL_SUBDIRS = (
     "tasks",
 )
 
+DIR_MODE = 0o700
+FILE_MODE = 0o600
+
 MAX_PROMPT_BYTES = 256 * 1024
 MAX_COMMIT_MESSAGE_LEN = 200
 MAX_TIMEOUT_SECONDS = 6 * 60 * 60
@@ -34,7 +41,22 @@ DEFAULT_TIMEOUT_SECONDS = 1800
 PROCESS_KILL_GRACE_SECONDS = 10
 DAEMON_POLL_SECONDS = 2.0
 
+# Hard bounds for durable logs (bytes before redaction/truncation mark).
+MAX_STDOUT_LOG_BYTES = 1 * 1024 * 1024
+MAX_STDERR_LOG_BYTES = 1 * 1024 * 1024
+MAX_BRIDGE_LOG_BYTES = 512 * 1024
+
 SHA_HEX_LEN = 40
+
+# Live writer CLIs retain host Git/GitHub credentials in v1; do not launch.
+LIVE_WRITER_UNSUPPORTED_REASON = (
+    "v1 live CURSOR_TASK/CODEX_TASK disabled until credential-isolation is proven "
+    "(isolated HOME/tool config, no GitHub/Git credential helper, no SSH agent, "
+    "GIT_TERMINAL_PROMPT=0, GIT_ASKPASS disabled, proven failed push/PR attempts)"
+)
+LIVE_ANTIGRAVITY_UNSUPPORTED_REASON = (
+    "v1 live ANTIGRAVITY_AUDIT disabled until independent read-only boundary is proven"
+)
 
 FORBIDDEN_MANIFEST_KEYS = frozenset(
     {
@@ -78,6 +100,7 @@ class VerifierTool(str, Enum):
 class Disposition(str, Enum):
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+    PARTIAL = "PARTIAL"
     TIMEOUT = "TIMEOUT"
     REJECTED = "REJECTED"
     QUARANTINED = "QUARANTINED"
@@ -213,6 +236,10 @@ class CommandEvidence:
     stdout_log: Optional[str] = None
     stderr_log: Optional[str] = None
     unsupported_reason: Optional[str] = None
+    stdout_bytes_captured: int = 0
+    stderr_bytes_captured: int = 0
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
 
 
 @dataclass
@@ -242,6 +269,11 @@ class TaskResult:
     error: Optional[str] = None
     probe: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    stdout_bytes_captured: int = 0
+    stderr_bytes_captured: int = 0
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+    bridge_log_truncated: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -270,6 +302,11 @@ class TaskResult:
             "error": self.error,
             "probe": self.probe,
             "notes": self.notes,
+            "stdoutBytesCaptured": self.stdout_bytes_captured,
+            "stderrBytesCaptured": self.stderr_bytes_captured,
+            "stdoutTruncated": self.stdout_truncated,
+            "stderrTruncated": self.stderr_truncated,
+            "bridgeLogTruncated": self.bridge_log_truncated,
         }
 
 

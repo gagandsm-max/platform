@@ -11,6 +11,7 @@ from .models import (
     APPROVED_CONTROL_ROOT,
     APPROVED_REPO_EXACT,
     APPROVED_REPO_PREFIX,
+    APPROVED_REPOSITORY,
     Action,
     BridgeError,
     DEFAULT_CONTROL_ROOT,
@@ -198,6 +199,10 @@ def validate_manifest_dict(
         raise BridgeError("writerTool must not equal verifierTool")
 
     repository = _as_str(_require(data, "repository"), "repository")
+    if repository != APPROVED_REPOSITORY:
+        raise BridgeError(
+            f"repository must be {APPROVED_REPOSITORY}; got {repository}"
+        )
     worktree_raw = _as_str(_require(data, "worktree"), "worktree")
     if ".." in Path(worktree_raw).parts or worktree_raw.startswith("~"):
         raise BridgeError(f"traversal rejected in worktree: {worktree_raw}")
