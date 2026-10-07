@@ -496,6 +496,8 @@ var ErrStructuredTransportNotWired = errors.New("STRUCTURED_EVIDENCE_TRANSPORT_N
 type StructuredEvidenceSink interface {
 	AcceptSoftwareInventory(ctx context.Context, snap SoftwareInventorySnapshot) error
 	AcceptProcessServiceCatalogue(ctx context.Context, cat ProcessServiceDiscoveryCatalogue) error
+	AcceptProcessNetworkEvidence(ctx context.Context, rec ProcessNetworkEvidence) error
+	AcceptProcessNetworkWindowAccounting(ctx context.Context, acc ProcessNetworkWindowAccounting) error
 	DeliveryState() StructuredEvidenceDeliveryState
 }
 
@@ -524,8 +526,10 @@ func (UnwiredStructuredEvidenceSink) DeliveryState() StructuredEvidenceDeliveryS
 // LocalRecordingStructuredEvidenceSink records validated evidence for tests.
 // DeliveryState remains LOCAL_ONLY and never asserts physical transport success.
 type LocalRecordingStructuredEvidenceSink struct {
-	Inventories []SoftwareInventorySnapshot
-	Catalogues  []ProcessServiceDiscoveryCatalogue
+	Inventories              []SoftwareInventorySnapshot
+	Catalogues               []ProcessServiceDiscoveryCatalogue
+	ProcessNetwork           []ProcessNetworkEvidence
+	ProcessNetworkAccounting []ProcessNetworkWindowAccounting
 }
 
 func (s *LocalRecordingStructuredEvidenceSink) AcceptSoftwareInventory(_ context.Context, snap SoftwareInventorySnapshot) error {
