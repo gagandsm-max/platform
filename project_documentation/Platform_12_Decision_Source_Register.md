@@ -309,11 +309,26 @@ These decisions are additive and do not reopen §5 P0/TBD items.
 
 ## 18. USER-FIXED engineering tool governance — 2026-09-27
 
+**Historical record and supersession:** The 2026-09-27 decisions below are retained for provenance. Effective 2026-10-07, their active Codex suspension and exceptional Antigravity writer-elevation permission are superseded by §18.1; they are not current tool authority.
+
 | Decision | Classification | Governing statement |
 |---|---|---|
 | Codex suspended from normal Platform workflow | USER-FIXED | Effective 2026-09-27, Codex CLI / GitHub Codex is suspended from the normal Platform engineering workflow due to token/cost overhead. Codex must not be selected by normal task manifests or routing as writer, verifier, certification lane or exceptional elevated writer until a future explicit Founder governance decision reactivates it. Compatibility projection assets under `.codex/agents/` may remain in the repository but do not authorize Codex use. |
 | Antigravity absorbs former Codex independent-audit duties | USER-FIXED | Antigravity CLI retains its verifier-first, read-only/adversarial-by-default posture and additionally performs the independent exact-SHA audit, adversarial review, negative/failure/security challenge and certification-gate evidence/recommendation duties formerly assigned to Codex. Antigravity supplies independent certification-gate evidence; it is not final certification authority and may not self-certify. Exceptional Antigravity writing still requires explicit isolated `writerElevation`. |
 | Unchanged control-plane and writer authority | USER-FIXED | Cursor CLI remains the default bounded writer. ChatGPT + GitHub remain control plane, architecture/technical authority, source-truth authority, sequencing, merge gatekeeper and final technical certification authority. Cursor Cloud remains a never-writer. GitHub Copilot remains limited auxiliary PR/code-review only. Platform product version remains **3.3.0**. Authoritative machine-readable expression: `project_agents/tool_authority.json`. |
+
+### 18.1 USER-FIXED dual-writer authority reconciliation — 2026-10-07
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Cursor CLI and Codex writer authority | USER-FIXED | Cursor CLI remains the default bounded implementation writer. Codex is an additional authorized bounded implementation, test and debugging writer, not an analysis-only tool, and neither writer requires `writerElevation`. |
+| One Codex authority | USER-FIXED | Codex CLI and ChatGPT Desktop App in Codex mode are client interfaces to one Codex authority, not separate writer identities, verifiers or certification authorities. |
+| Concurrent writer isolation and ownership | USER-FIXED | Cursor CLI and Codex may write concurrently only on separate assigned branches/worktrees with non-overlapping file ownership. Shared-file changes require sequencing or an explicit handoff; one writer owns each checkout/worktree. |
+| Independent acceptance and certification separation | USER-FIXED | Neither Cursor CLI nor Codex may independently verify as a certification gate, act as gatekeeper, merge into `main`, or certify itself or the other writer. Independent exact-head acceptance remains required. |
+| Antigravity read-only authority | USER-FIXED | Antigravity remains the independent read-only/adversarial exact-SHA auditor, negative/failure/security challenger and certification-gate evidence provider. The 2026-09-27 exceptional Antigravity writer-elevation permission is superseded: Antigravity is not an implementation writer and `writerElevation` is not an active path to make it one. |
+| Control-plane authority retained | USER-FIXED | ChatGPT + GitHub retains architecture and scope allocation, integration decisions, source review, guarded merge and final technical certification authority. |
+| Unchanged prohibited and limited tools | USER-FIXED | Cursor Cloud remains prohibited as a writer. GitHub Copilot remains auxiliary PR/code-review only. Dot gains no writer, verifier, gatekeeper, merge or certification authority from this reconciliation. |
+| Authority sources and precedence | USER-FIXED | Machine-readable permissions remain in `project_agents/tool_authority.json`; navigation and enforcement remain in canonical `AGENTS.md`. This reconciliation introduces no competing authority and does not alter `Platform_00_Document_Index.md` precedence. |
 
 ## 19. USER-FIXED service assurance and reporting decisions — 2026-09-27
 

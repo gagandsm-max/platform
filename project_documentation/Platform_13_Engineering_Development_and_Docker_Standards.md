@@ -30,6 +30,8 @@ This document defines how Platform code is structured and changed. It exists to 
 
 Before modifying code, the engineer/agent must read: `Platform_00_Document_Index.md`, the relevant BRD/PRD requirement, Architecture/HLD/LLD sections, `Platform_07_OSS_Catalog.md`, and any module-specific master. If the requested change contradicts a governing document, implementation stops until change control resolves it.
 
+Engineering-tool preflight also requires canonical `AGENTS.md`, `project_agents/tool_authority.json` and `Platform_12_Decision_Source_Register.md` §18.1. Establish isolated task ownership before writing: concurrent writers use separate branches/worktrees and non-overlapping files, while shared-file work is sequenced or explicitly handed off. Writer output requires independent acceptance and does not grant merge or certification authority.
+
 ## 3. Repository principles
 
 - Clean-room codebase independent of ThoughtData/NetAI proprietary assets.
