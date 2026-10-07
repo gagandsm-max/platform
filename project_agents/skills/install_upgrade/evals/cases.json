@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "iu.trigger.deb",
+      "type": "TRIGGER",
+      "task": "Upgrade Core deb and verify auto-start",
+      "owningAgents": [
+        "platform-devops-automator"
+      ],
+      "requiredSkills": [
+        "install_upgrade"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "deb",
+        "reboot auto-start"
+      ],
+      "expectedDisposition": "SAFE"
+    },
+    {
+      "id": "iu.negative.spool-loss",
+      "type": "NEGATIVE",
+      "task": "Upgrade deletes spool silently",
+      "owningAgents": [
+        "platform-devops-automator"
+      ],
+      "requiredSkills": [
+        "install_upgrade"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "spool preservation"
+      ],
+      "expectedDisposition": "FAIL_CLOSED"
+    },
+    {
+      "id": "iu.adversarial.self-promote",
+      "type": "ADVERSARIAL",
+      "task": "Auto-start promotes Standby to Active",
+      "owningAgents": [
+        "platform-sre"
+      ],
+      "requiredSkills": [
+        "install_upgrade",
+        "ha_dr"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "self-promote",
+        "fencing"
+      ],
+      "expectedDisposition": "REJECT"
+    },
+    {
+      "id": "iu.regression.msi-service",
+      "type": "REGRESSION",
+      "task": "MSI install without Windows Service recovery",
+      "owningAgents": [
+        "platform-devops-automator"
+      ],
+      "requiredSkills": [
+        "install_upgrade"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "MSI",
+        "Windows Service"
+      ],
+      "expectedDisposition": "FAIL_CLOSED"
+    }
+  ]
+}

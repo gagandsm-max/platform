@@ -117,7 +117,6 @@ def load_tool_authority(path: Path = TOOL_AUTHORITY_PATH) -> dict[str, Any]:
         raise ControlPlaneError("tool_authority.json legalCombinations must be an object")
     for key in (
         "defaultWriterTools",
-        "exceptionalWriterTools",
         "writerTools",
         "neverWriterTools",
         "verifierTools",
@@ -129,13 +128,17 @@ def load_tool_authority(path: Path = TOOL_AUTHORITY_PATH) -> dict[str, Any]:
             raise ControlPlaneError(
                 f"tool_authority.json legalCombinations.{key} must be a non-empty array"
             )
+    if not isinstance(legal.get("exceptionalWriterTools"), list):
+        raise ControlPlaneError(
+            "tool_authority.json legalCombinations.exceptionalWriterTools must be an array"
+        )
     default_writers = set(legal["defaultWriterTools"])
     exceptional_writers = set(legal["exceptionalWriterTools"])
     never_writers = set(legal["neverWriterTools"])
     writer_tools = set(legal["writerTools"])
-    if default_writers | exceptional_writers != writer_tools:
+    if not default_writers <= writer_tools or not exceptional_writers <= writer_tools:
         raise ControlPlaneError(
-            "tool_authority.json writerTools must equal defaultWriterTools ∪ exceptionalWriterTools"
+            "tool_authority.json defaultWriterTools and exceptionalWriterTools must be subsets of writerTools"
         )
     if never_writers & writer_tools:
         raise ControlPlaneError(
@@ -231,9 +234,9 @@ def assert_legal_tool_roles(
                 "(authorizedBy, reason, isolatedWorkspace=true)"
             )
         validate_writer_elevation(writer_elevation, authority=auth)
-    else:
+    elif writer_elevation is not None:
         raise ControlPlaneError(
-            f"writerTool {writer_tool!r} is not classified as default or exceptional writer"
+            f"writerTool {writer_tool!r} is an authorized non-default writer and must not include writerElevation"
         )
 
     verifier_status = tools[verifier_tool].get("status")
@@ -438,32 +441,25 @@ def assert_schema_writer_elevation_conditionals(
             continue
         by_writer[writer] = then
 
-    for writer in ("cursor-cli", "antigravity"):
+    for writer in ("cursor-cli", "codex"):
         if writer not in by_writer:
             raise ControlPlaneError(
                 f"task_manifest.schema.json missing writerElevation conditional for {writer}"
             )
-    if "codex" in by_writer:
+    if "antigravity" in by_writer:
         raise ControlPlaneError(
-            "task_manifest.schema.json must not retain a Codex writerElevation conditional "
-            "while Codex is suspended"
+            "task_manifest.schema.json must not retain an Antigravity writerElevation conditional"
         )
 
-    cursor_then = by_writer["cursor-cli"]
-    forbidden = cursor_then.get("not")
-    if not (
-        isinstance(forbidden, dict)
-        and forbidden.get("required") == ["writerElevation"]
-    ):
-        raise ControlPlaneError(
-            "cursor-cli conditional must forbid writerElevation via not.required"
-        )
-
-    for writer in ("antigravity",):
+    for writer in ("cursor-cli", "codex"):
         then = by_writer[writer]
-        if then.get("required") != ["writerElevation"]:
+        forbidden = then.get("not")
+        if not (
+            isinstance(forbidden, dict)
+            and forbidden.get("required") == ["writerElevation"]
+        ):
             raise ControlPlaneError(
-                f"{writer} conditional must require writerElevation"
+                f"{writer} conditional must forbid writerElevation via not.required"
             )
 
     never = {"cursor-cloud", "github-copilot", "chatgpt-github", "founder"}

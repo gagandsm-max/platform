@@ -287,7 +287,7 @@
     "source": "capability-pack-v1.2",
     "description": "Monitored-target specialist for OS, virtualization, storage, Kubernetes, cloud and infrastructure dependencies.",
     "canonical_path": "canonical/p1/platform-infrastructure-cloud-engineer.md",
-    "sha256": "f6cdd16a495925cd8b9eb7e3ca0c8fa20a26d1b01f87ddd5e1909a34fa151271"
+    "sha256": "c8ce48b41980193fc67a82c2cc9582b622bd5243127d544c8e3d26036b569424"
   },
   {
     "name": "platform-telemetry-pipeline-engineer",
@@ -307,7 +307,7 @@
     "source": "capability-pack-v1.2",
     "description": "Device Pack schema, identification, mappings, versioning, certification/provenance and test-lab semantics.",
     "canonical_path": "canonical/p1/platform-device-pack-engineer.md",
-    "sha256": "86cc30e8aaab8469b7ca26cf6fe0301d813d39402ea4cc8c73aa768eb2e99b23"
+    "sha256": "547bebc150e6097e999faf2295da85e707210458ba10397d9376a2219ddce967"
   },
   {
     "name": "platform-ncm-remediation-engineer",
@@ -317,7 +317,7 @@
     "source": "capability-pack-v1.2",
     "description": "Privileged configuration/remediation workflow: maker-checker, deterministic execution, rollback, blast-radius and evidence. No direct LLM privileged execution.",
     "canonical_path": "canonical/p1/platform-ncm-remediation-engineer.md",
-    "sha256": "11f6befbef8451d78343d7bb0d5d35f2f176a0cc340edd28daed4efbf43a7173"
+    "sha256": "e7e4cd54d08c5d4a43faa2d2a8fd53a6b36db11f9a398099bf95663375b5152b"
   },
   {
     "name": "platform-integration-connector-engineer",

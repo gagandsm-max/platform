@@ -1,0 +1,7 @@
+{
+  "case": "running_startup_mismatch",
+  "runningHash": "sha256:aaa",
+  "startupHash": "sha256:bbb",
+  "drift": true,
+  "notes": "synthetic sanitized"
+}

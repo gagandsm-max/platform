@@ -22,6 +22,7 @@ Always read:
 3. `Platform_07` approved dependencies
 4. Credential and rate-limit patterns (`connector_framework`)
 5. Topology identity rules (`topology_routing`, `Platform_20` where relevant)
+6. `references/vmware-first-ga.md` and fixtures/evals for vCenter/ESXi/vMotion and stale inventory
 
 Unsupported hypervisors/arrays ⇒ `UNVERIFIED`. Do not claim them as implemented.
 

@@ -1,0 +1,5 @@
+{
+  "actorTenant": "A",
+  "resourceTenant": "B",
+  "expect": "DENY"
+}

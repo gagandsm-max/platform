@@ -3,7 +3,7 @@ name: security_negative_testing
 description: Prove security boundaries with adversarial and negative cases rather than success-path evidence alone.
 ---
 
-<!-- generated from project_agents/skills/security_negative_testing/SKILL.md sha256:14e94ed0951a14ebba2c29577436ee7fa6263e286ec3a51e2668fb144a0bd4a4 -->
+<!-- generated from project_agents/skills/security_negative_testing/SKILL.md sha256:3e4914d0a7c918a36a0ea0e4d9196e4b4af7835fa0a69748d7e26b4fb073bbf5 -->
 
 # security_negative_testing
 
@@ -24,6 +24,7 @@ Always read:
 3. `project_agents/tool_authority.json` and task `securityBoundaries[]`
 4. Exact authn vs authz contracts for the surface (Keycloak/OIDC, mTLS SPIFFE-like sensor/agent identity, API tokens)
 5. Existing negative test harnesses for the module under change
+6. `references/attack-surface-cases.md` and fixtures/evals for tenant escape, traversal, injection and secret leakage
 
 Threat-model assets/actors/boundaries for the change class before writing “happy path green” claims.
 

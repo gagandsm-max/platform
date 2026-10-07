@@ -21,7 +21,18 @@ from control_plane import (
     assert_schema_tool_enums_match_authority,
     load_tool_authority,
 )
+from skill_evals import SkillEvalError, load_commercial_depth_policy, validate_skill_evals
+from skill_resources import (
+    SkillResourceError,
+    assert_safe_required_reference_file,
+    sync_skill_resources,
+    validate_skill_resources,
+)
 from skill_structure import format_structure_errors, validate_skill_structure
+
+# Active Capability Pack inventory ceiling (bounded; not unlimited growth).
+ACTIVE_SKILL_INVENTORY = 63
+ACTIVE_AGENT_INVENTORY = 34
 
 AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 SKILL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -153,15 +164,22 @@ def render_antigravity(entry: dict[str, Any], body: str, sha: str, canonical: Pa
 
 def render_codex(entry: dict[str, Any], body: str, sha: str, canonical: Path, repo: Path) -> str:
     escaped_body = body.replace('"""', '\\"\\"\\"')
-    # Codex defaults to exact-SHA read-only audit. Do NOT map canonical write mode
-    # to workspace-write.
-    sandbox = "read-only"
+    # Canonical read agents stay read-only. Canonical write agents receive only
+    # workspace-scoped writes: never unrestricted host access or implied network.
+    sandbox = "workspace-write" if entry.get("mode") == "write" else "read-only"
+    write_boundary = (
+        "Writable adapter boundary: operate only in the assigned worktree and task scope; "
+        "do not merge, certify, self-verify, or infer network authority from workspace-write.\n\n"
+        if entry.get("mode") == "write"
+        else ""
+    )
     return (
         f"name = {json.dumps(entry['name'])}\n"
         f"description = {json.dumps(entry['description'])}\n"
         f"sandbox_mode = {json.dumps(sandbox)}\n"
         'developer_instructions = """\n'
         f"Generated from project_agents/{source_ref(repo, canonical)} sha256:{sha}\n\n"
+        f"{write_boundary}"
         f"{escaped_body}\n"
         '"""\n'
     )
@@ -360,9 +378,19 @@ def prune_retired_adapters(directory: Path, expected_names: set[str], repo: Path
 
 
 def prune_retired_skill_mirrors(generated_root: Path, declared: set[str], repo: Path) -> list[str]:
+    """Retire generated skill mirrors that are no longer declared.
+
+    A generated SKILL.md marker proves ownership of SKILL.md only. Resource
+    files under references/fixtures/evals are unproven and must be preserved
+    with review-required reporting. Skill directories are deleted only when the
+    generated SKILL.md is the sole remaining content (no unproven extras).
+    Symlinks are never followed or deleted.
+    """
     skipped: list[str] = []
     if not generated_root.exists():
         return skipped
+    from skill_resources import ALLOWED_RESOURCE_DIRS
+
     for directory in list(generated_root.iterdir()):
         if not directory.is_dir() and not directory.is_symlink():
             continue
@@ -373,12 +401,60 @@ def prune_retired_skill_mirrors(generated_root: Path, declared: set[str], repo: 
             skipped.append(f"unowned root skill requires review (symlink not deleted): {rel}")
             continue
         skill_md = directory / "SKILL.md"
-        if skill_md.is_symlink() or directory.is_symlink():
+        if skill_md.is_symlink():
             skipped.append(f"unowned root skill requires review (symlink not deleted): {rel}")
             continue
         if skill_md.is_file() and has_generated_skill_marker(skill_md):
-            extras = [item for item in directory.iterdir() if item.name != "SKILL.md" and not item.name.endswith(TMP_SUFFIX)]
-            if extras:
+            # Preserve any unproven resource material; never recursively delete it.
+            has_unproven = False
+            for dirname in sorted(ALLOWED_RESOURCE_DIRS):
+                resource_root = directory / dirname
+                if not resource_root.exists():
+                    continue
+                has_unproven = True
+                if resource_root.is_symlink():
+                    skipped.append(
+                        f"unowned generated skill resource requires review (symlink not deleted): "
+                        f"{resource_root.relative_to(repo).as_posix()}"
+                    )
+                    continue
+                for path in sorted(resource_root.rglob("*")):
+                    if path.is_dir() and not path.is_symlink():
+                        continue
+                    if path.is_symlink():
+                        skipped.append(
+                            f"unowned generated skill resource requires review (symlink not deleted): "
+                            f"{path.relative_to(repo).as_posix()}"
+                        )
+                    elif path.is_file():
+                        skipped.append(
+                            f"unowned generated skill resource requires review (not deleted): "
+                            f"{path.relative_to(repo).as_posix()}"
+                        )
+                # Empty resource directory still blocks skill-dir deletion.
+                if resource_root.is_dir() and not resource_root.is_symlink():
+                    if not any(
+                        p for p in resource_root.rglob("*") if p.is_file() or p.is_symlink()
+                    ):
+                        skipped.append(
+                            f"unowned generated skill resource requires review (not deleted): "
+                            f"{resource_root.relative_to(repo).as_posix()}"
+                        )
+
+            extras = [
+                item
+                for item in directory.iterdir()
+                if item.name != "SKILL.md" and not item.name.endswith(TMP_SUFFIX)
+            ]
+            if has_unproven or extras:
+                for item in extras:
+                    if item.name in ALLOWED_RESOURCE_DIRS:
+                        continue
+                    if item.is_symlink():
+                        skipped.append(
+                            f"unowned root skill requires review (symlink not deleted): "
+                            f"{item.relative_to(repo).as_posix()}"
+                        )
                 skipped.append(
                     f"generated root skill leftover has extra files; not recursively deleted: {rel}"
                 )
@@ -415,18 +491,31 @@ def sync_agent_pack(repo: Path) -> str:
     declared_names = [str(entry["name"]) for entry in skill_manifest]
     if len(declared_names) != len(set(declared_names)):
         raise AgentPackError("duplicate skill names in project_agents/skills/manifest.json")
+    # Exact ACTIVE_* inventory ceilings are enforced by validate_agent_pack against
+    # the real repository. Sync remains usable for smaller fixture trees in tests.
     generated_roots = [repo / "skills", repo / ".agents" / "skills"]
     for generated_root in generated_roots:
         generated_root.mkdir(parents=True, exist_ok=True)
+    review: list[str] = []
     for skill in skill_manifest:
         name = assert_safe_name(str(skill.get("name", "")), SKILL_NAME_RE, "skill")
         canonical_skill = pa / "skills" / name / "SKILL.md"
+        canonical_dir = canonical_skill.parent
         if not canonical_skill.is_file() or canonical_skill.is_symlink():
             raise AgentPackError(f"missing canonical skill: {canonical_skill.relative_to(repo)}")
         rendered = render_generated_skill(name, canonical_skill.read_text(encoding="utf-8"))
         for generated_root in generated_roots:
             destination = owned_path(generated_root, name, SKILL_NAME_RE, "skill") / "SKILL.md"
             atomic_write(destination, rendered, repo)
+        review.extend(
+            sync_skill_resources(
+                name,
+                canonical_dir,
+                generated_roots,
+                repo,
+                skill_name_re=SKILL_NAME_RE,
+            )
+        )
 
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
@@ -435,7 +524,6 @@ def sync_agent_pack(repo: Path) -> str:
         repo / ".agents" / "agents": {f"{entry['name']}.md" for entry in manifest},
         repo / ".codex" / "agents": {f"{entry['name']}.toml" for entry in manifest},
     }
-    review: list[str] = []
     for directory, expected_names in expected_adapter_names.items():
         review.extend(prune_retired_adapters(directory, expected_names, repo))
         clean_tmp_files(directory, repo)
@@ -564,6 +652,16 @@ def validate_agent_pack(repo: Path) -> list[str]:
         if len(set(skill_names)) != len(skill_names):
             duplicates = sorted(str(name) for name, count in Counter(skill_names).items() if count > 1)
             errors.append(f"duplicate skill names: {', '.join(duplicates)}")
+        # Bounded inventory ceiling (not unlimited growth). Exact active-pack
+        # equality for the real repository is asserted by engineering_orchestrator tests.
+        if len(skill_names) > ACTIVE_SKILL_INVENTORY:
+            errors.append(
+                f"active skill inventory exceeds bounded ceiling {ACTIVE_SKILL_INVENTORY}, found {len(skill_names)}"
+            )
+        if len(manifest) > ACTIVE_AGENT_INVENTORY:
+            errors.append(
+                f"active agent inventory exceeds bounded ceiling {ACTIVE_AGENT_INVENTORY}, found {len(manifest)}"
+            )
         for name in skill_names:
             if name and not SKILL_NAME_RE.match(str(name)):
                 errors.append(f"unsafe skill name {name!r}")
@@ -648,7 +746,84 @@ def validate_agent_pack(repo: Path) -> list[str]:
                 if generated_text != expected:
                     errors.append(f"generated skill drift: {rel}")
 
+        # Resource projection + optional commercial-depth eval coverage.
+        # Fixture mini-repos may omit commercial_depth_policy.json; the real pack must include it.
+        depth_policy_path = pa / "skills" / "commercial_depth_policy.json"
+        depth_policy: dict[str, Any] = {}
+        if depth_policy_path.is_file() and not depth_policy_path.is_symlink():
+            try:
+                depth_policy = load_commercial_depth_policy(depth_policy_path)
+            except SkillEvalError as exc:
+                errors.append(str(exc))
+        elif len(declared) >= ACTIVE_SKILL_INVENTORY:
+            errors.append(f"missing commercial depth policy: {depth_policy_path}")
+        governed = depth_policy.get("skills") if isinstance(depth_policy.get("skills"), dict) else {}
+        defaults = depth_policy.get("defaults") if isinstance(depth_policy.get("defaults"), dict) else {}
         matrix_path = pa / "skills" / "agent_skill_matrix.json"
+        matrix_for_evals: dict[str, Any] = {}
+        if matrix_path.is_file():
+            try:
+                loaded_matrix = load_json(matrix_path)
+                if isinstance(loaded_matrix, dict):
+                    matrix_for_evals = loaded_matrix
+            except (OSError, json.JSONDecodeError):
+                pass
+        agent_names_for_evals = {str(entry.get("name")) for entry in manifest if entry.get("name")}
+        global_eval_ids: set[str] = set()
+        for name in sorted(declared):
+            canonical_dir = pa / "skills" / name
+            errors.extend(
+                validate_skill_resources(
+                    name,
+                    canonical_dir,
+                    (repo / "skills", repo / ".agents" / "skills"),
+                    repo,
+                )
+            )
+            policy = governed.get(name) if isinstance(governed.get(name), dict) else None
+            if policy is None:
+                # Ungoverned skills may still ship optional resources; validate evals if present.
+                errors.extend(
+                    validate_skill_evals(
+                        skill_name=name,
+                        skill_dir=canonical_dir,
+                        known_agents=agent_names_for_evals,
+                        known_skills=declared,
+                        agent_matrix=matrix_for_evals,
+                        require_evals=False,
+                        global_seen_ids=global_eval_ids,
+                    )
+                )
+                continue
+            require_refs = bool(policy.get("requireReferences", defaults.get("requireReferences", False)))
+            require_fixtures = bool(policy.get("requireFixtures", defaults.get("requireFixtures", False)))
+            require_evals = bool(policy.get("requireEvals", defaults.get("requireEvals", False)))
+            min_types = set(policy.get("minimumEvalTypes") or defaults.get("minimumEvalTypes") or [])
+            if require_refs and not (canonical_dir / "references").is_dir():
+                errors.append(f"{name}: missing required references/ directory")
+            if require_fixtures and not (canonical_dir / "fixtures").is_dir():
+                errors.append(f"{name}: missing required fixtures/ directory")
+            for required_file in policy.get("requiredReferenceFiles") or []:
+                if not isinstance(required_file, str):
+                    errors.append(f"{name}: requiredReferenceFiles entries must be strings")
+                    continue
+                try:
+                    assert_safe_required_reference_file(canonical_dir, required_file)
+                except SkillResourceError as exc:
+                    errors.append(f"{name}: requiredReferenceFiles invalid: {exc}")
+            errors.extend(
+                validate_skill_evals(
+                    skill_name=name,
+                    skill_dir=canonical_dir,
+                    known_agents=agent_names_for_evals,
+                    known_skills=declared,
+                    agent_matrix=matrix_for_evals,
+                    require_evals=require_evals,
+                    required_types=min_types if require_evals else None,
+                    global_seen_ids=global_eval_ids,
+                )
+            )
+
         if matrix_path.is_file():
             try:
                 matrix = load_json(matrix_path)
@@ -741,17 +916,18 @@ def validate_agent_pack(repo: Path) -> list[str]:
             errors.append(
                 "tool_authority.json must not list cursor-cloud or github-copilot as authorized writers"
             )
-        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder", "codex"):
+        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder"):
             if never not in set(legal["neverWriterTools"]):
                 errors.append(f"tool_authority.json neverWriterTools must include {never}")
-        if set(legal["exceptionalWriterTools"]) != {"antigravity"}:
-            errors.append(
-                "tool_authority.json exceptionalWriterTools must be exactly {antigravity}"
-            )
+        if legal["exceptionalWriterTools"]:
+            errors.append("tool_authority.json exceptionalWriterTools must be empty")
+        if set(legal["writerTools"]) != {"cursor-cli", "codex"}:
+            errors.append("tool_authority.json writerTools must be exactly {cursor-cli, codex}")
+        if "antigravity" in set(legal["writerTools"]):
+            errors.append("antigravity must not be an authorized writerTool")
         if tools.get("antigravity", {}).get("mayWriteProductCode") is not False:
             errors.append(
-                "antigravity must keep mayWriteProductCode=false; "
-                "write is task-scoped via writerElevation only"
+                "antigravity must keep mayWriteProductCode=false"
             )
         if tools.get("antigravity", {}).get("defaultGeneratedCapability") != "read-only":
             errors.append("antigravity defaultGeneratedCapability must remain read-only")
@@ -760,29 +936,38 @@ def validate_agent_pack(repo: Path) -> list[str]:
                 "antigravity mayCertify must remain false "
                 "(supplies certification-gate evidence; ChatGPT + GitHub certifies)"
             )
-        if tools.get("codex", {}).get("status") != "suspended":
-            errors.append("codex status must be suspended under current Founder policy")
-        if "codex" in set(legal["writerTools"]) or "codex" in set(legal["exceptionalWriterTools"]):
-            errors.append("codex must not be an authorized writerTool while suspended")
+        if tools.get("codex", {}).get("status") != "authorized":
+            errors.append("codex status must be authorized under the 2026-10-07 Founder decision")
+        if "codex" not in set(legal["writerTools"]):
+            errors.append("codex must be an authorized writerTool")
+        if "codex" in set(legal["exceptionalWriterTools"]):
+            errors.append("codex must not require exceptional writer elevation")
         if "codex" in set(legal["verifierTools"]):
-            errors.append("codex must not be an authorized verifierTool while suspended")
-        if "codex" not in set(legal.get("prohibitedWriterTools") or []):
-            errors.append("codex must be listed in prohibitedWriterTools while suspended")
+            errors.append("codex must not be an authorized verifierTool")
+        if "codex" in set(legal.get("prohibitedWriterTools") or []):
+            errors.append("codex must not be listed in prohibitedWriterTools")
         if "codex" not in set(legal.get("prohibitedVerifierTools") or []):
-            errors.append("codex must be listed in prohibitedVerifierTools while suspended")
-        if tools.get("codex", {}).get("mayWriteProductCode") is not False:
-            errors.append("codex mayWriteProductCode must remain false while suspended")
+            errors.append("codex must be listed in prohibitedVerifierTools")
+        if tools.get("codex", {}).get("mayWriteProductCode") is not True:
+            errors.append("codex mayWriteProductCode must be true")
         if tools.get("codex", {}).get("mayCertify") is not False:
-            errors.append("codex mayCertify must remain false while suspended")
-        if tools.get("codex", {}).get("defaultSandboxMode") != "read-only":
-            errors.append("codex defaultSandboxMode must remain read-only")
+            errors.append("codex mayCertify must remain false")
+        if tools.get("codex", {}).get("readAgentSandboxMode") != "read-only":
+            errors.append("codex readAgentSandboxMode must be read-only")
+        if tools.get("codex", {}).get("writeAgentSandboxMode") != "workspace-write":
+            errors.append("codex writeAgentSandboxMode must be workspace-write")
+        if set(tools.get("codex", {}).get("clientInterfaces") or []) != {
+            "codex-cli",
+            "chatgpt-desktop-codex-mode",
+        }:
+            errors.append("codex clientInterfaces must declare CLI and Desktop Codex mode")
         if tools.get("codex", {}).get("defaultWriter") is not False:
-            errors.append("codex defaultWriter must remain false while suspended")
+            errors.append("codex defaultWriter must remain false")
     except (OSError, json.JSONDecodeError, ControlPlaneError) as exc:
         errors.append(f"tool authority validation failed: {exc}")
 
-    # Generated Antigravity adapters stay read-only; Codex compatibility adapters
-    # may remain and must stay sandbox_mode=read-only (presence ≠ operational authority).
+    # Generated Antigravity adapters stay read-only. Codex sandbox mode follows
+    # canonical agent mode without granting unrestricted host or network access.
     for entry in manifest:
         name = entry.get("name")
         if not name:
@@ -802,13 +987,15 @@ def validate_agent_pack(repo: Path) -> list[str]:
             errors.append(f"missing Codex adapter: .codex/agents/{name}.toml")
         else:
             text = codex.read_text(encoding="utf-8")
-            if 'sandbox_mode = "workspace-write"' in text or "sandbox_mode = 'workspace-write'" in text:
+            expected_sandbox = "workspace-write" if entry.get("mode") == "write" else "read-only"
+            if f'sandbox_mode = "{expected_sandbox}"' not in text:
                 errors.append(
-                    f"Codex adapter must default sandbox_mode=read-only: .codex/agents/{name}.toml"
+                    f"Codex adapter sandbox mismatch for canonical mode {entry.get('mode')}: "
+                    f".codex/agents/{name}.toml"
                 )
-            if 'sandbox_mode = "read-only"' not in text and "sandbox_mode = 'read-only'" not in text:
+            if "danger-full-access" in text:
                 errors.append(
-                    f"Codex adapter missing sandbox_mode=read-only: .codex/agents/{name}.toml"
+                    f"Codex adapter must not grant unrestricted host access: .codex/agents/{name}.toml"
                 )
 
     agents_md = repo / "AGENTS.md"

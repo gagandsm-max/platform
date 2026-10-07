@@ -1,10 +1,10 @@
-# Capability Backlog — Auditor Skill Disposition (v1.2)
+# Capability Backlog — Auditor Skill Disposition (v1.3)
 
 The auditor proposed overlapping Skill names. v1.2 does **not** implement every proposed name.
 Machine form: `project_agents/skills/auditor_skill_disposition.json`.
 Counts below are derived from that file; do not freeze them as permanent validator policy.
 
-- IMPLEMENT_NOW: 60
+- IMPLEMENT_NOW: 63
 - MERGE_INTO: 108
 - DEFER: 56
 - Disposition rows: 224
@@ -76,6 +76,9 @@ UI amendment maps ten auditor-proposed UI Skill areas into three canonical Skill
 | `ux_operational_design` | canonical v1.2 UI skill |
 | `web_interface_quality` | canonical v1.2 UI skill |
 | `accessibility_inclusive_design` | canonical v1.2 UI skill |
+| `ncm_configuration_assurance` | canonical v1.3 skill |
+| `redfish_hardware_monitoring` | canonical v1.3 skill |
+| `database_monitoring` | canonical v1.3 skill |
 
 ## MERGE_INTO
 

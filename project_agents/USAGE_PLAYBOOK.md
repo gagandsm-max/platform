@@ -73,7 +73,7 @@ Trivial edits, comments, and isolated bug fixes do not require this checklist.
 
 `task intent → owning agent (AGENT_MATRIX) → required Skills (AGENT_SKILL_MATRIX) → risk-triggered reviewers → writerTool → verifierTool → evidence gate`
 
-ChatGPT+GitHub should route from these documents without loading every Skill body. Cursor CLI is the primary/default bounded writer. Cursor Cloud is a never-writer under current policy. Cursor `--agent` is unsupported. Antigravity is the combined independent verifier / adversarial / exact-SHA auditor / certification-gate evidence lane; it is read-only/adversarial by default and writes only under explicit isolated authority. Codex is Founder-suspended from the normal workflow (compatibility projection only). See `TOOL_COMPATIBILITY.md`.
+ChatGPT+GitHub should route from these documents without loading every Skill body. Cursor CLI is the primary/default bounded writer. Codex is an authorized non-default bounded implementation/test/debug writer; Codex CLI and ChatGPT Desktop App Codex mode are interfaces to that one authority. Cursor and Codex may write concurrently only on isolated, non-overlapping lanes, never the same checkout. Cursor Cloud is a never-writer. Cursor `--agent` is unsupported. Antigravity is the independent read-only verifier / adversarial / exact-SHA auditor / certification-gate evidence lane. ChatGPT + GitHub remains gatekeeper, merge and final certification authority. See `TOOL_COMPATIBILITY.md`.
 
 ## Do not use an agent when
 

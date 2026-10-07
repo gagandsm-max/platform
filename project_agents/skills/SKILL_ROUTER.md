@@ -1,4 +1,4 @@
-# Skill Router — Capability Pack v1.2
+# Skill Router — Capability Pack v1.3
 
 Canonical skills live only under `project_agents/skills/`. Generated copies under
 `.agents/skills/` (Cursor + Antigravity) and `skills/` (legacy mirror) are not a
@@ -64,6 +64,9 @@ Do not load every Skill body into context. Resolve names from this router and
 | PKI / mTLS | `pki_mtls` |
 | Secrets / credentials | `secrets_handling` |
 | Privileged NCM / remediation | `remediation_safety` |
+| NCM config acquisition/diff/drift/Change Plan evidence | `ncm_configuration_assurance` |
+| Redfish/BMC/OOB hardware | `redfish_hardware_monitoring` |
+| Customer PostgreSQL/MSSQL monitoring targets | `database_monitoring` |
 | Docker Compose | `docker_compose` |
 | CI/CD | `ci_cd` |
 | SBOM / provenance | `sbom_provenance` |
@@ -95,9 +98,11 @@ Add only when the change actually carries that risk:
 
 | Role | Tools |
 |---|---|
-| writerTool | `cursor-cli` (primary bounded writer). `cursor-cloud` is prohibited by default. Antigravity write elevation is exceptional, task-scoped and isolated. Codex is Founder-suspended and must not be selected |
-| verifierTool | `chatgpt-github`, `antigravity` (see `project_agents/tool_authority.json`). Codex is suspended. GitHub Copilot is auxiliary PR review only and never sole certification evidence |
+| writerTool | `cursor-cli` is the default bounded implementation writer; `codex` is an additional authorized bounded implementation, test and debugging writer. Neither requires `writerElevation`. Parallel writing requires separate assigned branches/worktrees and non-overlapping file ownership. `antigravity` is not a writer and has no writer-elevation path; `cursor-cloud` and `github-copilot` are prohibited writers |
+| verifierTool | `chatgpt-github`, `antigravity` only. Antigravity is the independent read-only verifier. Cursor CLI and Codex are not certification verifiers or gatekeepers. GitHub Copilot remains auxiliary PR review only and never sole certification evidence |
 | evidence gate | `exact_head_merge_gate` + `evidence_bundle`; writer cannot close it |
+
+This table summarizes current authority; it does not replace `project_agents/tool_authority.json`, canonical `AGENTS.md`, or `project_documentation/Platform_12_Decision_Source_Register.md` §18.1.
 
 ChatGPT+GitHub does not load Skill bodies unless the selected names require it.
 Use `AGENT_SKILL_MATRIX.md` for per-agent required vs conditional Skills.

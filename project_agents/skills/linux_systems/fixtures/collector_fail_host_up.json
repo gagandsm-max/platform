@@ -1,0 +1,5 @@
+{
+  "collector": "FAILED",
+  "icmp": "UP",
+  "mustNotClaim": "HOST_DOWN"
+}

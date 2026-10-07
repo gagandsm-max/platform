@@ -1,8 +1,10 @@
 name = "platform-integration-connector-engineer"
 description = "Connector framework and SaaS/ITSM/webhooks/carrier/change telemetry including auth, rate limiting, retry, idempotency, outbound durability and certification."
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-integration-connector-engineer.md sha256:3157decb9af407bb10deb5c0d7350d41e7728acbbbe15dcab529e9a59cf547b0
+
+Writable adapter boundary: operate only in the assigned worktree and task scope; do not merge, certify, self-verify, or infer network authority from workspace-write.
 
 # Platform Integration Connector Engineer
 

@@ -3,7 +3,7 @@ name: go_runtime
 description: Production Go service conventions for Sensor/Agent—context, goroutines, durability, TLS clients and race-safe tests.
 ---
 
-<!-- generated from project_agents/skills/go_runtime/SKILL.md sha256:edc20c59b69e18ae426524f1d1c8a0970923f366e023471926aeddbe63e96aae -->
+<!-- generated from project_agents/skills/go_runtime/SKILL.md sha256:7ca1aad40654b474acb9df5324d8eab50d269d96b4347e493b72021f19591a02 -->
 
 # go_runtime
 
@@ -24,6 +24,8 @@ Always read:
 3. `sensor_edge`, `replay_idempotency`, `pki_mtls` when transport/spool touched
 4. Error-code / structured logging conventions in-tree
 5. Task stopConditions for unsupported OS APIs
+6. `references/context-concurrency-race.md` and `evals/cases.json` for commercial-depth BUILD/TEST/DEBUG checks
+7. Remember: microbenchmark evidence is not production capacity certification (`capacity_performance`)
 
 ## Invariants
 

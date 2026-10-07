@@ -3,7 +3,7 @@ name: device_pack_authoring
 description: Device Pack schema, identification, mappings, versioning, certification/provenance and test-lab semantics.
 ---
 
-<!-- generated from project_agents/skills/device_pack_authoring/SKILL.md sha256:5ce308979531d9bc2bccb1cafc9fffba22afd34e1ce5de99588b2b0e8c120912 -->
+<!-- generated from project_agents/skills/device_pack_authoring/SKILL.md sha256:712ecc0ce4c6dbcff0033f0bded2f2ea416176683d4342a55aef33fbab253335 -->
 
 # device_pack_authoring
 
@@ -24,6 +24,7 @@ Always read:
 3. `snmp_mib` / `device_control_protocols` Skills for protocol constraints
 4. Existing golden fixtures and pack provenance fields
 5. OSS catalogue constraints for pack tooling dependencies
+6. `references/dimensional-certification.md` and fixtures/evals for Discovery/L1–L3/Topology/NCM dimensions and listed≠certified
 
 If a certification harness dimension is not built, mark `UNVERIFIED`—specification ≠ certification.
 

@@ -1,10 +1,10 @@
-# Skill Matrix — Capability Pack v1.2
+# Skill Matrix — Capability Pack v1.3
 
 Canonical Skill source: `project_agents/skills/`.
 Inventory is declared by `project_agents/skills/manifest.json`; do not freeze a Skill count as permanent validator policy.
-v1.2 currently ships the following bounded library (governance Skills retained; overlapping auditor names merged or deferred).
+v1.3 currently ships the following bounded library (governance Skills retained; overlapping auditor names merged or deferred).
 
-Current canonical Skill count (manifest-derived): **60**. That snapshot is not a permanent hardcoded validator policy.
+Current canonical Skill count (manifest-derived): **63**. That snapshot is not a permanent hardcoded validator policy.
 
 ## Governance / workflow
 
@@ -59,6 +59,8 @@ Current canonical Skill count (manifest-derived): **60**. That snapshot is not a
 | `linux_systems` | Linux OS, systemd, process, disk, and host-path semantics for Core/Sensor/Agent packaging and monitoring targets. |
 | `windows_monitoring` | Windows Agent service, MSI/BAT install, event/perf evidence and privacy-bounded endpoint collection. |
 | `agent_architecture` | Endpoint Agent identity, enrollment/mTLS, durable local collection and privacy-bounded operational telemetry. |
+| `redfish_hardware_monitoring` | BUILD-032 Redfish/BMC/OOB hardware monitoring without collapsing BMC and OS health. |
+| `database_monitoring` | BUILD-035 customer PostgreSQL/MSSQL monitoring targets (distinct from control-plane `postgresql`). |
 | `virtualization_storage` | Virtualization, datastore and storage-target monitoring without turning Platform into DCIM/BMS. |
 | `kubernetes_monitoring` | Kubernetes/container target monitoring, workload identity and collector-health separation. |
 | `cloud_monitoring` | Cloud-account/target monitoring, OpenTelemetry import boundaries and vendor-ID normalization. |
@@ -90,6 +92,7 @@ Current canonical Skill count (manifest-derived): **60**. That snapshot is not a
 | `tenant_isolation` | Server-side tenant isolation, RBAC/resource scope and cross-tenant negative cases. |
 | `pki_mtls` | PKI, mTLS enrollment, certificate identity and untrusted-cert rejection. |
 | `secrets_handling` | Credential Profiles, connector secrets, CI credentials, redaction and support-bundle safety. |
+| `ncm_configuration_assurance` | NCM configuration acquisition, history, diff, drift, compliance, Change Plan binding and pre/post/rollback evidence—without treating AI text as authorization. |
 | `remediation_safety` | Controlled remediation: deterministic actions, maker-checker, blast-radius, rollback and no LLM privileged execution. |
 
 ## Release / operations

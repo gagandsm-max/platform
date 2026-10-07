@@ -1,8 +1,10 @@
 name = "platform-telemetry-pipeline-engineer"
 description = "Streaming specialist after acceptance: normalization, Kafka, replay/idempotency, event time, backpressure, lag and reconciliation."
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-telemetry-pipeline-engineer.md sha256:e53e1ba3b45a16d85c88f6346f10714dda4ca3073f14808839a8aa2b9e114fad
+
+Writable adapter boundary: operate only in the assigned worktree and task scope; do not merge, certify, self-verify, or infer network authority from workspace-write.
 
 # Platform Telemetry Pipeline Engineer
 

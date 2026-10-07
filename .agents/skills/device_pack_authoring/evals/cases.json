@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "dpa.trigger.l1",
+      "type": "TRIGGER",
+      "task": "Author L1 metric mappings for a vendor family",
+      "owningAgents": [
+        "platform-device-pack-engineer"
+      ],
+      "requiredSkills": [
+        "device_pack_authoring"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "L1",
+        "dimensional"
+      ],
+      "expectedDisposition": "SAFE"
+    },
+    {
+      "id": "dpa.negative.listed-certified",
+      "type": "NEGATIVE",
+      "task": "Claim certified because product is listed",
+      "owningAgents": [
+        "platform-device-pack-engineer"
+      ],
+      "requiredSkills": [
+        "device_pack_authoring"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "listed \u2260 certified"
+      ],
+      "expectedDisposition": "REJECT"
+    },
+    {
+      "id": "dpa.adversarial.near-match",
+      "type": "ADVERSARIAL",
+      "task": "Near-match sysObjectID treated as exact",
+      "owningAgents": [
+        "platform-device-pack-engineer"
+      ],
+      "requiredSkills": [
+        "device_pack_authoring"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "near-match",
+        "identity"
+      ],
+      "expectedDisposition": "REJECT",
+      "fixtures": [
+        "fixtures/near_match_identity.json"
+      ]
+    },
+    {
+      "id": "dpa.regression.unsupported",
+      "type": "REGRESSION",
+      "task": "Unsupported version silently mapped",
+      "owningAgents": [
+        "platform-device-pack-engineer"
+      ],
+      "requiredSkills": [
+        "device_pack_authoring"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "unsupported-version",
+        "UNSUPPORTED"
+      ],
+      "expectedDisposition": "FAIL_CLOSED"
+    }
+  ]
+}

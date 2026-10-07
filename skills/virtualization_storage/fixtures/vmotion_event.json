@@ -1,0 +1,6 @@
+{
+  "event": "vMotion",
+  "vm": "vm-1",
+  "srcHost": "esxi-a",
+  "dstHost": "esxi-b"
+}

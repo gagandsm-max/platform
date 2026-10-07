@@ -518,37 +518,31 @@ class ToolAuthorityTests(unittest.TestCase):
             )
         self.assertIn("must not include writerElevation", str(ctx.exception))
 
-    def test_antigravity_without_elevation_rejected(self) -> None:
+    def test_antigravity_writer_selection_rejected(self) -> None:
         with self.assertRaises(control_plane.ControlPlaneError) as ctx:
             control_plane.validate_task_manifest(_task(writerTool="antigravity"))
-        self.assertIn("writerElevation", str(ctx.exception))
+        self.assertIn("not an authorized writer", str(ctx.exception).lower())
 
-    def test_antigravity_with_valid_isolated_elevation_accepted(self) -> None:
-        control_plane.validate_task_manifest(
-            _task(
-                writerTool="antigravity",
-                verifierTool="chatgpt-github",
-                gatekeeper="founder",
-                writerElevation={
-                    "authorizedBy": "chatgpt-github",
-                    "reason": "Founder-assigned isolated Antigravity implementation lane",
-                    "isolatedWorkspace": True,
-                },
-            )
-        )
-
-    def test_codex_suspended_rejected_as_writer(self) -> None:
+    def test_antigravity_writer_elevation_rejected(self) -> None:
         with self.assertRaises(control_plane.ControlPlaneError) as ctx:
             control_plane.validate_task_manifest(
-                _task(writerTool="codex", verifierTool="chatgpt-github")
+                _task(
+                    writerTool="antigravity",
+                    writerElevation={
+                        "authorizedBy": "founder",
+                        "reason": "attempt to elevate verifier",
+                        "isolatedWorkspace": True,
+                    },
+                )
             )
-        message = str(ctx.exception).lower()
-        self.assertTrue(
-            "suspended" in message or "prohibited" in message or "not an authorized writer" in message,
-            message,
+        self.assertIn("not an authorized writer", str(ctx.exception).lower())
+
+    def test_authorized_codex_writer_accepted(self) -> None:
+        control_plane.validate_task_manifest(
+            _task(writerTool="codex", verifierTool="antigravity", gatekeeper="founder")
         )
 
-    def test_codex_suspended_rejected_even_with_elevation(self) -> None:
+    def test_codex_rejects_writer_elevation(self) -> None:
         with self.assertRaises(control_plane.ControlPlaneError) as ctx:
             control_plane.validate_task_manifest(
                 _task(
@@ -557,27 +551,32 @@ class ToolAuthorityTests(unittest.TestCase):
                     gatekeeper="chatgpt-github",
                     writerElevation={
                         "authorizedBy": "founder",
-                        "reason": "attempt to elevate suspended Codex",
+                        "reason": "unnecessary",
                         "isolatedWorkspace": True,
                     },
                 )
             )
-        message = str(ctx.exception).lower()
-        self.assertTrue(
-            "suspended" in message or "prohibited" in message or "not an authorized writer" in message,
-            message,
-        )
+        self.assertIn("must not include writerElevation", str(ctx.exception))
 
-    def test_codex_suspended_rejected_as_verifier(self) -> None:
+    def test_codex_writer_plus_codex_verifier_rejected(self) -> None:
         with self.assertRaises(control_plane.ControlPlaneError) as ctx:
             control_plane.validate_task_manifest(
-                _task(writerTool="cursor-cli", verifierTool="codex")
+                _task(writerTool="codex", verifierTool="codex")
             )
-        message = str(ctx.exception).lower()
-        self.assertTrue(
-            "suspended" in message or "prohibited" in message or "not an authorized verifier" in message,
-            message,
-        )
+        self.assertIn("prohibited", str(ctx.exception).lower())
+
+    def test_codex_writer_plus_codex_gatekeeper_rejected(self) -> None:
+        with self.assertRaises(control_plane.ControlPlaneError) as ctx:
+            control_plane.validate_task_manifest(
+                _task(writerTool="codex", verifierTool="antigravity", gatekeeper="codex")
+            )
+        self.assertIn("prohibited", str(ctx.exception).lower())
+
+    def test_cursor_and_codex_cannot_both_own_one_manifest(self) -> None:
+        with self.assertRaises(control_plane.ControlPlaneError):
+            control_plane.validate_task_manifest(
+                _task(writerTool=["cursor-cli", "codex"])
+            )
 
     def test_cursor_cloud_elevation_rejected(self) -> None:
         with self.assertRaises(control_plane.ControlPlaneError) as ctx:
@@ -607,34 +606,24 @@ class ToolAuthorityTests(unittest.TestCase):
             )
         self.assertIn("prohibited", str(ctx.exception).lower())
 
-    def test_exceptional_writer_cannot_self_verify(self) -> None:
+    def test_writer_equals_verifier_fails(self) -> None:
         with self.assertRaises(control_plane.ControlPlaneError) as ctx:
             control_plane.validate_task_manifest(
                 _task(
-                    writerTool="antigravity",
-                    verifierTool="antigravity",
+                    writerTool="codex",
+                    verifierTool="codex",
                     gatekeeper="founder",
-                    writerElevation={
-                        "authorizedBy": "founder",
-                        "reason": "isolated write",
-                        "isolatedWorkspace": True,
-                    },
                 )
             )
-        self.assertIn("self-verify", str(ctx.exception))
+        self.assertIn("prohibited", str(ctx.exception).lower())
 
-    def test_exceptional_writer_cannot_self_certify_as_gatekeeper(self) -> None:
+    def test_writer_equals_gatekeeper_fails(self) -> None:
         with self.assertRaises(control_plane.ControlPlaneError) as ctx:
             control_plane.validate_task_manifest(
                 _task(
-                    writerTool="antigravity",
-                    verifierTool="chatgpt-github",
-                    gatekeeper="antigravity",
-                    writerElevation={
-                        "authorizedBy": "founder",
-                        "reason": "isolated write",
-                        "isolatedWorkspace": True,
-                    },
+                    writerTool="codex",
+                    verifierTool="antigravity",
+                    gatekeeper="codex",
                 )
             )
         message = str(ctx.exception).lower()
@@ -643,23 +632,8 @@ class ToolAuthorityTests(unittest.TestCase):
             message,
         )
 
-    def test_elevation_requires_isolated_workspace_true(self) -> None:
-        with self.assertRaises(control_plane.ControlPlaneError) as ctx:
-            control_plane.validate_task_manifest(
-                _task(
-                    writerTool="antigravity",
-                    verifierTool="chatgpt-github",
-                    writerElevation={
-                        "authorizedBy": "founder",
-                        "reason": "not isolated",
-                        "isolatedWorkspace": False,
-                    },
-                )
-            )
-        self.assertIn("isolatedWorkspace", str(ctx.exception))
-
-    def test_antigravity_and_codex_default_read_only_renderers(self) -> None:
-        entry = {
+    def test_antigravity_read_only_and_codex_mode_derived_renderers(self) -> None:
+        write_entry = {
             "name": "platform-minimal-change-engineer",
             "description": "demo",
             "mode": "write",
@@ -668,11 +642,18 @@ class ToolAuthorityTests(unittest.TestCase):
         body = "# demo\n"
         sha = "a" * 64
         canonical = REPO_ROOT / "project_agents" / "canonical" / "p0" / "platform-minimal-change-engineer.md"
-        agy = agent_pack.render_antigravity(entry, body, sha, canonical, REPO_ROOT)
+        agy = agent_pack.render_antigravity(write_entry, body, sha, canonical, REPO_ROOT)
         self.assertNotIn("replace_file_content", agy.split("---", 2)[1])
-        codex = agent_pack.render_codex(entry, body, sha, canonical, REPO_ROOT)
-        self.assertIn('sandbox_mode = "read-only"', codex)
-        self.assertNotIn("workspace-write", codex)
+        codex_write = agent_pack.render_codex(write_entry, body, sha, canonical, REPO_ROOT)
+        self.assertIn('sandbox_mode = "workspace-write"', codex_write)
+        self.assertNotIn("danger-full-access", codex_write)
+        self.assertIn("operate only in the assigned worktree and task scope", codex_write)
+        self.assertIn("do not merge, certify, self-verify", codex_write)
+
+        read_entry = dict(write_entry, mode="read")
+        codex_read = agent_pack.render_codex(read_entry, body, sha, canonical, REPO_ROOT)
+        self.assertIn('sandbox_mode = "read-only"', codex_read)
+        self.assertNotIn("workspace-write", codex_read)
 
     def test_duplicate_required_skill_rejected(self) -> None:
         with self.assertRaises(agent_pack.AgentPackError) as ctx:
@@ -764,36 +745,52 @@ class ToolAuthorityTests(unittest.TestCase):
         self.assertIn("cursor-cli", authority["legalCombinations"]["defaultWriterTools"])
         self.assertIn("cursor-cli", authority["legalCombinations"]["writerTools"])
         self.assertNotIn("cursor-cloud", authority["legalCombinations"]["writerTools"])
-        self.assertEqual(
-            set(authority["legalCombinations"]["exceptionalWriterTools"]),
-            {"antigravity"},
-        )
+        self.assertEqual(authority["legalCombinations"]["exceptionalWriterTools"], [])
         self.assertEqual(
             set(authority["legalCombinations"]["writerTools"]),
-            {"cursor-cli", "antigravity"},
+            {"cursor-cli", "codex"},
         )
         self.assertEqual(
             set(authority["legalCombinations"]["verifierTools"]),
             {"chatgpt-github", "antigravity"},
         )
-        self.assertNotIn("codex", authority["legalCombinations"]["writerTools"])
+        self.assertIn("codex", authority["legalCombinations"]["writerTools"])
+        self.assertNotIn("antigravity", authority["legalCombinations"]["writerTools"])
         self.assertNotIn("codex", authority["legalCombinations"]["verifierTools"])
-        self.assertEqual(authority["tools"]["codex"]["status"], "suspended")
-        self.assertIn("codex", authority["legalCombinations"]["neverWriterTools"])
-        self.assertIn("codex", authority["legalCombinations"]["prohibitedWriterTools"])
+        self.assertEqual(authority["tools"]["codex"]["status"], "authorized")
+        self.assertNotIn("codex", authority["legalCombinations"]["neverWriterTools"])
+        self.assertNotIn("codex", authority["legalCombinations"]["prohibitedWriterTools"])
         self.assertIn("codex", authority["legalCombinations"]["prohibitedVerifierTools"])
         self.assertIn("cursor-cloud", authority["legalCombinations"]["neverWriterTools"])
         self.assertIn("github-copilot", authority["legalCombinations"]["neverWriterTools"])
         self.assertFalse(authority["tools"]["antigravity"]["mayWriteProductCode"])
         self.assertFalse(authority["tools"]["antigravity"]["mayCertify"])
-        self.assertFalse(authority["tools"]["codex"]["mayWriteProductCode"])
+        self.assertTrue(authority["tools"]["codex"]["mayWriteProductCode"])
         self.assertFalse(authority["tools"]["codex"]["mayCertify"])
         self.assertEqual(
             authority["tools"]["antigravity"]["defaultGeneratedCapability"], "read-only"
         )
-        self.assertEqual(authority["tools"]["codex"]["defaultSandboxMode"], "read-only")
+        self.assertEqual(authority["tools"]["codex"]["readAgentSandboxMode"], "read-only")
+        self.assertEqual(
+            authority["tools"]["codex"]["writeAgentSandboxMode"], "workspace-write"
+        )
+        self.assertEqual(
+            set(authority["tools"]["codex"]["clientInterfaces"]),
+            {"codex-cli", "chatgpt-desktop-codex-mode"},
+        )
         self.assertIn("auditor", authority["tools"]["antigravity"]["roles"])
         self.assertIn("certification_gate", authority["tools"]["antigravity"]["roles"])
+        self.assertEqual(authority["tools"]["cursor-cli"]["roles"], ["writer"])
+        self.assertTrue(authority["tools"]["cursor-cli"]["mayWriteProductCode"])
+        self.assertTrue(authority["tools"]["cursor-cli"]["defaultWriter"])
+        self.assertFalse(authority["tools"]["cursor-cli"]["mayMerge"])
+        self.assertFalse(authority["tools"]["cursor-cli"]["mayCertify"])
+        self.assertIn("writer", authority["tools"]["codex"]["roles"])
+        self.assertFalse(authority["tools"]["codex"]["defaultWriter"])
+        self.assertFalse(authority["tools"]["codex"]["mayMerge"])
+        self.assertFalse(authority["tools"]["chatgpt-github"]["mayWriteProductCode"])
+        self.assertTrue(authority["tools"]["chatgpt-github"]["mayMerge"])
+        self.assertTrue(authority["tools"]["chatgpt-github"]["mayCertify"])
 
     def test_schema_writer_elevation_conditionals_match_runtime(self) -> None:
         schema = json.loads(
@@ -804,10 +801,10 @@ class ToolAuthorityTests(unittest.TestCase):
         control_plane.assert_schema_writer_elevation_conditionals(schema)
         control_plane.assert_schema_tool_enums_match_authority(task_schema=schema)
         writer_enum = schema["properties"]["writerTool"]["enum"]
-        self.assertEqual(writer_enum, ["cursor-cli", "antigravity"])
+        self.assertEqual(writer_enum, ["cursor-cli", "codex"])
         verifier_enum = schema["properties"]["verifierTool"]["enum"]
         self.assertEqual(verifier_enum, ["chatgpt-github", "antigravity"])
-        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder", "codex"):
+        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder", "antigravity"):
             self.assertNotIn(never, writer_enum)
         self.assertNotIn("codex", verifier_enum)
 
@@ -827,23 +824,16 @@ class ToolAuthorityTests(unittest.TestCase):
                 {"writerTool": "cursor-cli", "writerElevation": valid_elevation},
                 False,
             ),
-            ("antigravity-no-elevation", {"writerTool": "antigravity"}, False),
             (
-                "antigravity-valid-elevation",
+                "codex-no-elevation",
                 {
-                    "writerTool": "antigravity",
-                    "verifierTool": "chatgpt-github",
-                    "writerElevation": valid_elevation,
+                    "writerTool": "codex",
+                    "verifierTool": "antigravity",
                 },
                 True,
             ),
             (
-                "codex-suspended-no-elevation",
-                {"writerTool": "codex", "verifierTool": "chatgpt-github"},
-                False,
-            ),
-            (
-                "codex-suspended-with-elevation",
+                "codex-with-elevation",
                 {
                     "writerTool": "codex",
                     "verifierTool": "antigravity",
@@ -853,28 +843,19 @@ class ToolAuthorityTests(unittest.TestCase):
                 False,
             ),
             (
-                "elevation-isolated-false",
+                "antigravity-no-elevation",
                 {
                     "writerTool": "antigravity",
                     "verifierTool": "chatgpt-github",
-                    "writerElevation": {
-                        "authorizedBy": "founder",
-                        "reason": "bad isolation",
-                        "isolatedWorkspace": False,
-                    },
                 },
                 False,
             ),
             (
-                "elevation-bad-authorizedBy",
+                "antigravity-with-elevation",
                 {
                     "writerTool": "antigravity",
                     "verifierTool": "chatgpt-github",
-                    "writerElevation": {
-                        "authorizedBy": "cursor-cli",
-                        "reason": "wrong authorizer",
-                        "isolatedWorkspace": True,
-                    },
+                    "writerElevation": valid_elevation,
                 },
                 False,
             ),
@@ -910,21 +891,10 @@ class ToolAuthorityTests(unittest.TestCase):
             # Structural expectation encoded in schema allOf (defense for schema-only consumers).
             writer = payload["writerTool"]
             has_elevation = "writerElevation" in payload
-            if writer == "cursor-cli":
+            if writer in {"cursor-cli", "codex"}:
                 structural_ok = not has_elevation
-            elif writer == "antigravity":
-                structural_ok = has_elevation
-                if has_elevation:
-                    elev = payload["writerElevation"]
-                    structural_ok = (
-                        isinstance(elev, dict)
-                        and elev.get("isolatedWorkspace") is True
-                        and elev.get("authorizedBy") in {"chatgpt-github", "founder"}
-                        and isinstance(elev.get("reason"), str)
-                        and bool(str(elev.get("reason")).strip())
-                    )
             else:
-                # Suspended/prohibited tools (e.g. codex) are never structurally valid selections.
+                # Prohibited tools (including Antigravity as writer) are invalid selections.
                 structural_ok = False
             self.assertEqual(
                 structural_ok,

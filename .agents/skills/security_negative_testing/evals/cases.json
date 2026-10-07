@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "sec.trigger.tenant",
+      "type": "TRIGGER",
+      "task": "Cross-tenant read attempt",
+      "owningAgents": [
+        "platform-appsec-engineer"
+      ],
+      "requiredSkills": [
+        "security_negative_testing",
+        "tenant_isolation"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "tenant escape"
+      ],
+      "expectedDisposition": "SAFE"
+    },
+    {
+      "id": "sec.negative.traversal",
+      "type": "NEGATIVE",
+      "task": "Path traversal in support bundle",
+      "owningAgents": [
+        "platform-appsec-engineer"
+      ],
+      "requiredSkills": [
+        "security_negative_testing"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "path traversal",
+        "support bundles"
+      ],
+      "expectedDisposition": "REJECT",
+      "fixtures": [
+        "fixtures/path_traversal.json"
+      ]
+    },
+    {
+      "id": "sec.adversarial.pack-inject",
+      "type": "ADVERSARIAL",
+      "task": "Untrusted Device Pack parser injection",
+      "owningAgents": [
+        "platform-appsec-engineer"
+      ],
+      "requiredSkills": [
+        "security_negative_testing"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "Device Packs",
+        "parser injection"
+      ],
+      "expectedDisposition": "REJECT"
+    },
+    {
+      "id": "sec.regression.secret-leak",
+      "type": "REGRESSION",
+      "task": "Secret appears in logs",
+      "owningAgents": [
+        "platform-appsec-engineer"
+      ],
+      "requiredSkills": [
+        "security_negative_testing"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "secret leakage"
+      ],
+      "expectedDisposition": "FAIL_CLOSED"
+    }
+  ]
+}
