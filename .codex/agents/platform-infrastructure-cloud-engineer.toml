@@ -1,8 +1,10 @@
 name = "platform-infrastructure-cloud-engineer"
 description = "Monitored-target specialist for OS, virtualization, storage, Kubernetes, cloud and infrastructure dependencies."
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 developer_instructions = """
-Generated from project_agents/canonical/p1/platform-infrastructure-cloud-engineer.md sha256:f6cdd16a495925cd8b9eb7e3ca0c8fa20a26d1b01f87ddd5e1909a34fa151271
+Generated from project_agents/canonical/p1/platform-infrastructure-cloud-engineer.md sha256:c8ce48b41980193fc67a82c2cc9582b622bd5243127d544c8e3d26036b569424
+
+Writable adapter boundary: operate only in the assigned worktree and task scope; do not merge, certify, self-verify, or infer network authority from workspace-write.
 
 # Platform Infrastructure and Cloud Engineer
 
@@ -94,6 +96,9 @@ Own monitored-target implementation across OS, virtualization, storage, Kubernet
 - `capacity_performance`
 - `pki_mtls`
 - `tenant_isolation`
+- `redfish_hardware_monitoring`
+- `database_monitoring`
+
 
 ## Handoff
 Agent identity collisions to identity-access / onboarding path. Streaming after accept to telemetry-pipeline-engineer. Pack identification to device-pack-engineer.

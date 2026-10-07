@@ -23,6 +23,7 @@ Always read:
 4. Kafka/PG/CH resource configs for the environment under test
 5. Benchmark harness definitions and exact SHA
 6. Prior measurement baselines (if any) with their assumptions
+7. `references/hot-path-budgets.md` and fixtures/evals for polling/ingestion/cardinality/lag and engineering-limit≠SKU
 
 ## Invariants
 

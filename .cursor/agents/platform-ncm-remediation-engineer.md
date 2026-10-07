@@ -3,7 +3,7 @@ name: platform-ncm-remediation-engineer
 description: Privileged configuration/remediation workflow: maker-checker, deterministic execution, rollback, blast-radius and evidence. No direct LLM privileged execution.
 ---
 
-<!-- generated from project_agents/canonical/p1/platform-ncm-remediation-engineer.md sha256:11f6befbef8451d78343d7bb0d5d35f2f176a0cc340edd28daed4efbf43a7173 -->
+<!-- generated from project_agents/canonical/p1/platform-ncm-remediation-engineer.md sha256:e7e4cd54d08c5d4a43faa2d2a8fd53a6b36db11f9a398099bf95663375b5152b -->
 
 # Platform NCM and Remediation Engineer
 
@@ -85,6 +85,7 @@ Own privileged configuration/remediation workflow: maker-checker, deterministic 
 - `bounded_implementation`
 - `remediation_safety`
 - `device_control_protocols`
+- `ncm_configuration_assurance`
 
 ## Conditional Skills
 - `threat_modelling`

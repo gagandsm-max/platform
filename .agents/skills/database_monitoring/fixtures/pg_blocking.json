@@ -1,0 +1,10 @@
+{
+  "db": "postgresql",
+  "status": "ok",
+  "blocking": [
+    {
+      "blocked": 10,
+      "blocker": 2
+    }
+  ]
+}

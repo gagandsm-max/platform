@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "redfish.trigger.inventory",
+      "type": "TRIGGER",
+      "task": "Collect Redfish chassis inventory",
+      "owningAgents": [
+        "platform-infrastructure-cloud-engineer"
+      ],
+      "requiredSkills": [
+        "redfish_hardware_monitoring"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "BMC reachable",
+        "source provenance"
+      ],
+      "expectedDisposition": "SAFE"
+    },
+    {
+      "id": "redfish.negative.bmc-timeout",
+      "type": "NEGATIVE",
+      "task": "BMC timeout while OS Agent healthy",
+      "owningAgents": [
+        "platform-infrastructure-cloud-engineer"
+      ],
+      "requiredSkills": [
+        "redfish_hardware_monitoring"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "BMC unavailable \u2260 OS DOWN",
+        "collector"
+      ],
+      "expectedDisposition": "FAIL_CLOSED",
+      "fixtures": [
+        "fixtures/bmc_unreachable_os_healthy.json"
+      ]
+    },
+    {
+      "id": "redfish.adversarial.os-as-raid",
+      "type": "ADVERSARIAL",
+      "task": "Use OS disk metrics as RAID health truth",
+      "owningAgents": [
+        "platform-infrastructure-cloud-engineer",
+        "platform-device-pack-engineer"
+      ],
+      "requiredSkills": [
+        "redfish_hardware_monitoring"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "OS evidence does not become",
+        "RAID"
+      ],
+      "expectedDisposition": "REJECT"
+    },
+    {
+      "id": "redfish.regression.oem-version",
+      "type": "REGRESSION",
+      "task": "Unknown OEM extension on older API",
+      "owningAgents": [
+        "platform-device-pack-engineer"
+      ],
+      "requiredSkills": [
+        "redfish_hardware_monitoring"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "UNSUPPORTED",
+        "version"
+      ],
+      "expectedDisposition": "INCONCLUSIVE"
+    }
+  ]
+}

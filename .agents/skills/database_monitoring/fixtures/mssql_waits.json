@@ -1,0 +1,10 @@
+{
+  "db": "mssql",
+  "status": "ok",
+  "waits": [
+    {
+      "type": "WRITELOG",
+      "ms": 15
+    }
+  ]
+}

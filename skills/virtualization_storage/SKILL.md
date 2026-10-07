@@ -3,7 +3,7 @@ name: virtualization_storage
 description: Virtualization, datastore and storage-target monitoring without turning Platform into DCIM/BMS.
 ---
 
-<!-- generated from project_agents/skills/virtualization_storage/SKILL.md sha256:280cf14115e81c264a92ae8589acb77b65c60b9089ac6efb305e021e094a6523 -->
+<!-- generated from project_agents/skills/virtualization_storage/SKILL.md sha256:73ecbc262a2c20a633ea0d39dfc9a4de19a1e1af87c3d8e6765c0483cc7a9145 -->
 
 # virtualization_storage
 
@@ -24,6 +24,7 @@ Always read:
 3. `Platform_07` approved dependencies
 4. Credential and rate-limit patterns (`connector_framework`)
 5. Topology identity rules (`topology_routing`, `Platform_20` where relevant)
+6. `references/vmware-first-ga.md` and fixtures/evals for vCenter/ESXi/vMotion and stale inventory
 
 Unsupported hypervisors/arrays ⇒ `UNVERIFIED`. Do not claim them as implemented.
 

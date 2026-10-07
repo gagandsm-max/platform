@@ -65,7 +65,7 @@ class SkillDepthBatchTests(unittest.TestCase):
         self.assertEqual(counts["P0"], 0)
         self.assertEqual(counts["P1"], 0)
         self.assertEqual(counts["P2"], 0)
-        self.assertEqual(counts["OK"], 60)
+        self.assertEqual(counts["OK"], 63)
 
     def test_agent_architecture_is_operational_critical(self) -> None:
         self.assertIn("agent_architecture", self.sdr.OPERATIONAL_CRITICAL_SKILLS)
@@ -102,7 +102,7 @@ class SkillDepthBatchTests(unittest.TestCase):
         )
         skill_names = {entry["name"] for entry in skills}
         self.assertEqual(len(agents), 34)
-        self.assertEqual(len(skill_names), 60)
+        self.assertEqual(len(skill_names), 63)
         for root in (".cursor/agents", ".agents/agents", ".codex/agents"):
             files = [p for p in (REPO_ROOT / root).iterdir() if p.is_file()]
             self.assertEqual(len(files), 34, msg=root)
@@ -112,7 +112,7 @@ class SkillDepthBatchTests(unittest.TestCase):
                 for p in (REPO_ROOT / root).iterdir()
                 if p.is_dir() and p.name in skill_names and (p / "SKILL.md").is_file()
             ]
-            self.assertEqual(len(mirrored), 60, msg=root)
+            self.assertEqual(len(mirrored), 63, msg=root)
 
 
 if __name__ == "__main__":

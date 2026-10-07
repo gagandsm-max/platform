@@ -46,13 +46,13 @@ If documents conflict, stop and resolve through the precedence defined in `Platf
 
 ## Tool authority model
 
-- **ChatGPT + GitHub is the Platform control plane.** It owns source-truth rebaselining, architecture/technical decisions, task sequencing, PR integration, merge authority, progress accounting and final technical acceptance/certification. It (or the Founder) may authorize exceptional isolated write elevation via task-manifest `writerElevation`.
+- **ChatGPT + GitHub is the Platform control plane.** It owns source-truth rebaselining, architecture/technical decisions, task sequencing, PR integration, merge authority, progress accounting and final technical acceptance/certification. It does not write product code.
 - **Cursor CLI is the default bounded implementation writer.** It operates only on explicitly assigned branches/worktrees and bounded scope. A Cursor writer never self-certifies merge readiness and requires no `writerElevation`.
+- **Codex is an additional authorized bounded implementation, test and debugging writer** (Founder decision 2026-10-07). Codex CLI and ChatGPT Desktop App in Codex mode are approved client interfaces to the same Codex authority, not separate writers or certification authorities. Codex cannot independently verify, act as gatekeeper, merge or self-certify. Plain ChatGPT Desktop conversation is not assumed to have repository filesystem/execution access unless Codex mode or explicitly connected local-computer access is active.
 - **Cursor Cloud is a never-writer under current policy.** Elevation cannot authorize it; any future change requires an explicit Founder decision recorded in `project_agents/tool_authority.json`.
-- **Antigravity CLI is verifier-first and read-only/adversarial by default.** It is the independent exact-SHA auditor, negative/failure/security challenger and certification-gate evidence provider. Generated adapters remain read-only. Write authority is exceptional, explicit and isolated (`writerElevation` with `isolatedWorkspace: true`); Antigravity must not become a second writer on an active Cursor branch, cannot self-certify, and is not final certification authority — ChatGPT + GitHub performs final technical certification.
-- **Codex CLI / GitHub Codex is suspended from the normal Platform workflow** (Founder decision 2026-09-27; token/cost overhead). While suspended it is not a writer, not a verifier and not a certification lane. Compatibility projection may remain under `.codex/agents/` but does not authorize Codex use. Reactivation requires a future explicit Founder governance decision.
+- **Antigravity CLI is read-only/adversarial.** It is the independent exact-SHA auditor, negative/failure/security challenger and certification-gate evidence provider. It is not an implementation writer under the active commercial-readiness workflow, cannot validate its own work, cannot self-certify, and is not final certification authority — ChatGPT + GitHub performs final technical certification.
 - **GitHub Copilot is a never-writer** and limited auxiliary PR/code-review only. Elevation cannot authorize it as writer, verifier, gatekeeper, merge authority, or sole certification evidence.
-- **One writer per branch/worktree.** Parallelism is for independent review/evidence by default; parallel writes require isolated branches/worktrees and later controlled integration.
+- **One writer per checkout/worktree.** Cursor CLI and Codex may run concurrently only on isolated branches/worktrees with non-overlapping file ownership and later controlled integration.
 - Every tool must re-fetch authoritative `main` and exact task/PR head before acting. Main/head drift invalidates stale review.
 - No writer may close `REALITY_GATE`, `MERGE_READY`, `POST_MERGE_VERIFY` or `COMPLETE` for its own work.
 - Authoritative machine-readable source: `project_agents/tool_authority.json`.
@@ -195,13 +195,13 @@ Do not paste the agent or Skill catalogue here. Resolve it from manifests.
 - Generated Antigravity agents: `.agents/agents/`
 - Generated shared Skills (Cursor + Antigravity): `.agents/skills/`
 - Legacy Skill mirror: `skills/`
-- Codex compatibility projection (suspended tool; assets may remain): `.codex/agents/` (not an active certification lane)
+- Generated Codex agents: `.codex/agents/` (canonical read agents remain read-only; write agents use workspace-write; never an independent certification lane)
 - Routing: `project_agents/AGENT_MATRIX.md`, `project_agents/CHATGPT_AGENT_ROUTER.md`, `project_agents/skills/AGENT_SKILL_MATRIX.md`, `project_agents/skills/SKILL_ROUTER.md`
 - Tool contracts: `project_agents/TOOL_COMPATIBILITY.md`
 - Writer isolation: one writer per checkout; parallel writes use separate branches/worktrees
 - Evidence: typed claims, exact-head current-base CI, no writer self-certification
 
-Capability Pack v1.2 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.3.0. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
+Capability Pack v1.3 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library (63 Skills) from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.3.0. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
 
 ---
 

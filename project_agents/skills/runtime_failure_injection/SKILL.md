@@ -22,6 +22,7 @@ Always read:
 3. Compose/lab topology for the drill (never production)
 4. Task `securityBoundaries` and stop conditions forbidding destructive Docker shortcuts
 5. Prior runtime evidence SHA—invalidate on head drift
+6. `references/failure-modes-recovery-oracle.md` and fixtures/evals for lost ACK, dependency outage and recovery oracle
 
 Source inspection alone is `SOURCE_FACT`, not runtime proof.
 

@@ -3,7 +3,7 @@ name: windows_monitoring
 description: Windows Agent service, MSI/BAT install, event/perf evidence and privacy-bounded endpoint collection.
 ---
 
-<!-- generated from project_agents/skills/windows_monitoring/SKILL.md sha256:90a30295a063be88ef124eddbbeb8f936c744e8b3ba50e279dcb54b39e3232d3 -->
+<!-- generated from project_agents/skills/windows_monitoring/SKILL.md sha256:c5fd536e1a3991a0c44e5167185e410be28547baf39d3bd37d192014f028e578 -->
 
 # windows_monitoring
 
@@ -24,6 +24,7 @@ Always read:
 3. Privacy-bounded collection rules (`Platform_20` / Agent privacy)
 4. Credential Profile guidance for remote Windows methods if used
 5. Tested Windows version matrix (do not assume all SKUs)
+6. `references/agent-vs-winrm-wmi.md` and fixtures/evals for WinRM/WMI auth, firewall and SCM recovery
 
 If WinRM remote-only, WMI, or specific Event Log channels are unimplemented, mark `UNVERIFIED`.
 

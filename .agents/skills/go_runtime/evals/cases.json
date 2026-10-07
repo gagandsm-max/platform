@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "go.trigger.context",
+      "type": "TRIGGER",
+      "task": "Add context deadlines to Sensor uploader",
+      "owningAgents": [
+        "platform-sensor-runtime-engineer"
+      ],
+      "requiredSkills": [
+        "go_runtime"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "context cancellation",
+        "bounded concurrency"
+      ],
+      "expectedDisposition": "SAFE"
+    },
+    {
+      "id": "go.negative.goroutine-leak",
+      "type": "NEGATIVE",
+      "task": "Request handler spawns goroutine without cancel path",
+      "owningAgents": [
+        "platform-sensor-runtime-engineer"
+      ],
+      "requiredSkills": [
+        "go_runtime"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "goroutine",
+        "shutdown",
+        "cancel"
+      ],
+      "expectedDisposition": "FAIL_CLOSED",
+      "fixtures": [
+        "fixtures/goroutine_leak_on_cancel.json"
+      ]
+    },
+    {
+      "id": "go.adversarial.benchmark-as-cert",
+      "type": "ADVERSARIAL",
+      "task": "Claim GA capacity from a microbenchmark",
+      "owningAgents": [
+        "platform-sensor-runtime-engineer"
+      ],
+      "requiredSkills": [
+        "go_runtime"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "benchmark \u2260 production capacity certification"
+      ],
+      "expectedDisposition": "REJECT"
+    },
+    {
+      "id": "go.regression.race",
+      "type": "REGRESSION",
+      "task": "Shared map without synchronization",
+      "owningAgents": [
+        "platform-sensor-runtime-engineer"
+      ],
+      "requiredSkills": [
+        "go_runtime"
+      ],
+      "forbiddenSkills": [],
+      "requiredSemanticTokens": [
+        "race",
+        "go test -race"
+      ],
+      "expectedDisposition": "FAIL_CLOSED"
+    }
+  ]
+}

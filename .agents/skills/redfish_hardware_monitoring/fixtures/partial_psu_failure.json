@@ -1,0 +1,12 @@
+{
+  "status": "PARTIAL",
+  "psu": [
+    {
+      "ok": true
+    },
+    {
+      "ok": false
+    }
+  ],
+  "osState": "UNKNOWN"
+}

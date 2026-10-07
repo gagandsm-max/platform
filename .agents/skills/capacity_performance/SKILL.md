@@ -3,7 +3,7 @@ name: capacity_performance
 description: Hot-path capacity, latency, lag, cardinality and resource-budget evidence for Core, Sensor, UI and storage protection.
 ---
 
-<!-- generated from project_agents/skills/capacity_performance/SKILL.md sha256:9c4e17d1061b9cf7b3182d4c21959e151ab445effd48c2551d49565955ac7658 -->
+<!-- generated from project_agents/skills/capacity_performance/SKILL.md sha256:344d36fd5e62a29cc8f4c7305b3108d6614b8ab7ab02949da6c5555e0a8c6323 -->
 
 # capacity_performance
 
@@ -25,6 +25,7 @@ Always read:
 4. Kafka/PG/CH resource configs for the environment under test
 5. Benchmark harness definitions and exact SHA
 6. Prior measurement baselines (if any) with their assumptions
+7. `references/hot-path-budgets.md` and fixtures/evals for polling/ingestion/cardinality/lag and engineering-limit≠SKU
 
 ## Invariants
 

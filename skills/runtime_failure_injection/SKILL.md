@@ -3,7 +3,7 @@ name: runtime_failure_injection
 description: Exercise crash, retry, timeout, durability and partial-failure paths and distinguish runtime evidence from source inference.
 ---
 
-<!-- generated from project_agents/skills/runtime_failure_injection/SKILL.md sha256:f3a868d11abacdda9c92e53b069863b86a157ce44d83ed0190276f7c75da3128 -->
+<!-- generated from project_agents/skills/runtime_failure_injection/SKILL.md sha256:b916ba25808b566f69173e7174bc4769419e9250b14a00124ab84b48cff42725 -->
 
 # runtime_failure_injection
 
@@ -24,6 +24,7 @@ Always read:
 3. Compose/lab topology for the drill (never production)
 4. Task `securityBoundaries` and stop conditions forbidding destructive Docker shortcuts
 5. Prior runtime evidence SHA—invalidate on head drift
+6. `references/failure-modes-recovery-oracle.md` and fixtures/evals for lost ACK, dependency outage and recovery oracle
 
 Source inspection alone is `SOURCE_FACT`, not runtime proof.
 

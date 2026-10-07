@@ -23,6 +23,7 @@ Always read:
 4. Migration catalogues affecting the upgrade path (`migration_safety`)
 5. Backup prerequisites and secret/config preservation requirements
 6. Signature/provenance expectations for packages
+7. `references/packaging-reboot-rollback.md` and fixtures/evals for deb/rpm/MSI, spool/identity preservation and crash-loop evidence
 
 ## Invariants
 

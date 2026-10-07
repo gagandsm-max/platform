@@ -3,7 +3,7 @@ name: install_upgrade
 description: deb/rpm/MSI packaging, systemd lifecycle, upgrade/rollback and reboot auto-start evidence.
 ---
 
-<!-- generated from project_agents/skills/install_upgrade/SKILL.md sha256:c869075e4887f561e75f030049b2cdaa9dd80c7d1c93f9762bd82474da5c7d2a -->
+<!-- generated from project_agents/skills/install_upgrade/SKILL.md sha256:9ece5dbcef8a37370c9114e682e5f973148dd535485f7bd3146b899bd81adf12 -->
 
 # install_upgrade
 
@@ -25,6 +25,7 @@ Always read:
 4. Migration catalogues affecting the upgrade path (`migration_safety`)
 5. Backup prerequisites and secret/config preservation requirements
 6. Signature/provenance expectations for packages
+7. `references/packaging-reboot-rollback.md` and fixtures/evals for deb/rpm/MSI, spool/identity preservation and crash-loop evidence
 
 ## Invariants
 

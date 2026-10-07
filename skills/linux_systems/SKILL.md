@@ -3,7 +3,7 @@ name: linux_systems
 description: Linux OS, systemd, process, disk, and host-path semantics for Core/Sensor/Agent packaging and monitoring targets.
 ---
 
-<!-- generated from project_agents/skills/linux_systems/SKILL.md sha256:4da75ffdf008aff66d5b3bdf5db5c11eed666c8f3153eaa0c67b6d23fdef6124 -->
+<!-- generated from project_agents/skills/linux_systems/SKILL.md sha256:ce234df9c12989a13fe30b3f6340dca0e35dd294ee40c69e2d130bef2d1f0bf2 -->
 
 # linux_systems
 
@@ -24,6 +24,7 @@ Always read:
 3. Packaging/install Skills for Core/Sensor/Agent on Linux
 4. Least-privilege / permissions expectations in security docs
 5. Distro matrix actually tested (do not assume universal)
+6. `references/agent-vs-ssh-proc-sysfs.md` and fixtures/evals for Agent vs SSH, permission errors and partial evidence
 
 If remote-only SSH host monitoring or specific distros are unimplemented, mark `UNVERIFIED`.
 

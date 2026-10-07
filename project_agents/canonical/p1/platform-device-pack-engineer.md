@@ -83,6 +83,8 @@ Own Device Pack schema, identification, mappings, versioning, certification/prov
 - `device_control_protocols`
 - `sbom_provenance`
 - `migration_safety`
+- `redfish_hardware_monitoring`
+
 
 ## Handoff
 Protocol decode issues to network-engineer. Runtime collection issues to sensor-runtime-engineer. Privileged commands to ncm-remediation-engineer.

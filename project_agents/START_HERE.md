@@ -8,14 +8,14 @@ You do not need to memorize the current agent inventory or invoke agents manuall
 2. **Root `AGENTS.md` remains law.** Agent files never override the Platform Mother Reference.
 3. **Resolve Mother Reference dynamically.** Parse `project_documentation/Platform_00_Document_Index.md` for the current authoritative set instead of relying on a packaged document ceiling or remembered file count.
 4. **Use canonical skills.** Capability/risk procedures live under `project_agents/skills/`. Generated `.agents/skills/` is the shared Cursor/Antigravity projection. Root `skills/` remains a legacy generated mirror in this tranche. Neither generated tree is a second authority.
-5. **Tool roles are fixed by governance.** Cursor CLI is the default bounded writer using `.cursor/agents/` and `.agents/skills/`. Cursor Cloud and GitHub Copilot are never-writers under current policy. Antigravity uses `.agents/agents/` and `.agents/skills/` and is the combined independent verifier / adversarial / exact-SHA auditor / certification-gate evidence lane (read-only by default). Codex is Founder-suspended from the normal workflow; `.codex/agents/` may remain as a compatibility projection only and does not authorize Codex selection. ChatGPT/Founder may assign Antigravity an exceptional isolated write via task-manifest `writerElevation` without changing generated adapter defaults. See `TOOL_COMPATIBILITY.md` and `project_agents/tool_authority.json`. Cursor `--agent` is unsupported.
+5. **Tool roles are fixed by governance.** Cursor CLI is the default bounded writer using `.cursor/agents/` and `.agents/skills/`. Codex is an authorized non-default bounded writer using `.codex/agents/`; Codex CLI and ChatGPT Desktop App Codex mode are client interfaces to the same authority. Cursor Cloud and GitHub Copilot are never-writers. Antigravity uses `.agents/agents/` and `.agents/skills/` as the independent read-only/adversarial exact-SHA audit and certification-gate evidence lane. ChatGPT + GitHub remains gatekeeper, merge and final certification authority. See `TOOL_COMPATIBILITY.md` and `project_agents/tool_authority.json`. Cursor `--agent` is unsupported.
 6. **Use the smallest team.** Most tasks need one explorer, one implementation/domain agent, and one independent verifier.
 7. **Separate writing from verification.** The agent that writes the patch must not be the only agent that declares it correct.
 8. **Rebaseline before action.** Record authoritative main, exact input head, dependencies and required evidence before implementation or review; main/head drift blocks stale certification.
 
 ## The one prompt to remember
 
-Use this in ChatGPT, Cursor or Antigravity:
+Use this in ChatGPT, Cursor, Codex or Antigravity:
 
 ```text
 Route this task using the Platform agent pack. Read root AGENTS.md, parse project_documentation/Platform_00_Document_Index.md for the current Mother Reference set, and select applicable canonical skills from project_agents/skills/. Use the smallest useful set of agents. Separate diagnosis, implementation and independent verification. Do not allow parallel write agents to edit the same checkout.

@@ -1,8 +1,10 @@
 name = "platform-identity-access-engineer"
 description = "Platform IAM specialist. Use for Keycloak integration, OIDC/SAML/LDAP/Entra, MFA, RBAC/resource scope, service identities, API tokens, mTLS enrollment and tenant isolation."
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 developer_instructions = """
 Generated from project_agents/canonical/p1/platform-identity-access-engineer.md sha256:0c131ca325cdfe32e5d1330f14f702d9839a63c3829504b0a3c967b246a6b6a9
+
+Writable adapter boundary: operate only in the assigned worktree and task scope; do not merge, certify, self-verify, or infer network authority from workspace-write.
 
 # Platform Identity & Access Engineer
 

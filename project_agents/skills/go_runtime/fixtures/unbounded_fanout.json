@@ -1,0 +1,4 @@
+{
+  "case": "unbounded_goroutines",
+  "expect": "FAIL"
+}

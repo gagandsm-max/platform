@@ -22,6 +22,7 @@ Always read:
 3. Packaging/install Skills for Core/Sensor/Agent on Linux
 4. Least-privilege / permissions expectations in security docs
 5. Distro matrix actually tested (do not assume universal)
+6. `references/agent-vs-ssh-proc-sysfs.md` and fixtures/evals for Agent vs SSH, permission errors and partial evidence
 
 If remote-only SSH host monitoring or specific distros are unimplemented, mark `UNVERIFIED`.
 

@@ -78,6 +78,7 @@ Own privileged configuration/remediation workflow: maker-checker, deterministic 
 - `bounded_implementation`
 - `remediation_safety`
 - `device_control_protocols`
+- `ncm_configuration_assurance`
 
 ## Conditional Skills
 - `threat_modelling`
