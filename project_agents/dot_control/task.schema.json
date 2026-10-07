@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://amrud.ai/schemas/dot-control/task.schema.json",
+  "title": "AmrudAi Dot Host-Control Bridge Task Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "governingIssue",
+    "action",
+    "writerTool",
+    "verifierTool",
+    "repository",
+    "worktree",
+    "branch",
+    "authoritativeBase",
+    "expectedHead",
+    "allowedFiles",
+    "forbiddenFiles",
+    "promptFile",
+    "timeoutSeconds",
+    "allowCommit",
+    "allowPush",
+    "allowPullRequest",
+    "createdAt",
+    "requestedBy"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "dot-control-v1"
+    },
+    "taskId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "governingIssue": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "REPO_PROBE",
+        "GIT_COMMIT_PROOF",
+        "CURSOR_TASK",
+        "CODEX_TASK",
+        "ANTIGRAVITY_AUDIT",
+        "TEST_PROFILE"
+      ]
+    },
+    "writerTool": {
+      "type": "string",
+      "enum": ["cursor-cli", "codex", "none"],
+      "description": "Dot is never a writerTool."
+    },
+    "verifierTool": {
+      "type": "string",
+      "enum": ["antigravity", "none"],
+      "description": "Dot is never a verifierTool."
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "worktree": {
+      "type": "string",
+      "description": "Absolute approved AmrudAi worktree path."
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authoritativeBase": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "expectedHead": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "allowedFiles": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "forbiddenFiles": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "promptFile": {
+      "type": ["string", "null"],
+      "description": "Absolute path under control-root/tasks/<taskId>/ or null when unused."
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 21600
+    },
+    "allowCommit": { "type": "boolean" },
+    "allowPush": {
+      "type": "boolean",
+      "const": false
+    },
+    "allowPullRequest": {
+      "type": "boolean",
+      "const": false
+    },
+    "createdAt": {
+      "type": "string",
+      "minLength": 10
+    },
+    "requestedBy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "commitMessage": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Required for GIT_COMMIT_PROOF only."
+    },
+    "testProfile": {
+      "type": "string",
+      "enum": ["capability-pack", "agent", "static-contracts"],
+      "description": "Required for TEST_PROFILE only. Never a shell command."
+    }
+  },
+  "not": {
+    "anyOf": [
+      { "required": ["command"] },
+      { "required": ["commands"] },
+      { "required": ["shell"] },
+      { "required": ["argv"] },
+      { "required": ["args"] },
+      { "required": ["exec"] },
+      { "required": ["script"] },
+      { "required": ["sudo"] },
+      { "required": ["eval"] },
+      { "required": ["environment"] }
+    ]
+  }
+}

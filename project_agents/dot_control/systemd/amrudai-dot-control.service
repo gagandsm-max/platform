@@ -1,0 +1,38 @@
+# AmrudAi Dot Host-Control Bridge — systemd --user template
+#
+# Do NOT install or enable this unit as part of the implementation task.
+# Operator install (user-space only, no sudo required for user units):
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp project_agents/dot_control/systemd/amrudai-dot-control.service \
+#      ~/.config/systemd/user/
+#   # Adjust WorkingDirectory / ExecStart paths if the clone path differs.
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now amrudai-dot-control.service
+#
+# Prerequisites:
+#   PYTHONPATH=project_agents python3 -m dot_control --control-root /home/gagan/nms-dot-control init
+#
+# Revocation: systemctl --user disable --now amrudai-dot-control.service
+
+[Unit]
+Description=AmrudAi Dot Host-Control Bridge (user-space)
+After=default.target
+ConditionPathIsDirectory=/home/gagan/nms-dot-control
+
+[Service]
+Type=simple
+WorkingDirectory=/home/gagan/nms
+Environment=PYTHONPATH=/home/gagan/nms/project_agents
+ExecStart=/usr/bin/python3 -m dot_control --control-root /home/gagan/nms-dot-control daemon --poll 2
+Restart=on-failure
+RestartSec=5
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+# Restrict to AmrudAi paths; adjust ProtectHome if your distro supports it for user units.
+ProtectSystem=full
+ReadWritePaths=/home/gagan/nms-dot-control /home/gagan/nms /home/gagan/nms-dot-host-control-bridge
+
+[Install]
+WantedBy=default.target
