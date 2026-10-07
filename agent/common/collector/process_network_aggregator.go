@@ -61,6 +61,14 @@ func (c ProcessNetworkAggregatorConfig) normalized() (ProcessNetworkAggregatorCo
 		c.MaxRetainedWindows < 1 || c.MaxClosedWindows < 1 || c.MaxAccountingStubs < 1 {
 		return c, errors.New("PROCESS_NETWORK_BOUND_INVALID")
 	}
+	if c.MaxGlobalKeys > maxProcessNetworkGlobalKeys ||
+		c.MaxKeysPerWorkload > maxProcessNetworkKeysPerWorkload ||
+		c.MaxInputBatch > maxProcessNetworkInputBatch ||
+		c.MaxRetainedWindows > maxProcessNetworkRetainedWindows ||
+		c.MaxClosedWindows > maxProcessNetworkClosedWindows ||
+		c.MaxAccountingStubs > maxProcessNetworkAccountingStubs {
+		return c, errors.New("PROCESS_NETWORK_BOUND_INVALID: override exceeds implementation safety ceiling")
+	}
 	if c.MaxKeysPerWorkload > c.MaxGlobalKeys {
 		c.MaxKeysPerWorkload = c.MaxGlobalKeys
 	}
@@ -719,12 +727,6 @@ func foldMetrics(dst *pnMetrics, src pnMetrics) bool {
 	if addSatU32(&dst.rttN, src.rttN) {
 		sat = true
 	}
-	if src.hasActive {
-		dst.hasActive = true
-		if addSatU32(&dst.active, src.active) {
-			sat = true
-		}
-	}
 	if sat {
 		dst.saturated = true
 	}
@@ -1300,7 +1302,6 @@ func (a *ProcessNetworkAggregator) emitWindow(w *pnWindow) ProcessNetworkFlushOu
 		summaries := make([]ProcessNetworkOverflowSummary, 0, len(ovKeys))
 		var ovEvicted uint32
 		var ovShed uint32
-		var ovSampled uint32
 		var ovRecords uint64
 		ovSat := false
 		for _, p := range ovKeys {
@@ -1316,9 +1317,6 @@ func (a *ProcessNetworkAggregator) emitWindow(w *pnWindow) ProcessNetworkFlushOu
 			if addSatU32(&ovShed, ov.shed) {
 				ovSat = true
 			}
-			if addSatU32(&ovSampled, ov.sampled) {
-				ovSat = true
-			}
 			if addSatU64(&ovRecords, ov.metrics.eventCount) {
 				ovSat = true
 			}
@@ -1329,9 +1327,6 @@ func (a *ProcessNetworkAggregator) emitWindow(w *pnWindow) ProcessNetworkFlushOu
 			accQ = mergeQuality(accQ, ProcessNetworkQualityPartial)
 		}
 		sampled := wl.sampled
-		if addSatU32(&sampled, ovSampled) {
-			ovSat = true
-		}
 		acc := ProcessNetworkWindowAccounting{
 			SchemaVersion:          ProcessNetworkSchemaVersion,
 			SourceProvenance:       prov,
@@ -1488,9 +1483,6 @@ func fillOverflowSummary(ov *pnOverflow) ProcessNetworkOverflowSummary {
 	}
 	if ov.proto != ProcessNetworkProtocolTCP {
 		return sum
-	}
-	if ov.metrics.hasActive {
-		sum.ActiveConnections = uint32Ptr(ov.metrics.active)
 	}
 	if ov.metrics.hasDur {
 		sum.DurationTotalMs = uint64Ptr(ov.metrics.duration)

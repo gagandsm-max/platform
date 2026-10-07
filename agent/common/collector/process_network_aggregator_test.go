@@ -625,7 +625,7 @@ func TestProcessNetworkClosedWindowHorizonDoesNotReopen(t *testing.T) {
 		Window:               time.Minute,
 		TestAllowShortWindow: true,
 		MaxClosedWindows:     2,
-		MaxRetainedWindows:   8,
+		MaxRetainedWindows:   maxProcessNetworkRetainedWindows,
 	}
 	agg, err := NewProcessNetworkAggregator(cfg, sink)
 	if err != nil {

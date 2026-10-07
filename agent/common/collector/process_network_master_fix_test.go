@@ -118,7 +118,7 @@ func TestProcessNetworkLateAfterStubEvictionNeverBecomesOtherBucket(t *testing.T
 		Window:               time.Minute,
 		TestAllowShortWindow: true,
 		MaxClosedWindows:     1,
-		MaxRetainedWindows:   8,
+		MaxRetainedWindows:   maxProcessNetworkRetainedWindows,
 		MaxAccountingStubs:   4,
 	}
 	agg, err := NewProcessNetworkAggregator(cfg, sink)
@@ -298,6 +298,83 @@ func TestProcessNetworkAccountingStubAttackRemainsBounded(t *testing.T) {
 	}
 }
 
+func TestProcessNetworkConfigRejectsOverridesAboveHardCeilings(t *testing.T) {
+	cases := []ProcessNetworkAggregatorConfig{
+		{MaxGlobalKeys: maxProcessNetworkGlobalKeys + 1},
+		{MaxKeysPerWorkload: maxProcessNetworkKeysPerWorkload + 1},
+		{MaxInputBatch: maxProcessNetworkInputBatch + 1},
+		{MaxRetainedWindows: maxProcessNetworkRetainedWindows + 1},
+		{MaxClosedWindows: maxProcessNetworkClosedWindows + 1},
+		{MaxAccountingStubs: maxProcessNetworkAccountingStubs + 1},
+	}
+	for i, cfg := range cases {
+		cfg.SourceProvenance = ProcessNetworkSyntheticSourceProvenance
+		cfg.Window = time.Minute
+		cfg.TestAllowShortWindow = true
+		if _, err := NewProcessNetworkAggregator(cfg, nil); err == nil || !strings.Contains(err.Error(), "PROCESS_NETWORK_BOUND_INVALID") {
+			t.Fatalf("case %d: unsafe override accepted: %v", i, err)
+		}
+	}
+}
+
+func TestProcessNetworkOverflowNeverPublishesActiveGauge(t *testing.T) {
+	sink := &LocalRecordingStructuredEvidenceSink{}
+	agg := mustAgg(t, sink, withKeys(64, 1))
+	now := pnNow()
+	events := []ProcessNetworkSyntheticEvent{
+		{ObservedAt: now, Class: ProcessNetworkEventOpen, ProcessName: "app", Protocol: ProcessNetworkProtocolTCP, RemoteIP: "192.0.2.1", RemotePort: 443},
+		{ObservedAt: now, Class: ProcessNetworkEventBytes, ProcessName: "app", Protocol: ProcessNetworkProtocolTCP, RemoteIP: "192.0.2.2", RemotePort: 443, BytesTx: uint64Ptr(1)},
+		{ObservedAt: now, Class: ProcessNetworkEventClose, ProcessName: "app", Protocol: ProcessNetworkProtocolTCP, RemoteIP: "192.0.2.1", RemotePort: 443, DurationMs: uint64Ptr(10)},
+	}
+	if err := agg.Ingest(context.Background(), events); err != nil {
+		t.Fatal(err)
+	}
+	out, err := agg.FlushAll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, acc := range out.Accounting {
+		for _, ov := range acc.Overflows {
+			if ov.ActiveConnections != nil {
+				t.Fatalf("overflow active gauge is not lifecycle-safe: %+v", ov)
+			}
+		}
+	}
+}
+
+func TestProcessNetworkSampledWorkloadAccountingNotDoubleCountedByOverflow(t *testing.T) {
+	sink := &LocalRecordingStructuredEvidenceSink{}
+	agg := mustAgg(t, sink, withKeys(64, 1))
+	now := pnNow()
+	sampled := baseAt("app", "192.0.2.1", 443, now)
+	sampled.Sampled = true
+	replacement := baseAt("app", "192.0.2.2", 443, now)
+	if err := agg.Ingest(context.Background(), []ProcessNetworkSyntheticEvent{sampled, replacement}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := agg.FlushAll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, acc := range out.Accounting {
+		if acc.Workload == nil {
+			continue
+		}
+		found = true
+		if acc.SampledEventsCount != 1 {
+			t.Fatalf("sampled workload total double counted overflow subset: %d", acc.SampledEventsCount)
+		}
+		ov := overflowSummary([]ProcessNetworkWindowAccounting{acc}, ProcessNetworkProtocolTCP)
+		if ov == nil || ov.SampledEventsCount != 1 {
+			t.Fatalf("overflow sampled subset missing or wrong: %+v", ov)
+		}
+	}
+	if !found {
+		t.Fatal("workload accounting missing")
+	}
+}
+
 func TestProcessNetworkOverflowPreservesTCPMetricsAndNotUDP(t *testing.T) {
 	sink := &LocalRecordingStructuredEvidenceSink{}
 	agg := mustAgg(t, sink, withKeys(64, 1))
@@ -338,8 +415,11 @@ func TestProcessNetworkOverflowPreservesTCPMetricsAndNotUDP(t *testing.T) {
 	if ov.BytesTx == nil || *ov.BytesTx != 77 {
 		t.Fatalf("overflow bytes %v", ov.BytesTx)
 	}
-	if ov.ActiveConnections == nil || ov.DurationTotalMs == nil || *ov.DurationTotalMs != 40 {
-		t.Fatalf("overflow active/duration %+v", ov)
+	if ov.ActiveConnections != nil {
+		t.Fatalf("overflow must not publish non-additive active-connection gauge: %+v", ov.ActiveConnections)
+	}
+	if ov.DurationTotalMs == nil || *ov.DurationTotalMs != 40 {
+		t.Fatalf("overflow duration %+v", ov)
 	}
 	if ov.MeanRTTUs == nil || *ov.MeanRTTUs != 1500 {
 		t.Fatalf("overflow mean rtt %+v", ov.MeanRTTUs)
