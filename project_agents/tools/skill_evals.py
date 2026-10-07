@@ -15,7 +15,6 @@ from skill_resources import (
     MAX_RESOURCE_FILE_BYTES,
     SkillResourceError,
     assert_safe_resource_rel,
-    discover_canonical_resources,
 )
 
 EVAL_TYPES = frozenset({"TRIGGER", "NEGATIVE", "ADVERSARIAL", "REGRESSION"})
@@ -63,22 +62,38 @@ def load_eval_cases(path: Path) -> list[dict[str, Any]]:
 
 
 def package_text_corpus(skill_dir: Path) -> str:
-    """Concatenate SKILL.md + projected resource text for semantic-token search."""
+    """Concatenate authoritative guidance text for semantic-token search.
+
+    Semantic corpus is SKILL.md + references/* text only. Fixtures and evals are
+    excluded so requiredSemanticTokens / requiredInvariants cannot self-satisfy
+    from cases.json or scenario fixtures. Generated mirrors are never searched.
+    Non-text/binary references are skipped safely. No network/model evaluation.
+    """
     chunks: list[str] = []
     skill_md = skill_dir / "SKILL.md"
     if skill_md.is_file() and not skill_md.is_symlink():
-        chunks.append(skill_md.read_text(encoding="utf-8"))
-    try:
-        for rel in discover_canonical_resources(skill_dir):
-            path = skill_dir / rel
-            # Text search only; skip obvious binary by decoding strictly.
+        try:
+            chunks.append(skill_md.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            pass
+
+    refs_root = skill_dir / "references"
+    if refs_root.is_dir() and not refs_root.is_symlink():
+        for path in sorted(refs_root.rglob("*")):
+            if path.is_symlink() or path.is_dir():
+                continue
+            if not path.is_file():
+                continue
+            try:
+                rel = path.relative_to(skill_dir).as_posix()
+                assert_safe_resource_rel(rel)
+            except (ValueError, SkillResourceError):
+                continue
+            # Text search only; skip binary by decoding strictly.
             try:
                 chunks.append(path.read_text(encoding="utf-8"))
-            except UnicodeDecodeError:
+            except (OSError, UnicodeDecodeError):
                 continue
-    except SkillResourceError:
-        # Resource discovery errors are reported by resource validator.
-        pass
     return "\n".join(chunks)
 
 

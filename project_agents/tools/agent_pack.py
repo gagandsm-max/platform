@@ -22,7 +22,12 @@ from control_plane import (
     load_tool_authority,
 )
 from skill_evals import SkillEvalError, load_commercial_depth_policy, validate_skill_evals
-from skill_resources import sync_skill_resources, validate_skill_resources
+from skill_resources import (
+    SkillResourceError,
+    assert_safe_required_reference_file,
+    sync_skill_resources,
+    validate_skill_resources,
+)
 from skill_structure import format_structure_errors, validate_skill_structure
 
 # Active Capability Pack inventory ceiling (bounded; not unlimited growth).
@@ -366,9 +371,19 @@ def prune_retired_adapters(directory: Path, expected_names: set[str], repo: Path
 
 
 def prune_retired_skill_mirrors(generated_root: Path, declared: set[str], repo: Path) -> list[str]:
+    """Retire generated skill mirrors that are no longer declared.
+
+    A generated SKILL.md marker proves ownership of SKILL.md only. Resource
+    files under references/fixtures/evals are unproven and must be preserved
+    with review-required reporting. Skill directories are deleted only when the
+    generated SKILL.md is the sole remaining content (no unproven extras).
+    Symlinks are never followed or deleted.
+    """
     skipped: list[str] = []
     if not generated_root.exists():
         return skipped
+    from skill_resources import ALLOWED_RESOURCE_DIRS
+
     for directory in list(generated_root.iterdir()):
         if not directory.is_dir() and not directory.is_symlink():
             continue
@@ -379,51 +394,60 @@ def prune_retired_skill_mirrors(generated_root: Path, declared: set[str], repo: 
             skipped.append(f"unowned root skill requires review (symlink not deleted): {rel}")
             continue
         skill_md = directory / "SKILL.md"
-        if skill_md.is_symlink() or directory.is_symlink():
+        if skill_md.is_symlink():
             skipped.append(f"unowned root skill requires review (symlink not deleted): {rel}")
             continue
         if skill_md.is_file() and has_generated_skill_marker(skill_md):
-            # Safe prune of projected resource trees only (references/fixtures/evals).
-            from skill_resources import ALLOWED_RESOURCE_DIRS
-
+            # Preserve any unproven resource material; never recursively delete it.
+            has_unproven = False
             for dirname in sorted(ALLOWED_RESOURCE_DIRS):
                 resource_root = directory / dirname
                 if not resource_root.exists():
                     continue
+                has_unproven = True
                 if resource_root.is_symlink():
                     skipped.append(
-                        f"unowned root skill requires review (symlink not deleted): "
+                        f"unowned generated skill resource requires review (symlink not deleted): "
                         f"{resource_root.relative_to(repo).as_posix()}"
                     )
                     continue
-                for path in sorted(resource_root.rglob("*"), reverse=True):
+                for path in sorted(resource_root.rglob("*")):
+                    if path.is_dir() and not path.is_symlink():
+                        continue
                     if path.is_symlink():
                         skipped.append(
-                            f"unowned root skill requires review (symlink not deleted): "
+                            f"unowned generated skill resource requires review (symlink not deleted): "
                             f"{path.relative_to(repo).as_posix()}"
                         )
-                        continue
-                    if path.is_file():
-                        safe_unlink(path, generated_root, repo)
-                    elif path.is_dir():
-                        try:
-                            path.rmdir()
-                        except OSError:
-                            pass
-                if resource_root.exists():
-                    try:
-                        resource_root.rmdir()
-                    except OSError:
+                    elif path.is_file():
                         skipped.append(
-                            f"generated root skill resource dir not empty after prune: "
+                            f"unowned generated skill resource requires review (not deleted): "
+                            f"{path.relative_to(repo).as_posix()}"
+                        )
+                # Empty resource directory still blocks skill-dir deletion.
+                if resource_root.is_dir() and not resource_root.is_symlink():
+                    if not any(
+                        p for p in resource_root.rglob("*") if p.is_file() or p.is_symlink()
+                    ):
+                        skipped.append(
+                            f"unowned generated skill resource requires review (not deleted): "
                             f"{resource_root.relative_to(repo).as_posix()}"
                         )
+
             extras = [
                 item
                 for item in directory.iterdir()
                 if item.name != "SKILL.md" and not item.name.endswith(TMP_SUFFIX)
             ]
-            if extras:
+            if has_unproven or extras:
+                for item in extras:
+                    if item.name in ALLOWED_RESOURCE_DIRS:
+                        continue
+                    if item.is_symlink():
+                        skipped.append(
+                            f"unowned root skill requires review (symlink not deleted): "
+                            f"{item.relative_to(repo).as_posix()}"
+                        )
                 skipped.append(
                     f"generated root skill leftover has extra files; not recursively deleted: {rel}"
                 )
@@ -776,8 +800,10 @@ def validate_agent_pack(repo: Path) -> list[str]:
                 if not isinstance(required_file, str):
                     errors.append(f"{name}: requiredReferenceFiles entries must be strings")
                     continue
-                if not (canonical_dir / required_file).is_file():
-                    errors.append(f"{name}: missing required depth resource {required_file}")
+                try:
+                    assert_safe_required_reference_file(canonical_dir, required_file)
+                except SkillResourceError as exc:
+                    errors.append(f"{name}: requiredReferenceFiles invalid: {exc}")
             errors.extend(
                 validate_skill_evals(
                     skill_name=name,

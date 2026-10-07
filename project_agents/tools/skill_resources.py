@@ -7,7 +7,6 @@ bounds. No network access. No execution. scripts/ is unsupported.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Iterable
 
@@ -55,6 +54,51 @@ def assert_safe_resource_rel(rel: str) -> Path:
     if not _is_safe_relative_parts(parts):
         raise SkillResourceError(f"unsafe or unsupported resource path: {rel!r}")
     return path
+
+
+def assert_safe_required_reference_file(skill_dir: Path, rel: str) -> Path:
+    """Validate a commercial-depth requiredReferenceFiles entry.
+
+    Must be a safe relative path under references/, resolve to a regular file
+    beneath skill_dir/references/, and must not be a symlink. Does not follow
+    symlinks for authority. Rejects fixtures/, evals/, scripts/, absolute paths,
+    traversal, and unsafe components.
+    """
+    if not isinstance(rel, str):
+        raise SkillResourceError("requiredReferenceFiles entries must be strings")
+    path = assert_safe_resource_rel(rel)
+    if path.parts[0] != "references":
+        raise SkillResourceError(
+            f"requiredReferenceFiles entry must begin under references/: {rel!r}"
+        )
+    if not skill_dir.is_dir() or skill_dir.is_symlink():
+        raise SkillResourceError(f"skill directory missing or symlink: {skill_dir}")
+
+    refs_root = skill_dir / "references"
+    if refs_root.is_symlink():
+        raise SkillResourceError(f"references root must not be a symlink: {skill_dir.name}")
+    try:
+        refs_resolved = refs_root.resolve(strict=False)
+    except OSError as exc:
+        raise SkillResourceError(f"cannot resolve references root: {exc}") from exc
+
+    dest = skill_dir / path
+    if dest.is_symlink():
+        raise SkillResourceError(f"required reference must not be a symlink: {rel}")
+    # Containment before is_file (is_file follows symlinks on some platforms).
+    try:
+        dest_resolved = dest.resolve(strict=False)
+    except OSError as exc:
+        raise SkillResourceError(f"cannot resolve required reference {rel!r}: {exc}") from exc
+    if refs_resolved not in dest_resolved.parents and dest_resolved != refs_resolved:
+        raise SkillResourceError(
+            f"required reference escapes skill references/: {rel!r}"
+        )
+    if dest_resolved == refs_resolved:
+        raise SkillResourceError(f"required reference must be a file under references/: {rel!r}")
+    if not dest.is_file() or dest.is_symlink():
+        raise SkillResourceError(f"required reference missing or not a regular file: {rel}")
+    return dest
 
 
 def discover_canonical_resources(skill_dir: Path) -> list[Path]:
@@ -143,8 +187,13 @@ def sync_skill_resources(
     *,
     skill_name_re,
 ) -> list[str]:
-    """Project skill resources into each generated root. Returns review notes."""
-    from agent_pack import AgentPackError, TMP_SUFFIX, owned_path, safe_unlink
+    """Project skill resources into each generated root. Returns review notes.
+
+    Writes/updates expected canonical resources only. Unexpected generated
+    resource files are preserved and reported as review-required drift; they are
+    never silently deleted. validate_skill_resources fails until explicit cleanup.
+    """
+    from agent_pack import AgentPackError, TMP_SUFFIX, owned_path
 
     review: list[str] = []
     try:
@@ -168,7 +217,7 @@ def sync_skill_resources(
                 raise AgentPackError(f"refusing to overwrite symlink resource {dest}")
             atomic_write_bytes(dest, data, repo)
 
-        # Prune stale projected resources under allowed dirs only.
+        # Report unexpected resources; never delete unproven files.
         for dirname in sorted(ALLOWED_RESOURCE_DIRS):
             root = skill_out / dirname
             if not root.exists():
@@ -179,17 +228,11 @@ def sync_skill_resources(
                     f"{root.relative_to(repo).as_posix()}"
                 )
                 continue
-            for path in sorted(root.rglob("*"), reverse=True):
+            for path in sorted(root.rglob("*")):
                 rel = path.relative_to(skill_out).as_posix()
                 if path.name.endswith(TMP_SUFFIX):
                     continue
                 if path.is_dir() and not path.is_symlink():
-                    # Remove empty dirs after file prune.
-                    try:
-                        if not any(path.iterdir()):
-                            path.rmdir()
-                    except OSError:
-                        pass
                     continue
                 if rel in expected:
                     continue
@@ -200,23 +243,10 @@ def sync_skill_resources(
                     )
                     continue
                 if path.is_file():
-                    safe_unlink(path, skill_out, repo)
-            # Final empty-dir sweep.
-            if root.is_dir() and not root.is_symlink():
-                for dirpath, dirnames, filenames in os.walk(root, topdown=False):
-                    if filenames:
-                        continue
-                    if dirnames:
-                        continue
-                    try:
-                        Path(dirpath).rmdir()
-                    except OSError:
-                        pass
-                if root.exists() and root.is_dir() and not any(root.iterdir()):
-                    try:
-                        root.rmdir()
-                    except OSError:
-                        pass
+                    review.append(
+                        f"unowned generated skill resource requires review (not deleted): "
+                        f"{path.relative_to(repo).as_posix()}"
+                    )
 
         # Unsupported scripts/ in generated tree is drift.
         scripts = skill_out / "scripts"
