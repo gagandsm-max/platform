@@ -343,7 +343,7 @@ func TestProcessNetworkUnwiredSinkAndNoPhysicalDelivery(t *testing.T) {
 	}
 }
 
-func TestProcessNetworkGoModUnchanged(t *testing.T) {
+func TestProcessNetworkGoModGovernedOSS124Replace(t *testing.T) {
 	modPath := filepath.Join("..", "..", "go.mod")
 	b, err := os.ReadFile(modPath)
 	if err != nil {
@@ -353,8 +353,11 @@ func TestProcessNetworkGoModUnchanged(t *testing.T) {
 	if !strings.Contains(text, "module platform/agent") {
 		t.Fatal("module path")
 	}
-	if strings.Contains(text, "cilium") || strings.Contains(text, "ebpf") || strings.Contains(strings.ToLower(text), "require ") {
-		t.Fatalf("Slice 5 must not add Go dependencies:\n%s", text)
+	if !strings.Contains(text, "github.com/cilium/ebpf v0.22.0") {
+		t.Fatalf("Slice 7 must require governed cilium/ebpf v0.22.0:\n%s", text)
+	}
+	if !strings.Contains(text, "replace github.com/cilium/ebpf => ./third_party/github.com/cilium/ebpf") {
+		t.Fatalf("Slice 7 must local-replace OSS-124:\n%s", text)
 	}
 }
 

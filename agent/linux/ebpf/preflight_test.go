@@ -184,9 +184,9 @@ func TestUnsupportedOSAndArchitecture(t *testing.T) {
 	}
 }
 
-func TestSupportedPreflightStillBackendNotImplemented(t *testing.T) {
+func TestSupportedPreflightStillBackendNotWired(t *testing.T) {
 	got := checkerFor(t, supportedFixture(t), nil).Run(context.Background(), nil)
-	assertStateReason(t, got, collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotImplemented)
+	assertStateReason(t, got, collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
 	if !got.PreflightPassed || !got.KernelCompatible || !got.BTFPresent || !got.BTFReadable || got.BTFDigest == "" {
 		t.Fatalf("compatible evidence incomplete: %+v", got)
 	}
@@ -300,7 +300,7 @@ func TestResourceGuardRequiresLowWaterBeforeClearing(t *testing.T) {
 		cfg.RequestedMapBytes, cfg.RequestedRingBytes = 100, 100
 		cfg.LowWaterSatisfied = true
 	}).Run(context.Background(), &guarded)
-	assertStateReason(t, cleared, collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotImplemented)
+	assertStateReason(t, cleared, collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
 }
 
 func TestCancellationAndTimeout(t *testing.T) {
@@ -636,7 +636,7 @@ func TestSecurityContextDenialIsSafeEvidenceNotInventedBPFDenial(t *testing.T) {
 	s := supportedFixture(t)
 	s.errs[securityContextPath] = os.ErrPermission
 	got := checkerFor(t, s, nil).Run(context.Background(), nil)
-	assertStateReason(t, got, collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotImplemented)
+	assertStateReason(t, got, collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
 	if got.SecurityContext != "DENIED" {
 		t.Fatalf("security context=%q", got.SecurityContext)
 	}

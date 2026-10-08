@@ -143,8 +143,23 @@ func TestSoftwareInventoryGoModUnchangedShape(t *testing.T) {
 	if !strings.HasPrefix(body, "module platform/agent\n") {
 		t.Fatalf("unexpected module: %q", body)
 	}
-	if strings.Contains(body, "require (") || strings.Contains(body, "\nrequire ") {
-		t.Fatal("Slice 4 must not add module requirements")
+	// Slice 7 admits OSS-124 only via governed local replace. Inventory code
+	// must not introduce additional product module requirements.
+	if !strings.Contains(body, "github.com/cilium/ebpf v0.22.0") {
+		t.Fatal("expected governed OSS-124 require")
+	}
+	if !strings.Contains(body, "replace github.com/cilium/ebpf => ./third_party/github.com/cilium/ebpf") {
+		t.Fatal("expected OSS-124 local replace")
+	}
+	for _, forbidden := range []string{
+		"github.com/google/",
+		"gopkg.in/",
+		"go.uber.org/",
+		"github.com/prometheus/",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("unexpected opportunistic module %q", forbidden)
+		}
 	}
 }
 

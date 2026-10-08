@@ -69,12 +69,18 @@ func main() {
 	// stalled procfs/sysfs read cannot hold AgentService construction/Start,
 	// scheduler, collectors, queue/delivery, or liveness/readiness past the
 	// governed timeout. Late completions are discarded by RunStartup.
+	// Slice 7 implements the kernel backend package but does not wire
+	// Start-after-RUNNING into AgentService (Slice 8). Preflight remains the
+	// startup capability evidence path; when compatibility would previously
+	// report BACKEND_NOT_IMPLEMENTED it now reports BACKEND_NOT_WIRED.
 	capability := ebpf.New(ebpf.Config{
-		Enabled:           cfg.EBPFEnabled,
-		PreflightTimeout:  cfg.EBPFPreflightTimeout,
-		RecheckMin:        cfg.EBPFRecheckMin,
-		RecheckMax:        cfg.EBPFRecheckMax,
-		LowWaterSatisfied: true,
+		Enabled:            cfg.EBPFEnabled,
+		PreflightTimeout:   cfg.EBPFPreflightTimeout,
+		RecheckMin:         cfg.EBPFRecheckMin,
+		RecheckMax:         cfg.EBPFRecheckMax,
+		RequestedMapBytes:  ebpf.RequestedMapBytesEstimate,
+		RequestedRingBytes: ebpf.RequestedRingBytesExact,
+		LowWaterSatisfied:  true,
 	}).RunStartup(ctx, nil)
 	logger.Info("Linux eBPF capability preflight completed",
 		"event_code", "AGENT_EBPF_PREFLIGHT_COMPLETED",
