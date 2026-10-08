@@ -12,7 +12,7 @@ import (
 )
 
 func (b *Backend) readLoop(ctx context.Context) {
-	defer b.wg.Done()
+	defer b.workerExit()
 	rd := b.reader
 	if rd == nil {
 		return
@@ -24,15 +24,9 @@ func (b *Backend) readLoop(ctx context.Context) {
 		rd.SetDeadline(time.Now().Add(200 * time.Millisecond))
 		rec, err := rd.Read()
 		if err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				b.pollKernelLoss()
-				continue
-			}
-			if errors.Is(err, ringbuf.ErrClosed) || ctx.Err() != nil {
+			if b.handleRingReadError(ctx, err) {
 				return
 			}
-			b.loss.Add(LossClassDecoderReject, 1)
-			b.emitDrop(LossClassDecoderReject, 1)
 			continue
 		}
 		raw := make([]byte, len(rec.RawSample))
@@ -41,65 +35,127 @@ func (b *Backend) readLoop(ctx context.Context) {
 		case b.rawCh <- raw:
 		default:
 			b.loss.Add(LossClassUserspaceChanFull, 1)
-			b.emitDrop(LossClassUserspaceChanFull, 1)
+			if b.emitDrop(LossClassUserspaceChanFull, 1) {
+				return
+			}
 		}
 	}
 }
 
+// handleRingReadError classifies ringbuf.Reader.Read errors.
+// Returns true when the read loop must terminate.
+// Unexpected I/O/runtime failures are READER_FAILED (never DECODER_REJECT).
+func (b *Backend) handleRingReadError(ctx context.Context, err error) (stop bool) {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		// Kernel-loss polling is owned solely by ingestLoop.
+		return false
+	}
+	if errors.Is(err, ringbuf.ErrClosed) || ctx.Err() != nil {
+		return true
+	}
+	b.readerFaults.Add(1)
+	b.failRuntime(collector.ReasonReaderFailed)
+	return true
+}
+
 func (b *Backend) ingestLoop(ctx context.Context) {
-	defer b.wg.Done()
+	defer b.workerExit()
 	ticker := time.NewTicker(AggregationFlush)
 	defer ticker.Stop()
 	batch := make([]collector.ProcessNetworkSyntheticEvent, 0, IngestBatchSize)
 
-	flush := func() {
-		if len(batch) == 0 || b.aggregator == nil {
-			return
-		}
-		_ = b.aggregator.Ingest(ctx, batch)
-		batch = batch[:0]
-		_, _ = b.aggregator.FlushDue(ctx, time.Now().UTC())
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
-			flush()
+			b.flushBatch(context.Background(), &batch) // shutdown flush; cancel is not a runtime fault
 			return
 		case <-ticker.C:
-			flush()
-			b.pollKernelLoss()
+			if b.flushBatch(ctx, &batch) {
+				return
+			}
+			if b.pollKernelLoss() {
+				return
+			}
 		case raw, ok := <-b.rawCh:
 			if !ok {
-				flush()
+				b.flushBatch(context.Background(), &batch)
 				return
 			}
 			ev, err := decodeRawRecord(raw, b.bootWall, b.monoBaseNs)
 			if err != nil {
 				b.loss.Add(LossClassDecoderReject, 1)
-				b.emitDrop(LossClassDecoderReject, 1)
+				if b.emitDrop(LossClassDecoderReject, 1) {
+					return
+				}
 				continue
 			}
 			syn, err := toSynthetic(ev)
 			if err != nil {
 				b.loss.Add(LossClassDecoderReject, 1)
-				b.emitDrop(LossClassDecoderReject, 1)
+				if b.emitDrop(LossClassDecoderReject, 1) {
+					return
+				}
 				continue
 			}
 			batch = append(batch, syn)
 			if len(batch) >= IngestBatchSize {
-				flush()
+				if b.flushBatch(ctx, &batch) {
+					return
+				}
 			}
 		}
 	}
 }
 
-func (b *Backend) pollKernelLoss() {
+// flushBatch ingests and flushes a pending batch. Returns true when a fatal
+// local aggregator/runtime fault stopped the backend.
+func (b *Backend) flushBatch(ctx context.Context, batch *[]collector.ProcessNetworkSyntheticEvent) (fatal bool) {
+	if len(*batch) == 0 || b.aggregator == nil {
+		return false
+	}
+	toSend := *batch
+	*batch = (*batch)[:0]
+	if err := b.aggregator.Ingest(ctx, toSend); err != nil {
+		return b.observeAggregatorErr(err)
+	}
+	if _, err := b.aggregator.FlushDue(ctx, time.Now().UTC()); err != nil {
+		return b.observeAggregatorErr(err)
+	}
+	return false
+}
+
+// observeAggregatorErr classifies aggregator errors.
+// ErrStructuredTransportNotWired remains truthful NON-DELIVERY (not fatal).
+// Context cancel/deadline during shutdown is not a runtime failure.
+// Other local aggregator errors degrade the backend and cancel runtime.
+func (b *Backend) observeAggregatorErr(err error) (fatal bool) {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, collector.ErrStructuredTransportNotWired) {
+		b.transportNotWired.Add(1)
+		return false
+	}
+	b.aggregatorFaults.Add(1)
+	b.failRuntime(collector.ReasonSourceUnavailable)
+	return true
+}
+
+// pollKernelLoss is owned by ingestLoop. Loss reconciliation itself is
+// monotonic/CAS-exact so accidental duplicate polling cannot fabricate counts.
+// Returns true when a fatal aggregator fault stopped the backend.
+func (b *Backend) pollKernelLoss() (fatal bool) {
 	b.mu.Lock()
 	handles := b.handles
 	b.mu.Unlock()
 	if handles == nil || handles.primary.LossCounters == nil {
-		return
+		return false
 	}
 	var key uint32
 	var mapFail, ringFail uint64
@@ -108,21 +164,25 @@ func (b *Backend) pollKernelLoss() {
 	key = LossRingReserveFail
 	_ = handles.primary.LossCounters.Lookup(&key, &ringFail)
 
-	prev := b.loss.Snapshot()
-	b.loss.noteKernel(mapFail, ringFail)
-	cur := b.loss.Snapshot()
-	if d := cur[LossClassMapUpdateFail] - prev[LossClassMapUpdateFail]; d > 0 {
-		b.emitDrop(LossClassMapUpdateFail, uint32(d))
+	mapDelta, ringDelta := b.loss.reconcileKernelAbs(mapFail, ringFail)
+	if mapDelta > 0 {
+		if b.emitDrop(LossClassMapUpdateFail, uint32(mapDelta)) {
+			return true
+		}
 	}
-	if d := cur[LossClassRingReserveFail] - prev[LossClassRingReserveFail]; d > 0 {
-		b.emitDrop(LossClassRingReserveFail, uint32(d))
+	if ringDelta > 0 {
+		return b.emitDrop(LossClassRingReserveFail, uint32(ringDelta))
 	}
+	return false
 }
 
-func (b *Backend) emitDrop(class LossClass, n uint32) {
+func (b *Backend) emitDrop(class LossClass, n uint32) (fatal bool) {
 	if n == 0 || b.aggregator == nil {
-		return
+		return false
 	}
 	ev := backendDropEvent(string(class), n, time.Now().UTC())
-	_ = b.aggregator.Ingest(context.Background(), []collector.ProcessNetworkSyntheticEvent{ev})
+	if err := b.aggregator.Ingest(context.Background(), []collector.ProcessNetworkSyntheticEvent{ev}); err != nil {
+		return b.observeAggregatorErr(err)
+	}
+	return false
 }

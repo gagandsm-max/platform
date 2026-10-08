@@ -5,12 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"platform/agent/common/collector"
 
 	"github.com/cilium/ebpf/ringbuf"
 )
+
+// ErrBackendStopDeadline is returned when StopContext's caller deadline expires
+// before backend workers quiesce. Best-effort resource release still occurs.
+var ErrBackendStopDeadline = errors.New("BACKEND_STOP_DEADLINE")
 
 // Backend is the Slice-7 bounded Linux eBPF process-network kernel backend.
 // Lifecycle seam for Slice 8: Start / StopContext / Capability.
@@ -27,8 +32,9 @@ type Backend struct {
 	rawCh   chan []byte
 	loss    lossCounters
 
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	cancel       context.CancelFunc
+	workerRemain atomic.Int32
+	workersDone  chan struct{}
 
 	started           bool
 	stopped           bool
@@ -36,6 +42,11 @@ type Backend struct {
 	capability        collector.ProcessNetworkCapabilitySnapshot
 	bootWall          time.Time
 	monoBaseNs        uint64
+
+	// Observable Slice-7 runtime notes (not host/network DOWN signals).
+	transportNotWired atomic.Uint64
+	aggregatorFaults  atomic.Uint64
+	readerFaults      atomic.Uint64
 }
 
 // BackendConfig extends preflight Config with aggregator wiring.
@@ -74,11 +85,11 @@ func NewBackend(cfg BackendConfig) (*Backend, error) {
 	}, nil
 }
 
-// Capability returns a copy of the current capability snapshot.
+// Capability returns a deep copy of the current capability snapshot.
 func (b *Backend) Capability() collector.ProcessNetworkCapabilitySnapshot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.capability
+	return b.capability.Copy()
 }
 
 // Status is an alias for Capability for the Slice-8 lifecycle seam.
@@ -89,6 +100,22 @@ func (b *Backend) Status() collector.ProcessNetworkCapabilitySnapshot {
 // LossSnapshot returns discrete loss counters.
 func (b *Backend) LossSnapshot() map[LossClass]uint64 {
 	return b.loss.Snapshot()
+}
+
+// TransportNotWiredCount reports observed ErrStructuredTransportNotWired
+// non-delivery events (Slice-5 truthful boundary; not a kernel/decoder fault).
+func (b *Backend) TransportNotWiredCount() uint64 {
+	return b.transportNotWired.Load()
+}
+
+// AggregatorFaultCount reports local aggregator/runtime faults that degraded the backend.
+func (b *Backend) AggregatorFaultCount() uint64 {
+	return b.aggregatorFaults.Load()
+}
+
+// ReaderFaultCount reports unexpected ring-reader/runtime faults (not DECODER_REJECT).
+func (b *Backend) ReaderFaultCount() uint64 {
+	return b.readerFaults.Load()
 }
 
 // OptionalProbeAttached reports whether the independently degradable retransmit probe is live.
@@ -105,6 +132,9 @@ func (b *Backend) Start(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.started && !b.stopped {
+		if b.capability.State != collector.ProcessNetworkCapabilityActive {
+			return errors.New("BACKEND_RUNTIME_FAILED")
+		}
 		return nil
 	}
 	if b.stopped {
@@ -156,6 +186,8 @@ func (b *Backend) Start(ctx context.Context) error {
 	b.monoBaseNs = 0 // decoder falls back to wall clock when unset
 	b.started = true
 	b.stopped = false
+	b.workersDone = make(chan struct{})
+	b.workerRemain.Store(int32(BackendGoroutines))
 
 	reasons := []collector.ProcessNetworkCapabilityReason{}
 	if !handles.optAttached {
@@ -163,13 +195,15 @@ func (b *Backend) Start(ctx context.Context) error {
 	}
 	b.capability = b.activeCapability(snap, reasons)
 
-	b.wg.Add(BackendGoroutines)
 	go b.readLoop(runCtx)
 	go b.ingestLoop(runCtx)
 	return nil
 }
 
 // StopContext is idempotent and releases links/maps/reader/goroutines.
+// If workers have not quiesced before the caller deadline, returns
+// ErrBackendStopDeadline after best-effort cleanup. Does not spawn a
+// Wait-goroutine that can outlive the caller indefinitely.
 func (b *Backend) StopContext(ctx context.Context) error {
 	b.mu.Lock()
 	if !b.started || b.stopped {
@@ -180,6 +214,7 @@ func (b *Backend) StopContext(ctx context.Context) error {
 	cancel := b.cancel
 	rd := b.reader
 	handles := b.handles
+	done := b.workersDone
 	b.stopped = true
 	b.mu.Unlock()
 
@@ -189,19 +224,19 @@ func (b *Backend) StopContext(ctx context.Context) error {
 	if rd != nil {
 		_ = rd.Close()
 	}
-	done := make(chan struct{})
-	go func() {
-		b.wg.Wait()
-		close(done)
-	}()
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	select {
-	case <-done:
-	case <-ctx.Done():
-		// Still close handles to avoid FD leaks even on deadline.
+
+	var stopErr error
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			stopErr = fmt.Errorf("%w: %w", ErrBackendStopDeadline, ctx.Err())
+		}
 	}
+
 	if handles != nil {
 		handles.Close()
 	}
@@ -215,7 +250,38 @@ func (b *Backend) StopContext(ctx context.Context) error {
 		b.capability.ObservedAt = time.Now().UTC()
 	}
 	b.mu.Unlock()
-	return nil
+	return stopErr
+}
+
+// workerExit marks one backend worker finished. The final worker closes workersDone.
+// Must not call StopContext (avoids self-deadlock on the stop waiter).
+func (b *Backend) workerExit() {
+	if b.workerRemain.Add(-1) == 0 {
+		close(b.workersDone)
+	}
+}
+
+// failRuntime transitions away from ACTIVE for a typed runtime failure, cancels
+// the run context, and closes the ring reader to unblock peers. Safe from a
+// worker: never waits on workersDone / StopContext.
+func (b *Backend) failRuntime(reason collector.ProcessNetworkCapabilityReason) {
+	b.mu.Lock()
+	if b.capability.State == collector.ProcessNetworkCapabilityActive {
+		b.capability.State = collector.ProcessNetworkCapabilityUnavailable
+		b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{reason}
+		b.capability.ObservedAt = time.Now().UTC()
+		b.capability.TransitionAt = b.capability.ObservedAt
+		b.capability.PreflightPassed = false
+	}
+	cancel := b.cancel
+	rd := b.reader
+	b.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if rd != nil {
+		_ = rd.Close()
+	}
 }
 
 func (b *Backend) activeCapability(base collector.ProcessNetworkCapabilitySnapshot, extra []collector.ProcessNetworkCapabilityReason) collector.ProcessNetworkCapabilitySnapshot {

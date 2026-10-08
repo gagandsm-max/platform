@@ -55,13 +55,25 @@ func (l *lossCounters) Total() uint64 {
 		l.decoderReject.Load() + l.userspaceChanFull.Load()
 }
 
-// mergeKernelLoss reads saturating kernel ARRAY counters into userspace once.
-func (l *lossCounters) noteKernel(mapUpdate, ringReserve uint64) {
-	if mapUpdate > 0 {
-		l.mapUpdateFail.Store(mapUpdate)
-	}
-	if ringReserve > 0 {
-		l.ringReserveFail.Store(ringReserve)
+// reconcileKernelAbs advances absolute kernel ARRAY counters monotonically and
+// returns the exact deltas to emit. Concurrent or repeated callers cannot
+// double-count: only a successful CAS on an increase yields a non-zero delta.
+// Decreases/resets never regress userspace counters and never unsigned-underflow.
+func (l *lossCounters) reconcileKernelAbs(mapUpdate, ringReserve uint64) (mapDelta, ringDelta uint64) {
+	mapDelta = advanceAbs(&l.mapUpdateFail, mapUpdate)
+	ringDelta = advanceAbs(&l.ringReserveFail, ringReserve)
+	return mapDelta, ringDelta
+}
+
+func advanceAbs(counter *atomic.Uint64, absolute uint64) uint64 {
+	for {
+		prev := counter.Load()
+		if absolute <= prev {
+			return 0
+		}
+		if counter.CompareAndSwap(prev, absolute) {
+			return absolute - prev
+		}
 	}
 }
 
