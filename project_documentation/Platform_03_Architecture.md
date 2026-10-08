@@ -7,7 +7,7 @@
 **Depends on:** `Platform_01_BRD.md`, `Platform_02_PRD.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
+**Last reconciliation:** 2026-10-08 — BUILD-011 eBPF initial map policy reconcile (Issue #168 / Master comment `6059162933`); prior 2026-09-30 Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142) retained
 
 ---
 
@@ -1514,7 +1514,7 @@ Phase 1 explicitly enforces strict architectural boundaries:
 The eBPF integration follows a strictly bounded, non-flooding edge pipeline:
 ```text
 Linux Kernel (eBPF Probes)
-  → Linux Agent Collector (BPF ring buffer reader, LRU maps)
+  → Linux Agent Collector (BPF ring buffer reader, bounded explicit-loss-accounted maps)
   → Bounded Local Aggregator (bounded configurable buckets: process/service + remote IP/port + protocol)
   → Durable Agent Disk Spool
   → Assigned Sensor (mTLS HTTPS/gRPC)
@@ -1525,6 +1525,7 @@ Linux Kernel (eBPF Probes)
 ```
 - **Outcome:** Resolves which process, service, or container is communicating with which remote endpoint, along with connection performance (active/new/closed sockets, bytes TX/RX, RTT, retransmissions, failures).
 - **Data Minimization:** Strictly zero payload capture, zero TLS decryption, zero HTTP/SQL inspection, zero continuous profiling/stack traces, and no environment variable reading.
+- **Initial socket-state map (BUILD-011):** `BPF_MAP_TYPE_HASH` with explicit bounded `max_entries`, explicit insertion-failure / drop accounting, and no silent eviction. Platform's stronger invariant is **no silent loss**. `BPF_MAP_TYPE_LRU_HASH` is not permanently banned and may be reconsidered later only if exact or conservatively provable eviction/loss accounting is designed, tested and independently certified.
 - **Resource Priority:** Core monitoring and telemetry durability strictly take precedence. If map capacity or bounded Agent memory budgets derived from BUILD-019 / BUILD-130 benchmark certification are approached, the collector transitions to `RESOURCE_GUARDED`, sheds records to an aggregate bucket, and marks records with `shed_records_count > 0`.
 
 ### 44.4 Active path observability architecture
