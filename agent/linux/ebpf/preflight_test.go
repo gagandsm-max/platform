@@ -2,16 +2,26 @@ package ebpf
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"io/fs"
 	"math"
+	"net"
+	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"platform/agent/common"
+	"platform/agent/common/client"
 	"platform/agent/common/collector"
+	"platform/agent/common/config"
+	"platform/agent/common/identity"
 )
 
 var fixtureNow = time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
@@ -308,6 +318,240 @@ func TestCancellationAndTimeout(t *testing.T) {
 		got := c.Run(context.Background(), nil)
 		assertStateReason(t, got, collector.ProcessNetworkCapabilityUnavailable, collector.ReasonPreflightTimeout)
 	})
+}
+
+// nonCooperativeSource deliberately ignores context cancellation while blocked.
+// This models a stalled procfs/sysfs Open/Read that does not observe ctx.Done.
+type nonCooperativeSource struct {
+	inner   *fakeSource
+	entered chan struct{}
+	release chan struct{}
+	exited  chan struct{}
+	workers atomic.Int32
+}
+
+func (s *nonCooperativeSource) ReadBounded(ctx context.Context, path string, limit int64) ([]byte, bool, error) {
+	if path == kernelReleasePath {
+		s.workers.Add(1)
+		// Signal exit only after the outstanding-worker count drops so callers
+		// observing <-exited cannot race a still-nonzero workers counter.
+		defer func() {
+			s.workers.Add(-1)
+			close(s.exited)
+		}()
+		select {
+		case <-s.entered:
+		default:
+			close(s.entered)
+		}
+		<-s.release // intentionally does NOT select ctx.Done()
+		return s.inner.ReadBounded(context.Background(), path, limit)
+	}
+	return s.inner.ReadBounded(ctx, path, limit)
+}
+
+func (s *nonCooperativeSource) Lstat(path string) (os.FileInfo, error) { return s.inner.Lstat(path) }
+func (s *nonCooperativeSource) Quality() string                        { return s.inner.Quality() }
+
+func TestNonCooperativeSourceStartupIsolation(t *testing.T) {
+	inner := supportedFixture(t)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	exited := make(chan struct{})
+	source := &nonCooperativeSource{
+		inner:   inner,
+		entered: entered,
+		release: release,
+		exited:  exited,
+	}
+	timeout := 40 * time.Millisecond
+	c := checkerFor(t, inner, func(cfg *Config) {
+		cfg.PreflightTimeout = timeout
+		cfg.RecheckMin = time.Hour
+		cfg.RecheckMax = time.Hour
+	})
+	// Wall-clock observation so live /capabilities Fresh() does not immediately
+	// rewrite the timeout disposition to EVIDENCE_STALE under the fixture clock.
+	c.now = func() time.Time { return time.Now().UTC() }
+	c.source = source
+
+	started := time.Now()
+	resultCh := make(chan collector.ProcessNetworkCapabilitySnapshot, 1)
+	go func() { resultCh <- c.RunStartup(context.Background(), nil) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("optional preflight never entered the non-cooperative source")
+	}
+	var got collector.ProcessNetworkCapabilitySnapshot
+	select {
+	case got = <-resultCh:
+	case <-time.After(timeout + 200*time.Millisecond):
+		t.Fatal("RunStartup did not return within bounded tolerance after non-cooperative stall")
+	}
+	elapsed := time.Since(started)
+	if elapsed > timeout+150*time.Millisecond {
+		t.Fatalf("startup isolation exceeded bounded tolerance: elapsed=%v timeout=%v", elapsed, timeout)
+	}
+	assertStateReason(t, got, collector.ProcessNetworkCapabilityUnavailable, collector.ReasonPreflightTimeout)
+	if got.State == collector.ProcessNetworkCapabilityActive || got.PreflightPassed {
+		t.Fatalf("timeout disposition must not claim ACTIVE/passed: %+v", got)
+	}
+	if source.workers.Load() != 1 {
+		t.Fatalf("expected exactly one outstanding one-shot worker, got %d", source.workers.Load())
+	}
+
+	frozen := got.Copy()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	healthAddr := ln.Addr().String()
+	_ = ln.Close()
+	tempDir := t.TempDir()
+	cfg := &config.Config{
+		TenantID:           "tenant-ebpf-noncoop",
+		SensorURL:          "https://sensor.platform.local:8443",
+		StateDir:           tempDir,
+		QueueDir:           filepath.Join(tempDir, "queue"),
+		HealthAddress:      healthAddr,
+		CollectionInterval: time.Hour,
+		CollectionTimeout:  200 * time.Millisecond,
+		DeliveryTimeout:    200 * time.Millisecond,
+		RetryBase:          10 * time.Millisecond,
+		RetryMax:           50 * time.Millisecond,
+		MaxBufferRecords:   100,
+		MaxBufferBytes:     1024 * 1024,
+		MaxRecordBytes:     64 * 1024,
+		MaxBatchRecords:    10,
+		MaxBatchBytes:      384 * 1024,
+		MaxFilesystems:     8,
+	}
+	ident := &identity.AgentIdentity{
+		AgentID:  "agent-ebpf-noncoop",
+		TenantID: "tenant-ebpf-noncoop",
+		HostID:   "host-ebpf-noncoop",
+		OS:       "linux",
+		Arch:     "amd64",
+	}
+	svc, err := common.NewAgentService(cfg, ident, client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil,
+		common.WithProcessNetworkCapability(got))
+	if err != nil {
+		t.Fatalf("base AgentService construction blocked by optional preflight timeout: %v", err)
+	}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("base AgentService.Start blocked by optional preflight timeout: %v", err)
+	}
+	snapshot := svc.RuntimeSnapshot()
+	if !snapshot.SchedulerRunning {
+		t.Fatal("scheduler must start while optional eBPF preflight worker remains blocked")
+	}
+	if snapshot.EnabledCollectors == 0 {
+		t.Fatal("base collectors must remain registered while optional eBPF preflight is blocked")
+	}
+	if snapshot.ProcessNetworkCapability.State != collector.ProcessNetworkCapabilityUnavailable ||
+		len(snapshot.ProcessNetworkCapability.ReasonCodes) == 0 ||
+		snapshot.ProcessNetworkCapability.ReasonCodes[0] != collector.ReasonPreflightTimeout {
+		t.Fatalf("capability evidence not preserved on Agent: %+v", snapshot.ProcessNetworkCapability)
+	}
+
+	// Disable keep-alives so health-server Shutdown cannot wait on pooled
+	// connections and falsely look like a stuck optional eBPF worker.
+	httpClient := &http.Client{
+		Timeout: time.Second,
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
+	for _, path := range []string{"/live", "/ready", "/healthz", "/health"} {
+		resp, err := httpClient.Get("http://" + healthAddr + path)
+		if err != nil {
+			t.Fatalf("%s request failed while preflight blocked: %v", path, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s status=%d; eBPF timeout must not make base liveness/readiness/health fail", path, resp.StatusCode)
+		}
+	}
+	capResp, err := httpClient.Get("http://" + healthAddr + "/capabilities/process-network-ebpf")
+	if err != nil {
+		t.Fatalf("capability endpoint failed: %v", err)
+	}
+	body, err := io.ReadAll(capResp.Body)
+	_ = capResp.Body.Close()
+	if err != nil {
+		t.Fatalf("capability body: %v", err)
+	}
+	var evidence map[string]any
+	if err := json.Unmarshal(body, &evidence); err != nil {
+		t.Fatalf("capability json: %v", err)
+	}
+	if evidence["state"] != string(collector.ProcessNetworkCapabilityUnavailable) {
+		t.Fatalf("capability endpoint state=%v", evidence["state"])
+	}
+	reasons, _ := evidence["reason_codes"].([]any)
+	if len(reasons) == 0 || reasons[0] != string(collector.ReasonPreflightTimeout) {
+		t.Fatalf("capability endpoint reasons=%v", evidence["reason_codes"])
+	}
+
+	stopStarted := time.Now()
+	if err := svc.Stop(); err != nil {
+		t.Fatalf("shutdown failed while optional preflight remained blocked: %v", err)
+	}
+	if stopElapsed := time.Since(stopStarted); stopElapsed > 3*time.Second {
+		t.Fatalf("shutdown waited on stuck optional eBPF worker: %v", stopElapsed)
+	}
+
+	close(release)
+	select {
+	case <-exited:
+	case <-time.After(time.Second):
+		t.Fatal("blocked one-shot worker did not exit after source release")
+	}
+	if source.workers.Load() != 0 {
+		t.Fatalf("worker remained outstanding after release: %d", source.workers.Load())
+	}
+	if got.State != frozen.State || !equalReasons(got.ReasonCodes, frozen.ReasonCodes) || got.PreflightPassed != frozen.PreflightPassed {
+		t.Fatalf("late source completion mutated returned timeout evidence:\nbefore=%+v\nafter=%+v", frozen, got)
+	}
+	late := svc.RuntimeSnapshot().ProcessNetworkCapability
+	if late.State != collector.ProcessNetworkCapabilityUnavailable ||
+		len(late.ReasonCodes) == 0 || late.ReasonCodes[0] != collector.ReasonPreflightTimeout {
+		t.Fatalf("late completion altered Agent capability evidence: %+v", late)
+	}
+}
+
+func TestRunStartupParentCancelIsTruthful(t *testing.T) {
+	inner := supportedFixture(t)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	exited := make(chan struct{})
+	source := &nonCooperativeSource{inner: inner, entered: entered, release: release, exited: exited}
+	c := checkerFor(t, inner, func(cfg *Config) { cfg.PreflightTimeout = time.Second })
+	c.source = source
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan collector.ProcessNetworkCapabilitySnapshot, 1)
+	go func() { done <- c.RunStartup(ctx, nil) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("preflight did not enter non-cooperative source")
+	}
+	cancel()
+	var got collector.ProcessNetworkCapabilitySnapshot
+	select {
+	case got = <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("RunStartup did not return after parent cancel")
+	}
+	assertStateReason(t, got, collector.ProcessNetworkCapabilityUnavailable, collector.ReasonPreflightCancelled)
+	close(release)
+	select {
+	case <-exited:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not exit after release")
+	}
 }
 
 func TestEvidenceStale(t *testing.T) {

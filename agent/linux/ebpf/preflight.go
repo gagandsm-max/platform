@@ -61,8 +61,9 @@ type CapabilityMasks struct {
 	Ambient   uint64
 }
 
-// Checker owns no background work. Call Run at startup or at the snapshot's
-// NextRecheckAt; callers choose scheduling in a later authorized slice.
+// Checker owns no repeating background work. Call RunStartup once at Agent
+// process startup (or Run for cooperative evaluation). Callers choose any later
+// recheck scheduling in a subsequent authorized slice.
 type Checker struct {
 	cfg    Config
 	source evidenceSource
@@ -134,12 +135,60 @@ func newChecker(cfg Config, source evidenceSource, now func() time.Time, goos, g
 	return &Checker{cfg: cfg, source: source, now: now, goos: goos, goarch: goarch}
 }
 
-// Run collects a single bounded snapshot. A compatible result remains
-// UNAVAILABLE/BACKEND_NOT_IMPLEMENTED because this slice contains no backend.
-func (c *Checker) Run(parent context.Context, previous *collector.ProcessNetworkCapabilitySnapshot) collector.ProcessNetworkCapabilitySnapshot {
-	observed := c.now().UTC()
-	base := collector.ProcessNetworkCapabilitySnapshot{
-		ObservedAt:      observed,
+// RunStartup isolates the complete optional preflight behind one one-shot
+// execution boundary. When the governing timeout or parent cancellation wins
+// before the underlying evaluation returns, the caller receives truthful
+// UNAVAILABLE/PREFLIGHT_TIMEOUT or PREFLIGHT_CANCELLED evidence immediately so
+// base Agent startup can proceed. A pathological non-cooperative source may
+// leave at most that single one-shot worker outstanding for the startup
+// attempt; late results are discarded and never mutate the returned snapshot.
+func (c *Checker) RunStartup(parent context.Context, previous *collector.ProcessNetworkCapabilitySnapshot) collector.ProcessNetworkCapabilitySnapshot {
+	if parent == nil {
+		parent = context.Background()
+	}
+	timeout := c.cfg.PreflightTimeout
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+
+	// Capacity 1 so a late Run completion never blocks the one-shot worker
+	// after the caller has already taken a timeout/cancel disposition.
+	resultCh := make(chan collector.ProcessNetworkCapabilitySnapshot, 1)
+	go func() {
+		resultCh <- c.Run(ctx, previous)
+	}()
+
+	select {
+	case snap := <-resultCh:
+		return snap
+	case <-ctx.Done():
+		select {
+		case snap := <-resultCh:
+			return snap
+		default:
+			// Caller owns the timeout/cancel value-copy. Any later buffered
+			// result is unreachable once this frame returns and is GC'd; it
+			// must not mutate AgentService or readiness state.
+			return c.startupAborted(previous, ctx.Err())
+		}
+	}
+}
+
+func (c *Checker) startupAborted(previous *collector.ProcessNetworkCapabilitySnapshot, err error) collector.ProcessNetworkCapabilitySnapshot {
+	base := c.emptyBase()
+	reason := contextReason(err)
+	if reason == "" {
+		reason = collector.ReasonPreflightTimeout
+	}
+	return c.finish(base, previous, collector.ProcessNetworkCapabilityUnavailable,
+		[]collector.ProcessNetworkCapabilityReason{reason})
+}
+
+func (c *Checker) emptyBase() collector.ProcessNetworkCapabilitySnapshot {
+	return collector.ProcessNetworkCapabilitySnapshot{
+		ObservedAt:      c.now().UTC(),
 		OS:              c.goos,
 		Arch:            c.goarch,
 		SourceQuality:   c.source.Quality(),
@@ -151,6 +200,14 @@ func (c *Checker) Run(parent context.Context, previous *collector.ProcessNetwork
 			LowWaterSatisfied:  c.cfg.LowWaterSatisfied,
 		},
 	}
+}
+
+// Run collects a single bounded snapshot. A compatible result remains
+// UNAVAILABLE/BACKEND_NOT_IMPLEMENTED because this slice contains no backend.
+// Production Agent startup must use RunStartup so non-cooperative procfs/sysfs
+// stalls cannot hold the base Agent path past the governed timeout.
+func (c *Checker) Run(parent context.Context, previous *collector.ProcessNetworkCapabilitySnapshot) collector.ProcessNetworkCapabilitySnapshot {
+	base := c.emptyBase()
 
 	if !c.cfg.Enabled {
 		base.SourceQuality = "DISABLED"

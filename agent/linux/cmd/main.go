@@ -65,15 +65,17 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	preflightCtx, preflightCancel := context.WithTimeout(ctx, cfg.EBPFPreflightTimeout)
+	// Optional eBPF preflight is isolated behind one one-shot boundary so a
+	// stalled procfs/sysfs read cannot hold AgentService construction/Start,
+	// scheduler, collectors, queue/delivery, or liveness/readiness past the
+	// governed timeout. Late completions are discarded by RunStartup.
 	capability := ebpf.New(ebpf.Config{
 		Enabled:           cfg.EBPFEnabled,
 		PreflightTimeout:  cfg.EBPFPreflightTimeout,
 		RecheckMin:        cfg.EBPFRecheckMin,
 		RecheckMax:        cfg.EBPFRecheckMax,
 		LowWaterSatisfied: true,
-	}).Run(preflightCtx, nil)
-	preflightCancel()
+	}).RunStartup(ctx, nil)
 	logger.Info("Linux eBPF capability preflight completed",
 		"event_code", "AGENT_EBPF_PREFLIGHT_COMPLETED",
 		"safe_context", map[string]any{
