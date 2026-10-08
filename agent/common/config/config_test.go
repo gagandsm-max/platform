@@ -90,6 +90,9 @@ func TestConfigValidation(t *testing.T) {
 	if cfg.MaxBatchBytes != 384*1024 {
 		t.Fatalf("default MaxBatchBytes must stay under Core 512KiB record limit, got %d", cfg.MaxBatchBytes)
 	}
+	if cfg.EBPFEnabled || cfg.EBPFPreflightTimeout != 2*time.Second || cfg.EBPFRecheckMin != 5*time.Minute || cfg.EBPFRecheckMax != time.Hour {
+		t.Fatalf("unexpected safe eBPF defaults: enabled=%v timeout=%v min=%v max=%v", cfg.EBPFEnabled, cfg.EBPFPreflightTimeout, cfg.EBPFRecheckMin, cfg.EBPFRecheckMax)
+	}
 
 	// 2. Cleartext HTTP rejected for Sensor telemetry URL
 	httpEnv := append([]string{}, baseEnv...)
@@ -228,5 +231,38 @@ func TestConfigValidation(t *testing.T) {
 	_, err = LoadConfigFromEnv(overRecord)
 	if err == nil || !strings.Contains(err.Error(), "CONFIG_MAX_RECORD_BYTES_OUT_OF_BOUNDS") {
 		t.Fatalf("MaxRecordBytes above wrap-safe cap must fail closed, got %v", err)
+	}
+
+	// 12. Preflight-only eBPF config is bounded and strict.
+	ebpfEnv := append([]string{}, baseEnv...)
+	ebpfEnv = append(ebpfEnv,
+		"PLATFORM_AGENT_EBPF_ENABLED=true",
+		"PLATFORM_AGENT_EBPF_PREFLIGHT_TIMEOUT=750ms",
+		"PLATFORM_AGENT_EBPF_RECHECK_MIN=2m",
+		"PLATFORM_AGENT_EBPF_RECHECK_MAX=30m",
+	)
+	cfg, err = LoadConfigFromEnv(ebpfEnv)
+	if err != nil {
+		t.Fatalf("valid eBPF preflight config: %v", err)
+	}
+	if !cfg.EBPFEnabled || cfg.EBPFPreflightTimeout != 750*time.Millisecond || cfg.EBPFRecheckMin != 2*time.Minute || cfg.EBPFRecheckMax != 30*time.Minute {
+		t.Fatalf("eBPF preflight config mismatch: %+v", cfg)
+	}
+	for _, setting := range []string{
+		"PLATFORM_AGENT_EBPF_ENABLED=1",
+		"PLATFORM_AGENT_EBPF_PREFLIGHT_TIMEOUT=99ms",
+		"PLATFORM_AGENT_EBPF_RECHECK_MIN=30s",
+		"PLATFORM_AGENT_EBPF_RECHECK_MAX=25h",
+	} {
+		bad := append([]string{}, baseEnv...)
+		bad = append(bad, setting)
+		if _, err := LoadConfigFromEnv(bad); err == nil {
+			t.Fatalf("expected bounded config rejection for %s", setting)
+		}
+	}
+	badBounds := append([]string{}, baseEnv...)
+	badBounds = append(badBounds, "PLATFORM_AGENT_EBPF_RECHECK_MIN=2h", "PLATFORM_AGENT_EBPF_RECHECK_MAX=1h")
+	if _, err := LoadConfigFromEnv(badBounds); err == nil || !strings.Contains(err.Error(), "CONFIG_EBPF_RECHECK_BOUNDS_INVALID") {
+		t.Fatalf("expected eBPF recheck bounds rejection, got %v", err)
 	}
 }

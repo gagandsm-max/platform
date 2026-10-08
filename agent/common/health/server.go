@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"platform/agent/common/client"
+	"platform/agent/common/collector"
 	"platform/agent/common/delivery"
 	"platform/agent/common/queue"
 )
@@ -34,14 +35,15 @@ type CollectorSnapshot struct {
 // RuntimeSnapshot is the narrow operational evidence boundary used by the
 // single readiness evaluator for /ready, /healthz and /health.
 type RuntimeSnapshot struct {
-	Lifecycle          string
-	Queue              queue.QueueStats
-	Delivery           delivery.DeliveryStats
-	SchedulerRunning   bool
-	EnabledCollectors  int
-	Collectors         []CollectorSnapshot
-	CollectorLastRun   time.Time
-	CollectorRunErrors int // cumulative historical counter; not a hard readiness input
+	Lifecycle                string
+	Queue                    queue.QueueStats
+	Delivery                 delivery.DeliveryStats
+	SchedulerRunning         bool
+	EnabledCollectors        int
+	Collectors               []CollectorSnapshot
+	CollectorLastRun         time.Time
+	CollectorRunErrors       int // cumulative historical counter; not a hard readiness input
+	ProcessNetworkCapability collector.ProcessNetworkCapabilitySnapshot
 }
 
 // StatsProvider supplies one atomic-enough runtime snapshot for health decisions.
@@ -129,6 +131,7 @@ func NewServer(addr string, provider StatsProvider, logger *slog.Logger, opts ..
 	mux.HandleFunc("/ready", s.handleReady)
 	mux.HandleFunc("/healthz", s.handleReady) // BUILD-005: preserve Agent compatibility alias to readiness
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/capabilities/process-network-ebpf", s.handleProcessNetworkCapability)
 
 	s.httpSrv = &http.Server{
 		Addr:         addr,
@@ -246,6 +249,73 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		body["reason_codes"] = append([]string(nil), d.reasons...)
 	}
 	writeJSON(w, d.httpStatus, body)
+}
+
+// handleProcessNetworkCapability exposes optional, bounded support evidence on
+// the loopback-only health server without extending the SUPPORT_EVIDENCE schema
+// or making the capability an Agent readiness dependency.
+func (s *Server) handleProcessNetworkCapability(w http.ResponseWriter, _ *http.Request) {
+	snap := s.snapshot().ProcessNetworkCapability
+	if !snap.Available() {
+		now := time.Now().UTC()
+		snap = collector.ProcessNetworkCapabilitySnapshot{
+			State:         collector.ProcessNetworkCapabilityUnavailable,
+			ReasonCodes:   []collector.ProcessNetworkCapabilityReason{collector.ReasonSourceUnavailable},
+			ObservedAt:    now,
+			TransitionAt:  now,
+			ValidUntil:    now.Add(time.Minute),
+			NextRecheckAt: now,
+			SourceQuality: "UNAVAILABLE",
+		}
+	}
+	body := processNetworkCapabilityEvidence(snap)
+	body["document_type"] = "CAPABILITY_EVIDENCE"
+	body["component"] = componentName
+	body["capability"] = "process_network_ebpf"
+	body["ts"] = nowTimestamp()
+	writeJSON(w, http.StatusOK, body)
+}
+
+func processNetworkCapabilityEvidence(s collector.ProcessNetworkCapabilitySnapshot) map[string]any {
+	s = s.Fresh(time.Now())
+	reasons := make([]string, len(s.ReasonCodes))
+	for i := range s.ReasonCodes {
+		reasons[i] = string(s.ReasonCodes[i])
+	}
+	return map[string]any{
+		"state":              string(s.State),
+		"reason_codes":       reasons,
+		"observed_at":        supportTime(s.ObservedAt),
+		"transition_at":      supportTime(s.TransitionAt),
+		"last_success_at":    supportTime(s.LastSuccessAt),
+		"valid_until":        supportTime(s.ValidUntil),
+		"next_recheck_at":    supportTime(s.NextRecheckAt),
+		"attempt_count":      s.AttemptCount,
+		"kernel_fingerprint": s.KernelFingerprint,
+		"os":                 s.OS,
+		"arch":               s.Arch,
+		"kernel_release":     s.KernelRelease,
+		"boot_id_digest":     s.BootIDDigest,
+		"btf_present":        s.BTFPresent,
+		"btf_regular":        s.BTFRegular,
+		"btf_readable":       s.BTFReadable,
+		"btf_digest":         s.BTFDigest,
+		"btf_digest_bytes":   s.BTFDigestBytes,
+		"cap_bpf":            s.CAPBPF,
+		"cap_perfmon":        s.CAPPerfmon,
+		"security_context":   s.SecurityContext,
+		"kernel_compatible":  s.KernelCompatible,
+		"preflight_passed":   s.PreflightPassed,
+		"resource_guard":     s.Resource,
+		"source_quality":     s.SourceQuality,
+	}
+}
+
+func supportTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func (s *Server) snapshot() RuntimeSnapshot {

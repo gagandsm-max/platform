@@ -57,8 +57,9 @@ type AgentService struct {
 	healthSrv *health.Server
 	logger    *slog.Logger
 
-	version           string
-	serviceInstanceID string
+	version                  string
+	serviceInstanceID        string
+	processNetworkCapability collector.ProcessNetworkCapabilitySnapshot
 
 	// registryOverride is applied only during NewAgentService construction.
 	registryOverride *collector.Registry
@@ -84,6 +85,15 @@ func WithSupportabilityIdentity(version, serviceInstanceID string) ServiceOption
 		if strings.TrimSpace(serviceInstanceID) != "" {
 			s.serviceInstanceID = serviceInstanceID
 		}
+	}
+}
+
+// WithProcessNetworkCapability attaches immutable optional preflight evidence.
+// It does not participate in Agent lifecycle, readiness, scheduler, queue, or
+// delivery decisions.
+func WithProcessNetworkCapability(snapshot collector.ProcessNetworkCapabilitySnapshot) ServiceOption {
+	return func(s *AgentService) {
+		s.processNetworkCapability = snapshot.Copy()
 	}
 }
 
@@ -489,13 +499,14 @@ func (s *AgentService) RuntimeSnapshot() health.RuntimeSnapshot {
 	}
 
 	return health.RuntimeSnapshot{
-		Lifecycle:          life,
-		Queue:              qStats,
-		Delivery:           dStats,
-		SchedulerRunning:   st.Running,
-		EnabledCollectors:  st.EnabledCollectors,
-		Collectors:         collectors,
-		CollectorLastRun:   st.LastRun,
-		CollectorRunErrors: st.RunErrors,
+		Lifecycle:                life,
+		Queue:                    qStats,
+		Delivery:                 dStats,
+		SchedulerRunning:         st.Running,
+		EnabledCollectors:        st.EnabledCollectors,
+		Collectors:               collectors,
+		CollectorLastRun:         st.LastRun,
+		CollectorRunErrors:       st.RunErrors,
+		ProcessNetworkCapability: s.processNetworkCapability.Copy(),
 	}
 }

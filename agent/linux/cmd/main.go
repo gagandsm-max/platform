@@ -12,6 +12,7 @@ import (
 	"platform/agent/common/config"
 	"platform/agent/common/identity"
 	"platform/agent/common/supportability"
+	"platform/agent/linux/ebpf"
 )
 
 const (
@@ -64,9 +65,28 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// Optional eBPF preflight is isolated behind one one-shot boundary so a
+	// stalled procfs/sysfs read cannot hold AgentService construction/Start,
+	// scheduler, collectors, queue/delivery, or liveness/readiness past the
+	// governed timeout. Late completions are discarded by RunStartup.
+	capability := ebpf.New(ebpf.Config{
+		Enabled:           cfg.EBPFEnabled,
+		PreflightTimeout:  cfg.EBPFPreflightTimeout,
+		RecheckMin:        cfg.EBPFRecheckMin,
+		RecheckMax:        cfg.EBPFRecheckMax,
+		LowWaterSatisfied: true,
+	}).RunStartup(ctx, nil)
+	logger.Info("Linux eBPF capability preflight completed",
+		"event_code", "AGENT_EBPF_PREFLIGHT_COMPLETED",
+		"safe_context", map[string]any{
+			"state":        capability.State,
+			"reason_codes": capability.ReasonCodes,
+			"next_recheck": capability.NextRecheckAt,
+		})
 
 	svc, err := common.NewAgentService(cfg, ident, nil, logger,
-		common.WithSupportabilityIdentity(agentVersion, serviceInstanceID))
+		common.WithSupportabilityIdentity(agentVersion, serviceInstanceID),
+		common.WithProcessNetworkCapability(capability))
 	if err != nil {
 		logger.Error("Failed to initialize agent service",
 			"event_code", "AGENT_SERVICE_INIT_FAILED",

@@ -14,29 +14,33 @@ import (
 )
 
 var allowedEnvVars = map[string]bool{
-	"PLATFORM_AGENT_TENANT_ID":           true,
-	"PLATFORM_AGENT_SENSOR_URL":          true,
-	"PLATFORM_AGENT_CORE_URL":            true,
-	"PLATFORM_AGENT_CA_FILE":             true,
-	"PLATFORM_AGENT_CERT_FILE":           true,
-	"PLATFORM_AGENT_KEY_FILE":            true,
-	"PLATFORM_AGENT_ID":                  true,
-	"PLATFORM_AGENT_SITE_ID":             true,
-	"PLATFORM_AGENT_STATE_DIR":           true,
-	"PLATFORM_AGENT_COLLECTION_INTERVAL": true,
-	"PLATFORM_AGENT_COLLECTION_TIMEOUT":  true,
-	"PLATFORM_AGENT_HEALTH_ADDRESS":      true,
-	"PLATFORM_AGENT_MAX_BUFFER_RECORDS":  true,
-	"PLATFORM_AGENT_MAX_BUFFER_BYTES":    true,
-	"PLATFORM_AGENT_MAX_RECORD_BYTES":    true,
-	"PLATFORM_AGENT_MAX_BATCH_RECORDS":   true,
-	"PLATFORM_AGENT_MAX_BATCH_BYTES":     true,
-	"PLATFORM_AGENT_MAX_FILESYSTEMS":     true,
-	"PLATFORM_AGENT_RETRY_BASE":          true,
-	"PLATFORM_AGENT_RETRY_MAX":           true,
-	"PLATFORM_AGENT_DELIVERY_TIMEOUT":    true,
-	"PLATFORM_LOG_LEVEL":                 true,
-	"PLATFORM_ENV":                       true,
+	"PLATFORM_AGENT_TENANT_ID":              true,
+	"PLATFORM_AGENT_SENSOR_URL":             true,
+	"PLATFORM_AGENT_CORE_URL":               true,
+	"PLATFORM_AGENT_CA_FILE":                true,
+	"PLATFORM_AGENT_CERT_FILE":              true,
+	"PLATFORM_AGENT_KEY_FILE":               true,
+	"PLATFORM_AGENT_ID":                     true,
+	"PLATFORM_AGENT_SITE_ID":                true,
+	"PLATFORM_AGENT_STATE_DIR":              true,
+	"PLATFORM_AGENT_COLLECTION_INTERVAL":    true,
+	"PLATFORM_AGENT_COLLECTION_TIMEOUT":     true,
+	"PLATFORM_AGENT_HEALTH_ADDRESS":         true,
+	"PLATFORM_AGENT_MAX_BUFFER_RECORDS":     true,
+	"PLATFORM_AGENT_MAX_BUFFER_BYTES":       true,
+	"PLATFORM_AGENT_MAX_RECORD_BYTES":       true,
+	"PLATFORM_AGENT_MAX_BATCH_RECORDS":      true,
+	"PLATFORM_AGENT_MAX_BATCH_BYTES":        true,
+	"PLATFORM_AGENT_MAX_FILESYSTEMS":        true,
+	"PLATFORM_AGENT_RETRY_BASE":             true,
+	"PLATFORM_AGENT_RETRY_MAX":              true,
+	"PLATFORM_AGENT_DELIVERY_TIMEOUT":       true,
+	"PLATFORM_AGENT_EBPF_ENABLED":           true,
+	"PLATFORM_AGENT_EBPF_PREFLIGHT_TIMEOUT": true,
+	"PLATFORM_AGENT_EBPF_RECHECK_MIN":       true,
+	"PLATFORM_AGENT_EBPF_RECHECK_MAX":       true,
+	"PLATFORM_LOG_LEVEL":                    true,
+	"PLATFORM_ENV":                          true,
 }
 
 const (
@@ -59,30 +63,34 @@ const (
 )
 
 type Config struct {
-	TenantID           string
-	SensorURL          string
-	CoreURL            string
-	CAFile             string
-	CertFile           string
-	KeyFile            string
-	AgentID            string
-	SiteID             string
-	StateDir           string
-	QueueDir           string
-	CollectionInterval time.Duration
-	CollectionTimeout  time.Duration
-	HealthAddress      string
-	MaxBufferRecords   int
-	MaxBufferBytes     int64
-	MaxRecordBytes     int
-	MaxBatchRecords    int
-	MaxBatchBytes      int64
-	MaxFilesystems     int
-	RetryBase          time.Duration
-	RetryMax           time.Duration
-	DeliveryTimeout    time.Duration
-	LogLevel           string
-	Environment        string
+	TenantID             string
+	SensorURL            string
+	CoreURL              string
+	CAFile               string
+	CertFile             string
+	KeyFile              string
+	AgentID              string
+	SiteID               string
+	StateDir             string
+	QueueDir             string
+	CollectionInterval   time.Duration
+	CollectionTimeout    time.Duration
+	HealthAddress        string
+	MaxBufferRecords     int
+	MaxBufferBytes       int64
+	MaxRecordBytes       int
+	MaxBatchRecords      int
+	MaxBatchBytes        int64
+	MaxFilesystems       int
+	RetryBase            time.Duration
+	RetryMax             time.Duration
+	DeliveryTimeout      time.Duration
+	EBPFEnabled          bool
+	EBPFPreflightTimeout time.Duration
+	EBPFRecheckMin       time.Duration
+	EBPFRecheckMax       time.Duration
+	LogLevel             string
+	Environment          string
 }
 
 func LoadConfig() (*Config, error) {
@@ -237,6 +245,46 @@ func LoadConfigFromEnv(environ []string) (*Config, error) {
 	}
 	if c.RetryMax < c.RetryBase {
 		return nil, errors.New("CONFIG_RETRY_BOUNDS_INVALID: RETRY_MAX cannot be less than RETRY_BASE")
+	}
+
+	// Optional eBPF enrichment remains default-off. These settings control only
+	// the stdlib preflight/recheck evidence seam; no kernel backend exists here.
+	c.EBPFEnabled = false
+	if val := strings.TrimSpace(envMap["PLATFORM_AGENT_EBPF_ENABLED"]); val != "" {
+		switch val {
+		case "true":
+			c.EBPFEnabled = true
+		case "false":
+		default:
+			return nil, errors.New("CONFIG_EBPF_ENABLED_INVALID: must be true or false")
+		}
+	}
+	c.EBPFPreflightTimeout = 2 * time.Second
+	if val := envMap["PLATFORM_AGENT_EBPF_PREFLIGHT_TIMEOUT"]; val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d < 100*time.Millisecond || d > 10*time.Second {
+			return nil, errors.New("CONFIG_EBPF_PREFLIGHT_TIMEOUT_OUT_OF_BOUNDS: must be between 100ms and 10s")
+		}
+		c.EBPFPreflightTimeout = d
+	}
+	c.EBPFRecheckMin = 5 * time.Minute
+	if val := envMap["PLATFORM_AGENT_EBPF_RECHECK_MIN"]; val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d < time.Minute || d > 24*time.Hour {
+			return nil, errors.New("CONFIG_EBPF_RECHECK_MIN_OUT_OF_BOUNDS: must be between 1m and 24h")
+		}
+		c.EBPFRecheckMin = d
+	}
+	c.EBPFRecheckMax = time.Hour
+	if val := envMap["PLATFORM_AGENT_EBPF_RECHECK_MAX"]; val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil || d < time.Minute || d > 24*time.Hour {
+			return nil, errors.New("CONFIG_EBPF_RECHECK_MAX_OUT_OF_BOUNDS: must be between 1m and 24h")
+		}
+		c.EBPFRecheckMax = d
+	}
+	if c.EBPFRecheckMax < c.EBPFRecheckMin {
+		return nil, errors.New("CONFIG_EBPF_RECHECK_BOUNDS_INVALID: RECHECK_MAX cannot be less than RECHECK_MIN")
 	}
 
 	// 6. Health address (loopback only)

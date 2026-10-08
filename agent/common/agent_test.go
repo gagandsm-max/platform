@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"platform/agent/common/client"
+	"platform/agent/common/collector"
 	"platform/agent/common/config"
 	"platform/agent/common/identity"
 )
@@ -129,6 +130,50 @@ func TestAgentServiceWiresHTTPSTransport(t *testing.T) {
 	}
 	if _, ok := svc.transport.(*client.HTTPSTransport); !ok {
 		t.Fatalf("expected *client.HTTPSTransport, got %T", svc.transport)
+	}
+}
+
+func TestOptionalEBPFCapabilityDoesNotBlockSchedulerStartup(t *testing.T) {
+	tempDir := t.TempDir()
+	cfg := &config.Config{
+		TenantID:           "tenant-test",
+		SensorURL:          "https://sensor.platform.local:8443",
+		StateDir:           tempDir,
+		QueueDir:           filepath.Join(tempDir, "queue"),
+		HealthAddress:      "127.0.0.1:0",
+		CollectionInterval: time.Hour,
+		CollectionTimeout:  500 * time.Millisecond,
+		DeliveryTimeout:    500 * time.Millisecond,
+		RetryBase:          10 * time.Millisecond,
+		RetryMax:           50 * time.Millisecond,
+		MaxBufferRecords:   100,
+		MaxBufferBytes:     1024 * 1024,
+		MaxRecordBytes:     64 * 1024,
+		MaxBatchRecords:    10,
+		MaxBatchBytes:      384 * 1024,
+		MaxFilesystems:     8,
+	}
+	ident := &identity.AgentIdentity{AgentID: "agent-ebpf-optional", TenantID: "tenant-test", HostID: "host-ebpf-optional", OS: "linux", Arch: "amd64"}
+	capability := collector.ProcessNetworkCapabilitySnapshot{
+		State:       collector.ProcessNetworkCapabilityKernelIncompatible,
+		ReasonCodes: []collector.ProcessNetworkCapabilityReason{collector.ReasonBTFMissing},
+		ObservedAt:  time.Now().UTC(),
+		ValidUntil:  time.Now().UTC().Add(time.Hour),
+	}
+	svc, err := NewAgentService(cfg, ident, client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil, WithProcessNetworkCapability(capability))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("optional eBPF evidence blocked Agent start: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+	snapshot := svc.RuntimeSnapshot()
+	if !snapshot.SchedulerRunning {
+		t.Fatal("scheduler did not start while optional eBPF was incompatible")
+	}
+	if snapshot.ProcessNetworkCapability.State != collector.ProcessNetworkCapabilityKernelIncompatible {
+		t.Fatalf("capability snapshot not preserved: %+v", snapshot.ProcessNetworkCapability)
 	}
 }
 
