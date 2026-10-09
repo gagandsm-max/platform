@@ -1192,3 +1192,13 @@ Maturity remains `SPECIFIED` until corresponding production source exists. Docum
 ## 18. v3.3.0 formal-ID allocation note
 
 ACP-001..ACP-018 adds only the collision-free IDs indexed above: `REQ-EMC-023..026`, `REQ-NET-017`, `REQ-OTEL-001..006`, `REQ-NCM-006..012`, `REQ-INT-006..013`, `REQ-CMDB-001..007` and `PRD-EMC-023..026`. Investigation Workbench remains under `REQ-RCA-012`; Path Intelligence strengthens `REQ-NET-016`; browser journeys remain `PRD-EGC-013/REQ-EGC-012`; database and virtualization depth extend `REQ-INF-007` and `REQ-INF-004`. No duplicate subsystem family is created.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 traceability overlay — Founder decision 2026-10-09
+
+Issue #196 changes certification applicability, not requirement identity. Existing REQ/PRD IDs remain canonical and are not renumbered or duplicated.
+
+- A Phase-1 certification claim must trace every requirement applicable to the single-customer / standalone-Core profile and explicitly mark Phase-1.5-only HA/MSP obligations as out-of-profile, not silently PASS.
+- Optional certified modules are traced and certified only when included in the declared Phase-1 product profile.
+- Phase 1.5 reuses the same requirement IDs and adds the HA/MSP failure/security/capacity evidence applicable to that profile.
+- No requirement may be deleted merely because it moves out of the Phase-1 certification envelope.
