@@ -63,7 +63,16 @@ const (
 	ReasonEvidenceStale         ProcessNetworkCapabilityReason = "EVIDENCE_STALE"
 	ReasonPreflightTimeout      ProcessNetworkCapabilityReason = "PREFLIGHT_TIMEOUT"
 	ReasonPreflightCancelled    ProcessNetworkCapabilityReason = "PREFLIGHT_CANCELLED"
-	ReasonSourceUnavailable     ProcessNetworkCapabilityReason = "SOURCE_UNAVAILABLE"
+	ReasonSourceUnavailable        ProcessNetworkCapabilityReason = "SOURCE_UNAVAILABLE"
+	ReasonObjectIntegrityFailed    ProcessNetworkCapabilityReason = "OBJECT_INTEGRITY_FAILED"
+	ReasonVerifierRejected         ProcessNetworkCapabilityReason = "BACKEND_VERIFIER_REJECTED"
+	ReasonTracepointUnavailable    ProcessNetworkCapabilityReason = "BACKEND_TRACEPOINT_UNAVAILABLE"
+	ReasonAttachFailed             ProcessNetworkCapabilityReason = "BACKEND_ATTACH_FAILED"
+	ReasonLoadFailed               ProcessNetworkCapabilityReason = "BACKEND_LOAD_FAILED"
+	ReasonReaderFailed             ProcessNetworkCapabilityReason = "READER_FAILED"
+	ReasonOptionalProbeUnavailable ProcessNetworkCapabilityReason = "OPTIONAL_PROBE_UNAVAILABLE"
+	ReasonBackendNotWired          ProcessNetworkCapabilityReason = "BACKEND_NOT_WIRED"
+	ReasonBackendStopped           ProcessNetworkCapabilityReason = "BACKEND_STOPPED"
 )
 
 // ProcessNetworkCapabilityPresence exposes capability evidence without raw

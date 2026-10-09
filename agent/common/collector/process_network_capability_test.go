@@ -50,11 +50,11 @@ func TestProcessNetworkCapabilityFreshUsesExclusiveValidityBound(t *testing.T) {
 func TestProcessNetworkCapabilitySnapshotCopyDoesNotAliasReasons(t *testing.T) {
 	original := ProcessNetworkCapabilitySnapshot{
 		State:       ProcessNetworkCapabilityUnavailable,
-		ReasonCodes: []ProcessNetworkCapabilityReason{ReasonBackendNotImplemented},
+		ReasonCodes: []ProcessNetworkCapabilityReason{ReasonBackendNotWired},
 	}
 	copy := original.Copy()
 	copy.ReasonCodes[0] = ReasonSourceUnavailable
-	if original.ReasonCodes[0] != ReasonBackendNotImplemented {
+	if original.ReasonCodes[0] != ReasonBackendNotWired {
 		t.Fatal("snapshot copy aliases reason codes")
 	}
 }

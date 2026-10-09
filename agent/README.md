@@ -31,11 +31,36 @@ Default registered collectors (`cpu`, `memory`, `filesystem`, `pressure`, `diski
 
 BUILD-011 Slice 3 adds a **local, unwired** Linux process/service source (`LinuxProcessServiceSource`) that reads bounded `/proc` identity/runtime facts and optional read-only systemd unit evidence. It reuses the Slice-1 selector/catalogue contracts, never registers as a `HostCollector`, never encodes the catalogue into scalar metric labels, and does not claim Agent→Sensor structured delivery (BUILD-016/062). Customer alert/policy evaluation remains BUILD-070.
 
-The next BUILD-011 checkpoint adds a standard-library-only, non-loading Linux eBPF capability preflight. It uses fixed, bounded, read-only sources (`/proc/sys/kernel/osrelease`, `/proc/sys/kernel/random/boot_id`, `/proc/self/status`, optional coarse `/proc/self/attr/current`, and `/sys/kernel/btf/vmlinux` metadata/readability plus a bounded digest prefix). It parses `CapEff`, `CapPrm`, `CapBnd`, and `CapAmb` explicitly for `CAP_BPF` and `CAP_PERFMON`; UID/root is never treated as capability evidence. The public state vocabulary is exactly `ACTIVE`, `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, and `RESOURCE_GUARDED`.
+### Bounded Linux eBPF process-network (BUILD-011 Slice 7)
 
-This remains a preflight boundary, not a kernel backend. No BPF dependency, bytecode, object, loader, attach point, map, ring/perf buffer, subprocess, systemd capability change, or continuous reader exists. Even when compatibility checks pass, the truthful state is `UNAVAILABLE` with `BACKEND_NOT_IMPLEMENTED`. Optional capability evidence is exposed separately at `/capabilities/process-network-ebpf` on the same loopback-only health server so the governed `/health` support-evidence schema remains unchanged. It never changes `/live`, `/ready`, scheduler operation, scalar collection, durable queue/delivery, or monitored host/process/service/network state.
+The **base Agent** (host collectors, durable queue, Sensor delivery, health) is independent of eBPF. Optional process-network enrichment is default-off (`PLATFORM_AGENT_EBPF_ENABLED=false`). When unsupported, privilege-denied, kernel-incompatible, or resource-guarded, the base Agent continues; eBPF never takes precedence over protected workloads.
 
-This checkpoint does not collect process command lines, environment variables, packet contents, arbitrary command output, application traces, or unrestricted process data. Collector failure is monitoring-health/degraded evidence, never authoritative host DOWN.
+**Slice 7** implements the governed kernel backend under `agent/linux/ebpf/`. Intended data path:
+
+1. Kernel classic tracepoint `sock/inet_sock_set_state` (primary, required for `ACTIVE`).
+2. Bounded in-kernel HASH connection state + ring buffer (+ discrete loss counters).
+3. Userspace ring reader → fixed ABI decoder → bounded channel/batch.
+4. `ProcessNetworkAggregator.Ingest` → `StructuredEvidenceSink`.
+
+Optional probe `tcp/tcp_retransmit_skb` is independently degradable: primary can stay `ACTIVE` with reason `OPTIONAL_PROBE_UNAVAILABLE` if the retransmit program fails to load/attach.
+
+Observable loss classes (counted once, never invent “zero loss”): `MAP_UPDATE_FAIL`, `RING_RESERVE_FAIL`, `DECODER_REJECT`, `USERSPACE_CHANNEL_FULL`.
+
+Public capability states remain exactly: `ACTIVE`, `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`. Preflight uses fixed, bounded, read-only sources (`/proc/sys/kernel/osrelease`, `/proc/sys/kernel/random/boot_id`, `/proc/self/status`, optional `/proc/self/attr/current`, `/sys/kernel/btf/vmlinux` metadata/digest prefix). It parses `CapEff`/`CapPrm`/`CapBnd`/`CapAmb` for `CAP_BPF` and `CAP_PERFMON` only; UID/root is never capability evidence.
+
+**Slice-8 boundary:** production `AgentService` still runs preflight only at startup. Compatible preflight reports `UNAVAILABLE` with `BACKEND_NOT_WIRED` until Slice 8 wires `Backend.Start` after `RUNNING`. The backend package exposes `Start` / `StopContext` / `Capability` for that wiring; this slice does not claim live attach in the shipped Agent process path. Stale reason `BACKEND_NOT_IMPLEMENTED` is no longer the truthful compatible outcome.
+
+Capability evidence is at loopback `/capabilities/process-network-ebpf` (same health server; `/health` schema unchanged). eBPF never changes `/live`, `/ready`, scheduler, scalar collectors, durable queue/delivery, or host DOWN semantics. Collector/eBPF failure is monitoring-health/degraded or enrichment-quality evidence only.
+
+**Security / data minimization:** least privilege is `CAP_BPF` + `CAP_PERFMON` (or target-kernel equivalent). Do not broaden to `--privileged`, `CAP_SYS_ADMIN`, `CAP_NET_ADMIN`, or `CAP_NET_RAW` for this feature. No payload, TLS contents, HTTP body, SQL text, env vars, or process cmdline. Comm is the bounded kernel `comm` only. Attach surface is classic tracepoints only — no XDP, tc, LSM, socket-filter, kprobe, or uprobe. Object load fail-closes on embedded-object admission/allowlists before kernel map/program creation; no arbitrary object path, no target-host BPF compilation, no bpffs pins.
+
+**Structured transport (still truthful):** default sink is `UnwiredStructuredEvidenceSink` with delivery state `TRANSPORT_NOT_WIRED` and `ErrStructuredTransportNotWired`. Physical Agent→Sensor structured delivery remains BUILD-016/062; Slice 7 does not claim that path.
+
+**Non-goals:** separate eBPF microservice or datastore; always-on DPI/PCAP; full APM; BUILD-018 packaging delivery; BUILD-019 Sensor spillover claims; RHEL/arm64/Secure Boot certification; physical structured-delivery certification.
+
+**OSS-124:** temporary `IN_REPO_GOVERNED_REPLACE` of `github.com/cilium/ebpf` under `agent/third_party/github.com/cilium/ebpf/` (see `agent/third_party/OSS-124-PROVENANCE.md`). Not a general third-party dumping mechanism.
+
+Ops: [INSTALLATION.md](INSTALLATION.md), [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Support: support@amrudai.com · https://www.amrudai.com/docs
 
 ## Durable local buffer
 
@@ -88,8 +113,8 @@ Optional governed inputs:
 - `PLATFORM_AGENT_RETRY_BASE`
 - `PLATFORM_AGENT_RETRY_MAX`
 - `PLATFORM_AGENT_DELIVERY_TIMEOUT`
-- `PLATFORM_AGENT_EBPF_ENABLED` (default `false`; preflight evidence only)
-- `PLATFORM_AGENT_EBPF_PREFLIGHT_TIMEOUT` (default `2s`, bounded `100ms..10s`)
+- `PLATFORM_AGENT_EBPF_ENABLED` (default `false`; enables optional eBPF preflight/recheck evidence; production AgentService still does not Start the kernel backend until Slice 8)
+- `PLATFORM_AGENT_EBPF_PREFLIGHT_TIMEOUT` (default `2s`, bounded `100ms..10s`; bounds the one-shot startup preflight so stalled procfs/sysfs cannot hold base Agent start)
 - `PLATFORM_AGENT_EBPF_RECHECK_MIN` (default `5m`, bounded `1m..24h`)
 - `PLATFORM_AGENT_EBPF_RECHECK_MAX` (default `1h`, bounded `1m..24h` and not below the minimum)
 - `PLATFORM_LOG_LEVEL`

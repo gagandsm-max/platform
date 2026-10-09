@@ -494,7 +494,7 @@ func TestOptionalEBPFCapabilityEvidenceDoesNotAffectLiveOrReady(t *testing.T) {
 			prov := healthyProvider()
 			prov.processNetworkCapability = collector.ProcessNetworkCapabilitySnapshot{
 				State:             state,
-				ReasonCodes:       []collector.ProcessNetworkCapabilityReason{collector.ReasonBackendNotImplemented},
+				ReasonCodes:       []collector.ProcessNetworkCapabilityReason{collector.ReasonBackendNotWired},
 				ObservedAt:        time.Now().UTC(),
 				TransitionAt:      time.Now().UTC(),
 				ValidUntil:        time.Now().UTC().Add(time.Hour),

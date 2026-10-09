@@ -1,6 +1,9 @@
-// Package ebpf provides a standard-library-only, non-loading Linux eBPF
-// capability preflight. It never loads bytecode, creates maps, attaches hooks,
-// executes a subprocess, or accepts production filesystem paths from config.
+// Package ebpf provides the BUILD-011 Slice 7 bounded Linux eBPF
+// process-network kernel backend and its capability preflight.
+//
+// Preflight remains standard-library-only and never loads bytecode. Backend
+// Start fail-closes through governed object admission before kernel
+// interaction. AgentService Start-after-RUNNING wiring is Slice 8.
 package ebpf
 
 import (
@@ -203,9 +206,11 @@ func (c *Checker) emptyBase() collector.ProcessNetworkCapabilitySnapshot {
 }
 
 // Run collects a single bounded snapshot. A compatible result remains
-// UNAVAILABLE/BACKEND_NOT_IMPLEMENTED because this slice contains no backend.
-// Production Agent startup must use RunStartup so non-cooperative procfs/sysfs
-// stalls cannot hold the base Agent path past the governed timeout.
+// UNAVAILABLE/BACKEND_NOT_WIRED until Slice 8 wires Backend.Start into
+// AgentService. The kernel backend package exists in this package; preflight
+// alone never loads or attaches. Production Agent startup must use RunStartup
+// so non-cooperative procfs/sysfs stalls cannot hold the base Agent path past
+// the governed timeout.
 func (c *Checker) Run(parent context.Context, previous *collector.ProcessNetworkCapabilitySnapshot) collector.ProcessNetworkCapabilitySnapshot {
 	base := c.emptyBase()
 
@@ -346,9 +351,9 @@ func (c *Checker) Run(parent context.Context, previous *collector.ProcessNetwork
 	}
 
 	base.PreflightPassed = true
-	// There is deliberately no backend status probe or load attempt in this slice.
+	// Preflight never loads/attaches. AgentService Start wiring is Slice 8.
 	return c.finish(base, previous, collector.ProcessNetworkCapabilityUnavailable,
-		[]collector.ProcessNetworkCapabilityReason{collector.ReasonBackendNotImplemented})
+		[]collector.ProcessNetworkCapabilityReason{collector.ReasonBackendNotWired})
 }
 
 func (c *Checker) readText(ctx context.Context, path string, limit int64) (string, error) {
