@@ -1626,3 +1626,16 @@ These exact IDs are governed by the architecture decisions in §45.
 - `REQ-CMDB-004` — External CI relationships reuse the canonical temporal graph and preserve source/authority/confidence/freshness/lifecycle alongside observed technical relationships.
 - `REQ-OTEL-002` — OTLP tenant/source authority is server-derived from authenticated ingress; telemetry resource attributes are identity evidence, never tenant authorization.
 - `REQ-OTEL-004` — OTel reuses PostgreSQL control/policy, ClickHouse analytical history, Kafka internal transport and Valkey ephemeral/cache roles; no mandatory new telemetry/trace database is introduced.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 deployment architecture — Founder decision 2026-10-09
+
+### Phase 1
+One enterprise/customer uses one authoritative standalone Core. Multiple Sensors, Sensor Pools, Agents and sites are allowed. Sensor assignment generations/fencing and observation provenance remain required because one customer can operate multiple Sensors. Tenant-aware contracts remain canonical so Phase 1.5 does not require a schema/API fork.
+
+Phase-1 deletion ACKs are certified against the standalone failure matrix: process/service crash, restart/reboot and other explicitly certified recoverable failures. Catastrophic loss of the standalone Core/storage is governed by backup/DR RPO/RTO and is not falsely represented as RPO=0.
+
+### Phase 1.5
+Uses exactly two full Cores Active/Standby. Automatic promotion requires positive fencing/authority proof. Ambiguous partitions fail closed rather than permit dual writable authority. Phase 1.5 adds cross-Core durable-ACK guarantees, PostgreSQL/Kafka/ClickHouse continuity, former-Active rejoin, Sensor re-anchor/push continuity and shared MSP isolation.
+
+No third full Core, witness, new journal, quorum service or additional datastore is selected by this phase decision. Those mechanisms remain evidence-driven engineering choices inside the existing HA gates.
