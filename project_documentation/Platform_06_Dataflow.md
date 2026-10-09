@@ -1716,7 +1716,7 @@ Each test must prove source → normalized message → persistence → downstrea
 
 ## 73. Explicit Dataflow TBDs
 
-- Exact durable ingest acknowledgment boundary under the final two-Core Kafka/ClickHouse design.
+- Phase-1 standalone deletion-ACK durability boundary and failure matrix; Phase-1.5 cross-Core deletion-ACK barrier under the final two-Core PostgreSQL/Kafka/ClickHouse design.
 - Exact HA fencing mechanism.
 - Exact DR activation/endpoint switch automation and RPO/RTO.
 - GNN runtime/framework and feature serving transport.
@@ -2453,3 +2453,14 @@ ITSM approval is necessary where policy requires but is never sufficient to bypa
 
 - `REQ-INT-007` — Outbound integration flow is domain transaction -> PostgreSQL transactional outbox -> connector worker -> vendor API with deterministic operation identity, idempotency, retry/backoff+jitter, rate limits, quarantine/DLQ, pause/drain/replay, per-tenant quotas and lineage.
 - `REQ-INT-008` — Inbound flow is authenticated vendor event/webhook -> connector/tenant binding -> replay/idempotency validation -> PostgreSQL inbox -> normalized governed event; bounded updated-since/cursor polling is fallback when events are inadequate.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 dataflow overlay — 2026-10-09
+
+### Phase 1 standalone
+Sensor durable spool → authenticated Core ingestion → PostgreSQL pending reservation → Kafka transactional publication → PostgreSQL finalized watermark → accepted-through ACK → Sensor releases acknowledged spool segment.
+
+This flow is certified only against the declared standalone failure matrix. Full standalone-site/storage destruction uses backup/DR recovery semantics rather than a zero-RPO HA claim.
+
+### Phase 1.5 HA
+The same logical flow gains a certified cross-Core durability/authority barrier before deletion-authorizing ACK semantics qualify as RPO=0 for a permanent single-Core failure. During ambiguous partition or degraded redundancy, Sensors continue bounded local buffering; the platform may refuse deletion-authorizing ACKs rather than trade data integrity for superficial availability.
