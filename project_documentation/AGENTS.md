@@ -241,3 +241,16 @@ Non-negotiable boundaries:
 - Full developer-centric APM and full always-on DPI/NDR remain excluded. Existing bounded incident-triggered packet evidence remains governed under Platform_19.
 
 The v3.3.0 requirements are architecture/product authority only. Runtime implementation, benchmark, certification and deployment remain owned by their future BUILDs and evidence gates.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 execution envelope — Founder decision 2026-10-09
+
+Issue #196 is the governing phase-classification authority.
+
+- **Phase 1 is the commercial priority:** one customer / one enterprise deployment, one authoritative standalone Core, with multiple sites, Sensors, Sensor Pools and Agents allowed.
+- **Phase 1.5 extends the same architecture:** exactly-two-Core Active/Standby HA plus shared MSP/multi-customer certification. It is not a fork and must not duplicate schemas, APIs, transports, stores, policy engines or UI authorities.
+- Phase 1 keeps tenant-aware contracts, resource scoping, security, durable replay, backup/restore, upgrade, capacity, failure and supportability gates. Single-customer scope is never permission to remove tenant identifiers or weaken authorization.
+- Phase 1 has no Core-HA availability claim and no cross-Core deletion-ACK RPO=0 claim. Phase 1.5 owns positive fencing, PostgreSQL/Kafka/ClickHouse HA, Core failover/rejoin, Sensor re-anchor/push continuity and cross-Core deletion-ACK durability.
+- Existing BUILD IDs remain unchanged. Mixed-scope BUILDs certify explicit Phase-1 and Phase-1.5 subprofiles instead of spawning duplicate builds.
+- Do not pull BUILD-120–124 into the Phase-1 critical path. Do not defer ordinary multi-Sensor assignment fencing, monitoring correctness, No Data != Down, standalone durability, security, backup/restore or capacity certification merely because HA/MSP moved to Phase 1.5.
+- Advanced GNN/LLM and regional federation remain non-blocking roadmap capability unless separately promoted through change control.
