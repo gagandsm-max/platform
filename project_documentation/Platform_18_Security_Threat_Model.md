@@ -150,3 +150,10 @@ No new privilege, endpoint Python runtime, unrestricted shell/PowerShell facilit
 | Vendor rate-limit exhaustion | Bounded queues, token/rate budgets, Retry-After aware scheduling where available, exponential backoff+jitter and backlog recovery protection. |
 
 Full developer-centric APM, full always-on DPI/NDR and ticket/comment-driven arbitrary execution remain outside the approved trust boundary.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 threat-model applicability — 2026-10-09
+
+Phase 1 is single-customer, not single-user or trusted-network. It still requires strong authentication, server-side RBAC/resource authorization, mTLS component identity, credential/secret protection, least privilege, audit, input/rate controls, supply-chain security and safe privileged-action boundaries. Tenant-aware identifiers remain mandatory defense-in-depth and migration compatibility.
+
+Phase 1.5 adds mandatory adversarial cross-customer isolation, overlapping-address-space tests, shared-cache/query/graph/AI-context isolation, noisy-neighbour controls and two-Core split-brain/fencing threats. HA ambiguity must fail closed. Phase 1.5 cannot inherit a Phase-1 security PASS for these additional threats without independent evidence.
