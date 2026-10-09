@@ -604,3 +604,10 @@ Triggered Fast RCA is product terminology only. It does not create a second RCA/
 - NCM Change Assurance supplies intended diff, precheck/risk/blast snapshot, approval, execution/canary/batch/postcheck/stabilization/rollback evidence to Change Intelligence/RCA. A change preceding an incident is temporal correlation unless additional evidence supports causality.
 - Investigation Workbench presents the same evidence/RCA truth and must expose contradictions, missing/stale evidence, external-vs-observed provenance and `INCONCLUSIVE`; it does not introduce an independent confidence or causal model.
 - AI/LLM may summarize mappings, external notes, trace/log context or proposed remediation only through existing AI Gateway/data/tool-policy controls. Untrusted log/ticket/CMDB text remains prompt-injection input and cannot directly select a tenant, execute NCM, alter authority or bypass approval.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase applicability — 2026-10-09
+
+Phase 1 requires semantic monitoring state/evidence quality, No Data != Down, deterministic alert qualification, deterministic/evidence-backed RCA and INCONCLUSIVE behavior. Hosted/local LLM and GNN functionality is optional/non-authoritative and is not a Phase-1 GA dependency.
+
+Phase 1.5 adds HA/MSP-aware evidence and shared-estate isolation where applicable. Advanced AI remains optional unless separately promoted; AI resource or provider failure must never reduce protected monitoring correctness in either phase.
