@@ -1,7 +1,9 @@
 package ebpf
 
 import (
+	"math"
 	"sync/atomic"
+	"time"
 
 	"platform/agent/common/collector"
 )
@@ -75,6 +77,24 @@ func advanceAbs(counter *atomic.Uint64, absolute uint64) uint64 {
 			return absolute - prev
 		}
 	}
+}
+
+// backendDropEvent64 preserves the exact uint64 loss total in lossCounters
+// while producing one bounded event for the existing uint32 evidence schema.
+// Oversized deltas saturate visibly instead of wrapping or expanding into an
+// unbounded number of events.
+func backendDropEvent64(reason string, n uint64, at time.Time) collector.ProcessNetworkSyntheticEvent {
+	count, guarded := backendDropRepresentation(n)
+	ev := backendDropEvent(reason, count, at)
+	ev.ResourceGuarded = guarded
+	return ev
+}
+
+func backendDropRepresentation(n uint64) (uint32, bool) {
+	if n > math.MaxUint32 {
+		return math.MaxUint32, true
+	}
+	return uint32(n), false
 }
 
 func lossToQuality(total uint64) collector.ProcessNetworkQualityState {

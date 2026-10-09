@@ -13,9 +13,12 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 )
 
-// ErrBackendStopDeadline is returned when StopContext's caller deadline expires
-// before backend workers quiesce. Best-effort resource release still occurs.
+// ErrBackendStopDeadline is returned when StopContext's bounded caller deadline
+// expires before backend workers quiesce. Kernel handles remain worker-owned
+// until the final worker exits; they are never force-closed on this error.
 var ErrBackendStopDeadline = errors.New("BACKEND_STOP_DEADLINE")
+
+const defaultBackendStopTimeout = 5 * time.Second
 
 // Backend is the Slice-7 bounded Linux eBPF process-network kernel backend.
 // Lifecycle seam for Slice 8: Start / StopContext / Capability.
@@ -35,8 +38,14 @@ type Backend struct {
 	cancel       context.CancelFunc
 	workerRemain atomic.Int32
 	workersDone  chan struct{}
+	shutdownCtx  context.Context
+
+	readerCloseOnce sync.Once
+	finalizeOnce    sync.Once
+	closeHandles    func(*kernelHandles)
 
 	started           bool
+	stopRequested     bool
 	stopped           bool
 	optionalAvailable bool
 	capability        collector.ProcessNetworkCapabilitySnapshot
@@ -77,6 +86,9 @@ func NewBackend(cfg BackendConfig) (*Backend, error) {
 		cfg:        cfg.Config,
 		aggregator: cfg.Aggregator,
 		preflight:  New(cfg.Config),
+		closeHandles: func(handles *kernelHandles) {
+			handles.Close()
+		},
 		capability: collector.ProcessNetworkCapabilitySnapshot{
 			State:       collector.ProcessNetworkCapabilityUnavailable,
 			ReasonCodes: []collector.ProcessNetworkCapabilityReason{collector.ReasonFeatureDisabled},
@@ -131,14 +143,14 @@ func (b *Backend) OptionalProbeAttached() bool {
 func (b *Backend) Start(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.started && !b.stopped {
+	if b.stopRequested || b.stopped {
+		return errors.New("BACKEND_STOPPED")
+	}
+	if b.started {
 		if b.capability.State != collector.ProcessNetworkCapabilityActive {
 			return errors.New("BACKEND_RUNTIME_FAILED")
 		}
 		return nil
-	}
-	if b.stopped {
-		return errors.New("BACKEND_STOPPED")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -185,6 +197,7 @@ func (b *Backend) Start(ctx context.Context) error {
 	b.bootWall = time.Now().UTC()
 	b.monoBaseNs = 0 // decoder falls back to wall clock when unset
 	b.started = true
+	b.stopRequested = false
 	b.stopped = false
 	b.workersDone = make(chan struct{})
 	b.workerRemain.Store(int32(BackendGoroutines))
@@ -200,65 +213,121 @@ func (b *Backend) Start(ctx context.Context) error {
 	return nil
 }
 
-// StopContext is idempotent and releases links/maps/reader/goroutines.
-// If workers have not quiesced before the caller deadline, returns
-// ErrBackendStopDeadline after best-effort cleanup. Does not spawn a
-// Wait-goroutine that can outlive the caller indefinitely.
+// StopContext is idempotent and requests bounded graceful shutdown. The final
+// worker owns kernel-handle release, so a stop deadline can never force-close a
+// map/program/link that a worker may still dereference. No waiter goroutine is
+// spawned.
 func (b *Backend) StopContext(ctx context.Context) error {
+	stopCtx, stopCancel := boundedBackendStopContext(ctx)
+	defer stopCancel()
+
 	b.mu.Lock()
-	if !b.started || b.stopped {
+	if !b.started {
+		b.stopRequested = true
 		b.stopped = true
 		b.mu.Unlock()
 		return nil
 	}
-	cancel := b.cancel
-	rd := b.reader
-	handles := b.handles
 	done := b.workersDone
-	b.stopped = true
+	if b.stopRequested {
+		b.mu.Unlock()
+		return waitBackendWorkers(stopCtx, done)
+	}
+	cancel := b.cancel
+	b.stopRequested = true
+	b.shutdownCtx = stopCtx
+	if b.capability.State == collector.ProcessNetworkCapabilityActive {
+		now := time.Now().UTC()
+		b.capability.State = collector.ProcessNetworkCapabilityUnavailable
+		b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{collector.ReasonBackendStopped}
+		b.capability.ObservedAt = now
+		b.capability.TransitionAt = now
+		b.capability.PreflightPassed = false
+	}
 	b.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
 	}
-	if rd != nil {
-		_ = rd.Close()
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	var stopErr error
-	if done != nil {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			stopErr = fmt.Errorf("%w: %w", ErrBackendStopDeadline, ctx.Err())
-		}
-	}
-
-	if handles != nil {
-		handles.Close()
-	}
-	b.mu.Lock()
-	b.handles = nil
-	b.reader = nil
-	b.cancel = nil
-	if b.capability.State == collector.ProcessNetworkCapabilityActive {
-		b.capability.State = collector.ProcessNetworkCapabilityUnavailable
-		b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{collector.ReasonBackendStopped}
-		b.capability.ObservedAt = time.Now().UTC()
-	}
-	b.mu.Unlock()
-	return stopErr
+	b.closeReader()
+	return waitBackendWorkers(stopCtx, done)
 }
 
-// workerExit marks one backend worker finished. The final worker closes workersDone.
-// Must not call StopContext (avoids self-deadlock on the stop waiter).
+func boundedBackendStopContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if _, bounded := parent.Deadline(); bounded {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, defaultBackendStopTimeout)
+}
+
+func waitBackendWorkers(ctx context.Context, done <-chan struct{}) error {
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("%w: %w", ErrBackendStopDeadline, ctx.Err())
+	}
+}
+
+// workerExit marks one backend worker finished. The final worker releases the
+// reader and kernel handles exactly once before advertising quiescence.
 func (b *Backend) workerExit() {
 	if b.workerRemain.Add(-1) == 0 {
-		close(b.workersDone)
+		b.finalizeRuntimeResources()
+		b.mu.Lock()
+		done := b.workersDone
+		b.mu.Unlock()
+		if done != nil {
+			close(done)
+		}
 	}
+}
+
+func (b *Backend) closeReader() {
+	b.readerCloseOnce.Do(func() {
+		b.mu.Lock()
+		rd := b.reader
+		b.mu.Unlock()
+		if rd != nil {
+			_ = rd.Close()
+		}
+	})
+}
+
+func (b *Backend) finalizeRuntimeResources() {
+	b.finalizeOnce.Do(func() {
+		b.closeReader()
+		b.mu.Lock()
+		handles := b.handles
+		closeHandles := b.closeHandles
+		b.handles = nil
+		b.reader = nil
+		b.cancel = nil
+		b.shutdownCtx = nil
+		if b.stopRequested {
+			b.stopped = true
+		}
+		b.mu.Unlock()
+
+		if handles != nil {
+			if closeHandles != nil {
+				closeHandles(handles)
+			} else {
+				handles.Close()
+			}
+		}
+	})
 }
 
 // failRuntime transitions away from ACTIVE for a typed runtime failure, cancels
@@ -274,14 +343,11 @@ func (b *Backend) failRuntime(reason collector.ProcessNetworkCapabilityReason) {
 		b.capability.PreflightPassed = false
 	}
 	cancel := b.cancel
-	rd := b.reader
 	b.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	if rd != nil {
-		_ = rd.Close()
-	}
+	b.closeReader()
 }
 
 func (b *Backend) activeCapability(base collector.ProcessNetworkCapabilitySnapshot, extra []collector.ProcessNetworkCapabilityReason) collector.ProcessNetworkCapabilitySnapshot {
