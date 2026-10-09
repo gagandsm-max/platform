@@ -2283,7 +2283,7 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 - NCM/IPAM/CLI governance;
 - dashboards/studios/admin/RBAC/audit;
 - retention/rollups and 80% storage protection on Core and Sensor;
-- HA failover <60s with Sensor continuity;
+- for the **Phase 1.5 HA profile**, Core failover <60s with Sensor continuity; Phase 1 standalone has no HA availability/failover claim;
 - DR architecture/runbook and backup/restore verification;
 - HTTPS-only UI;
 - SBOM/licence/security scans;
