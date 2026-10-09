@@ -54,7 +54,7 @@ Optional probe `tcp/tcp_retransmit_skb` is independently degradable: primary can
 
 Observable loss/support classes (counted once, never invent “zero loss”): `MAP_UPDATE_FAIL`, `RING_RESERVE_FAIL`, `DECODER_REJECT`, `USERSPACE_CHANNEL_FULL`, plus `TRANSPORT_NOT_WIRED`, reader/aggregator fault counts when exposed on the capability endpoint.
 
-Public capability states remain exactly: `ACTIVE`, `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`.
+Public capability states remain exactly: `ACTIVE`, `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`. Positive reconciled kernel `MAP_UPDATE_FAIL` / `RING_RESERVE_FAIL` while `ACTIVE` latches `RESOURCE_GUARDED` (`RESOURCE_LIMIT`); this is enrichment capability evidence only — never host/service/network DOWN.
 
 **Security / data minimization:** least privilege is `CAP_BPF` + `CAP_PERFMON` (or target-kernel equivalent). Do not broaden to `--privileged`, `CAP_SYS_ADMIN`, `CAP_NET_ADMIN`, or `CAP_NET_RAW` for this feature. No payload, TLS contents, HTTP body, SQL text, env vars, or process cmdline. Comm is the bounded kernel `comm` only. Attach surface is classic tracepoints only — no XDP, tc, LSM, socket-filter, kprobe, or uprobe. Object load fail-closes on embedded-object admission/allowlists before kernel map/program creation; no arbitrary object path, no target-host BPF compilation, no bpffs pins.
 

@@ -656,8 +656,11 @@ func TestStopDeadlineRetainsHandlesUntilFinalWorkerExit(t *testing.T) {
 	if finalHandles != nil || !finalStopped {
 		t.Fatalf("final cleanup incomplete: handles=%p stopped=%v", finalHandles, finalStopped)
 	}
-	if err := b.StopContext(context.Background()); err != nil {
-		t.Fatalf("post-cleanup idempotent stop: %v", err)
+	// Prior stop exhausted the flush budget; idempotent Stop must keep surfacing
+	// incomplete-flush evidence rather than rewriting history as success.
+	if err := b.StopContext(context.Background()); err == nil ||
+		(!errors.Is(err, ErrBackendShutdownFlush) && !errors.Is(err, ErrBackendStopDeadline)) {
+		t.Fatalf("post-cleanup idempotent stop must retain flush-incomplete evidence, got %v", err)
 	}
 	if closed.Load() != 1 {
 		t.Fatalf("idempotent stop double-closed handles: %d", closed.Load())
@@ -935,5 +938,221 @@ func TestStartAfterRuntimeFailureRejected(t *testing.T) {
 	_ = b.handleRingReadError(ctx, errors.New("ring I/O boom"))
 	if err := b.Start(context.Background()); err == nil || err.Error() != "BACKEND_RUNTIME_FAILED" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestNormalBackendShutdownFlushesPendingRecords(t *testing.T) {
+	agg, sink := testAgg(t)
+	b, err := NewBackend(BackendConfig{
+		Config:     Config{Enabled: false, PreflightTimeout: time.Second, RecheckMin: time.Minute},
+		Aggregator: agg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, runtimeCancel := startIngestLoopWithPendingOldEvent(t, b)
+	defer runtimeCancel()
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stopCancel()
+	if err := b.StopContext(stopCtx); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	if len(sink.ProcessNetwork)+len(sink.ProcessNetworkAccounting) == 0 {
+		t.Fatal("pending records must flush on governed Backend.StopContext")
+	}
+	cap := b.Capability()
+	if cap.State != collector.ProcessNetworkCapabilityUnavailable || !hasReason(cap, collector.ReasonBackendStopped) {
+		t.Fatalf("want BACKEND_STOPPED got %+v", cap)
+	}
+}
+
+func TestRuntimeCancelBeforeStopContextDropsPendingFlush(t *testing.T) {
+	// Exposes the P1-A mechanism: canceling the backend runtime before
+	// StopContext installs shutdownCtx discards pending ingest.
+	agg, sink := testAgg(t)
+	b, err := NewBackend(BackendConfig{
+		Config:     Config{Enabled: false, PreflightTimeout: time.Second, RecheckMin: time.Minute},
+		Aggregator: agg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, cancel := startIngestLoopWithPendingOldEvent(t, b)
+	cancel() // defect order: runtime cancel before StopContext
+	select {
+	case <-b.workersDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ingest worker did not exit after runtime cancel")
+	}
+	if got := len(sink.ProcessNetwork) + len(sink.ProcessNetworkAccounting); got != 0 {
+		t.Fatalf("cancel-before-stop unexpectedly delivered %d records", got)
+	}
+	if err := b.StopContext(context.Background()); err != nil {
+		t.Fatalf("late StopContext: %v", err)
+	}
+	if got := len(sink.ProcessNetwork) + len(sink.ProcessNetworkAccounting); got != 0 {
+		t.Fatalf("late StopContext must not invent delivery after cancel-first loss: %d", got)
+	}
+}
+
+func TestShutdownFlushFailureSurfacedNotSilentSuccess(t *testing.T) {
+	sink := newContextBlockingSink(nil)
+	b := testBackendWithSink(t, sink)
+	_, runtimeCancel := startIngestLoopWithPendingOldEvent(t, b)
+	defer runtimeCancel()
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer stopCancel()
+	err := b.StopContext(stopCtx)
+	if err == nil {
+		t.Fatal("budget-exhausted shutdown flush must not report successful Stop")
+	}
+	if !errors.Is(err, ErrBackendStopDeadline) && !errors.Is(err, ErrBackendShutdownFlush) {
+		t.Fatalf("want stop-deadline/flush-incomplete evidence, got %v", err)
+	}
+}
+
+func TestPositiveKernelMapLossTransitionsResourceGuarded(t *testing.T) {
+	b := testBackendInactive(t)
+	ctx, cancel := armRuntime(b)
+	defer cancel()
+
+	mapDelta, ringDelta := b.loss.reconcileKernelAbs(3, 0)
+	if mapDelta != 3 || ringDelta != 0 {
+		t.Fatalf("mapDelta=%d ringDelta=%d", mapDelta, ringDelta)
+	}
+	if mapDelta > 0 || ringDelta > 0 {
+		b.guardCapabilityForKernelLoss()
+	}
+	if fatal := b.emitDrop(ctx, LossClassMapUpdateFail, mapDelta); fatal {
+		t.Fatal("BACKEND_DROP must not be fatal")
+	}
+	cap := b.Capability()
+	if cap.State != collector.ProcessNetworkCapabilityResourceGuarded {
+		t.Fatalf("state=%s want RESOURCE_GUARDED", cap.State)
+	}
+	if !hasReason(cap, collector.ReasonResourceLimit) {
+		t.Fatalf("want RESOURCE_LIMIT got %+v", cap)
+	}
+	if snap := b.LossSnapshot()[LossClassMapUpdateFail]; snap != 3 {
+		t.Fatalf("exact loss authority=%d", snap)
+	}
+	// Zero additional loss must not fabricate recovery to ACTIVE.
+	mapDelta, _ = b.loss.reconcileKernelAbs(3, 0)
+	if mapDelta != 0 {
+		t.Fatalf("repeat delta=%d", mapDelta)
+	}
+	b.guardCapabilityForKernelLoss()
+	if b.Capability().State != collector.ProcessNetworkCapabilityResourceGuarded {
+		t.Fatal("guard must remain latched without verified low-water recovery")
+	}
+	if ctx.Err() != nil {
+		t.Fatal("kernel loss must not cancel protected runtime")
+	}
+}
+
+func TestPositiveKernelRingLossTransitionsResourceGuarded(t *testing.T) {
+	b := testBackendInactive(t)
+	ctx, cancel := armRuntime(b)
+	defer cancel()
+
+	mapDelta, ringDelta := b.loss.reconcileKernelAbs(0, 2)
+	if mapDelta != 0 || ringDelta != 2 {
+		t.Fatalf("mapDelta=%d ringDelta=%d", mapDelta, ringDelta)
+	}
+	b.guardCapabilityForKernelLoss()
+	if fatal := b.emitDrop(ctx, LossClassRingReserveFail, ringDelta); fatal {
+		t.Fatal("ring BACKEND_DROP must not be fatal")
+	}
+	cap := b.Capability()
+	if cap.State != collector.ProcessNetworkCapabilityResourceGuarded || !hasReason(cap, collector.ReasonResourceLimit) {
+		t.Fatalf("want RESOURCE_GUARDED/RESOURCE_LIMIT got %+v", cap)
+	}
+	if b.LossSnapshot()[LossClassRingReserveFail] != 2 {
+		t.Fatalf("ring loss=%d", b.LossSnapshot()[LossClassRingReserveFail])
+	}
+}
+
+func TestFatalFailureWhileResourceGuardedBecomesUnavailable(t *testing.T) {
+	b := testBackendInactive(t)
+	ctx, cancel := armRuntime(b)
+	defer cancel()
+	b.mu.Lock()
+	b.capability.State = collector.ProcessNetworkCapabilityResourceGuarded
+	b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{collector.ReasonResourceLimit}
+	b.mu.Unlock()
+
+	if !b.handleRingReadError(ctx, errors.New("ring I/O boom while guarded")) {
+		t.Fatal("fatal reader failure must stop read loop")
+	}
+	cap := b.Capability()
+	if cap.State != collector.ProcessNetworkCapabilityUnavailable {
+		t.Fatalf("state=%s want UNAVAILABLE", cap.State)
+	}
+	if !hasReason(cap, collector.ReasonReaderFailed) {
+		t.Fatalf("want READER_FAILED got %+v", cap)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("fatal failure must cancel runtime even when previously guarded")
+	}
+}
+
+func TestStopWhileResourceGuardedReportsBackendStopped(t *testing.T) {
+	b := testBackendInactive(t)
+	runtimeCtx, runtimeCancel := armRuntime(b)
+	defer runtimeCancel()
+	b.mu.Lock()
+	b.capability.State = collector.ProcessNetworkCapabilityResourceGuarded
+	b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{collector.ReasonResourceLimit}
+	b.rawCh = make(chan []byte)
+	b.mu.Unlock()
+	_, closed := trackHandleCleanup(b)
+	go b.readLoop(runtimeCtx)
+	go b.ingestLoop(runtimeCtx)
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	if err := b.StopContext(stopCtx); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	cap := b.Capability()
+	if cap.State != collector.ProcessNetworkCapabilityUnavailable || !hasReason(cap, collector.ReasonBackendStopped) {
+		t.Fatalf("want BACKEND_STOPPED got %+v", cap)
+	}
+	if closed.Load() != 1 {
+		t.Fatalf("handle close count=%d", closed.Load())
+	}
+}
+
+func TestResourceGuardedDoesNotAssertHostOrDeviceDown(t *testing.T) {
+	b := testBackendInactive(t)
+	_, cancel := armRuntime(b)
+	defer cancel()
+	b.guardCapabilityForKernelLoss()
+	cap := b.Capability()
+	if cap.State != collector.ProcessNetworkCapabilityResourceGuarded {
+		t.Fatalf("state=%s", cap.State)
+	}
+	for _, forbidden := range []string{"DOWN", "DEVICE_DOWN", "HOST_DOWN"} {
+		if string(cap.State) == forbidden {
+			t.Fatalf("capability must not collapse to %s", forbidden)
+		}
+		for _, r := range cap.ReasonCodes {
+			if string(r) == forbidden {
+				t.Fatalf("reason must not assert %s", forbidden)
+			}
+		}
+	}
+	vocab := map[collector.ProcessNetworkCapabilityState]bool{
+		collector.ProcessNetworkCapabilityActive:             true,
+		collector.ProcessNetworkCapabilityUnsupported:        true,
+		collector.ProcessNetworkCapabilityUnavailable:        true,
+		collector.ProcessNetworkCapabilityPrivilegeDenied:    true,
+		collector.ProcessNetworkCapabilityKernelIncompatible: true,
+		collector.ProcessNetworkCapabilityResourceGuarded:    true,
+	}
+	if !vocab[cap.State] {
+		t.Fatalf("public capability vocabulary changed: %s", cap.State)
 	}
 }

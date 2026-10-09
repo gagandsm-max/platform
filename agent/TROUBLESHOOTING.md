@@ -15,11 +15,11 @@ Use loopback `GET /capabilities/process-network-ebpf` and structured logs (`AGEN
 | Tracepoint missing | `UNAVAILABLE` / `BACKEND_TRACEPOINT_UNAVAILABLE` | Primary needs `sock/inet_sock_set_state`. Kernel without the governed classic tracepoint cannot run this backend. |
 | Attach failure | `UNAVAILABLE` / `BACKEND_ATTACH_FAILED` | Check privilege/tracepoint availability; primary attach failure never becomes `ACTIVE`. |
 | Optional retransmit only failed | `ACTIVE` + `OPTIONAL_PROBE_UNAVAILABLE` | Expected independent degradation; primary enrichment may still operate. Check `support_counters.optional_probe_attached`. |
-| Map/ring pressure | Loss: `MAP_UPDATE_FAIL`, `RING_RESERVE_FAIL` | Enrichment shedding under load; protected workloads take precedence. Do not raise privileges to “fix” loss. |
+| Map/ring pressure | `RESOURCE_GUARDED` / `RESOURCE_LIMIT` plus loss: `MAP_UPDATE_FAIL`, `RING_RESERVE_FAIL` | Positive reconciled kernel map/ring loss latches enrichment to `RESOURCE_GUARDED` with `PARTIAL` quality evidence; base Agent `/ready` and host monitoring stay up. Guard remains latched until governed healthy restart (no automatic ACTIVE recovery from “no new drops”). Do not raise privileges to “fix” loss. |
 | Decoder rejects | Loss: `DECODER_REJECT` | ABI/size/type/family/address/comm/protocol rejections; count and quality degrade — not host DOWN. |
 | Userspace backpressure | Loss: `USERSPACE_CHANNEL_FULL` | Bounded channel drop; do not enlarge by inventing unbounded queues on the host. |
 | Transport not wired | Counter: `TRANSPORT_NOT_WIRED` | Expected until BUILD-016/062; physical ProcessNetworkEvidence delivery is absent by design. |
-| Resource ceiling | `RESOURCE_GUARDED` / `RESOURCE_LIMIT` | Implementation resource guard; wait for low-water / reduce contention. Do not disable the guard. |
+| Resource ceiling / preflight guard | `RESOURCE_GUARDED` / `RESOURCE_LIMIT` | Implementation resource guard at preflight or runtime; reduce contention. Do not disable the guard. Runtime low-water re-entry remains evidence-gated under BUILD-019 / BUILD-130. |
 | Runtime backend failure after ACTIVE | `UNAVAILABLE` + typed reason (e.g. `READER_FAILED`) | Capability endpoint updates; Agent lifecycle stays `RUNNING` and base readiness unchanged. |
 | Backend stopped | `UNAVAILABLE` / `BACKEND_STOPPED` | After clean stop/cleanup under the Agent whole-service shutdown budget. |
 | Shutdown timeout during activation | Agent `FAILED` / `AGENT_SHUTDOWN_TIMEOUT` | Non-cooperative activation did not settle before the subordinate activation sub-budget; backend stop is skipped while scheduler/worker/health teardown still run under the remaining whole-service budget. Do not force-close kernel resources. Restart via systemd. |

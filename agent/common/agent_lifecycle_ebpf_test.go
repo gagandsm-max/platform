@@ -466,6 +466,140 @@ func TestCapabilityCallerMutationCannotMutateBackend(t *testing.T) {
 	}
 }
 
+// cancelOrderRuntime exposes the P1-A cancel-before-StopContext defect: if the
+// Agent cancels the shared runtime before StopContext, pending enrichment flush
+// cannot install a live stop context.
+type cancelOrderRuntime struct {
+	fakeProcessNetworkRuntime
+	agentCtx               context.Context
+	canceledBeforeStop     atomic.Bool
+	stopObservedLiveRunCtx atomic.Bool
+}
+
+func (f *cancelOrderRuntime) Start(ctx context.Context) error {
+	f.agentCtx = ctx
+	go func() {
+		<-ctx.Done()
+		if f.stopCalls.Load() == 0 {
+			f.canceledBeforeStop.Store(true)
+		}
+	}()
+	return f.fakeProcessNetworkRuntime.Start(ctx)
+}
+
+func (f *cancelOrderRuntime) StopContext(ctx context.Context) error {
+	if f.agentCtx != nil && f.agentCtx.Err() == nil {
+		f.stopObservedLiveRunCtx.Store(true)
+	}
+	return f.fakeProcessNetworkRuntime.StopContext(ctx)
+}
+
+func TestAgentStopInstallsBackendFlushBeforeRuntimeCancel(t *testing.T) {
+	rt := &cancelOrderRuntime{}
+	rt.setCapability(collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
+	svc, err := NewAgentService(testEBPFAgentCfg(t), testAgentIdent("agent-cancel-order"),
+		client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil, WithProcessNetworkRuntime(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitCapability(t, &rt.fakeProcessNetworkRuntime, collector.ProcessNetworkCapabilityActive, 2*time.Second)
+	if err := svc.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if rt.stopCalls.Load() != 1 {
+		t.Fatalf("backend StopContext calls=%d", rt.stopCalls.Load())
+	}
+	if rt.canceledBeforeStop.Load() {
+		t.Fatal("P1-A regression: Agent canceled shared runtime before Backend.StopContext")
+	}
+	if !rt.stopObservedLiveRunCtx.Load() {
+		t.Fatal("Backend.StopContext must observe a live Agent runtime to install shutdown flush")
+	}
+	if svc.LifecycleState() != LifecycleStopped {
+		t.Fatalf("lifecycle=%s", svc.LifecycleState())
+	}
+}
+
+func TestStopDuringOptionalActivationKeepsProtectedTeardown(t *testing.T) {
+	gate := make(chan struct{})
+	rt := &fakeProcessNetworkRuntime{startGate: gate}
+	rt.setCapability(collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
+	addr := freeLoopbackAddr(t)
+	cfg := testEBPFAgentCfg(t)
+	cfg.HealthAddress = addr
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-stop-activating"),
+		client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil, WithProcessNetworkRuntime(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.setShutdownBudgetForTest(2 * time.Second)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && rt.startCalls.Load() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- svc.Stop() }()
+	time.Sleep(50 * time.Millisecond)
+	close(gate)
+	select {
+	case err := <-stopDone:
+		if err != nil {
+			t.Fatalf("Stop: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop deadlocked while optional activation in progress")
+	}
+	if svc.LifecycleState() != LifecycleStopped {
+		t.Fatalf("lifecycle=%s", svc.LifecycleState())
+	}
+	_, err = http.Get("http://" + addr + "/live")
+	if err == nil {
+		t.Fatal("health must stop after protected teardown")
+	}
+}
+
+func TestResourceGuardedCapabilityDoesNotForceNotReady(t *testing.T) {
+	rt := &fakeProcessNetworkRuntime{}
+	rt.setCapability(collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
+	addr := freeLoopbackAddr(t)
+	cfg := testEBPFAgentCfg(t)
+	cfg.HealthAddress = addr
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-guarded-ready"),
+		client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil, WithProcessNetworkRuntime(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitCapability(t, rt, collector.ProcessNetworkCapabilityActive, 2*time.Second)
+	rt.setCapability(collector.ProcessNetworkCapabilityResourceGuarded, collector.ReasonResourceLimit)
+	resp, err := http.Get("http://" + addr + "/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		t.Fatal("RESOURCE_GUARDED must not force base Agent NOT_READY")
+	}
+	snap := svc.RuntimeSnapshot()
+	if snap.ProcessNetworkCapability.State != collector.ProcessNetworkCapabilityResourceGuarded {
+		t.Fatalf("capability=%s", snap.ProcessNetworkCapability.State)
+	}
+	if svc.LifecycleState() != LifecycleRunning {
+		t.Fatalf("lifecycle=%s", svc.LifecycleState())
+	}
+	if err := svc.Stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStopWhileBackendActivationRunning(t *testing.T) {
 	gate := make(chan struct{})
 	rt := &fakeProcessNetworkRuntime{startGate: gate}

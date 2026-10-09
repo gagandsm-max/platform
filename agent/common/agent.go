@@ -36,10 +36,11 @@ const (
 // Slice 4 selects systemd TimeoutStopSec above this runtime budget.
 const defaultAgentShutdownBudget = 10 * time.Second
 
-// activationSettleBudgetDenominator derives the subordinate optional-activation
-// settle window from the single whole-service shutdown budget (numerator 1).
-// Optional enrichment must not monopolize protected base-Agent teardown.
-const activationSettleBudgetDenominator = 2
+// optionalEnrichmentBudgetDenominator derives the shared subordinate optional-
+// enrichment budget (activation settle + backend stop) from the single
+// whole-service shutdown budget (numerator 1). Optional enrichment must not
+// monopolize protected base-Agent scheduler/worker/health teardown.
+const optionalEnrichmentBudgetDenominator = 2
 
 var (
 	// ErrAlreadyRunning is returned when Start is invoked while STARTING/RUNNING.
@@ -452,15 +453,14 @@ func (s *AgentService) Stop() error {
 			},
 		)
 
-		// Cancel owned runtime context before waiting on component shutdown.
-		if cancel != nil {
-			cancel()
-		}
-
-		// One whole-service absolute deadline. Optional activation settle uses a
-		// subordinate sub-deadline derived from it — never an additive budget.
+		// One whole-service absolute deadline. Activation settle and backend stop
+		// share one subordinate optional-enrichment budget derived from it —
+		// never an additive budget that can starve protected teardown.
 		deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), budget)
 		defer deadlineCancel()
+
+		optionalBudget := optionalEnrichmentBudget(budget)
+		optionalDeadline := time.Now().Add(optionalBudget)
 
 		var activationErr error
 		activationSettled := true
@@ -472,7 +472,22 @@ func (s *AgentService) Stop() error {
 		// best-effort scheduler/worker/health teardown under the remaining
 		// whole-service deadline.
 		if activationDone != nil {
-			settleBudget := activationSettleBudget(budget)
+			// Cancel the shared runtime only while activation is still in
+			// progress so cooperative Start observes abort. Cancelling after
+			// ACTIVE would wake ingestLoop before StopContext can install a
+			// live shutdown-flush context and silently discard pending records.
+			select {
+			case <-activationDone:
+			default:
+				if cancel != nil {
+					cancel()
+					cancel = nil
+				}
+			}
+			settleBudget := time.Until(optionalDeadline)
+			if settleBudget < 0 {
+				settleBudget = 0
+			}
 			settleCtx, settleCancel := context.WithTimeout(deadlineCtx, settleBudget)
 			select {
 			case <-activationDone:
@@ -480,33 +495,46 @@ func (s *AgentService) Stop() error {
 			case <-settleCtx.Done():
 				settleCancel()
 				activationSettled = false
-				activationErr = fmt.Errorf("%w: optional process-network activation did not settle before activation sub-budget", ErrShutdownTimeout)
+				activationErr = fmt.Errorf("%w: optional process-network activation did not settle before optional-enrichment sub-budget", ErrShutdownTimeout)
 				s.logger.Error("AmrudAi Agent optional process-network activation unsettled during shutdown",
 					"event_code", "AGENT_EBPF_ACTIVATION_SHUTDOWN_UNSETTLED",
 					"safe_context", map[string]any{
-						"lifecycle_state": string(LifecycleStopping),
-						"reason_class":    "shutdown_timeout",
-						"detail":          "process_network_activation_unsettled",
+						"lifecycle_state":  string(LifecycleStopping),
+						"reason_class":     "shutdown_timeout",
+						"detail":           "process_network_activation_unsettled",
 						"settle_budget_ms": settleBudget.Milliseconds(),
 					},
 				)
 			}
 		}
 
+		var backendErr error
+		// Active/settled backend stop must install its bounded flush context
+		// before the shared Agent runtime is cancelled. Run under the remaining
+		// optional-enrichment budget so enrichment cannot exhaust the whole
+		// service deadline ahead of scheduler/worker/health teardown.
+		if rt != nil && activationSettled {
+			backendBudget := time.Until(optionalDeadline)
+			if backendBudget < 0 {
+				backendBudget = 0
+			}
+			backendCtx, backendCancel := context.WithTimeout(deadlineCtx, backendBudget)
+			backendErr = rt.StopContext(backendCtx)
+			backendCancel()
+		}
+
+		// Cancel owned runtime context for protected components after optional
+		// enrichment has had its chance to flush under a live stop context.
+		if cancel != nil {
+			cancel()
+		}
+
 		var (
-			backendErr error
-			schedErr   error
-			workerErr  error
-			compWG     sync.WaitGroup
+			schedErr  error
+			workerErr error
+			compWG    sync.WaitGroup
 		)
 		compWG.Add(2)
-		if rt != nil && activationSettled {
-			compWG.Add(1)
-			go func() {
-				defer compWG.Done()
-				backendErr = rt.StopContext(deadlineCtx)
-			}()
-		}
 		go func() {
 			defer compWG.Done()
 			schedErr = s.scheduler.StopContext(deadlineCtx)
@@ -553,14 +581,14 @@ func (s *AgentService) Stop() error {
 	}
 }
 
-// activationSettleBudget returns the subordinate settle window for optional
-// process-network activation. It is derived from the whole-service budget and
-// never extends Stop beyond that single absolute deadline.
-func activationSettleBudget(whole time.Duration) time.Duration {
+// optionalEnrichmentBudget returns the shared subordinate budget for optional
+// process-network activation settle and backend stop. It is derived from the
+// whole-service budget and never extends Stop beyond that single absolute deadline.
+func optionalEnrichmentBudget(whole time.Duration) time.Duration {
 	if whole <= 0 {
 		return 0
 	}
-	sub := whole / time.Duration(activationSettleBudgetDenominator)
+	sub := whole / time.Duration(optionalEnrichmentBudgetDenominator)
 	if sub < time.Millisecond {
 		if whole > time.Millisecond {
 			return time.Millisecond

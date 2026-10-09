@@ -133,12 +133,29 @@ func (b *Backend) flushBatch(runtimeCtx, operationCtx context.Context, batch *[]
 	toSend := *batch
 	*batch = (*batch)[:0]
 	if err := b.aggregator.Ingest(operationCtx, toSend); err != nil {
+		b.noteShutdownFlushFailure(err)
 		return b.observeAggregatorErr(runtimeCtx, err)
 	}
 	if _, err := b.aggregator.FlushDue(operationCtx, time.Now().UTC()); err != nil {
+		b.noteShutdownFlushFailure(err)
 		return b.observeAggregatorErr(runtimeCtx, err)
 	}
 	return false
+}
+
+// noteShutdownFlushFailure records stop-requested flush failures so StopContext
+// cannot report success after silently discarding pending records. TRANSPORT_NOT_WIRED
+// remains a truthful non-delivery boundary, not a flush failure.
+func (b *Backend) noteShutdownFlushFailure(err error) {
+	if err == nil || errors.Is(err, collector.ErrStructuredTransportNotWired) {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.stopRequested || b.shutdownFlushErr != nil {
+		return
+	}
+	b.shutdownFlushErr = err
 }
 
 // observeAggregatorErr classifies aggregator errors.
@@ -164,6 +181,7 @@ func (b *Backend) observeAggregatorErr(runtimeCtx context.Context, err error) (f
 
 // pollKernelLoss is owned by ingestLoop. Loss reconciliation itself is
 // monotonic/CAS-exact so accidental duplicate polling cannot fabricate counts.
+// Positive reconciled kernel map/ring loss while ACTIVE latches RESOURCE_GUARDED.
 // Returns true when a fatal aggregator fault stopped the backend.
 func (b *Backend) pollKernelLoss(ctx context.Context) (fatal bool) {
 	b.mu.Lock()
@@ -180,6 +198,9 @@ func (b *Backend) pollKernelLoss(ctx context.Context) (fatal bool) {
 	_ = handles.primary.LossCounters.Lookup(&key, &ringFail)
 
 	mapDelta, ringDelta := b.loss.reconcileKernelAbs(mapFail, ringFail)
+	if mapDelta > 0 || ringDelta > 0 {
+		b.guardCapabilityForKernelLoss()
+	}
 	if mapDelta > 0 {
 		if b.emitDrop(ctx, LossClassMapUpdateFail, mapDelta) {
 			return true

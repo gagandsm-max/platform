@@ -18,6 +18,11 @@ import (
 // until the final worker exits; they are never force-closed on this error.
 var ErrBackendStopDeadline = errors.New("BACKEND_STOP_DEADLINE")
 
+// ErrBackendShutdownFlush is returned when a stop-requested shutdown flush could
+// not complete within the permitted budget. Pending records must not be reported
+// as successfully shut down when the flush failed.
+var ErrBackendShutdownFlush = errors.New("BACKEND_SHUTDOWN_FLUSH_INCOMPLETE")
+
 const defaultBackendStopTimeout = 5 * time.Second
 
 // Backend is the Slice-7 bounded Linux eBPF process-network kernel backend.
@@ -51,6 +56,7 @@ type Backend struct {
 	capability        collector.ProcessNetworkCapabilitySnapshot
 	bootWall          time.Time
 	monoBaseNs        uint64
+	shutdownFlushErr  error
 
 	// Observable Slice-7 runtime notes (not host/network DOWN signals).
 	transportNotWired atomic.Uint64
@@ -360,12 +366,13 @@ func (b *Backend) StopContext(ctx context.Context) error {
 	done := b.workersDone
 	if b.stopRequested {
 		b.mu.Unlock()
-		return waitBackendWorkers(stopCtx, done)
+		return b.finishStop(stopCtx, done)
 	}
 	cancel := b.cancel
 	b.stopRequested = true
 	b.shutdownCtx = stopCtx
-	if b.capability.State == collector.ProcessNetworkCapabilityActive {
+	switch b.capability.State {
+	case collector.ProcessNetworkCapabilityActive, collector.ProcessNetworkCapabilityResourceGuarded:
 		now := time.Now().UTC()
 		b.capability.State = collector.ProcessNetworkCapabilityUnavailable
 		b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{collector.ReasonBackendStopped}
@@ -379,7 +386,26 @@ func (b *Backend) StopContext(ctx context.Context) error {
 		cancel()
 	}
 	b.closeReader()
-	return waitBackendWorkers(stopCtx, done)
+	return b.finishStop(stopCtx, done)
+}
+
+func (b *Backend) finishStop(stopCtx context.Context, done <-chan struct{}) error {
+	waitErr := waitBackendWorkers(stopCtx, done)
+	b.mu.Lock()
+	flushErr := b.shutdownFlushErr
+	b.mu.Unlock()
+	if flushErr != nil {
+		if waitErr != nil {
+			return fmt.Errorf("%w: %w; %w", ErrBackendShutdownFlush, flushErr, waitErr)
+		}
+		// Flush budget exhaustion is a stop-deadline class failure with explicit
+		// incomplete-flush evidence (never a silent successful Stop).
+		if errors.Is(flushErr, context.DeadlineExceeded) || errors.Is(flushErr, context.Canceled) {
+			return fmt.Errorf("%w: %w: %w", ErrBackendStopDeadline, ErrBackendShutdownFlush, flushErr)
+		}
+		return fmt.Errorf("%w: %w", ErrBackendShutdownFlush, flushErr)
+	}
+	return waitErr
 }
 
 func boundedBackendStopContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -460,12 +486,14 @@ func (b *Backend) finalizeRuntimeResources() {
 	})
 }
 
-// failRuntime transitions away from ACTIVE for a typed runtime failure, cancels
-// the run context, and closes the ring reader to unblock peers. Safe from a
-// worker: never waits on workersDone / StopContext.
+// failRuntime transitions away from ACTIVE or RESOURCE_GUARDED for a typed
+// runtime failure, cancels the run context, and closes the ring reader to
+// unblock peers. Safe from a worker: never waits on workersDone / StopContext.
+// Fatal reader/aggregator failures retain precedence over a latched guard.
 func (b *Backend) failRuntime(reason collector.ProcessNetworkCapabilityReason) {
 	b.mu.Lock()
-	if b.capability.State == collector.ProcessNetworkCapabilityActive {
+	switch b.capability.State {
+	case collector.ProcessNetworkCapabilityActive, collector.ProcessNetworkCapabilityResourceGuarded:
 		b.capability.State = collector.ProcessNetworkCapabilityUnavailable
 		b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{reason}
 		b.capability.ObservedAt = time.Now().UTC()
@@ -478,6 +506,23 @@ func (b *Backend) failRuntime(reason collector.ProcessNetworkCapabilityReason) {
 		cancel()
 	}
 	b.closeReader()
+}
+
+// guardCapabilityForKernelLoss latches ACTIVE → RESOURCE_GUARDED with
+// RESOURCE_LIMIT when positive reconciled kernel map/ring loss is observed.
+// Guard remains latched until a governed healthy restart; zero additional loss
+// must not fabricate automatic recovery to ACTIVE.
+func (b *Backend) guardCapabilityForKernelLoss() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.capability.State != collector.ProcessNetworkCapabilityActive {
+		return
+	}
+	now := time.Now().UTC()
+	b.capability.State = collector.ProcessNetworkCapabilityResourceGuarded
+	b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{collector.ReasonResourceLimit}
+	b.capability.ObservedAt = now
+	b.capability.TransitionAt = now
 }
 
 func (b *Backend) activeCapability(base collector.ProcessNetworkCapabilitySnapshot, extra []collector.ProcessNetworkCapabilityReason) collector.ProcessNetworkCapabilitySnapshot {
