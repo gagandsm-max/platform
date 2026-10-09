@@ -709,7 +709,7 @@ sequenceDiagram
 
 ---
 
-## 27. Flow DF-026 — NCM push with approval and validation
+## 27. Flow DF-026 — Phase-1.5 NCM push with approval and validation
 
 ```mermaid
 sequenceDiagram
@@ -1921,7 +1921,7 @@ Sensor loads Device Pack/YANG mapping, validates subscription paths using goyang
 
 User imports OpenAPI/Swagger or configures endpoint -> kin-openapi validates schema -> authentication/test executes through selected Sensor -> response preview/inference -> user confirms entity/metric mapping -> Device Pack/Connector version is published -> scheduler issues jobs -> Sensor executes paging/token refresh/chained calls -> canonical observations enter ingestion.
 
-## 86. Flow DF-077 — NCM controlled change using OSS worker
+## 86. Flow DF-077 — Phase-1.5 NCM controlled change using OSS worker
 
 Core creates approved NCM job -> NCM Worker uses Nornir/scrapli/scrapli_cfg/approved driver -> retrieves pre-change config -> computes diff -> maker/checker approval where policy requires -> executes -> validates -> captures post-change config -> rollback on policy/validation failure -> emits NCM change evidence to audit and RCA timeline.
 
@@ -2427,7 +2427,7 @@ Platform observed entity/approved stable relationship
 
 Missing external CIs do not automatically delete Platform entities. Observed and declared relationships remain distinguishable.
 
-### DF-ACP-005 — NCM + external Change
+### DF-ACP-005 — Phase-1.5 privileged NCM + external Change
 
 ```text
 authorized Change Plan

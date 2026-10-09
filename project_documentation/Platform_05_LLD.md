@@ -1414,6 +1414,8 @@ ncm_job_target
   rollback_result
 ```
 
+Phase applicability: Phase-1 baseline NCM uses `BACKUP|DIFF|COMPLIANCE` jobs and may expose a separately certified human-initiated `COMMAND` session under strict command policy. `PUSH|ROLLBACK` and orchestrated write-capable change jobs are Phase-1.5 privileged scope by default.
+
 NCM executor receives a short-lived signed job token referencing credentials, never long-lived plaintext secrets.
 
 ---
@@ -3098,7 +3100,7 @@ Windows installed-software inventory is observational. Certified Agent/WinRM/WMI
 
 The following are logical contracts; exact physical table/field names may differ if schema review preserves the semantics.
 
-### 94.1 Change Plan and Change Assurance
+### 94.1 Phase-1.5 privileged Change Plan and Change Assurance
 
 ```text
 change_plan
@@ -3218,7 +3220,7 @@ These exact IDs are governed by the concrete v3.3 contracts in §94.
 
 - `REQ-CMDB-002` — ExternalBinding carries tenant/connector/internal entity/external identity plus match evidence/confidence, mapping/authority profile, external version and synchronization state; it must not create duplicate Platform entities.
 - `REQ-INT-009` — Echo-loop prevention combines external event/object/version, Platform correlation/operation/hash, origin and prior outbound lineage; one source marker is insufficient.
-- `REQ-NCM-007` — Change Assurance Record binds immutable plan/version, exact targets/configuration hashes, approved window, risk/blast evidence and execution/postcheck/stabilization/rollback/outcome evidence; material plan mutation stales approval.
+- `REQ-NCM-007` — Phase-1.5 privileged Change Assurance Record binds immutable plan/version, exact targets/configuration hashes, approved window, risk/blast evidence and execution/postcheck/stabilization/rollback/outcome evidence; material plan mutation stales approval.
 
 <!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
 ## Phase 1 / Phase 1.5 low-level invariants — 2026-10-09
