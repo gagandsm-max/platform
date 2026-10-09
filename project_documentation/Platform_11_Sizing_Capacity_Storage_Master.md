@@ -24,9 +24,9 @@ All numbers below are **engineering planning targets until benchmark-certified**
 | 10,000 | 1 | **16 vCPU / 64 GB RAM planning target** |
 | 15,000 | 1 | **24 vCPU / 96 GB RAM planning target** |
 
-### 2.2 HA
+### 2.2 Phase 1.5 HA
 
-HA uses **exactly two full Core nodes**, one Active and one Standby. Each full Core is sized to carry the certified workload after failover. There is no third customer-visible Core/governance node.
+The **Phase 1.5 HA profile** uses exactly two full Core nodes, one Active and one Standby. Each full Core is sized to carry the certified workload after failover. Phase 1 standalone uses one Core and is benchmarked separately. There is no third customer-visible full Core/governance node.
 
 | Devices | Full Core nodes | Per-Core target |
 |---:|---:|---|

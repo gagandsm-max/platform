@@ -97,9 +97,9 @@ Devices, interfaces, metrics, poll interval, SNMP version/security, RTT, timeout
 
 Measure navigation shell, dashboard first meaningful render, common query latency, search suggestions, alert action acknowledgment, large table interaction and concurrent NOC users. Exact GA SLOs are frozen from benchmark evidence.
 
-## 5. HA/DR
+## 5. Continuity / HA / DR
 
-Measure Core failover (<60s requirement), sensor uninterrupted collection/buffering, backlog replay time and correctness. DR measures RPO/RTO once contractual values are frozen.
+**Phase 1 standalone:** measure process/service/host interruption, durable Sensor buffering/replay, standalone restart/recovery, backup/restore and DR RPO/RTO once contractual values are frozen. **Phase 1.5 HA:** additionally measure Core failover (<60s requirement), fencing/split-brain prevention, Sensor uninterrupted collection/buffering, backlog replay/rejoin time and correctness.
 
 ## 6. Regression gate
 
@@ -241,7 +241,7 @@ Required evidence includes: 2,500-device scenario; deterministic distribution; r
 
 Required evidence includes: source values > 2^53; near UInt64 maximum; reset; reboot; discontinuity; legitimate wrap only where provable; irregular sample interval; Kafka serialization without JSON Number loss; ClickHouse raw exactness.
 
-### 8.4 Two-Core HA
+### 8.4 Phase 1.5 Two-Core HA
 
 HA certification gates remain explicit and unmet until evidence exists. Do not invent passing evidence. Status remains SPECIFIED / P0 / NOT PRODUCTION CERTIFIED.
 
@@ -352,7 +352,7 @@ Phase-1 Unified Network & Infrastructure Observability capability claims are gov
 12. **Cloud and Kubernetes depth:** Validated normalization of cloud-network entities (VPCs, subnets, route tables, security policies, load balancers, NAT gateways) and Kubernetes workloads into canonical Platform graph models with connector self-health separation. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED subject to provider capability, cost, and rate limits; they are not a mandatory Phase-1 dependency.
 13. **SLO and error budget evidence:** Where BUILD-095 applies, error budget burn rates and compliance scorecards calculate deterministically from qualified evidence ledgers.
 14. **Telemetry overload and load-shedding:** Extreme metric, flow, and syslog surges exercise Sensor spool watermarks, Kafka consumer backpressure, and ClickHouse micro-batching without dropping high-priority control or liveness signals.
-15. **Core and Sensor interruption and replay:** Active Core crash or Sensor disconnection verifies zero duplicate authority, stateful failover within the <60s target, and idempotent replay of buffered Sensor spools upon reconnection.
+15. **Core and Sensor interruption and replay:** Phase 1 verifies standalone Core process/host interruption, Sensor disconnection and idempotent replay without unsupported data loss. Phase 1.5 additionally verifies Active-Core failure, positive fencing, no duplicate authority, stateful failover within the <60s target and backlog replay/rejoin correctness.
 16. **Low-compute and non-interference guarantee:** Bounded Linux eBPF telemetry and active path probing must measurably operate within declared CPU, RAM, and network envelopes; if resource contention occurs, optional enrichment must yield, throttle, or suspend before primary monitoring, collection, durable transport, ingestion, alert qualification, incident processing, or deterministic RCA are degraded.
 
 ---

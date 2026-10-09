@@ -163,8 +163,8 @@ Role templates are starting points only. Authorization is evaluated as **Who × 
 
 ### 6.3 Deployment topologies (business)
 
-- **Standalone:** one Core node
-- **HA:** exactly two full Core nodes (Active/Standby); no customer-visible third Core/governance node in the required HA topology
+- **Phase 1 Standalone:** one authoritative Core node
+- **Phase 1.5 HA:** exactly two full Core nodes (Active/Standby); no customer-visible third full Core/governance node in the required HA topology
 - **DR:** site-level disaster recovery capability is mandatory in v1.0 business scope; contractual RPO/RTO remain TBD
 - **Future federation:** Master Core / Regional Core is architecturally anticipated and out of initial implementation scope
 
@@ -195,7 +195,7 @@ Platform shall provide the following capability families. Each family depends on
 | 17 | Audit / governance | Actions are attributable and exportable | Durable audit target |
 | 18 | Data retention / protection | Live monitoring survives storage pressure | 80% protection, legal hold |
 | 19 | Backup / restore / DR | Recoverability is demonstrated | HA≠DR separation |
-| 20 | HA / continuity | Control plane restores quickly; Sensors keep collecting | Exactly-two-Core topology |
+| 20 | HA / continuity (**Phase 1.5 profile**) | Control plane restores quickly; Sensors keep collecting | Exactly-two-Core topology |
 | 21 | Install / upgrade | Customers install without Docker mandate; upgrades are safe | Native packages, preflight |
 | 22 | Supportability | Failures are diagnosable with support bundles | Structured logs, correlation IDs |
 | 23 | Operational diagnostics | NOC verifies without context switch | Sensor/Agent paths, RBAC |
@@ -489,9 +489,9 @@ Historical telemetry is less important than continuity of live monitoring.
 
 ---
 
-## 30. HA and business continuity (business)
+## 30. Phase 1.5 HA and business continuity (business)
 
-A HA installation shall use exactly two full Core nodes:
+Phase 1 standalone has no Core-HA availability claim. A Phase 1.5 HA installation shall use exactly two full Core nodes:
 
 - Core-A and Core-B; one Active, one Standby in normal operation
 - Both continuously synchronize required persistent state
@@ -502,7 +502,7 @@ A HA installation shall use exactly two full Core nodes:
 
 Sensors/Agents should use the stable **Core HA endpoint** rather than remain permanently bound to a single physical Core address.
 
-**Business note:** exactly-two-Core HA is a fixed product requirement; detailed fencing/failover/rejoin mechanisms for stateful services remain open engineering P0s until certified (Architecture / programme #92). Documentation must not pretend those mechanisms are already certified.
+**Business note:** exactly-two-Core HA is a fixed requirement for the Phase 1.5 HA profile; detailed fencing/failover/rejoin mechanisms for stateful services remain open engineering P0s until certified. This does not block Phase-1 standalone certification.
 
 ---
 

@@ -146,13 +146,13 @@ Asset Reconciliation; Technology Lifecycle Risk; Backup & Restore; DR; Upgrade &
 ## 5. Core installation, packaging, HA and DR
 
 **Feature contract (summary):**
-- **Purpose/outcome:** Installable Core with Standalone or exactly-two-Core HA and v1.0 DR capability
+- **Purpose/outcome:** Installable Core with Phase-1 Standalone or Phase-1.5 exactly-two-Core HA profile and v1.0 DR capability
 - **Subfeatures:** build separation; installer; HA Active/Standby; DR backup/replication readiness; native packages; auto-start
 - **Primary persona:** Platform Super Admin / implementer
 - **Dependencies:** PKI, networking, storage, peer Core for HA
 - **Preconditions:** OS certification matrix met
 - **Primary workflow:** install → configure topology → validate readiness
-- **Product behavior:** HA failover target <60s; Sensors continue buffering
+- **Product behavior:** Phase 1 standalone uses supervised restart/recovery and durable Sensor buffering; Phase 1.5 HA adds <60s certified Core failover target and Sensor continuity
 - **Failure/degraded behavior:** fail-safe prefer no dual-active; Sensors buffer
 - **Acceptance outcome:** installer/HA/DR acceptance gates demonstrated
 - **Maturity boundary:** SPECIFIED; HA stateful mechanisms remain open P0 until certified (Architecture/#92)
@@ -179,7 +179,9 @@ The Core installer shall:
 8. Validate UI, internal data services, certificates and synchronization before reporting HA ready.
 9. Generate an installation readiness/result report with errors and remediation.
 
-### 5.3 HA behavior
+### 5.3 Phase 1.5 HA behavior
+
+The following requirements apply to the Phase 1.5 HA certification profile and do not block Phase-1 standalone GA.
 
 | ID | Requirement |
 |---|---|
@@ -2220,8 +2222,8 @@ Exact SLOs TBD after baseline benchmark, but release testing must cover dashboar
 
 - Non-HA installations have no HA availability claim.
 - HA target: 99.95% service design objective subject to deployment assumptions and final SLA definition.
-- Core failover certified target <60s.
-- Sensor monitoring continuity through Core failover.
+- Phase 1.5 HA Core failover certified target <60s.
+- Phase 1.5 Sensor monitoring continuity through Core failover.
 
 ### 41.4 Scale
 
@@ -2272,13 +2274,13 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 - actionable preflight diagnostics;
 - central Sensor/Agent assignment and locality/capacity-aware placement;
 - SNMP/flow/syslog/network protocol collection;
-- infrastructure/cloud/K8s/DB/synthetic coverage committed for release;
+- infrastructure/cloud/K8s/DB/synthetic coverage only for technology modules explicitly included in the declared release profile; optional certified modules are not universal Phase-1 blockers;
 - policy inheritance and no hard-coded customer thresholds;
 - alert qualification and recovery qualification;
 - alert storm/flapping/dependency compression;
 - incident lifecycle and ITSM sync;
 - temporal operational graph and evidence-preserving RCA;
-- GNN/ML integration only behind evidence/quality guardrails;
+- GNN/ML integration, when enabled, only behind evidence/quality guardrails; advanced learned/LLM capability is not a mandatory Phase-1 dependency;
 - `INCONCLUSIVE` RCA behavior;
 - NCM/IPAM/CLI governance;
 - dashboards/studios/admin/RBAC/audit;

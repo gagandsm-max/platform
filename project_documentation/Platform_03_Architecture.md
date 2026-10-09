@@ -149,9 +149,9 @@ flowchart LR
 
 Core-01 runs the complete Core stack. Sensors are separate installs and remain responsible for collection.
 
-### 4.2 Two-node HA deployment
+### 4.2 Phase 1.5 two-node HA deployment
 
-**Status:** SPECIFIED / **P0** / **NOT PRODUCTION CERTIFIED**. Exactly two full Core nodes Active/Standby remains fixed architecture and must not be downgraded to P1. Unresolved P0 work includes active authority/fencing, service fencing generation, Kafka consumer ownership, PostgreSQL replication/failover/fencing/rewind, ClickHouse replication/promotion/fencing, stable Core endpoint/VIP, Sensor reconnect/re-anchor, Sensor assignment ownership/lease/fencing, push-protocol continuity, split-brain failure behavior, RPO/RTO, failover under load and backlog replay. Exact mechanism selection is a dedicated P0 engineering spike constrained by exactly two Core nodes, no silent split-brain, minimal operational complexity and no unnecessary third full Core. This baseline does **not** select Patroni, repmgr, ClickHouse Keeper, Raft, Consul, etcd or a third coordination service.
+**Status:** SPECIFIED / **P0** / **NOT PRODUCTION CERTIFIED** for the Phase 1.5 HA profile. Exactly two full Core nodes Active/Standby remains fixed Phase-1.5 architecture and must not be downgraded to P1. Unresolved P0 work includes active authority/fencing, service fencing generation, Kafka consumer ownership, PostgreSQL replication/failover/fencing/rewind, ClickHouse replication/promotion/fencing, stable Core endpoint/VIP, Sensor reconnect/re-anchor, Sensor assignment ownership/lease/fencing, push-protocol continuity, split-brain failure behavior, RPO/RTO, failover under load and backlog replay. Exact mechanism selection is a dedicated P0 engineering spike constrained by exactly two Core nodes, no silent split-brain, minimal operational complexity and no unnecessary third full Core. This baseline does **not** select Patroni, repmgr, ClickHouse Keeper, Raft, Consul, etcd or a third coordination service.
 
 
 ```mermaid
@@ -316,7 +316,7 @@ Reasons:
 ### Valkey degradation requirement
 Valkey is reconstructable ephemeral/cache state **ONLY** and must never become authoritative business state. Architecture requires Core to **degrade safely if Valkey is unavailable** rather than convert cache loss into authoritative data loss. Current hard-dependency behavior, if present, is an implementation gap under #92.
 
-## 7. Exactly-two-Core HA and stateful-service strategy
+## 7. Phase 1.5 exactly-two-Core HA and stateful-service strategy
 The two-Core topology creates special engineering requirements because textbook Kafka controller quorums and ClickHouse Keeper quorums normally prefer an odd number of voting members.
 
 Platform therefore adopts these architectural rules:
@@ -327,14 +327,14 @@ Platform therefore adopts these architectural rules:
 4. **Kafka:** treat Kafka as an internal transport, not the sole copy of telemetry. Sensor durable spools are the edge replay source; ClickHouse/PostgreSQL are persistent destinations. The exact Kafka active/passive/failover implementation for two Core nodes is a P0 design spike. It must preserve the no-third-Core requirement and prove failover behavior experimentally.
 5. **No hidden split-brain:** a two-node partition must not result in two writable authoritative Cores.
 
-This is an explicit technical risk area and requires failure testing before GA.
+This is an explicit technical risk area and requires failure testing before Phase-1.5 HA certification; it is not a Phase-1 standalone GA prerequisite.
 
 ---
 
 
 ### Open HA P0 mechanisms (must remain explicit)
 
-Exactly-two-Core HA is **USER-FIXED** product topology. The following remain **OPEN P0 / NOT PRODUCTION CERTIFIED** until evidence closes them (do not invent selections here):
+Exactly-two-Core HA is **USER-FIXED** for the Phase 1.5 HA product topology. The following remain **OPEN P0 / NOT PRODUCTION CERTIFIED** until evidence closes them (do not invent selections here):
 
 1. Active authority and fencing (including ambiguous partition / split-brain behavior)
 2. Service fencing generation and assignment ownership/lease/fencing
@@ -1435,8 +1435,8 @@ Platform must monitor itself: collectors, Sensors, queues, ingestion lag, droppe
 ## 40. Architecture acceptance gates
 Architecture is accepted for implementation only when engineering plans explicitly address:
 
-- two-Core split-brain prevention;
-- two-Core PostgreSQL/ClickHouse/Kafka failover/replay behavior;
+- for Phase-1.5 HA certification, two-Core split-brain prevention;
+- for Phase-1.5 HA certification, two-Core PostgreSQL/ClickHouse/Kafka failover/replay behavior;
 - Sensor spool durability/idempotency;
 - SNWP-2500-v1 benchmark;
 - Sensor workload model;
@@ -1500,7 +1500,7 @@ A2.1 absorbed Version 3.0 ARCH-* blocks, v3.1 packaging/runtime sections and v3.
 
 ### 44.1 Product positioning and required Phase-1 capability set
 
-AmrudAi Phase 1 is **Unified Network & Infrastructure Observability**. It defines the required Phase-1 capability set (subject to applicable implementation, benchmark and certification gates) unifying network monitoring, infrastructure monitoring, temporal operational topology, telemetry quality and trust, cross-signal investigation, active path observability, Flow/log/event correlation, bounded Linux process-to-network evidence via eBPF, Service Assurance / SLI / SLO / Error Budget, cloud and Kubernetes monitoring, deterministic evidence-led RCA, and change intelligence into a cohesive, low-footprint platform.
+AmrudAi Phase 1 is **Unified Network & Infrastructure Observability**. The mandatory base profile unifies network monitoring, core infrastructure monitoring, temporal operational topology, telemetry quality/trust, cross-signal investigation, active path observability, Flow/log/event correlation, bounded Linux process-to-network evidence via eBPF where certified, Service Assurance, deterministic evidence-led RCA and change intelligence. Cloud/Kubernetes, specialist infrastructure and other technology-family depth are optional certified modules unless explicitly included in the declared Phase-1 profile.
 
 ### 44.2 Hard product boundaries
 

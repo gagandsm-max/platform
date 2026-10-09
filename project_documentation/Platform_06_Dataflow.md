@@ -1703,7 +1703,7 @@ QA must trace correlation IDs end-to-end for at least:
 - one ITSM ticket lifecycle;
 - one NCM change;
 - one storage emergency purge;
-- one Core failover/replay;
+- one standalone Core restart/replay; and, for the Phase-1.5 HA profile, one Core failover/replay;
 - one Sensor failure/reassignment;
 - one licence stop/resume;
 - one AI query with evidence/tool audit;
