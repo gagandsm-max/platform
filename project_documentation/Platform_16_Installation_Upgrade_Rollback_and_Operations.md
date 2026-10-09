@@ -173,3 +173,14 @@ Runbooks cover image repository/provenance/integrity failure, entitlement/compat
 ### 13.6 Browser journeys — Phase 1.5
 
 Before browser runtime release, operations must define browser worker crash cleanup, stale process cleanup, credential/token expiry, screenshot/artifact TTL/access/redaction, site/Sensor capacity exhaustion and degraded-mode behavior that cannot starve base monitoring.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 operational profiles — 2026-10-09
+
+### Phase 1
+Installation provisions one authoritative Core plus the required Sensors/Agents. Backup/restore, health diagnostics, upgrade preflight, interrupted-upgrade recovery and support bundles remain mandatory. There is no HA failover claim; total standalone-site/storage loss is recovered according to the certified backup/DR RPO/RTO.
+
+### Phase 1.5
+Installation additionally configures exactly two full Cores, stable endpoint/fencing, data-service continuity and rejoin. HA upgrade/canary/rollback tests must prove mixed-version and failover safety. Shared-MSP deployments additionally require customer/tenant isolation diagnostics and operator-visible noisy-neighbour/capacity evidence.
+
+The installer must make the selected certification profile explicit and must not imply HA/MSP support merely because HA-related binaries/config templates exist.
