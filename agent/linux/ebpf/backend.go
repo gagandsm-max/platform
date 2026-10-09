@@ -23,6 +23,10 @@ var ErrBackendStopDeadline = errors.New("BACKEND_STOP_DEADLINE")
 // as successfully shut down when the flush failed.
 var ErrBackendShutdownFlush = errors.New("BACKEND_SHUTDOWN_FLUSH_INCOMPLETE")
 
+// ErrBackendLossAccountingIncomplete is returned when a final kernel loss
+// snapshot could not be established before loss-map resources were released.
+var ErrBackendLossAccountingIncomplete = errors.New("BACKEND_LOSS_ACCOUNTING_INCOMPLETE")
+
 const defaultBackendStopTimeout = 5 * time.Second
 
 // Backend is the Slice-7 bounded Linux eBPF process-network kernel backend.
@@ -46,8 +50,13 @@ type Backend struct {
 	shutdownCtx  context.Context
 
 	readerCloseOnce sync.Once
+	rawChCloseOnce  sync.Once
 	finalizeOnce    sync.Once
 	closeHandles    func(*kernelHandles)
+
+	// kernelLossSnapshotFn optionally overrides absolute kernel loss reads
+	// (production uses BPF map Lookup). ok=false means no complete snapshot.
+	kernelLossSnapshotFn func() (mapUpdate, ringReserve uint64, ok bool)
 
 	started           bool
 	stopRequested     bool
@@ -57,6 +66,7 @@ type Backend struct {
 	bootWall          time.Time
 	monoBaseNs        uint64
 	shutdownFlushErr  error
+	finalLossDone     bool
 
 	// Observable Slice-7 runtime notes (not host/network DOWN signals).
 	transportNotWired atomic.Uint64
@@ -322,17 +332,26 @@ func (b *Backend) Start(ctx context.Context) error {
 		return err
 	}
 
-	runCtx, cancel := context.WithCancel(ctx)
+	// Worker runtime is intentionally detached from the Agent Start/Stop parent
+	// context once ACTIVE is committed. Cooperative abort during incomplete
+	// activation still observes ctx/stopRequested above. After workers can
+	// accept events, only Backend.StopContext may cancel them — and only after
+	// installing shutdownCtx — so Agent.Stop cannot recreate the cancel-before-
+	// flush race via an open activationDone window.
+	runCtx, cancel := context.WithCancel(context.Background())
 	b.cancel = cancel
 	b.handles = handles
 	b.reader = rd
 	b.rawCh = make(chan []byte, RawRecordChannel)
+	b.rawChCloseOnce = sync.Once{}
 	b.optionalAvailable = handles.optAttached
 	b.bootWall = time.Now().UTC()
 	b.monoBaseNs = 0 // decoder falls back to wall clock when unset
 	b.started = true
 	b.stopRequested = false
 	b.stopped = false
+	b.finalLossDone = false
+	b.shutdownFlushErr = nil
 	b.workersDone = make(chan struct{})
 	b.workerRemain.Store(int32(BackendGoroutines))
 
@@ -373,12 +392,17 @@ func (b *Backend) StopContext(ctx context.Context) error {
 	b.shutdownCtx = stopCtx
 	switch b.capability.State {
 	case collector.ProcessNetworkCapabilityActive, collector.ProcessNetworkCapabilityResourceGuarded:
+		wasGuarded := b.capability.State == collector.ProcessNetworkCapabilityResourceGuarded ||
+			b.capability.Resource.Guarded
 		now := time.Now().UTC()
 		b.capability.State = collector.ProcessNetworkCapabilityUnavailable
 		b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{collector.ReasonBackendStopped}
 		b.capability.ObservedAt = now
 		b.capability.TransitionAt = now
 		b.capability.PreflightPassed = false
+		// Stop from RESOURCE_GUARDED retains resource-guard evidence; ACTIVE stop
+		// keeps Guarded=false so state and embedded flag stay consistent.
+		b.capability.Resource.Guarded = wasGuarded
 	}
 	b.mu.Unlock()
 
@@ -395,15 +419,16 @@ func (b *Backend) finishStop(stopCtx context.Context, done <-chan struct{}) erro
 	flushErr := b.shutdownFlushErr
 	b.mu.Unlock()
 	if flushErr != nil {
-		if waitErr != nil {
-			return fmt.Errorf("%w: %w; %w", ErrBackendShutdownFlush, flushErr, waitErr)
-		}
+		joined := errors.Join(flushErr, waitErr)
 		// Flush budget exhaustion is a stop-deadline class failure with explicit
 		// incomplete-flush evidence (never a silent successful Stop).
 		if errors.Is(flushErr, context.DeadlineExceeded) || errors.Is(flushErr, context.Canceled) {
-			return fmt.Errorf("%w: %w: %w", ErrBackendStopDeadline, ErrBackendShutdownFlush, flushErr)
+			return errors.Join(ErrBackendStopDeadline, ErrBackendShutdownFlush, joined)
 		}
-		return fmt.Errorf("%w: %w", ErrBackendShutdownFlush, flushErr)
+		if errors.Is(flushErr, ErrBackendShutdownFlush) || errors.Is(flushErr, ErrBackendLossAccountingIncomplete) {
+			return joined
+		}
+		return errors.Join(ErrBackendShutdownFlush, joined)
 	}
 	return waitErr
 }
@@ -460,9 +485,25 @@ func (b *Backend) closeReader() {
 	})
 }
 
+// closeRawCh closes the sole-producer raw record channel exactly once.
+// Only readLoop may call this; ingestLoop never closes rawCh.
+func (b *Backend) closeRawCh() {
+	b.rawChCloseOnce.Do(func() {
+		b.mu.Lock()
+		ch := b.rawCh
+		b.mu.Unlock()
+		if ch != nil {
+			close(ch)
+		}
+	})
+}
+
 func (b *Backend) finalizeRuntimeResources() {
 	b.finalizeOnce.Do(func() {
 		b.closeReader()
+		// Last-chance kernel loss reconcile while maps remain valid. Prefer the
+		// ingest shutdown path; this covers fatal exits that skipped it.
+		b.reconcileFinalKernelLoss(context.Background(), false)
 		b.mu.Lock()
 		handles := b.handles
 		closeHandles := b.closeHandles
@@ -494,11 +535,16 @@ func (b *Backend) failRuntime(reason collector.ProcessNetworkCapabilityReason) {
 	b.mu.Lock()
 	switch b.capability.State {
 	case collector.ProcessNetworkCapabilityActive, collector.ProcessNetworkCapabilityResourceGuarded:
+		wasGuarded := b.capability.State == collector.ProcessNetworkCapabilityResourceGuarded ||
+			b.capability.Resource.Guarded
 		b.capability.State = collector.ProcessNetworkCapabilityUnavailable
 		b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{reason}
 		b.capability.ObservedAt = time.Now().UTC()
 		b.capability.TransitionAt = b.capability.ObservedAt
 		b.capability.PreflightPassed = false
+		// Fatal override of RESOURCE_GUARDED: state is no longer guarded, but
+		// retain resource admission evidence for supportability.
+		b.capability.Resource.Guarded = wasGuarded
 	}
 	cancel := b.cancel
 	b.mu.Unlock()
@@ -511,7 +557,8 @@ func (b *Backend) failRuntime(reason collector.ProcessNetworkCapabilityReason) {
 // guardCapabilityForKernelLoss latches ACTIVE → RESOURCE_GUARDED with
 // RESOURCE_LIMIT when positive reconciled kernel map/ring loss is observed.
 // Guard remains latched until a governed healthy restart; zero additional loss
-// must not fabricate automatic recovery to ACTIVE.
+// must not fabricate automatic recovery to ACTIVE. Embedded Resource.Guarded
+// must agree with State=RESOURCE_GUARDED.
 func (b *Backend) guardCapabilityForKernelLoss() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -523,6 +570,10 @@ func (b *Backend) guardCapabilityForKernelLoss() {
 	b.capability.ReasonCodes = []collector.ProcessNetworkCapabilityReason{collector.ReasonResourceLimit}
 	b.capability.ObservedAt = now
 	b.capability.TransitionAt = now
+	b.capability.Resource.RequestedMapBytes = b.cfg.RequestedMapBytes
+	b.capability.Resource.RequestedRingBytes = b.cfg.RequestedRingBytes
+	b.capability.Resource.MaximumBytes = b.cfg.MaximumBytes
+	b.capability.Resource.Guarded = true
 }
 
 func (b *Backend) activeCapability(base collector.ProcessNetworkCapabilitySnapshot, extra []collector.ProcessNetworkCapabilityReason) collector.ProcessNetworkCapabilitySnapshot {
@@ -535,6 +586,7 @@ func (b *Backend) activeCapability(base collector.ProcessNetworkCapabilitySnapsh
 	base.Resource.RequestedMapBytes = b.cfg.RequestedMapBytes
 	base.Resource.RequestedRingBytes = b.cfg.RequestedRingBytes
 	base.Resource.MaximumBytes = b.cfg.MaximumBytes
+	base.Resource.Guarded = false
 	base.ValidUntil = base.ObservedAt.Add(b.cfg.RecheckMin)
 	base.NextRecheckAt = base.ValidUntil
 	return base

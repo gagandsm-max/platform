@@ -317,7 +317,7 @@ func TestAggregatorIngestErrorObservable(t *testing.T) {
 	batch := []collector.ProcessNetworkSyntheticEvent{
 		backendDropEvent(string(LossClassDecoderReject), 1, time.Now().UTC()),
 	}
-	fatal := b.flushBatch(ctx, ctx, &batch)
+	fatal := b.flushBatch(ctx, ctx, &batch, false)
 	if !fatal {
 		t.Fatal("expected fatal aggregator fault")
 	}
@@ -368,7 +368,7 @@ func TestAggregatorFlushDueErrorObservable(t *testing.T) {
 	// Force window end into the past so FlushDue delivers immediately.
 	syn.ObservedAt = time.Now().UTC().Add(-2 * time.Minute)
 	batch := []collector.ProcessNetworkSyntheticEvent{syn}
-	fatal := b.flushBatch(ctx, ctx, &batch)
+	fatal := b.flushBatch(ctx, ctx, &batch, false)
 	if !fatal {
 		t.Fatal("expected FlushDue sink failure to be fatal")
 	}
@@ -502,7 +502,7 @@ func TestTransportNotWiredPreservedNotKernelFailure(t *testing.T) {
 	}
 	syn.ObservedAt = time.Now().UTC().Add(-2 * time.Minute)
 	batch := []collector.ProcessNetworkSyntheticEvent{syn}
-	fatal := b.flushBatch(ctx, ctx, &batch)
+	fatal := b.flushBatch(ctx, ctx, &batch, false)
 	if fatal {
 		t.Fatal("TRANSPORT_NOT_WIRED must not be fatal")
 	}
@@ -892,7 +892,7 @@ func TestObserveAggregatorErrActiveContextErrorsFatal(t *testing.T) {
 			defer cancel()
 			batch := []collector.ProcessNetworkSyntheticEvent{oldSyntheticEvent(t)}
 
-			if !b.flushBatch(ctx, ctx, &batch) {
+			if !b.flushBatch(ctx, ctx, &batch, false) {
 				t.Fatalf("active runtime sink error %v must be fatal", sinkErr)
 			}
 			if b.AggregatorFaultCount() != 1 {
@@ -967,9 +967,12 @@ func TestNormalBackendShutdownFlushesPendingRecords(t *testing.T) {
 	}
 }
 
-func TestRuntimeCancelBeforeStopContextDropsPendingFlush(t *testing.T) {
-	// Exposes the P1-A mechanism: canceling the backend runtime before
-	// StopContext installs shutdownCtx discards pending ingest.
+func TestRuntimeCancelBeforeStopContextStillFlushesPending(t *testing.T) {
+	// Prior defect: canceling the backend runtime before StopContext installed
+	// shutdownCtx discarded pending ingest. Closure uses an independent bounded
+	// flush budget when shutdownCtx is absent so cancel-first cannot silently
+	// drop records. Agent.Stop must still install shutdownCtx before cancel for
+	// governed whole-service budgets (see common activation-race tests).
 	agg, sink := testAgg(t)
 	b, err := NewBackend(BackendConfig{
 		Config:     Config{Enabled: false, PreflightTimeout: time.Second, RecheckMin: time.Minute},
@@ -979,20 +982,17 @@ func TestRuntimeCancelBeforeStopContextDropsPendingFlush(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, cancel := startIngestLoopWithPendingOldEvent(t, b)
-	cancel() // defect order: runtime cancel before StopContext
+	cancel() // former defect order: runtime cancel before StopContext
 	select {
 	case <-b.workersDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("ingest worker did not exit after runtime cancel")
 	}
-	if got := len(sink.ProcessNetwork) + len(sink.ProcessNetworkAccounting); got != 0 {
-		t.Fatalf("cancel-before-stop unexpectedly delivered %d records", got)
+	if got := len(sink.ProcessNetwork) + len(sink.ProcessNetworkAccounting); got == 0 {
+		t.Fatal("cancel-before-stop must not silently discard pending ingest")
 	}
 	if err := b.StopContext(context.Background()); err != nil {
 		t.Fatalf("late StopContext: %v", err)
-	}
-	if got := len(sink.ProcessNetwork) + len(sink.ProcessNetworkAccounting); got != 0 {
-		t.Fatalf("late StopContext must not invent delivery after cancel-first loss: %d", got)
 	}
 }
 

@@ -523,6 +523,180 @@ func TestAgentStopInstallsBackendFlushBeforeRuntimeCancel(t *testing.T) {
 	}
 }
 
+// activeBeforeDoneRuntime reproduces ACTIVE publication before activationDone
+// closes: Start publishes ACTIVE, signals a barrier, then blocks until released.
+// Agent.Stop must not cancel accepting workers before StopContext.
+type activeBeforeDoneRuntime struct {
+	fakeProcessNetworkRuntime
+	activePublished        chan struct{}
+	releaseStart           chan struct{}
+	agentCtx               context.Context
+	canceledBeforeStop     atomic.Bool
+	stopObservedLiveRunCtx atomic.Bool
+}
+
+func (f *activeBeforeDoneRuntime) Start(ctx context.Context) error {
+	f.startCalls.Add(1)
+	f.agentCtx = ctx
+	go func() {
+		<-ctx.Done()
+		if f.stopCalls.Load() == 0 {
+			f.canceledBeforeStop.Store(true)
+		}
+	}()
+	now := time.Now().UTC()
+	f.mu.Lock()
+	f.capability.State = collector.ProcessNetworkCapabilityActive
+	f.capability.ReasonCodes = nil
+	f.capability.ObservedAt = now
+	f.capability.TransitionAt = now
+	f.capability.LastSuccessAt = now
+	f.capability.ValidUntil = now.Add(time.Hour)
+	f.capability.PreflightPassed = true
+	f.support.Present = true
+	f.mu.Unlock()
+	if f.activePublished != nil {
+		close(f.activePublished)
+	}
+	if f.releaseStart != nil {
+		select {
+		case <-f.releaseStart:
+		case <-ctx.Done():
+			// Accepting workers must not be canceled solely because activationDone
+			// is still open; if this fires before StopContext, the race regressed.
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func (f *activeBeforeDoneRuntime) StopContext(ctx context.Context) error {
+	if f.agentCtx != nil && f.agentCtx.Err() == nil {
+		f.stopObservedLiveRunCtx.Store(true)
+	}
+	return f.fakeProcessNetworkRuntime.StopContext(ctx)
+}
+
+func TestActiveBeforeActivationDoneStopDoesNotCancelWorkers(t *testing.T) {
+	activePublished := make(chan struct{})
+	releaseStart := make(chan struct{})
+	rt := &activeBeforeDoneRuntime{
+		activePublished: activePublished,
+		releaseStart:    releaseStart,
+	}
+	rt.setCapability(collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
+
+	svc, err := NewAgentService(testEBPFAgentCfg(t), testAgentIdent("agent-active-before-done"),
+		client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil, WithProcessNetworkRuntime(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-activePublished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ACTIVE was not published before activationDone barrier")
+	}
+	// activationDone is still open (Start blocked on releaseStart).
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- svc.Stop() }()
+
+	// Allow Stop to observe open activationDone + ACTIVE and choose cancel policy.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) && rt.stopCalls.Load() == 0 && !rt.canceledBeforeStop.Load() {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if rt.canceledBeforeStop.Load() && rt.stopCalls.Load() == 0 {
+		close(releaseStart)
+		<-stopDone
+		t.Fatal("P1 activation race: Stop canceled accepting workers before StopContext")
+	}
+	close(releaseStart)
+	select {
+	case err := <-stopDone:
+		if err != nil {
+			t.Fatalf("Stop: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop deadlocked across ACTIVE-before-activationDone barrier")
+	}
+	if rt.canceledBeforeStop.Load() {
+		t.Fatal("Stop must not cancel runtime before StopContext when backend already ACTIVE")
+	}
+	if !rt.stopObservedLiveRunCtx.Load() {
+		t.Fatal("StopContext must observe live Agent runtime for shutdown flush")
+	}
+	if rt.stopCalls.Load() != 1 {
+		t.Fatalf("StopContext calls=%d", rt.stopCalls.Load())
+	}
+}
+
+func TestTypedBackendShutdownFlushSurvivesAgentStop(t *testing.T) {
+	flushErr := errors.New("BACKEND_SHUTDOWN_FLUSH_INCOMPLETE: fixture sink blocked")
+	rt := &fakeProcessNetworkRuntime{stopErr: flushErr}
+	rt.setCapability(collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
+	svc, err := NewAgentService(testEBPFAgentCfg(t), testAgentIdent("agent-typed-flush"),
+		client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil, WithProcessNetworkRuntime(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.setShutdownBudgetForTest(2 * time.Second)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitCapability(t, rt, collector.ProcessNetworkCapabilityActive, 2*time.Second)
+	err = svc.Stop()
+	if err == nil {
+		t.Fatal("expected shutdown flush failure")
+	}
+	if !errors.Is(err, flushErr) {
+		t.Fatalf("typed flush error must survive AgentService.Stop, got %v", err)
+	}
+	if errors.Is(err, ErrShutdownTimeout) {
+		t.Fatal("non-timeout sink/flush failure must not be mislabeled ErrShutdownTimeout")
+	}
+	if svc.LifecycleState() != LifecycleFailed {
+		t.Fatalf("lifecycle=%s", svc.LifecycleState())
+	}
+}
+
+func TestProtectedTeardownUnderOptionalBudgetExhaustion(t *testing.T) {
+	gate := make(chan struct{})
+	rt := &fakeProcessNetworkRuntime{startGate: gate, ignoreCancel: true}
+	rt.setCapability(collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
+	addr := freeLoopbackAddr(t)
+	cfg := testEBPFAgentCfg(t)
+	cfg.HealthAddress = addr
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-optional-budget"),
+		client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil, WithProcessNetworkRuntime(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.setShutdownBudgetForTest(200 * time.Millisecond)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && rt.startCalls.Load() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	err = svc.Stop()
+	if err == nil || !errors.Is(err, ErrShutdownTimeout) {
+		t.Fatalf("expected activation settle timeout, got %v", err)
+	}
+	if !svc.scheduler.AdmissionClosedForTest() {
+		t.Fatal("protected scheduler teardown must run after optional budget exhaustion")
+	}
+	httpClient := &http.Client{Timeout: 100 * time.Millisecond}
+	if resp, liveErr := httpClient.Get("http://" + addr + "/live"); liveErr == nil {
+		_ = resp.Body.Close()
+		t.Fatal("protected health teardown must run after optional budget exhaustion")
+	}
+	close(gate)
+}
+
 func TestStopDuringOptionalActivationKeepsProtectedTeardown(t *testing.T) {
 	gate := make(chan struct{})
 	rt := &fakeProcessNetworkRuntime{startGate: gate}

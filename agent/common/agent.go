@@ -472,14 +472,17 @@ func (s *AgentService) Stop() error {
 		// best-effort scheduler/worker/health teardown under the remaining
 		// whole-service deadline.
 		if activationDone != nil {
-			// Cancel the shared runtime only while activation is still in
-			// progress so cooperative Start observes abort. Cancelling after
-			// ACTIVE would wake ingestLoop before StopContext can install a
-			// live shutdown-flush context and silently discard pending records.
+			// Cancel the shared Agent runtime only while activation is still in
+			// progress AND the backend is not yet accepting events. activationDone
+			// being open is not proof that no backend workers exist: Backend.Start
+			// may publish ACTIVE and launch workers before returning (and before
+			// activationDone closes). Cancelling accepting workers before
+			// StopContext installs a live shutdown-flush context recreates the
+			// original cancellation defect.
 			select {
 			case <-activationDone:
 			default:
-				if cancel != nil {
+				if cancel != nil && !processNetworkAcceptingEvents(rt) {
 					cancel()
 					cancel = nil
 				}
@@ -548,16 +551,20 @@ func (s *AgentService) Stop() error {
 		healthErr := s.healthSrv.Stop(deadlineCtx)
 
 		if err := joinShutdownErrors(deadlineCtx, activationErr, backendErr, schedErr, workerErr, healthErr); err != nil {
-			stopErr := fmt.Errorf("%w: %v", ErrShutdownTimeout, err)
+			stopErr := classifyAgentStopError(deadlineCtx, err)
 			s.lifeMu.Lock()
 			s.setStateLocked(LifecycleFailed)
 			s.stopErr = stopErr
 			s.lifeMu.Unlock()
+			reasonClass := "shutdown_failed"
+			if errors.Is(stopErr, ErrShutdownTimeout) {
+				reasonClass = "shutdown_timeout"
+			}
 			s.logger.Error("AmrudAi Agent service shutdown failed",
 				"event_code", "AGENT_SERVICE_STOP_FAILED",
 				"safe_context", map[string]any{
 					"lifecycle_state": string(LifecycleFailed),
-					"reason_class":    "shutdown_timeout",
+					"reason_class":    reasonClass,
 				},
 			)
 			return stopErr
@@ -598,22 +605,56 @@ func optionalEnrichmentBudget(whole time.Duration) time.Duration {
 	return sub
 }
 
-func joinShutdownErrors(deadlineCtx context.Context, errs ...error) error {
-	var parts []string
-	for _, err := range errs {
-		if err == nil {
-			continue
-		}
-		// Ignore bare context errors when a component already reported timeout.
-		parts = append(parts, err.Error())
+// processNetworkAcceptingEvents reports whether the optional enrichment runtime
+// has already published a state in which backend workers may accept events.
+// Used so Stop does not treat an open activationDone as proof that no workers exist.
+func processNetworkAcceptingEvents(rt ProcessNetworkRuntime) bool {
+	if rt == nil {
+		return false
 	}
-	if len(parts) == 0 {
+	switch rt.Capability().State {
+	case collector.ProcessNetworkCapabilityActive, collector.ProcessNetworkCapabilityResourceGuarded:
+		return true
+	default:
+		return false
+	}
+}
+
+// joinShutdownErrors preserves typed error identity via errors.Join so
+// errors.Is / errors.As work through the AgentService.Stop boundary.
+func joinShutdownErrors(deadlineCtx context.Context, errs ...error) error {
+	var nonempty []error
+	for _, err := range errs {
+		if err != nil {
+			nonempty = append(nonempty, err)
+		}
+	}
+	if len(nonempty) == 0 {
 		if err := deadlineCtx.Err(); err != nil {
 			return err
 		}
 		return nil
 	}
-	return errors.New(strings.Join(parts, "; "))
+	return errors.Join(nonempty...)
+}
+
+// classifyAgentStopError wraps with ErrShutdownTimeout only for authentic
+// deadline exhaustion. Sink failures, incomplete flush, backend runtime faults
+// and activation settlement failures retain their typed identities.
+func classifyAgentStopError(deadlineCtx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrShutdownTimeout) {
+		return err
+	}
+	timedOut := deadlineCtx.Err() != nil ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled)
+	if timedOut {
+		return fmt.Errorf("%w: %w", ErrShutdownTimeout, err)
+	}
+	return err
 }
 
 func (s *AgentService) QueueStats() queue.QueueStats {
