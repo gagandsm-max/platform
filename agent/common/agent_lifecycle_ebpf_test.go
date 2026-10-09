@@ -505,12 +505,16 @@ func TestNonCooperativeActivationStopTimeout(t *testing.T) {
 	gate := make(chan struct{})
 	rt := &fakeProcessNetworkRuntime{startGate: gate, ignoreCancel: true}
 	rt.setCapability(collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
-	svc, err := NewAgentService(testEBPFAgentCfg(t), testAgentIdent("agent-noncoop"),
+	addr := freeLoopbackAddr(t)
+	cfg := testEBPFAgentCfg(t)
+	cfg.HealthAddress = addr
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-noncoop"),
 		client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil, WithProcessNetworkRuntime(rt))
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc.setShutdownBudgetForTest(150 * time.Millisecond)
+	// Whole-service budget; activation settle is a subordinate half-window.
+	svc.setShutdownBudgetForTest(300 * time.Millisecond)
 	if err := svc.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -518,13 +522,20 @@ func TestNonCooperativeActivationStopTimeout(t *testing.T) {
 	for time.Now().Before(deadline) && rt.startCalls.Load() == 0 {
 		time.Sleep(5 * time.Millisecond)
 	}
+	httpClient := &http.Client{Timeout: 100 * time.Millisecond}
+	liveBefore, liveErr := httpClient.Get("http://" + addr + "/live")
+	if liveErr != nil {
+		t.Fatalf("health must be up before Stop: %v", liveErr)
+	}
+	_ = liveBefore.Body.Close()
+
 	start := time.Now()
 	err = svc.Stop()
 	elapsed := time.Since(start)
 	if err == nil || !errors.Is(err, ErrShutdownTimeout) {
 		t.Fatalf("expected bounded shutdown timeout, got %v", err)
 	}
-	if elapsed > 800*time.Millisecond {
+	if elapsed > time.Second {
 		t.Fatalf("Stop hung too long: %s", elapsed)
 	}
 	if svc.LifecycleState() != LifecycleFailed {
@@ -532,6 +543,25 @@ func TestNonCooperativeActivationStopTimeout(t *testing.T) {
 	}
 	if rt.stopCalls.Load() != 0 {
 		t.Fatal("must not call StopContext while activation unsettled")
+	}
+	// Protected base teardown must continue after activation sub-budget expiry.
+	// Stop only returns after the scheduler+worker WaitGroup and health.Stop.
+	if !svc.scheduler.AdmissionClosedForTest() {
+		t.Fatal("scheduler stop must be attempted after activation timeout")
+	}
+	if svc.SchedulerStatus().Running {
+		t.Fatal("scheduler must not remain running after stop attempt")
+	}
+	workerCtx, workerCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	workerErr := svc.worker.StopContext(workerCtx)
+	workerCancel()
+	if workerErr != nil {
+		t.Fatalf("worker stop must have been attempted during AgentService.Stop: %v", workerErr)
+	}
+	liveAfter, liveAfterErr := httpClient.Get("http://" + addr + "/live")
+	if liveAfterErr == nil {
+		_ = liveAfter.Body.Close()
+		t.Fatal("health stop must be attempted last after activation timeout")
 	}
 	close(gate) // unblock leaked activation for test process exit
 	time.Sleep(20 * time.Millisecond)

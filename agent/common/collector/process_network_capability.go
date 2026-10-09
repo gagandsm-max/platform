@@ -123,6 +123,10 @@ type ProcessNetworkCapabilitySnapshot struct {
 	PreflightPassed   bool                             `json:"preflight_passed"`
 	Resource          ProcessNetworkResourceEvidence   `json:"resource_guard"`
 	SourceQuality     string                           `json:"source_quality"`
+	// CurrentAuthority marks runtime-backed or static configuration truth that
+	// remains authoritative without a Slice-8 recheck daemon. Historical /
+	// preflight-only evidence leaves this false so Fresh may emit EVIDENCE_STALE.
+	CurrentAuthority bool `json:"-"`
 }
 
 func (s ProcessNetworkCapabilitySnapshot) Available() bool {
@@ -135,10 +139,15 @@ func (s ProcessNetworkCapabilitySnapshot) Copy() ProcessNetworkCapabilitySnapsho
 	return s
 }
 
-// Fresh returns a copy and converts expired evidence to the truthful public
-// UNAVAILABLE/EVIDENCE_STALE state. ValidUntil is an exclusive bound.
+// Fresh returns a copy and converts expired historical/preflight evidence to
+// the truthful public UNAVAILABLE/EVIDENCE_STALE state. ValidUntil is an
+// exclusive bound. CurrentAuthority snapshots are not age-staled: runtime and
+// static configuration truth remain their current typed state.
 func (s ProcessNetworkCapabilitySnapshot) Fresh(now time.Time) ProcessNetworkCapabilitySnapshot {
 	out := s.Copy()
+	if out.CurrentAuthority {
+		return out
+	}
 	now = now.UTC()
 	if out.ValidUntil.IsZero() || !now.Before(out.ValidUntil) {
 		out.State = ProcessNetworkCapabilityUnavailable

@@ -40,8 +40,8 @@ The **base AmrudAi Agent** (host collectors, durable queue, Sensor delivery, hea
 1. Base lifecycle reaches `RUNNING` first (`health` → `worker` → `scheduler`).
 2. Exactly **one** asynchronous backend activation attempt begins after `RUNNING` (no retry daemon).
 3. Activation failure never calls `failStart`, never stops scheduler/delivery, and never makes `/ready` `NOT_READY`.
-4. `GET /capabilities/process-network-ebpf` reports **current** dynamic capability (`ACTIVE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `UNAVAILABLE`, `FEATURE_DISABLED`, `BACKEND_STOPPED`, …) plus bounded support counters when a runtime is present.
-5. Shutdown uses the **single** whole-service budget: cancel runtime → boundedly settle the one activation attempt → `Backend.StopContext` with scheduler/worker → health last.
+4. `GET /capabilities/process-network-ebpf` reports **current** dynamic capability (`ACTIVE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `UNAVAILABLE`, `FEATURE_DISABLED`, `BACKEND_STOPPED`, …) plus bounded support counters when a runtime is present. Runtime-backed and static `FEATURE_DISABLED` configuration truth are current authority and are not age-staled to `EVIDENCE_STALE` merely because `ValidUntil` elapsed (no Slice-8 recheck daemon). Historical/preflight-only evidence without a runtime may still become `EVIDENCE_STALE`.
+5. Shutdown uses the **single** whole-service budget: cancel runtime → settle optional activation under a subordinate sub-deadline (half the whole budget) → when settled, `Backend.StopContext` with scheduler/worker → health last. If activation remains unsettled, skip unsafe backend stop, continue best-effort scheduler/worker/health teardown under the remaining whole-service deadline, and return a truthful joined `AGENT_SHUTDOWN_TIMEOUT` with lifecycle `FAILED`. Optional eBPF construction failure never terminates base Agent startup.
 
 Intended data path (when activated):
 

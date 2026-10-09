@@ -105,10 +105,14 @@ func NewBackend(cfg BackendConfig) (*Backend, error) {
 }
 
 // Capability returns a deep copy of the current capability snapshot.
+// Runtime-backed capability is current authority: HTTP rendering must not
+// age-stale it to EVIDENCE_STALE merely because ValidUntil elapsed.
 func (b *Backend) Capability() collector.ProcessNetworkCapabilitySnapshot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.capability.Copy()
+	out := b.capability.Copy()
+	out.CurrentAuthority = true
+	return out
 }
 
 // Status is an alias for Capability for the Slice-8 lifecycle seam.
@@ -117,15 +121,15 @@ func (b *Backend) Status() collector.ProcessNetworkCapabilitySnapshot {
 }
 
 // SupportSnapshot returns backend-neutral loss/support counters for the
-// loopback capability endpoint. Never a readiness input.
+// loopback capability endpoint. Never a readiness input. Loads typed atomic
+// counters directly — no per-call map allocation.
 func (b *Backend) SupportSnapshot() collector.ProcessNetworkSupportSnapshot {
-	loss := b.loss.Snapshot()
 	return collector.ProcessNetworkSupportSnapshot{
 		Present:               true,
-		MapUpdateFail:         loss[LossClassMapUpdateFail],
-		RingReserveFail:       loss[LossClassRingReserveFail],
-		DecoderReject:         loss[LossClassDecoderReject],
-		UserspaceChannelFull:  loss[LossClassUserspaceChanFull],
+		MapUpdateFail:         b.loss.mapUpdateFail.Load(),
+		RingReserveFail:       b.loss.ringReserveFail.Load(),
+		DecoderReject:         b.loss.decoderReject.Load(),
+		UserspaceChannelFull:  b.loss.userspaceChanFull.Load(),
 		TransportNotWired:     b.TransportNotWiredCount(),
 		AggregatorFaults:      b.AggregatorFaultCount(),
 		ReaderFaults:          b.ReaderFaultCount(),
@@ -440,6 +444,7 @@ func (b *Backend) finalizeRuntimeResources() {
 		b.reader = nil
 		b.cancel = nil
 		b.shutdownCtx = nil
+		b.optionalAvailable = false
 		if b.stopRequested {
 			b.stopped = true
 		}

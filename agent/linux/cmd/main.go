@@ -7,14 +7,11 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"platform/agent/common"
-	"platform/agent/common/collector"
 	"platform/agent/common/config"
 	"platform/agent/common/identity"
 	"platform/agent/common/supportability"
-	"platform/agent/linux/ebpf"
 )
 
 const (
@@ -70,57 +67,9 @@ func main() {
 
 	opts := []common.ServiceOption{
 		common.WithSupportabilityIdentity(agentVersion, serviceInstanceID),
-	}
-
-	// Optional eBPF Backend is constructed only on the Linux production path.
-	// Concrete ebpf types never enter agent/common. Disabled remains a static
-	// FEATURE_DISABLED capability with no kernel activation attempt.
-	if cfg.EBPFEnabled {
-		agg, err := collector.NewProcessNetworkAggregator(collector.ProcessNetworkAggregatorConfig{
-			SourceProvenance: collector.ProcessNetworkEBPFSourceProvenance,
-		}, collector.UnwiredStructuredEvidenceSink{})
-		if err != nil {
-			logger.Error("Failed to initialize process-network aggregator",
-				"event_code", "AGENT_EBPF_AGGREGATOR_INIT_FAILED",
-				"safe_context", map[string]any{"reason_class": "initialization_failed"})
-			os.Exit(exitService)
-		}
-		backend, err := ebpf.NewBackend(ebpf.BackendConfig{
-			Config: ebpf.Config{
-				Enabled:            true,
-				PreflightTimeout:   cfg.EBPFPreflightTimeout,
-				RecheckMin:         cfg.EBPFRecheckMin,
-				RecheckMax:         cfg.EBPFRecheckMax,
-				RequestedMapBytes:  ebpf.RequestedMapBytesEstimate,
-				RequestedRingBytes: ebpf.RequestedRingBytesExact,
-				LowWaterSatisfied:  true,
-			},
-			Aggregator: agg,
-		})
-		if err != nil {
-			logger.Error("Failed to construct optional eBPF backend",
-				"event_code", "AGENT_EBPF_BACKEND_INIT_FAILED",
-				"safe_context", map[string]any{"reason_class": "initialization_failed"})
-			os.Exit(exitService)
-		}
-		opts = append(opts, common.WithProcessNetworkRuntime(backend))
-		logger.Info("AmrudAi Agent optional eBPF runtime constructed",
-			"event_code", "AGENT_EBPF_RUNTIME_WIRED",
-			"safe_context", map[string]any{
-				"reason_class": "optional_enrichment",
-				"activation":   "after_running_async_once",
-			})
-	} else {
-		now := time.Now().UTC()
-		opts = append(opts, common.WithProcessNetworkCapability(collector.ProcessNetworkCapabilitySnapshot{
-			State:         collector.ProcessNetworkCapabilityUnavailable,
-			ReasonCodes:   []collector.ProcessNetworkCapabilityReason{collector.ReasonFeatureDisabled},
-			ObservedAt:    now,
-			TransitionAt:  now,
-			ValidUntil:    now.Add(cfg.EBPFRecheckMin),
-			NextRecheckAt: now.Add(cfg.EBPFRecheckMin),
-			SourceQuality: "DISABLED",
-		}))
+		// Optional eBPF is subordinate: construction failure never terminates
+		// the base Agent. Concrete ebpf types stay under agent/linux/**.
+		optionalProcessNetworkOption(cfg, logger, nil),
 	}
 
 	svc, err := common.NewAgentService(cfg, ident, nil, logger, opts...)

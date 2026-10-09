@@ -36,6 +36,11 @@ const (
 // Slice 4 selects systemd TimeoutStopSec above this runtime budget.
 const defaultAgentShutdownBudget = 10 * time.Second
 
+// activationSettleBudgetDenominator derives the subordinate optional-activation
+// settle window from the single whole-service shutdown budget (numerator 1).
+// Optional enrichment must not monopolize protected base-Agent teardown.
+const activationSettleBudgetDenominator = 2
+
 var (
 	// ErrAlreadyRunning is returned when Start is invoked while STARTING/RUNNING.
 	ErrAlreadyRunning = errors.New("AGENT_ALREADY_RUNNING: Start rejected; service already started")
@@ -452,31 +457,39 @@ func (s *AgentService) Stop() error {
 			cancel()
 		}
 
+		// One whole-service absolute deadline. Optional activation settle uses a
+		// subordinate sub-deadline derived from it — never an additive budget.
 		deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), budget)
 		defer deadlineCancel()
 
+		var activationErr error
+		activationSettled := true
 		// Boundedly settle the one optional activation attempt before calling
 		// Backend.StopContext, so Stop never blocks unboundedly behind an
 		// in-progress Backend.Start mutex and never force-closes kernel
-		// resources still owned by an unfinished Start.
+		// resources still owned by an unfinished Start. If the subordinate
+		// settle window expires, skip unsafe Backend.StopContext and continue
+		// best-effort scheduler/worker/health teardown under the remaining
+		// whole-service deadline.
 		if activationDone != nil {
+			settleBudget := activationSettleBudget(budget)
+			settleCtx, settleCancel := context.WithTimeout(deadlineCtx, settleBudget)
 			select {
 			case <-activationDone:
-			case <-deadlineCtx.Done():
-				stopErr := fmt.Errorf("%w: optional process-network activation did not settle before shutdown budget", ErrShutdownTimeout)
-				s.lifeMu.Lock()
-				s.setStateLocked(LifecycleFailed)
-				s.stopErr = stopErr
-				s.lifeMu.Unlock()
-				s.logger.Error("AmrudAi Agent service shutdown failed",
-					"event_code", "AGENT_SERVICE_STOP_FAILED",
+				settleCancel()
+			case <-settleCtx.Done():
+				settleCancel()
+				activationSettled = false
+				activationErr = fmt.Errorf("%w: optional process-network activation did not settle before activation sub-budget", ErrShutdownTimeout)
+				s.logger.Error("AmrudAi Agent optional process-network activation unsettled during shutdown",
+					"event_code", "AGENT_EBPF_ACTIVATION_SHUTDOWN_UNSETTLED",
 					"safe_context", map[string]any{
-						"lifecycle_state": string(LifecycleFailed),
+						"lifecycle_state": string(LifecycleStopping),
 						"reason_class":    "shutdown_timeout",
 						"detail":          "process_network_activation_unsettled",
+						"settle_budget_ms": settleBudget.Milliseconds(),
 					},
 				)
-				return stopErr
 			}
 		}
 
@@ -487,7 +500,7 @@ func (s *AgentService) Stop() error {
 			compWG     sync.WaitGroup
 		)
 		compWG.Add(2)
-		if rt != nil {
+		if rt != nil && activationSettled {
 			compWG.Add(1)
 			go func() {
 				defer compWG.Done()
@@ -506,7 +519,7 @@ func (s *AgentService) Stop() error {
 
 		healthErr := s.healthSrv.Stop(deadlineCtx)
 
-		if err := joinShutdownErrors(deadlineCtx, backendErr, schedErr, workerErr, healthErr); err != nil {
+		if err := joinShutdownErrors(deadlineCtx, activationErr, backendErr, schedErr, workerErr, healthErr); err != nil {
 			stopErr := fmt.Errorf("%w: %v", ErrShutdownTimeout, err)
 			s.lifeMu.Lock()
 			s.setStateLocked(LifecycleFailed)
@@ -538,6 +551,23 @@ func (s *AgentService) Stop() error {
 		s.lifeMu.Unlock()
 		return fmt.Errorf("AGENT_LIFECYCLE_INVALID: unexpected state %q", s.state)
 	}
+}
+
+// activationSettleBudget returns the subordinate settle window for optional
+// process-network activation. It is derived from the whole-service budget and
+// never extends Stop beyond that single absolute deadline.
+func activationSettleBudget(whole time.Duration) time.Duration {
+	if whole <= 0 {
+		return 0
+	}
+	sub := whole / time.Duration(activationSettleBudgetDenominator)
+	if sub < time.Millisecond {
+		if whole > time.Millisecond {
+			return time.Millisecond
+		}
+		return whole
+	}
+	return sub
 }
 
 func joinShutdownErrors(deadlineCtx context.Context, errs ...error) error {

@@ -9,7 +9,7 @@ import (
 	"platform/agent/common/collector"
 )
 
-func testAgg(t *testing.T) (*collector.ProcessNetworkAggregator, *collector.LocalRecordingStructuredEvidenceSink) {
+func testAgg(t testing.TB) (*collector.ProcessNetworkAggregator, *collector.LocalRecordingStructuredEvidenceSink) {
 	t.Helper()
 	sink := &collector.LocalRecordingStructuredEvidenceSink{}
 	agg, err := collector.NewProcessNetworkAggregator(collector.ProcessNetworkAggregatorConfig{

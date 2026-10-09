@@ -14,7 +14,7 @@ import (
 	"platform/agent/common/collector"
 )
 
-func testBackendInactive(t *testing.T) *Backend {
+func testBackendInactive(t testing.TB) *Backend {
 	t.Helper()
 	agg, _ := testAgg(t)
 	b, err := NewBackend(BackendConfig{
@@ -815,6 +815,44 @@ func TestStopContextNormalIdempotent(t *testing.T) {
 	}
 	if closed.Load() != 1 {
 		t.Fatalf("idempotent stop double close count=%d", closed.Load())
+	}
+}
+
+func TestOptionalProbeDetachedAfterFinalCleanup(t *testing.T) {
+	b := testBackendInactive(t)
+	runtimeCtx, runtimeCancel := armRuntime(b)
+	defer runtimeCancel()
+	b.mu.Lock()
+	b.optionalAvailable = true
+	b.rawCh = make(chan []byte)
+	b.mu.Unlock()
+	_, closed := trackHandleCleanup(b)
+	go b.readLoop(runtimeCtx)
+	go b.ingestLoop(runtimeCtx)
+
+	if !b.SupportSnapshot().OptionalProbeAttached {
+		t.Fatal("precondition: optional probe must report attached")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := b.StopContext(ctx); err != nil {
+		t.Fatalf("StopContext: %v", err)
+	}
+	if closed.Load() != 1 {
+		t.Fatalf("final cleanup close count=%d", closed.Load())
+	}
+	cap := b.Capability()
+	if cap.State != collector.ProcessNetworkCapabilityUnavailable || !hasReason(cap, collector.ReasonBackendStopped) {
+		t.Fatalf("want BACKEND_STOPPED got %+v", cap)
+	}
+	if b.SupportSnapshot().OptionalProbeAttached {
+		t.Fatal("optional_probe_attached must be false after final cleanup")
+	}
+	if b.OptionalProbeAttached() {
+		t.Fatal("OptionalProbeAttached must be false after final cleanup")
+	}
+	if closed.Load() != 1 {
+		t.Fatalf("no double-close: close count=%d", closed.Load())
 	}
 }
 

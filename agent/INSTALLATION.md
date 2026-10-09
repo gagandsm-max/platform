@@ -46,11 +46,13 @@ GET /capabilities/process-network-ebpf
 
 Returns the **current** capability snapshot (`state`, `reason_codes`, BTF/cap presence, resource guard) and, when the optional runtime is present, bounded `support_counters` (`MAP_UPDATE_FAIL`, `RING_RESERVE_FAIL`, `DECODER_REJECT`, `USERSPACE_CHANNEL_FULL`, `TRANSPORT_NOT_WIRED`, reader/aggregator faults, optional-probe attached). Does not alter `/live`, `/ready`, or `/health` schemas. Support counters are never readiness inputs.
 
-When `PLATFORM_AGENT_EBPF_ENABLED=true`, AgentService performs one async `Backend.Start` after base `RUNNING`. Compatible activation yields `ACTIVE`; failures yield typed non-ACTIVE states while the base Agent stays operational. Disabled yields `UNAVAILABLE` / `FEATURE_DISABLED` with no kernel activation attempt.
+When `PLATFORM_AGENT_EBPF_ENABLED=true`, AgentService performs one async `Backend.Start` after base `RUNNING`. Compatible activation yields `ACTIVE`; failures yield typed non-ACTIVE states while the base Agent stays operational. Disabled yields `UNAVAILABLE` / `FEATURE_DISABLED` with no kernel activation attempt. Optional aggregator/backend construction failure emits bounded `SOURCE_UNAVAILABLE` evidence and continues base Agent startup (scheduler/worker/queue/health remain operational).
+
+Runtime-backed capability and static `FEATURE_DISABLED` configuration truth remain current authority on `/capabilities/process-network-ebpf` and are not rewritten to `EVIDENCE_STALE` solely because wall-clock validity elapsed. Historical/preflight-only evidence without a runtime may still become `EVIDENCE_STALE`.
 
 ## Stop / cleanup
 
-SIGTERM / `AgentService.Stop` cancels the owned runtime context, boundedly settles the one activation attempt, then stops the backend under the same whole-service shutdown budget as scheduler/worker (health last). Backend stop releases ring reader, links, and maps; no bpffs pins are used. Non-cooperative activation that does not settle before the budget fails shutdown truthfully (`AGENT_SHUTDOWN_TIMEOUT`) rather than hanging forever or force-closing kernel resources.
+SIGTERM / `AgentService.Stop` cancels the owned runtime context and settles the one activation attempt under a subordinate sub-deadline derived from the single whole-service shutdown budget (half that budget). When activation settles, backend stop runs with scheduler/worker under the remaining whole-service deadline (health last). Backend stop releases ring reader, links, and maps and clears `optional_probe_attached`; no bpffs pins are used. Non-cooperative activation that does not settle before the subordinate window skips unsafe `Backend.StopContext`, continues best-effort scheduler/worker/health teardown under the remaining whole-service deadline, and fails shutdown truthfully (`AGENT_SHUTDOWN_TIMEOUT`, lifecycle `FAILED`) rather than hanging forever, force-closing kernel resources, or inventing successful cleanup.
 
 ## Verification (engineering)
 

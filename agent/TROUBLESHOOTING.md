@@ -22,7 +22,9 @@ Use loopback `GET /capabilities/process-network-ebpf` and structured logs (`AGEN
 | Resource ceiling | `RESOURCE_GUARDED` / `RESOURCE_LIMIT` | Implementation resource guard; wait for low-water / reduce contention. Do not disable the guard. |
 | Runtime backend failure after ACTIVE | `UNAVAILABLE` + typed reason (e.g. `READER_FAILED`) | Capability endpoint updates; Agent lifecycle stays `RUNNING` and base readiness unchanged. |
 | Backend stopped | `UNAVAILABLE` / `BACKEND_STOPPED` | After clean stop/cleanup under the Agent whole-service shutdown budget. |
-| Shutdown timeout during activation | Agent `FAILED` / `AGENT_SHUTDOWN_TIMEOUT` | Non-cooperative activation did not settle before the single shutdown budget; do not force-close kernel resources. Restart via systemd. |
+| Shutdown timeout during activation | Agent `FAILED` / `AGENT_SHUTDOWN_TIMEOUT` | Non-cooperative activation did not settle before the subordinate activation sub-budget; backend stop is skipped while scheduler/worker/health teardown still run under the remaining whole-service budget. Do not force-close kernel resources. Restart via systemd. |
+| Optional construction failed | `UNAVAILABLE` / `SOURCE_UNAVAILABLE` | Aggregator/backend construction failed; base Agent continues. Inspect construction logs (`AGENT_EBPF_CONSTRUCTION_FAILED`); fix config/object integrity before expecting enrichment. |
+| False `EVIDENCE_STALE` while runtime attached | should not occur | Runtime-backed current authority and static `FEATURE_DISABLED` are not age-staled. If seen without a runtime, historical/preflight evidence expired as designed. |
 
 ## Cleanup
 
