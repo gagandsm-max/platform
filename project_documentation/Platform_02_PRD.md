@@ -2460,3 +2460,15 @@ The following exact IDs are owned by the v3.3 product requirements in §58. Thes
 | `REQ-OTEL-003` | Phase-1 OTLP enforces request/decompression bounds, cardinality governance, sensitive-field policy, explicit reject/drop accounting and bounded backpressure; no-data is not service failure. |
 | `REQ-OTEL-005` | Phase-1.5 may add bounded sampled spans, short quota-controlled retention, trace search/waterfall, trace-derived service edges and sampling after benchmark gates. |
 | `REQ-OTEL-006` | Java/.NET/Node.js/Python instrumentation onboarding is a Phase-1.5 certification target; full developer APM/profiling/RUM/session replay remains excluded. |
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 product certification profiles — Founder decision 2026-10-09
+
+| Profile | Required product behavior |
+|---|---|
+| **Phase 1 — Single-Customer Enterprise** | One authoritative standalone Core; multiple sites/Sensors/Agents; enterprise security/RBAC; tenant-aware contracts; network + infrastructure observability; discovery/inventory; process/service + installed-software visibility; Flow/Syslog when certified; topology/evidence; semantic monitoring states and No Data != Down; alert/incident lifecycle; deterministic RCA; reporting/SLA; certified notification/ITSM; IPAM; safe NCM backup/diff/compliance/manual operations where certified; storage protection; backup/restore; upgrade/recovery; capacity/chaos/operability evidence. |
+| **Phase 1 optional certified modules** | Agentless infrastructure, OOB hardware, virtualization, storage, database, cloud/Kubernetes/OTLP, SD-WAN, advanced protocols and synthetics may ship when their own certification profile passes. Absence of an optional module does not block the base Phase-1 profile. |
+| **Phase 1.5 — Enterprise HA + MSP** | Adds exactly-two-Core Active/Standby HA, positive fencing, PostgreSQL/Kafka/ClickHouse failover/rejoin, cross-Core deletion-authorizing ACK durability, Sensor failover/re-anchor/push continuity, shared MSP/cross-customer isolation, overlapping private-address spaces, noisy-neighbour controls, broader privileged automation and certified enterprise identity extensions. |
+| **Roadmap / non-blocking unless promoted** | Advanced GNN/LLM, regional federation and other explicitly future capabilities remain outside the mandatory Phase-1/1.5 base unless change control promotes them. |
+
+Phase 1 does not weaken any applicable security, correctness, durability, backup, capacity or upgrade acceptance criterion. It narrows the deployment/failure matrix only.
