@@ -190,7 +190,7 @@ For each overlay profile, benchmarks must measure incremental:
 - alert qualification and incident creation latency;
 - investigation and deterministic RCA response latency.
 
-**Inviolable non-interference gate:** Certification fails if optional observability enrichment causes base monitoring objectives (scheduled polling, durability, liveness, alert qualification, deterministic RCA, or HA failover targets) to be violated or degraded. Engineering is strictly prohibited from "fixing" an overlay benchmark failure by silently raising minimum Core, Sensor, or Agent hardware tiers. If resource budgets are exceeded, eBPF aggregation, active path probing cadences, and analytical enrichment must load-shed, sample, or suspend to protect primary monitoring correctness.
+**Inviolable non-interference gate:** Certification fails if optional observability enrichment causes base monitoring objectives (scheduled polling, durability, liveness, alert qualification, deterministic RCA, or **deployment-profile-applicable** continuity/failover targets) to be violated or degraded. Engineering is strictly prohibited from "fixing" an overlay benchmark failure by silently raising minimum Core, Sensor, or Agent hardware tiers. If resource budgets are exceeded, eBPF aggregation, active path probing cadences, and analytical enrichment must load-shed, sample, or suspend to protect primary monitoring correctness.
 
 
 ## 9. Core storage sizing model
