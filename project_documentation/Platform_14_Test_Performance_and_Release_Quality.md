@@ -115,11 +115,11 @@ Core workflows function in Docker test environment; schemas/contracts versioned;
 
 ## 2. Beta/Pilot
 
-Representative protocols/vendors certified; provisioning diagnostics actionable; two-Core failover tested; package install/reboot/upgrade tested; security/tenant isolation passed; SBOM/license gates clean; backup/restore exercised.
+Representative protocols/vendors certified; provisioning diagnostics actionable; package install/reboot/upgrade tested; applicable security/tenant-resource isolation passed; SBOM/license gates clean; backup/restore exercised. Two-Core failover is additionally required for a Phase-1.5 HA Beta/Pilot, not for Phase-1 standalone.
 
 ## 3. Release Candidate
 
-Full regression, performance certification, HA/DR evidence, migration/upgrade matrix, `.deb/.rpm` install tests, Windows MSI/service certification, signed artifacts, vulnerability disposition, documentation and support runbooks complete.
+Full regression, performance certification, **profile-applicable** continuity evidence (Phase 1 standalone durability/DR; Phase 1.5 additionally HA), migration/upgrade matrix, `.deb/.rpm` install tests, Windows MSI/service certification where included, signed artifacts, vulnerability disposition, documentation and support runbooks complete.
 
 ## 4. GA blockers
 
@@ -130,13 +130,13 @@ Full regression, performance certification, HA/DR evidence, migration/upgrade ma
 - broken reboot auto-start or supervised crash recovery for any mandatory runtime service;
 - package upgrade that loses configuration/data;
 - missing SBOM/notices/provenance;
-- HA failover violating agreed <60s target under certified test profile;
+- for a **Phase 1.5 HA** release, HA failover violating the agreed <60s target under the certified HA profile;
 - unsupported silent data loss in certified normal failure scenarios;
 - unresolved RED OSS dependency.
 
 ## 5. Evidence
 
-Every GA build has a release evidence bundle containing test results, benchmark summary, package hashes/signatures, SBOMs, OSS notices, vulnerability scan, upgrade/rollback results, HA/DR results and known limitations.
+Every GA build has a release evidence bundle containing test results, benchmark summary, package hashes/signatures, SBOMs, OSS notices, vulnerability scan, upgrade/rollback results, **profile-applicable** continuity evidence (standalone backup/DR for Phase 1; HA+DR for Phase 1.5) and known limitations.
 
 ## 6. v3.2.2 specialized-master quality supplements
 
