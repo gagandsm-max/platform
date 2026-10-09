@@ -766,3 +766,16 @@ Phase-1 business outcomes are:
 Phase-1.5 specialist outcomes include endpoint/switch-port intelligence, browser journey synthetics, deeper DB performance intelligence, virtualization optimization, NCM firmware lifecycle and the second-wave ITSM connector certification set. Deep VoIP specialist depth is Phase 2.
 
 Explicit non-goals remain: full traditional developer-centric APM, continuous profiling/flame graphs/source navigation/full RUM/session replay, unlimited trace retention, full always-on DPI/NDR, uncontrolled automated NCM, another graph/CMDB, or customer-specific Core forks.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 business release envelope — Founder decision 2026-10-09
+
+### Phase 1 — Single-Customer Enterprise
+The first commercial priority is a production-grade single-customer AmrudAi deployment with one authoritative standalone Core and any certified number of customer-local Sensors/Agents. Phase 1 is a narrower deployment claim, not a lower-quality product tier. Enterprise security, monitoring correctness, durable edge buffering/replay, storage protection, backup/restore, upgrade/recovery, capacity evidence and operational supportability remain mandatory.
+
+The intended Phase-1 outcome is a commercially sellable Network & Infrastructure Observability platform for one enterprise. Core capabilities include certified network/infrastructure collection, discovery/inventory, process/service and installed-software visibility, Flow/Syslog where certified, topology/evidence, semantic alert qualification including No Data != Down, incidents, deterministic RCA, reporting/SLA, certified notification/ITSM paths, IPAM and safe/read-only NCM capabilities. Optional technology modules may ship when independently certified without becoming universal Phase-1 GA blockers.
+
+Phase 1 does not claim two-Core HA, automatic Core failover, shared MSP hosting, cross-customer isolation certification, cross-Core deletion-ACK RPO=0, regional federation or advanced autonomous remediation.
+
+### Phase 1.5 — Enterprise HA + MSP
+Phase 1.5 adds exactly-two-Core HA, single-Core-failure deletion-ACK durability, failover/rejoin, shared MSP/multi-customer certification, overlapping-address-space isolation, noisy-neighbour controls and broader privileged automation where independently certified. It reuses Phase-1 contracts and code; there is no separate product fork.
