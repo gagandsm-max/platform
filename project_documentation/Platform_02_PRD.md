@@ -1356,31 +1356,30 @@ No universal customer CPU/memory/disk threshold is fixed here. Effective values 
 
 
 ## 24. NCM and Privileged CLI Session Broker
-NCM is Day-1 important and shall support:
+NCM is important, but certification is profile-scoped.
 
-- credentialed SSH/NETCONF/API connections;
-- configuration backup;
-- version history;
-- diff;
-- change detection;
+**Phase 1 baseline** shall support:
+- credentialed read-only SSH/NETCONF/API access through governed adapters;
+- configuration backup and protected version history;
+- diff and change detection;
 - compliance rules/golden configuration;
-- templates;
-- bulk push;
-- scheduling/windows;
-- maker-checker approval;
-- RBAC;
-- rollback where adapter/device supports it;
-- reports;
-- API;
-- browser CLI integration;
-- change audit;
-- RCA correlation.
+- RBAC, reports/API, change audit and RCA correlation;
+- browser CLI only as an optional separately certified human-initiated session; configuration/destructive commands require the existing JIT/MFA/reason/ticket/approval policy where applicable.
+
+**Phase 1.5 privileged Change Assurance** adds:
+- write-capable templates and bulk push;
+- scheduling/change windows;
+- maker-checker privileged execution;
+- dry-run/impact and blast-radius evidence;
+- canary/fixed staged rollout with stop conditions;
+- post-change validation/stabilization;
+- rollback only where the adapter/device mechanism is independently certified safe.
 
 Semantic diff shall only be claimed where a Device Pack/parser supports it.
 
 NCM worker concurrency/rate limits are independent from routine monitoring workers so NCM jobs cannot starve polling.
 
-Bulk operations shall support dry-run/impact preview and canary/staged execution.
+Where Phase-1.5 bulk/privileged change operations are enabled, they shall support dry-run/impact preview and canary/staged execution.
 
 ---
 
@@ -2379,7 +2378,7 @@ Phase 1 does **not** require retained distributed spans, trace search/waterfalls
 
 ### 58.4 NCM — Network Change & Configuration Assurance
 
-NCM Phase 1 lifecycle is **Plan -> Backup -> Compare -> Preflight -> Assess -> Approve -> Execute -> Validate -> Observe -> Rollback/Escalate -> Audit**. It strengthens existing `REQ-NCM-001..005` with scheduled/on-demand/pre/post backup, protected history, change detection, evidence-based attribution, secret-safe configuration search, raw diff, semantic diff only through certified parsers, desired/golden state with inheritance/exceptions/drift, baseline compliance, versioned templates, deterministic pre-change checks, graph-derived blast-radius evidence, explainable deterministic risk, maker-checker, external ITSM approval binding, canary/fixed staged rollout, explicit stop criteria, post-change validation/stabilization and rollback only through certified adapter/device mechanisms.
+**Phase 1 NCM baseline** is configuration assurance without mandatory automated change execution: backup/version history, diff/change detection, compliance/golden-state, safe search/report/API and optional tightly controlled human-initiated CLI where independently certified. **Phase 1.5 privileged NCM Change Assurance** owns the full `Plan -> Backup -> Compare -> Preflight -> Assess -> Approve -> Execute -> Validate -> Observe -> Rollback/Escalate -> Audit` lifecycle, including versioned templates, deterministic pre-change checks, graph-derived blast-radius evidence, maker-checker, external ITSM approval binding, canary/fixed staged rollout, explicit stop criteria, post-change validation/stabilization and rollback only through certified adapter/device mechanisms.
 
 Phase-1 compliance covers customer/vendor operational baselines and deterministic configuration checks. Advanced CIS/STIG-oriented certified rule content is Phase 1.5/evidence-and-rights dependent and must never be presented as compliance certification merely because a check exists.
 
@@ -2426,7 +2425,7 @@ The following v3.3.0 requirement families are normative extensions of the produc
 | `REQ-RCA-012` extension | Investigation Workbench over Unified Operations Timeline | Platform_03/04/05/06, Platform_09, Platform_17, Platform_19, Platform_22 |
 | `REQ-NET-016` extension | Path Intelligence over active-path + canonical temporal graph | Platform_03/04/05/06, Platform_09/10/14/17/22/23 |
 | `REQ-OTEL-001..006` | Phase-1 OTLP metrics/logs/context and Phase-1.5 bounded sampled spans/runtime onboarding | Platform_03/04/05/06, Platform_09/10/11/14/16/17/18/19/20/22 |
-| `REQ-NCM-006..012` | Change & Configuration Assurance, exact approval binding, canary/staging/postcheck/certified rollback, Phase-1.5 firmware | Platform_03/04/05/06, Platform_09/10/11/14/16/17/18/19 |
+| `REQ-NCM-006..012` | Phase-1.5 privileged Change & Configuration Assurance, exact approval binding, canary/staging/postcheck/certified rollback and firmware. Phase-1 baseline remains backup/diff/compliance/manual-session scope under `REQ-NCM-001..005`. | Platform_03/04/05/06, Platform_09/10/11/14/16/17/18/19 |
 | `REQ-INT-006..013` | Platform-wide Integration Fabric, durable inbox/outbox, loop prevention, Mapping Studio/Test Sandbox and connector priorities | Platform_03/04/05/06, Platform_09/10/11/14/16/17/18/20/23 |
 | `REQ-CMDB-001..007` | CMDB modes, bindings, authority/conflicts, graph relationships, IRE, lifecycle and scale | Platform_03/04/05/06, Platform_09/10/11/14/16/17/18/20/23 |
 | `REQ-NET-017` | Phase-1.5 Endpoint & Switch-Port Intelligence | Platform_03/05/06, Platform_09/14/17/18/20/23 |
@@ -2445,7 +2444,7 @@ The following exact IDs are owned by the v3.3 product requirements in §58. Thes
 |---|---|
 | `REQ-CMDB-001` | CMDB supports governed Enrichment, bounded Publication, and Phase-1 architecture for Reconciled Bidirectional mode without a second entity/CMDB database. |
 | `REQ-INT-006` | The platform-wide canonical external-object model covers Incident, Problem, Change, ChangeTask, Approval, typed ExternalActivity, maintenance, assignment/principal, business service, CI/relationship, attachment, binding and conflict concepts. |
-| `REQ-NCM-006` | NCM Change & Configuration Assurance follows Plan -> Backup -> Compare -> Preflight -> Assess -> Approve -> Execute -> Validate -> Observe -> Rollback/Escalate -> Audit. |
+| `REQ-NCM-006` | **Phase 1.5 privileged extension:** NCM Change & Configuration Assurance follows Plan -> Backup -> Compare -> Preflight -> Assess -> Approve -> Execute -> Validate -> Observe -> Rollback/Escalate -> Audit. |
 | `REQ-OTEL-001` | Phase-1 OTLP certification targets metrics and structured logs with resource identity and trace/span correlation identifiers/exemplars where supplied; retained distributed spans are not a Phase-1 GA requirement. |
 | `REQ-CMDB-003` | Field/class authority and explicit conflict handling replace last-write-wins; external CMDB metadata cannot silently overwrite observed Platform technical truth. |
 | `REQ-CMDB-005` | Certified ServiceNow CI publication/reconciliation uses IRE by default; generic direct CMDB table writes are not the default integration path. |
@@ -2454,10 +2453,10 @@ The following exact IDs are owned by the v3.3 product requirements in §58. Thes
 | `REQ-INT-011` | Integration Test Sandbox reports SUPPORTED, SUPPORTED_WITH_LIMITATION, PERMISSION_MISSING, API_EDITION_UNAVAILABLE or UNSUPPORTED based on real capability tests. |
 | `REQ-INT-012` | Phase-1 connector certification targets are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP, with exact edition/API/version/auth/workflow certification. |
 | `REQ-INT-013` | Phase-1.5 certification-priority targets are Ivanti, Freshservice/MSP, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM; this is not a global market-share ranking. |
-| `REQ-NCM-008` | Pre-change assurance evaluates certified reachability/auth/privilege/current-config/fresh-backup and applicable HA/routing/path/incident/service/freeze/ITSM context. |
+| `REQ-NCM-008` | **Phase 1.5 privileged extension:** pre-change assurance evaluates certified reachability/auth/privilege/current-config/fresh-backup and applicable HA/routing/path/incident/service/freeze/ITSM context before execution. |
 | `REQ-NCM-009` | Change risk is deterministic/explainable and graph-derived blast-radius evidence exposes confidence, freshness and uncertainty rather than AI certainty. |
-| `REQ-NCM-010` | Canary/fixed staged rollout uses bounded concurrency/failure-domain sequencing and explicit stop conditions; unsafe failure stops future batches. |
-| `REQ-NCM-011` | Post-change validation/stabilization compares configuration and operational evidence; rollback uses only certified safe vendor/device mechanisms, otherwise escalation is required. |
+| `REQ-NCM-010` | **Phase 1.5 privileged extension:** canary/fixed staged rollout uses bounded concurrency/failure-domain sequencing and explicit stop conditions; unsafe failure stops future batches. |
+| `REQ-NCM-011` | **Phase 1.5 privileged extension:** post-change validation/stabilization compares configuration and operational evidence; rollback uses only certified safe vendor/device mechanisms, otherwise escalation is required. |
 | `REQ-NCM-012` | Firmware lifecycle is Phase 1.5 and includes approved provenance/integrity/compatibility/storage/backup/approval/canary/staging/reboot/postcheck/ITSM/audit with certified rollback only. |
 | `REQ-OTEL-003` | Phase-1 OTLP enforces request/decompression bounds, cardinality governance, sensitive-field policy, explicit reject/drop accounting and bounded backpressure; no-data is not service failure. |
 | `REQ-OTEL-005` | Phase-1.5 may add bounded sampled spans, short quota-controlled retention, trace search/waterfall, trace-derived service edges and sampling after benchmark gates. |

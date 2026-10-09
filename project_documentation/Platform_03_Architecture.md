@@ -1614,7 +1614,7 @@ External CIs are bindings to canonical entities. External relationships enter th
 
 ### 45.5 NCM assurance architecture
 
-NCM execution continues through existing NCM orchestration/worker and assigned Sensor/device adapter boundaries. Change Assurance adds a plan/evidence lifecycle and references canonical topology/service/incident/change/audit state rather than duplicating them. Approval validity is checked against immutable Change Plan version, exact target-set hash, rendered configuration/template hash and approved maintenance window before execution; local Platform RBAC/policy/preconditions remain independently authoritative.
+Phase-1.5 privileged NCM execution continues through the existing NCM orchestration/worker and assigned Sensor/device adapter boundaries. Phase-1 baseline configuration assurance remains read-only/observational plus any separately certified human-initiated manual session. Change Assurance adds a plan/evidence lifecycle and references canonical topology/service/incident/change/audit state rather than duplicating them. Approval validity is checked against immutable Change Plan version, exact target-set hash, rendered configuration/template hash and approved maintenance window before execution; local Platform RBAC/policy/preconditions remain independently authoritative.
 
 Firmware remains Phase 1.5 and uses governed artifact storage/repository references; firmware binaries are not stored in PostgreSQL/ClickHouse telemetry tables.
 
