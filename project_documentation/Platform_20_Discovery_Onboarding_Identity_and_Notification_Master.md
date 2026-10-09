@@ -821,3 +821,10 @@ A governed OpenTelemetry source onboarding flow records ingress profile, endpoin
 ### 15.3 Integration onboarding
 
 ITSM/CMDB connectors use the same governed onboarding principles: test network/TLS/proxy/authentication, discover API/version/capability/permissions, propose standard mappings, show unsupported/edition-limited features, exercise Integration Test Sandbox and activate only explicitly selected synchronization modes. Notification/onboarding events are deduplicated/rate-bounded so connector or reconciliation storms do not flood administrators.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase applicability — 2026-10-09
+
+Phase 1 onboarding is optimized for one enterprise/customer while preserving canonical tenant/customer IDs, resource scopes, Sensor/Agent identity and audited review. Customer-switching/MSP portfolio workflows are not required for the Phase-1 certification profile.
+
+Phase 1.5 adds shared-MSP customer onboarding, cross-customer isolation, tenant-aware identity routing and enterprise lifecycle extensions such as SCIM only when independently certified. The same onboarding/identity contracts are reused.
