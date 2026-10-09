@@ -434,3 +434,10 @@ Change Intelligence consumes both external ITSM Change metadata and NCM Change A
 ### 18.4 Problem management
 
 Similar Incident Memory may recommend creation/linkage of an external Problem and preserve its external binding, accepted RCA/workaround/known-error/corrective-action/PIR references. Automated external Problem creation is not a Phase-1 GA requirement; connector canonical support is established in Phase 1 and richer Problem workflow is Phase 1.5 unless a certified connector/use case promotes it through change control.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase applicability — 2026-10-09
+
+Phase 1 may ship evidence-backed deterministic operational intelligence, Triggered Fast RCA/Investigation capabilities and customer-value measurements only where their required producers/backends are certified. Advanced learned/LLM assistance is optional and must not be necessary for correct monitoring or deterministic RCA.
+
+Phase 1.5 may add broader shared-MSP and HA-aware portfolio intelligence. This does not create a second RCA/evidence authority.
