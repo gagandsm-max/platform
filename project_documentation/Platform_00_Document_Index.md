@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-10-05 — Founder-approved ACP-001..ACP-018 cross-cutting architecture reconciliation; set-wide Mother Reference version advances to v3.3.0 with no new Platform_24+ specialized master.
+**Last reconciliation:** 2026-10-09 — Founder-approved Phase 1 single-customer / Phase 1.5 HA+MSP certification-envelope reconciliation (Issue #196). The authoritative set remains v3.3.0 with the same 25 files and no new Platform_24+ specialized master.
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Authority
@@ -588,3 +588,28 @@ Current v3.3.0 governing deltas are:
 - Full always-on DPI/NDR remains excluded; bounded incident-triggered packet evidence remains governed by existing security/privacy/retention contracts.
 
 Maturity invariant remains: **SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED**. This reconciliation changes product/architecture requirements only; it does not certify runtime capability.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 certification envelope — 2026-10-09
+
+Founder authority in Issue #196 establishes a certification/deployment envelope, not a second architecture.
+
+### Phase 1 — Single-Customer Enterprise
+- one customer / one enterprise deployment;
+- one authoritative standalone Core;
+- multiple sites, Sensors, Sensor Pools and Agents are allowed;
+- tenant-aware identity, data, API, audit and authorization contracts remain intact even when only one production customer is present;
+- no two-Core HA availability claim, automatic Core failover claim, or shared-MSP/cross-customer-hosting certification claim;
+- network/infrastructure monitoring correctness, standalone durability/replay, security/RBAC, storage protection, backup/restore, upgrade/recovery, capacity/resource certification and supportability remain mandatory;
+- deterministic alert qualification/RCA must work without advanced AI.
+
+### Phase 1.5 — Enterprise HA + MSP
+Adds to the same codebase/contracts:
+- exactly two full Cores Active/Standby;
+- positive fencing, split-brain prevention, PostgreSQL/Kafka/ClickHouse failover/rejoin;
+- deletion-authorizing ACK durability across the certified single-Core HA failure matrix;
+- Sensor reconnect/re-anchor and polling/push continuity across Core failover;
+- shared MSP/multi-customer runtime certification, overlapping-address-space safety and cross-tenant/noisy-neighbour isolation;
+- broader privileged automation only where maker-checker, blast-radius, rollback and audit are certified.
+
+This phase split does not renumber requirements or BUILD IDs, remove tenant context from contracts, or downgrade any Phase-1 security/data-integrity/backup/capacity/release gate. Phase 1.5 is additive.
