@@ -613,3 +613,5 @@ Adds to the same codebase/contracts:
 - broader privileged automation only where maker-checker, blast-radius, rollback and audit are certified.
 
 This phase split does not renumber requirements or BUILD IDs, remove tenant context from contracts, or downgrade any Phase-1 security/data-integrity/backup/capacity/release gate. Phase 1.5 is additive.
+
+**Phase-1.5 naming clarification:** pre-existing second-wave Phase-1.5 capability labels (for example bounded sampled spans, browser journeys, firmware lifecycle, deeper DB/virtualization intelligence, endpoint/switch-port intelligence and second-wave connectors) remain optional independently certified Phase-1.5 extensions unless explicitly included in the declared Phase-1.5 commercial profile. The base Phase-1.5 platform certification is the HA/MSP extension defined above; it does not silently make every second-wave technology module mandatory.
