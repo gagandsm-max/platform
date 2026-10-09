@@ -554,7 +554,7 @@ Illustrative historical `boot_epoch` prose aliases the v1 wire field `bootEpoch`
 
 ### 7.2 Ack semantics
 
-A Sensor deletes a local segment only after Core returns a durable acceptance acknowledgment consistent with the certified HA design.
+A Sensor deletes a local segment only after Core returns a durable acceptance acknowledgment consistent with the **declared certification profile**. Phase 1 uses the certified standalone durability boundary; Phase 1.5 additionally requires the certified cross-Core HA durability barrier.
 
 **CURRENT_IMPLEMENTED_V1 Sensor→Core telemetry ACK boundary:**
 
@@ -3219,3 +3219,12 @@ These exact IDs are governed by the concrete v3.3 contracts in §94.
 - `REQ-CMDB-002` — ExternalBinding carries tenant/connector/internal entity/external identity plus match evidence/confidence, mapping/authority profile, external version and synchronization state; it must not create duplicate Platform entities.
 - `REQ-INT-009` — Echo-loop prevention combines external event/object/version, Platform correlation/operation/hash, origin and prior outbound lineage; one source marker is insufficient.
 - `REQ-NCM-007` — Change Assurance Record binds immutable plan/version, exact targets/configuration hashes, approved window, risk/blast evidence and execution/postcheck/stabilization/rollback/outcome evidence; material plan mutation stales approval.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 low-level invariants — 2026-10-09
+
+1. Phase-1 standalone ingestion retains the existing PG reservation → Kafka transactional publication → PG finalize → ACK sequence and exact replay/checksum/idempotency contracts. It does not claim survival of total standalone-site/storage destruction.
+2. Phase-1.5 adds a certified cross-Core durability barrier before a deletion-authorizing ACK may be treated as RPO=0 across the declared single-Core HA failure matrix.
+3. Sensor job/assignment generation and stale-fence rejection remain Phase-1 requirements because a single customer may operate multiple Sensors.
+4. Phase-1.5 adds Core-failover re-anchor/ownership transfer and push-protocol continuity; stale Sensors may contribute explicitly historical/provenanced evidence where safe but may not retain current privileged execution authority.
+5. No new physical transport, queue, database or alternate business authority is introduced by the phase split.
