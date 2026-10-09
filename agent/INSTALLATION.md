@@ -1,10 +1,10 @@
-# Platform Linux Agent — installation notes (BUILD-011 Slice 7 eBPF)
+# AmrudAi Linux Agent — installation notes (BUILD-011 Slice 8 eBPF)
 
 Concise ops guidance for the bounded Linux eBPF process-network backend. Packaging installers remain **BUILD-018**; this document does not certify `.deb`/`.rpm` delivery.
 
 ## Prerequisites (optional eBPF enrichment)
 
-Base Agent host metrics and Sensor delivery do **not** require eBPF.
+Base AmrudAi Agent host metrics and Sensor delivery do **not** require eBPF.
 
 For optional process-network eBPF:
 
@@ -15,7 +15,7 @@ For optional process-network eBPF:
 
 ## Base Agent when eBPF is unsupported
 
-If eBPF is disabled, missing caps, missing/incompatible BTF, unsupported OS/arch/kernel, or `RESOURCE_GUARDED`, the Agent continues scalar collection, durable queue, and Sensor telemetry. eBPF states are enrichment capability evidence only — never authoritative host/process/network DOWN.
+If eBPF is disabled, missing caps, missing/incompatible BTF, unsupported OS/arch/kernel, or `RESOURCE_GUARDED`, the Agent continues scalar collection, durable queue, and Sensor telemetry. eBPF states are enrichment capability evidence only — never authoritative host/process/network DOWN. `/ready` remains governed by base Agent lifecycle, scheduler, collectors, queue, and delivery safety only.
 
 ## Object and provenance validation
 
@@ -30,6 +30,8 @@ There is **no** configurable arbitrary BPF object path. Do not replace the gover
 
 OSS-124 (`cilium/ebpf`) builds via temporary local replace under `agent/third_party/` (`IN_REPO_GOVERNED_REPLACE`). See `agent/third_party/OSS-124-PROVENANCE.md`.
 
+Production aggregator provenance is `agent.linux.process_network.ebpf` (collection evidence identity only).
+
 ## No target-host BPF compilation
 
 Deployed Agents load the pre-built embedded object. Operators must not install Clang/LLVM on monitored hosts to “rebuild BPF,” and must not compile BPF at Agent start.
@@ -42,9 +44,13 @@ Loopback health server (default `127.0.0.1:8089`):
 GET /capabilities/process-network-ebpf
 ```
 
-Returns the capability snapshot (`state`, `reason_codes`, BTF/cap presence, resource guard). Does not alter `/live`, `/ready`, or `/health` schemas.
+Returns the **current** capability snapshot (`state`, `reason_codes`, BTF/cap presence, resource guard) and, when the optional runtime is present, bounded `support_counters` (`MAP_UPDATE_FAIL`, `RING_RESERVE_FAIL`, `DECODER_REJECT`, `USERSPACE_CHANNEL_FULL`, `TRANSPORT_NOT_WIRED`, reader/aggregator faults, optional-probe attached). Does not alter `/live`, `/ready`, or `/health` schemas. Support counters are never readiness inputs.
 
-Until Slice 8 wires `Backend.Start` into AgentService after `RUNNING`, a compatible preflight outcome remains `UNAVAILABLE` / `BACKEND_NOT_WIRED`.
+When `PLATFORM_AGENT_EBPF_ENABLED=true`, AgentService performs one async `Backend.Start` after base `RUNNING`. Compatible activation yields `ACTIVE`; failures yield typed non-ACTIVE states while the base Agent stays operational. Disabled yields `UNAVAILABLE` / `FEATURE_DISABLED` with no kernel activation attempt.
+
+## Stop / cleanup
+
+SIGTERM / `AgentService.Stop` cancels the owned runtime context, boundedly settles the one activation attempt, then stops the backend under the same whole-service shutdown budget as scheduler/worker (health last). Backend stop releases ring reader, links, and maps; no bpffs pins are used. Non-cooperative activation that does not settle before the budget fails shutdown truthfully (`AGENT_SHUTDOWN_TIMEOUT`) rather than hanging forever or force-closing kernel resources.
 
 ## Verification (engineering)
 
@@ -57,6 +63,8 @@ go build ./linux/cmd
 ```
 
 Or the Agent Docker image build, which runs Agent-owned static/race gates before producing the non-root runtime image (no compiler in the final image).
+
+Privileged live attach certification remains a separate Antigravity whole-BUILD gate.
 
 ## Privilege boundary (install advice)
 
@@ -82,8 +90,8 @@ This slice does **not** claim:
 - RHEL, arm64, or Secure Boot product certification;
 - BUILD-018 package install certification;
 - BUILD-019 Sensor-path claims;
-- physical Agent→Sensor structured evidence delivery (still `TRANSPORT_NOT_WIRED` / `UnwiredStructuredEvidenceSink`);
-- live production `ACTIVE` attach via AgentService (Slice 8 wiring).
+- BUILD-130 capacity certification;
+- physical Agent→Sensor structured evidence delivery (still `TRANSPORT_NOT_WIRED` / `UnwiredStructuredEvidenceSink`).
 
 ## Support
 

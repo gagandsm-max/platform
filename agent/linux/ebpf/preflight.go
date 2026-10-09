@@ -205,12 +205,12 @@ func (c *Checker) emptyBase() collector.ProcessNetworkCapabilitySnapshot {
 	}
 }
 
-// Run collects a single bounded snapshot. A compatible result remains
-// UNAVAILABLE/BACKEND_NOT_WIRED until Slice 8 wires Backend.Start into
-// AgentService. The kernel backend package exists in this package; preflight
-// alone never loads or attaches. Production Agent startup must use RunStartup
-// so non-cooperative procfs/sysfs stalls cannot hold the base Agent path past
-// the governed timeout.
+// Run collects a single bounded snapshot. A compatible standalone preflight
+// result remains UNAVAILABLE/BACKEND_NOT_WIRED because preflight alone never
+// loads or attaches. Backend.Start (wired by AgentService after RUNNING in
+// Slice 8) reuses this path then continues to load/attach. Production callers
+// that need timeout isolation must use RunStartup so non-cooperative
+// procfs/sysfs stalls cannot hold the caller past the governed timeout.
 func (c *Checker) Run(parent context.Context, previous *collector.ProcessNetworkCapabilitySnapshot) collector.ProcessNetworkCapabilitySnapshot {
 	base := c.emptyBase()
 

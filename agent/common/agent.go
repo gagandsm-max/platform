@@ -60,6 +60,7 @@ type AgentService struct {
 	version                  string
 	serviceInstanceID        string
 	processNetworkCapability collector.ProcessNetworkCapabilitySnapshot
+	processNetworkRuntime    ProcessNetworkRuntime
 
 	// registryOverride is applied only during NewAgentService construction.
 	registryOverride *collector.Registry
@@ -70,6 +71,9 @@ type AgentService struct {
 	runCancel      context.CancelFunc
 	shutdownBudget time.Duration
 	stopErr        error
+
+	// Optional process-network activation: exactly one owned attempt after RUNNING.
+	activationDone chan struct{}
 }
 
 // ServiceOption configures Agent service construction for BUILD-005 supportability identity.
@@ -88,12 +92,22 @@ func WithSupportabilityIdentity(version, serviceInstanceID string) ServiceOption
 	}
 }
 
-// WithProcessNetworkCapability attaches immutable optional preflight evidence.
+// WithProcessNetworkCapability attaches immutable optional preflight evidence
+// when no ProcessNetworkRuntime is injected (for example eBPF disabled).
 // It does not participate in Agent lifecycle, readiness, scheduler, queue, or
 // delivery decisions.
 func WithProcessNetworkCapability(snapshot collector.ProcessNetworkCapabilitySnapshot) ServiceOption {
 	return func(s *AgentService) {
 		s.processNetworkCapability = snapshot.Copy()
+	}
+}
+
+// WithProcessNetworkRuntime injects an optional subordinate enrichment runtime.
+// Concrete Linux eBPF Backend construction remains under agent/linux/**.
+// Activation is attempted asynchronously only after base Agent reaches RUNNING.
+func WithProcessNetworkRuntime(rt ProcessNetworkRuntime) ServiceOption {
+	return func(s *AgentService) {
+		s.processNetworkRuntime = rt
 	}
 }
 
@@ -272,7 +286,7 @@ func (s *AgentService) Start(ctx context.Context) error {
 		return fmt.Errorf("AGENT_LIFECYCLE_INVALID: unexpected state %q", s.state)
 	}
 
-	s.logger.Info("Platform Agent service starting",
+	s.logger.Info("AmrudAi Agent service starting",
 		"event_code", "AGENT_SERVICE_STARTING",
 		"safe_context", map[string]any{
 			"lifecycle_state": string(LifecycleStarting),
@@ -310,16 +324,64 @@ func (s *AgentService) Start(ctx context.Context) error {
 	s.runCancel = runCancel
 	s.setStateLocked(LifecycleRunning)
 	s.stopErr = nil
+	var activationDone chan struct{}
+	if s.processNetworkRuntime != nil {
+		activationDone = make(chan struct{})
+		s.activationDone = activationDone
+	}
 	s.lifeMu.Unlock()
 
-	s.logger.Info("Platform Agent service running",
+	s.logger.Info("AmrudAi Agent service running",
 		"event_code", "AGENT_SERVICE_RUNNING",
 		"safe_context", map[string]any{
 			"lifecycle_state":    string(LifecycleRunning),
 			"receiver_available": s.transport.Available(),
 		},
 	)
+
+	// Optional enrichment activation is subordinate and asynchronous: base Agent
+	// must already be RUNNING and Start must return without waiting on eBPF.
+	if activationDone != nil {
+		go s.activateProcessNetworkOnce(runCtx, activationDone)
+	}
 	return nil
+}
+
+// activateProcessNetworkOnce performs exactly one owned optional backend Start.
+// Failure never calls failStart and never stops scheduler/worker/health.
+func (s *AgentService) activateProcessNetworkOnce(ctx context.Context, done chan struct{}) {
+	defer close(done)
+	rt := s.processNetworkRuntime
+	if rt == nil {
+		return
+	}
+	s.logger.Info("AmrudAi Agent optional process-network activation beginning",
+		"event_code", "AGENT_EBPF_ACTIVATION_BEGIN",
+		"safe_context", map[string]any{
+			"lifecycle_state": string(LifecycleRunning),
+			"reason_class":    "optional_enrichment",
+		},
+	)
+	if err := rt.Start(ctx); err != nil {
+		capSnap := rt.Capability()
+		s.logger.Info("AmrudAi Agent optional process-network activation failed",
+			"event_code", "AGENT_EBPF_ACTIVATION_FAILED",
+			"safe_context", map[string]any{
+				"lifecycle_state": string(s.LifecycleState()),
+				"reason_class":    "optional_enrichment_failed",
+				"capability":      string(capSnap.State),
+			},
+		)
+		return
+	}
+	capSnap := rt.Capability()
+	s.logger.Info("AmrudAi Agent optional process-network activation succeeded",
+		"event_code", "AGENT_EBPF_ACTIVATION_SUCCEEDED",
+		"safe_context", map[string]any{
+			"lifecycle_state": string(s.LifecycleState()),
+			"capability":      string(capSnap.State),
+		},
+	)
 }
 
 func (s *AgentService) failStart(err error) error {
@@ -327,7 +389,7 @@ func (s *AgentService) failStart(err error) error {
 	s.setStateLocked(LifecycleFailed)
 	s.stopErr = err
 	s.lifeMu.Unlock()
-	s.logger.Error("Platform Agent service startup failed",
+	s.logger.Error("AmrudAi Agent service startup failed",
 		"event_code", "AGENT_SERVICE_START_FAILED",
 		"safe_context", map[string]any{
 			"lifecycle_state": string(LifecycleFailed),
@@ -356,7 +418,7 @@ func (s *AgentService) Stop() error {
 		s.setStateLocked(LifecycleStopped)
 		s.stopErr = nil
 		s.lifeMu.Unlock()
-		s.logger.Info("Platform Agent service stopped",
+		s.logger.Info("AmrudAi Agent service stopped",
 			"event_code", "AGENT_SERVICE_STOPPED",
 			"safe_context", map[string]any{
 				"lifecycle_state": string(LifecycleStopped),
@@ -368,13 +430,15 @@ func (s *AgentService) Stop() error {
 		s.setStateLocked(LifecycleStopping)
 		budget := s.shutdownBudget
 		cancel := s.runCancel
+		activationDone := s.activationDone
+		rt := s.processNetworkRuntime
 		s.lifeMu.Unlock()
 
 		if budget <= 0 {
 			budget = defaultAgentShutdownBudget
 		}
 
-		s.logger.Info("Platform Agent service stopping",
+		s.logger.Info("AmrudAi Agent service stopping",
 			"event_code", "AGENT_SERVICE_STOPPING",
 			"safe_context", map[string]any{
 				"lifecycle_state": string(LifecycleStopping),
@@ -391,12 +455,45 @@ func (s *AgentService) Stop() error {
 		deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), budget)
 		defer deadlineCancel()
 
+		// Boundedly settle the one optional activation attempt before calling
+		// Backend.StopContext, so Stop never blocks unboundedly behind an
+		// in-progress Backend.Start mutex and never force-closes kernel
+		// resources still owned by an unfinished Start.
+		if activationDone != nil {
+			select {
+			case <-activationDone:
+			case <-deadlineCtx.Done():
+				stopErr := fmt.Errorf("%w: optional process-network activation did not settle before shutdown budget", ErrShutdownTimeout)
+				s.lifeMu.Lock()
+				s.setStateLocked(LifecycleFailed)
+				s.stopErr = stopErr
+				s.lifeMu.Unlock()
+				s.logger.Error("AmrudAi Agent service shutdown failed",
+					"event_code", "AGENT_SERVICE_STOP_FAILED",
+					"safe_context", map[string]any{
+						"lifecycle_state": string(LifecycleFailed),
+						"reason_class":    "shutdown_timeout",
+						"detail":          "process_network_activation_unsettled",
+					},
+				)
+				return stopErr
+			}
+		}
+
 		var (
-			schedErr  error
-			workerErr error
-			compWG    sync.WaitGroup
+			backendErr error
+			schedErr   error
+			workerErr  error
+			compWG     sync.WaitGroup
 		)
 		compWG.Add(2)
+		if rt != nil {
+			compWG.Add(1)
+			go func() {
+				defer compWG.Done()
+				backendErr = rt.StopContext(deadlineCtx)
+			}()
+		}
 		go func() {
 			defer compWG.Done()
 			schedErr = s.scheduler.StopContext(deadlineCtx)
@@ -409,13 +506,13 @@ func (s *AgentService) Stop() error {
 
 		healthErr := s.healthSrv.Stop(deadlineCtx)
 
-		if err := joinShutdownErrors(deadlineCtx, schedErr, workerErr, healthErr); err != nil {
+		if err := joinShutdownErrors(deadlineCtx, backendErr, schedErr, workerErr, healthErr); err != nil {
 			stopErr := fmt.Errorf("%w: %v", ErrShutdownTimeout, err)
 			s.lifeMu.Lock()
 			s.setStateLocked(LifecycleFailed)
 			s.stopErr = stopErr
 			s.lifeMu.Unlock()
-			s.logger.Error("Platform Agent service shutdown failed",
+			s.logger.Error("AmrudAi Agent service shutdown failed",
 				"event_code", "AGENT_SERVICE_STOP_FAILED",
 				"safe_context", map[string]any{
 					"lifecycle_state": string(LifecycleFailed),
@@ -429,7 +526,7 @@ func (s *AgentService) Stop() error {
 		s.setStateLocked(LifecycleStopped)
 		s.stopErr = nil
 		s.lifeMu.Unlock()
-		s.logger.Info("Platform Agent service stopped",
+		s.logger.Info("AmrudAi Agent service stopped",
 			"event_code", "AGENT_SERVICE_STOPPED",
 			"safe_context", map[string]any{
 				"lifecycle_state": string(LifecycleStopped),
@@ -481,6 +578,7 @@ func (s *AgentService) SchedulerStatus() scheduler.Status {
 
 // RuntimeSnapshot adapts authoritative AgentService evidence for health readiness.
 // Lifecycle is read first and released before queue/delivery/scheduler locks.
+// Process-network capability is dynamic when a runtime is injected.
 func (s *AgentService) RuntimeSnapshot() health.RuntimeSnapshot {
 	life := string(s.LifecycleState())
 
@@ -498,6 +596,13 @@ func (s *AgentService) RuntimeSnapshot() health.RuntimeSnapshot {
 		})
 	}
 
+	capSnap := s.processNetworkCapability.Copy()
+	var support collector.ProcessNetworkSupportSnapshot
+	if s.processNetworkRuntime != nil {
+		capSnap = s.processNetworkRuntime.Capability()
+		support = s.processNetworkRuntime.SupportSnapshot()
+	}
+
 	return health.RuntimeSnapshot{
 		Lifecycle:                life,
 		Queue:                    qStats,
@@ -507,6 +612,7 @@ func (s *AgentService) RuntimeSnapshot() health.RuntimeSnapshot {
 		Collectors:               collectors,
 		CollectorLastRun:         st.LastRun,
 		CollectorRunErrors:       st.RunErrors,
-		ProcessNetworkCapability: s.processNetworkCapability.Copy(),
+		ProcessNetworkCapability: capSnap,
+		ProcessNetworkSupport:    support,
 	}
 }

@@ -82,6 +82,12 @@ func NewBackend(cfg BackendConfig) (*Backend, error) {
 		return nil, fmt.Errorf("BACKEND_RESOURCE_CEILING: requested map+ring %d exceeds implementation ceiling %d",
 			cfg.RequestedMapBytes+cfg.RequestedRingBytes, cfg.MaximumBytes)
 	}
+	initialReasons := []collector.ProcessNetworkCapabilityReason{collector.ReasonFeatureDisabled}
+	if cfg.Enabled {
+		// Enabled but not yet started: truthful until AgentService activation.
+		initialReasons = []collector.ProcessNetworkCapabilityReason{collector.ReasonBackendNotWired}
+	}
+	now := time.Now().UTC()
 	return &Backend{
 		cfg:        cfg.Config,
 		aggregator: cfg.Aggregator,
@@ -90,9 +96,10 @@ func NewBackend(cfg BackendConfig) (*Backend, error) {
 			handles.Close()
 		},
 		capability: collector.ProcessNetworkCapabilitySnapshot{
-			State:       collector.ProcessNetworkCapabilityUnavailable,
-			ReasonCodes: []collector.ProcessNetworkCapabilityReason{collector.ReasonFeatureDisabled},
-			ObservedAt:  time.Now().UTC(),
+			State:        collector.ProcessNetworkCapabilityUnavailable,
+			ReasonCodes:  initialReasons,
+			ObservedAt:   now,
+			TransitionAt: now,
 		},
 	}, nil
 }
@@ -107,6 +114,23 @@ func (b *Backend) Capability() collector.ProcessNetworkCapabilitySnapshot {
 // Status is an alias for Capability for the Slice-8 lifecycle seam.
 func (b *Backend) Status() collector.ProcessNetworkCapabilitySnapshot {
 	return b.Capability()
+}
+
+// SupportSnapshot returns backend-neutral loss/support counters for the
+// loopback capability endpoint. Never a readiness input.
+func (b *Backend) SupportSnapshot() collector.ProcessNetworkSupportSnapshot {
+	loss := b.loss.Snapshot()
+	return collector.ProcessNetworkSupportSnapshot{
+		Present:               true,
+		MapUpdateFail:         loss[LossClassMapUpdateFail],
+		RingReserveFail:       loss[LossClassRingReserveFail],
+		DecoderReject:         loss[LossClassDecoderReject],
+		UserspaceChannelFull:  loss[LossClassUserspaceChanFull],
+		TransportNotWired:     b.TransportNotWiredCount(),
+		AggregatorFaults:      b.AggregatorFaultCount(),
+		ReaderFaults:          b.ReaderFaultCount(),
+		OptionalProbeAttached: b.OptionalProbeAttached(),
+	}
 }
 
 // LossSnapshot returns discrete loss counters.
@@ -137,55 +161,155 @@ func (b *Backend) OptionalProbeAttached() bool {
 	return b.optionalAvailable
 }
 
+func (b *Backend) stopRequestedLocked() bool {
+	return b.stopRequested || b.stopped
+}
+
+func (b *Backend) isStopRequested() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.stopRequestedLocked()
+}
+
+func (b *Backend) publishCapability(snap collector.ProcessNetworkCapabilitySnapshot) {
+	b.mu.Lock()
+	b.capability = snap
+	b.mu.Unlock()
+}
+
+func (b *Backend) abortStartCapability(base collector.ProcessNetworkCapabilitySnapshot, err error) {
+	reasons := []collector.ProcessNetworkCapabilityReason{collector.ReasonPreflightCancelled}
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		reasons = []collector.ProcessNetworkCapabilityReason{collector.ReasonPreflightTimeout}
+	}
+	if b.isStopRequested() {
+		reasons = []collector.ProcessNetworkCapabilityReason{collector.ReasonBackendStopped}
+	}
+	b.publishCapability(b.failCapability(base, collector.ProcessNetworkCapabilityUnavailable, reasons))
+}
+
 // Start fail-closes before kernel interaction on object/preflight failure.
 // Primary attach failure never becomes ACTIVE. Exactly two goroutines on success.
 // No retry loop inside Start.
+//
+// Slice-8 cancellation safety: expensive preflight/load/attach work does not
+// hold b.mu for the whole Start, Capability remains readable, and a canceled
+// Agent runtime context cannot publish ACTIVE or leak unpublished handles.
 func (b *Backend) Start(ctx context.Context) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.stopRequested || b.stopped {
-		return errors.New("BACKEND_STOPPED")
-	}
-	if b.started {
-		if b.capability.State != collector.ProcessNetworkCapabilityActive {
-			return errors.New("BACKEND_RUNTIME_FAILED")
-		}
-		return nil
-	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
+	b.mu.Lock()
+	if b.stopRequestedLocked() {
+		b.mu.Unlock()
+		return errors.New("BACKEND_STOPPED")
+	}
+	if b.started {
+		active := b.capability.State == collector.ProcessNetworkCapabilityActive
+		b.mu.Unlock()
+		if !active {
+			return errors.New("BACKEND_RUNTIME_FAILED")
+		}
+		return nil
+	}
+	b.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		b.abortStartCapability(collector.ProcessNetworkCapabilitySnapshot{}, err)
+		return err
+	}
+
 	snap := b.preflight.RunStartup(ctx, nil)
-	b.capability = snap
+	b.publishCapability(snap)
+	if b.isStopRequested() {
+		b.abortStartCapability(snap, context.Canceled)
+		return errors.New("BACKEND_STOPPED")
+	}
+	if err := ctx.Err(); err != nil {
+		b.abortStartCapability(snap, err)
+		return err
+	}
 	if !snap.PreflightPassed {
 		// Never ACTIVE on preflight failure.
 		if snap.State == collector.ProcessNetworkCapabilityActive {
 			snap.State = collector.ProcessNetworkCapabilityUnavailable
-			b.capability = snap
+			b.publishCapability(snap)
 		}
 		return fmt.Errorf("BACKEND_PREFLIGHT: %s", snap.State)
 	}
 
 	spec, _, err := LoadGovernedSpec()
 	if err != nil {
-		b.capability = b.failCapability(snap, collector.ProcessNetworkCapabilityUnavailable,
-			[]collector.ProcessNetworkCapabilityReason{collector.ReasonObjectIntegrityFailed})
+		b.publishCapability(b.failCapability(snap, collector.ProcessNetworkCapabilityUnavailable,
+			[]collector.ProcessNetworkCapabilityReason{collector.ReasonObjectIntegrityFailed}))
 		return fmt.Errorf("BACKEND_OBJECT: %w", err)
+	}
+	if err := ctx.Err(); err != nil || b.isStopRequested() {
+		if err == nil {
+			err = context.Canceled
+		}
+		b.abortStartCapability(snap, err)
+		if b.isStopRequested() {
+			return errors.New("BACKEND_STOPPED")
+		}
+		return err
 	}
 
 	handles, err, class := acquireKernel(spec)
 	if err != nil {
-		b.capability = mapAcquireFailure(snap, class)
+		b.publishCapability(mapAcquireFailure(snap, class))
 		return fmt.Errorf("BACKEND_ACQUIRE(%s): %w", class, err)
+	}
+	if err := ctx.Err(); err != nil || b.isStopRequested() {
+		handles.Close()
+		if err == nil {
+			err = context.Canceled
+		}
+		b.abortStartCapability(snap, err)
+		if b.isStopRequested() {
+			return errors.New("BACKEND_STOPPED")
+		}
+		return err
 	}
 
 	rd, err := ringbuf.NewReader(handles.primary.Events)
 	if err != nil {
 		handles.Close()
-		b.capability = b.failCapability(snap, collector.ProcessNetworkCapabilityUnavailable,
-			[]collector.ProcessNetworkCapabilityReason{collector.ReasonReaderFailed})
+		b.publishCapability(b.failCapability(snap, collector.ProcessNetworkCapabilityUnavailable,
+			[]collector.ProcessNetworkCapabilityReason{collector.ReasonReaderFailed}))
 		return fmt.Errorf("BACKEND_READER: %w", err)
+	}
+	if err := ctx.Err(); err != nil || b.isStopRequested() {
+		_ = rd.Close()
+		handles.Close()
+		if err == nil {
+			err = context.Canceled
+		}
+		b.abortStartCapability(snap, err)
+		if b.isStopRequested() {
+			return errors.New("BACKEND_STOPPED")
+		}
+		return err
+	}
+
+	b.mu.Lock()
+	if b.stopRequestedLocked() || b.started {
+		b.mu.Unlock()
+		_ = rd.Close()
+		handles.Close()
+		if b.started {
+			return nil
+		}
+		b.abortStartCapability(snap, context.Canceled)
+		return errors.New("BACKEND_STOPPED")
+	}
+	if err := ctx.Err(); err != nil {
+		b.mu.Unlock()
+		_ = rd.Close()
+		handles.Close()
+		b.abortStartCapability(snap, err)
+		return err
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -210,6 +334,7 @@ func (b *Backend) Start(ctx context.Context) error {
 
 	go b.readLoop(runCtx)
 	go b.ingestLoop(runCtx)
+	b.mu.Unlock()
 	return nil
 }
 

@@ -41,6 +41,7 @@ type mockStatsProvider struct {
 	sequenceConflict         bool
 	ackRecoveryConflict      bool
 	processNetworkCapability collector.ProcessNetworkCapabilitySnapshot
+	processNetworkSupport    collector.ProcessNetworkSupportSnapshot
 }
 
 func healthyProvider() *mockStatsProvider {
@@ -97,6 +98,7 @@ func (m *mockStatsProvider) RuntimeSnapshot() RuntimeSnapshot {
 			LastFailureClass:  m.lastFailureClass,
 		},
 		ProcessNetworkCapability: m.processNetworkCapability.Copy(),
+		ProcessNetworkSupport:    m.processNetworkSupport.Copy(),
 	}
 }
 
@@ -571,6 +573,54 @@ func TestMissingOptionalEBPFEvidenceIsBoundedUnavailable(t *testing.T) {
 	reasons := evidence["reason_codes"].([]any)
 	if len(reasons) != 1 || reasons[0] != string(collector.ReasonSourceUnavailable) {
 		t.Fatalf("missing reasons=%v", reasons)
+	}
+}
+
+func TestProcessNetworkSupportCountersOnCapabilityEndpoint(t *testing.T) {
+	prov := healthyProvider()
+	now := time.Now().UTC()
+	prov.processNetworkCapability = collector.ProcessNetworkCapabilitySnapshot{
+		State:         collector.ProcessNetworkCapabilityActive,
+		ObservedAt:    now,
+		TransitionAt:  now,
+		ValidUntil:    now.Add(time.Hour),
+		NextRecheckAt: now.Add(time.Hour),
+		SourceQuality: "FIXTURE",
+	}
+	prov.processNetworkSupport = collector.ProcessNetworkSupportSnapshot{
+		Present:               true,
+		MapUpdateFail:         1,
+		RingReserveFail:       2,
+		DecoderReject:         3,
+		UserspaceChannelFull:  4,
+		TransportNotWired:     5,
+		AggregatorFaults:      6,
+		ReaderFaults:          7,
+		OptionalProbeAttached: true,
+	}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReady(t, s, http.StatusOK, "UP", true, "")
+	evidence := assertProcessNetworkCapability(t, s)
+	counters, ok := evidence["support_counters"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing support_counters: %v", evidence)
+	}
+	if counters["MAP_UPDATE_FAIL"].(float64) != 1 ||
+		counters["RING_RESERVE_FAIL"].(float64) != 2 ||
+		counters["DECODER_REJECT"].(float64) != 3 ||
+		counters["USERSPACE_CHANNEL_FULL"].(float64) != 4 ||
+		counters["TRANSPORT_NOT_WIRED"].(float64) != 5 ||
+		counters["aggregator_faults"].(float64) != 6 ||
+		counters["reader_faults"].(float64) != 7 ||
+		counters["optional_probe_attached"] != true {
+		t.Fatalf("support_counters=%v", counters)
+	}
+	body := assertHealth(t, s, http.StatusOK, "UP", "")
+	if _, exists := body["support_counters"]; exists {
+		t.Fatal("/health must not absorb eBPF support counters into SUPPORT_EVIDENCE")
 	}
 }
 

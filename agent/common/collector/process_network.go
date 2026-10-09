@@ -34,6 +34,10 @@ const (
 	maxProcessNetworkContainerIDLen         = maxProcessServiceIdentityLen
 	maxProcessNetworkProvenanceLen          = maxProcessServiceProvenanceLen
 	ProcessNetworkSyntheticSourceProvenance = "agent.linux.process_network.synthetic"
+	// ProcessNetworkEBPFSourceProvenance is the production Linux eBPF
+	// process-network collection provenance. It is aggregator-owned evidence
+	// identity only — never tenant, entity, or authorization authority.
+	ProcessNetworkEBPFSourceProvenance = "agent.linux.process_network.ebpf"
 )
 
 var (

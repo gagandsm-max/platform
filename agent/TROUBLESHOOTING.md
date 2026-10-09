@@ -1,26 +1,28 @@
-# Platform Linux Agent — eBPF troubleshooting (BUILD-011 Slice 7)
+# AmrudAi Linux Agent — eBPF troubleshooting (BUILD-011 Slice 8)
 
-Use loopback `GET /capabilities/process-network-ebpf` and structured logs (`AGENT_EBPF_PREFLIGHT_COMPLETED`, reason codes only — never raw verifier dumps, secrets, or customer payloads). Base Agent host telemetry should keep running when eBPF cannot activate.
+Use loopback `GET /capabilities/process-network-ebpf` and structured logs (`AGENT_EBPF_ACTIVATION_*`, reason codes only — never raw verifier dumps, secrets, or customer payloads). Base AmrudAi Agent host telemetry should keep running when eBPF cannot activate.
 
 ## Symptom → reason map
 
 | Observation | Typical `state` / `reason_codes` | Safe action |
 |---|---|---|
-| Feature off | `UNAVAILABLE` / `FEATURE_DISABLED` | Set `PLATFORM_AGENT_EBPF_ENABLED=true` only if enrichment is intended; leave false otherwise. |
-| Missing BPF/perfmon caps | `PRIVILEGE_DENIED` / `CAP_BPF_MISSING`, `CAP_PERFMON_MISSING` | Grant **only** `CAP_BPF` + `CAP_PERFMON` to the Agent process. Do not use root as a substitute for cap evidence. |
+| Feature off | `UNAVAILABLE` / `FEATURE_DISABLED` | Set `PLATFORM_AGENT_EBPF_ENABLED=true` only if enrichment is intended; leave false otherwise. No kernel backend is constructed or started. |
+| Missing BPF/perfmon caps | `PRIVILEGE_DENIED` / `CAP_BPF_MISSING`, `CAP_PERFMON_MISSING` | Grant **only** `CAP_BPF` + `CAP_PERFMON` to the Agent process. Do not use root as a substitute for cap evidence. Base `/ready` must stay healthy. |
 | Capability status unreadable | `UNAVAILABLE` or `PRIVILEGE_DENIED` / `CAPABILITY_READ_FAILED` | Fix `/proc/self/status` readability for the Agent; do not disable security frameworks. |
 | No BTF | `KERNEL_INCOMPATIBLE` / `BTF_MISSING`, `BTF_UNREADABLE`, `BTF_INCOMPATIBLE` | Use a BTF-enabled kernel with readable `/sys/kernel/btf/vmlinux`. Do not compile BPF on the target. |
 | Object admission failure | `UNAVAILABLE` / `OBJECT_INTEGRITY_FAILED` | Use the shipping Agent binary/object. Do not replace the governed BPF object or point at a custom `.o`. |
 | Verifier rejection | `UNAVAILABLE` / `BACKEND_VERIFIER_REJECTED` | Collect safe capability snapshot + Agent version/kernel release; escalate to support. Do not patch bytecode on-host. |
 | Tracepoint missing | `UNAVAILABLE` / `BACKEND_TRACEPOINT_UNAVAILABLE` | Primary needs `sock/inet_sock_set_state`. Kernel without the governed classic tracepoint cannot run this backend. |
 | Attach failure | `UNAVAILABLE` / `BACKEND_ATTACH_FAILED` | Check privilege/tracepoint availability; primary attach failure never becomes `ACTIVE`. |
-| Optional retransmit only failed | `ACTIVE` (or preflight path) + `OPTIONAL_PROBE_UNAVAILABLE` | Expected independent degradation; primary enrichment may still operate when wired. |
+| Optional retransmit only failed | `ACTIVE` + `OPTIONAL_PROBE_UNAVAILABLE` | Expected independent degradation; primary enrichment may still operate. Check `support_counters.optional_probe_attached`. |
 | Map/ring pressure | Loss: `MAP_UPDATE_FAIL`, `RING_RESERVE_FAIL` | Enrichment shedding under load; protected workloads take precedence. Do not raise privileges to “fix” loss. |
 | Decoder rejects | Loss: `DECODER_REJECT` | ABI/size/type/family/address/comm/protocol rejections; count and quality degrade — not host DOWN. |
 | Userspace backpressure | Loss: `USERSPACE_CHANNEL_FULL` | Bounded channel drop; do not enlarge by inventing unbounded queues on the host. |
+| Transport not wired | Counter: `TRANSPORT_NOT_WIRED` | Expected until BUILD-016/062; physical ProcessNetworkEvidence delivery is absent by design. |
 | Resource ceiling | `RESOURCE_GUARDED` / `RESOURCE_LIMIT` | Implementation resource guard; wait for low-water / reduce contention. Do not disable the guard. |
-| Compatible but not started | `UNAVAILABLE` / `BACKEND_NOT_WIRED` | Slice 7 truth: AgentService has not wired `Backend.Start` (Slice 8). Not a host misconfiguration. |
-| Backend stopped | `UNAVAILABLE` / `BACKEND_STOPPED` | After clean `StopContext`; restart path is Slice-8 lifecycle once wired. |
+| Runtime backend failure after ACTIVE | `UNAVAILABLE` + typed reason (e.g. `READER_FAILED`) | Capability endpoint updates; Agent lifecycle stays `RUNNING` and base readiness unchanged. |
+| Backend stopped | `UNAVAILABLE` / `BACKEND_STOPPED` | After clean stop/cleanup under the Agent whole-service shutdown budget. |
+| Shutdown timeout during activation | Agent `FAILED` / `AGENT_SHUTDOWN_TIMEOUT` | Non-cooperative activation did not settle before the single shutdown budget; do not force-close kernel resources. Restart via systemd. |
 
 ## Cleanup
 
@@ -32,7 +34,7 @@ Use loopback `GET /capabilities/process-network-ebpf` and structured logs (`AGEN
 
 Collect:
 
-- Capability JSON from `/capabilities/process-network-ebpf` (reason codes, kernel fingerprint fields, cap presence, resource guard — no raw BTF blob).
+- Capability JSON from `/capabilities/process-network-ebpf` (reason codes, kernel fingerprint fields, cap presence, resource guard, support counters — no raw BTF blob).
 - Agent version / service instance id from structured logs.
 - Kernel release string already present in the snapshot (not full `dmesg` dumps unless support requests a redacted subset).
 - Confirmation that base `/live` and `/ready` remain healthy.
