@@ -116,3 +116,10 @@ Capability Packs shipped by Platform are versioned release artifacts with declar
 Phase-1.5 firmware images are **customer/vendor-entitled privileged artifacts**, not ordinary Platform dependencies. If Platform provides repository/caching/distribution functions, metadata must preserve source/vendor, exact image/version/model compatibility, entitlement/reference, checksum and vendor signature status where available, acquisition/import actor/time, approval state and immutable content identity. Firmware artifacts are access-controlled, auditable and excluded from general telemetry/support-bundle export. Platform must not redistribute vendor firmware without appropriate rights/entitlement.
 
 Selecting a browser-runtime package for Phase-1.5 synthetics requires separate Platform_07 admission, pinned browser/runtime provenance, SBOM/CVE/licence scans, signed/offline packaging strategy and rollback/upgrade evidence before release.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 packaging profile — 2026-10-09
+
+Phase 1 produces the normal Core/Sensor/Agent release artifacts for a standalone single-customer deployment. Packaging must not install or require an unneeded third coordination/witness service merely to preserve a future HA design.
+
+Phase 1.5 reuses the same signed/versioned artifacts wherever practical and adds the certified two-Core HA/MSP deployment configuration, failover/rejoin metadata and any HA-specific dependency only after explicit admission. Separate product forks/packages for MSP versus enterprise are prohibited unless an independently justified platform-specific artifact is required.
