@@ -608,6 +608,6 @@ Triggered Fast RCA is product terminology only. It does not create a second RCA/
 <!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
 ## Phase applicability — 2026-10-09
 
-Phase 1 requires semantic monitoring state/evidence quality, No Data != Down, deterministic alert qualification, deterministic/evidence-backed RCA and INCONCLUSIVE behavior. Hosted/local LLM and GNN functionality is optional/non-authoritative and is not a Phase-1 GA dependency.
+Phase 1 requires semantic monitoring state/evidence quality, No Data != Down, deterministic alert qualification, deterministic/evidence-backed RCA and INCONCLUSIVE behavior. Hosted/local LLM and GNN functionality is optional/non-authoritative and is not a Phase-1 GA dependency. NCM/change evidence may inform RCA when available; privileged NCM Change Assurance execution is not a Phase-1 correctness dependency.
 
-Phase 1.5 adds HA/MSP-aware evidence and shared-estate isolation where applicable. Advanced AI remains optional unless separately promoted; AI resource or provider failure must never reduce protected monitoring correctness in either phase.
+Phase 1.5 adds HA/MSP-aware evidence and shared-estate isolation where applicable and is the default envelope for privileged NCM Change Assurance/remediation automation. Advanced AI remains optional unless separately promoted; AI resource or provider failure must never reduce protected monitoring correctness in either phase.

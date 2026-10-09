@@ -438,6 +438,6 @@ Similar Incident Memory may recommend creation/linkage of an external Problem an
 <!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
 ## Phase applicability — 2026-10-09
 
-Phase 1 may ship evidence-backed deterministic operational intelligence, Triggered Fast RCA/Investigation capabilities and customer-value measurements only where their required producers/backends are certified. Advanced learned/LLM assistance is optional and must not be necessary for correct monitoring or deterministic RCA.
+Phase 1 may ship evidence-backed deterministic operational intelligence, Triggered Fast RCA/Investigation capabilities and customer-value measurements only where their required producers/backends are certified. Advanced learned/LLM assistance is optional and must not be necessary for correct monitoring or deterministic RCA. Phase-1 recommendations may reference NCM/change evidence but do not require privileged automated NCM/remediation execution.
 
-Phase 1.5 may add broader shared-MSP and HA-aware portfolio intelligence. This does not create a second RCA/evidence authority.
+Phase 1.5 may add broader shared-MSP and HA-aware portfolio intelligence. Privileged NCM Change Assurance/remediation, when included, remains subject to deterministic action definitions, authorization, approval, blast-radius limits, validation, certified rollback/escalation and durable audit. This does not create a second RCA/evidence authority.

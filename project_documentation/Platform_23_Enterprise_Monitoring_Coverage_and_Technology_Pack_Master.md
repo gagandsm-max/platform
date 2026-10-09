@@ -709,4 +709,4 @@ ITSM/CMDB adapters remain `INTEGRATION` Capability Packs using Platform_10 mecha
 
 Phase 1 certifies a declared Single-Customer Network & Infrastructure Observability coverage profile. Core network/infrastructure families needed for that profile are mandatory; additional technology families are optional certified modules and do not become GA blockers merely because they are listed in the coverage catalogue.
 
-Phase 1.5 extends certification to HA/MSP deployment semantics and larger shared estates; it does not require a second Capability Pack framework. A technology/family remains uncertified until its dimensional Discovery/L1/L2/L3/Topology/NCM/Security/version evidence passes, regardless of phase.
+Phase 1.5 extends certification to HA/MSP deployment semantics and larger shared estates; it does not require a second Capability Pack framework. Existing second-wave Phase-1.5 technology targets remain optional independently certified extensions and are not all prerequisites for the base HA/MSP Phase-1.5 profile. A technology/family remains uncertified until its dimensional Discovery/L1/L2/L3/Topology/NCM/Security/version evidence passes, regardless of phase.

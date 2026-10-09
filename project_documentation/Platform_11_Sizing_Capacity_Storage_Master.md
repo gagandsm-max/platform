@@ -360,7 +360,7 @@ Certification scenarios include representative **100K, 500K and 1M+ external bin
 
 ### 16.4 NCM and firmware
 
-NCM concurrency budgets are independent of routine polling and bounded by tenant, site, vendor/device family, HA/failure domain and device/vendor session/API limits. Measure backup/config size, diff/search workload, concurrent pre/post checks, batch/canary timing, rollback traffic and Integration Service dependency. Phase-1.5 firmware adds repository/storage/bandwidth, staged image transfer, reboot concurrency and rollback-image reserve.
+NCM resource budgets are independent of routine polling. **Phase 1 baseline** measures backup/config size, diff/search workload and any separately certified human-initiated CLI/manual-session cost. **Phase 1.5 privileged Change Assurance** additionally measures concurrent pre/post checks, batch/canary timing, rollback traffic, HA/failure-domain sequencing and Integration Service dependency, bounded by tenant, site, vendor/device family and device/vendor session/API limits. Phase-1.5 firmware adds repository/storage/bandwidth, staged image transfer, reboot concurrency and rollback-image reserve.
 
 ### 16.5 Browser journey synthetics — Phase 1.5
 
