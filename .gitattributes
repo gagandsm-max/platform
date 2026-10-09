@@ -1,0 +1,4 @@
+# AmrudAi byte-preserved governed/imported sources are integrity-checked by
+# exact manifests/object provenance and are excluded from product whitespace style.
+agent/third_party/github.com/cilium/ebpf/** -whitespace
+agent/linux/ebpf/bpf/headers/** -whitespace
