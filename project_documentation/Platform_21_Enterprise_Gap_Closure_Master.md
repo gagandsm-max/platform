@@ -223,3 +223,10 @@ This reconciliation promotes the **requirement phase**, not implementation state
 - Deep specialist VoIP/CDR/CMR/MOS/call-path depth beyond existing operational network/VoIP monitoring remains **Phase 2**.
 
 These phase decisions reuse existing architecture owners and do not select new dependencies by themselves.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase applicability — 2026-10-09
+
+Phase 1 consumes the enterprise controls in this master that are required for a standalone single-customer deployment, including applicable service assurance, policy/audit and integration behavior.
+
+Shared-MSP customer lifecycle, MSP portfolio isolation and SCIM-style organization-wide lifecycle are Phase-1.5 certification extensions unless separately required by a Phase-1 customer profile. Their deferral does not authorize weaker Phase-1 authentication, RBAC, credential, audit or resource-scope controls.
