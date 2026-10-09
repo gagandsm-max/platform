@@ -703,3 +703,10 @@ Evidence-dependent targets include GCP; Aruba/HPE, Dell networking, Extreme, Che
 ### 29.5 Integration Pack certification
 
 ITSM/CMDB adapters remain `INTEGRATION` Capability Packs using Platform_10 mechanics. Connector certification records exact deployment variant/edition/API/auth plus supported Incident/Problem/Change/Approval/activity/reverse-event/CMDB/relationship/business-service capabilities and limitations. Phase-1 connector priorities are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP; six Phase-1.5 certification-priority connectors are defined by `REQ-INT-013`.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 coverage profile — 2026-10-09
+
+Phase 1 certifies a declared Single-Customer Network & Infrastructure Observability coverage profile. Core network/infrastructure families needed for that profile are mandatory; additional technology families are optional certified modules and do not become GA blockers merely because they are listed in the coverage catalogue.
+
+Phase 1.5 extends certification to HA/MSP deployment semantics and larger shared estates; it does not require a second Capability Pack framework. A technology/family remains uncertified until its dimensional Discovery/L1/L2/L3/Topology/NCM/Security/version evidence passes, regardless of phase.
