@@ -7482,3 +7482,10 @@ Synchronization/conflict UI keeps **Monitoring State** separate from **External 
 ### 15.6 Phase-1.5 specialist UX
 
 Endpoint & Switch-Port Intelligence adds MAC/IP/user-when-available/AP/switch/port/VLAN attachment history and provenance. Browser Journey Synthetics adds step/assertion/timing/failure-evidence views only after browser runtime admission. Database Performance Intelligence adds bounded fingerprint/wait/blocking/deadlock/regression/plan evidence. Virtualization Optimization shows evidence-backed recommendations requiring governed human action. None of these Phase-1.5 screens are first-GA implementation claims.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 UI applicability — 2026-10-09
+
+Phase 1 is a single-customer profile. The UI may suppress customer/tenant switching and HA/MSP administration surfaces when the deployment has only one authorized customer and no HA entitlement, but server-side tenant/resource scope remains authoritative and all internal identifiers stay tenant-aware. Hidden or unavailable Phase-1.5 controls must not imply their backend capability is certified.
+
+Phase 1.5 enables the governed customer/tenant selector, cross-customer portfolio views, two-Core HA administration and MSP-specific workflows only after the corresponding backend/security certification passes. One UI codebase is retained.
