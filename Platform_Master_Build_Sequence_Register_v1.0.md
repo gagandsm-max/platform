@@ -219,9 +219,13 @@ Execution rules until BUILD-134:
 16. **Phase 1 commercial direction:** Single-Customer Enterprise Network & Infrastructure Observability. Deterministic RCA (BUILD-100) remains Phase-1 scope. BUILD-102 GNN and BUILD-103 local-LLM/advanced AI remain roadmap/non-blocking unless promoted. Issue #145 remains separate FUTURE Phase-2 architecture / change-control authority.
 17. **Deletion-authorizing ACK:** Phase 1 standalone ACK durability covers the certified standalone recoverable failure matrix; catastrophic standalone Core/storage loss uses backup/DR RPO/RTO. Phase 1.5 additionally requires `ACKED-FOR-DELETION TELEMETRY RPO = 0` across the certified permanent single-Core HA failure matrix. Physical HA mechanisms remain unselected until HA engineering closes them.
 
-## Immediate sequence after A2.3
+## Phase-1 primary execution sequence after the Phase-envelope freeze
 
-BUILD-000 → 001 → 002 → 003 → 004 → 005 → 010 → 011 → 016 → 017 → 013 → 014 → 019 → 020 → 021 → 022 → 023 → 024 → 025 → 026 → 030/031 → 037 → 040/041/042/043/044 → 048 → 049 → 050/051/052/053 → 054 → 060 onward.
+Historical execution through BUILD-011 remains unchanged. After BUILD-011, the shortest mandatory Phase-1 standalone path is:
+
+`013 → 014 → 016 → 017 → 018 → 019 → 020 → 021 → 022 → 023 → 024 → 025 → 026 → 040/041/042/043/044 → 046 → 048 → 060–075 → 080–086 → 090(BASE) → 092 → 095–101 → 110–118 → 125–132 → 134`.
+
+Optional Phase-1 modules (`012/015 EDS`, `030–036 + 037 overlays`, `045/047/049`, `050–054 + 093/094`, specialist Packs) may execute in parallel when dependencies and isolated worktrees permit, but they do not block base Phase-1 certification unless explicitly included in the declared commercial profile. Phase-1.5 HA/MSP work follows its separate gate/BUILD-120–124 sequence.
 
 ## Handoff rule
 
@@ -272,7 +276,7 @@ This overlay changes certification sequencing, not BUILD numbering.
 | **Phase 1 REQUIRED — foundation/edge** | BUILD-000–005; BUILD-010–011; BUILD-013–014; BUILD-016–026. BUILD-012/015 EDS are optional certified Phase-1 enrichment unless explicitly included in the declared release profile. BUILD-019 certifies the declared base Agent profile and included overlays. |
 | **Phase 1 REQUIRED — core network** | BUILD-040–044, BUILD-046 and profile-scoped BUILD-048. BUILD-045/047/049 and BUILD-050–054 (Flow/Syslog streaming) are optional certified modules and become release gates only when included in the declared Phase-1 profile. |
 | **Phase 1 OPTIONAL CERTIFIED MODULES** | BUILD-012/015 EDS; BUILD-030–036 technology producers with profile-scoped BUILD-037; BUILD-045/047/049; BUILD-050–054 + BUILD-093/094 Flow/Log modules; and other specialist technology families may ship independently when certified. They do not universally block the base Phase-1 profile. |
-| **Phase 1 REQUIRED — Core/operations** | BUILD-060–075, BUILD-080–086, BUILD-092, BUILD-095–101, BUILD-110–118, BUILD-125–132, plus BUILD-134 Phase-1 final certification. BUILD-090/091 are profile-split: backup/diff/compliance are Phase-1 baseline; tightly controlled manual CLI is optional when certified; privileged push/remediation is Phase 1.5. BUILD-093/094 are optional with Flow/Log modules. |
+| **Phase 1 REQUIRED — Core/operations** | BUILD-060–075, BUILD-080–086, **BUILD-090 baseline**, BUILD-092, BUILD-095–101, BUILD-110–118, BUILD-125–132, plus BUILD-134 Phase-1 final certification. BUILD-091 tightly controlled manual CLI is optional when certified; BUILD-090 privileged push/remediation subprofile and broader BUILD-091 configuration/destructive command authority are Phase 1.5. BUILD-093/094 are optional with Flow/Log modules. |
 | **Phase 1.5 REQUIRED — platform extension** | BUILD-120–124 plus HA/MSP subprofiles of BUILD-060/068/073/086/090/091/097/117/128/130/131/132/134. These extend existing contracts; no duplicate BUILDs. Privileged NCM Change Assurance execution is Phase 1.5 by default. |
 | **Phase 1.5 OPTIONAL SPECIALIST EXTENSIONS / roadmap** | Existing second-wave Phase-1.5 labels (sampled spans, browser journeys, firmware lifecycle, deeper DB/virtualization, endpoint/switch-port intelligence and second-wave connectors) remain independently certified optional extensions unless explicitly included in the Phase-1.5 commercial profile. BUILD-102/103 advanced AI and regional federation remain roadmap/non-blocking unless promoted. |
 
