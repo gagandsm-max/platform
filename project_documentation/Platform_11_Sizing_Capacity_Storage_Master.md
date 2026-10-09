@@ -370,3 +370,17 @@ Before selecting/shipping a browser runtime, benchmark memory/browser, CPU/brows
 ### v3.3 formal CMDB scale requirement anchor
 
 - `REQ-CMDB-007` — CMDB reconciliation is incremental, idempotent, rate-bounded and audited; certification benchmarks representative 100K, 500K and 1M+ bindings/CIs plus multi-million relationships where applicable without converting those test points into universal capacity claims.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 capacity certification overlay — 2026-10-09
+
+### Phase 1
+- the 8 vCPU / 32 GB Core value remains an engineering target, not an achieved capacity claim, for the standalone SNWP-2500-v1 profile;
+- one Core is measured with all mandatory Phase-1 services and the exact selected module set;
+- capacity evidence separates sustained, burst and backlog-recovery capacity;
+- Sensor capacity is certified by role/workload (NETWORK, INFRASTRUCTURE, FLOW, LOG, Agent ingress, small COMBINED where explicitly supported), not by device count alone;
+- spool sizing uses measured retained bytes/sec × required outage duration × write/compression/indexing amplification × safety/recovery headroom;
+- swap is a resilience safety valve, never counted as equivalent physical RAM or normal performance headroom.
+
+### Phase 1.5
+Adds per-Core failover reserve, live workload + backlog replay after failover, shared-MSP/noisy-neighbour quotas and the resource cost of two-Core durability/rejoin. HA per-Core targets do not block Phase-1 standalone certification.
