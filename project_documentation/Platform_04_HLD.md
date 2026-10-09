@@ -1418,3 +1418,11 @@ Failure boundaries are explicit: unsupported/denied inventory fields become part
 - **CMDB Reconciler:** logical Integration Service function maps ExternalBinding records to canonical entity/relationship authority. It is not a second inventory database.
 
 Protected workload ordering remains: authority/control, telemetry durability, ingestion/current-state and critical alert qualification take precedence over OTel enrichment, investigation fan-out, CMDB reconciliation, connector replay and other non-critical enrichment during resource pressure.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 deployment-profile HLD — 2026-10-09
+
+- **Phase 1:** one authoritative standalone Core deployment unit; multiple certified Sensors/Agents and sites may attach. All mandatory control/data-plane interfaces remain tenant-aware and versioned.
+- **Phase 1.5:** adds a second full Core and the HA/MSP operating profile; existing services/interfaces remain the same authorities and must not fork into MSP-specific duplicates.
+- Phase-1 service decomposition must preserve later independent scaling/failover seams but shall not introduce premature microservices solely for Phase 1.5.
+- HA-only components/workflows are inactive or absent from the Phase-1 runtime profile; their absence must not weaken standalone backup, replay, security or supportability.
