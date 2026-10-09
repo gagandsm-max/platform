@@ -162,9 +162,11 @@ Runbooks cover vendor outage, credential expiry/revocation, webhook authenticati
 
 Operations expose connector/binding counts, match-confidence/conflict states, stale external versions, incremental-sync checkpoint/lag, relationship reconciliation health and pending operator conflicts. External CI deletion/missing state does not automatically delete a Platform entity; decommission remains governed.
 
-### 13.4 NCM Change Assurance
+### 13.4 NCM operations by certification profile
 
-Runbooks cover stale/failed backup, precheck failure, external approval unavailable/rejected/stale, plan mutation, canary/batch stop, postcheck/stabilization failure, unsupported rollback, partial rollback and escalation. A failed rollback must preserve evidence and stop further destructive rollout. Maintenance/suppression is always explicitly ended or left in a visible failed/attention state; no silent indefinite maintenance.
+**Phase 1 baseline** runbooks cover backup/version/diff/compliance failures, credential/auth failures, safe read-only collection, audit and any separately certified human-initiated CLI session failure/termination path.
+
+**Phase 1.5 privileged Change Assurance** runbooks cover stale/failed backup, precheck failure, external approval unavailable/rejected/stale, plan mutation, canary/batch stop, postcheck/stabilization failure, unsupported rollback, partial rollback and escalation. A failed rollback must preserve evidence and stop further destructive rollout. Maintenance/suppression is always explicitly ended or left in a visible failed/attention state; no silent indefinite maintenance.
 
 ### 13.5 Firmware — Phase 1.5
 

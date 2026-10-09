@@ -448,9 +448,11 @@ Test certified OTLP/gRPC and HTTP profiles for metrics and logs, resource/scope 
 
 Before certification prove span schema correctness, head/tail sampling behavior, trace routing, sampling provenance, memory/state limits, restart/HA behavior, short-retention enforcement, trace query bounds, service-edge provenance, Flight Recorder pinning, cross-signal correlation and measured Core/Sensor/ClickHouse cost. Numerical acceptance values are benchmark outputs, not Mother Reference inventions.
 
-### 12.4 NCM Change Assurance
+### 12.4 NCM profile certification
 
-Negative/edge tests include backup failure/staleness, config search redaction, raw/semantic diff parser mismatch, privilege failure, missing/forged/replayed/stale approval, modified-after-approval targets/config/window, concurrent/out-of-band change, precheck deterioration, canary failure, partial rollout, stop-condition enforcement, HA-pair/failure-domain sequencing, post-validation failure, unsupported/failed rollback, device unreachable, vendor rate/session limits, maintenance-window expiry and complete audit/evidence manifest.
+**Phase 1 baseline** tests backup/version/diff/change-detection/compliance/golden-state correctness, config-search redaction, auth/privilege failure, read-only safety, audit and optional human-initiated CLI command-policy/credential isolation where that session profile is included.
+
+**Phase 1.5 privileged Change Assurance** additionally tests missing/forged/replayed/stale approval, modified-after-approval targets/config/window, concurrent/out-of-band change, precheck deterioration, canary failure, partial rollout, stop-condition enforcement, HA-pair/failure-domain sequencing, post-validation failure, unsupported/failed rollback, device unreachable, vendor rate/session limits, maintenance-window expiry and complete audit/evidence manifest.
 
 ### 12.5 Firmware — Phase 1.5
 
@@ -475,4 +477,4 @@ Minimum capacity evidence distinguishes sustained workload, short burst/storm wo
 ### Phase 1.5 certification
 Adds Core partition/split-brain/fencing/former-Active-return, PostgreSQL/Kafka/ClickHouse failover and rejoin, deletion-authorizing ACK RPO=0 across the declared single-Core HA failure matrix, Sensor reconnect/re-anchor and push continuity, adversarial cross-customer isolation/noisy-neighbour tests, and HA recovery capacity under simultaneous live workload.
 
-A Phase-1 PASS cannot be relabeled Phase-1.5 without this evidence.
+A Phase-1 PASS cannot be relabeled Phase-1.5 without this evidence. Phase-1.5 base HA/MSP certification also does not imply certification of every optional second-wave Phase-1.5 specialist module; each included module carries its own applicable tests.

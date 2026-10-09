@@ -7469,9 +7469,9 @@ Path views show current/historical/multi-vantage path, path fingerprints/change,
 
 Administration exposes **Add OpenTelemetry Source** with ingress profile, endpoint/authentication, signal selection, tenant/site/source binding, connection test, telemetry preview, resource/service identity-resolution preview, cardinality/sensitive-field/quality findings, estimated capacity impact and controlled activation. Phase-1 service views use metrics/logs and trace-context/exemplars when present; Phase-1 UI does not promise distributed trace waterfall/search. Phase-1.5 may add bounded trace search/waterfall after certification.
 
-### 15.4 NCM Change Assurance
+### 15.4 Phase-1.5 privileged NCM Change Assurance
 
-NCM UI adds Change Plans, Assurance Records, Pre-checks, Risk/Blast Radius, External Change/Approval, Canary/Batches, Post-check/Stabilization and Outcome/Audit views. The approval panel displays exact plan version, target/config hashes and approved window and clearly marks `STALE_REAPPROVAL_REQUIRED`. Risk/blast-radius views expose evidence freshness/confidence and never present graph inference as certain impact.
+Phase-1 baseline NCM UI exposes backup/version/diff/compliance/golden-state/reporting and only separately certified human-initiated CLI/manual controls. Phase-1.5 NCM UI adds Change Plans, Assurance Records, Pre-checks, Risk/Blast Radius, External Change/Approval, Canary/Batches, Post-check/Stabilization and Outcome/Audit views. The approval panel displays exact plan version, target/config hashes and approved window and clearly marks `STALE_REAPPROVAL_REQUIRED`. Risk/blast-radius views expose evidence freshness/confidence and never present graph inference as certain impact.
 
 ### 15.5 ITSM & CMDB Integration onboarding
 
@@ -7488,4 +7488,4 @@ Endpoint & Switch-Port Intelligence adds MAC/IP/user-when-available/AP/switch/po
 
 Phase 1 is a single-customer profile. The UI may suppress customer/tenant switching and HA/MSP administration surfaces when the deployment has only one authorized customer and no HA entitlement, but server-side tenant/resource scope remains authoritative and all internal identifiers stay tenant-aware. Hidden or unavailable Phase-1.5 controls must not imply their backend capability is certified.
 
-Phase 1.5 enables the governed customer/tenant selector, cross-customer portfolio views, two-Core HA administration and MSP-specific workflows only after the corresponding backend/security certification passes. One UI codebase is retained.
+Phase 1.5 enables the governed customer/tenant selector, cross-customer portfolio views, two-Core HA administration and MSP-specific workflows only after the corresponding backend/security certification passes. Privileged NCM push/approval/canary/rollback surfaces are Phase-1.5 by default; Phase-1 hides them unless a specific human-initiated operation was separately certified and promoted through change control. One UI codebase is retained.
