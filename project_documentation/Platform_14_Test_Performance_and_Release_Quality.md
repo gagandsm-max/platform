@@ -463,3 +463,16 @@ Per certified connector/edition/API test authentication/permissions, standard/cu
 ### 12.7 Phase-1.5 browser/DB/virtualization/endpoint
 
 Browser journeys require credential isolation, sandbox/runtime admission, deterministic steps/assertions/timing, screenshot/artifact access/TTL/redaction, crash/timeout/cancellation and capacity isolation. DB intelligence requires safe fingerprint/wait/blocking/deadlock/regression/plan evidence without dangerous query execution/autotuning. Virtualization recommendations require evidence/false-positive testing and no autonomous apply. Endpoint/switch-port history requires identity/provenance/movement/tenant/privacy tests and no duplicate endpoint store.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 certification gates — 2026-10-09
+
+### Phase 1 certification
+The release candidate is tested as a single-customer, standalone-Core product. It must still pass applicable security, tenant/resource-scope, telemetry correctness, durability/replay, storage exhaustion, backup/restore, upgrade/recovery, load, soak, failure and supportability gates. Phase 1 does not require two-Core failover or shared-MSP cross-customer certification.
+
+Minimum capacity evidence distinguishes sustained workload, short burst/storm workload, and recovery/backlog-drain workload while live monitoring continues. Phase-1 negative tests include multi-Sensor stale assignment/fencing because multiple Sensors are allowed.
+
+### Phase 1.5 certification
+Adds Core partition/split-brain/fencing/former-Active-return, PostgreSQL/Kafka/ClickHouse failover and rejoin, deletion-authorizing ACK RPO=0 across the declared single-Core HA failure matrix, Sensor reconnect/re-anchor and push continuity, adversarial cross-customer isolation/noisy-neighbour tests, and HA recovery capacity under simultaneous live workload.
+
+A Phase-1 PASS cannot be relabeled Phase-1.5 without this evidence.
