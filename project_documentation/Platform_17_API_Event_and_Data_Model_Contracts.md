@@ -281,7 +281,7 @@ validate complete source batch
 
 Semantics are **at-least-once**, not exactly-once. Duplicate Kafka publication of the same stable logical observation identity is tolerated; canonical ClickHouse reads must not expose duplicate logical numeric observations. Concurrent exact HTTP retries while a reservation is `RETRY_PENDING` may amplify republish volume; that is a recorded **P1** hardening concern under the normal serialized Sensor uploader path. No distributed publisher lease/service is introduced by this documentation baseline.
 
-**Deletion-authorizing ACK HA durability invariant:** If Core issues an ACK that authorizes the Sensor to delete acknowledged telemetry from its durable spool, that telemetry must survive every failure in the certified single-Core HA failure matrix (`ACKED-FOR-DELETION TELEMETRY RPO = 0` for those scenarios; not site/DR RPO). Conceptual lifecycle: Sensor durable spool → Core acceptance → certified HA durability barrier → deletion-authorizing ACK → Sensor may delete acknowledged segment. Physical HA mechanisms remain unselected; closure belongs to `HA_DURABILITY_DESIGN_GATE` / BUILD-120–124.
+**Deletion-authorizing ACK durability is profile-scoped. Phase 1 standalone:** an ACK authorizing Sensor spool deletion must survive the certified standalone application/service/restart/reboot and recoverable failure matrix; catastrophic destruction of the standalone Core/storage is governed by backup/DR RPO/RTO and is not claimed as RPO=0. **Phase 1.5 HA:** the same logical ACK additionally requires a certified cross-Core durability barrier such that acknowledged-for-deletion telemetry survives every declared permanent single-Core HA failure (`ACKED-FOR-DELETION TELEMETRY RPO = 0` for that matrix). Physical HA mechanisms remain unselected; HA closure belongs to `HA_DURABILITY_DESIGN_GATE` / BUILD-120–124.
 
 ## 8. Unified correlation / RCA contract supplement — v3.2.2
 
@@ -880,3 +880,11 @@ Metrics/logs preserve OpenTelemetry Resource and Instrumentation Scope metadata 
 ### 13.6 Endpoint/access-port relationship evidence — Phase 1.5
 
 Attachment observations map mutable MAC/IP/user-when-available/AP/switch/port/VLAN evidence to canonical entities/graph with source, observed time, confidence/quality and history. PID/MAC/IP/user labels are not silently promoted to permanent global identity without reconciliation evidence.
+
+<!-- PHASE-1-1.5-ENVELOPE-2026-10-09 -->
+## Phase 1 / Phase 1.5 contract invariants — 2026-10-09
+
+- Tenant/customer identifiers, resource scopes, entity authority, correlation/idempotency keys and provenance fields remain present in Phase 1 even though only one production customer is certified. Phase 1.5 therefore extends deployment/security evidence without schema forks.
+- Phase 1 does not introduce a separate standalone transport or schema.
+- Phase 1.5 does not introduce MSP-specific duplicate event families; it applies stronger cross-tenant/HA authority and failure guarantees to the same versioned contracts.
+- Profile/certification metadata may describe supported deployment mode, but it must never be accepted from an untrusted data-plane producer as authorization.
