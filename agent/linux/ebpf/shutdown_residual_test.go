@@ -373,12 +373,15 @@ func TestBackendDropNotDoubleCountedFromLossSnapshot(t *testing.T) {
 		t.Fatalf("FlushAll: %v", err)
 	}
 	accepted, dropped, shed := processNetworkRepresentedTotals(sink)
-	unrepresented := backendLossNotInSink(b, dropped)
+	unrepresented, covErr := backendLossNotInSink(b, dropped)
+	if covErr != nil {
+		t.Fatalf("backend loss coverage: %v", covErr)
+	}
 	if unrepresented != 0 {
 		t.Fatalf("emitDrop'd BACKEND_DROP must be fully covered by sink dropped; unrepresented=%d dropped=%d loss=%v",
 			unrepresented, dropped, b.LossSnapshot())
 	}
-	backend := b.LossSnapshot()[LossClassMapUpdateFail] + b.LossSnapshot()[LossClassRingReserveFail]
+	backend := backendLossTotal(b)
 	if dropped < backend {
 		t.Fatalf("sink dropped=%d must cover backend loss=%d", dropped, backend)
 	}

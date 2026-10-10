@@ -273,12 +273,17 @@ func TestRawChConservationWithSoleProducerClose(t *testing.T) {
 		t.Fatalf("StopContext: %v", err)
 	}
 	// Exact conservation via represented event totals (not len(evidence)>0).
+	// Path-loss classes that were emitDrop'd are already in sink dropped; only
+	// unrepresented path loss may be added. Kernel MAP/RING loss is out of contract.
 	accepted, dropped, shed := processNetworkRepresentedTotals(sink)
-	chanFull := b.LossSnapshot()[LossClassUserspaceChanFull]
-	decoderReject := b.LossSnapshot()[LossClassDecoderReject]
-	if accepted+dropped+shed+chanFull+decoderReject != n {
-		t.Fatalf("conservation: accepted=%d dropped=%d shed=%d chan=%d decoder=%d want=%d (len(evidence)=%d)",
-			accepted, dropped, shed, chanFull, decoderReject, n, len(sink.ProcessNetwork))
+	unrepresented, covErr := ringPathLossNotInSink(b, dropped)
+	if covErr != nil {
+		t.Fatalf("ring path loss coverage: %v (accepted=%d dropped=%d shed=%d loss=%v)",
+			covErr, accepted, dropped, shed, b.LossSnapshot())
+	}
+	if accepted+dropped+shed+unrepresented != n {
+		t.Fatalf("conservation: accepted=%d dropped=%d shed=%d unrepresented=%d want=%d (len(evidence)=%d)",
+			accepted, dropped, shed, unrepresented, n, len(sink.ProcessNetwork))
 	}
 	if rd.pending() != 0 {
 		t.Fatalf("unconserved ring pending=%d", rd.pending())
@@ -484,38 +489,74 @@ func TestRingDrainIncompleteOnBudgetExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	block := make(chan struct{})
-	rd := &fakeEventReader{
-		records: [][]byte{putEventV1(t, nil)},
-		block:   block, // after first record, block until Close
+
+	// Hold detach past the Stop budget so shutdownCtx expires before drain begins.
+	// Then release with detach failure: !producersQuiesced + expired opCtx makes
+	// drainKernelRing note ErrBackendRingDrainIncomplete immediately (reader.go).
+	hold := make(chan struct{})
+	detachBegan := make(chan struct{})
+	var detachOnce sync.Once
+	b.detachProbesFn = func(*kernelHandles) error {
+		detachOnce.Do(func() { close(detachBegan) })
+		<-hold
+		return errDetachCause
 	}
-	// Put one record then block further reads past deadline by keeping block open
-	// and emptying records after first read — actually keep many and block.
-	rd.records = append(rd.records, putEventV1(t, nil), putEventV1(t, nil))
-	b.detachProbesFn = func(*kernelHandles) error { return nil }
+
+	block := make(chan struct{})
+	rd := &fakeEventReader{block: block}
 	_, _ = trackHandleCleanup(b)
-	runtimeCtx, runtimeCancel := armRuntimeWithReader(b, rd, 8)
+	runtimeCtx, runtimeCancel := armRuntimeWithReader(b, rd, 2)
 	defer runtimeCancel()
 	go b.readLoop(runtimeCtx)
 	go b.ingestLoop(runtimeCtx)
 
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer stopCancel()
 	err = b.StopContext(stopCtx)
+
 	select {
-	case <-block:
-	default:
-		close(block)
+	case <-detachBegan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("detach never began")
 	}
 	if err == nil {
-		// May succeed if drain finished quickly; require incomplete OR deadline.
-		t.Log("stop completed within budget")
+		t.Fatal("clean Stop must fail when stop budget expires while detach/drain incomplete")
 	}
-	if err != nil &&
-		!errors.Is(err, ErrBackendStopDeadline) &&
-		!errors.Is(err, ErrBackendRingDrainIncomplete) &&
-		!errors.Is(err, ErrBackendShutdownFlush) {
-		t.Fatalf("unexpected stop error class: %v", err)
+	if !errors.Is(err, ErrBackendStopDeadline) {
+		t.Fatalf("want ErrBackendStopDeadline while detach held, got %v", err)
+	}
+
+	close(hold)
+
+	// Bounded cleanup: release reader block so Close/finalize cannot hang the suite.
+	rd.mu.Lock()
+	if rd.block != nil {
+		close(rd.block)
+		rd.block = nil
+	}
+	rd.mu.Unlock()
+
+	select {
+	case <-b.workersDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("workers did not finish after detach release")
+	}
+
+	retained := b.StopContext(context.Background())
+	if retained == nil {
+		t.Fatal("retained Stop must not rewrite incomplete drain as success")
+	}
+	if !errors.Is(retained, ErrBackendRingDrainIncomplete) {
+		t.Fatalf("want ErrBackendRingDrainIncomplete after expired-budget drain, got %v", retained)
+	}
+	if !errors.Is(retained, ErrBackendProducerQuiesceIncomplete) {
+		t.Fatalf("want ErrBackendProducerQuiesceIncomplete, got %v", retained)
+	}
+	if !errors.Is(retained, errDetachCause) {
+		t.Fatalf("detach cause must remain errors.Is visible, got %v", retained)
+	}
+	if !errors.Is(retained, ErrBackendStopDeadline) {
+		t.Fatalf("first StopDeadline must remain retained, got %v", retained)
 	}
 }
 

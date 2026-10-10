@@ -3,6 +3,7 @@ package ebpf
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -47,17 +48,53 @@ func processNetworkRepresentedTotals(sink *collector.LocalRecordingStructuredEvi
 	return
 }
 
-// backendLossNotInSink returns LossSnapshot totals for classes that have not
-// already been represented as sink DroppedRecordsCount (TRANSPORT_NOT_WIRED or
-// failed emit paths). When emitDrop succeeded, sink dropped already covers them.
-func backendLossNotInSink(b *Backend, sinkDropped uint64) uint64 {
+// errBackendLossCoverageAmbiguous is returned when sink DroppedRecordsCount and
+// LossSnapshot cannot be reconciled without LossClass-keyed sink attribution.
+// Production emitDrop discards the reason string, so aggregate subtraction alone
+// cannot prove per-class coverage when sinkDropped exceeds backend totals.
+var errBackendLossCoverageAmbiguous = errors.New("BACKEND_LOSS_COVERAGE_AMBIGUOUS")
+
+// backendLossTotal sums all LossClass counters (authoritative backend loss).
+func backendLossTotal(b *Backend) uint64 {
 	snap := b.LossSnapshot()
-	backend := snap[LossClassMapUpdateFail] + snap[LossClassRingReserveFail] +
+	return snap[LossClassMapUpdateFail] + snap[LossClassRingReserveFail] +
 		snap[LossClassUserspaceChanFull] + snap[LossClassDecoderReject]
-	if backend <= sinkDropped {
-		return 0
+}
+
+// backendLossNotInSink returns LossSnapshot units not covered by sink
+// DroppedRecordsCount under the fixture contract:
+//
+//	sinkDropped is produced only by emitDrop→BACKEND_DROP for this Backend
+//	(no foreign BACKEND_DROP / non-backend drop credits).
+//
+// Because sink drops are not LossClass-keyed (reason discarded at emit),
+// sinkDropped > backendTotal is AMBIGUOUS — not “fully represented”.
+// Callers must Fatal on err; do not treat (0, err) as coverage success.
+func backendLossNotInSink(b *Backend, sinkDropped uint64) (unrepresented uint64, err error) {
+	backend := backendLossTotal(b)
+	if sinkDropped > backend {
+		return 0, fmt.Errorf("%w: sinkDropped=%d backendLoss=%d (foreign/extra sink drops can mask unemitted LossSnapshot)",
+			errBackendLossCoverageAmbiguous, sinkDropped, backend)
 	}
-	return backend - sinkDropped
+	return backend - sinkDropped, nil
+}
+
+// ringPathLossNotInSink is for ring-record conservation fixtures only.
+// MAP/RING kernel counters are not ring-record substitutes; their presence
+// fails the fixture contract instead of entering the conservation sum.
+func ringPathLossNotInSink(b *Backend, sinkDropped uint64) (unrepresented uint64, err error) {
+	snap := b.LossSnapshot()
+	kernel := snap[LossClassMapUpdateFail] + snap[LossClassRingReserveFail]
+	if kernel != 0 {
+		return 0, fmt.Errorf("%w: kernel MAP/RING loss=%d present in ring-conservation fixture",
+			errBackendLossCoverageAmbiguous, kernel)
+	}
+	path := snap[LossClassUserspaceChanFull] + snap[LossClassDecoderReject]
+	if sinkDropped > path {
+		return 0, fmt.Errorf("%w: sinkDropped=%d pathLoss=%d",
+			errBackendLossCoverageAmbiguous, sinkDropped, path)
+	}
+	return path - sinkDropped, nil
 }
 
 // TestStopRequestedBeforeDetachBegins proves StopContext publishes stopRequested
@@ -190,7 +227,11 @@ func TestDelayedDetachLateRingEventConserved(t *testing.T) {
 		t.Fatalf("unread ring records remain: %d", rd.pending())
 	}
 	accepted, dropped, shed := processNetworkRepresentedTotals(sink)
-	unrepresented := backendLossNotInSink(b, dropped)
+	unrepresented, covErr := ringPathLossNotInSink(b, dropped)
+	if covErr != nil {
+		t.Fatalf("ring path loss coverage: %v (accepted=%d dropped=%d shed=%d loss=%v)",
+			covErr, accepted, dropped, shed, b.LossSnapshot())
+	}
 	represented := accepted + dropped + shed + unrepresented
 	want := uint64(initial + late)
 	if represented != want {
@@ -396,13 +437,83 @@ func TestExactRingRecordConservationAcceptedPlusDrops(t *testing.T) {
 		t.Fatalf("StopContext: %v", err)
 	}
 	accepted, dropped, shed := processNetworkRepresentedTotals(sink)
-	unrepresented := backendLossNotInSink(b, dropped)
+	unrepresented, covErr := ringPathLossNotInSink(b, dropped)
+	if covErr != nil {
+		t.Fatalf("ring path loss coverage: %v (accepted=%d dropped=%d shed=%d loss=%v)",
+			covErr, accepted, dropped, shed, b.LossSnapshot())
+	}
 	if accepted+dropped+shed+unrepresented != n {
 		t.Fatalf("DISJOINT conservation failed: accepted=%d dropped=%d shed=%d unrepresented=%d want=%d (len(evidence)=%d)",
 			accepted, dropped, shed, unrepresented, n, len(sink.ProcessNetwork))
 	}
 	if accepted < 1 {
 		t.Fatal("expected at least one accepted represented event")
+	}
+}
+
+// TestBackendLossNotInSinkRejectsForeignSinkMasking is the adversarial
+// counterexample for the old aggregate subtraction oracle: foreign sink
+// DroppedRecordsCount larger than LossSnapshot must not report unrepresented=0.
+func TestBackendLossNotInSinkRejectsForeignSinkMasking(t *testing.T) {
+	agg, sink := testAgg(t)
+	b, err := NewBackend(BackendConfig{
+		Config:     Config{Enabled: false, PreflightTimeout: time.Second, RecheckMin: time.Minute},
+		Aggregator: agg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Unemitted LossSnapshot (never emitDrop).
+	b.loss.Add(LossClassMapUpdateFail, 3)
+
+	// Foreign sink drops: BACKEND_DROP via aggregator only (no LossSnapshot bump).
+	n := uint32(5)
+	ctx := context.Background()
+	if err := agg.Ingest(ctx, []collector.ProcessNetworkSyntheticEvent{{
+		ObservedAt:   time.Now().UTC(),
+		Class:        collector.ProcessNetworkEventBackendDrop,
+		DroppedCount: &n,
+	}}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if _, err := agg.FlushAll(ctx); err != nil {
+		t.Fatalf("FlushAll: %v", err)
+	}
+	_, dropped, _ := processNetworkRepresentedTotals(sink)
+	if dropped < 5 {
+		t.Fatalf("precondition: sink dropped=%d want >=5", dropped)
+	}
+
+	// Old arithmetic (inline oracle): masks MAP=3 behind foreign sink=5.
+	oldBackend := backendLossTotal(b)
+	var oldUnrep uint64
+	if oldBackend > dropped {
+		oldUnrep = oldBackend - dropped
+	}
+	if oldUnrep != 0 {
+		t.Fatalf("adversarial precondition broken: old helper unrepresented=%d (want 0 mask)", oldUnrep)
+	}
+
+	unrep, covErr := backendLossNotInSink(b, dropped)
+	if covErr == nil {
+		t.Fatalf("new helper must reject ambiguous coverage; unrepresented=%d", unrep)
+	}
+	if !errors.Is(covErr, errBackendLossCoverageAmbiguous) {
+		t.Fatalf("want errBackendLossCoverageAmbiguous, got %v", covErr)
+	}
+}
+
+// TestBackendLossNotInSinkReportsUnemittedWhenSinkEmpty proves unemitted
+// LossSnapshot remains visible when the sink has zero drop coverage.
+func TestBackendLossNotInSinkReportsUnemittedWhenSinkEmpty(t *testing.T) {
+	b := testBackendInactive(t)
+	b.loss.Add(LossClassMapUpdateFail, 3)
+	unrep, err := backendLossNotInSink(b, 0)
+	if err != nil {
+		t.Fatalf("empty sink coverage: %v", err)
+	}
+	if unrep != 3 {
+		t.Fatalf("unrepresented=%d want 3", unrep)
 	}
 }
 
