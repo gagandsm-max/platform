@@ -35,6 +35,19 @@ func (b *Backend) readLoop(ctx context.Context) {
 		rd.SetDeadline(time.Now().Add(200 * time.Millisecond))
 		raw, err := rd.ReadRaw()
 		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				continue
+			}
+			// Stop/cancel overlapping an ordinary read must not treat runtime
+			// cancellation alone as a clean exit that skips governed drain.
+			if b.isStopRequested() || ctx.Err() != nil {
+				if !errors.Is(err, ringbuf.ErrClosed) && !errors.Is(err, os.ErrClosed) {
+					b.noteShutdownEvidence(fmt.Errorf("%w: unexpected ring read overlapping stop: %w", ErrBackendRingDrainIncomplete, err))
+					b.readerFaults.Add(1)
+				}
+				b.shutdownReadPath(ctx, rd)
+				return
+			}
 			if b.handleRingReadError(ctx, err) {
 				return
 			}
@@ -94,7 +107,7 @@ func (b *Backend) drainKernelRing(runtimeCtx context.Context, rd eventReader) {
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				if b.kernelProducersQuiesced() {
-					// Probe detach completed: idle deadline means the ring is empty.
+					// Confirmed producer quiescence + idle deadline = ring exhaustion.
 					return
 				}
 				// Detach failed or never completed: idle time is not exhaustion proof.
@@ -106,10 +119,10 @@ func (b *Backend) drainKernelRing(runtimeCtx context.Context, rd eventReader) {
 				b.noteShutdownEvidence(fmt.Errorf("%w: reader closed before ring drain completed", ErrBackendRingDrainIncomplete))
 				return
 			}
-			if b.handleRingReadError(runtimeCtx, err) {
-				return
-			}
-			continue
+			// Unexpected read/poller/record faults must never be erased solely
+			// because the runtime context is already canceled during Stop.
+			b.noteShutdownEvidence(fmt.Errorf("%w: unexpected ring read during drain: %w", ErrBackendRingDrainIncomplete, err))
+			return
 		}
 		select {
 		case b.rawCh <- raw:
@@ -120,10 +133,12 @@ func (b *Backend) drainKernelRing(runtimeCtx context.Context, rd eventReader) {
 	}
 }
 
-// handleRingReadError classifies ringbuf.Reader.Read errors.
-// Returns true when the read loop must terminate.
+// handleRingReadError classifies ringbuf.Reader.Read errors on the active
+// readLoop path. Returns true when the read loop must terminate.
 // Unexpected I/O/runtime failures are READER_FAILED (never DECODER_REJECT).
-func (b *Backend) handleRingReadError(ctx context.Context, err error) (stop bool) {
+// Runtime cancellation alone must not silence unexpected faults — Stop-overlap
+// classification is owned by readLoop / drainKernelRing before this helper.
+func (b *Backend) handleRingReadError(_ context.Context, err error) (stop bool) {
 	if err == nil {
 		return false
 	}
@@ -131,7 +146,7 @@ func (b *Backend) handleRingReadError(ctx context.Context, err error) (stop bool
 		// Kernel-loss polling is owned solely by ingestLoop.
 		return false
 	}
-	if errors.Is(err, ringbuf.ErrClosed) || errors.Is(err, os.ErrClosed) || ctx.Err() != nil {
+	if errors.Is(err, ringbuf.ErrClosed) || errors.Is(err, os.ErrClosed) {
 		return true
 	}
 	b.readerFaults.Add(1)
@@ -248,7 +263,7 @@ func (b *Backend) shutdownDrainAndFlush(operationCtx context.Context, batch *[]c
 
 	// Ensure producers are quiesced before the authoritative final loss snapshot.
 	if err := b.quiesceKernelProducers(); err != nil {
-		b.noteShutdownEvidence(fmt.Errorf("%w: %v", ErrBackendProducerQuiesceIncomplete, err))
+		b.noteShutdownEvidence(fmt.Errorf("%w: %w", ErrBackendProducerQuiesceIncomplete, err))
 	}
 
 	if len(*batch) > 0 {
@@ -447,7 +462,7 @@ func (b *Backend) reconcileFinalKernelLoss(ctx context.Context, emitDrops bool) 
 
 	if !quiesced {
 		if err := b.quiesceKernelProducers(); err != nil && stopRequested {
-			b.noteShutdownEvidence(fmt.Errorf("%w: %v", ErrBackendProducerQuiesceIncomplete, err))
+			b.noteShutdownEvidence(fmt.Errorf("%w: %w", ErrBackendProducerQuiesceIncomplete, err))
 		}
 	}
 

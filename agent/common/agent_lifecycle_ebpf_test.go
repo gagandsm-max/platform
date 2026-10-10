@@ -808,6 +808,49 @@ func TestProtectedTeardownWhenBackendStopHitsDeadline(t *testing.T) {
 	}
 }
 
+// TestShutdownRingDrainIncompletePropagatesToAgent is residual requirement #10:
+// Backend incomplete-drain identity must reach AgentService.Stop, while
+// protected scheduler/delivery/health teardown still completes.
+func TestShutdownRingDrainIncompletePropagatesToAgent(t *testing.T) {
+	ringDrainIncomplete := errors.New("BACKEND_RING_DRAIN_INCOMPLETE")
+	ringCause := errors.New("ring poller unexpected fault")
+	rt := &fakeProcessNetworkRuntime{
+		stopErr: errors.Join(ringDrainIncomplete, ringCause),
+	}
+	rt.setCapability(collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
+	addr := freeLoopbackAddr(t)
+	cfg := testEBPFAgentCfg(t)
+	cfg.HealthAddress = addr
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-ring-drain-propagate"),
+		client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil, WithProcessNetworkRuntime(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.setShutdownBudgetForTest(2 * time.Second)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitCapability(t, rt, collector.ProcessNetworkCapabilityActive, 2*time.Second)
+	err = svc.Stop()
+	if err == nil {
+		t.Fatal("Agent Stop must surface backend ring-drain incomplete")
+	}
+	if !errors.Is(err, ringDrainIncomplete) || !errors.Is(err, ringCause) {
+		t.Fatalf("want ring-drain incomplete + cause through Agent Stop, got %v", err)
+	}
+	if rt.stopCalls.Load() != 1 {
+		t.Fatalf("StopContext calls=%d", rt.stopCalls.Load())
+	}
+	if !svc.scheduler.AdmissionClosedForTest() {
+		t.Fatal("protected scheduler teardown must remain correct")
+	}
+	httpClient := &http.Client{Timeout: 100 * time.Millisecond}
+	if resp, liveErr := httpClient.Get("http://" + addr + "/live"); liveErr == nil {
+		_ = resp.Body.Close()
+		t.Fatal("protected health teardown must remain correct")
+	}
+}
+
 func TestStopDuringOptionalActivationKeepsProtectedTeardown(t *testing.T) {
 	gate := make(chan struct{})
 	rt := &fakeProcessNetworkRuntime{startGate: gate}

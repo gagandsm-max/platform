@@ -124,7 +124,10 @@ type Backend struct {
 	monoBaseNs         uint64
 	shutdownFlushErr   error
 	fatalRuntimeErr    error
-	finalLossDone      bool
+	// stopOutcomeErr freezes the first unsuccessful StopContext wait/outcome so a
+	// later completed asynchronous cleanup cannot rewrite that history as success.
+	stopOutcomeErr error
+	finalLossDone  bool
 
 	// Observable Slice-7 runtime notes (not host/network DOWN signals).
 	transportNotWired atomic.Uint64
@@ -418,6 +421,7 @@ func (b *Backend) Start(ctx context.Context) error {
 	b.finalLossDone = false
 	b.shutdownFlushErr = nil
 	b.fatalRuntimeErr = nil
+	b.stopOutcomeErr = nil
 	b.workersDone = make(chan struct{})
 	b.workerRemain.Store(int32(BackendGoroutines))
 
@@ -453,8 +457,9 @@ func (b *Backend) StopContext(ctx context.Context) error {
 		b.stopped = true
 		fatalErr := b.fatalRuntimeErr
 		flushErr := b.shutdownFlushErr
+		priorStop := b.stopOutcomeErr
 		b.mu.Unlock()
-		return errors.Join(fatalErr, flushErr)
+		return errors.Join(fatalErr, flushErr, priorStop)
 	}
 	done := b.workersDone
 	if b.stopRequested {
@@ -503,8 +508,15 @@ func (b *Backend) finishStop(stopCtx context.Context, done <-chan struct{}) erro
 	b.mu.Lock()
 	flushErr := b.shutdownFlushErr
 	fatalErr := b.fatalRuntimeErr
+	// Compose the observable outcome before freezing so the retained historical
+	// error matches what this Stop attempt returns (not a partial wait-only latch).
+	preliminary := errors.Join(fatalErr, flushErr, waitErr)
+	if preliminary != nil && b.stopOutcomeErr == nil {
+		b.stopOutcomeErr = preliminary
+	}
+	priorStop := b.stopOutcomeErr
 	b.mu.Unlock()
-	joined := errors.Join(fatalErr, flushErr, waitErr)
+	joined := errors.Join(fatalErr, flushErr, waitErr, priorStop)
 	if joined == nil {
 		return nil
 	}
@@ -547,7 +559,7 @@ func (b *Backend) quiesceKernelProducers() error {
 		b.optionalAvailable = false
 		b.mu.Unlock()
 		if detachErr != nil {
-			b.noteShutdownEvidence(fmt.Errorf("%w: %v", ErrBackendProducerQuiesceIncomplete, detachErr))
+			b.noteShutdownEvidence(fmt.Errorf("%w: %w", ErrBackendProducerQuiesceIncomplete, detachErr))
 		}
 	})
 	b.mu.Lock()
@@ -612,7 +624,11 @@ func (b *Backend) closeReader() {
 		rd := b.reader
 		b.mu.Unlock()
 		if rd != nil {
-			_ = rd.Close()
+			if err := rd.Close(); err != nil {
+				// Reader cleanup failure must remain typed/visible; never a silent
+				// successful shutdown after an incomplete close.
+				b.noteShutdownEvidence(fmt.Errorf("%w: reader close failed: %w", ErrBackendRingDrainIncomplete, err))
+			}
 		}
 	})
 }

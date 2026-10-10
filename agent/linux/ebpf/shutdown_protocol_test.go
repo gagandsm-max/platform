@@ -22,6 +22,12 @@ type fakeEventReader struct {
 	deadline          time.Time
 	block             chan struct{} // when non-nil, ReadRaw waits until closed or Close
 	closedWithPending atomic.Bool
+	// failWith, when set, is returned instead of an idle deadline (and instead of
+	// further successful reads once failAfter successful reads have occurred).
+	failWith  error
+	failAfter uint64
+	reads     uint64
+	closeErr  error
 }
 
 func (f *fakeEventReader) SetDeadline(t time.Time) {
@@ -37,11 +43,22 @@ func (f *fakeEventReader) ReadRaw() ([]byte, error) {
 			f.mu.Unlock()
 			return nil, ringbuf.ErrClosed
 		}
+		if f.failWith != nil && f.reads >= f.failAfter {
+			err := f.failWith
+			f.mu.Unlock()
+			return nil, err
+		}
 		if len(f.records) > 0 {
 			raw := f.records[0]
 			f.records = f.records[1:]
+			f.reads++
 			f.mu.Unlock()
 			return raw, nil
+		}
+		if f.failWith != nil {
+			err := f.failWith
+			f.mu.Unlock()
+			return nil, err
 		}
 		deadline := f.deadline
 		block := f.block
@@ -55,6 +72,16 @@ func (f *fakeEventReader) ReadRaw() ([]byte, error) {
 			case <-time.After(time.Until(deadline)):
 				return nil, os.ErrDeadlineExceeded
 			}
+			// After an intentional wake, prefer an armed failWith so Stop-overlap
+			// tests can deliver an unexpected error from the in-flight ReadRaw
+			// without racing the readLoop top-of-loop cancel check.
+			f.mu.Lock()
+			if f.failWith != nil {
+				err := f.failWith
+				f.mu.Unlock()
+				return nil, err
+			}
+			f.mu.Unlock()
 			continue
 		}
 		if deadline.IsZero() {
@@ -81,7 +108,7 @@ func (f *fakeEventReader) Close() error {
 			f.block = nil
 		}
 	}
-	return nil
+	return f.closeErr
 }
 
 func (f *fakeEventReader) pending() int {

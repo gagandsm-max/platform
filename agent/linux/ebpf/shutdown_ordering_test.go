@@ -18,9 +18,13 @@ func (f *fakeEventReader) inject(raw []byte) {
 	f.records = append(f.records, raw)
 }
 
-// processNetworkRepresentedTotals sums connection-lifecycle and explicit
-// drop/shed counters from sink evidence. SampledEventsCount alone is insufficient
-// because ordinary OPEN/CLOSE records increment New/ClosedConnections.
+// processNetworkRepresentedTotals sums DISJOINT sink categories:
+//   - accepted: connection-lifecycle counters (never backend loss counters)
+//   - dropped/shed: explicit drop/shed evidence already represented in the sink
+//
+// Callers must not add Backend LossSnapshot map/ring/chan/decoder totals on top
+// of dropped when those BACKEND_DROP records were already emitDrop'd into the
+// sink — that would double-count the same loss.
 func processNetworkRepresentedTotals(sink *collector.LocalRecordingStructuredEvidenceSink) (accepted, dropped, shed uint64) {
 	for _, e := range sink.ProcessNetwork {
 		if e.NewConnections != nil {
@@ -41,6 +45,19 @@ func processNetworkRepresentedTotals(sink *collector.LocalRecordingStructuredEvi
 		shed += uint64(a.ShedRecordsCount)
 	}
 	return
+}
+
+// backendLossNotInSink returns LossSnapshot totals for classes that have not
+// already been represented as sink DroppedRecordsCount (TRANSPORT_NOT_WIRED or
+// failed emit paths). When emitDrop succeeded, sink dropped already covers them.
+func backendLossNotInSink(b *Backend, sinkDropped uint64) uint64 {
+	snap := b.LossSnapshot()
+	backend := snap[LossClassMapUpdateFail] + snap[LossClassRingReserveFail] +
+		snap[LossClassUserspaceChanFull] + snap[LossClassDecoderReject]
+	if backend <= sinkDropped {
+		return 0
+	}
+	return backend - sinkDropped
 }
 
 // TestStopRequestedBeforeDetachBegins proves StopContext publishes stopRequested
@@ -173,13 +190,12 @@ func TestDelayedDetachLateRingEventConserved(t *testing.T) {
 		t.Fatalf("unread ring records remain: %d", rd.pending())
 	}
 	accepted, dropped, shed := processNetworkRepresentedTotals(sink)
-	chanFull := b.LossSnapshot()[LossClassUserspaceChanFull]
-	decoderReject := b.LossSnapshot()[LossClassDecoderReject]
-	represented := accepted + dropped + shed + chanFull + decoderReject
+	unrepresented := backendLossNotInSink(b, dropped)
+	represented := accepted + dropped + shed + unrepresented
 	want := uint64(initial + late)
 	if represented != want {
-		t.Fatalf("represented event conservation: accepted=%d dropped=%d shed=%d chanFull=%d decoder=%d total=%d want=%d sinkEvidence=%d",
-			accepted, dropped, shed, chanFull, decoderReject, represented, want, len(sink.ProcessNetwork))
+		t.Fatalf("DISJOINT conservation: accepted=%d dropped=%d shed=%d unrepresentedLoss=%d total=%d want=%d sinkEvidence=%d",
+			accepted, dropped, shed, unrepresented, represented, want, len(sink.ProcessNetwork))
 	}
 	if closed.Load() != 1 {
 		t.Fatalf("handles closed=%d", closed.Load())
@@ -212,6 +228,9 @@ func TestDrainIdleBeforeQuiesceNeverClean(t *testing.T) {
 	}
 }
 
+// errDetachCause is a typed detach failure retained for errors.Is assertions.
+var errDetachCause = errors.New("link close failed")
+
 // TestDetachFailureTypedIncompleteEvidence covers device detach error → never nil Stop.
 func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	agg, _ := testAgg(t)
@@ -224,7 +243,7 @@ func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	}
 	rd := &fakeEventReader{records: [][]byte{putEventV1(t, nil)}}
 	b.detachProbesFn = func(*kernelHandles) error {
-		return errors.New("link close failed")
+		return errDetachCause
 	}
 	_, _ = trackHandleCleanup(b)
 	runtimeCtx, runtimeCancel := armRuntimeWithReader(b, rd, 4)
@@ -242,6 +261,9 @@ func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	}
 	if !errors.Is(err, ErrBackendProducerQuiesceIncomplete) {
 		t.Fatalf("want ErrBackendProducerQuiesceIncomplete, got %v", err)
+	}
+	if !errors.Is(err, errDetachCause) {
+		t.Fatalf("detach cause must remain errors.Is visible, got %v", err)
 	}
 	if b.kernelProducersQuiesced() {
 		t.Fatal("failed detach must not latch producersQuiesced")
@@ -312,6 +334,10 @@ func TestStalledDetachStopReturnsWithinDeadline(t *testing.T) {
 	if closed.Load() != 1 {
 		t.Fatalf("final worker must release handles exactly once, closes=%d", closed.Load())
 	}
+	// P2: first unsuccessful Stop must remain observable after async cleanup.
+	if err := b.StopContext(context.Background()); err == nil || !errors.Is(err, ErrBackendStopDeadline) {
+		t.Fatalf("repeated Stop after stalled-detach cleanup must retain first deadline, got %v", err)
+	}
 }
 
 // TestBackendCancelIsNotStopDeadline ensures explicit cancellation is not
@@ -370,11 +396,10 @@ func TestExactRingRecordConservationAcceptedPlusDrops(t *testing.T) {
 		t.Fatalf("StopContext: %v", err)
 	}
 	accepted, dropped, shed := processNetworkRepresentedTotals(sink)
-	chanFull := b.LossSnapshot()[LossClassUserspaceChanFull]
-	decoderReject := b.LossSnapshot()[LossClassDecoderReject]
-	if accepted+dropped+shed+chanFull+decoderReject != n {
-		t.Fatalf("conservation failed: accepted=%d dropped=%d shed=%d chan=%d decoder=%d want=%d (len(evidence)=%d)",
-			accepted, dropped, shed, chanFull, decoderReject, n, len(sink.ProcessNetwork))
+	unrepresented := backendLossNotInSink(b, dropped)
+	if accepted+dropped+shed+unrepresented != n {
+		t.Fatalf("DISJOINT conservation failed: accepted=%d dropped=%d shed=%d unrepresented=%d want=%d (len(evidence)=%d)",
+			accepted, dropped, shed, unrepresented, n, len(sink.ProcessNetwork))
 	}
 	if accepted < 1 {
 		t.Fatal("expected at least one accepted represented event")
