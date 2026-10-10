@@ -16,8 +16,9 @@ func (b *Backend) readLoop(ctx context.Context) {
 	defer b.workerExit()
 	rd := b.reader
 	if rd == nil {
-		// No ring reader armed: this worker is not the rawCh producer (unit
-		// fixtures may enqueue). Do not close rawCh.
+		// No ring reader armed: this worker is not the rawCh producer. Unit
+		// fixtures that enqueue on rawCh must close it via an explicit sole-
+		// producer seam; production never takes the nil-reader path after Start.
 		return
 	}
 	// Sole producer for rawCh when a reader is armed: close exactly once on
@@ -25,19 +26,20 @@ func (b *Backend) readLoop(ctx context.Context) {
 	// buffer. No other goroutine may send on or close rawCh.
 	defer b.closeRawCh()
 	for {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || b.isStopRequested() {
+			// Stop/cancel: drain remaining kernel-ring records while the reader
+			// is still usable, then exit so closeRawCh runs after the final send.
+			b.drainKernelRing(ctx, rd)
 			return
 		}
 		rd.SetDeadline(time.Now().Add(200 * time.Millisecond))
-		rec, err := rd.Read()
+		raw, err := rd.ReadRaw()
 		if err != nil {
 			if b.handleRingReadError(ctx, err) {
 				return
 			}
 			continue
 		}
-		raw := make([]byte, len(rec.RawSample))
-		copy(raw, rec.RawSample)
 		select {
 		case b.rawCh <- raw:
 		default:
@@ -45,6 +47,44 @@ func (b *Backend) readLoop(ctx context.Context) {
 			if b.emitDrop(ctx, LossClassUserspaceChanFull, 1) {
 				return
 			}
+		}
+	}
+}
+
+// drainKernelRing reads pending kernel-ring records after production quiesces.
+// It never invents unread counts: on timeout/close it records incomplete drain.
+func (b *Backend) drainKernelRing(runtimeCtx context.Context, rd eventReader) {
+	if rd == nil {
+		return
+	}
+	opCtx, opCancel := b.operationContextForShutdown(runtimeCtx)
+	defer opCancel()
+	for {
+		if opCtx.Err() != nil {
+			b.noteShutdownEvidence(fmt.Errorf("%w: kernel ring drain budget exhausted", ErrBackendRingDrainIncomplete))
+			return
+		}
+		rd.SetDeadline(time.Now().Add(50 * time.Millisecond))
+		raw, err := rd.ReadRaw()
+		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				// After probe quiescence an idle deadline means the ring is empty.
+				return
+			}
+			if errors.Is(err, ringbuf.ErrClosed) || errors.Is(err, os.ErrClosed) {
+				b.noteShutdownEvidence(fmt.Errorf("%w: reader closed before ring drain completed", ErrBackendRingDrainIncomplete))
+				return
+			}
+			if b.handleRingReadError(runtimeCtx, err) {
+				return
+			}
+			continue
+		}
+		select {
+		case b.rawCh <- raw:
+		case <-opCtx.Done():
+			b.noteShutdownEvidence(fmt.Errorf("%w: rawCh backpressure during kernel ring drain", ErrBackendRingDrainIncomplete))
+			return
 		}
 	}
 }
@@ -60,7 +100,7 @@ func (b *Backend) handleRingReadError(ctx context.Context, err error) (stop bool
 		// Kernel-loss polling is owned solely by ingestLoop.
 		return false
 	}
-	if errors.Is(err, ringbuf.ErrClosed) || ctx.Err() != nil {
+	if errors.Is(err, ringbuf.ErrClosed) || errors.Is(err, os.ErrClosed) || ctx.Err() != nil {
 		return true
 	}
 	b.readerFaults.Add(1)
@@ -121,18 +161,21 @@ func (b *Backend) shutdownFlushContext(runtimeCtx context.Context) context.Conte
 	return runtimeCtx
 }
 
-// operationContextForShutdown returns a live operation context for shutdown
-// flush/drain work. Prefer StopContext's shutdownCtx. If that context is missing
-// or already canceled, use an independent bounded budget so producer-close races
-// cannot silently discard pending records via a canceled runtime parent.
+// operationContextForShutdown returns the governed shutdown operation context.
+// Prefer StopContext's installed shutdownCtx without extending or renewing it —
+// an already-expired shutdown budget must surface incomplete flush honestly.
+// A separate bounded fallback is used only for genuinely independent fatal
+// cleanup when no governed StopContext exists; that fallback must not be treated
+// as part of a completed Agent shutdown budget.
 func (b *Backend) operationContextForShutdown(runtimeCtx context.Context) (context.Context, context.CancelFunc) {
 	noop := func() {}
-	if op := b.shutdownFlushContext(runtimeCtx); op != nil && op.Err() == nil {
-		return op, noop
+	b.mu.Lock()
+	shutdownCtx := b.shutdownCtx
+	b.mu.Unlock()
+	if shutdownCtx != nil {
+		return shutdownCtx, noop
 	}
-	if op := b.shutdownFlushContext(context.Background()); op != nil && op.Err() == nil {
-		return op, noop
-	}
+	// Fatal path without StopContext: independent bounded cleanup only.
 	return context.WithTimeout(context.Background(), defaultBackendStopTimeout)
 }
 
@@ -153,54 +196,65 @@ func (b *Backend) appendDecodedRaw(ctx context.Context, batch *[]collector.Proce
 	return false
 }
 
-// shutdownDrainAndFlush performs governed shutdown telemetry handling:
-// final kernel-loss reconcile, drain of buffered rawCh records, local-batch
-// ingest, and FlushAll of current open aggregation windows. Incomplete drain
-// or flush is recorded explicitly — never reported as a clean successful Stop.
+// shutdownDrainAndFlush performs governed shutdown telemetry handling after the
+// sole rawCh producer has closed (or runtime cancel forced the ingest path):
+// drain remaining rawCh records, ingest the local batch, reconcile final kernel
+// loss after production quiescence, then FlushAll open aggregation windows.
 func (b *Backend) shutdownDrainAndFlush(operationCtx context.Context, batch *[]collector.ProcessNetworkSyntheticEvent) {
 	if operationCtx == nil {
 		operationCtx = context.Background()
 	}
-	// Capture final map/ring loss while kernel maps remain valid.
-	b.reconcileFinalKernelLoss(operationCtx, true)
-
+	// When no reader is armed, readLoop is not the sole producer and will not
+	// close rawCh. Ingest owns completion in that case (cancel-before-Stop and
+	// ingest-only fixtures). When a reader is armed, only readLoop may close.
+	if !b.readerArmed() {
+		b.closeRawCh()
+	}
 	incomplete := b.drainRawChannel(operationCtx, batch)
 	if incomplete {
-		b.noteShutdownFlushFailure(fmt.Errorf("%w: buffered raw records remain after shutdown budget", ErrBackendShutdownFlush))
+		b.noteShutdownEvidence(fmt.Errorf("%w: buffered raw records remain after shutdown budget", ErrBackendShutdownFlush))
 	}
-	b.shutdownFlushAggregator(operationCtx, batch)
+
+	// Ensure producers are quiesced before the authoritative final loss snapshot.
+	if err := b.quiesceKernelProducers(); err != nil {
+		b.noteShutdownEvidence(fmt.Errorf("%w: %v", ErrBackendProducerQuiesceIncomplete, err))
+	}
+
+	if len(*batch) > 0 {
+		toSend := *batch
+		*batch = (*batch)[:0]
+		if err := b.aggregator.Ingest(operationCtx, toSend); err != nil {
+			b.noteShutdownEvidence(err)
+			if !errors.Is(err, collector.ErrStructuredTransportNotWired) {
+				_ = b.observeAggregatorErr(operationCtx, err)
+				// Continue to final loss + FlushAll so incomplete evidence is maximal.
+			} else {
+				b.transportNotWired.Add(1)
+			}
+		}
+	}
+
+	// Final loss after quiescence and before aggregator FlushAll so BACKEND_DROP
+	// evidence is included in the final flush.
+	b.reconcileFinalKernelLoss(operationCtx, true)
+
+	if b.aggregator != nil {
+		if _, err := b.aggregator.FlushAll(operationCtx); err != nil {
+			b.noteShutdownEvidence(err)
+			_ = b.observeAggregatorErr(operationCtx, err)
+		}
+	}
 }
 
 // drainRawChannel consumes buffered raw records until the sole producer closes
 // rawCh or the shutdown operation budget expires. Returns true when the budget
 // expired with the channel still open or undrained records possible.
 //
-// When no ring reader was armed (ingest-only unit fixtures), the channel is
-// drained non-blocking only — there is no producer that will close rawCh.
-// When a reader exists, readLoop is the sole closer; ingest waits for that
-// close so in-flight producer sends cannot race a premature empty-channel exit.
+// Production always waits for the sole producer close. Fixtures that enqueue
+// without an armed reader must close rawCh themselves (sole-producer seam).
 func (b *Backend) drainRawChannel(operationCtx context.Context, batch *[]collector.ProcessNetworkSyntheticEvent) (incomplete bool) {
 	if b.rawCh == nil {
 		return false
-	}
-	b.mu.Lock()
-	expectProducerClose := b.reader != nil
-	b.mu.Unlock()
-	if !expectProducerClose {
-		for {
-			select {
-			case raw, ok := <-b.rawCh:
-				if !ok {
-					return false
-				}
-				_ = b.appendDecodedRaw(operationCtx, batch, raw)
-				if len(*batch) >= IngestBatchSize {
-					_ = b.flushBatch(operationCtx, operationCtx, batch, true)
-				}
-			default:
-				return false
-			}
-		}
 	}
 	for {
 		select {
@@ -240,10 +294,8 @@ func (b *Backend) shutdownFlushAggregator(operationCtx context.Context, batch *[
 		toSend := *batch
 		*batch = (*batch)[:0]
 		if err := b.aggregator.Ingest(operationCtx, toSend); err != nil {
-			b.noteShutdownFlushFailure(err)
+			b.noteShutdownEvidence(err)
 			if !errors.Is(err, collector.ErrStructuredTransportNotWired) {
-				// Do not clear without recording outcome — batch already cleared
-				// only after assigning to toSend; failure is noted above.
 				_ = b.observeAggregatorErr(operationCtx, err)
 				return
 			}
@@ -251,7 +303,7 @@ func (b *Backend) shutdownFlushAggregator(operationCtx context.Context, batch *[
 		}
 	}
 	if _, err := b.aggregator.FlushAll(operationCtx); err != nil {
-		b.noteShutdownFlushFailure(err)
+		b.noteShutdownEvidence(err)
 		_ = b.observeAggregatorErr(operationCtx, err)
 	}
 }
@@ -268,7 +320,7 @@ func (b *Backend) flushBatch(runtimeCtx, operationCtx context.Context, batch *[]
 	if len(*batch) == 0 {
 		if shutdown {
 			if _, err := b.aggregator.FlushAll(operationCtx); err != nil {
-				b.noteShutdownFlushFailure(err)
+				b.noteShutdownEvidence(err)
 				return b.observeAggregatorErr(runtimeCtx, err)
 			}
 		}
@@ -277,7 +329,7 @@ func (b *Backend) flushBatch(runtimeCtx, operationCtx context.Context, batch *[]
 	toSend := *batch
 	*batch = (*batch)[:0]
 	if err := b.aggregator.Ingest(operationCtx, toSend); err != nil {
-		b.noteShutdownFlushFailure(err)
+		b.noteShutdownEvidence(err)
 		return b.observeAggregatorErr(runtimeCtx, err)
 	}
 	var err error
@@ -287,25 +339,30 @@ func (b *Backend) flushBatch(runtimeCtx, operationCtx context.Context, batch *[]
 		_, err = b.aggregator.FlushDue(operationCtx, time.Now().UTC())
 	}
 	if err != nil {
-		b.noteShutdownFlushFailure(err)
+		b.noteShutdownEvidence(err)
 		return b.observeAggregatorErr(runtimeCtx, err)
 	}
 	return false
 }
 
-// noteShutdownFlushFailure records stop-requested flush failures so StopContext
-// cannot report success after silently discarding pending records. TRANSPORT_NOT_WIRED
-// remains a truthful non-delivery boundary, not a flush failure.
-func (b *Backend) noteShutdownFlushFailure(err error) {
+// noteShutdownEvidence records shutdown flush/accounting failures so StopContext
+// cannot report success after silently discarding pending records.
+// TRANSPORT_NOT_WIRED remains a truthful non-delivery boundary, not a flush failure.
+// Evidence is retained independently of stopRequested so fatal-before-Stop paths
+// cannot be concealed by a later nil Stop.
+func (b *Backend) noteShutdownEvidence(err error) {
 	if err == nil || errors.Is(err, collector.ErrStructuredTransportNotWired) {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.stopRequested {
-		return
-	}
 	b.shutdownFlushErr = errors.Join(b.shutdownFlushErr, err)
+}
+
+// noteShutdownFlushFailure is retained as the historical name used by tests and
+// call sites; it forwards to noteShutdownEvidence.
+func (b *Backend) noteShutdownFlushFailure(err error) {
+	b.noteShutdownEvidence(err)
 }
 
 // observeAggregatorErr classifies aggregator errors.
@@ -344,20 +401,31 @@ func (b *Backend) pollKernelLoss(ctx context.Context) (fatal bool) {
 }
 
 // reconcileFinalKernelLoss captures outstanding map-update and ring-reservation
-// loss before kernel loss-map resources are released. emitDrops controls whether
-// BACKEND_DROP events are ingested (ingest shutdown path) versus counter-only
-// reconcile (finalize last chance).
+// loss after production has quiesced and before loss-map resources are released.
+// finalLossDone is latched only after the snapshot attempt so post-quiescence
+// increments are not silently discarded by a premature latch.
 func (b *Backend) reconcileFinalKernelLoss(ctx context.Context, emitDrops bool) {
 	b.mu.Lock()
 	if b.finalLossDone {
 		b.mu.Unlock()
 		return
 	}
-	b.finalLossDone = true
 	stopRequested := b.stopRequested
+	quiesced := b.producersQuiesced
 	b.mu.Unlock()
 
+	if !quiesced {
+		if err := b.quiesceKernelProducers(); err != nil && stopRequested {
+			b.noteShutdownEvidence(fmt.Errorf("%w: %v", ErrBackendProducerQuiesceIncomplete, err))
+		}
+	}
+
 	mapFail, ringFail, ok, present := b.snapshotKernelLoss()
+
+	b.mu.Lock()
+	b.finalLossDone = true
+	b.mu.Unlock()
+
 	if !present {
 		// No loss-map resources were ever armed — nothing to reconcile.
 		return
@@ -365,9 +433,7 @@ func (b *Backend) reconcileFinalKernelLoss(ctx context.Context, emitDrops bool) 
 	if !ok {
 		// Maps were expected but a complete snapshot could not be established.
 		// Never fabricate a successful zero-loss reading.
-		if stopRequested {
-			b.noteShutdownFlushFailure(ErrBackendLossAccountingIncomplete)
-		}
+		b.noteShutdownEvidence(ErrBackendLossAccountingIncomplete)
 		return
 	}
 	if !emitDrops {

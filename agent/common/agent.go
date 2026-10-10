@@ -463,30 +463,14 @@ func (s *AgentService) Stop() error {
 		optionalDeadline := time.Now().Add(optionalBudget)
 
 		var activationErr error
-		activationSettled := true
-		// Boundedly settle the one optional activation attempt before calling
-		// Backend.StopContext, so Stop never blocks unboundedly behind an
-		// in-progress Backend.Start mutex and never force-closes kernel
-		// resources still owned by an unfinished Start. If the subordinate
-		// settle window expires, skip unsafe Backend.StopContext and continue
-		// best-effort scheduler/worker/health teardown under the remaining
-		// whole-service deadline.
+		// Boundedly settle the one optional activation attempt before StopContext
+		// so cooperative Starts can finish under the shared optional-enrichment
+		// sub-budget. Lifecycle ownership is Backend.stopRequested via
+		// StopContext — never a capability snapshot. Do not cancel the Agent
+		// runtime here: that recreates cancel-before-flush when ACTIVE workers
+		// already exist, and is unnecessary because StopContext latches
+		// stopRequested so an in-progress Start cannot commit workers after Stop.
 		if activationDone != nil {
-			// Cancel the shared Agent runtime only while activation is still in
-			// progress AND the backend is not yet accepting events. activationDone
-			// being open is not proof that no backend workers exist: Backend.Start
-			// may publish ACTIVE and launch workers before returning (and before
-			// activationDone closes). Cancelling accepting workers before
-			// StopContext installs a live shutdown-flush context recreates the
-			// original cancellation defect.
-			select {
-			case <-activationDone:
-			default:
-				if cancel != nil && !processNetworkAcceptingEvents(rt) {
-					cancel()
-					cancel = nil
-				}
-			}
 			settleBudget := time.Until(optionalDeadline)
 			if settleBudget < 0 {
 				settleBudget = 0
@@ -497,7 +481,6 @@ func (s *AgentService) Stop() error {
 				settleCancel()
 			case <-settleCtx.Done():
 				settleCancel()
-				activationSettled = false
 				activationErr = fmt.Errorf("%w: optional process-network activation did not settle before optional-enrichment sub-budget", ErrShutdownTimeout)
 				s.logger.Error("AmrudAi Agent optional process-network activation unsettled during shutdown",
 					"event_code", "AGENT_EBPF_ACTIVATION_SHUTDOWN_UNSETTLED",
@@ -512,11 +495,12 @@ func (s *AgentService) Stop() error {
 		}
 
 		var backendErr error
-		// Active/settled backend stop must install its bounded flush context
-		// before the shared Agent runtime is cancelled. Run under the remaining
-		// optional-enrichment budget so enrichment cannot exhaust the whole
-		// service deadline ahead of scheduler/worker/health teardown.
-		if rt != nil && activationSettled {
+		// Always request Backend.StopContext when a runtime is present — even if
+		// activation settle timed out. StopContext is linearizable with Start via
+		// the Backend mutex and stopRequested: pre-commit Starts abort; committed
+		// workers are shut down within the remaining optional-enrichment budget.
+		// Skipping StopContext orphans detached workers after a late ACTIVE commit.
+		if rt != nil {
 			backendBudget := time.Until(optionalDeadline)
 			if backendBudget < 0 {
 				backendBudget = 0
@@ -605,21 +589,6 @@ func optionalEnrichmentBudget(whole time.Duration) time.Duration {
 	return sub
 }
 
-// processNetworkAcceptingEvents reports whether the optional enrichment runtime
-// has already published a state in which backend workers may accept events.
-// Used so Stop does not treat an open activationDone as proof that no workers exist.
-func processNetworkAcceptingEvents(rt ProcessNetworkRuntime) bool {
-	if rt == nil {
-		return false
-	}
-	switch rt.Capability().State {
-	case collector.ProcessNetworkCapabilityActive, collector.ProcessNetworkCapabilityResourceGuarded:
-		return true
-	default:
-		return false
-	}
-}
-
 // joinShutdownErrors preserves typed error identity via errors.Join so
 // errors.Is / errors.As work through the AgentService.Stop boundary.
 func joinShutdownErrors(deadlineCtx context.Context, errs ...error) error {
@@ -639,8 +608,11 @@ func joinShutdownErrors(deadlineCtx context.Context, errs ...error) error {
 }
 
 // classifyAgentStopError wraps with ErrShutdownTimeout only for authentic
-// deadline exhaustion. Sink failures, incomplete flush, backend runtime faults
-// and activation settlement failures retain their typed identities.
+// deadline exhaustion. Explicit cancellation, sink failures, incomplete flush,
+// backend runtime faults and activation settlement failures retain their typed
+// identities. Ordinary context.Canceled is never mislabeled as a timeout.
+// When the whole-service deadline is exhausted, that cause is preserved even if
+// another typed error is also present.
 func classifyAgentStopError(deadlineCtx context.Context, err error) error {
 	if err == nil {
 		return nil
@@ -648,11 +620,13 @@ func classifyAgentStopError(deadlineCtx context.Context, err error) error {
 	if errors.Is(err, ErrShutdownTimeout) {
 		return err
 	}
-	timedOut := deadlineCtx.Err() != nil ||
-		errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, context.Canceled)
-	if timedOut {
+	deadlineExhausted := errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) ||
+		errors.Is(err, context.DeadlineExceeded)
+	if deadlineExhausted {
 		return fmt.Errorf("%w: %w", ErrShutdownTimeout, err)
+	}
+	if derr := deadlineCtx.Err(); derr != nil && !errors.Is(err, derr) {
+		return errors.Join(err, derr)
 	}
 	return err
 }

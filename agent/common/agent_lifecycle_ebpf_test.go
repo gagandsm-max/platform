@@ -686,6 +686,11 @@ func TestProtectedTeardownUnderOptionalBudgetExhaustion(t *testing.T) {
 	if err == nil || !errors.Is(err, ErrShutdownTimeout) {
 		t.Fatalf("expected activation settle timeout, got %v", err)
 	}
+	// Even when activation settle times out, StopContext must still be requested
+	// so a late Start commit cannot orphan detached workers.
+	if rt.stopCalls.Load() != 1 {
+		t.Fatalf("StopContext must run despite unsettled activation, calls=%d", rt.stopCalls.Load())
+	}
 	if !svc.scheduler.AdmissionClosedForTest() {
 		t.Fatal("protected scheduler teardown must run after optional budget exhaustion")
 	}
@@ -695,6 +700,26 @@ func TestProtectedTeardownUnderOptionalBudgetExhaustion(t *testing.T) {
 		t.Fatal("protected health teardown must run after optional budget exhaustion")
 	}
 	close(gate)
+}
+
+func TestClassifyAgentStopErrorDistinguishesCancelFromTimeout(t *testing.T) {
+	deadlineCtx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	canceled := context.Canceled
+	got := classifyAgentStopError(deadlineCtx, canceled)
+	if errors.Is(got, ErrShutdownTimeout) {
+		t.Fatalf("bare Canceled must not be labeled timeout: %v", got)
+	}
+	if !errors.Is(got, context.Canceled) {
+		t.Fatalf("Canceled identity must be preserved: %v", got)
+	}
+
+	expired, expireCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Millisecond))
+	expireCancel()
+	got = classifyAgentStopError(expired, errors.New("backend flush incomplete"))
+	if !errors.Is(got, ErrShutdownTimeout) {
+		t.Fatalf("deadline exhaustion must wrap ErrShutdownTimeout: %v", got)
+	}
 }
 
 func TestStopDuringOptionalActivationKeepsProtectedTeardown(t *testing.T) {
@@ -849,8 +874,10 @@ func TestNonCooperativeActivationStopTimeout(t *testing.T) {
 	if svc.LifecycleState() != LifecycleFailed {
 		t.Fatalf("lifecycle=%s", svc.LifecycleState())
 	}
-	if rt.stopCalls.Load() != 0 {
-		t.Fatal("must not call StopContext while activation unsettled")
+	// Unsettled activation must still request StopContext so a late Start commit
+	// cannot orphan detached workers (Backend.stopRequested ownership).
+	if rt.stopCalls.Load() != 1 {
+		t.Fatalf("StopContext must run despite unsettled activation, calls=%d", rt.stopCalls.Load())
 	}
 	// Protected base teardown must continue after activation sub-budget expiry.
 	// Stop only returns after the scheduler+worker WaitGroup and health.Stop.

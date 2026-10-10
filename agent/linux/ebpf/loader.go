@@ -30,14 +30,32 @@ type kernelHandles struct {
 	optAttached bool
 }
 
+// CloseLinks detaches/breaks all probe links without releasing maps or programs.
+// cilium/ebpf semantics: unpinned link.Close() breaks the attachment (stops new
+// kernel production) while map/program FDs remain independently valid for drain
+// and final loss-counter reads. Prefer Close over Detach: Detach may return
+// ErrNotSupported on some link implementations, while Close is authoritative
+// for unpinned links used by BUILD-011.
+func (h *kernelHandles) CloseLinks() error {
+	if h == nil {
+		return nil
+	}
+	var first error
+	for i := len(h.links) - 1; i >= 0; i-- {
+		if err := h.links[i].Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	h.links = nil
+	h.optAttached = false
+	return first
+}
+
 func (h *kernelHandles) Close() {
 	if h == nil {
 		return
 	}
-	for i := len(h.links) - 1; i >= 0; i-- {
-		_ = h.links[i].Close()
-	}
-	h.links = nil
+	_ = h.CloseLinks()
 	if h.optional != nil && h.optional.HandleTCPRetransmit != nil {
 		_ = h.optional.HandleTCPRetransmit.Close()
 		h.optional.HandleTCPRetransmit = nil

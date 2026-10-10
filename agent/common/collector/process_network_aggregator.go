@@ -1133,7 +1133,15 @@ func (a *ProcessNetworkAggregator) FlushAll(ctx context.Context) (ProcessNetwork
 		out.Accounting = append(out.Accounting, a.retainClosed(w, part)...)
 	}
 	out.Accounting = append(out.Accounting, a.emitExactBucketAccounting()...)
-	return a.deliver(ctx, out)
+	delivered, err := a.deliver(ctx, out)
+	if err != nil && !errors.Is(err, ErrStructuredTransportNotWired) &&
+		!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		// Sink rejected delivery after windows were assembled. Never report nil
+		// success. BUILD-011 has no durable retry/spool; TRANSPORT_NOT_WIRED and
+		// BUILD-016/062 remain authoritative for physical delivery ownership.
+		return delivered, errors.Join(ErrProcessNetworkFlushDeliveryIncomplete, err)
+	}
+	return delivered, err
 }
 
 func (a *ProcessNetworkAggregator) Close(ctx context.Context) error {

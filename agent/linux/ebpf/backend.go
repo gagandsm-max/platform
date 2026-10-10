@@ -27,7 +27,61 @@ var ErrBackendShutdownFlush = errors.New("BACKEND_SHUTDOWN_FLUSH_INCOMPLETE")
 // snapshot could not be established before loss-map resources were released.
 var ErrBackendLossAccountingIncomplete = errors.New("BACKEND_LOSS_ACCOUNTING_INCOMPLETE")
 
+// ErrBackendProducerQuiesceIncomplete is returned when kernel probe detachment
+// failed or in-flight producer completion could not be proven before final
+// loss accounting.
+var ErrBackendProducerQuiesceIncomplete = errors.New("BACKEND_PRODUCER_QUIESCE_INCOMPLETE")
+
+// ErrBackendRingDrainIncomplete is returned when pending kernel-ring records
+// could not be proven fully drained before the reader was closed or the
+// shutdown budget expired.
+var ErrBackendRingDrainIncomplete = errors.New("BACKEND_RING_DRAIN_INCOMPLETE")
+
+// ErrBackendFatalRuntime is returned when a reader or aggregator fatal failure
+// was retained and later observed by StopContext.
+var ErrBackendFatalRuntime = errors.New("BACKEND_FATAL_RUNTIME")
+
 const defaultBackendStopTimeout = 5 * time.Second
+
+// eventReader is the Backend ring consumption seam. Production wraps
+// *ringbuf.Reader; tests may inject a deterministic reader to exercise drain
+// without live BPF maps. SetDeadline has no error return to match cilium/ebpf.
+type eventReader interface {
+	SetDeadline(time.Time)
+	ReadRaw() ([]byte, error)
+	Close() error
+}
+
+// ringbufEventReader adapts *ringbuf.Reader to eventReader.
+type ringbufEventReader struct {
+	rd *ringbuf.Reader
+}
+
+func (r *ringbufEventReader) SetDeadline(t time.Time) {
+	if r != nil && r.rd != nil {
+		r.rd.SetDeadline(t)
+	}
+}
+
+func (r *ringbufEventReader) ReadRaw() ([]byte, error) {
+	if r == nil || r.rd == nil {
+		return nil, ringbuf.ErrClosed
+	}
+	rec, err := r.rd.Read()
+	if err != nil {
+		return nil, err
+	}
+	raw := make([]byte, len(rec.RawSample))
+	copy(raw, rec.RawSample)
+	return raw, nil
+}
+
+func (r *ringbufEventReader) Close() error {
+	if r == nil || r.rd == nil {
+		return nil
+	}
+	return r.rd.Close()
+}
 
 // Backend is the Slice-7 bounded Linux eBPF process-network kernel backend.
 // Lifecycle seam for Slice 8: Start / StopContext / Capability.
@@ -40,7 +94,7 @@ type Backend struct {
 	preflight  *Checker
 
 	handles *kernelHandles
-	reader  *ringbuf.Reader
+	reader  eventReader
 	rawCh   chan []byte
 	loss    lossCounters
 
@@ -49,24 +103,28 @@ type Backend struct {
 	workersDone  chan struct{}
 	shutdownCtx  context.Context
 
-	readerCloseOnce sync.Once
-	rawChCloseOnce  sync.Once
-	finalizeOnce    sync.Once
-	closeHandles    func(*kernelHandles)
+	readerCloseOnce  sync.Once
+	rawChCloseOnce   sync.Once
+	finalizeOnce     sync.Once
+	quiesceOnce      sync.Once
+	closeHandles     func(*kernelHandles)
+	detachProbesFn   func(*kernelHandles) error
 
 	// kernelLossSnapshotFn optionally overrides absolute kernel loss reads
 	// (production uses BPF map Lookup). ok=false means no complete snapshot.
 	kernelLossSnapshotFn func() (mapUpdate, ringReserve uint64, ok bool)
 
-	started           bool
-	stopRequested     bool
-	stopped           bool
-	optionalAvailable bool
-	capability        collector.ProcessNetworkCapabilitySnapshot
-	bootWall          time.Time
-	monoBaseNs        uint64
-	shutdownFlushErr  error
-	finalLossDone     bool
+	started            bool
+	stopRequested      bool
+	stopped            bool
+	optionalAvailable  bool
+	producersQuiesced  bool
+	capability         collector.ProcessNetworkCapabilitySnapshot
+	bootWall           time.Time
+	monoBaseNs         uint64
+	shutdownFlushErr   error
+	fatalRuntimeErr    error
+	finalLossDone      bool
 
 	// Observable Slice-7 runtime notes (not host/network DOWN signals).
 	transportNotWired atomic.Uint64
@@ -110,6 +168,9 @@ func NewBackend(cfg BackendConfig) (*Backend, error) {
 		preflight:  New(cfg.Config),
 		closeHandles: func(handles *kernelHandles) {
 			handles.Close()
+		},
+		detachProbesFn: func(handles *kernelHandles) error {
+			return handles.CloseLinks()
 		},
 		capability: collector.ProcessNetworkCapabilitySnapshot{
 			State:        collector.ProcessNetworkCapabilityUnavailable,
@@ -341,17 +402,22 @@ func (b *Backend) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(context.Background())
 	b.cancel = cancel
 	b.handles = handles
-	b.reader = rd
+	b.reader = &ringbufEventReader{rd: rd}
 	b.rawCh = make(chan []byte, RawRecordChannel)
 	b.rawChCloseOnce = sync.Once{}
+	b.quiesceOnce = sync.Once{}
+	b.readerCloseOnce = sync.Once{}
+	b.finalizeOnce = sync.Once{}
 	b.optionalAvailable = handles.optAttached
 	b.bootWall = time.Now().UTC()
 	b.monoBaseNs = 0 // decoder falls back to wall clock when unset
 	b.started = true
 	b.stopRequested = false
 	b.stopped = false
+	b.producersQuiesced = false
 	b.finalLossDone = false
 	b.shutdownFlushErr = nil
+	b.fatalRuntimeErr = nil
 	b.workersDone = make(chan struct{})
 	b.workerRemain.Store(int32(BackendGoroutines))
 
@@ -367,10 +433,10 @@ func (b *Backend) Start(ctx context.Context) error {
 	return nil
 }
 
-// StopContext is idempotent and requests bounded graceful shutdown. The final
-// worker owns kernel-handle release, so a stop deadline can never force-close a
-// map/program/link that a worker may still dereference. No waiter goroutine is
-// spawned.
+// StopContext is idempotent and requests bounded graceful shutdown. Probe links
+// are detached first so new kernel production stops while maps/programs and the
+// ring reader remain valid for controlled drain and final loss accounting. The
+// final worker owns map/program release. No waiter goroutine is spawned.
 func (b *Backend) StopContext(ctx context.Context) error {
 	stopCtx, stopCancel := boundedBackendStopContext(ctx)
 	defer stopCancel()
@@ -379,8 +445,10 @@ func (b *Backend) StopContext(ctx context.Context) error {
 	if !b.started {
 		b.stopRequested = true
 		b.stopped = true
+		fatalErr := b.fatalRuntimeErr
+		flushErr := b.shutdownFlushErr
 		b.mu.Unlock()
-		return nil
+		return errors.Join(fatalErr, flushErr)
 	}
 	done := b.workersDone
 	if b.stopRequested {
@@ -406,31 +474,91 @@ func (b *Backend) StopContext(ctx context.Context) error {
 	}
 	b.mu.Unlock()
 
+	// Quiesce kernel producers before waking workers into the drain path.
+	// Maps/programs and the ring reader stay open until final worker cleanup.
+	if err := b.quiesceKernelProducers(); err != nil {
+		b.noteShutdownEvidence(fmt.Errorf("%w: %v", ErrBackendProducerQuiesceIncomplete, err))
+	}
+
 	if cancel != nil {
 		cancel()
 	}
-	b.closeReader()
-	return b.finishStop(stopCtx, done)
+	// Do not close the ring reader here: readLoop must drain pending kernel
+	// records while the reader remains usable. closeReader is reserved for
+	// finalization or deadline-interrupt paths that record incomplete drain.
+	// When no reader is armed, readLoop is not the sole rawCh producer — Stop
+	// owns channel close so ingest can observe producer completion. Production
+	// Start always arms a reader; this branch is the ownership complement, not
+	// a nonblocking fixture drain shortcut.
+	if !b.readerArmed() {
+		b.closeRawCh()
+	}
+	err := b.finishStop(stopCtx, done)
+	if errors.Is(err, ErrBackendStopDeadline) {
+		b.closeReader()
+	}
+	return err
 }
 
 func (b *Backend) finishStop(stopCtx context.Context, done <-chan struct{}) error {
 	waitErr := waitBackendWorkers(stopCtx, done)
 	b.mu.Lock()
 	flushErr := b.shutdownFlushErr
+	fatalErr := b.fatalRuntimeErr
 	b.mu.Unlock()
-	if flushErr != nil {
-		joined := errors.Join(flushErr, waitErr)
-		// Flush budget exhaustion is a stop-deadline class failure with explicit
-		// incomplete-flush evidence (never a silent successful Stop).
-		if errors.Is(flushErr, context.DeadlineExceeded) || errors.Is(flushErr, context.Canceled) {
-			return errors.Join(ErrBackendStopDeadline, ErrBackendShutdownFlush, joined)
-		}
-		if errors.Is(flushErr, ErrBackendShutdownFlush) || errors.Is(flushErr, ErrBackendLossAccountingIncomplete) {
-			return joined
-		}
-		return errors.Join(ErrBackendShutdownFlush, joined)
+	joined := errors.Join(fatalErr, flushErr, waitErr)
+	if joined == nil {
+		return nil
 	}
-	return waitErr
+	// Flush budget exhaustion is a stop-deadline class failure with explicit
+	// incomplete-flush evidence (never a silent successful Stop).
+	if flushErr != nil && (errors.Is(flushErr, context.DeadlineExceeded) ||
+		(errors.Is(flushErr, context.Canceled) && errors.Is(stopCtx.Err(), context.DeadlineExceeded))) {
+		return errors.Join(ErrBackendStopDeadline, ErrBackendShutdownFlush, joined)
+	}
+	if fatalErr != nil && !errors.Is(joined, ErrBackendFatalRuntime) {
+		joined = errors.Join(ErrBackendFatalRuntime, joined)
+	}
+	return joined
+}
+
+// quiesceKernelProducers detaches probe links exactly once so new kernel events
+// cannot be produced, while leaving maps/programs valid for drain and final
+// loss snapshots. Concurrent/duplicate calls are safe.
+func (b *Backend) quiesceKernelProducers() error {
+	var detachErr error
+	b.quiesceOnce.Do(func() {
+		b.mu.Lock()
+		handles := b.handles
+		detachFn := b.detachProbesFn
+		b.mu.Unlock()
+		if handles == nil {
+			b.mu.Lock()
+			b.producersQuiesced = true
+			b.optionalAvailable = false
+			b.mu.Unlock()
+			return
+		}
+		if detachFn != nil {
+			detachErr = detachFn(handles)
+		} else {
+			detachErr = handles.CloseLinks()
+		}
+		b.mu.Lock()
+		b.producersQuiesced = detachErr == nil
+		b.optionalAvailable = false
+		b.mu.Unlock()
+		if detachErr != nil {
+			b.noteShutdownEvidence(fmt.Errorf("%w: %v", ErrBackendProducerQuiesceIncomplete, detachErr))
+		}
+	})
+	b.mu.Lock()
+	quiesced := b.producersQuiesced
+	b.mu.Unlock()
+	if !quiesced && detachErr == nil {
+		return ErrBackendProducerQuiesceIncomplete
+	}
+	return detachErr
 }
 
 func boundedBackendStopContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -485,6 +613,12 @@ func (b *Backend) closeReader() {
 	})
 }
 
+func (b *Backend) readerArmed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.reader != nil
+}
+
 // closeRawCh closes the sole-producer raw record channel exactly once.
 // Only readLoop may call this; ingestLoop never closes rawCh.
 func (b *Backend) closeRawCh() {
@@ -500,6 +634,8 @@ func (b *Backend) closeRawCh() {
 
 func (b *Backend) finalizeRuntimeResources() {
 	b.finalizeOnce.Do(func() {
+		// Ensure producers are quiesced before any last-chance loss snapshot.
+		_ = b.quiesceKernelProducers()
 		b.closeReader()
 		// Last-chance kernel loss reconcile while maps remain valid. Prefer the
 		// ingest shutdown path; this covers fatal exits that skipped it.
@@ -528,9 +664,10 @@ func (b *Backend) finalizeRuntimeResources() {
 }
 
 // failRuntime transitions away from ACTIVE or RESOURCE_GUARDED for a typed
-// runtime failure, cancels the run context, and closes the ring reader to
-// unblock peers. Safe from a worker: never waits on workersDone / StopContext.
-// Fatal reader/aggregator failures retain precedence over a latched guard.
+// runtime failure, retains fatal evidence independently of Stop, cancels the
+// run context, and closes the ring reader to unblock peers. Safe from a worker:
+// never waits on workersDone / StopContext. Fatal reader/aggregator failures
+// retain precedence over a latched guard and over a later BACKEND_STOPPED stop.
 func (b *Backend) failRuntime(reason collector.ProcessNetworkCapabilityReason) {
 	b.mu.Lock()
 	switch b.capability.State {
@@ -546,12 +683,21 @@ func (b *Backend) failRuntime(reason collector.ProcessNetworkCapabilityReason) {
 		// retain resource admission evidence for supportability.
 		b.capability.Resource.Guarded = wasGuarded
 	}
+	b.fatalRuntimeErr = errors.Join(b.fatalRuntimeErr,
+		fmt.Errorf("%w: %s", ErrBackendFatalRuntime, reason))
 	cancel := b.cancel
+	armed := b.reader != nil
 	b.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	b.closeReader()
+	// When no reader was armed, readLoop is not the sole rawCh producer and has
+	// already exited without closing the channel. Close it so ingest can finish
+	// shutdown drain after a fatal cancel.
+	if !armed {
+		b.closeRawCh()
+	}
 }
 
 // guardCapabilityForKernelLoss latches ACTIVE → RESOURCE_GUARDED with
