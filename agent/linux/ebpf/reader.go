@@ -27,9 +27,9 @@ func (b *Backend) readLoop(ctx context.Context) {
 	defer b.closeRawCh()
 	for {
 		if ctx.Err() != nil || b.isStopRequested() {
-			// Stop/cancel: drain remaining kernel-ring records while the reader
-			// is still usable, then exit so closeRawCh runs after the final send.
-			b.drainKernelRing(ctx, rd)
+			// Owned shutdown path: detach producers, then drain. Blocking
+			// link.Close runs here so AgentService.Stop stays caller-bounded.
+			b.shutdownReadPath(ctx, rd)
 			return
 		}
 		rd.SetDeadline(time.Now().Add(200 * time.Millisecond))
@@ -51,8 +51,33 @@ func (b *Backend) readLoop(ctx context.Context) {
 	}
 }
 
+// shutdownReadPath establishes producer quiescence before accepting ring-drain
+// completion. Happens-before order:
+//
+//	stopRequested publication → probe-detach initiation → detach completion/failure
+//	→ drain admission → ring exhaustion → rawCh producer close → final loss
+//	→ FlushAll → kernel resource release (final worker).
+//
+// A detach failure yields typed incomplete evidence; idle ring time alone never
+// proves a clean drain while producers may still be active.
+func (b *Backend) shutdownReadPath(runtimeCtx context.Context, rd eventReader) {
+	if err := b.quiesceKernelProducers(); err != nil {
+		// quiesceKernelProducers already notes ErrBackendProducerQuiesceIncomplete;
+		// retain the return for call-site clarity without inventing unread counts.
+		_ = err
+	}
+	b.drainKernelRing(runtimeCtx, rd)
+}
+
+func (b *Backend) kernelProducersQuiesced() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.producersQuiesced
+}
+
 // drainKernelRing reads pending kernel-ring records after production quiesces.
 // It never invents unread counts: on timeout/close it records incomplete drain.
+// An idle Read deadline is accepted as empty only after producersQuiesced.
 func (b *Backend) drainKernelRing(runtimeCtx context.Context, rd eventReader) {
 	if rd == nil {
 		return
@@ -68,8 +93,14 @@ func (b *Backend) drainKernelRing(runtimeCtx context.Context, rd eventReader) {
 		raw, err := rd.ReadRaw()
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
-				// After probe quiescence an idle deadline means the ring is empty.
-				return
+				if b.kernelProducersQuiesced() {
+					// Probe detach completed: idle deadline means the ring is empty.
+					return
+				}
+				// Detach failed or never completed: idle time is not exhaustion proof.
+				// Keep best-effort draining until the operation budget ends so late
+				// records can still be recovered; never claim a clean drain.
+				continue
 			}
 			if errors.Is(err, ringbuf.ErrClosed) || errors.Is(err, os.ErrClosed) {
 				b.noteShutdownEvidence(fmt.Errorf("%w: reader closed before ring drain completed", ErrBackendRingDrainIncomplete))

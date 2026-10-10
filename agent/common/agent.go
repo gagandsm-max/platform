@@ -591,6 +591,9 @@ func optionalEnrichmentBudget(whole time.Duration) time.Duration {
 
 // joinShutdownErrors preserves typed error identity via errors.Join so
 // errors.Is / errors.As work through the AgentService.Stop boundary.
+// When the whole-service deadline (or cancel) has already fired, that cause is
+// retained alongside any component errors — never omitted merely because a
+// component failure is also present.
 func joinShutdownErrors(deadlineCtx context.Context, errs ...error) error {
 	var nonempty []error
 	for _, err := range errs {
@@ -598,11 +601,23 @@ func joinShutdownErrors(deadlineCtx context.Context, errs ...error) error {
 			nonempty = append(nonempty, err)
 		}
 	}
-	if len(nonempty) == 0 {
-		if err := deadlineCtx.Err(); err != nil {
-			return err
+	if derr := deadlineCtx.Err(); derr != nil {
+		present := false
+		for _, err := range nonempty {
+			if errors.Is(err, derr) {
+				present = true
+				break
+			}
 		}
+		if !present {
+			nonempty = append(nonempty, derr)
+		}
+	}
+	if len(nonempty) == 0 {
 		return nil
+	}
+	if len(nonempty) == 1 {
+		return nonempty[0]
 	}
 	return errors.Join(nonempty...)
 }

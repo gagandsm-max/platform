@@ -433,10 +433,16 @@ func (b *Backend) Start(ctx context.Context) error {
 	return nil
 }
 
-// StopContext is idempotent and requests bounded graceful shutdown. Probe links
-// are detached first so new kernel production stops while maps/programs and the
-// ring reader remain valid for controlled drain and final loss accounting. The
-// final worker owns map/program release. No waiter goroutine is spawned.
+// StopContext is idempotent and requests bounded graceful shutdown.
+//
+// Ownership: StopContext publishes stopRequested + shutdownCtx, cancels the
+// worker runtime, and waits on workersDone under the caller deadline. Potentially
+// blocking probe detach (link.Close) and kernel-ring drain run on the owned
+// readLoop worker (or ingest when no reader is armed) — never synchronously on
+// the Stop caller. Maps/programs/reader remain worker-owned until the final
+// worker exits. No waiter goroutine is spawned. A stalled detach cannot block
+// AgentService past the optional-enrichment sub-budget; Stop returns a typed
+// incomplete/deadline error while cleanup ownership stays with the workers.
 func (b *Backend) StopContext(ctx context.Context) error {
 	stopCtx, stopCancel := boundedBackendStopContext(ctx)
 	defer stopCancel()
@@ -474,30 +480,22 @@ func (b *Backend) StopContext(ctx context.Context) error {
 	}
 	b.mu.Unlock()
 
-	// Quiesce kernel producers before waking workers into the drain path.
-	// Maps/programs and the ring reader stay open until final worker cleanup.
-	if err := b.quiesceKernelProducers(); err != nil {
-		b.noteShutdownEvidence(fmt.Errorf("%w: %v", ErrBackendProducerQuiesceIncomplete, err))
-	}
-
+	// Wake workers into the owned shutdown path. Do not call quiesceKernelProducers
+	// or closeReader here: link.Close / Reader.Close may stall, and forcing either
+	// on the Stop caller would starve protected Agent teardown or race workers
+	// still using those FDs. Worker-owned shutdownReadPath / finalizeRuntimeResources
+	// perform detach, drain, and release.
 	if cancel != nil {
 		cancel()
 	}
-	// Do not close the ring reader here: readLoop must drain pending kernel
-	// records while the reader remains usable. closeReader is reserved for
-	// finalization or deadline-interrupt paths that record incomplete drain.
 	// When no reader is armed, readLoop is not the sole rawCh producer — Stop
-	// owns channel close so ingest can observe producer completion. Production
-	// Start always arms a reader; this branch is the ownership complement, not
-	// a nonblocking fixture drain shortcut.
+	// owns channel close so ingest can observe producer completion and run the
+	// quiesce+flush path. Production Start always arms a reader; this branch is
+	// the ownership complement for ingest-only fixtures.
 	if !b.readerArmed() {
 		b.closeRawCh()
 	}
-	err := b.finishStop(stopCtx, done)
-	if errors.Is(err, ErrBackendStopDeadline) {
-		b.closeReader()
-	}
-	return err
+	return b.finishStop(stopCtx, done)
 }
 
 func (b *Backend) finishStop(stopCtx context.Context, done <-chan struct{}) error {
@@ -584,7 +582,13 @@ func waitBackendWorkers(ctx context.Context, done <-chan struct{}) error {
 	case <-done:
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("%w: %w", ErrBackendStopDeadline, ctx.Err())
+		err := ctx.Err()
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("%w: %w", ErrBackendStopDeadline, err)
+		}
+		// Explicit cancellation remains cancellation — never mislabeled as a
+		// stop-deadline exhaustion.
+		return err
 	}
 }
 

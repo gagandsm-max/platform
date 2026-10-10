@@ -36,6 +36,9 @@ type kernelHandles struct {
 // and final loss-counter reads. Prefer Close over Detach: Detach may return
 // ErrNotSupported on some link implementations, while Close is authoritative
 // for unpinned links used by BUILD-011.
+//
+// link.Close is not assumed to return immediately; callers that must remain
+// deadline-bounded must not invoke this on the Agent Stop caller stack.
 func (h *kernelHandles) CloseLinks() error {
 	if h == nil {
 		return nil

@@ -722,6 +722,92 @@ func TestClassifyAgentStopErrorDistinguishesCancelFromTimeout(t *testing.T) {
 	}
 }
 
+// TestJoinShutdownErrorsPreservesWholeServiceDeadlineCause is P2-1: when a
+// component error coexists with an expired whole-service deadline, both
+// identities remain visible to errors.Is (and classify wraps ErrShutdownTimeout).
+func TestJoinShutdownErrorsPreservesWholeServiceDeadlineCause(t *testing.T) {
+	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Millisecond))
+	cancel()
+	component := errors.New("BACKEND_SHUTDOWN_FLUSH_INCOMPLETE: fixture")
+	joined := joinShutdownErrors(expired, component)
+	if joined == nil {
+		t.Fatal("expected joined error")
+	}
+	if !errors.Is(joined, component) {
+		t.Fatalf("component identity lost: %v", joined)
+	}
+	if !errors.Is(joined, context.DeadlineExceeded) {
+		t.Fatalf("whole-service DeadlineExceeded must be preserved alongside component error: %v", joined)
+	}
+	classified := classifyAgentStopError(expired, joined)
+	if !errors.Is(classified, ErrShutdownTimeout) {
+		t.Fatalf("classify must surface ErrShutdownTimeout: %v", classified)
+	}
+	if !errors.Is(classified, component) {
+		t.Fatalf("classify must retain component: %v", classified)
+	}
+	if !errors.Is(classified, context.DeadlineExceeded) {
+		t.Fatalf("classify must retain DeadlineExceeded: %v", classified)
+	}
+}
+
+// TestJoinShutdownErrorsCancelNotDeadline ensures cancel cause is preserved
+// without inventing ErrShutdownTimeout.
+func TestJoinShutdownErrorsCancelNotDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	component := errors.New("scheduler stop failed")
+	joined := joinShutdownErrors(ctx, component)
+	if !errors.Is(joined, component) || !errors.Is(joined, context.Canceled) {
+		t.Fatalf("want component+Canceled, got %v", joined)
+	}
+	classified := classifyAgentStopError(ctx, joined)
+	if errors.Is(classified, ErrShutdownTimeout) {
+		t.Fatalf("cancel must not become ErrShutdownTimeout: %v", classified)
+	}
+}
+
+// TestProtectedTeardownWhenBackendStopHitsDeadline proves AgentService.Stop
+// still tears down scheduler/worker/health when optional backend StopContext
+// returns a typed deadline error (production ownership model).
+func TestProtectedTeardownWhenBackendStopHitsDeadline(t *testing.T) {
+	rt := &fakeProcessNetworkRuntime{
+		stopErr: errors.Join(errors.New("BACKEND_STOP_DEADLINE"), context.DeadlineExceeded),
+	}
+	rt.setCapability(collector.ProcessNetworkCapabilityUnavailable, collector.ReasonBackendNotWired)
+	addr := freeLoopbackAddr(t)
+	cfg := testEBPFAgentCfg(t)
+	cfg.HealthAddress = addr
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-backend-deadline-teardown"),
+		client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST"), nil, WithProcessNetworkRuntime(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.setShutdownBudgetForTest(2 * time.Second)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitCapability(t, rt, collector.ProcessNetworkCapabilityActive, 2*time.Second)
+	err = svc.Stop()
+	if err == nil || !errors.Is(err, ErrShutdownTimeout) {
+		t.Fatalf("want ErrShutdownTimeout from backend deadline, got %v", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want DeadlineExceeded preserved through Agent Stop: %v", err)
+	}
+	if rt.stopCalls.Load() != 1 {
+		t.Fatalf("StopContext calls=%d", rt.stopCalls.Load())
+	}
+	if !svc.scheduler.AdmissionClosedForTest() {
+		t.Fatal("protected scheduler teardown must run after backend stop deadline")
+	}
+	httpClient := &http.Client{Timeout: 100 * time.Millisecond}
+	if resp, liveErr := httpClient.Get("http://" + addr + "/live"); liveErr == nil {
+		_ = resp.Body.Close()
+		t.Fatal("protected health teardown must run after backend stop deadline")
+	}
+}
+
 func TestStopDuringOptionalActivationKeepsProtectedTeardown(t *testing.T) {
 	gate := make(chan struct{})
 	rt := &fakeProcessNetworkRuntime{startGate: gate}

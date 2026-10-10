@@ -245,12 +245,13 @@ func TestRawChConservationWithSoleProducerClose(t *testing.T) {
 	if err := b.StopContext(context.Background()); err != nil {
 		t.Fatalf("StopContext: %v", err)
 	}
-	// Exact conservation: every ring record was accepted into aggregator/sink path
-	// (TRANSPORT_NOT_WIRED may still yield evidence in local recording sink).
-	accepted := len(sink.ProcessNetwork)
-	if accepted < 1 {
-		t.Fatalf("expected conserved evidence, got ProcessNetwork=%d accounting=%d",
-			len(sink.ProcessNetwork), len(sink.ProcessNetworkAccounting))
+	// Exact conservation via represented event totals (not len(evidence)>0).
+	accepted, dropped, shed := processNetworkRepresentedTotals(sink)
+	chanFull := b.LossSnapshot()[LossClassUserspaceChanFull]
+	decoderReject := b.LossSnapshot()[LossClassDecoderReject]
+	if accepted+dropped+shed+chanFull+decoderReject != n {
+		t.Fatalf("conservation: accepted=%d dropped=%d shed=%d chan=%d decoder=%d want=%d (len(evidence)=%d)",
+			accepted, dropped, shed, chanFull, decoderReject, n, len(sink.ProcessNetwork))
 	}
 	if rd.pending() != 0 {
 		t.Fatalf("unconserved ring pending=%d", rd.pending())
