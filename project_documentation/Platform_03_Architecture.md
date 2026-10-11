@@ -7,7 +7,7 @@
 **Depends on:** `Platform_01_BRD.md`, `Platform_02_PRD.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-10-08 — BUILD-011 eBPF initial map policy reconcile (Issue #168 / Master comment `6059162933`); prior 2026-09-30 Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142) retained
+**Last reconciliation:** 2026-10-11 — Issue #200/#202 Tranche A Phase 1/1.5 certification-envelope reconciliation (retains v3.3.0); prior BUILD-011 eBPF map policy (Issue #168) and Issue #142 Phase-1 observability closure retained
 
 ---
 
@@ -19,16 +19,16 @@ The architecture is governed by the following constraints already decided:
 - Working product name is **Platform** (commercial product name: **AmrudAi**).
 - Core and Sensor run on Ubuntu/RHEL; no Windows Core/Sensor initially.
 - Core, Sensor and Agent are separate builds.
-- One Core for standalone; exactly two full Core nodes for HA.
-- HA is Active/Standby with less-than-60-second Core service restoration target.
+- One Core for standalone (Phase 1 certification envelope); exactly two full Core nodes for HA (Phase 1.5 certification envelope). Exactly-two-Core HA remains fixed architecture and must not be downgraded.
+- HA is Active/Standby with less-than-60-second Core service restoration target under the Phase 1.5 envelope. Phase 1 makes no Core-HA availability claim.
 - All Core components run on Core nodes; no mandatory third Core/governance node.
-- Sensors continue polling during Core failover.
+- Sensors continue polling during Core unavailability/failover; multi-Sensor assignment generation/fencing remains Phase 1 mandatory.
 - Sensor → Core uses secure HTTPS/gRPC over mTLS to a Platform ingestion endpoint; Kafka is internal to Core.
 - Kafka, ClickHouse, PostgreSQL and Valkey are baseline Core technologies; no separate eBPF database, graph database, or trace backend is introduced.
 - Go for Sensor/Agent runtime, Java 21 for Core control plane, React/TypeScript UI, Python where appropriate for AI/analytics/NCM.
 - UI is HTTPS only and does not expose an application endpoint on TCP/80.
 - Core and Sensor managed storage have a mandatory 80% storage-protection watermark.
-- DR capability is required in v1.0.
+- DR capability is required in v1.0 and remains mandatory for Phase 1; HA is distinct from DR.
 - **Hard Phase-1 product boundaries:**
   - Full APM, bytecode instrumentation, method-level timing, continuous profiling, flame graphs, and RUM are excluded.
   - Full DPI, always-on packet capture, TLS decryption, and packet payload reconstruction are excluded. (Existing bounded incident-triggered packet evidence remains active and is preserved).
@@ -151,7 +151,7 @@ Core-01 runs the complete Core stack. Sensors are separate installs and remain r
 
 ### 4.2 Two-node HA deployment
 
-**Status:** SPECIFIED / **P0** / **NOT PRODUCTION CERTIFIED**. Exactly two full Core nodes Active/Standby remains fixed architecture and must not be downgraded to P1. Unresolved P0 work includes active authority/fencing, service fencing generation, Kafka consumer ownership, PostgreSQL replication/failover/fencing/rewind, ClickHouse replication/promotion/fencing, stable Core endpoint/VIP, Sensor reconnect/re-anchor, Sensor assignment ownership/lease/fencing, push-protocol continuity, split-brain failure behavior, RPO/RTO, failover under load and backlog replay. Exact mechanism selection is a dedicated P0 engineering spike constrained by exactly two Core nodes, no silent split-brain, minimal operational complexity and no unnecessary third full Core. This baseline does **not** select Patroni, repmgr, ClickHouse Keeper, Raft, Consul, etcd or a third coordination service.
+**Status:** SPECIFIED / **P0** / **NOT PRODUCTION CERTIFIED**. **Certification envelope:** Phase 1.5. Exactly two full Core nodes Active/Standby remains fixed architecture and must not be downgraded to P1; a Phase 1 standalone certificate must not imply this HA envelope. Unresolved P0 work includes active authority/fencing, Kafka consumer ownership, PostgreSQL replication/failover/fencing/rewind, ClickHouse replication/promotion/fencing, stable Core endpoint/VIP, Sensor reconnect/re-anchor, push-protocol continuity, split-brain failure behavior, HA ACK RPO evidence (distinct from site/DR RPO), failover under load and backlog replay. Sensor assignment ownership/lease/fencing remains a Phase 1 mandatory multi-Sensor safety requirement even with standalone Core and must not be deferred solely because Core HA is Phase 1.5. Exact mechanism selection is a dedicated P0 engineering spike constrained by exactly two Core nodes, no silent split-brain, minimal operational complexity and no unnecessary third full Core. This baseline does **not** select Patroni, repmgr, ClickHouse Keeper, Raft, Consul, etcd or a third coordination service.
 
 
 ```mermaid
@@ -319,9 +319,11 @@ Valkey is reconstructable ephemeral/cache state **ONLY** and must never become a
 ## 7. Exactly-two-Core HA and stateful-service strategy
 The two-Core topology creates special engineering requirements because textbook Kafka controller quorums and ClickHouse Keeper quorums normally prefer an odd number of voting members.
 
+This section is the **Phase 1.5 HA certification envelope**. Phase 1 certifies one authoritative standalone Core with mandatory backup/restore and site-loss DR; it does not claim two-Core service continuity. HA ≠ DR.
+
 Platform therefore adopts these architectural rules:
 
-1. **The product topology is authoritative:** exactly two full Core nodes in HA.
+1. **The product HA topology is authoritative:** exactly two full Core nodes in HA (Phase 1.5 cert).
 2. **PostgreSQL:** use primary/standby streaming replication with controlled promotion/fencing semantics.
 3. **ClickHouse:** maintain a second up-to-date Core copy through an implementation specifically validated for two-node active/passive failover. Candidate mechanisms include dual-write/backfill or controlled replica strategy; the final certified mechanism is a P0 engineering design spike and must not falsely claim quorum guarantees that are not present.
 4. **Kafka:** treat Kafka as an internal transport, not the sole copy of telemetry. Sensor durable spools are the edge replay source; ClickHouse/PostgreSQL are persistent destinations. The exact Kafka active/passive/failover implementation for two Core nodes is a P0 design spike. It must preserve the no-third-Core requirement and prove failover behavior experimentally.
@@ -334,16 +336,17 @@ This is an explicit technical risk area and requires failure testing before GA.
 
 ### Open HA P0 mechanisms (must remain explicit)
 
-Exactly-two-Core HA is **USER-FIXED** product topology. The following remain **OPEN P0 / NOT PRODUCTION CERTIFIED** until evidence closes them (do not invent selections here):
+Exactly-two-Core HA is **USER-FIXED** product topology and the Phase 1.5 certification envelope. The following remain **OPEN P0 / NOT PRODUCTION CERTIFIED** until evidence closes them (do not invent selections here):
 
-1. Active authority and fencing (including ambiguous partition / split-brain behavior)
-2. Service fencing generation and assignment ownership/lease/fencing
-3. PostgreSQL promotion, rejoin, rewind and fencing
-4. Kafka ownership/failover and consumer ownership under Active/Standby
-5. ClickHouse continuity/promotion/fencing (no false quorum claims on two nodes)
-6. Stable Core HA endpoint/VIP behavior
-7. Sensor reconnect/re-anchor and push-protocol continuity across failover
-8. RPO/RTO implementation evidence and failover-under-load / backlog replay evidence
+1. Active authority and fencing (including ambiguous partition / split-brain behavior) — Phase 1.5
+2. Sensor assignment generation/ownership/lease/fencing for multi-Sensor estates — **Phase 1 mandatory** (standalone Core); not deferred to Core HA
+3. PostgreSQL promotion, rejoin, rewind and fencing — Phase 1.5
+4. Kafka ownership/failover and consumer ownership under Active/Standby — Phase 1.5
+5. ClickHouse continuity/promotion/fencing (no false quorum claims on two nodes) — Phase 1.5
+6. Stable Core HA endpoint/VIP behavior — Phase 1.5
+7. Sensor reconnect/re-anchor and push-protocol continuity across Core failover — Phase 1.5
+8. HA ACK RPO evidence for the certified permanent one-Core HA failure matrix (`ACKED-FOR-DELETION TELEMETRY RPO = 0`) — Phase 1.5; distinct from site/DR RPO and from Phase 1 standalone deletion-ACK durability
+9. Failover-under-load / backlog replay evidence — Phase 1.5
 
 **Not selected by documentation alone:** Patroni, repmgr, ClickHouse Keeper, Raft, Consul, etcd, or a third full Core/coordination server. Spike constraints: exactly two nodes, no silent split-brain, minimal ops complexity.
 
@@ -926,23 +929,24 @@ durable spool stream identity
 
 At-least-once. Concurrent pending-reservation HTTP retries may amplify Kafka republish (P1 hardening). PR #59 insert-token/dedupe-window correctness is superseded; bounded Kafka→ClickHouse micro-batching remains future P1 performance work after benchmark.
 
-**Deletion-authorizing ACK / HA durability invariant (FROZEN governance; physical mechanism NOT selected):**
+**Deletion-authorizing ACK durability (FROZEN governance; physical mechanism NOT selected):**
 
-If Core issues an ACK that authorizes the Sensor to delete acknowledged telemetry from its durable spool, that telemetry must survive every failure in the certified single-Core HA failure matrix.
+Phase 1 and Phase 1.5 share the same ACK contract shape but different certified failure matrices:
 
-Equivalent technical target: `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified single-Core HA failure scenarios (distinct from site/DR RPO).
+1. **Phase 1 standalone deletion-ACK durability:** if Core issues an ACK authorizing Sensor durable-spool deletion, that telemetry must survive the certified standalone failure matrix (application/process/service crash/restart, governed host reboot and other explicitly certified recoverable failures). Catastrophic destruction/loss of the single Core/storage is **not** Phase-1 zero-RPO HA; recovery uses backup/restore and the declared Phase-1 DR profile.
+2. **Phase 1.5 HA deletion-ACK invariant:** if Core issues an ACK authorizing Sensor durable-spool deletion, that telemetry must survive every failure in the certified permanent single-Core HA failure matrix. Equivalent technical target: `ACKED-FOR-DELETION TELEMETRY RPO = 0` for those HA scenarios (distinct from site/DR RPO).
 
 Conceptual lifecycle:
 
 ```text
 Sensor durable spool
 → Core acceptance
-→ certified HA durability barrier
+→ certified durability barrier for the active envelope (standalone matrix or HA matrix)
 → deletion-authorizing ACK
 → Sensor may delete acknowledged segment
 ```
 
-Closure of physical mechanisms (dual watermark, Kafka ISR/topology, synchronous PostgreSQL design, ClickHouse replication, Patroni/repmgr/Keeper, witness, etcd/Consul/Raft, Sensor quorum, new coordinator) remains an output of `HA_DURABILITY_DESIGN_GATE` / BUILD-120–124 engineering — not selected here.
+`HA_DURABILITY_DESIGN_GATE` (after BUILD-061 / before BUILD-062) must produce both the Phase 1 standalone deletion-ACK durability gate outputs and the Phase 1.5 HA durability gate outputs without renumbering BUILD IDs. Closure of physical HA mechanisms (dual watermark, Kafka ISR/topology, synchronous PostgreSQL design, ClickHouse replication, Patroni/repmgr/Keeper, witness, etcd/Consul/Raft, Sensor quorum, new coordinator) remains an output of that gate / BUILD-120–124 engineering — not selected here.
 
 1. Exact two-Core Kafka failover implementation and acceptance model.
 2. Exact two-Core ClickHouse synchronization/failover implementation.
@@ -1204,11 +1208,11 @@ Large/global environments may later use autonomous regional Cores with a Master 
 ## 34. Backup, restore, DR and upgrades
 Architecture must separate:
 
-- HA: same deployment service continuity.
-- Backup/restore: recover data/configuration.
-- DR: recover from site-level loss.
+- HA: same-deployment service continuity via exactly-two-Core Active/Standby (Phase 1.5 certification envelope).
+- Backup/restore: recover data/configuration (mandatory in Phase 1).
+- DR: recover from site-level loss, including redeploy/endpoint redirection for the declared Phase-1 DR profile (mandatory in Phase 1; HA ≠ DR).
 
-DR is mandatory v1.0, but exact RPO/RTO is TBD.
+DR is mandatory v1.0 / Phase 1. Exact contractual/external RPO/RTO is TBD; internal technical RPO/RTO engineering targets are Master technical authority.
 
 Upgrade architecture uses preflight, backup, compatibility checks, Sensor drains, component migration, validation and rollback. Device Packs/Agents/Sensors support staged/canary rollout.
 
@@ -1391,7 +1395,7 @@ Platform must monitor itself: collectors, Sensors, queues, ingestion lag, droppe
 |---|---|---|
 | ADR-001 | Product is clean-room, independent from ThoughtData/NetAI | Accepted |
 | ADR-002 | Core/Sensor Linux: Ubuntu 24 LTS + RHEL 9 initial certification | Accepted |
-| ADR-003 | Core HA = exactly two full nodes, Active/Standby | Accepted |
+| ADR-003 | Core HA = exactly two full nodes, Active/Standby (Phase 1.5 cert envelope; Phase 1 = standalone one Core) | Accepted |
 | ADR-004 | Sensors poll independently and buffer through Core failover | Accepted |
 | ADR-005 | Sensor→Core via HTTPS/gRPC mTLS ingestion, Kafka internal | Accepted |
 | ADR-006 | Kafka + ClickHouse + PostgreSQL + Valkey baseline | Accepted |
@@ -1616,6 +1620,8 @@ External CIs are bindings to canonical entities. External relationships enter th
 
 NCM execution continues through existing NCM orchestration/worker and assigned Sensor/device adapter boundaries. Change Assurance adds a plan/evidence lifecycle and references canonical topology/service/incident/change/audit state rather than duplicating them. Approval validity is checked against immutable Change Plan version, exact target-set hash, rendered configuration/template hash and approved maintenance window before execution; local Platform RBAC/policy/preconditions remain independently authoritative.
 
+**Phase 1 independently certifiable NCM subset:** backup/version/diff/compliance/golden-state and controlled manual CLI only when RBAC/credential brokering/audit are certified. Mass push, canary/staged automated privileged execution and automated remediation default to Phase 1.5 unless Founder change control promotes them.
+
 Firmware remains Phase 1.5 and uses governed artifact storage/repository references; firmware binaries are not stored in PostgreSQL/ClickHouse telemetry tables.
 
 
@@ -1626,3 +1632,16 @@ These exact IDs are governed by the architecture decisions in §45.
 - `REQ-CMDB-004` — External CI relationships reuse the canonical temporal graph and preserve source/authority/confidence/freshness/lifecycle alongside observed technical relationships.
 - `REQ-OTEL-002` — OTLP tenant/source authority is server-derived from authenticated ingress; telemetry resource attributes are identity evidence, never tenant authorization.
 - `REQ-OTEL-004` — OTel reuses PostgreSQL control/policy, ClickHouse analytical history, Kafka internal transport and Valkey ephemeral/cache roles; no mandatory new telemetry/trace database is introduced.
+
+---
+
+## 46. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #202
+
+Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified ≠ deployed. Mother Reference set version remains **3.3.0** through Tranche A; v3.4.0 is reserved for gated Tranche D.
+
+| Envelope | Core topology | Tenancy cert | Durability / continuity | NCM / AI notes |
+|---|---|---|---|---|
+| **Phase 1** | One authoritative standalone Core; multiple Sensors/Agents/sites | Single-customer enterprise; tenant-aware contracts retained; no MSP/shared-tenancy cert claim | Standalone deletion-ACK for certified recoverable failure matrix; backup/restore + site-loss DR mandatory; Sensor assignment fencing mandatory; no Core-HA claim | Deterministic RCA without mandatory LLM; `REQ-MIA-033` applies to certified local-AI profiles; NCM read-only/low-risk subset independently certifiable |
+| **Phase 1.5** | Exactly two full Core nodes Active/Standby; positive fencing; split-brain prevented | MSP/shared multi-tenancy + noisy-neighbor adversarial certification | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures; Sensor reconnect/re-anchor + push HA continuity | Privileged NCM automation defaults; firmware Phase 1.5 |
+
+BUILD-011 technical post-merge at `179a72837d050f4c757858452d3719c2e8978b95` does not certify Phase-1 GA, Core HA, capacity or eBPF physical transport. Physical HA mechanisms remain unselected (BUILD-120–124 / `HA_DURABILITY_DESIGN_GATE`).

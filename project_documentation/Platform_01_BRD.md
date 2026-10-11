@@ -7,7 +7,7 @@
 **Implementation model:** Clean-room implementation; independent project, not part of ThoughtData, Enterprise360 or NetAI
 **Audience:** Founders, product leadership, engineering, architecture, QA, security, sales engineering, support
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
+**Last reconciliation:** 2026-10-11 — Issue #200/#202 Tranche A Phase 1/1.5 certification-envelope reconciliation (retains v3.3.0)
 
 ---
 
@@ -100,7 +100,7 @@ Business outcome: an authorized operator can discover, monitor, diagnose and gov
 **Industry lessons (business intent, not proprietary copy):**
 
 - Scale collection horizontally with Sensors/pollers rather than making the central UI/control server poll every device.
-- Use exactly two application Core nodes for HA (Active/Standby).
+- Use exactly two application Core nodes for HA (Active/Standby); this HA topology is the Phase 1.5 certification envelope. Phase 1 certifies one authoritative standalone Core.
 - Place Sensors close to monitored resources; allow multiple Sensors per site for capacity.
 - Centralize configuration; Sensors remain headless and continue buffering during WAN/Core interruption.
 - Treat topology as an operational reasoning model, not merely a visual map.
@@ -139,11 +139,12 @@ Role templates are starting points only. Authorization is evaluated as **Who × 
 
 ## 5. MSP versus customer deployment context
 
-- **Single-customer mode:** one tenant/customer boundary; no MSP multi-customer switcher required.
-- **MSP / multi-tenant mode:** one Platform deployment may operate many customers with hard isolation at API, authorization, query and persistence layers—not UI-only separation.
+- **Single-customer mode:** one tenant/customer boundary; no MSP multi-customer switcher required. This is the Phase 1 commercial certification envelope.
+- **MSP / multi-tenant mode:** one Platform deployment may operate many customers with hard isolation at API, authorization, query and persistence layers—not UI-only separation. Adversarial MSP/shared-customer isolation and noisy-neighbor certification are Phase 1.5 envelopes.
+- Tenant-aware identity/API/event/security/RBAC/audit contracts remain mandatory in Phase 1 even when only one customer is deployed; single-customer deployment must not drop tenancy contracts.
 - MSP operators may scope across authorized customers; a customer user must never browse another customer’s estate.
 - Overlapping IP spaces across customers are expected and must be handled by tenant-aware identity, not IP-alone identity.
-- Noisy-neighbor protection (quotas, query/cardinality limits) is a business continuity requirement for MSP viability.
+- Noisy-neighbor protection (quotas, query/cardinality limits) is a business continuity requirement for MSP viability and is a Phase 1.5 certification gate for shared-tenancy deployments.
 
 ---
 
@@ -163,10 +164,10 @@ Role templates are starting points only. Authorization is evaluated as **Who × 
 
 ### 6.3 Deployment topologies (business)
 
-- **Standalone:** one Core node
-- **HA:** exactly two full Core nodes (Active/Standby); no customer-visible third Core/governance node in the required HA topology
-- **DR:** site-level disaster recovery capability is mandatory in v1.0 business scope; contractual RPO/RTO remain TBD
-- **Future federation:** Master Core / Regional Core is architecturally anticipated and out of initial implementation scope
+- **Standalone:** one Core node — Phase 1 certification envelope (production-enterprise single-customer; no Core-HA availability claim)
+- **HA:** exactly two full Core nodes (Active/Standby); no customer-visible third Core/governance node in the required HA topology — Phase 1.5 certification envelope
+- **DR:** site-level disaster recovery capability is mandatory in v1.0 business scope and remains mandatory for Phase 1 (backup/restore plus site-loss recovery for the declared Phase-1 DR profile); HA is distinct from DR; contractual/external RPO/RTO remain TBD
+- **Future federation:** Master Core / Regional Core is architecturally anticipated and out of Phase 1 / Phase 1.5 certification envelopes unless separately promoted
 
 ---
 
@@ -340,7 +341,11 @@ Dependencies: FLOW/LOG product roles, local Sensor spool, Kafka (internal), Clic
 
 ## 18. NCM (business)
 
-Business outcome: configuration backup, versioning, diff, compliance, controlled push, rollback, approval and audit.
+Business outcome: configuration backup, versioning, diff, compliance, controlled change with approval/audit, and (where certified) rollback.
+
+**Phase 1 certification subset (independently certifiable):** config backup/version/diff/compliance/golden-state; controlled manual CLI only when RBAC, credential brokering and audit are certified.
+
+**Phase 1.5 default for privileged automation:** mass push, canary/staged automated privileged execution, maker-checker-driven automated remediation and related blast-radius automation—unless Founder change control explicitly promotes a capability into Phase 1. Firmware lifecycle remains Phase 1.5.
 
 Dependencies: privileged credentials, maker-checker, blast-radius controls, Sensor-near execution, separation of NCM workers from routine polling capacity.
 
@@ -491,7 +496,9 @@ Historical telemetry is less important than continuity of live monitoring.
 
 ## 30. HA and business continuity (business)
 
-A HA installation shall use exactly two full Core nodes:
+**Phase 1 business continuity** uses one authoritative standalone Core with mandatory backup/restore and site-loss DR for the declared Phase-1 DR profile. Phase 1 does not claim two-Core service continuity or HA zero-RPO. Sensor assignment ownership/fencing remains mandatory because multiple Sensors are permitted.
+
+A **Phase 1.5 HA** installation shall use exactly two full Core nodes:
 
 - Core-A and Core-B; one Active, one Standby in normal operation
 - Both continuously synchronize required persistent state
@@ -499,10 +506,11 @@ A HA installation shall use exactly two full Core nodes:
 - Sensor polling continues independently through Core failover; data is buffered and replayed as capacity permits
 - No third customer-visible Core/governance node is part of the required HA topology
 - Dual-active/split-brain must be prevented; ambiguous partitions must not create two authoritative active Cores
+- Deletion-authorizing ACK durability for the certified HA permanent one-Core failure matrix is `ACKED-FOR-DELETION TELEMETRY RPO = 0` (distinct from site/DR RPO)
 
 Sensors/Agents should use the stable **Core HA endpoint** rather than remain permanently bound to a single physical Core address.
 
-**Business note:** exactly-two-Core HA is a fixed product requirement; detailed fencing/failover/rejoin mechanisms for stateful services remain open engineering P0s until certified (Architecture / programme #92). Documentation must not pretend those mechanisms are already certified.
+**Business note:** exactly-two-Core HA is a fixed product architecture requirement and the Phase 1.5 certification envelope; detailed fencing/failover/rejoin mechanisms for stateful services remain open engineering P0s until certified (Architecture / BUILD-120–124). Documentation must not pretend those mechanisms are already certified, and a Phase 1 certificate must not imply Phase 1.5 HA or MSP isolation.
 
 ---
 
