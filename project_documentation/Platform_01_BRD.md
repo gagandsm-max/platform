@@ -670,7 +670,7 @@ The product may not be considered enterprise-ready unless all applicable gates a
 1. UI-only normal provisioning works for individual, bulk and discovery workflows
 2. Provisioning errors are actionable and evidence-based
 3. Core and Sensor remain within certified resource envelopes for reference workloads
-4. HA pair fails over within the certified target without stopping Sensor polling
+4. Phase 1.5 HA profile: HA pair fails over within the certified target without stopping Sensor polling
 5. Storage pressure at the 80% watermark does not stop live monitoring and produces an auditable reclamation event
 6. Alert qualification demonstrably reduces avoidable device-down false positives
 7. RCA can return INCONCLUSIVE and every root-cause conclusion links to inspectable evidence

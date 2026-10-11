@@ -2230,8 +2230,8 @@ Exact SLOs TBD after baseline benchmark, but release testing must cover dashboar
 
 - Non-HA installations have no HA availability claim.
 - HA target: 99.95% service design objective subject to deployment assumptions and final SLA definition.
-- Core failover certified target <60s.
-- Sensor monitoring continuity through Core failover.
+- Phase 1.5 HA profile: Core failover certified target <60s.
+- Phase 1.5 HA profile: Sensor monitoring continuity through Core failover.
 
 ### 41.4 Scale
 
@@ -2293,8 +2293,8 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 - NCM/IPAM/CLI governance;
 - dashboards/studios/admin/RBAC/audit;
 - retention/rollups and 80% storage protection on Core and Sensor;
-- HA failover <60s with Sensor continuity;
-- DR architecture/runbook and backup/restore verification;
+- Phase 1.5 HA profile: Core HA failover <60s with Sensor continuity;
+- Phase 1 standalone: DR architecture/runbook and backup/restore (including site-loss DR) verification;
 - HTTPS-only UI;
 - SBOM/licence/security scans;
 - certified resource/performance tests under SNWP-2500-v1 and OBS-P1 enrichment overlay;
