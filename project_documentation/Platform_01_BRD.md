@@ -7,7 +7,7 @@
 **Implementation model:** Clean-room implementation; independent project, not part of ThoughtData, Enterprise360 or NetAI
 **Audience:** Founders, product leadership, engineering, architecture, QA, security, sales engineering, support
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-10-11 — Issue #200/#202 Tranche A Phase 1/1.5 certification-envelope reconciliation (retains v3.3.0)
+**Last reconciliation:** 2026-10-11 — Issue #200/#202/#206 Tranche A Sensor RAM ratio correction (≥4 GB/vCPU; retains v3.3.0); prior Phase 1/1.5 certification-envelope reconciliation retained
 
 ---
 
@@ -636,9 +636,9 @@ Current safe planning baseline:
 
 - Network Sensor: 4 vCPU / 16 GB RAM / 150 GB local SSD for approximately 800 normally monitored network devices under agreed reference conditions
 
-Engineering density target to benchmark:
+Engineering density target to benchmark (NOT CERTIFIED):
 
-- 8 vCPU / 16 GB Sensor profile targeting approximately 2,000–2,500 normal network devices where workload permits
+- 8 vCPU / 32 GB Sensor profile targeting approximately 2,000–2,500 normal network devices where workload permits
 
 Device count is never the sole sizing dimension. Monitoring Work Units must account for metrics, interfaces, polling frequency, protocol, RTT, timeouts, Flow, syslog, gNMI, NCM and other work.
 

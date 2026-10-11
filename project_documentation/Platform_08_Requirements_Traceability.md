@@ -4,7 +4,7 @@
 **Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Global Traceability Index (A2.3 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
-**Last reconciliation:** 2026-10-11 — Issue #200/#202 Tranche A Phase 1/1.5 certification-envelope notes on existing IDs only; marker-bounded primary registries remain 412 REQ IDs and 205 PRD IDs (no new IDs).
+**Last reconciliation:** 2026-10-11 — Issue #200/#202/#206 Tranche A Sensor RAM ratio correction on REQ-S-011 text only (≥4 GB/vCPU; retains v3.3.0); prior Phase 1/1.5 certification-envelope notes retained; marker-bounded primary registries remain 412 REQ IDs and 205 PRD IDs (no new IDs).
 **Normalization state:** NORMALIZED_V1 (global index layer). Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Purpose
@@ -322,7 +322,7 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 | REQ-S-008 | Sensor 80% disk protection and bounded junk/log cleanup | `Platform_08_Requirements_Traceability.md` | Sensor/Agent | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-S-009 | Sensor self-observability: CPU/RAM/disk/queue/poll latency/backlog/failures | `Platform_08_Requirements_Traceability.md` | Sensor/Agent | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-S-010 | Initial planning baseline 4 vCPU/16GB/150GB ~800 normal network devices | `Platform_08_Requirements_Traceability.md` | Sensor/Agent | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
-| REQ-S-011 | Benchmark 8 vCPU/16GB high-density target ~2,000–2,500 normal network devices | `Platform_08_Requirements_Traceability.md` | Sensor/Agent | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
+| REQ-S-011 | Benchmark 8 vCPU/32GB high-density target ~2,000–2,500 normal network devices (NOT CERTIFIED) | `Platform_08_Requirements_Traceability.md` | Sensor/Agent | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-S-012 | Agentless infrastructure target ~800 endpoints per 4C/16G Sensor | `Platform_08_Requirements_Traceability.md` | Sensor/Agent | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-S-013 | Agent-push target ~2,200 endpoints per 4C/16G ingestion capacity unit | `Platform_08_Requirements_Traceability.md` | Sensor/Agent | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
 | REQ-S-014 | Windows/Linux Agent supports host metrics and edge network tests | `Platform_08_Requirements_Traceability.md` | Sensor/Agent | BASE_RTM_INDEXED | SPECIFIED | Historical base RTM layer checkmarks retained; A1 does not re-certify maturity |
@@ -760,7 +760,7 @@ Historical layer checkmarks below mean documentation mapping only (`SPECIFIED` i
 | REQ-S-008 | Sensor 80% disk protection and bounded junk/log cleanup | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-009 | Sensor self-observability: CPU/RAM/disk/queue/poll latency/backlog/failures | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-010 | Initial planning baseline 4 vCPU/16GB/150GB ~800 normal network devices | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| REQ-S-011 | Benchmark 8 vCPU/16GB high-density target ~2,000–2,500 normal network devices | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| REQ-S-011 | Benchmark 8 vCPU/32GB high-density target ~2,000–2,500 normal network devices (NOT CERTIFIED) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-012 | Agentless infrastructure target ~800 endpoints per 4C/16G Sensor | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-013 | Agent-push target ~2,200 endpoints per 4C/16G ingestion capacity unit | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | REQ-S-014 | Windows/Linux Agent supports host metrics and edge network tests | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |

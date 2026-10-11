@@ -7,7 +7,7 @@
 **Depends on:** `Platform_01_BRD.md`, `Platform_02_PRD.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-10-11 — Issue #200/#202 Tranche A Phase 1/1.5 certification-envelope reconciliation (retains v3.3.0); prior BUILD-011 eBPF map policy (Issue #168) and Issue #142 Phase-1 observability closure retained
+**Last reconciliation:** 2026-10-11 — Issue #200/#202/#206 Tranche A Sensor RAM ratio correction (≥4 GB/vCPU; retains v3.3.0); prior Phase 1/1.5 certification-envelope reconciliation, BUILD-011 eBPF map policy (Issue #168) and Issue #142 Phase-1 observability closure retained
 
 ---
 
@@ -1176,7 +1176,7 @@ Up to 2,500 devices under SNWP-2500-v1: 8 vCPU / 32 GB RAM mandatory optimizatio
 ### 33.2 Sensor planning baseline
 
 - 4 vCPU / 16 GB / 150 GB local SSD: ~800 normal network devices planning baseline.
-- 8 vCPU / 16 GB: engineering benchmark objective ~2,000–2,500 normal network devices where workload permits.
+- 8 vCPU / 32 GB: engineering benchmark objective ~2,000–2,500 normal network devices where workload permits (NOT CERTIFIED).
 
 ### 33.3 Horizontal scaling
 
@@ -1550,7 +1550,7 @@ Cloud monitoring under `REQ-INF-008` is clarified to include first-class Phase-1
 
 ### 44.7 Sizing overlay OBS-P1 over SNWP-2500-v1
 
-Observability Phase 1 capabilities are governed by the versioned `OBS-P1 enrichment overlay` defined in `Platform_11` §8.1. OBS-P1 benchmarks must prove whether eBPF local aggregation, active path probing, and cloud-network enrichment fit within existing planned hardware baselines (Network Sensor current planning baseline: 4 vCPU / 16 GB RAM / 150 GB SSD for ~800 normal network devices, with 8 vCPU / 16 GB RAM as an engineering benchmark objective for 2,000–2,500 devices) under low-compute non-interference gates; they may not be pre-declared certified.
+Observability Phase 1 capabilities are governed by the versioned `OBS-P1 enrichment overlay` defined in `Platform_11` §8.1. OBS-P1 benchmarks must prove whether eBPF local aggregation, active path probing, and cloud-network enrichment fit within existing planned hardware baselines (Network Sensor current planning baseline: 4 vCPU / 16 GB RAM / 150 GB SSD for ~800 normal network devices, with 8 vCPU / 32 GB RAM as an engineering benchmark objective for 2,000–2,500 devices — NOT CERTIFIED) under low-compute non-interference gates; they may not be pre-declared certified.
 
 ---
 

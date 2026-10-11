@@ -7,7 +7,7 @@
 **Depends on:** `Platform_01_BRD.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_08_Requirements_Traceability.md`, specialized masters `Platform_19`..`Platform_23`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-10-11 — Issue #200/#202 Tranche A Phase 1/1.5 certification-envelope reconciliation (retains v3.3.0)
+**Last reconciliation:** 2026-10-11 — Issue #200/#202/#206 Tranche A Sensor RAM ratio correction (≥4 GB/vCPU; retains v3.3.0); prior Phase 1/1.5 certification-envelope reconciliation retained
 
 ---
 
@@ -2219,7 +2219,7 @@ Data placement policies shall be architecturally possible so future regional Cor
 
 - Core target up to 2,500 devices: 8 vCPU / 32 GB under certified Standard Network Workload Profile.
 - Sensor current planning baseline: 4 vCPU / 16 GB / 150 GB for ~800 normal network devices.
-- Sensor engineering benchmark target: 8 vCPU / 16 GB for ~2,000–2,500 normal devices where workload permits.
+- Sensor engineering benchmark target (NOT CERTIFIED): 8 vCPU / 32 GB for ~2,000–2,500 normal devices where workload permits.
 - Agent footprint target: TBD by OS/workload benchmark; must be explicitly measured and kept low.
 
 ### 41.2 UI/API performance
@@ -2281,7 +2281,7 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 - UI-driven provisioning for single, bulk and discovery;
 - actionable preflight diagnostics;
 - central Sensor/Agent assignment and locality/capacity-aware placement;
-- SNMP/flow/syslog/network protocol collection;
+- certified SNMP/ICMP/network protocol collection; Flow/Syslog/streaming collection only when those profiles are included and certified;
 - infrastructure/cloud/K8s/DB/synthetic coverage committed for release;
 - policy inheritance and no hard-coded customer thresholds;
 - alert qualification and recovery qualification;
