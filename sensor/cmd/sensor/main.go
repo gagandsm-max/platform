@@ -29,14 +29,15 @@ import (
 )
 
 // newProductionScheduler constructs the single production-owned scheduler.
-// Slice 6 registers zero JobKind routes so the empty ExecutorRegistry remains
-// fail-closed for any accidentally admitted work.
-func newProductionScheduler(rt config.RuntimeConfig, logger *slog.Logger) (*scheduler.Scheduler, error) {
+// The caller supplies the registry shared with the Universal Sensor runtime.
+func newProductionScheduler(rt config.RuntimeConfig, registry *sensorruntime.ExecutorRegistry, logger *slog.Logger) (*scheduler.Scheduler, error) {
+	if registry == nil {
+		return nil, fmt.Errorf("SENSOR_RUNTIME_INVALID_CONFIG: executor registry is required")
+	}
 	schedCfg, err := config.ToSchedulerConfig(rt.Scheduler)
 	if err != nil {
 		return nil, err
 	}
-	registry := sensorruntime.NewExecutorRegistry()
 	return scheduler.New(schedCfg, registry, scheduler.WithLogger(logger))
 }
 
@@ -163,7 +164,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	prodScheduler, err := newProductionScheduler(rt, logger)
+	// Activation of newSNMPBootstrap is blocked until every default enabled
+	// capability (including ICMP) has a real runtime integration. Keep the
+	// existing lifecycle here; do not filter capabilities to disguise that gap.
+	prodScheduler, err := newProductionScheduler(rt, sensorruntime.NewExecutorRegistry(), logger)
 	if err != nil {
 		logger.Error("Failed to initialize production scheduler",
 			"error_code", "SENSOR_SCHEDULER_INIT_FAILED",
