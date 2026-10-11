@@ -199,7 +199,8 @@ public class AgentControlRepository {
     }
 
     /**
-     * Row-lock the agent principal so assign-after-revoke serializes when no ACTIVE assignment exists.
+     * Row-lock the agent principal so assign-after-revoke and credential rotate/revoke/bind
+     * serialize when operating on the same principal.
      */
     public void lockPrincipalForUpdate(UUID tenantId, String agentId) {
         List<String> rows = jdbc.query("""

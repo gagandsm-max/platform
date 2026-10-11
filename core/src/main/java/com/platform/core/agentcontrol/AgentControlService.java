@@ -93,6 +93,8 @@ public class AgentControlService {
     public AgentCertificateCredential bindCertificate(String agentId, X509Certificate certificate) {
         Objects.requireNonNull(certificate, "certificate");
         AgentPrincipal principal = requirePrincipal(agentId);
+        // Serialize with rotate/revoke on the same principal (deliberate multi-ACTIVE overlap remains allowed).
+        repository.lockPrincipalForUpdate(principal.tenantId(), principal.agentId());
         Instant now = Instant.now();
         Instant notBefore = certificate.getNotBefore().toInstant();
         Instant notAfter = certificate.getNotAfter().toInstant();
@@ -134,6 +136,8 @@ public class AgentControlService {
     public AgentCertificateCredential rotateCertificate(String agentId, X509Certificate newCertificate) {
         AgentPrincipal principal = requirePrincipal(agentId);
         Objects.requireNonNull(newCertificate, "newCertificate");
+        // Serialize credential mutations for this principal before reading ACTIVE set.
+        repository.lockPrincipalForUpdate(principal.tenantId(), principal.agentId());
         Instant now = Instant.now();
         Instant notBefore = newCertificate.getNotBefore().toInstant();
         Instant notAfter = newCertificate.getNotAfter().toInstant();
@@ -184,6 +188,7 @@ public class AgentControlService {
                 .orElseThrow(() -> new AgentControlException(
                         AgentControlException.ERR_AGENT_CREDENTIAL_NOT_FOUND,
                         "Credential fingerprint not found"));
+        repository.lockPrincipalForUpdate(credential.tenantId(), credential.agentId());
         Instant now = Instant.now();
         repository.updateCredentialStatus(
                 credential.credentialId(), AgentCredentialStatus.REVOKED, now, now);
@@ -216,6 +221,7 @@ public class AgentControlService {
     @Transactional("transactionManager")
     public AgentPrincipal revokeAgent(String agentId) {
         AgentPrincipal principal = requirePrincipal(agentId);
+        repository.lockPrincipalForUpdate(principal.tenantId(), principal.agentId());
         Instant now = Instant.now();
         repository.updatePrincipalStatus(principal.agentId(), AgentLifecycleStatus.REVOKED, now);
         List<AgentCertificateCredential> active =
