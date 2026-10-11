@@ -83,8 +83,9 @@ public class SensorControlService {
     public SensorCertificateCredential bindCertificate(String sensorId, X509Certificate certificate) {
         Objects.requireNonNull(certificate, "certificate");
         SensorPrincipal principal = requirePrincipal(sensorId);
-        // Serialize with rotate/revoke on the same principal (deliberate multi-ACTIVE overlap remains allowed).
-        repository.lockPrincipalForUpdate(principal.tenantId(), principal.sensorId());
+        // Serialize with rotate/revoke/disable; re-read lifecycle under the principal row lock.
+        principal = requireActivePrincipalForCredentialIssuance(
+                repository.lockPrincipalForUpdate(principal.tenantId(), principal.sensorId()));
         Instant now = Instant.now();
         Instant notBefore = certificate.getNotBefore().toInstant();
         Instant notAfter = certificate.getNotAfter().toInstant();
@@ -134,7 +135,8 @@ public class SensorControlService {
         Objects.requireNonNull(issuerDn, "issuerDn");
         Objects.requireNonNull(notBefore, "notBefore");
         Objects.requireNonNull(notAfter, "notAfter");
-        repository.lockPrincipalForUpdate(principal.tenantId(), principal.sensorId());
+        principal = requireActivePrincipalForCredentialIssuance(
+                repository.lockPrincipalForUpdate(principal.tenantId(), principal.sensorId()));
         if (!fingerprintSha256.matches("^[a-f0-9]{64}$")) {
             throw new SensorControlException(SensorControlException.ERR_SENSOR_CREDENTIAL_INVALID,
                     "fingerprint must be lowercase hex SHA-256");
@@ -176,8 +178,9 @@ public class SensorControlService {
     public SensorCertificateCredential rotateCertificate(String sensorId, X509Certificate newCertificate) {
         SensorPrincipal principal = requirePrincipal(sensorId);
         Objects.requireNonNull(newCertificate, "newCertificate");
-        // Serialize credential mutations for this principal before reading ACTIVE set.
-        repository.lockPrincipalForUpdate(principal.tenantId(), principal.sensorId());
+        // Serialize credential mutations; re-read lifecycle under the principal row lock.
+        principal = requireActivePrincipalForCredentialIssuance(
+                repository.lockPrincipalForUpdate(principal.tenantId(), principal.sensorId()));
         Instant now = Instant.now();
         Instant notBefore = newCertificate.getNotBefore().toInstant();
         Instant notAfter = newCertificate.getNotAfter().toInstant();
@@ -245,6 +248,8 @@ public class SensorControlService {
     @Transactional("transactionManager")
     public SensorPrincipal disableSensor(String sensorId) {
         SensorPrincipal principal = requirePrincipal(sensorId);
+        // Same principal lock order as bind/rotate/revoke so disable cannot race past credential issuance.
+        principal = repository.lockPrincipalForUpdate(principal.tenantId(), principal.sensorId());
         Instant now = Instant.now();
         repository.updatePrincipalStatus(principal.sensorId(), SensorLifecycleStatus.DISABLED, now);
         auditEmitter.emitControlEvent(
@@ -261,7 +266,7 @@ public class SensorControlService {
     @Transactional("transactionManager")
     public SensorPrincipal revokeSensor(String sensorId) {
         SensorPrincipal principal = requirePrincipal(sensorId);
-        repository.lockPrincipalForUpdate(principal.tenantId(), principal.sensorId());
+        principal = repository.lockPrincipalForUpdate(principal.tenantId(), principal.sensorId());
         Instant now = Instant.now();
         repository.updatePrincipalStatus(principal.sensorId(), SensorLifecycleStatus.REVOKED, now);
         List<SensorCertificateCredential> active =
@@ -322,6 +327,18 @@ public class SensorControlService {
         return repository.findPrincipalById(requireSensorId(sensorId))
                 .orElseThrow(() -> new SensorControlException(
                         SensorControlException.ERR_SENSOR_NOT_FOUND, "Sensor not found"));
+    }
+
+    /**
+     * Credential bind/rotate may issue ACTIVE credentials only for ACTIVE principals.
+     * Must be evaluated on the principal row read under {@code FOR UPDATE}.
+     */
+    private static SensorPrincipal requireActivePrincipalForCredentialIssuance(SensorPrincipal principal) {
+        if (principal.status() != SensorLifecycleStatus.ACTIVE) {
+            throw new SensorControlException(SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Sensor is not ACTIVE");
+        }
+        return principal;
     }
 
     private static SensorCertificateCredential buildCredential(

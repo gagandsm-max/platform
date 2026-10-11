@@ -164,20 +164,22 @@ public class SensorControlRepository {
 
     /**
      * Row-lock the sensor principal so credential rotate/revoke/bind serialize per principal.
+     * Returns the locked row so callers can re-evaluate lifecycle state after acquiring the lock.
      */
-    public void lockPrincipalForUpdate(UUID tenantId, String sensorId) {
-        List<String> rows = jdbc.query("""
-                SELECT sensor_id FROM platform.sensor
+    public SensorPrincipal lockPrincipalForUpdate(UUID tenantId, String sensorId) {
+        List<SensorPrincipal> rows = jdbc.query("""
+                SELECT * FROM platform.sensor
                  WHERE tenant_id = :tenantId AND sensor_id = :sensorId
                  FOR UPDATE
                 """,
                 new MapSqlParameterSource()
                         .addValue("tenantId", tenantId)
                         .addValue("sensorId", sensorId),
-                (rs, rowNum) -> rs.getString("sensor_id"));
+                PRINCIPAL_MAPPER);
         if (rows.isEmpty()) {
             throw new SensorControlException(SensorControlException.ERR_SENSOR_NOT_FOUND, "Sensor not found");
         }
+        return rows.get(0);
     }
 
     public void updateCredentialStatus(

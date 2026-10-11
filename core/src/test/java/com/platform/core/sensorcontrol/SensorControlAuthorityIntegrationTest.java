@@ -40,7 +40,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -501,6 +503,179 @@ class SensorControlAuthorityIntegrationTest {
         assertEquals(SensorCredentialStatus.ACTIVE, active.get(0).status());
     }
 
+    @Test
+    void rotateAndBindAfterPrincipalRevokeOrDisable_denied() throws Exception {
+        Tenant tenant = tenantService.create("Sensor Lifecycle Deny Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+
+        sensorControl.enrollSensor("sensor-lc-rev", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        sensorControl.bindCertificate("sensor-lc-rev",
+                mockCert(new byte[]{11, 11, 1}, "a101", notBefore, notAfter));
+        sensorControl.revokeSensor("sensor-lc-rev");
+        SensorControlException rotateRevoked = assertThrows(SensorControlException.class,
+                () -> sensorControl.rotateCertificate("sensor-lc-rev",
+                        mockCert(new byte[]{11, 11, 2}, "a102", notBefore, notAfter)));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, rotateRevoked.getCode());
+        SensorControlException bindRevoked = assertThrows(SensorControlException.class,
+                () -> sensorControl.bindCertificate("sensor-lc-rev",
+                        mockCert(new byte[]{11, 11, 3}, "a103", notBefore, notAfter)));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, bindRevoked.getCode());
+        String metaFp = CertificateFingerprints.sha256Hex(new byte[]{11, 11, 4});
+        SensorControlException metaRevoked = assertThrows(SensorControlException.class,
+                () -> sensorControl.bindCertificateFromMetadata(
+                        "sensor-lc-rev", metaFp, null, "a104", "CN=CA", null, notBefore, notAfter));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, metaRevoked.getCode());
+        assertTrue(sensorRepo.listActiveCredentialsForSensor(tenant.tenantId(), "sensor-lc-rev").isEmpty());
+
+        sensorControl.enrollSensor("sensor-lc-dis", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        sensorControl.bindCertificate("sensor-lc-dis",
+                mockCert(new byte[]{12, 12, 1}, "a111", notBefore, notAfter));
+        sensorControl.disableSensor("sensor-lc-dis");
+        SensorControlException rotateDisabled = assertThrows(SensorControlException.class,
+                () -> sensorControl.rotateCertificate("sensor-lc-dis",
+                        mockCert(new byte[]{12, 12, 2}, "a112", notBefore, notAfter)));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, rotateDisabled.getCode());
+        SensorControlException bindDisabled = assertThrows(SensorControlException.class,
+                () -> sensorControl.bindCertificate("sensor-lc-dis",
+                        mockCert(new byte[]{12, 12, 3}, "a113", notBefore, notAfter)));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, bindDisabled.getCode());
+        String metaDisFp = CertificateFingerprints.sha256Hex(new byte[]{12, 12, 4});
+        SensorControlException metaDisabled = assertThrows(SensorControlException.class,
+                () -> sensorControl.bindCertificateFromMetadata(
+                        "sensor-lc-dis", metaDisFp, null, "a114", "CN=CA", null, notBefore, notAfter));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, metaDisabled.getCode());
+        assertEquals(1, sensorRepo.listActiveCredentialsForSensor(tenant.tenantId(), "sensor-lc-dis").size());
+    }
+
+    @Test
+    void deliberateCertificateOverlapRemainsValidForActivePrincipal() throws Exception {
+        Tenant tenant = tenantService.create("Sensor Overlap Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-overlap", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        sensorControl.bindCertificate("sensor-overlap",
+                mockCert(new byte[]{13, 13, 1}, "a201", notBefore, notAfter));
+        sensorControl.bindCertificate("sensor-overlap",
+                mockCert(new byte[]{13, 13, 2}, "a202", notBefore, notAfter));
+        assertEquals(2, sensorRepo.listActiveCredentialsForSensor(tenant.tenantId(), "sensor-overlap").size());
+        assertEquals(SensorLifecycleStatus.ACTIVE,
+                sensorRepo.findPrincipalById("sensor-overlap").orElseThrow().status());
+    }
+
+    @Test
+    void revokeRacingWithRotate_cannotLeaveActiveCredentialForRevokedPrincipal() throws Exception {
+        Tenant tenant = tenantService.create("Sensor Rot Principal Revoke Race", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-race-rev", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        sensorControl.bindCertificate("sensor-race-rev",
+                mockCert(new byte[]{14, 14, 1}, "a301", notBefore, notAfter));
+        X509Certificate newCert = mockCert(new byte[]{14, 14, 2}, "a302", notBefore, notAfter);
+
+        CountDownLatch rotateReachedLock = new CountDownLatch(1);
+        CountDownLatch allowRotateLock = new CountDownLatch(1);
+        AtomicReference<Throwable> rotateFailure = new AtomicReference<>();
+
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+            ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+            ctx.register(PersistenceConfig.class);
+            ctx.registerBean(SensorControlRepository.class,
+                    () -> new GatedLockSensorControlRepository(pg.namedJdbc(), rotateReachedLock, allowRotateLock));
+            ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+            ctx.register(SensorControlService.class);
+            ctx.refresh();
+
+            SensorControlService txService = ctx.getBean(SensorControlService.class);
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> rotate = pool.submit(() -> {
+                    try {
+                        txService.rotateCertificate("sensor-race-rev", newCert);
+                    } catch (Throwable t) {
+                        rotateFailure.set(t);
+                    }
+                    return null;
+                });
+                assertTrue(rotateReachedLock.await(10, TimeUnit.SECONDS));
+                sensorControl.revokeSensor("sensor-race-rev");
+                allowRotateLock.countDown();
+                rotate.get(30, TimeUnit.SECONDS);
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        Throwable failure = rotateFailure.get();
+        assertTrue(failure instanceof SensorControlException);
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID,
+                ((SensorControlException) failure).getCode());
+        assertEquals(SensorLifecycleStatus.REVOKED,
+                sensorRepo.findPrincipalById("sensor-race-rev").orElseThrow().status());
+        assertTrue(sensorRepo.listActiveCredentialsForSensor(tenant.tenantId(), "sensor-race-rev").isEmpty());
+        assertTrue(sensorRepo.findCredentialByFingerprint(CertificateFingerprints.sha256DerHex(newCert)).isEmpty());
+    }
+
+    @Test
+    void disableRacingWithRotate_cannotCreateActiveCredentialAfterDisable() throws Exception {
+        Tenant tenant = tenantService.create("Sensor Rot Principal Disable Race", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-race-dis", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        X509Certificate oldCert = mockCert(new byte[]{15, 15, 1}, "a401", notBefore, notAfter);
+        String oldFp = CertificateFingerprints.sha256DerHex(oldCert);
+        sensorControl.bindCertificate("sensor-race-dis", oldCert);
+        X509Certificate newCert = mockCert(new byte[]{15, 15, 2}, "a402", notBefore, notAfter);
+        String newFp = CertificateFingerprints.sha256DerHex(newCert);
+
+        CountDownLatch rotateReachedLock = new CountDownLatch(1);
+        CountDownLatch allowRotateLock = new CountDownLatch(1);
+        AtomicReference<Throwable> rotateFailure = new AtomicReference<>();
+
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+            ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+            ctx.register(PersistenceConfig.class);
+            ctx.registerBean(SensorControlRepository.class,
+                    () -> new GatedLockSensorControlRepository(pg.namedJdbc(), rotateReachedLock, allowRotateLock));
+            ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+            ctx.register(SensorControlService.class);
+            ctx.refresh();
+
+            SensorControlService txService = ctx.getBean(SensorControlService.class);
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> rotate = pool.submit(() -> {
+                    try {
+                        txService.rotateCertificate("sensor-race-dis", newCert);
+                    } catch (Throwable t) {
+                        rotateFailure.set(t);
+                    }
+                    return null;
+                });
+                assertTrue(rotateReachedLock.await(10, TimeUnit.SECONDS));
+                sensorControl.disableSensor("sensor-race-dis");
+                allowRotateLock.countDown();
+                rotate.get(30, TimeUnit.SECONDS);
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        Throwable failure = rotateFailure.get();
+        assertTrue(failure instanceof SensorControlException);
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID,
+                ((SensorControlException) failure).getCode());
+        assertEquals(SensorLifecycleStatus.DISABLED,
+                sensorRepo.findPrincipalById("sensor-race-dis").orElseThrow().status());
+        List<SensorCertificateCredential> active =
+                sensorRepo.listActiveCredentialsForSensor(tenant.tenantId(), "sensor-race-dis");
+        assertEquals(1, active.size());
+        assertEquals(oldFp, active.get(0).fingerprintSha256());
+        assertTrue(sensorRepo.findCredentialByFingerprint(newFp).isEmpty());
+    }
+
     public static class FailingInsertSensorControlRepository extends SensorControlRepository {
         public FailingInsertSensorControlRepository(NamedParameterJdbcTemplate jdbc) {
             super(jdbc);
@@ -509,6 +684,38 @@ class SensorControlAuthorityIntegrationTest {
         @Override
         public void insertCredential(SensorCertificateCredential credential) {
             throw new IllegalStateException("forced insert failure for rotation rollback test");
+        }
+    }
+
+    public static class GatedLockSensorControlRepository extends SensorControlRepository {
+        private final CountDownLatch reachedLock;
+        private final CountDownLatch allowLock;
+        private final AtomicInteger gateUses = new AtomicInteger();
+
+        public GatedLockSensorControlRepository(
+                NamedParameterJdbcTemplate jdbc,
+                CountDownLatch reachedLock,
+                CountDownLatch allowLock
+        ) {
+            super(jdbc);
+            this.reachedLock = reachedLock;
+            this.allowLock = allowLock;
+        }
+
+        @Override
+        public SensorPrincipal lockPrincipalForUpdate(UUID tenantId, String sensorId) {
+            if (gateUses.getAndIncrement() == 0) {
+                reachedLock.countDown();
+                try {
+                    if (!allowLock.await(30, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting for lock gate release");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("interrupted waiting for lock gate release", e);
+                }
+            }
+            return super.lockPrincipalForUpdate(tenantId, sensorId);
         }
     }
 

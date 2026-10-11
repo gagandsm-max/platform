@@ -884,6 +884,176 @@ class AgentControlAuthorityIntegrationTest {
                 agentRepo.findCredentialByFingerprint(oldFp).orElseThrow().status());
     }
 
+    @Test
+    void rotateAndBindAfterPrincipalRevokeOrDisable_denied() throws Exception {
+        Tenant tenant = tenantService.create("Lifecycle Deny Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+
+        agentControl.enrollAgent("agent-lc-rev", tenant.tenantId(), null);
+        agentControl.bindCertificate("agent-lc-rev",
+                mockCert(new byte[]{1, 1, 1}, "f101", notBefore, notAfter));
+        agentControl.revokeAgent("agent-lc-rev");
+        AgentControlException rotateRevoked = assertThrows(AgentControlException.class,
+                () -> agentControl.rotateCertificate("agent-lc-rev",
+                        mockCert(new byte[]{1, 1, 2}, "f102", notBefore, notAfter)));
+        assertEquals(AgentControlException.ERR_AGENT_STATE_INVALID, rotateRevoked.getCode());
+        AgentControlException bindRevoked = assertThrows(AgentControlException.class,
+                () -> agentControl.bindCertificate("agent-lc-rev",
+                        mockCert(new byte[]{1, 1, 3}, "f103", notBefore, notAfter)));
+        assertEquals(AgentControlException.ERR_AGENT_STATE_INVALID, bindRevoked.getCode());
+        assertTrue(agentRepo.listActiveCredentialsForAgent(tenant.tenantId(), "agent-lc-rev").isEmpty());
+
+        agentControl.enrollAgent("agent-lc-dis", tenant.tenantId(), null);
+        agentControl.bindCertificate("agent-lc-dis",
+                mockCert(new byte[]{2, 2, 1}, "f111", notBefore, notAfter));
+        agentControl.disableAgent("agent-lc-dis");
+        AgentControlException rotateDisabled = assertThrows(AgentControlException.class,
+                () -> agentControl.rotateCertificate("agent-lc-dis",
+                        mockCert(new byte[]{2, 2, 2}, "f112", notBefore, notAfter)));
+        assertEquals(AgentControlException.ERR_AGENT_STATE_INVALID, rotateDisabled.getCode());
+        AgentControlException bindDisabled = assertThrows(AgentControlException.class,
+                () -> agentControl.bindCertificate("agent-lc-dis",
+                        mockCert(new byte[]{2, 2, 3}, "f113", notBefore, notAfter)));
+        assertEquals(AgentControlException.ERR_AGENT_STATE_INVALID, bindDisabled.getCode());
+        assertEquals(1, agentRepo.listActiveCredentialsForAgent(tenant.tenantId(), "agent-lc-dis").size());
+    }
+
+    @Test
+    void deliberateCertificateOverlapRemainsValidForActivePrincipal() throws Exception {
+        Tenant tenant = tenantService.create("Overlap Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        agentControl.enrollAgent("agent-overlap", tenant.tenantId(), null);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        X509Certificate certA = mockCert(new byte[]{9, 9, 1}, "f201", notBefore, notAfter);
+        X509Certificate certB = mockCert(new byte[]{9, 9, 2}, "f202", notBefore, notAfter);
+        agentControl.bindCertificate("agent-overlap", certA);
+        agentControl.bindCertificate("agent-overlap", certB);
+        List<AgentCertificateCredential> active =
+                agentRepo.listActiveCredentialsForAgent(tenant.tenantId(), "agent-overlap");
+        assertEquals(2, active.size());
+        assertEquals(AgentLifecycleStatus.ACTIVE,
+                agentRepo.findPrincipalById("agent-overlap").orElseThrow().status());
+    }
+
+    @Test
+    void revokeRacingWithRotate_cannotLeaveActiveCredentialForRevokedPrincipal() throws Exception {
+        Tenant tenant = tenantService.create("Rot Principal Revoke Race", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        agentControl.enrollAgent("agent-race-rev", tenant.tenantId(), null);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        agentControl.bindCertificate("agent-race-rev",
+                mockCert(new byte[]{3, 3, 1}, "f301", notBefore, notAfter));
+        X509Certificate newCert = mockCert(new byte[]{3, 3, 2}, "f302", notBefore, notAfter);
+
+        CountDownLatch rotateReachedLock = new CountDownLatch(1);
+        CountDownLatch allowRotateLock = new CountDownLatch(1);
+        AtomicReference<Throwable> rotateFailure = new AtomicReference<>();
+
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+            ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+            ctx.register(PersistenceConfig.class);
+            ctx.registerBean(AgentControlRepository.class,
+                    () -> new GatedLockAgentControlRepository(pg.namedJdbc(), rotateReachedLock, allowRotateLock));
+            ctx.registerBean(SensorControlRepository.class, () -> sensorRepo);
+            ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+            ctx.registerBean(AssignmentMetrics.class, AssignmentMetrics::new);
+            ctx.register(AgentControlService.class);
+            ctx.refresh();
+
+            AgentControlService txService = ctx.getBean(AgentControlService.class);
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> rotate = pool.submit(() -> {
+                    try {
+                        txService.rotateCertificate("agent-race-rev", newCert);
+                    } catch (Throwable t) {
+                        rotateFailure.set(t);
+                    }
+                    return null;
+                });
+                assertTrue(rotateReachedLock.await(10, TimeUnit.SECONDS));
+                // Principal was read as ACTIVE before lock; revoke commits first.
+                agentControl.revokeAgent("agent-race-rev");
+                allowRotateLock.countDown();
+                rotate.get(30, TimeUnit.SECONDS);
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        Throwable failure = rotateFailure.get();
+        assertTrue(failure instanceof AgentControlException);
+        assertEquals(AgentControlException.ERR_AGENT_STATE_INVALID,
+                ((AgentControlException) failure).getCode());
+        assertEquals(AgentLifecycleStatus.REVOKED,
+                agentRepo.findPrincipalById("agent-race-rev").orElseThrow().status());
+        assertTrue(agentRepo.listActiveCredentialsForAgent(tenant.tenantId(), "agent-race-rev").isEmpty());
+        assertTrue(agentRepo.findCredentialByFingerprint(CertificateFingerprints.sha256DerHex(newCert)).isEmpty());
+    }
+
+    @Test
+    void disableRacingWithRotate_cannotCreateActiveCredentialAfterDisable() throws Exception {
+        Tenant tenant = tenantService.create("Rot Principal Disable Race", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        agentControl.enrollAgent("agent-race-dis", tenant.tenantId(), null);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        X509Certificate oldCert = mockCert(new byte[]{4, 4, 1}, "f401", notBefore, notAfter);
+        String oldFp = CertificateFingerprints.sha256DerHex(oldCert);
+        agentControl.bindCertificate("agent-race-dis", oldCert);
+        X509Certificate newCert = mockCert(new byte[]{4, 4, 2}, "f402", notBefore, notAfter);
+        String newFp = CertificateFingerprints.sha256DerHex(newCert);
+
+        CountDownLatch rotateReachedLock = new CountDownLatch(1);
+        CountDownLatch allowRotateLock = new CountDownLatch(1);
+        AtomicReference<Throwable> rotateFailure = new AtomicReference<>();
+
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+            ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+            ctx.register(PersistenceConfig.class);
+            ctx.registerBean(AgentControlRepository.class,
+                    () -> new GatedLockAgentControlRepository(pg.namedJdbc(), rotateReachedLock, allowRotateLock));
+            ctx.registerBean(SensorControlRepository.class, () -> sensorRepo);
+            ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+            ctx.registerBean(AssignmentMetrics.class, AssignmentMetrics::new);
+            ctx.register(AgentControlService.class);
+            ctx.refresh();
+
+            AgentControlService txService = ctx.getBean(AgentControlService.class);
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> rotate = pool.submit(() -> {
+                    try {
+                        txService.rotateCertificate("agent-race-dis", newCert);
+                    } catch (Throwable t) {
+                        rotateFailure.set(t);
+                    }
+                    return null;
+                });
+                assertTrue(rotateReachedLock.await(10, TimeUnit.SECONDS));
+                agentControl.disableAgent("agent-race-dis");
+                allowRotateLock.countDown();
+                rotate.get(30, TimeUnit.SECONDS);
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        Throwable failure = rotateFailure.get();
+        assertTrue(failure instanceof AgentControlException);
+        assertEquals(AgentControlException.ERR_AGENT_STATE_INVALID,
+                ((AgentControlException) failure).getCode());
+        assertEquals(AgentLifecycleStatus.DISABLED,
+                agentRepo.findPrincipalById("agent-race-dis").orElseThrow().status());
+        List<AgentCertificateCredential> active =
+                agentRepo.listActiveCredentialsForAgent(tenant.tenantId(), "agent-race-dis");
+        assertEquals(1, active.size());
+        assertEquals(oldFp, active.get(0).fingerprintSha256());
+        assertTrue(agentRepo.findCredentialByFingerprint(newFp).isEmpty());
+    }
+
     /**
      * Repository stub that performs real supersede updates then fails insert — proves @Transactional rollback.
      */
@@ -895,6 +1065,42 @@ class AgentControlAuthorityIntegrationTest {
         @Override
         public void insertCredential(AgentCertificateCredential credential) {
             throw new IllegalStateException("forced insert failure for rotation rollback test");
+        }
+    }
+
+    /**
+     * Gates the first principal lock so a concurrent revoke/disable can commit after the
+     * pre-lock principal read and before lock acquisition — deterministic race ordering.
+     */
+    public static class GatedLockAgentControlRepository extends AgentControlRepository {
+        private final CountDownLatch reachedLock;
+        private final CountDownLatch allowLock;
+        private final AtomicInteger gateUses = new AtomicInteger();
+
+        public GatedLockAgentControlRepository(
+                NamedParameterJdbcTemplate jdbc,
+                CountDownLatch reachedLock,
+                CountDownLatch allowLock
+        ) {
+            super(jdbc);
+            this.reachedLock = reachedLock;
+            this.allowLock = allowLock;
+        }
+
+        @Override
+        public AgentPrincipal lockPrincipalForUpdate(UUID tenantId, String agentId) {
+            if (gateUses.getAndIncrement() == 0) {
+                reachedLock.countDown();
+                try {
+                    if (!allowLock.await(30, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting for lock gate release");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("interrupted waiting for lock gate release", e);
+                }
+            }
+            return super.lockPrincipalForUpdate(tenantId, agentId);
         }
     }
 
