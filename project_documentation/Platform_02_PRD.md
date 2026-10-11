@@ -2275,7 +2275,7 @@ A separate Heavy Network Workload profile shall benchmark high-interface/high-fr
 **SNWP status:** SNWP-2500-v1 is a **TARGET/PROFILE** for capacity engineering. Documentation of SNWP does not constitute BENCHMARKED or CERTIFIED capacity claims.
 
 ## 42. Product acceptance criteria
-Before an initial enterprise release can be signed off, engineering/QA shall prove at minimum:
+Acceptance criteria apply to the selected certification envelope. Before an initial enterprise release for that envelope can be signed off, engineering/QA shall prove at minimum:
 
 - installation/upgrade/rollback and separate Core/Sensor/Agent builds;
 - UI-driven provisioning for single, bulk and discovery;
@@ -2293,12 +2293,15 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 - NCM/IPAM/CLI governance;
 - dashboards/studios/admin/RBAC/audit;
 - retention/rollups and 80% storage protection on Core and Sensor;
-- Phase 1.5 HA profile: Core HA failover <60s with Sensor continuity;
 - Phase 1 standalone: DR architecture/runbook and backup/restore (including site-loss DR) verification;
 - HTTPS-only UI;
 - SBOM/licence/security scans;
 - certified resource/performance tests under SNWP-2500-v1 and OBS-P1 enrichment overlay;
 - Unified Network & Infrastructure Observability certification profile (NIOCP-P1-v1 defined in Platform_14 §11; future certification profile, NOT YET CERTIFIED until applicable evidence exists).
+
+Phase 1 standalone certification is not gated by Core HA failover. When the Phase 1.5 HA certification envelope is selected, engineering/QA shall additionally prove:
+
+- Phase 1.5 HA profile: Core HA failover <60s with Sensor continuity.
 
 ---
 
