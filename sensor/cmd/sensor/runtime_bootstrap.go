@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	icmpintegration "platform/sensor/internal/integration/icmp"
+	protocolicmp "platform/sensor/internal/protocol/icmp"
+	"time"
 
 	"platform/sensor/internal/config"
 	snmpintegration "platform/sensor/internal/integration/snmp"
@@ -22,11 +25,52 @@ type snmpBootstrap struct {
 	Scheduler *scheduler.Scheduler
 	registry  *sensorruntime.ExecutorRegistry
 	SNMP      *snmpintegration.Component
+	ICMP      *icmpintegration.Component
 }
 
-// newSNMPBootstrap is source-complete but intentionally not activated in main:
-// the default SNMP+ICMP configuration fails Runtime.Start without real ICMP
-// integration. All requested capabilities are retained for fail-closed validation.
+// startProductionBootstrap activates the integrated runtime only for NETWORK.
+// Other roles retain their existing composition and single scheduler until their
+// real runtime components are integrated. A nil Runtime is never a ready claim.
+func startProductionBootstrap(ctx context.Context, cfg config.RuntimeConfig, sink observation.Sink, logger *slog.Logger) (*snmpBootstrap, error) {
+	if err := sensorruntime.ValidateCapabilities(cfg.Role, cfg.EnabledCapabilities); err != nil {
+		return nil, err
+	}
+	if cfg.Role != sensorruntime.RoleNetwork {
+		registry := sensorruntime.NewExecutorRegistry()
+		sched, err := newProductionScheduler(cfg, registry, logger)
+		if err != nil {
+			return nil, err
+		}
+		logger.Warn("Sensor retains legacy operational composition; runtime integration is NETWORK-only",
+			"event_code", "SENSOR_RUNTIME_ROLE_NOT_INTEGRATED",
+			"safe_context", map[string]any{"sensor_role": string(cfg.Role), "runtime_activated": false, "reason_class": "interim_role_compatibility"})
+		return &snmpBootstrap{Scheduler: sched, registry: registry}, nil
+	}
+	b, err := newSNMPBootstrap(cfg, sink, logger)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.Runtime.Start(ctx); err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Scheduler.ShutdownGracePeriod)
+		defer cancel()
+		return nil, errors.Join(err, b.shutdown(shutdownCtx))
+	}
+	logger.Info("NETWORK Sensor runtime activated",
+		"event_code", "SENSOR_RUNTIME_STARTED",
+		"safe_context", map[string]any{"sensor_role": string(cfg.Role), "runtime_activated": true})
+	return b, nil
+}
+
+func (b *snmpBootstrap) shutdown(ctx context.Context) error {
+	if b.Runtime != nil {
+		return b.Runtime.Shutdown(ctx)
+	}
+	return b.Scheduler.Shutdown(ctx)
+}
+
+// newSNMPBootstrap registers real SNMP and ICMP implementations. All requested
+// capabilities are retained for runtime fail-closed validation; no recurring
+// work is admitted by bootstrap (BUILD-021 owns admission).
 func newSNMPBootstrap(cfg config.RuntimeConfig, sink observation.Sink, logger *slog.Logger) (*snmpBootstrap, error) {
 	if sink == nil {
 		return nil, fmt.Errorf("SNMP_INTEGRATION_INVALID_CONFIG: observation sink is required")
@@ -46,6 +90,21 @@ func newSNMPBootstrap(cfg config.RuntimeConfig, sink observation.Sink, logger *s
 	}
 	b := &snmpBootstrap{Runtime: rt, Scheduler: sched, registry: registry}
 	for _, capability := range cfg.EnabledCapabilities {
+		if capability == sensorruntime.CapabilityICMP {
+			collector, err := protocolicmp.NewCollector(protocolicmp.Limits{MaxSamples: 8, MaxPayloadBytes: 128, MaxExecutionTimeout: 10 * time.Second, MaxReplyPacketsPerSample: 32, MaxSchedulerPayloadBytes: cfg.Scheduler.MaxPayloadBytes})
+			if err != nil {
+				return nil, errors.Join(err, rt.Shutdown(context.Background()))
+			}
+			exec, err := icmpintegration.NewExecutor(protocolicmp.NewExecutor(collector), sink, icmpintegration.Config{SensorID: cfg.SensorID, MaxResultBytes: sink.MaxPayloadBytes(), MaxEnvelopeBytes: sink.MaxPayloadBytes(), MaxSamples: 8})
+			if err == nil {
+				err = icmpintegration.Register(rt, registry, exec)
+			}
+			if err != nil {
+				return nil, errors.Join(err, rt.Shutdown(context.Background()))
+			}
+			b.ICMP = exec.Component()
+			continue
+		}
 		if capability != sensorruntime.CapabilitySNMP {
 			continue
 		}

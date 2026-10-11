@@ -164,16 +164,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Activation of newSNMPBootstrap is blocked until every default enabled
-	// capability (including ICMP) has a real runtime integration. Keep the
-	// existing lifecycle here; do not filter capabilities to disguise that gap.
-	prodScheduler, err := newProductionScheduler(rt, sensorruntime.NewExecutorRegistry(), logger)
+	// NETWORK Runtime owns the single scheduler and real protocol routes.
+	// Other roles retain legacy composition; BUILD-021 owns recurring admission.
+	bootstrap, err := startProductionBootstrap(context.Background(), rt, sink, logger)
 	if err != nil {
-		logger.Error("Failed to initialize production scheduler",
-			"error_code", "SENSOR_SCHEDULER_INIT_FAILED",
-			"safe_context", map[string]any{"reason_class": "initialization_failed"})
+		logger.Error("Failed to start Sensor runtime", "error_code", "SENSOR_RUNTIME_START_FAILED", "safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(1)
 	}
+	prodScheduler := bootstrap.Scheduler
 
 	controlReconciler, err := control.NewReconciler(client, controlStore, rt, runtimeState, logger, controlMetrics)
 	if err != nil {
@@ -347,9 +345,11 @@ func main() {
 		}
 	}
 
-	if err := prodScheduler.Shutdown(context.Background()); err != nil {
-		logger.Warn("Production scheduler shutdown error",
-			"error_code", "SENSOR_SCHEDULER_SHUTDOWN_FAILED",
+	runtimeShutdownCtx, runtimeShutdownCancel := context.WithTimeout(context.Background(), rt.Scheduler.ShutdownGracePeriod)
+	defer runtimeShutdownCancel()
+	if err := bootstrap.shutdown(runtimeShutdownCtx); err != nil {
+		logger.Warn("Sensor runtime shutdown error",
+			"error_code", "SENSOR_RUNTIME_SHUTDOWN_FAILED",
 			"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 	}
 
