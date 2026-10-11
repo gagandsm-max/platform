@@ -427,6 +427,7 @@ func TestIsTerminalCoreError(t *testing.T) {
 		}
 	}
 	for _, code := range []string{
+		"ERR_NON_NUMERIC_RECORD",
 		"ERR_AGENT_ENTITY_UNRESOLVED",
 		"ERR_AGENT_ASSIGNMENT_UNKNOWN",
 		"ERR_AUTH_IDENTITY_MISMATCH",
@@ -458,6 +459,135 @@ func TestIsTerminalCoreError(t *testing.T) {
 	}
 	if isTerminalCoreError(errors.New("other")) {
 		t.Fatal("generic error must not be terminal")
+	}
+}
+
+// Hypothetical typed payloads only: these fixtures do not enable a typed producer.
+func appendCompatibilityPayload(t *testing.T, s *spool.DiskSpool, collection string) spool.Record {
+	t.Helper()
+	payload := durableBatchPayload{
+		TenantID: "018f0e0a-0000-7000-8000-000000000001", AgentID: "agent-1",
+		SensorID: "sensor-infra-01", Generation: 1, FirstSequence: 10, LastSequence: 10,
+		RecordIDs: []string{"r-10"}, BatchChecksum: "chk", BatchID: "ab-1", CorrelationID: "corr-1",
+		Timestamp: time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
+		Envelope:  json.RawMessage(`{"records":[{"sequence":10,"id":"r-10","checksum":"c1","payload":` + collection + `}]}`),
+	}
+	enc, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := s.Append(spool.AppendRequest{
+		Class: spool.ClassOperational, Type: agentBatchRecordType, Payload: enc, CreatedAt: payload.Timestamp,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+func TestDrainTypedCompatibilityRejectionDoesNotInventCoreAck(t *testing.T) {
+	const typed = `{"hostId":"h1","evidenceType":"ProcessNetworkEvidence","remoteIP":"192.0.2.10","remotePort":443,"protocol":"TCP","bytesTx":1024}`
+	const scalar = `{"hostId":"h1","observations":[{"metricKey":"cpu.util","value":42.5,"observedAt":"2026-09-11T10:00:00Z"}]}`
+	cases := []struct {
+		name     string
+		code     string
+		payloads []string
+		poison   bool
+	}{
+		{"typed_without_host", "ERR_AGENT_HOST_ID_REQUIRED", []string{`{"evidenceType":"ProcessNetworkEvidence","bytesTx":1024}`}, true},
+		{"typed_with_host", "ERR_NON_NUMERIC_RECORD", []string{typed}, false},
+		{"scalar_then_typed", "ERR_NON_NUMERIC_RECORD", []string{scalar, typed}, false},
+		{"typed_then_scalar", "ERR_NON_NUMERIC_RECORD", []string{typed, scalar}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, dir := openSpool(t)
+			var source []spool.Record
+			for _, payload := range tc.payloads {
+				source = append(source, appendCompatibilityPayload(t, s, payload))
+			}
+			// Core semantics are exercised by AgentIngestionValidatorTest; this seam
+			// exercises real HTTP-error classification and durable Sensor drain behavior.
+			tr := &fakeTransport{err: coreclient.ClassifyAgentTelemetryFailure(400,
+				[]byte(`{"status":"REJECTED","code":"`+tc.code+`","message":"unsupported typed evidence"}`))}
+			d, err := New(Config{
+				SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
+				MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+				RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
+				IdleInterval: time.Millisecond, ShutdownGrace: time.Second, JitterFraction: 0,
+			}, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ok, err := d.RunOnce(context.Background())
+			var drainErr *Error
+			if ok || !errors.As(err, &drainErr) || drainErr.Transient() || !coreclient.IsCoreAPICode(err, tc.code) {
+				t.Fatalf("expected classified non-transient rejection, ok=%v err=%v", ok, err)
+			}
+			if len(tr.last.Records) != len(source) {
+				t.Fatalf("forwarded records=%d want=%d", len(tr.last.Records), len(source))
+			}
+			for i, payload := range tc.payloads {
+				var deliveries []struct {
+					Payload json.RawMessage `json:"payload"`
+				}
+				if err := json.Unmarshal(tr.last.Records[i].Records, &deliveries); err != nil {
+					t.Fatal(err)
+				}
+				if len(deliveries) != 1 || string(deliveries[0].Payload) != payload {
+					t.Fatalf("Sensor must forward original payload without scalar conversion: %s", tr.last.Records[i].Records)
+				}
+			}
+			st, err := s.Stats()
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(filepath.Join(dir, poisonDirName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.poison {
+				if drainErr.Code != CodePoison || st.RecordCount != 0 || len(entries) != 1 || d.Metrics().PoisonCount.Load() != 1 {
+					t.Fatalf("host-id failure must park the head, stats=%+v entries=%v err=%v", st, entries, drainErr)
+				}
+				artifact, err := os.ReadFile(filepath.Join(dir, poisonDirName, entries[0].Name()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				parts := strings.SplitN(string(artifact), "\n", 2)
+				if len(parts) != 2 || !strings.Contains(parts[0], tc.code) || parts[1] != string(source[0].Payload) {
+					t.Fatalf("poison artifact must preserve reason and exact source payload: %s", artifact)
+				}
+			} else {
+				if drainErr.Code != CodeTransport || st.RecordCount != len(source) || len(entries) != 0 || d.Metrics().PoisonCount.Load() != 0 {
+					t.Fatalf("non-numeric rejection must retain hot spool without poison, stats=%+v entries=%v", st, entries)
+				}
+				frozen := tr.last
+				// A later scalar record cannot bypass the rejected frozen outbound window.
+				appendCompatibilityPayload(t, s, scalar)
+				ok, err = d.RunOnce(context.Background())
+				if ok || !coreclient.IsCoreAPICode(err, tc.code) || tr.last.BatchID != frozen.BatchID ||
+					tr.last.Checksum != frozen.Checksum || tr.last.LastIngressSequence != frozen.LastIngressSequence {
+					t.Fatalf("retry must retain identical rejected batch, ok=%v err=%v", ok, err)
+				}
+				retained, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+				if err != nil || len(retained.Records) != len(source) {
+					t.Fatalf("frozen records not retained: %+v err=%v", retained, err)
+				}
+				for i, rec := range retained.Records {
+					if rec.Sequence != source[i].Sequence || string(rec.Payload) != string(source[i].Payload) {
+						t.Fatal("retained payload/sequence changed")
+					}
+				}
+				st, err = s.Stats()
+				if err != nil || st.RecordCount != len(source)+1 || d.Metrics().FailuresPermanent.Load() != 2 {
+					t.Fatalf("scalar backlog must remain visible after repeated rejection: %+v err=%v", st, err)
+				}
+			}
+			if d.Metrics().Successes.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 || d.Metrics().LastSuccessUnix.Load() != 0 {
+				t.Fatal("unsupported typed rejection must never report successful Core ingestion")
+			}
+		})
 	}
 }
 
