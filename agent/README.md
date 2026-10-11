@@ -1,6 +1,6 @@
-# Platform Agent runtime
+# AmrudAi Agent runtime
 
-This directory contains the Linux-first Platform Agent runtime governed by Platform v3.3.0.
+This directory contains the Linux-first AmrudAi Agent runtime governed by Platform v3.3.0.
 
 ## Architecture boundary
 
@@ -31,11 +31,19 @@ Default registered collectors (`cpu`, `memory`, `filesystem`, `pressure`, `diski
 
 BUILD-011 Slice 3 adds a **local, unwired** Linux process/service source (`LinuxProcessServiceSource`) that reads bounded `/proc` identity/runtime facts and optional read-only systemd unit evidence. It reuses the Slice-1 selector/catalogue contracts, never registers as a `HostCollector`, never encodes the catalogue into scalar metric labels, and does not claim Agent→Sensor structured delivery (BUILD-016/062). Customer alert/policy evaluation remains BUILD-070.
 
-### Bounded Linux eBPF process-network (BUILD-011 Slice 7)
+### Bounded Linux eBPF process-network (BUILD-011 Slice 8)
 
-The **base Agent** (host collectors, durable queue, Sensor delivery, health) is independent of eBPF. Optional process-network enrichment is default-off (`PLATFORM_AGENT_EBPF_ENABLED=false`). When unsupported, privilege-denied, kernel-incompatible, or resource-guarded, the base Agent continues; eBPF never takes precedence over protected workloads.
+The **base AmrudAi Agent** (host collectors, durable queue, Sensor delivery, health) is independent of eBPF. Optional process-network enrichment is default-off (`PLATFORM_AGENT_EBPF_ENABLED=false`). When unsupported, privilege-denied, kernel-incompatible, or resource-guarded, the base Agent continues; eBPF never takes precedence over protected workloads.
 
-**Slice 7** implements the governed kernel backend under `agent/linux/ebpf/`. Intended data path:
+**Slice 8** wires the certified Linux eBPF `Backend` as an **optional subordinate runtime** of `AgentService`:
+
+1. Base lifecycle reaches `RUNNING` first (`health` → `worker` → `scheduler`).
+2. Exactly **one** asynchronous backend activation attempt begins after `RUNNING` (no retry daemon).
+3. Activation failure never calls `failStart`, never stops scheduler/delivery, and never makes `/ready` `NOT_READY`.
+4. `GET /capabilities/process-network-ebpf` reports **current** dynamic capability (`ACTIVE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `UNAVAILABLE`, `FEATURE_DISABLED`, `BACKEND_STOPPED`, …) plus bounded support counters when a runtime is present. Runtime-backed and static `FEATURE_DISABLED` configuration truth are current authority and are not age-staled to `EVIDENCE_STALE` merely because `ValidUntil` elapsed (no Slice-8 recheck daemon). Historical/preflight-only evidence without a runtime may still become `EVIDENCE_STALE`.
+5. Shutdown uses the **single** whole-service budget: cancel runtime → settle optional activation under a subordinate sub-deadline (half the whole budget) → when settled, `Backend.StopContext` with scheduler/worker → health last. If activation remains unsettled, skip unsafe backend stop, continue best-effort scheduler/worker/health teardown under the remaining whole-service deadline, and return a truthful joined `AGENT_SHUTDOWN_TIMEOUT` with lifecycle `FAILED`. Optional eBPF construction failure never terminates base Agent startup.
+
+Intended data path (when activated):
 
 1. Kernel classic tracepoint `sock/inet_sock_set_state` (primary, required for `ACTIVE`).
 2. Bounded in-kernel HASH connection state + ring buffer (+ discrete loss counters).
@@ -44,19 +52,15 @@ The **base Agent** (host collectors, durable queue, Sensor delivery, health) is 
 
 Optional probe `tcp/tcp_retransmit_skb` is independently degradable: primary can stay `ACTIVE` with reason `OPTIONAL_PROBE_UNAVAILABLE` if the retransmit program fails to load/attach.
 
-Observable loss classes (counted once, never invent “zero loss”): `MAP_UPDATE_FAIL`, `RING_RESERVE_FAIL`, `DECODER_REJECT`, `USERSPACE_CHANNEL_FULL`.
+Observable loss/support classes (counted once, never invent “zero loss”): `MAP_UPDATE_FAIL`, `RING_RESERVE_FAIL`, `DECODER_REJECT`, `USERSPACE_CHANNEL_FULL`, plus `TRANSPORT_NOT_WIRED`, reader/aggregator fault counts when exposed on the capability endpoint.
 
-Public capability states remain exactly: `ACTIVE`, `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`. Preflight uses fixed, bounded, read-only sources (`/proc/sys/kernel/osrelease`, `/proc/sys/kernel/random/boot_id`, `/proc/self/status`, optional `/proc/self/attr/current`, `/sys/kernel/btf/vmlinux` metadata/digest prefix). It parses `CapEff`/`CapPrm`/`CapBnd`/`CapAmb` for `CAP_BPF` and `CAP_PERFMON` only; UID/root is never capability evidence.
-
-**Slice-8 boundary:** production `AgentService` still runs preflight only at startup. Compatible preflight reports `UNAVAILABLE` with `BACKEND_NOT_WIRED` until Slice 8 wires `Backend.Start` after `RUNNING`. The backend package exposes `Start` / `StopContext` / `Capability` for that wiring; this slice does not claim live attach in the shipped Agent process path. Stale reason `BACKEND_NOT_IMPLEMENTED` is no longer the truthful compatible outcome.
-
-Capability evidence is at loopback `/capabilities/process-network-ebpf` (same health server; `/health` schema unchanged). eBPF never changes `/live`, `/ready`, scheduler, scalar collectors, durable queue/delivery, or host DOWN semantics. Collector/eBPF failure is monitoring-health/degraded or enrichment-quality evidence only.
+Public capability states remain exactly: `ACTIVE`, `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`. Positive reconciled kernel `MAP_UPDATE_FAIL` / `RING_RESERVE_FAIL` while `ACTIVE` latches `RESOURCE_GUARDED` (`RESOURCE_LIMIT`); this is enrichment capability evidence only — never host/service/network DOWN.
 
 **Security / data minimization:** least privilege is `CAP_BPF` + `CAP_PERFMON` (or target-kernel equivalent). Do not broaden to `--privileged`, `CAP_SYS_ADMIN`, `CAP_NET_ADMIN`, or `CAP_NET_RAW` for this feature. No payload, TLS contents, HTTP body, SQL text, env vars, or process cmdline. Comm is the bounded kernel `comm` only. Attach surface is classic tracepoints only — no XDP, tc, LSM, socket-filter, kprobe, or uprobe. Object load fail-closes on embedded-object admission/allowlists before kernel map/program creation; no arbitrary object path, no target-host BPF compilation, no bpffs pins.
 
-**Structured transport (still truthful):** default sink is `UnwiredStructuredEvidenceSink` with delivery state `TRANSPORT_NOT_WIRED` and `ErrStructuredTransportNotWired`. Physical Agent→Sensor structured delivery remains BUILD-016/062; Slice 7 does not claim that path.
+**Structured transport (still truthful):** default sink is `UnwiredStructuredEvidenceSink` with delivery state `TRANSPORT_NOT_WIRED` and `ErrStructuredTransportNotWired`. Physical Agent→Sensor structured delivery remains BUILD-016/062; Slice 8 does not claim that path. Production provenance for the eBPF aggregator is `agent.linux.process_network.ebpf` (evidence identity only — not tenant/entity authority).
 
-**Non-goals:** separate eBPF microservice or datastore; always-on DPI/PCAP; full APM; BUILD-018 packaging delivery; BUILD-019 Sensor spillover claims; RHEL/arm64/Secure Boot certification; physical structured-delivery certification.
+**Non-goals / deferred certifications:** separate eBPF microservice or datastore; always-on DPI/PCAP; full APM; BUILD-018 packaging delivery; BUILD-019 Sensor spillover claims; BUILD-130 capacity certification; RHEL/arm64/Secure Boot certification; physical structured-delivery certification.
 
 **OSS-124:** temporary `IN_REPO_GOVERNED_REPLACE` of `github.com/cilium/ebpf` under `agent/third_party/github.com/cilium/ebpf/` (see `agent/third_party/OSS-124-PROVENANCE.md`). Not a general third-party dumping mechanism.
 
@@ -113,8 +117,8 @@ Optional governed inputs:
 - `PLATFORM_AGENT_RETRY_BASE`
 - `PLATFORM_AGENT_RETRY_MAX`
 - `PLATFORM_AGENT_DELIVERY_TIMEOUT`
-- `PLATFORM_AGENT_EBPF_ENABLED` (default `false`; enables optional eBPF preflight/recheck evidence; production AgentService still does not Start the kernel backend until Slice 8)
-- `PLATFORM_AGENT_EBPF_PREFLIGHT_TIMEOUT` (default `2s`, bounded `100ms..10s`; bounds the one-shot startup preflight so stalled procfs/sysfs cannot hold base Agent start)
+- `PLATFORM_AGENT_EBPF_ENABLED` (default `false`; when true, Linux composition constructs the optional eBPF Backend and AgentService attempts one async activation after `RUNNING`)
+- `PLATFORM_AGENT_EBPF_PREFLIGHT_TIMEOUT` (default `2s`, bounded `100ms..10s`; bounds the one-shot startup preflight so stalled procfs/sysfs cannot hold optional enrichment activation unboundedly)
 - `PLATFORM_AGENT_EBPF_RECHECK_MIN` (default `5m`, bounded `1m..24h`)
 - `PLATFORM_AGENT_EBPF_RECHECK_MAX` (default `1h`, bounded `1m..24h` and not below the minimum)
 - `PLATFORM_LOG_LEVEL`
@@ -148,6 +152,7 @@ Loopback-only health endpoints use certified Slice-3 local-safety semantics:
   - `DEGRADED` / HTTP 200 / `ready=true` for Sensor/upstream or partial collector degradation while durable local buffering remains safe;
   - `NOT_READY` / HTTP 503 only for local unsafe/unexecutable state (examples: lifecycle failure, scheduler unavailable, zero enabled collectors, all enabled collectors blocked/outstanding, queue hard capacity/integrity block, `BLOCKED` or `OVERSIZED` delivery hold).
 - `/health` — same readiness decision as `/ready`, with `SUPPORT_EVIDENCE` detail.
+- `/capabilities/process-network-ebpf` — optional enrichment capability + bounded support counters; **never** a readiness hard-reason input.
 
 Constructing an mTLS client is not treated as Sensor reachability.
 

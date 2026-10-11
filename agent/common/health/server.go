@@ -44,6 +44,7 @@ type RuntimeSnapshot struct {
 	CollectorLastRun         time.Time
 	CollectorRunErrors       int // cumulative historical counter; not a hard readiness input
 	ProcessNetworkCapability collector.ProcessNetworkCapabilitySnapshot
+	ProcessNetworkSupport    collector.ProcessNetworkSupportSnapshot
 }
 
 // StatsProvider supplies one atomic-enough runtime snapshot for health decisions.
@@ -255,7 +256,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 // the loopback-only health server without extending the SUPPORT_EVIDENCE schema
 // or making the capability an Agent readiness dependency.
 func (s *Server) handleProcessNetworkCapability(w http.ResponseWriter, _ *http.Request) {
-	snap := s.snapshot().ProcessNetworkCapability
+	runtime := s.snapshot()
+	snap := runtime.ProcessNetworkCapability
 	if !snap.Available() {
 		now := time.Now().UTC()
 		snap = collector.ProcessNetworkCapabilitySnapshot{
@@ -268,7 +270,7 @@ func (s *Server) handleProcessNetworkCapability(w http.ResponseWriter, _ *http.R
 			SourceQuality: "UNAVAILABLE",
 		}
 	}
-	body := processNetworkCapabilityEvidence(snap)
+	body := processNetworkCapabilityEvidence(snap, runtime.ProcessNetworkSupport)
 	body["document_type"] = "CAPABILITY_EVIDENCE"
 	body["component"] = componentName
 	body["capability"] = "process_network_ebpf"
@@ -276,13 +278,13 @@ func (s *Server) handleProcessNetworkCapability(w http.ResponseWriter, _ *http.R
 	writeJSON(w, http.StatusOK, body)
 }
 
-func processNetworkCapabilityEvidence(s collector.ProcessNetworkCapabilitySnapshot) map[string]any {
+func processNetworkCapabilityEvidence(s collector.ProcessNetworkCapabilitySnapshot, support collector.ProcessNetworkSupportSnapshot) map[string]any {
 	s = s.Fresh(time.Now())
 	reasons := make([]string, len(s.ReasonCodes))
 	for i := range s.ReasonCodes {
 		reasons[i] = string(s.ReasonCodes[i])
 	}
-	return map[string]any{
+	body := map[string]any{
 		"state":              string(s.State),
 		"reason_codes":       reasons,
 		"observed_at":        supportTime(s.ObservedAt),
@@ -309,6 +311,20 @@ func processNetworkCapabilityEvidence(s collector.ProcessNetworkCapabilitySnapsh
 		"resource_guard":     s.Resource,
 		"source_quality":     s.SourceQuality,
 	}
+	if support.Present {
+		// Bounded typed counters only — no payload, cmdline, env, or verifier dump.
+		body["support_counters"] = map[string]any{
+			"MAP_UPDATE_FAIL":         support.MapUpdateFail,
+			"RING_RESERVE_FAIL":       support.RingReserveFail,
+			"DECODER_REJECT":          support.DecoderReject,
+			"USERSPACE_CHANNEL_FULL":  support.UserspaceChannelFull,
+			"TRANSPORT_NOT_WIRED":     support.TransportNotWired,
+			"aggregator_faults":       support.AggregatorFaults,
+			"reader_faults":           support.ReaderFaults,
+			"optional_probe_attached": support.OptionalProbeAttached,
+		}
+	}
+	return body
 }
 
 func supportTime(value time.Time) string {

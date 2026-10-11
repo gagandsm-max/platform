@@ -12,7 +12,6 @@ import (
 	"platform/agent/common/config"
 	"platform/agent/common/identity"
 	"platform/agent/common/supportability"
-	"platform/agent/linux/ebpf"
 )
 
 const (
@@ -55,7 +54,7 @@ func main() {
 	}
 	slog.SetDefault(logger)
 
-	logger.Info("Platform Linux Agent starting",
+	logger.Info("AmrudAi Linux Agent starting",
 		"safe_context", map[string]any{
 			"host_id":    ident.HostID,
 			"log_level":  cfg.LogLevel,
@@ -65,34 +64,15 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// Optional eBPF preflight is isolated behind one one-shot boundary so a
-	// stalled procfs/sysfs read cannot hold AgentService construction/Start,
-	// scheduler, collectors, queue/delivery, or liveness/readiness past the
-	// governed timeout. Late completions are discarded by RunStartup.
-	// Slice 7 implements the kernel backend package but does not wire
-	// Start-after-RUNNING into AgentService (Slice 8). Preflight remains the
-	// startup capability evidence path; when compatibility would previously
-	// report BACKEND_NOT_IMPLEMENTED it now reports BACKEND_NOT_WIRED.
-	capability := ebpf.New(ebpf.Config{
-		Enabled:            cfg.EBPFEnabled,
-		PreflightTimeout:   cfg.EBPFPreflightTimeout,
-		RecheckMin:         cfg.EBPFRecheckMin,
-		RecheckMax:         cfg.EBPFRecheckMax,
-		RequestedMapBytes:  ebpf.RequestedMapBytesEstimate,
-		RequestedRingBytes: ebpf.RequestedRingBytesExact,
-		LowWaterSatisfied:  true,
-	}).RunStartup(ctx, nil)
-	logger.Info("Linux eBPF capability preflight completed",
-		"event_code", "AGENT_EBPF_PREFLIGHT_COMPLETED",
-		"safe_context", map[string]any{
-			"state":        capability.State,
-			"reason_codes": capability.ReasonCodes,
-			"next_recheck": capability.NextRecheckAt,
-		})
 
-	svc, err := common.NewAgentService(cfg, ident, nil, logger,
+	opts := []common.ServiceOption{
 		common.WithSupportabilityIdentity(agentVersion, serviceInstanceID),
-		common.WithProcessNetworkCapability(capability))
+		// Optional eBPF is subordinate: construction failure never terminates
+		// the base Agent. Concrete ebpf types stay under agent/linux/**.
+		optionalProcessNetworkOption(cfg, logger, nil),
+	}
+
+	svc, err := common.NewAgentService(cfg, ident, nil, logger, opts...)
 	if err != nil {
 		logger.Error("Failed to initialize agent service",
 			"event_code", "AGENT_SERVICE_INIT_FAILED",
@@ -111,18 +91,18 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	sig := <-sigCh
-	logger.Info("Platform Linux Agent received signal, shutting down",
+	logger.Info("AmrudAi Linux Agent received signal, shutting down",
 		"safe_context", map[string]any{"signal": sig.String()})
 	// AgentService owns runtime cancellation; Stop cancels and bounds shutdown.
 	// Parent cancel remains a belt-and-braces signal for any Start-scoped work.
 	cancel()
 	if err := svc.Stop(); err != nil {
-		logger.Error("Platform Linux Agent shutdown failed",
+		logger.Error("AmrudAi Linux Agent shutdown failed",
 			"event_code", "AGENT_SERVICE_STOP_FAILED",
 			"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 		os.Exit(exitStop)
 	}
-	logger.Info("Platform Linux Agent exited cleanly")
+	logger.Info("AmrudAi Linux Agent exited cleanly")
 }
 
 func logLevel(value string) slog.Level {

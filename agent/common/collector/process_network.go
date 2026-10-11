@@ -34,11 +34,20 @@ const (
 	maxProcessNetworkContainerIDLen         = maxProcessServiceIdentityLen
 	maxProcessNetworkProvenanceLen          = maxProcessServiceProvenanceLen
 	ProcessNetworkSyntheticSourceProvenance = "agent.linux.process_network.synthetic"
+	// ProcessNetworkEBPFSourceProvenance is the production Linux eBPF
+	// process-network collection provenance. It is aggregator-owned evidence
+	// identity only — never tenant, entity, or authorization authority.
+	ProcessNetworkEBPFSourceProvenance = "agent.linux.process_network.ebpf"
 )
 
 var (
 	ErrProcessNetworkObservedAtInvalid       = errors.New("PROCESS_NETWORK_OBSERVED_AT_INVALID: observed_at is required and must be non-zero")
 	ErrProcessNetworkAccountingBoundExceeded = errors.New("PROCESS_NETWORK_ACCOUNTING_BOUND_EXCEEDED: exact-bucket accounting capacity exhausted")
+	// ErrProcessNetworkFlushDeliveryIncomplete is returned when FlushAll assembled
+	// evidence but the sink rejected delivery. Windows are not silently treated
+	// as successfully delivered. BUILD-011 does not own durable retry/spool —
+	// TRANSPORT_NOT_WIRED / BUILD-016/062 remain authoritative for physical delivery.
+	ErrProcessNetworkFlushDeliveryIncomplete = errors.New("PROCESS_NETWORK_FLUSH_DELIVERY_INCOMPLETE: sink rejected evidence; no durable BUILD-011 transport retry")
 )
 
 // ProcessNetworkEventClass is a backend-neutral synthetic event class.

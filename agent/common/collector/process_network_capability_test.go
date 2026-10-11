@@ -58,3 +58,56 @@ func TestProcessNetworkCapabilitySnapshotCopyDoesNotAliasReasons(t *testing.T) {
 		t.Fatal("snapshot copy aliases reason codes")
 	}
 }
+
+func TestCurrentAuthorityCapabilityDoesNotAgeStale(t *testing.T) {
+	expired := time.Date(2026, 10, 7, 1, 0, 0, 0, time.UTC)
+	now := expired.Add(time.Hour)
+
+	active := ProcessNetworkCapabilitySnapshot{
+		State:            ProcessNetworkCapabilityActive,
+		ValidUntil:       expired,
+		CurrentAuthority: true,
+	}
+	if got := active.Fresh(now); got.State != ProcessNetworkCapabilityActive {
+		t.Fatalf("runtime ACTIVE falsely staled: %+v", got)
+	}
+
+	denied := ProcessNetworkCapabilitySnapshot{
+		State:            ProcessNetworkCapabilityPrivilegeDenied,
+		ReasonCodes:      []ProcessNetworkCapabilityReason{ReasonPrivilegeDenied},
+		ValidUntil:       expired,
+		CurrentAuthority: true,
+	}
+	if got := denied.Fresh(now); got.State != ProcessNetworkCapabilityPrivilegeDenied || len(got.ReasonCodes) != 1 || got.ReasonCodes[0] != ReasonPrivilegeDenied {
+		t.Fatalf("runtime failure falsely staled: %+v", got)
+	}
+
+	unwired := ProcessNetworkCapabilitySnapshot{
+		State:            ProcessNetworkCapabilityUnavailable,
+		ReasonCodes:      []ProcessNetworkCapabilityReason{ReasonBackendNotWired},
+		CurrentAuthority: true,
+		// Zero ValidUntil must not render EVIDENCE_STALE for current runtime authority.
+	}
+	if got := unwired.Fresh(now); got.State != ProcessNetworkCapabilityUnavailable || len(got.ReasonCodes) != 1 || got.ReasonCodes[0] != ReasonBackendNotWired {
+		t.Fatalf("initial runtime BACKEND_NOT_WIRED falsely staled: %+v", got)
+	}
+
+	disabled := ProcessNetworkCapabilitySnapshot{
+		State:            ProcessNetworkCapabilityUnavailable,
+		ReasonCodes:      []ProcessNetworkCapabilityReason{ReasonFeatureDisabled},
+		ValidUntil:       expired,
+		CurrentAuthority: true,
+	}
+	if got := disabled.Fresh(now); got.State != ProcessNetworkCapabilityUnavailable || len(got.ReasonCodes) != 1 || got.ReasonCodes[0] != ReasonFeatureDisabled {
+		t.Fatalf("FEATURE_DISABLED falsely staled: %+v", got)
+	}
+
+	historical := ProcessNetworkCapabilitySnapshot{
+		State:       ProcessNetworkCapabilityKernelIncompatible,
+		ReasonCodes: []ProcessNetworkCapabilityReason{ReasonBTFMissing},
+		ValidUntil:  expired,
+	}
+	if got := historical.Fresh(now); got.State != ProcessNetworkCapabilityUnavailable || len(got.ReasonCodes) != 1 || got.ReasonCodes[0] != ReasonEvidenceStale {
+		t.Fatalf("historical preflight must still become EVIDENCE_STALE: %+v", got)
+	}
+}

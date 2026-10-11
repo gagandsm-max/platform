@@ -41,6 +41,7 @@ type mockStatsProvider struct {
 	sequenceConflict         bool
 	ackRecoveryConflict      bool
 	processNetworkCapability collector.ProcessNetworkCapabilitySnapshot
+	processNetworkSupport    collector.ProcessNetworkSupportSnapshot
 }
 
 func healthyProvider() *mockStatsProvider {
@@ -97,6 +98,7 @@ func (m *mockStatsProvider) RuntimeSnapshot() RuntimeSnapshot {
 			LastFailureClass:  m.lastFailureClass,
 		},
 		ProcessNetworkCapability: m.processNetworkCapability.Copy(),
+		ProcessNetworkSupport:    m.processNetworkSupport.Copy(),
 	}
 }
 
@@ -559,6 +561,90 @@ func TestStaleOptionalEBPFEvidenceBecomesUnavailableWithoutAffectingReadiness(t 
 	}
 }
 
+func TestCurrentAuthorityCapabilityDoesNotFalseStaleOnEndpoint(t *testing.T) {
+	cases := []struct {
+		name  string
+		snap  collector.ProcessNetworkCapabilitySnapshot
+		state collector.ProcessNetworkCapabilityState
+		reason collector.ProcessNetworkCapabilityReason
+	}{
+		{
+			name: "runtime_active",
+			snap: collector.ProcessNetworkCapabilitySnapshot{
+				State:            collector.ProcessNetworkCapabilityActive,
+				ObservedAt:       time.Now().UTC().Add(-time.Hour),
+				TransitionAt:     time.Now().UTC().Add(-time.Hour),
+				ValidUntil:       time.Now().UTC().Add(-time.Minute),
+				CurrentAuthority: true,
+				SourceQuality:    "FIXTURE",
+			},
+			state: collector.ProcessNetworkCapabilityActive,
+		},
+		{
+			name: "runtime_privilege_denied",
+			snap: collector.ProcessNetworkCapabilitySnapshot{
+				State:            collector.ProcessNetworkCapabilityPrivilegeDenied,
+				ReasonCodes:      []collector.ProcessNetworkCapabilityReason{collector.ReasonPrivilegeDenied},
+				ObservedAt:       time.Now().UTC().Add(-time.Hour),
+				TransitionAt:     time.Now().UTC().Add(-time.Hour),
+				ValidUntil:       time.Now().UTC().Add(-time.Minute),
+				CurrentAuthority: true,
+				SourceQuality:    "FIXTURE",
+			},
+			state:  collector.ProcessNetworkCapabilityPrivilegeDenied,
+			reason: collector.ReasonPrivilegeDenied,
+		},
+		{
+			name: "runtime_backend_not_wired_zero_valid_until",
+			snap: collector.ProcessNetworkCapabilitySnapshot{
+				State:            collector.ProcessNetworkCapabilityUnavailable,
+				ReasonCodes:      []collector.ProcessNetworkCapabilityReason{collector.ReasonBackendNotWired},
+				ObservedAt:       time.Now().UTC(),
+				TransitionAt:     time.Now().UTC(),
+				CurrentAuthority: true,
+				SourceQuality:    "FIXTURE",
+			},
+			state:  collector.ProcessNetworkCapabilityUnavailable,
+			reason: collector.ReasonBackendNotWired,
+		},
+		{
+			name: "feature_disabled",
+			snap: collector.ProcessNetworkCapabilitySnapshot{
+				State:            collector.ProcessNetworkCapabilityUnavailable,
+				ReasonCodes:      []collector.ProcessNetworkCapabilityReason{collector.ReasonFeatureDisabled},
+				ObservedAt:       time.Now().UTC().Add(-time.Hour),
+				TransitionAt:     time.Now().UTC().Add(-time.Hour),
+				ValidUntil:       time.Now().UTC().Add(-time.Minute),
+				CurrentAuthority: true,
+				SourceQuality:    "DISABLED",
+			},
+			state:  collector.ProcessNetworkCapabilityUnavailable,
+			reason: collector.ReasonFeatureDisabled,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prov := healthyProvider()
+			prov.processNetworkCapability = tc.snap
+			s, err := NewServer("127.0.0.1:0", prov, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertReady(t, s, http.StatusOK, "UP", true, "")
+			evidence := assertProcessNetworkCapability(t, s)
+			if evidence["state"] != string(tc.state) {
+				t.Fatalf("state=%v want=%s", evidence["state"], tc.state)
+			}
+			if tc.reason != "" {
+				reasons := evidence["reason_codes"].([]any)
+				if len(reasons) != 1 || reasons[0] != string(tc.reason) {
+					t.Fatalf("reasons=%v want=%s", reasons, tc.reason)
+				}
+			}
+		})
+	}
+}
+
 func TestMissingOptionalEBPFEvidenceIsBoundedUnavailable(t *testing.T) {
 	s, err := NewServer("127.0.0.1:0", healthyProvider(), nil)
 	if err != nil {
@@ -571,6 +657,54 @@ func TestMissingOptionalEBPFEvidenceIsBoundedUnavailable(t *testing.T) {
 	reasons := evidence["reason_codes"].([]any)
 	if len(reasons) != 1 || reasons[0] != string(collector.ReasonSourceUnavailable) {
 		t.Fatalf("missing reasons=%v", reasons)
+	}
+}
+
+func TestProcessNetworkSupportCountersOnCapabilityEndpoint(t *testing.T) {
+	prov := healthyProvider()
+	now := time.Now().UTC()
+	prov.processNetworkCapability = collector.ProcessNetworkCapabilitySnapshot{
+		State:         collector.ProcessNetworkCapabilityActive,
+		ObservedAt:    now,
+		TransitionAt:  now,
+		ValidUntil:    now.Add(time.Hour),
+		NextRecheckAt: now.Add(time.Hour),
+		SourceQuality: "FIXTURE",
+	}
+	prov.processNetworkSupport = collector.ProcessNetworkSupportSnapshot{
+		Present:               true,
+		MapUpdateFail:         1,
+		RingReserveFail:       2,
+		DecoderReject:         3,
+		UserspaceChannelFull:  4,
+		TransportNotWired:     5,
+		AggregatorFaults:      6,
+		ReaderFaults:          7,
+		OptionalProbeAttached: true,
+	}
+	s, err := NewServer("127.0.0.1:0", prov, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReady(t, s, http.StatusOK, "UP", true, "")
+	evidence := assertProcessNetworkCapability(t, s)
+	counters, ok := evidence["support_counters"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing support_counters: %v", evidence)
+	}
+	if counters["MAP_UPDATE_FAIL"].(float64) != 1 ||
+		counters["RING_RESERVE_FAIL"].(float64) != 2 ||
+		counters["DECODER_REJECT"].(float64) != 3 ||
+		counters["USERSPACE_CHANNEL_FULL"].(float64) != 4 ||
+		counters["TRANSPORT_NOT_WIRED"].(float64) != 5 ||
+		counters["aggregator_faults"].(float64) != 6 ||
+		counters["reader_faults"].(float64) != 7 ||
+		counters["optional_probe_attached"] != true {
+		t.Fatalf("support_counters=%v", counters)
+	}
+	body := assertHealth(t, s, http.StatusOK, "UP", "")
+	if _, exists := body["support_counters"]; exists {
+		t.Fatal("/health must not absorb eBPF support counters into SUPPORT_EVIDENCE")
 	}
 }
 
