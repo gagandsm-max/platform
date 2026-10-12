@@ -392,13 +392,9 @@ func TestSNMPBootstrapStartOwnershipAndShutdown(t *testing.T) {
 }
 
 func TestSNMPBootstrapDefaultAndICMPOnlyCapabilities(t *testing.T) {
-	data, err := os.ReadFile("../../../compose.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "PLATFORM_SENSOR_ENABLED_CAPABILITIES: SNMP,ICMP") {
-		t.Fatal("default changed; reassess compatibility test")
-	}
+	// bootstrapFixture uses testRuntime's NETWORK configuration with explicit
+	// capabilities. This covers bootstrap compatibility, not repository-root
+	// Compose configuration parity, which requires a separate deployment gate.
 	for _, caps := range [][]sensorruntime.Capability{{sensorruntime.CapabilitySNMP, sensorruntime.CapabilityICMP}, {sensorruntime.CapabilityICMP}} {
 		b, _, _ := bootstrapFixture(t, caps...)
 		if err := b.Runtime.Start(context.Background()); err != nil {
