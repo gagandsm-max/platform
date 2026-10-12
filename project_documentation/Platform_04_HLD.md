@@ -7,7 +7,7 @@
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
+**Last reconciliation:** 2026-10-12 — Issue #200/#203 Tranche B Phase 1/1.5 certification-envelope reconciliation (HLD/HA/DR/NCM/ACK); prior Issue #142 Phase-1 observability closure retained
 
 **Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
@@ -390,7 +390,9 @@ Agent does not permanently select a Sensor independently. Core decides placement
 
 ## 7. Core HA HLD
 
-**Maturity / Issue #92:** Exactly-two-Core Active/Standby topology remains USER-FIXED. Stateful fencing, failover, rejoin and production certification remain **OPEN P0 / NOT PRODUCTION CERTIFIED**. Do not treat this HLD section as HA production certification.
+**Certification envelope / Issue #200:** Exactly-two-Core Active/Standby is the **Phase 1.5** HA certification envelope. Phase 1 certifies one authoritative standalone Core and makes **no** Core-HA service-continuity claim. HA ≠ DR.
+
+**Maturity / Issue #92:** Exactly-two-Core Active/Standby topology remains USER-FIXED. Stateful fencing, failover, rejoin and production certification remain **OPEN P0 / NOT PRODUCTION CERTIFIED**. Do not treat this HLD section as HA production certification. Physical mechanisms (Patroni/repmgr/Keeper/etcd/Consul/Raft/witness/third Core/replicated ingress journal) remain **unselected**; closure belongs to BUILD-120–124 / `HA_DURABILITY_DESIGN_GATE`.
 
 ### 7.1 States
 
@@ -538,7 +540,7 @@ All canonical messages include:
 
 ### 10.3 Two-Core behavior
 
-Kafka is internal transport. Sensor local spools are required specifically so the product does not rely on an unsafe claim that a two-voter Kafka quorum remains fully available after one Core failure. The final active/passive Kafka arrangement and replay contract is a P0 LLD/benchmark item.
+Kafka is internal transport. Sensor local spools are required specifically so the product does not rely on an unsafe claim that a two-voter Kafka quorum remains fully available after one Core failure. The final active/passive Kafka arrangement and replay contract is a P0 LLD/benchmark item under the **Phase 1.5** HA envelope. Phase 1 standalone deletion-ACK durability (certified recoverable Core process/service crash/restart and governed host reboot) remains mandatory without claiming permanent single-Core HA RPO=0.
 
 ---
 
@@ -839,6 +841,8 @@ NCM jobs require:
 - rollback support metadata;
 - immutable audit.
 
+**Phase 1 / Phase 1.5 NCM envelope (Issue #200):** Phase 1 independently certifiable NCM subset is config backup/version/diff/compliance/golden-state, plus controlled manual CLI only when RBAC/credential brokering/audit are certified. Mass push, canary/staged automated privileged execution and automated remediation default to **Phase 1.5** unless Founder change control promotes them. LLM output may not directly execute privileged NCM actions in either envelope.
+
 ---
 
 ## 22. IPAM HLD
@@ -983,10 +987,12 @@ These are engineering starting targets, not contractual limits.
 
 ## 29. DR HLD
 
+**Certification envelope / Issue #200:** Backup/restore and site-loss DR (redeploy/endpoint redirection for the declared Phase-1 DR profile) are **mandatory for Phase 1**. HA ≠ DR. Exactly-two-Core Active/Standby continuity is Phase 1.5 and must not be implied by a Phase 1 DR certificate.
+
 **Maturity / Issue #92:** Backup/restore/DR implementation evidence remains incomplete; exact RPO/RTO remain TBD where already recorded.
 
 
-DR must be possible in v1.0. Required architecture hooks:
+DR must be possible in v1.0 / Phase 1. Required architecture hooks:
 
 - signed/exportable Platform configuration and policy backups;
 - PostgreSQL backup/restore and DR replication option;
@@ -1418,3 +1424,16 @@ Failure boundaries are explicit: unsupported/denied inventory fields become part
 - **CMDB Reconciler:** logical Integration Service function maps ExternalBinding records to canonical entity/relationship authority. It is not a second inventory database.
 
 Protected workload ordering remains: authority/control, telemetry durability, ingestion/current-state and critical alert qualification take precedence over OTel enrichment, investigation fan-out, CMDB reconciliation, connector replay and other non-critical enrichment during resource pressure.
+
+---
+
+## 49. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #203
+
+Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified ≠ deployed. Mother Reference set version remains **3.3.0** through Tranche B; v3.4.0 is reserved for gated Tranche D.
+
+| Envelope | Core / edge topology | Tenancy / security | Durability / continuity | NCM / monitoring notes |
+|---|---|---|---|---|
+| **Phase 1** | One authoritative standalone Core; multiple Sensors/Agents/sites | Tenant-aware identity/API/RBAC/audit retained; no MSP/shared-tenancy cert claim | Standalone deletion-ACK for certified recoverable failure matrix; backup/restore + site-loss DR mandatory; Sensor assignment generation/fencing mandatory; no Core-HA claim | Independently certifiable NCM read-only/low-risk + controlled manual CLI when security certified; `No Data != Device Down`; SNMP/ICMP typed observations with GOOD/PARTIAL/UNKNOWN |
+| **Phase 1.5** | Exactly two full Core nodes Active/Standby; positive fencing; split-brain prevented | MSP/shared multi-tenancy + noisy-neighbor adversarial certification | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures; Sensor reconnect/re-anchor + push HA continuity; PG/Kafka/ClickHouse recovery | Privileged NCM automation defaults (maker-checker, canary, blast-radius, rollback where eligible) |
+
+Multi-Sensor assignment generation, lease ownership, stale privileged-work rejection and replay/idempotency remain **Phase 1 mandatory** even with standalone Core. Physical HA mechanisms remain unselected. Issue #218 records that Core numeric-only ingestion does not yet accept Sensor ICMP typed evidence end-to-end; architecture still requires typed ICMP observation acceptance without collapsing missing/partial evidence into DEVICE_DOWN.

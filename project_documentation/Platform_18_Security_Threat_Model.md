@@ -3,6 +3,7 @@
 **Document ID:** PLATFORM-THREAT-001  
 **Version:** 3.3.0
 **Status:** Authoritative Mother Reference
+**Last reconciliation:** 2026-10-12 — Issue #200/#203 Tranche B Phase 1/1.5 certification-envelope reconciliation (trust boundaries/tenant/NCM/HA peer)
 
 ## 1. Assets
 
@@ -11,6 +12,8 @@ Credentials, certificates/private keys, tenant data, telemetry, **SNMP communiti
 ## 2. Trust boundaries
 
 Browser↔Core; Sensor/Agent↔Core ingestion/control; **Network/Streaming Sensor↔SNMP-managed device/notification source**; Core↔data services; Core↔ITSM/cloud/AI; NCM worker↔managed device; package/update channel; tenant boundary; HA peer boundary; **Linux Agent↔host kernel/eBPF; Sensor active path probe↔transit network paths**.
+
+**Certification envelope / Issue #200:** Phase 1 certifies one authoritative standalone Core with tenant-aware identity, mTLS Sensor/Agent enrollment, server-side RBAC/resource scope and audit—even for single-customer enterprise—without claiming MSP/shared-customer isolation certification. The HA peer boundary (exactly-two-Core Active/Standby fencing, ambiguous-partition fail-closed, former-Active rejoin protection) is the **Phase 1.5** envelope. HA ≠ DR. No third Core, witness, replicated ingress journal or speculative coordination service is introduced by this threat model.
 
 ## 3. Threat classes
 
@@ -136,7 +139,7 @@ No new privilege, endpoint Python runtime, unrestricted shell/PowerShell facilit
 | Malicious attachment | Explicit feature enablement, type/size limits, safe storage, malware scanning where supported/required, access/TTL/audit; never auto-execute. |
 | SSRF/egress abuse | Connector destination allowlists, URL/DNS/IP/redirect validation, proxy policy, private-address controls where applicable and bounded timeouts. |
 | CMDB poisoning / wrong CI match | Explicit authority profile, match evidence/confidence, conflict queue, tenant scope, no last-write-wins and no automatic destructive reconciliation. |
-| NCM command/template injection | Typed/validated templates and certified Device Pack actions; secret-safe rendering; no ITSM text -> CLI; RBAC/approval/audit. |
+| NCM command/template injection | Typed/validated templates and certified Device Pack actions; secret-safe rendering; no ITSM text -> CLI; RBAC/approval/audit. Phase 1 independently certifiable surface is backup/version/diff/compliance + controlled manual CLI when credential brokering/RBAC/audit are certified; mass push/canary/automated privileged remediation defaults to Phase 1.5. |
 | Firmware substitution/supply-chain | Approved repository/provenance, digest/signature when available, entitlement/compatibility validation, controlled access and audit. |
 | Unsafe rollback | Rollback only via certified vendor/device mechanism with preconditions; otherwise stop/escalate. |
 | OTLP tenant spoofing | Authenticated server-side source identity; OTel attributes never authorize tenant. |
@@ -150,3 +153,14 @@ No new privilege, endpoint Python runtime, unrestricted shell/PowerShell facilit
 | Vendor rate-limit exhaustion | Bounded queues, token/rate budgets, Retry-After aware scheduling where available, exponential backoff+jitter and backlog recovery protection. |
 
 Full developer-centric APM, full always-on DPI/NDR and ticket/comment-driven arbitrary execution remain outside the approved trust boundary.
+
+---
+
+## 13. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #203
+
+Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified ≠ deployed. Mother Reference set version remains **3.3.0** through Tranche B; v3.4.0 is reserved for gated Tranche D.
+
+| Envelope | Security certification emphasis | Explicit nonclaims |
+|---|---|---|
+| **Phase 1** | Standalone Core; mTLS Sensor/Agent identity; tenant-aware RBAC/resource scope/audit; Credential Profile separation; assignment/fencing stale-work rejection; Inform local ACK != Core durable ACK; `No Data != Device Down` semantic integrity; backup/restore + site-loss DR security hooks | No Core-HA availability claim; no MSP/shared-tenant isolation certification claim; Issue #218 Core ICMP typed-acceptance gap is an integrity/availability risk until closed—not an authorization to invent false DOWN; NCM automation not Phase 1 default |
+| **Phase 1.5** | Exactly-two-Core HA peer fencing/split-brain prevention; PG/Kafka/ClickHouse continuity trust; HA deletion-ACK RPO=0 matrix; MSP/shared-tenant adversarial isolation across identity/API/RBAC/credentials/NCM/AI/audit; privileged automation guardrails | Physical fencing/replication mechanisms remain unselected; no third Core/witness/journal preselected; HA does not replace DR |

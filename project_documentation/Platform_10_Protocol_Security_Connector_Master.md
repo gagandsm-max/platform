@@ -4,6 +4,7 @@
 **Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Protocol/Security/Connector Contract**  
 **Product:** Platform
+**Last reconciliation:** 2026-10-12 — Issue #200/#203 Tranche B Phase 1/1.5 certification-envelope reconciliation (protocol/ICMP/NCM/mTLS/tenant boundaries)
 
 ## 1. Governing principles
 
@@ -18,7 +19,7 @@
 
 | Capability | Protocol/security modes | Typical/default endpoint | UI configuration | OSS foundation | Required Platform behavior |
 |---|---|---|---|---|---|
-| Availability | ICMPv4/ICMPv6 | No TCP/UDP port | timeout, attempts, interval, packet size, source/Sensor | `golang.org/x/net/icmp` | loss/RTT/jitter, multi-vantage evidence, qualification input |
+| Availability | ICMPv4/ICMPv6 | No TCP/UDP port | timeout, attempts, interval, packet size, source/Sensor | `golang.org/x/net/icmp` | Typed observation: loss/RTT/jitter, multi-vantage evidence, `GOOD`/`PARTIAL`/`UNKNOWN` quality; never sole DEVICE_DOWN authority when corroboration exists (`No Data != Device Down`) |
 | SNMP polling | SNMP v1, v2c, v3 | UDP/161 default; configurable | version, community or v3 user/security level/auth/privacy/context, timeout/retry, bulk size | GoSNMP | GET/GETNEXT/GETBULK/WALK for routine monitoring; actionable typed errors; SET only through privileged NCM/remediation |
 | SNMPv3 auth | noAuthNoPriv, authNoPriv, authPriv; MD5/SHA-1 legacy where required; supported SHA-2 variants | SNMP endpoint | profile-level algorithm selection | GoSNMP + Platform wrapper | secure defaults, compatibility validation, no secret exposure |
 | SNMPv3 privacy | DES legacy opt-in; AES variants where library/device supports | SNMP endpoint | privacy algorithm/key and security level | GoSNMP + Platform wrapper | compatibility test before provisioning |
@@ -49,6 +50,12 @@
 - **Target authorization:** scheduled/on-demand SNMP targets derive from tenant-scoped canonical entities/authorized diagnostic scope. Arbitrary target testing follows the same anti-pivot/SSRF-like restrictions as other Sensor diagnostics.
 - **Trap trust:** v1/v2c UDP trap source/community is weak identity evidence. v3 notifications use configured USM/security validation. Source allowlist/policy, bounds and rate protection apply before event qualification.
 - **Inform ACK:** SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded parse, configured security validation and sufficient source/tenant attribution while preserving the raw typed notification. MIB/Pack enrichment, Core/Kafka/ClickHouse completion and alert/incident creation are not ACK prerequisites. ACK means local accepted/accounted only.
+
+### 2.2 ICMP typed-observation and Core acceptance boundary
+
+Phase 1 architecture requires ICMP availability evidence as a protocol-aware typed Sensor observation with sent/received, RTT, loss, IPv4/IPv6, vantage/provenance and quality states. Unreachable versus packet-loss and incomplete path hops must remain distinguishable from authoritative DEVICE_DOWN. Core must accept ICMP evidence through a governed Sensor→Core durable path without silently dropping mixed batches or ACKing evidence it did not persist.
+
+**Issue #218 implementation gap (SOURCE_FACT / NOT CLOSED):** Current Core numeric-only ingestion rejects Sensor `icmp_observation_v1` envelopes that lack `protocolPayload.observations` or `metric_id`+numeric `value`. That Core gap is a P1 telemetry-integrity blocker for end-to-end ICMP enablement; it does not authorize rewriting Mother Reference architecture to numeric-only ICMP or collapsing missing ICMP into DEVICE_DOWN. Closure requires Master-selected Core contract work and evidence—not documentation fiction.
 
 ## 3. Infrastructure/cloud credential matrix
 
@@ -272,3 +279,16 @@ Certified CI publication/reconciliation uses the Identification and Reconciliati
 ### 11.5 NCM/firmware privileged boundary
 
 External ITSM approval is workflow evidence, not privileged execution authority. NCM execution additionally requires valid connector identity, expected external workflow state/approver, non-stale exact Change Plan/hash/targets/window binding, local RBAC/resource scope/policy/preconditions and audit. Stale/replayed approval is rejected. Firmware transfer/execution in Phase 1.5 requires approved repository/provenance/integrity and vendor-specific capability certification; no universal rollback claim.
+
+**Phase 1 / Phase 1.5 privileged separation (Issue #200):** Phase 1 independently certifiable NCM is backup/version/diff/compliance/golden-state plus controlled manual CLI only when RBAC/credential brokering/audit are certified. Mass push, canary/staged automated privileged remediation and maker-checker automation defaults belong to **Phase 1.5** unless Founder change control promotes them. Protocol connectors must not bypass Sensor assignment/fencing or local Platform authorization.
+
+---
+
+## 12. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #203
+
+Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified ≠ deployed. Mother Reference set version remains **3.3.0** through Tranche B; v3.4.0 is reserved for gated Tranche D.
+
+| Envelope | Protocol / identity emphasis | Tenancy / MSP | Explicit nonclaims |
+|---|---|---|---|
+| **Phase 1** | Standalone Core; Sensor/Agent mTLS enrollment; SNMP typed read monitoring; ICMP typed availability evidence; Inform local ACK boundary; multi-Sensor assignment fencing | Tenant-aware Credential Profiles, RBAC and audit mandatory for single-customer enterprise; no MSP/shared-customer isolation cert claim | Issue #218 Core ICMP acceptance gap open; NCM automation not Phase 1 default; no Core-HA claim |
+| **Phase 1.5** | Same protocol contracts under exactly-two-Core HA continuity; push-protocol HA reconnect/re-anchor | MSP/shared multi-tenancy adversarial isolation certification across connectors/credentials/NCM | Physical HA mechanisms unselected; firmware remains Phase 1.5; listed ITSM vendors are targets until evidence passes |
