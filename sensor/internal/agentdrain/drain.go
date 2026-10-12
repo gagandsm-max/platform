@@ -272,7 +272,18 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 
 	req, err := d.makeRequest(batch)
 	if err != nil {
-		// Malformed durable payload is terminal for the head record — abandon frozen window, then park.
+		// Only a locally identified malformed singleton can authorize parking.
+		// A failure elsewhere in a frozen batch (or a request/configuration limit)
+		// does not identify the head as poison.
+		var malformed *Error
+		isMalformed := errors.As(err, &malformed) && malformed.Code == CodePoison
+		if len(batch.Records) != 1 || !isMalformed {
+			reason := "ERR_AGENT_REQUEST_BUILD_FAILED"
+			if isMalformed {
+				reason = "ERR_MALFORMED_DURABLE_PAYLOAD"
+			}
+			return false, d.retainBlocked(ctx, batch, reason, err)
+		}
 		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
 			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
 		}
@@ -299,8 +310,12 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 
 	if isTerminalCoreError(err) {
 		code := terminalCode(err)
-		// Explicit poison allowlist: Core rejected before durable reservation.
-		// Abandon local outbound window before acknowledging the poison head.
+		// Core rejects the whole request without identifying an offending record.
+		// Even one Sensor record may contain several independent Agent deliveries.
+		if len(req.Records) != 1 || !singleDelivery(req.Records[0].Records) {
+			return false, d.retainBlocked(ctx, batch, code, err)
+		}
+		// An unambiguous singleton rejection may abandon and durably park.
 		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
 			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
 		}
@@ -321,8 +336,29 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		return false, codeErr(CodeTransport, "transient Core agent-telemetry failure; spool retained", err, true)
 	}
 
+	return false, d.retainBlocked(ctx, batch, terminalCode(err), err)
+}
+
+// singleDelivery deliberately fails closed on missing, empty or malformed arrays.
+func singleDelivery(raw json.RawMessage) bool {
+	var records []json.RawMessage
+	return json.Unmarshal(raw, &records) == nil && len(records) == 1
+}
+
+// retainBlocked preserves the frozen range and reports the original cause without
+// logging payloads or untrusted Core messages. Pace RunOnce as well as the loop:
+// direct callers must not spin on an ambiguous permanent rejection.
+func (d *Drain) retainBlocked(ctx context.Context, batch spool.Batch, reason string, cause error) error {
 	d.metrics.FailuresPermanent.Add(1)
-	return false, codeErr(CodeTransport, "permanent Core agent-telemetry failure; spool retained", err, false)
+	d.metrics.Backpressure.Add(1)
+	d.logger.Warn("Agent-ingress delivery blocked; spool retained",
+		"event_code", sanitizeReason(reason),
+		"safe_context", map[string]any{
+			"first_sequence": batch.FirstSequence, "last_sequence": batch.LastSequence,
+			"record_count": len(batch.Records),
+		})
+	_ = d.wait(ctx, d.cfg.MaxBackoff)
+	return codeErr(CodeTransport, "agent-telemetry rejection attribution ambiguous; spool retained", cause, false)
 }
 
 func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, error) {
@@ -330,16 +366,16 @@ func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, 
 	h := sha256.New()
 	for _, rec := range batch.Records {
 		if rec.Type != agentBatchRecordType {
-			return coreclient.AgentTelemetryBatch{}, fmt.Errorf("unexpected spool record type %q", rec.Type)
+			return coreclient.AgentTelemetryBatch{}, codeErr(CodePoison, "unexpected durable spool record type", nil, false)
 		}
 		var payload durableBatchPayload
 		if err := json.Unmarshal(rec.Payload, &payload); err != nil {
-			return coreclient.AgentTelemetryBatch{}, fmt.Errorf("corrupt durable agent payload: %w", err)
+			return coreclient.AgentTelemetryBatch{}, codeErr(CodePoison, "corrupt durable agent payload", err, false)
 		}
 		if strings.TrimSpace(payload.TenantID) == "" || strings.TrimSpace(payload.AgentID) == "" ||
 			strings.TrimSpace(payload.SensorID) == "" || payload.Generation < 1 ||
 			payload.FirstSequence == 0 || payload.LastSequence < payload.FirstSequence {
-			return coreclient.AgentTelemetryBatch{}, fmt.Errorf("incomplete durable agent payload")
+			return coreclient.AgentTelemetryBatch{}, codeErr(CodePoison, "incomplete durable agent payload", nil, false)
 		}
 		var env envelopeLite
 		deliveryRecords := json.RawMessage("[]")
