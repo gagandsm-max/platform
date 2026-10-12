@@ -88,7 +88,7 @@ No implementation may permanently diverge from mother-reference truth. If implem
 - Every mandatory runtime service required by the enabled deployment profile auto-starts after host reboot and implements bounded supervised recovery with dependency-aware readiness and visible crash-loop diagnostics. This includes Core/Sensor/Agents and separately managed mandatory Core data/runtime services such as PostgreSQL, ClickHouse, Kafka and Valkey where applicable. Optional/on-demand workers run only when required; customers must not need routine manual process starts after reboot or a recoverable crash. Automatic boot/start and supervised recovery must preserve existing authority, role, fencing, replication, durability and rejoin contracts; they must not self-promote Standby, bypass Core Active/Standby fencing, bypass PostgreSQL/Kafka/ClickHouse replication/durability/safe-rejoin rules, create dual-active authority, repeatedly force-start known-unsafe local state, or treat process existence as recovery success. If safe automatic recovery cannot be established, the component remains FAILED/DEGRADED/RECOVERING with actionable evidence and a governed operator/runbook path. Standalone/non-HA bounded supervised restart remains mandatory. BUILD-120–124 remain the owners of exactly-two-Core HA authority/fencing and stateful failover/rejoin; do not invent Patroni/repmgr/Keeper/etcd/Consul/Raft/witness/third-Core or a new supervisor service here.
 - Structured logs, stable error codes, correlation IDs, health state and support diagnostics are mandatory. Never log secrets.
 - Only dependencies approved in `Platform_07_OSS_Catalog.md` may ship. New OSS requires catalogue + transitive-license/CVE/SBOM review before merge.
-- Two full Core nodes only for HA: Active/Standby, <60s failover target. Sensors continue collecting/buffering during Core failover while capacity permits (80% storage protection; absolute zero-loss is not promised).
+- Phase 1 certification envelope uses one authoritative standalone Core (no Core-HA availability claim). Exactly-two-Core Active/Standby HA (<60s failover target) remains fixed architecture and is a Phase 1.5 certification envelope (BUILD-120–124). Sensors continue collecting/buffering during Core unavailability/failover while capacity permits (80% storage protection; absolute zero-loss is not promised). HA is distinct from DR.
 - Sensor/Agent external transport is HTTPS/gRPC over mTLS; Kafka is internal.
 - Core and Sensor 80% storage protection is mandatory.
 - UI is HTTPS-only; no application listener on port 80.
@@ -111,6 +111,29 @@ No implementation may permanently diverge from mother-reference truth. If implem
 - Bounded Linux Agent eBPF process-network evidence (`REQ-INF-013`) executes in-kernel socket telemetry with strict local aggregation (`process/service + canonical target + port + bounded configurable bucket`), using existing Agent→Sensor→Core durable paths and zero separate eBPF services or datastores. Protected workloads (authority, polling, transport, ingestion, alert qualification, deterministic RCA) strictly take precedence over eBPF enrichment; eBPF must drop/shed/suspend before primary monitoring is harmed.
 - Active path observability (`REQ-NET-016`) runs bounded multi-vantage active path tracing preserving flow identity where supported to eliminate false multipath anomalies. Incomplete path evidence must never be collapsed into generic device down.
 - OpenTelemetry ingestion accepts metric and log telemetry and preserves trace context references (`REQ-INF-010`); Phase 1.5 may add bounded customer-supplied trace and dependency evidence without committing to a full distributed trace backend.
+
+## Phase 1 / Phase 1.5 certification envelopes (Issue #200 / #202)
+
+Frozen certification envelopes for Mother Reference reconciliation. Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified ≠ deployed. Tranche A retains Mother Reference set version **3.3.0**; set-wide advance to v3.4.0 is reserved for gated Tranche D.
+
+**Phase 1 — single-customer enterprise (production, not lab MVP):**
+- one authoritative standalone Core; no Core-HA service-continuity claim and no MSP/shared-customer isolation certification claim;
+- multiple sites/regions, Sensors/Sensor Pools and Agents permitted;
+- tenant-aware identity/API/event/security/RBAC/audit contracts remain mandatory even when only one customer is deployed;
+- Sensor assignment generation/fencing, lease ownership and stale privileged-work rejection remain mandatory with a standalone Core;
+- deletion-authorizing Sensor ACK must survive the certified standalone failure matrix (process/service crash/restart, governed host reboot and other explicitly certified recoverable failures); catastrophic single-Core/storage destruction is not Phase-1 zero-RPO HA;
+- backup/restore and site-loss DR (redeploy/endpoint redirection for the declared Phase-1 DR profile) are mandatory; HA ≠ DR;
+- deterministic monitoring/alerting/RCA must operate with LLM/GNN unavailable; `REQ-MIA-033` CPU-only applicability is preserved for certified local-AI profiles that declare Local AI/ML/LLM mandatory—it does not make LLM a Phase-1 unconditional requirement;
+- NCM Phase-1 independently certifiable subset: config backup/version/diff/compliance/golden-state; controlled manual CLI only when RBAC/credential brokering/audit are certified. Mass push/canary/automated privileged remediation defaults to Phase 1.5 unless Founder change control promotes it.
+
+**Phase 1.5 — HA / MSP / scale expansion (same architecture/codebase):**
+- exactly two full Core nodes Active/Standby with positive fencing and split-brain prevention;
+- PostgreSQL/Kafka/ClickHouse failover/rejoin, stable endpoint, Sensor reconnect/re-anchor and push-protocol HA continuity;
+- `ACKED-FOR-DELETION TELEMETRY RPO = 0` for the certified permanent single-Core HA failure matrix (distinct from site/DR RPO);
+- MSP/shared multi-tenancy adversarial isolation and noisy-neighbor certification;
+- privileged automation (maker-checker, canary/bounded rollout, blast-radius, rollback where eligible) under existing NCM/remediation safety contracts.
+
+BUILD-011 technical post-merge evidence at main `179a72837d050f4c757858452d3719c2e8978b95` does not imply Phase-1 GA, capacity, Core HA, or eBPF physical-transport certification. See `Platform_00` A.15, `Platform_03` and `Platform_12` Issue #200/#202 decision entries.
 
 ## Definition of done
 

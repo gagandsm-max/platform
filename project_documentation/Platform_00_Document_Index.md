@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-10-05 — Founder-approved ACP-001..ACP-018 cross-cutting architecture reconciliation; set-wide Mother Reference version advances to v3.3.0 with no new Platform_24+ specialized master.
+**Last reconciliation:** 2026-10-11 — Issue #200/#202 Tranche A Phase 1/1.5 certification-envelope reconciliation; Mother Reference set version remains v3.3.0 (v3.4.0 reserved for gated Tranche D). Prior 2026-10-05 ACP-001..ACP-018 set-wide advance to v3.3.0 retained.
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Authority
@@ -260,7 +260,8 @@ A1 makes this contract normative. Completing the field set for every capability 
 - Commercial branding and reports: Customer-facing UI displays effective commercial branding (defaulting to AmrudAi, or licensed tenant/MSP branding where white-label is active); report artifacts are **PDF and/or CSV only**; generated PDF reports prominently display the effective commercial logo (defaulting to the governed AmrudAi logo, or licensed tenant/MSP logo where white-label is active); CSV reports contain tabular data only.
 - Clean-room implementation; no ThoughtData/NetAI proprietary implementation reuse.
 - Core/Sensor: **Ubuntu 24.x LTS family** and **RHEL 9.x family** first (subject to certification matrix); Windows Core/Sensor not initial scope.
-- Standalone: one Core. HA: exactly two full Core nodes, Active/Standby, target <60s Core-service restoration.
+- Standalone: one Core. This is the Phase 1 certification-envelope topology (single-customer enterprise; no Core-HA availability claim).
+- HA: exactly two full Core nodes, Active/Standby, target <60s Core-service restoration. Exactly-two-Core HA remains USER-FIXED architecture and is the Phase 1.5 certification envelope (not implied by a Phase 1 certificate). HA is distinct from DR.
 - Sensors continue polling and locally buffer through Core failure/WAN loss while capacity permits; 80% storage protection may reclaim/shed eligible oldest lower-priority data and must expose data-loss risk. Absolute zero-loss is not promised.
 - Sensor/Agent external channel: HTTPS/gRPC over mTLS; Kafka stays internal.
 - Data stack: PostgreSQL authoritative control state, ClickHouse high-volume telemetry analytics, Kafka streaming backbone, Valkey cache/ephemeral state.
@@ -275,7 +276,7 @@ A1 makes this contract normative. Completing the field set for every capability 
 - SNMP is a typed evidence source rather than a numeric-only transport. Exact raw counters, state/inventory/topology facts and collection-quality outcomes remain semantically distinct; a failed SNMP poll alone does not prove device failure.
 - Routine SNMP monitoring is read-only. SNMP SET, when implemented, is a privileged NCM/remediation action subject to authorization, policy/approval, pre/post verification and audit rather than an ordinary polling operation.
 - Customer controls raw retention, rollups, archive and allowed purge priority.
-- DR capability required in v1.0; contractual RPO/RTO remain TBD until frozen.
+- DR capability required in v1.0 and remains mandatory for the Phase 1 certification envelope (backup/restore plus site-loss recovery for the declared Phase-1 DR profile); contractual/external RPO/RTO remain TBD until frozen. Internal technical RPO/RTO engineering targets are Master technical authority.
 - Gemini through AI Gateway initially; deterministic/causal RCA remains independent.
 - HTTPS-only Platform UI; no application listener on TCP/80.
 - Development/test: Docker Compose standard; host laptop kept free of project-specific runtimes.
@@ -308,7 +309,7 @@ A1 makes this contract normative. Completing the field set for every capability 
 - Authoritative system/event/telemetry instants are absolute UTC; interactive display uses IANA zones with precedence override → user preference → browser local → tenant.timezone → UTC; display preference never rewrites operational policy timezones; host OS timezone is non-authoritative.
 - Recurring monitoring uses Core schedule/placement authority plus Sensor durable local desired-state execution; Monitor Group, Scheduling Class and Execution Class remain distinct; cadence and freshness are both required; deterministic phase spreading and failure-domain backoff are mandatory architecture.
 - Exact raw Counter64 Sensor→Core→Kafka→ClickHouse transport/persistence is **IMPLEMENTED+TESTED** on current main after PR #84, including full unsigned-64 boundary coverage and replay-safe `UInt64` persistence; benchmarking/certification/deployment remain open, and derived delta/rate/reset/wrap/discontinuity semantics remain a P0 implementation gap.
-- Exactly-two-Core Active/Standby HA remains P0 and not production-certified; no Patroni/repmgr/ClickHouse Keeper/Raft/Consul/etcd third-coordination selection is made by this baseline.
+- Exactly-two-Core Active/Standby HA remains P0 and not production-certified; Phase 1 certifies standalone Core only. No Patroni/repmgr/ClickHouse Keeper/Raft/Consul/etcd third-coordination selection is made by this baseline.
 - Standard production Sensor roles are NETWORK, INFRASTRUCTURE, FLOW and LOG; SYNTHETIC and CLOUD_API are conditional dedicated roles; COMBINED is lab/dev/small-deployment unless separately certified; runtime STREAMING_EVENT requires product/runtime reconciliation toward FLOW/LOG.
 - PR #81 Sensor telemetry durability is canonical at-least-once; concurrent pending-reservation republish amplification is P1 hardening, not a new datastore.
 
@@ -340,7 +341,8 @@ Authoritative list is `Platform_12_Decision_Source_Register.md` §5 and the 2026
 - exact two-Core ClickHouse replication/promotion/fencing design;
 - exact PostgreSQL two-Core failover/fencing/rewind mechanics;
 - exact Core service fencing/VIP implementation and failure matrix;
-- Sensor ownership/lease/fencing and push-protocol HA continuity;
+- Sensor ownership/lease/fencing (Phase 1 mandatory for multi-Sensor assignment safety even with standalone Core);
+- push-protocol HA continuity and Sensor reconnect/re-anchor across Core failover (Phase 1.5);
 - Flow/NTA production runtime and FLOW-role certification; LOG production role/runtime reconciliation;
 - final contractual DR RPO/RTO and data-loss objectives;
 - final SNWP-2500-v1 metric/interface/event mix and certified performance results;
@@ -588,3 +590,19 @@ Current v3.3.0 governing deltas are:
 - Full always-on DPI/NDR remains excluded; bounded incident-triggered packet evidence remains governed by existing security/privacy/retention contracts.
 
 Maturity invariant remains: **SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED**. This reconciliation changes product/architecture requirements only; it does not certify runtime capability.
+
+---
+
+## A.15 Phase 1 / Phase 1.5 certification-envelope reconciliation — Issue #200 / #202
+
+**Authority:** Issue [#200](https://github.com/gagandsm-max/platform/issues/200) (frozen envelopes) and Issue [#202](https://github.com/gagandsm-max/platform/issues/202) (Tranche A bounded writer). Technical main precondition: BUILD-011 post-merge at `179a72837d050f4c757858452d3719c2e8978b95` (CI run `38120861672`); that evidence does not certify Phase-1 GA or Core HA.
+
+**Versioning:** Tranche A updates normative phase/certification-envelope content while retaining Mother Reference set version **3.3.0**. No document may claim the full set is already v3.4.0; atomic 3.3.0→3.4.0 advance is reserved for gated Tranche D with Build Register + `mother_reference_manifest.json`.
+
+**Governing deltas for this index (do not invent new REQ/BUILD IDs):**
+
+- Phase 1 = one authoritative standalone Core; production-enterprise security/correctness; multiple Sensors/Agents/sites; tenant-aware contracts retained; Sensor assignment fencing mandatory; standalone deletion-ACK durability for the certified recoverable failure matrix; backup/restore and site-loss DR mandatory; no Core-HA and no MSP/shared-tenancy certification claim.
+- Phase 1.5 = exactly two full Core nodes with fencing/failover/rejoin; `ACKED-FOR-DELETION TELEMETRY RPO = 0` for the certified HA permanent one-Core failure matrix; MSP/shared-tenancy and noisy-neighbor certification; privileged NCM automation defaults.
+- HA ≠ DR. Deterministic RCA without mandatory LLM preserved. `REQ-MIA-033` applicability clarified (CPU-only for certified local-AI profiles), not weakened. Approved NCM Phase 1/1.5 split preserved. Platform_07 remains review-only unless a current OSS source contradiction is proven.
+
+Tranche A allowlist ownership: `AGENTS.md`, `Platform_00`, `Platform_01`, `Platform_02`, `Platform_03`, `Platform_07` (VERIFY_ONLY by default), `Platform_08`, `Platform_12`. Subsequent technical/security/sizing/specialized-master reconciliation proceeds in Tranches B–D from certified main after each gated merge.

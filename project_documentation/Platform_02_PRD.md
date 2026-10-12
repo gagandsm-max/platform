@@ -7,7 +7,7 @@
 **Depends on:** `Platform_01_BRD.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_08_Requirements_Traceability.md`, specialized masters `Platform_19`..`Platform_23`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
+**Last reconciliation:** 2026-10-11 — Issue #200/#202/#206 Tranche A Sensor RAM ratio correction (≥4 GB/vCPU; retains v3.3.0); prior Phase 1/1.5 certification-envelope reconciliation retained
 
 ---
 
@@ -126,16 +126,16 @@ Asset Reconciliation; Technology Lifecycle Risk; Backup & Restore; DR; Upgrade &
 - **Dependencies:** IAM, RBAC, query layer, persistence tenancy
 - **Preconditions:** tenant identity provisioned
 - **Primary workflow:** create/select tenant → scoped operations
-- **Product behavior:** isolation enforced server-side at API/authz/query/persistence
+- **Product behavior:** isolation enforced server-side at API/authz/query/persistence; tenant-aware contracts remain mandatory in Phase 1 single-customer deployments
 - **Failure/degraded behavior:** cross-tenant access denied; noisy neighbor throttled
-- **Acceptance outcome:** negative cross-tenant tests pass
-- **Maturity boundary:** SPECIFIED (target); do not infer IMPLEMENTED from this PRD alone
+- **Acceptance outcome:** negative cross-tenant tests pass for the declared certification envelope
+- **Maturity boundary:** SPECIFIED (target); Phase 1 certifies single-customer enterprise with tenant-aware contracts; MSP/shared-customer adversarial isolation and noisy-neighbor certification are Phase 1.5. Do not infer IMPLEMENTED/CERTIFIED from this PRD alone.
 
 | ID | Requirement |
 |---|---|
-| PRD-TEN-001 | Platform shall support single-customer and MSP/multi-tenant operating modes. |
+| PRD-TEN-001 | Platform shall support single-customer and MSP/multi-tenant operating modes. Single-customer is the Phase 1 certification envelope; MSP/shared multi-tenancy certification is Phase 1.5. |
 | PRD-TEN-002 | Tenant isolation shall be enforced in API, authorization, query and persistence layers, not only by hiding UI elements. |
-| PRD-TEN-003 | MSP users may be scoped to one or multiple customers; customer users shall not see other customers. |
+| PRD-TEN-003 | MSP users may be scoped to one or multiple customers; customer users shall not see other customers. MSP-mode certification is Phase 1.5. |
 | PRD-TEN-004 | Tenants shall have independent policy, dashboards, retention, integrations, credentials, groups and reporting scopes where allowed. |
 | PRD-TEN-005 | Overlapping IP address spaces across tenants shall be supported through tenant-aware canonical identity. |
 | PRD-TEN-006 | Resource usage/quota controls shall prevent one tenant from exhausting shared query/report/AI/ingestion resources in multi-tenant deployments. |
@@ -146,16 +146,16 @@ Asset Reconciliation; Technology Lifecycle Risk; Backup & Restore; DR; Upgrade &
 ## 5. Core installation, packaging, HA and DR
 
 **Feature contract (summary):**
-- **Purpose/outcome:** Installable Core with Standalone or exactly-two-Core HA and v1.0 DR capability
+- **Purpose/outcome:** Installable Core with Standalone (Phase 1 cert envelope) or exactly-two-Core HA (Phase 1.5 cert envelope) and mandatory v1.0 / Phase-1 DR capability
 - **Subfeatures:** build separation; installer; HA Active/Standby; DR backup/replication readiness; native packages; auto-start
 - **Primary persona:** Platform Super Admin / implementer
 - **Dependencies:** PKI, networking, storage, peer Core for HA
 - **Preconditions:** OS certification matrix met
 - **Primary workflow:** install → configure topology → validate readiness
-- **Product behavior:** HA failover target <60s; Sensors continue buffering
-- **Failure/degraded behavior:** fail-safe prefer no dual-active; Sensors buffer
-- **Acceptance outcome:** installer/HA/DR acceptance gates demonstrated
-- **Maturity boundary:** SPECIFIED; HA stateful mechanisms remain open P0 until certified (Architecture/#92)
+- **Product behavior:** Phase 1 standalone production-enterprise install; Phase 1.5 HA failover target <60s; Sensors continue buffering; HA ≠ DR
+- **Failure/degraded behavior:** fail-safe prefer no dual-active; Sensors buffer; Phase 1 site-loss uses backup/restore/DR rather than Core HA
+- **Acceptance outcome:** installer/HA/DR acceptance gates demonstrated for the declared envelope
+- **Maturity boundary:** SPECIFIED; HA stateful mechanisms remain open P0 until Phase 1.5 certified (Architecture/BUILD-120–124). Phase 1 certificate must not imply HA.
 
 ### 5.1 Build separation
 
@@ -181,6 +181,8 @@ The Core installer shall:
 
 ### 5.3 HA behavior
 
+PRD-HA-001..008 define the **Phase 1.5** exactly-two-Core HA certification envelope. They remain architecture/product requirements at maturity SPECIFIED until Phase 1.5 evidence exists. A Phase 1 standalone certificate must not imply these HA guarantees.
+
 | ID | Requirement |
 |---|---|
 | PRD-HA-001 | Exactly two full Core nodes shall comprise the standard HA application pair. |
@@ -194,7 +196,7 @@ The Core installer shall:
 
 ### 5.4 DR
 
-DR capability is mandatory in v1.0. Product shall include:
+DR capability is mandatory in v1.0 and remains mandatory for the **Phase 1** certification envelope. HA is distinct from DR: Phase 1 must certify backup/restore plus site-loss recovery/redeploy/endpoint-redirection behavior for its declared DR profile, without claiming two-Core HA continuity or HA zero-RPO. Product shall include:
 
 - backup and restore workflows;
 - DR state export/replication architecture;
@@ -202,7 +204,7 @@ DR capability is mandatory in v1.0. Product shall include:
 - runbook and audit trail;
 - test/verification capability.
 
-Exact contractual RPO, RTO and automated/manual DR activation remain TBD and must be parameterized/configurable where architecture permits.
+Exact contractual/external RPO, RTO and automated/manual DR activation remain TBD and must be parameterized/configurable where architecture permits. Internal technical RPO/RTO engineering targets are Master technical authority.
 
 ---
 
@@ -346,6 +348,10 @@ Sensors shall:
 - support idempotent replay and sequence tracking;
 - apply the 80% local-storage safety policy;
 - preserve higher-priority/recent operational data preferentially under extreme local pressure.
+
+**Phase 1 deletion-ACK durability:** a deletion-authorizing Sensor ACK must survive the certified standalone Core failure matrix (application/process/service crash/restart, governed host reboot and other explicitly certified recoverable failures). Catastrophic destruction/loss of the single Core/storage is not Phase-1 zero-RPO HA; that belongs to backup/DR and the declared Phase-1 RPO/RTO profile. Phase 1.5 adds `ACKED-FOR-DELETION TELEMETRY RPO = 0` for the certified permanent one-Core HA failure matrix.
+
+**Phase 1 Sensor authority:** assignment generation/fencing, lease ownership and stale privileged-work rejection remain mandatory with multiple Sensors even when Core is standalone. Cross-Core failover re-anchor and push-protocol HA continuity are Phase 1.5.
 
 ---
 
@@ -1354,31 +1360,35 @@ No universal customer CPU/memory/disk threshold is fixed here. Effective values 
 
 
 ## 24. NCM and Privileged CLI Session Broker
-NCM is Day-1 important and shall support:
+NCM is Day-1 important. Capabilities below are architecture/product scope; certification follows the Phase 1 / Phase 1.5 split (see also §58.4).
 
-- credentialed SSH/NETCONF/API connections;
+**Phase 1 independently certifiable subset:**
+- credentialed SSH/NETCONF/API connections for authorized NCM/CLI paths;
 - configuration backup;
 - version history;
 - diff;
 - change detection;
 - compliance rules/golden configuration;
-- templates;
-- bulk push;
-- scheduling/windows;
-- maker-checker approval;
+- templates (non-executing authoring/storage where certified);
 - RBAC;
-- rollback where adapter/device supports it;
 - reports;
 - API;
-- browser CLI integration;
+- browser CLI integration only when credential brokering/RBAC/audit are certified;
 - change audit;
-- RCA correlation.
+- RCA correlation as supporting evidence.
+
+**Phase 1.5 default (unless Founder change control promotes earlier):**
+- bulk push;
+- scheduling/windows for privileged mass execution;
+- maker-checker approval driving automated privileged execution;
+- canary/staged automated privileged rollout;
+- rollback where adapter/device supports it as part of automated remediation paths.
 
 Semantic diff shall only be claimed where a Device Pack/parser supports it.
 
 NCM worker concurrency/rate limits are independent from routine monitoring workers so NCM jobs cannot starve polling.
 
-Bulk operations shall support dry-run/impact preview and canary/staged execution.
+Bulk operations shall support dry-run/impact preview and canary/staged execution when the privileged-automation envelope is certified (Phase 1.5 by default).
 
 ---
 
@@ -2209,7 +2219,7 @@ Data placement policies shall be architecturally possible so future regional Cor
 
 - Core target up to 2,500 devices: 8 vCPU / 32 GB under certified Standard Network Workload Profile.
 - Sensor current planning baseline: 4 vCPU / 16 GB / 150 GB for ~800 normal network devices.
-- Sensor engineering benchmark target: 8 vCPU / 16 GB for ~2,000–2,500 normal devices where workload permits.
+- Sensor engineering benchmark target (NOT CERTIFIED): 8 vCPU / 32 GB for ~2,000–2,500 normal devices where workload permits.
 - Agent footprint target: TBD by OS/workload benchmark; must be explicitly measured and kept low.
 
 ### 41.2 UI/API performance
@@ -2220,8 +2230,8 @@ Exact SLOs TBD after baseline benchmark, but release testing must cover dashboar
 
 - Non-HA installations have no HA availability claim.
 - HA target: 99.95% service design objective subject to deployment assumptions and final SLA definition.
-- Core failover certified target <60s.
-- Sensor monitoring continuity through Core failover.
+- Phase 1.5 HA profile: Core failover certified target <60s.
+- Phase 1.5 HA profile: Sensor monitoring continuity through Core failover.
 
 ### 41.4 Scale
 
@@ -2265,13 +2275,13 @@ A separate Heavy Network Workload profile shall benchmark high-interface/high-fr
 **SNWP status:** SNWP-2500-v1 is a **TARGET/PROFILE** for capacity engineering. Documentation of SNWP does not constitute BENCHMARKED or CERTIFIED capacity claims.
 
 ## 42. Product acceptance criteria
-Before an initial enterprise release can be signed off, engineering/QA shall prove at minimum:
+Acceptance criteria apply to the selected certification envelope. Before an initial enterprise release for that envelope can be signed off, engineering/QA shall prove at minimum:
 
 - installation/upgrade/rollback and separate Core/Sensor/Agent builds;
 - UI-driven provisioning for single, bulk and discovery;
 - actionable preflight diagnostics;
 - central Sensor/Agent assignment and locality/capacity-aware placement;
-- SNMP/flow/syslog/network protocol collection;
+- certified SNMP/ICMP/network protocol collection; Flow/Syslog/streaming collection only when those profiles are included and certified;
 - infrastructure/cloud/K8s/DB/synthetic coverage committed for release;
 - policy inheritance and no hard-coded customer thresholds;
 - alert qualification and recovery qualification;
@@ -2283,12 +2293,15 @@ Before an initial enterprise release can be signed off, engineering/QA shall pro
 - NCM/IPAM/CLI governance;
 - dashboards/studios/admin/RBAC/audit;
 - retention/rollups and 80% storage protection on Core and Sensor;
-- HA failover <60s with Sensor continuity;
-- DR architecture/runbook and backup/restore verification;
+- Phase 1 standalone: DR architecture/runbook and backup/restore (including site-loss DR) verification;
 - HTTPS-only UI;
 - SBOM/licence/security scans;
 - certified resource/performance tests under SNWP-2500-v1 and OBS-P1 enrichment overlay;
 - Unified Network & Infrastructure Observability certification profile (NIOCP-P1-v1 defined in Platform_14 §11; future certification profile, NOT YET CERTIFIED until applicable evidence exists).
+
+Phase 1 standalone certification is not gated by Core HA failover. When the Phase 1.5 HA certification envelope is selected, engineering/QA shall additionally prove:
+
+- Phase 1.5 HA profile: Core HA failover <60s with Sensor continuity.
 
 ---
 
@@ -2377,7 +2390,9 @@ Phase 1 does **not** require retained distributed spans, trace search/waterfalls
 
 ### 58.4 NCM — Network Change & Configuration Assurance
 
-NCM Phase 1 lifecycle is **Plan -> Backup -> Compare -> Preflight -> Assess -> Approve -> Execute -> Validate -> Observe -> Rollback/Escalate -> Audit**. It strengthens existing `REQ-NCM-001..005` with scheduled/on-demand/pre/post backup, protected history, change detection, evidence-based attribution, secret-safe configuration search, raw diff, semantic diff only through certified parsers, desired/golden state with inheritance/exceptions/drift, baseline compliance, versioned templates, deterministic pre-change checks, graph-derived blast-radius evidence, explainable deterministic risk, maker-checker, external ITSM approval binding, canary/fixed staged rollout, explicit stop criteria, post-change validation/stabilization and rollback only through certified adapter/device mechanisms.
+The full NCM Change Assurance lifecycle is **Plan -> Backup -> Compare -> Preflight -> Assess -> Approve -> Execute -> Validate -> Observe -> Rollback/Escalate -> Audit**. It strengthens existing `REQ-NCM-001..005` with scheduled/on-demand/pre/post backup, protected history, change detection, evidence-based attribution, secret-safe configuration search, raw diff, semantic diff only through certified parsers, desired/golden state with inheritance/exceptions/drift, baseline compliance, versioned templates, deterministic pre-change checks, graph-derived blast-radius evidence, explainable deterministic risk, maker-checker, external ITSM approval binding, canary/fixed staged rollout, explicit stop criteria, post-change validation/stabilization and rollback only through certified adapter/device mechanisms.
+
+**Certification split (Issue #200 / #202):** Phase 1 may independently certify the read-only / low-risk subset (backup/version/diff/compliance/golden-state and controlled manual CLI when RBAC/credential-brokering/audit are certified). Execute/canary/fixed staged rollout, mass push and automated privileged remediation default to the Phase 1.5 envelope unless Founder change control explicitly promotes a capability. Firmware lifecycle remains Phase 1.5.
 
 Phase-1 compliance covers customer/vendor operational baselines and deterministic configuration checks. Advanced CIS/STIG-oriented certified rule content is Phase 1.5/evidence-and-rights dependent and must never be presented as compliance certification merely because a check exists.
 
