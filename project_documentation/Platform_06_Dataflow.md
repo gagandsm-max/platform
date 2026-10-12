@@ -744,7 +744,7 @@ sequenceDiagram
   end
 ```
 
-**Phase 1 / Phase 1.5 NCM envelope (Issue #200):** DF-025 backup/version/diff/compliance flows are Phase 1 independently certifiable when RBAC/credential/audit gates pass. DF-026 mass push / canary / automated privileged remediation defaults to **Phase 1.5** unless Founder change control promotes it. Controlled manual CLI remains Phase 1 only when security contracts are certified. Schema presence of push/rollback paths is not Phase 1 certification.
+**Phase 1 / Phase 1.5 NCM envelope (Issue #200):** Phase 1 independently certifiable NCM subset remains config backup/version/diff/compliance/golden-state; controlled manual CLI remains Phase 1 only when RBAC/credential/audit contracts are certified. DF-025 depicts configuration backup and version storage only—not comparison, compliance or golden-state evaluation. DF-026 depicts one approved configuration push with pre-check, validation and optional rollback—not mass deployment, canary execution or the full controlled-remediation workflow. Mass push / canary / automated privileged remediation defaults to **Phase 1.5** unless Founder change control promotes it. Schema presence of push/rollback paths is not Phase 1 certification.
 
 ---
 
