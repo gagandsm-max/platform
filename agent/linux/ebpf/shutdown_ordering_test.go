@@ -283,8 +283,15 @@ var errDetachCause = errors.New("link close failed")
 //     against the Stop budget),
 //  2. interrupts with sticky interruption so a later SetDeadline cannot lose
 //     the wakeup,
-//  3. waits for the injected detach failure before asserting typed quiesce
-//     evidence.
+//  3. waits until recorded shutdownFlushErr contains the typed quiesce
+//     evidence (noteShutdownEvidence after detachFn returns) — not merely
+//     detach callback entry — before asserting StopContext identities.
+//
+// Interleaving: closing a barrier inside detachProbesFn before return only
+// proves callback ENTRY. If the worker is descheduled between entry/return and
+// noteShutdownEvidence, finishStop can snapshot only ErrBackendStopDeadline
+// under the short caller budget. Evidence rendezvous inspects b.mu-guarded
+// shutdownFlushErr so the typed assertion is scheduling-independent.
 // Bounded-deadline-without-detach remains covered by
 // TestStalledDetachStopReturnsWithinDeadline.
 func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
@@ -302,10 +309,7 @@ func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 		block:   block,
 		onBlock: armed,
 	}
-	detachDone := make(chan struct{})
-	var detachOnce sync.Once
 	b.detachProbesFn = func(*kernelHandles) error {
-		detachOnce.Do(func() { close(detachDone) })
 		return errDetachCause
 	}
 	_, _ = trackHandleCleanup(b)
@@ -339,15 +343,35 @@ func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	// Wake the armed ReadRaw so shutdownReadPath runs while stop budget remains.
 	rd.interruptRead()
 
-	select {
-	case <-detachDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("injected detach failure never executed")
+	// Rendezvous on recorded quiesce evidence — callback entry/return is not
+	// sufficient (see comment above). Polling is bounded; no busy-spin.
+	evidenceDeadline := time.After(2 * time.Second)
+	for {
+		b.mu.Lock()
+		flushErr := b.shutdownFlushErr
+		b.mu.Unlock()
+		if errors.Is(flushErr, ErrBackendProducerQuiesceIncomplete) && errors.Is(flushErr, errDetachCause) {
+			break
+		}
+		select {
+		case <-evidenceDeadline:
+			t.Fatal("recorded ErrBackendProducerQuiesceIncomplete/errDetachCause never observed")
+		case <-time.After(time.Millisecond):
+		}
 	}
 
 	err = <-stopDone
 	if err == nil {
 		t.Fatal("detach failure must not yield clean Stop")
+	}
+	// First Stop may legitimately carry only ErrBackendStopDeadline when the
+	// caller budget expired between detachFn and noteShutdownEvidence. After
+	// the evidence barrier, a retained Stop must expose both typed identities.
+	if !errors.Is(err, ErrBackendProducerQuiesceIncomplete) || !errors.Is(err, errDetachCause) {
+		err = b.StopContext(context.Background())
+	}
+	if err == nil {
+		t.Fatal("detach failure must not yield clean Stop after retained evidence")
 	}
 	if !errors.Is(err, ErrBackendProducerQuiesceIncomplete) {
 		t.Fatalf("want ErrBackendProducerQuiesceIncomplete, got %v", err)

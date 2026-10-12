@@ -168,14 +168,24 @@ func (f *fakeEventReader) interruptRead() {
 // SetDeadline re-arms a future poll deadline afterward. Otherwise ReadRaw can
 // enter an uninterruptible Sleep-until-deadline and recreate the original
 // 200ms Stop-budget race.
+//
+// Correctness is scheduling-independent: arm a future deadline beyond a
+// generous outer watchdog. Sticky interruption must make ReadRaw return
+// os.ErrDeadlineExceeded within the watchdog; if SetDeadline re-armed an idle
+// wait, ReadRaw would block until the future deadline and the watchdog would
+// fire. Do not assert absolute goroutine scheduling latency.
 func TestFakeEventReaderInterruptSurvivesLaterSetDeadline(t *testing.T) {
 	pending := []byte{0x01, 0x02}
 	rd := &fakeEventReader{
 		block:   make(chan struct{}),
 		records: [][]byte{pending},
 	}
+
+	const outerWatchdog = 500 * time.Millisecond
+	futureBeyondWatchdog := 2 * time.Second
+
 	rd.interruptRead()
-	rd.SetDeadline(time.Now().Add(200 * time.Millisecond))
+	rd.SetDeadline(time.Now().Add(futureBeyondWatchdog))
 
 	// Pending records remain deliverable after interruption.
 	raw, err := rd.ReadRaw()
@@ -183,7 +193,6 @@ func TestFakeEventReaderInterruptSurvivesLaterSetDeadline(t *testing.T) {
 		t.Fatalf("pending record after interrupt: raw=%v err=%v", raw, err)
 	}
 
-	start := time.Now()
 	done := make(chan error, 1)
 	go func() {
 		_, err := rd.ReadRaw()
@@ -192,15 +201,28 @@ func TestFakeEventReaderInterruptSurvivesLaterSetDeadline(t *testing.T) {
 
 	select {
 	case err := <-done:
-		elapsed := time.Since(start)
-		if elapsed > 50*time.Millisecond {
-			t.Fatalf("interrupted ReadRaw took %v; interruption was lost to SetDeadline", elapsed)
-		}
 		if !errors.Is(err, os.ErrDeadlineExceeded) {
 			t.Fatalf("want os.ErrDeadlineExceeded after interrupt, got %v", err)
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(outerWatchdog):
 		t.Fatal("ReadRaw blocked after interruptRead→SetDeadline(future); interruption lost")
+	}
+
+	// Negative sticky re-arm: a second future deadline beyond the same watchdog
+	// must still not restore an uninterruptible idle wait.
+	rd.SetDeadline(time.Now().Add(futureBeyondWatchdog))
+	done2 := make(chan error, 1)
+	go func() {
+		_, err := rd.ReadRaw()
+		done2 <- err
+	}()
+	select {
+	case err := <-done2:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("sticky interrupt must survive second SetDeadline(future), got %v", err)
+		}
+	case <-time.After(outerWatchdog):
+		t.Fatal("second SetDeadline(future) re-armed idle wait; sticky interrupt lost")
 	}
 }
 
