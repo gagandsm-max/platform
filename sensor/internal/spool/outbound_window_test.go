@@ -229,3 +229,45 @@ func checksumRecords(recs []Record) string {
 	}
 	return h
 }
+
+func TestRebatchOutboundWindowConservationAndExpectedRange(t *testing.T) {
+	s := openTest(t, 1024)
+	for i := 0; i < 5; i++ {
+		add(t, s, fmt.Sprintf("p%d", i))
+	}
+	original, err := s.ReadOrReserveOutboundBatch(5, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RebatchOutboundBatch(1, 4); CodeOf(err) != CodeOutboundWindow {
+		t.Fatalf("stale range: %v", err)
+	}
+	for _, want := range []uint64{2, 1, 1} {
+		current, err := s.ReadOrReserveOutboundBatch(5, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RebatchOutboundBatch(current.FirstSequence, current.LastSequence); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.ReadOrReserveOutboundBatch(5, 1024)
+		if err != nil || got.FirstSequence != 1 || got.LastSequence != want {
+			t.Fatalf("range: %+v %v", got, err)
+		}
+		st, err := s.Stats()
+		if err != nil || st.RecordCount != 5 {
+			t.Fatalf("lost records: %+v %v", st, err)
+		}
+	}
+	blocked, err := s.OutboundBatchSizeRejected()
+	if err != nil || !blocked {
+		t.Fatalf("singleton not blocked: %v", err)
+	}
+	all, err := s.ReadBatch(5, 1024)
+	if err != nil || checksumRecords(all.Records) != checksumRecords(original.Records) {
+		t.Fatal("source drift")
+	}
+	if err := s.CompleteOutboundBatch(5); CodeOf(err) != CodeOutboundWindow {
+		t.Fatalf("old ACK accepted: %v", err)
+	}
+}

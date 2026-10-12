@@ -12,7 +12,7 @@ import (
 )
 
 // outboundWindow is a versioned sidecar that freezes the exact [first,last]
-// range selected for network transmission until durable ACK or explicit poison abandon.
+// range selected for network transmission until durable ACK, explicit poison abandon, or verified pre-reservation size rejection.
 // It is spool metadata, not a telemetry record. Older recover() scanners ignore it
 // because it is not named record-*.json and is not state.json.
 type outboundWindow struct {
@@ -20,6 +20,7 @@ type outboundWindow struct {
 	StreamID      string `json:"streamId"`
 	FirstSequence uint64 `json:"firstSequence"`
 	LastSequence  uint64 `json:"lastSequence"`
+	SizeRejected  bool   `json:"sizeRejected,omitempty"`
 }
 
 // ReadOrReserveOutboundBatch returns the currently frozen outbound range, or
@@ -108,6 +109,54 @@ func (s *DiskSpool) AbandonOutboundBatch() error {
 	return s.clearOutboundWindowLocked()
 }
 
+// RebatchOutboundBatch replaces only the expected frozen metadata after the caller
+// proves ERR_BATCH_TOO_LARGE/413 occurred before Core reservation. The caller must
+// serialize delivery: no request for the old range may still be in flight.
+// Atomic replacement preserves either the old or smaller prefix across a crash;
+// no record, stream identity or ACK watermark is changed. A singleton is durably
+// marked blocked rather than repeatedly sent or treated as poison.
+func (s *DiskSpool) RebatchOutboundBatch(first, last uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return newError(CodeClosed, "spool is closed", nil)
+	}
+	win, exists, err := s.loadOutboundWindowLocked()
+	if err != nil {
+		return err
+	}
+	if !exists || win.FirstSequence != first || win.LastSequence != last {
+		return newError(CodeOutboundWindow, "rebatch range must equal frozen outbound window", nil)
+	}
+	if _, err := s.readExactRangeLocked(first, last, 1, 1); err != nil {
+		return err
+	}
+	if first == last {
+		win.SizeRejected = true
+	} else {
+		// Strictly reduce record count, including odd ranges, without splitting records.
+		win.LastSequence = first + (last-first+1)/2 - 1
+	}
+	raw, err := json.Marshal(win)
+	if err != nil {
+		return newError(CodeOutboundWindow, "failed encoding rebatch metadata", err)
+	}
+	return atomicWriteFile(s.outboundWindowPath(), raw, 0640)
+}
+
+// OutboundBatchSizeRejected reports the durable singleton size block. Records
+// remain readable for diagnostics; automatic delivery must stop pending governed
+// recovery of this record or the Core limit, rather than silently clearing it.
+func (s *DiskSpool) OutboundBatchSizeRejected() (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false, newError(CodeClosed, "spool is closed", nil)
+	}
+	win, exists, err := s.loadOutboundWindowLocked()
+	return exists && win.SizeRejected, err
+}
+
 func (s *DiskSpool) outboundWindowPath() string {
 	return filepath.Join(s.dir, outboundWindowFileName)
 }
@@ -161,6 +210,9 @@ func (s *DiskSpool) validateOutboundWindowLocked(win outboundWindow) error {
 	}
 	if win.FirstSequence == 0 || win.LastSequence < win.FirstSequence {
 		return newError(CodeOutboundWindow, "outbound window sequence range is impossible", nil)
+	}
+	if win.SizeRejected && win.FirstSequence != win.LastSequence {
+		return newError(CodeOutboundWindow, "size block requires a singleton window", nil)
 	}
 	if win.FirstSequence > MaxSafeSequence || win.LastSequence > MaxSafeSequence {
 		return newError(CodeOutboundWindow, "outbound window sequence exceeds MAX_SAFE_SEQUENCE", nil)
