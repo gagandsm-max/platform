@@ -278,8 +278,13 @@ var errDetachCause = errors.New("link close failed")
 // uninterruptible sleep is not woken by runtime cancel. A Stop budget equal to
 // that deadline can therefore expire before detach runs, returning only
 // ErrBackendStopDeadline — correct caller-bounded behavior when detach has not
-// completed. This fixture therefore uses an interruptible reader block and
-// waits for the injected detach failure before asserting typed quiesce evidence.
+// completed. This fixture therefore:
+//  1. waits until ReadRaw is armed on an interruptible block (no startup race
+//     against the Stop budget),
+//  2. interrupts with sticky interruption so a later SetDeadline cannot lose
+//     the wakeup,
+//  3. waits for the injected detach failure before asserting typed quiesce
+//     evidence.
 // Bounded-deadline-without-detach remains covered by
 // TestStalledDetachStopReturnsWithinDeadline.
 func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
@@ -292,9 +297,10 @@ func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	block := make(chan struct{})
+	armed := make(chan struct{})
 	rd := &fakeEventReader{
-		records: [][]byte{putEventV1(t, nil)},
 		block:   block,
+		onBlock: armed,
 	}
 	detachDone := make(chan struct{})
 	var detachOnce sync.Once
@@ -308,8 +314,14 @@ func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	go b.readLoop(runtimeCtx)
 	go b.ingestLoop(runtimeCtx)
 
-	// Short budget: failed detach leaves producersQuiesced=false so drain will
-	// not accept idle-as-empty and exits via the governed shutdown deadline.
+	select {
+	case <-armed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReadRaw never armed on interruptible block")
+	}
+
+	// Short budget starts only after the reader is blocked, so interrupt→detach
+	// is not racing ordinary startup against the same 200ms envelope.
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer stopCancel()
 	stopDone := make(chan error, 1)
