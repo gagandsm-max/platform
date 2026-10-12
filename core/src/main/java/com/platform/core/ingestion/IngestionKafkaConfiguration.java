@@ -58,6 +58,19 @@ public class IngestionKafkaConfiguration {
     }
 
     /**
+     * Fail-closed numeric topic contract: producer hardcodes {@link KafkaTelemetryProducer#TOPIC_TELEMETRY_NUMERIC}.
+     * Any configured consumer topic override that differs is rejected at startup so producer and consumer
+     * cannot silently disagree.
+     */
+    @Bean(name = "telemetryNumericTopicContract")
+    public String telemetryNumericTopicContract(
+            @Value("${platform.ingestion.kafka.topic:telemetry.numeric.v1}") String configuredTopic
+    ) {
+        enforceTelemetryNumericTopicContract(configuredTopic);
+        return configuredTopic;
+    }
+
+    /**
      * Telemetry listener consumer factory with fail-closed transactional visibility pins.
      * Hostile {@code isolation.level}/{@code enable.auto.commit} overrides cannot weaken these invariants.
      */
@@ -67,8 +80,16 @@ public class IngestionKafkaConfiguration {
         return createPinnedTelemetryConsumerFactory(properties);
     }
 
+    /**
+     * Platform-owned telemetry listener container factory.
+     * Not {@code @ConditionalOnMissingBean}: a replacing bean would bypass
+     * {@link #enforceTransactionalVisibilityInvariants(ConsumerFactory)} at wiring time.
+     * Spring Boot defaults ({@code spring.main.allow-bean-definition-overriding=false}) reject
+     * a duplicate bean definition fail-closed. Residual replacement risk is limited to trusted
+     * application classpath code that can already override security/Kafka beans under an
+     * explicitly permissive bean-overriding policy — not plain YAML or env alone.
+     */
     @Bean(name = TELEMETRY_KAFKA_LISTENER_CONTAINER_FACTORY)
-    @ConditionalOnMissingBean(name = TELEMETRY_KAFKA_LISTENER_CONTAINER_FACTORY)
     public ConcurrentKafkaListenerContainerFactory<String, String> telemetryKafkaListenerContainerFactory(
             @Qualifier(TELEMETRY_KAFKA_CONSUMER_FACTORY) ConsumerFactory<String, String> consumerFactory
     ) {
@@ -103,6 +124,17 @@ public class IngestionKafkaConfiguration {
         DefaultKafkaConsumerFactory<String, String> factory = new DefaultKafkaConsumerFactory<>(consumerProperties);
         enforceTransactionalVisibilityInvariants(factory);
         return factory;
+    }
+
+    static void enforceTelemetryNumericTopicContract(String configuredTopic) {
+        String expected = KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC;
+        if (configuredTopic == null || !expected.equals(configuredTopic.trim())) {
+            throw new IllegalStateException(
+                    "Telemetry numeric Kafka topic must be exactly '" + expected
+                            + "' to match KafkaTelemetryProducer; configured platform.ingestion.kafka.topic="
+                            + configuredTopic
+            );
+        }
     }
 
     static void enforceTransactionalVisibilityInvariants(ConsumerFactory<?, ?> consumerFactory) {

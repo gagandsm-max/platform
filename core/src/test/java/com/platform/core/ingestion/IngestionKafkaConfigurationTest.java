@@ -5,6 +5,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.BeanCreationException;
+import org.springframework.beans.factory.BeanDefinitionStoreException;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
@@ -15,6 +16,7 @@ import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.mock.env.MockEnvironment;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -132,6 +134,42 @@ class IngestionKafkaConfigurationTest {
     }
 
     @Test
+    void enforceRejectsUnsupportedTelemetryTopicOverride() {
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> IngestionKafkaConfiguration.enforceTelemetryNumericTopicContract("other.topic.v1")
+        );
+        assertTrue(ex.getMessage().contains(KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC));
+        assertTrue(ex.getMessage().contains("other.topic.v1"));
+    }
+
+    @Test
+    void enforceAcceptsCanonicalTelemetryNumericTopic() {
+        IngestionKafkaConfiguration.enforceTelemetryNumericTopicContract(
+                KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC
+        );
+    }
+
+    @Test
+    void unsupportedTopicPropertyFailsContextStartup() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            MockEnvironment env = new MockEnvironment();
+            env.setProperty("platform.ingestion.kafka.topic", "hostile.redirect.v1");
+            context.setEnvironment(env);
+            context.registerBean(KafkaProperties.class, KafkaProperties::new);
+            context.register(IngestionKafkaConfiguration.class);
+
+            BeanCreationException ex = assertThrows(BeanCreationException.class, context::refresh);
+            Throwable root = rootCause(ex);
+            assertInstanceOf(IllegalStateException.class, root);
+            assertTrue(
+                    root.getMessage().contains(KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC),
+                    "startup must fail closed on topic mismatch; got: " + root.getMessage()
+            );
+        }
+    }
+
+    @Test
     void replacedUnsafeTelemetryConsumerFactoryFailsListenerStartup() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
             context.registerBean(KafkaProperties.class, KafkaProperties::new);
@@ -150,11 +188,28 @@ class IngestionKafkaConfigurationTest {
     }
 
     @Test
+    void duplicateListenerFactoryDefinitionFailsClosedWhenOverridingDisabled() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.setAllowBeanDefinitionOverriding(false);
+            context.registerBean(KafkaProperties.class, KafkaProperties::new);
+            context.register(HostileListenerFactoryOverride.class);
+            context.register(IngestionKafkaConfiguration.class);
+
+            assertThrows(BeanDefinitionStoreException.class, context::refresh);
+        }
+    }
+
+    @Test
     void safeTelemetryConsumerBeansWireTogether() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
             context.registerBean(KafkaProperties.class, KafkaProperties::new);
             context.register(IngestionKafkaConfiguration.class);
             context.refresh();
+
+            assertEquals(
+                    KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC,
+                    context.getBean("telemetryNumericTopicContract", String.class)
+            );
 
             ConsumerFactory<?, ?> consumerFactory = context.getBean(
                     IngestionKafkaConfiguration.TELEMETRY_KAFKA_CONSUMER_FACTORY,
@@ -193,6 +248,14 @@ class IngestionKafkaConfigurationTest {
             unsafe.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_uncommitted");
             unsafe.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
             return new DefaultKafkaConsumerFactory<>(unsafe);
+        }
+    }
+
+    @Configuration
+    static class HostileListenerFactoryOverride {
+        @Bean(name = IngestionKafkaConfiguration.TELEMETRY_KAFKA_LISTENER_CONTAINER_FACTORY)
+        ConcurrentKafkaListenerContainerFactory<String, String> telemetryKafkaListenerContainerFactory() {
+            return new ConcurrentKafkaListenerContainerFactory<>();
         }
     }
 }

@@ -95,7 +95,9 @@ platform:
     dev-cert-dir: ${PLATFORM_SENSOR_CONTROL_DEV_CERT_DIR:/certs}
   ingestion:
     kafka:
-      topic: ${TELEMETRY_NUMERIC_TOPIC:telemetry.numeric.v1}
+      # Issue #222: producer hardcodes telemetry.numeric.v1. Do not env-override this
+      # independently — IngestionKafkaConfiguration rejects any other configured value.
+      topic: telemetry.numeric.v1
   security:
     oidc:
       # Fail-closed resource-server boundary. Leave blank until the deployment IdP issuer is configured.
