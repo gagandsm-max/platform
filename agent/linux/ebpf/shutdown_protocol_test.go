@@ -21,6 +21,8 @@ type fakeEventReader struct {
 	closed            bool
 	deadline          time.Time
 	block             chan struct{} // when non-nil, ReadRaw waits until closed or Close
+	interrupted       bool          // sticky: survives later SetDeadline re-arms
+	onBlock           chan struct{} // optional; closed once when entering block wait
 	closedWithPending atomic.Bool
 	// failWith, when set, is returned instead of an idle deadline (and instead of
 	// further successful reads once failAfter successful reads have occurred).
@@ -32,8 +34,13 @@ type fakeEventReader struct {
 
 func (f *fakeEventReader) SetDeadline(t time.Time) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.interrupted {
+		// Keep interruption observable: never re-arm an idle wait after interruptRead.
+		f.deadline = time.Now().Add(-time.Millisecond)
+		return
+	}
 	f.deadline = t
-	f.mu.Unlock()
 }
 
 func (f *fakeEventReader) ReadRaw() ([]byte, error) {
@@ -60,13 +67,25 @@ func (f *fakeEventReader) ReadRaw() ([]byte, error) {
 			f.mu.Unlock()
 			return nil, err
 		}
+		if f.interrupted {
+			f.mu.Unlock()
+			return nil, os.ErrDeadlineExceeded
+		}
 		deadline := f.deadline
 		block := f.block
+		onBlock := f.onBlock
 		f.mu.Unlock()
 		if !deadline.IsZero() && !time.Now().Before(deadline) {
 			return nil, os.ErrDeadlineExceeded
 		}
 		if block != nil {
+			if onBlock != nil {
+				select {
+				case <-onBlock:
+				default:
+					close(onBlock)
+				}
+			}
 			select {
 			case <-block:
 			case <-time.After(time.Until(deadline)):
@@ -121,6 +140,90 @@ func (f *fakeEventReader) isClosed() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.closed
+}
+
+// interruptRead wakes a ReadRaw blocked on f.block and latches a sticky
+// interruption so a later SetDeadline cannot re-arm an uninterruptible idle
+// sleep. Used by shutdown fixtures that must observe stop/cancel without
+// waiting out the production 200ms read deadline. Pending records, failWith,
+// and Close semantics remain unchanged.
+func (f *fakeEventReader) interruptRead() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.interrupted = true
+	f.deadline = time.Now().Add(-time.Millisecond)
+	if f.block == nil {
+		return
+	}
+	select {
+	case <-f.block:
+	default:
+		close(f.block)
+	}
+	f.block = nil
+}
+
+// TestFakeEventReaderInterruptSurvivesLaterSetDeadline is the Issue #219
+// residual-race regression: interruptRead must remain observable even when
+// SetDeadline re-arms a future poll deadline afterward. Otherwise ReadRaw can
+// enter an uninterruptible Sleep-until-deadline and recreate the original
+// 200ms Stop-budget race.
+//
+// Correctness is scheduling-independent: arm a future deadline beyond a
+// generous outer watchdog. Sticky interruption must make ReadRaw return
+// os.ErrDeadlineExceeded within the watchdog; if SetDeadline re-armed an idle
+// wait, ReadRaw would block until the future deadline and the watchdog would
+// fire. Do not assert absolute goroutine scheduling latency.
+func TestFakeEventReaderInterruptSurvivesLaterSetDeadline(t *testing.T) {
+	pending := []byte{0x01, 0x02}
+	rd := &fakeEventReader{
+		block:   make(chan struct{}),
+		records: [][]byte{pending},
+	}
+
+	const outerWatchdog = 500 * time.Millisecond
+	futureBeyondWatchdog := 2 * time.Second
+
+	rd.interruptRead()
+	rd.SetDeadline(time.Now().Add(futureBeyondWatchdog))
+
+	// Pending records remain deliverable after interruption.
+	raw, err := rd.ReadRaw()
+	if err != nil || string(raw) != string(pending) {
+		t.Fatalf("pending record after interrupt: raw=%v err=%v", raw, err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := rd.ReadRaw()
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("want os.ErrDeadlineExceeded after interrupt, got %v", err)
+		}
+	case <-time.After(outerWatchdog):
+		t.Fatal("ReadRaw blocked after interruptRead→SetDeadline(future); interruption lost")
+	}
+
+	// Negative sticky re-arm: a second future deadline beyond the same watchdog
+	// must still not restore an uninterruptible idle wait.
+	rd.SetDeadline(time.Now().Add(futureBeyondWatchdog))
+	done2 := make(chan error, 1)
+	go func() {
+		_, err := rd.ReadRaw()
+		done2 <- err
+	}()
+	select {
+	case err := <-done2:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("sticky interrupt must survive second SetDeadline(future), got %v", err)
+		}
+	case <-time.After(outerWatchdog):
+		t.Fatal("second SetDeadline(future) re-armed idle wait; sticky interrupt lost")
+	}
 }
 
 func armRuntimeWithReader(b *Backend, rd eventReader, rawCap int) (context.Context, context.CancelFunc) {
