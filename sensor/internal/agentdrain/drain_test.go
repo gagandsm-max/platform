@@ -407,27 +407,27 @@ func TestDrainParksRecordTooLarge(t *testing.T) {
 	}
 }
 
-func TestIsTerminalCoreError(t *testing.T) {
+func TestIsRecordAttributableCoreError(t *testing.T) {
 	for _, code := range []string{
-		"ERR_MALFORMED_JSON",
 		"ERR_MALFORMED_RECORD",
 		"ERR_MALFORMED_RECORD_PAYLOAD",
-		"ERR_UNSUPPORTED_SCHEMA_VERSION",
-		"ERR_CHECKSUM_MISMATCH",
 		"ERR_AGENT_HOST_ID_REQUIRED",
 		"ERR_RECORD_TOO_LARGE",
-		"ERR_BATCH_TOO_LARGE",
-		"ERR_REQUEST_TOO_LARGE",
 		"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED",
 		"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID",
 		"ERR_REVOKED_ASSIGNMENT_ACCEPTED_BEFORE_ACTIVATION",
 		"ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION",
 	} {
-		if !isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 400}) {
+		if !isRecordAttributableCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 400}) {
 			t.Fatalf("expected poison allowlist terminal for %s", code)
 		}
 	}
 	for _, code := range []string{
+		"ERR_MALFORMED_JSON",
+		"ERR_UNSUPPORTED_SCHEMA_VERSION",
+		"ERR_CHECKSUM_MISMATCH",
+		"ERR_BATCH_TOO_LARGE",
+		"ERR_REQUEST_TOO_LARGE",
 		"ERR_NON_NUMERIC_RECORD",
 		"ERR_AGENT_ENTITY_UNRESOLVED",
 		"ERR_AGENT_ASSIGNMENT_UNKNOWN",
@@ -449,16 +449,16 @@ func TestIsTerminalCoreError(t *testing.T) {
 		"ERR_OTHER_CONTRACT",
 		"ERR_UNKNOWN_APPLICATION",
 	} {
-		if isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 403}) {
+		if isRecordAttributableCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 403}) {
 			t.Fatalf("%s must not be poison-terminal", code)
 		}
 	}
 	for _, status := range []int{400, 401, 403, 409, 413, 422} {
-		if isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_UNKNOWN_APP", HTTPStatus: status}) {
+		if isRecordAttributableCoreError(&coreclient.CoreAPIError{Code: "ERR_UNKNOWN_APP", HTTPStatus: status}) {
 			t.Fatalf("unknown HTTP %d must not be poison-terminal by status alone", status)
 		}
 	}
-	if isTerminalCoreError(errors.New("other")) {
+	if isRecordAttributableCoreError(errors.New("other")) {
 		t.Fatal("generic error must not be terminal")
 	}
 }
@@ -1462,12 +1462,12 @@ func TestIssue216PermanentErrorsDoNotAttributeBatchHead(t *testing.T) {
 	}
 }
 
-func TestIssue216BlockedLoopCancellation(t *testing.T) {
+func testIssue216BlockedLoopCancellation(t *testing.T, code string, count int) {
 	s, dir := openSpool(t)
-	appendNDurable(t, s, 2)
+	appendNDurable(t, s, count)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tr := &fakeTransport{err: &coreclient.CoreAPIError{Code: "ERR_AGENT_HOST_ID_REQUIRED", HTTPStatus: 400}}
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{Code: code, HTTPStatus: 400}}
 	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, MaxBackoff: time.Hour}, s, &captureTransport{inner: tr, onCall: func(coreclient.AgentTelemetryBatch) { cancel() }})
 	if err != nil {
 		t.Fatal(err)
@@ -1487,7 +1487,119 @@ func TestIssue216BlockedLoopCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := s.Stats()
-	if err != nil || st.RecordCount != 2 || d.metrics.Attempts.Load() != 1 || d.metrics.FailuresPermanent.Load() != 1 || d.metrics.DurableAcks.Load() != 0 {
+	if err != nil || st.RecordCount != count || d.metrics.Attempts.Load() != 1 || d.metrics.FailuresPermanent.Load() != 1 || d.metrics.DurableAcks.Load() != 0 {
 		t.Fatalf("cancellation lost data or spun retries: %+v %v", st, err)
+	}
+}
+
+func TestIssue216SingletonRequestFailuresRetainFrozenReplay(t *testing.T) {
+	const scalar = `{"hostId":"h1","observations":[{"metricKey":"cpu.util","value":42.5,"observedAt":"2026-09-11T10:00:00Z"}]}`
+	for _, code := range []string{"ERR_CHECKSUM_MISMATCH", "ERR_UNSUPPORTED_SCHEMA_VERSION", "ERR_MALFORMED_JSON", "ERR_BATCH_TOO_LARGE", "ERR_REQUEST_TOO_LARGE"} {
+		t.Run(code, func(t *testing.T) {
+			s, dir := openSpool(t)
+			appendCompatibilityPayload(t, s, scalar)
+			status := 400
+			if code == "ERR_BATCH_TOO_LARGE" || code == "ERR_REQUEST_TOO_LARGE" {
+				status = 413
+			}
+			tr := &fakeTransport{err: coreclient.ClassifyAgentTelemetryFailure(status, []byte(`{"status":"REJECTED","code":"`+code+`","message":"request rejected"}`))}
+			var logs strings.Builder
+			cfg := Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, MaxBatchRecords: 10, MaxBackoff: 7 * time.Millisecond, InitialBackoff: time.Millisecond, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+			d, err := New(cfg, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, err := d.makeRequest(before)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waits := 0
+			wait := func(_ context.Context, delay time.Duration) error {
+				waits++
+				if delay != cfg.MaxBackoff {
+					t.Fatalf("retry delay=%v", delay)
+				}
+				return nil
+			}
+			d.wait = wait
+			assertRetained := func(d *Drain, s *spool.DiskSpool, count int) {
+				t.Helper()
+				ok, err := d.RunOnce(context.Background())
+				var de *Error
+				if ok || !errors.As(err, &de) || de.Code != CodeTransport || !coreclient.IsCoreAPICode(err, code) {
+					t.Fatalf("rejection lost: ok=%v err=%v", ok, err)
+				}
+				st, err := s.Stats()
+				if err != nil || st.RecordCount != count {
+					t.Fatalf("NO CORE ACK: spool count=%d want=%d err=%v", st.RecordCount, count, err)
+				}
+				after, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+				if err != nil || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(original, tr.last) {
+					t.Fatalf("frozen sequence/checksum/payload/replay identity changed: %v", err)
+				}
+				entries, err := os.ReadDir(d.poisonDir)
+				if err != nil || len(entries) != 0 || d.metrics.PoisonCount.Load() != 0 || d.metrics.AuthorityPoisonCount.Load() != 0 || d.metrics.Successes.Load() != 0 || d.metrics.DurableAcks.Load() != 0 || d.metrics.LastSuccessUnix.Load() != 0 {
+					t.Fatal("request rejection archived or falsely ACKed")
+				}
+				if d.metrics.Backpressure.Load() == 0 || d.metrics.FailuresPermanent.Load() == 0 {
+					t.Fatal("blocked status absent")
+				}
+			}
+			assertRetained(d, s, 1)
+			assertRetained(d, s, 1)
+			appendCompatibilityPayload(t, s, scalar)
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			restarted, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close()
+			d2, err := New(cfg, restarted, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d2.wait = wait
+			assertRetained(d2, restarted, 2)
+			if waits != 3 || d.metrics.Attempts.Load() != 2 || d2.metrics.Attempts.Load() != 1 {
+				t.Fatal("retry accounting incorrect")
+			}
+			if !strings.Contains(logs.String(), code) || !strings.Contains(logs.String(), "spool retained") {
+				t.Fatal("visible blocked log absent")
+			}
+			tr.err = nil
+			d2.transport = &echoTransport{inner: tr}
+			if ok, err := d2.RunOnce(context.Background()); !ok || err != nil {
+				t.Fatalf("valid singleton ACK failed: %v %v", ok, err)
+			}
+			remaining, err := restarted.ReadOrReserveOutboundBatch(10, 1024*1024)
+			if err != nil || len(remaining.Records) != 1 || remaining.FirstSequence != 2 {
+				t.Fatalf("ACK crossed frozen window: %+v %v", remaining, err)
+			}
+			if d2.metrics.Successes.Load() != 1 || d2.metrics.DurableAcks.Load() != 1 || d2.metrics.LastSuccessUnix.Load() == 0 {
+				t.Fatal("valid ACK accounting incorrect")
+			}
+			if ok, err := d2.RunOnce(context.Background()); !ok || err != nil {
+				t.Fatalf("backlog ACK failed: %v %v", ok, err)
+			}
+			st, err := restarted.Stats()
+			if err != nil || st.RecordCount != 0 {
+				t.Fatalf("ACK failed to drain: %+v %v", st, err)
+			}
+		})
+	}
+}
+
+func TestIssue216BlockedLoopCancellation(t *testing.T) {
+	testIssue216BlockedLoopCancellation(t, "ERR_AGENT_HOST_ID_REQUIRED", 2)
+}
+func TestIssue216SingletonRequestFailureCancellation(t *testing.T) {
+	for _, code := range []string{"ERR_CHECKSUM_MISMATCH", "ERR_UNSUPPORTED_SCHEMA_VERSION", "ERR_MALFORMED_JSON", "ERR_BATCH_TOO_LARGE", "ERR_REQUEST_TOO_LARGE"} {
+		t.Run(code, func(t *testing.T) { testIssue216BlockedLoopCancellation(t, code, 1) })
 	}
 }

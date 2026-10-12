@@ -308,14 +308,14 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 
-	if isTerminalCoreError(err) {
+	if isRecordAttributableCoreError(err) {
 		code := terminalCode(err)
 		// Core rejects the whole request without identifying an offending record.
 		// Even one Sensor record may contain several independent Agent deliveries.
 		if len(req.Records) != 1 || !singleDelivery(req.Records[0].Records) {
 			return false, d.retainBlocked(ctx, batch, code, err)
 		}
-		// An unambiguous singleton rejection may abandon and durably park.
+		// Only a record-attributable singleton rejection may abandon and durably park.
 		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
 			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
 		}
@@ -578,21 +578,18 @@ func (d *Drain) Shutdown(ctx context.Context) error {
 	}
 }
 
-func isTerminalCoreError(err error) bool {
-	// BUILD-003: poison parking is an EXPLICIT allowlist of genuinely malformed /
-	// intrinsically un-ingestable durable payloads. Default for unknown/application/
-	// authority/assignment/state Core errors is retain spool and fail closed.
+func isRecordAttributableCoreError(err error) bool {
+	// Poison parking requires an explicit record-attributable Core contract plus
+	// a singleton Sensor record and Agent delivery. Request JSON, schema, batch
+	// checksum and batch/request size failures cannot identify record poison,
+	// even for a singleton; they retain the frozen window via retainBlocked.
+	// Unknown/application/authority/assignment/state errors also fail closed.
 	// HTTP status alone must never authorize AcknowledgeThrough.
-	// BUILD-004 Slice 4: add only the four revoked-temporal authority codes below.
-	return coreclient.IsCoreAPICode(err, "ERR_MALFORMED_JSON") ||
-		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD") ||
+	// BUILD-004 Slice 4 retains the four revoked-temporal authority codes.
+	return coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD_PAYLOAD") ||
-		coreclient.IsCoreAPICode(err, "ERR_UNSUPPORTED_SCHEMA_VERSION") ||
-		coreclient.IsCoreAPICode(err, "ERR_CHECKSUM_MISMATCH") ||
 		coreclient.IsCoreAPICode(err, "ERR_AGENT_HOST_ID_REQUIRED") ||
 		coreclient.IsCoreAPICode(err, "ERR_RECORD_TOO_LARGE") ||
-		coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") ||
-		coreclient.IsCoreAPICode(err, "ERR_REQUEST_TOO_LARGE") ||
 		isAuthorityPoisonError(err)
 }
 
