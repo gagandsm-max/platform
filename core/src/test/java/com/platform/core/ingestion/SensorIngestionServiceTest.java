@@ -434,4 +434,155 @@ class SensorIngestionServiceTest {
         verify(watermarkStore, never()).finalizeReservedBatch(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
     }
+
+    // =========================================================================
+    // ISSUE #218 — BUILD-020 icmp_observation_v1 CHARACTERIZATION (service path)
+    //
+    // CHARACTERIZATION ONLY of current numeric-only Core limitation. Validation
+    // fails before reserve/finalize/Kafka/ACK. When typed ICMP ingestion is
+    // approved and implemented, replace these expected-rejection tests with
+    // durable typed-acceptance + complete-accounting coverage.
+    // =========================================================================
+
+    private SensorIngestionService serviceWithRealValidator() {
+        TestSensorAuthorityResolver realResolver = new TestSensorAuthorityResolver();
+        realResolver.registerScope("sensor-net-01", testScope);
+        IngestionValidator realValidator = new IngestionValidator(
+                new ObjectMapper().findAndRegisterModules(), realResolver, metrics);
+        return new SensorIngestionService(realValidator, realResolver, watermarkStore, kafkaProducer, metrics);
+    }
+
+    /**
+     * Source-faithful BUILD-020 Envelope+Evidence as produced by
+     * sensor/internal/integration/icmp/executor.go (icmp_observation_v1).
+     */
+    private String build020IcmpRecordJson(long sequence) {
+        String envelope = "{"
+                + "\"schemaVersion\":1,"
+                + "\"batchId\":\"icmp-aabbccddeeff00112233445566778899\","
+                + "\"recordType\":\"icmp_observation_v1\","
+                + "\"collectedAt\":\"2026-10-11T14:00:00Z\","
+                + "\"sensorId\":\"sensor-net-01\","
+                + "\"tenantId\":\"" + tenantId + "\","
+                + "\"entityId\":\"" + entityId + "\","
+                + "\"job\":{\"jobId\":\"icmp-job-1\",\"assignmentKey\":\"icmp-assign-1\",\"assignmentVersion\":1,\"attempt\":1},"
+                + "\"protocol\":\"ICMP\","
+                + "\"protocolVersion\":\"4\","
+                + "\"operation\":\"ECHO\","
+                + "\"status\":\"COLLECTED\","
+                + "\"quality\":\"GOOD\","
+                + "\"protocolSchemaVersion\":1,"
+                + "\"protocolPayload\":{"
+                + "\"schemaVersion\":1,"
+                + "\"target\":\"127.0.0.1\","
+                + "\"ipVersion\":4,"
+                + "\"source\":\"SENSOR_PING_SOCKET\","
+                + "\"startedAt\":\"2026-10-11T13:59:59.900Z\","
+                + "\"completedAt\":\"2026-10-11T14:00:00Z\","
+                + "\"requestedSamples\":2,"
+                + "\"received\":2,"
+                + "\"packetLossPct\":0.0,"
+                + "\"minRttMicros\":120,"
+                + "\"avgRttMicros\":150,"
+                + "\"maxRttMicros\":180,"
+                + "\"samples\":["
+                + "{\"sequence\":1,\"success\":true,\"rttMicros\":120},"
+                + "{\"sequence\":2,\"success\":true,\"rttMicros\":180}"
+                + "]"
+                + "}"
+                + "}";
+        return "{\"sequence\":" + sequence + ",\"type\":\"icmp_observation_v1\",\"payload\":" + envelope + "}";
+    }
+
+    private String snmpNumericRecordJson(long sequence, long unsignedValue) {
+        return "{\"sequence\":" + sequence + ",\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{"
+                + "\"tenantId\":\"" + tenantId + "\","
+                + "\"entityId\":\"" + entityId + "\","
+                + "\"collectedAt\":\"2026-10-11T14:00:00Z\","
+                + "\"protocol\":\"SNMP\","
+                + "\"quality\":\"GOOD\","
+                + "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":"
+                + unsignedValue + "}}]}}}";
+    }
+
+    private String sha256Of(String... recordJsons) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        for (String recordJson : recordJsons) {
+            digest.update(recordJson.getBytes(StandardCharsets.UTF_8));
+        }
+        StringBuilder sb = new StringBuilder();
+        for (byte b : digest.digest()) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    private void assertNoDurableSideEffects() {
+        // MANDATORY #4/#5/#6: no durable ACK path, no PG reserve/finalize, no Kafka.
+        verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
+        verify(watermarkStore, never()).reserveBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+        verify(watermarkStore, never()).claimPublisherLease(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+        verify(watermarkStore, never()).finalizeReservedBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
+        verify(watermarkStore, never()).releasePublisherLease(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
+    }
+
+    @Test
+    void issue218_sourceFaithfulIcmpBatchRejectedWithNoAckNoPgAdvanceNoKafka() throws Exception {
+        SensorIngestionService realService = serviceWithRealValidator();
+        X509Certificate cert = createMockCert("sensor-net-01");
+
+        String icmp = build020IcmpRecordJson(1);
+        String checksum = sha256Of(icmp);
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
+                + "\"batchId\":\"b-icmp-svc\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + checksum + "\",\"records\":[" + icmp + "]}";
+        TelemetryBatchRequest req = new ObjectMapper().readValue(json, TelemetryBatchRequest.class);
+        byte[] rawBody = json.getBytes(StandardCharsets.UTF_8);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                realService.ingestTelemetry(rawBody, req, "b-icmp-svc", cert));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode(),
+                "CHARACTERIZATION: no Core durable ACK for BUILD-020 icmp_observation_v1 under numeric-only Core");
+        assertNoDurableSideEffects();
+    }
+
+    @Test
+    void issue218_mixedAndReverseOrderIcmpBatchesRejectWithoutPartialPublishOrDurableAdvance() throws Exception {
+        SensorIngestionService realService = serviceWithRealValidator();
+        X509Certificate cert = createMockCert("sensor-net-01");
+        ObjectMapper mapper = new ObjectMapper();
+
+        // Mixed: SNMP numeric sibling first, ICMP second — whole batch rejected.
+        String snmpFirst = snmpNumericRecordJson(1, 12345);
+        String icmpSecond = build020IcmpRecordJson(2);
+        String mixedChecksum = sha256Of(snmpFirst, icmpSecond);
+        String mixedJson = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
+                + "\"batchId\":\"b-icmp-mixed\",\"firstSequence\":1,\"lastSequence\":2,\"checksum\":\""
+                + mixedChecksum + "\",\"records\":[" + snmpFirst + "," + icmpSecond + "]}";
+        TelemetryBatchRequest mixedReq = mapper.readValue(mixedJson, TelemetryBatchRequest.class);
+
+        IngestionException mixedEx = assertThrows(IngestionException.class, () ->
+                realService.ingestTelemetry(mixedJson.getBytes(StandardCharsets.UTF_8), mixedReq, "b-icmp-mixed", cert));
+        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", mixedEx.getCode());
+
+        // Reverse sequence order on the wire (ICMP seq=1 after SNMP seq=2 in array).
+        String icmpFirst = build020IcmpRecordJson(1);
+        String snmpSecond = snmpNumericRecordJson(2, 67890);
+        String reverseChecksum = sha256Of(snmpSecond, icmpFirst);
+        String reverseJson = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
+                + "\"batchId\":\"b-icmp-rev\",\"firstSequence\":1,\"lastSequence\":2,\"checksum\":\""
+                + reverseChecksum + "\",\"records\":[" + snmpSecond + "," + icmpFirst + "]}";
+        TelemetryBatchRequest reverseReq = mapper.readValue(reverseJson, TelemetryBatchRequest.class);
+
+        IngestionException reverseEx = assertThrows(IngestionException.class, () ->
+                realService.ingestTelemetry(reverseJson.getBytes(StandardCharsets.UTF_8), reverseReq, "b-icmp-rev", cert));
+        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", reverseEx.getCode());
+
+        assertNoDurableSideEffects();
+    }
 }
