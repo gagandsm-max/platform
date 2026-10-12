@@ -123,6 +123,26 @@ func (f *fakeEventReader) isClosed() bool {
 	return f.closed
 }
 
+// interruptRead wakes a ReadRaw blocked on f.block and expires any armed
+// deadline so the next loop iteration returns promptly. Used by shutdown
+// fixtures that must observe stop/cancel without waiting out the production
+// 200ms read deadline. No-op for uninterruptible Sleep-until-deadline waits
+// when block is nil — callers must arm block for controlled wakeup.
+func (f *fakeEventReader) interruptRead() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deadline = time.Now().Add(-time.Millisecond)
+	if f.block == nil {
+		return
+	}
+	select {
+	case <-f.block:
+	default:
+		close(f.block)
+	}
+	f.block = nil
+}
+
 func armRuntimeWithReader(b *Backend, rd eventReader, rawCap int) (context.Context, context.CancelFunc) {
 	ctx, cancel := armRuntime(b)
 	b.mu.Lock()

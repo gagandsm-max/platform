@@ -273,6 +273,15 @@ func TestDrainIdleBeforeQuiesceNeverClean(t *testing.T) {
 var errDetachCause = errors.New("link close failed")
 
 // TestDetachFailureTypedIncompleteEvidence covers device detach error → never nil Stop.
+//
+// The production readLoop arms a 200ms ReadRaw deadline and fakeEventReader's
+// uninterruptible sleep is not woken by runtime cancel. A Stop budget equal to
+// that deadline can therefore expire before detach runs, returning only
+// ErrBackendStopDeadline — correct caller-bounded behavior when detach has not
+// completed. This fixture therefore uses an interruptible reader block and
+// waits for the injected detach failure before asserting typed quiesce evidence.
+// Bounded-deadline-without-detach remains covered by
+// TestStalledDetachStopReturnsWithinDeadline.
 func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	agg, _ := testAgg(t)
 	b, err := NewBackend(BackendConfig{
@@ -282,8 +291,15 @@ func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rd := &fakeEventReader{records: [][]byte{putEventV1(t, nil)}}
+	block := make(chan struct{})
+	rd := &fakeEventReader{
+		records: [][]byte{putEventV1(t, nil)},
+		block:   block,
+	}
+	detachDone := make(chan struct{})
+	var detachOnce sync.Once
 	b.detachProbesFn = func(*kernelHandles) error {
+		detachOnce.Do(func() { close(detachDone) })
 		return errDetachCause
 	}
 	_, _ = trackHandleCleanup(b)
@@ -296,7 +312,28 @@ func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	// not accept idle-as-empty and exits via the governed shutdown deadline.
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer stopCancel()
-	err = b.StopContext(stopCtx)
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- b.StopContext(stopCtx) }()
+
+	waitUntil := time.After(2 * time.Second)
+	for !b.isStopRequested() {
+		select {
+		case <-waitUntil:
+			t.Fatal("stopRequested was not published")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	// Wake the armed ReadRaw so shutdownReadPath runs while stop budget remains.
+	rd.interruptRead()
+
+	select {
+	case <-detachDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("injected detach failure never executed")
+	}
+
+	err = <-stopDone
 	if err == nil {
 		t.Fatal("detach failure must not yield clean Stop")
 	}
