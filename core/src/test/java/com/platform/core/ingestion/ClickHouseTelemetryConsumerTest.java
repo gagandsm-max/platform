@@ -7,13 +7,20 @@ import ch.qos.logback.classic.spi.IThrowableProxy;
 import ch.qos.logback.classic.spi.StackTraceElementProxy;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.core.ingestion.dto.CanonicalCounterObservation;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.kafka.KafkaException;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.ListenerExecutionFailedException;
 import org.springframework.kafka.listener.MessageListenerContainer;
@@ -24,6 +31,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -64,6 +72,45 @@ class ClickHouseTelemetryConsumerTest {
         verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
         verify(ack, times(1)).acknowledge();
         assertFalse(metrics.isConsumerDegraded());
+    }
+
+    @Test
+    void testCounter64ConsumeSuccessAcknowledgesOffset() throws Exception {
+        CanonicalCounterObservation counter = new CanonicalCounterObservation(
+                "tenant-1", "entity-1", ".1.3.6.1.2.1.2.2.1.16.1", "sensor-net-01",
+                Instant.now(), new java.math.BigInteger("18446744073709551615"), 1, 0, "100", "snmp"
+        );
+        String json = objectMapper.writeValueAsString(counter);
+        ConsumerRecord<String, String> record = new ConsumerRecord<>(
+                "telemetry.numeric.v1", 0, 200L, "sensor-net-01:100", json
+        );
+        Acknowledgment ack = mock(Acknowledgment.class);
+
+        consumer.consume(record, ack);
+
+        verify(clickHouseClient, times(1)).insertCounterBatch(anyList());
+        verify(clickHouseClient, never()).insertNumericBatch(anyList());
+        verify(ack, times(1)).acknowledge();
+        assertFalse(metrics.isConsumerDegraded());
+    }
+
+    @Test
+    void telemetryListenerFactoryPreservesManualAckAndReadCommittedPins() {
+        IngestionKafkaConfiguration configuration = new IngestionKafkaConfiguration();
+        ConsumerFactory<String, String> consumerFactory =
+                configuration.telemetryKafkaConsumerFactory(new KafkaProperties());
+        ConcurrentKafkaListenerContainerFactory<String, String> listenerFactory =
+                configuration.telemetryKafkaListenerContainerFactory(consumerFactory);
+
+        assertSame(consumerFactory, listenerFactory.getConsumerFactory());
+        assertEquals(
+                ContainerProperties.AckMode.MANUAL_IMMEDIATE,
+                listenerFactory.getContainerProperties().getAckMode()
+        );
+        Map<String, Object> effective = ((DefaultKafkaConsumerFactory<String, String>) consumerFactory)
+                .getConfigurationProperties();
+        assertEquals("read_committed", effective.get(ConsumerConfig.ISOLATION_LEVEL_CONFIG));
+        assertEquals(false, effective.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
     }
 
     @Test

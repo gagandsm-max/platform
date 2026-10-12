@@ -2,6 +2,7 @@ package com.platform.core.ingestion;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -18,11 +19,16 @@ import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.FixedBackOff;
 
+import java.util.HashMap;
 import java.util.Map;
 
 @Configuration
 @ConditionalOnClass(KafkaTemplate.class)
 public class IngestionKafkaConfiguration {
+
+    static final String TELEMETRY_KAFKA_CONSUMER_FACTORY = "telemetryKafkaConsumerFactory";
+    static final String TELEMETRY_KAFKA_LISTENER_CONTAINER_FACTORY = "telemetryKafkaListenerContainerFactory";
+    private static final String READ_COMMITTED = "read_committed";
 
     @Value("${spring.kafka.producer.transaction-id-prefix:${SPRING_KAFKA_PRODUCER_TRANSACTION_ID_PREFIX:}}")
     private String transactionIdPrefix;
@@ -51,11 +57,25 @@ public class IngestionKafkaConfiguration {
         return new KafkaTemplate<>(producerFactory);
     }
 
-    @Bean
-    @ConditionalOnMissingBean(name = "telemetryKafkaListenerContainerFactory")
+    /**
+     * Telemetry listener consumer factory with fail-closed transactional visibility pins.
+     * Hostile {@code isolation.level}/{@code enable.auto.commit} overrides cannot weaken these invariants.
+     */
+    @Bean(name = TELEMETRY_KAFKA_CONSUMER_FACTORY)
+    @ConditionalOnMissingBean(name = TELEMETRY_KAFKA_CONSUMER_FACTORY)
+    public ConsumerFactory<String, String> telemetryKafkaConsumerFactory(KafkaProperties properties) {
+        return createPinnedTelemetryConsumerFactory(properties);
+    }
+
+    @Bean(name = TELEMETRY_KAFKA_LISTENER_CONTAINER_FACTORY)
+    @ConditionalOnMissingBean(name = TELEMETRY_KAFKA_LISTENER_CONTAINER_FACTORY)
     public ConcurrentKafkaListenerContainerFactory<String, String> telemetryKafkaListenerContainerFactory(
-            ConsumerFactory<String, String> consumerFactory
+            @Qualifier(TELEMETRY_KAFKA_CONSUMER_FACTORY) ConsumerFactory<String, String> consumerFactory
     ) {
+        // Re-validate at listener wiring so a replaced telemetryKafkaConsumerFactory bean cannot
+        // silently expose aborted transactional records or auto-commit offsets.
+        enforceTransactionalVisibilityInvariants(consumerFactory);
+
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         // Manual immediate acknowledgement ensures offsets ONLY commit after ClickHouse persistence succeeds
@@ -73,5 +93,46 @@ public class IngestionKafkaConfiguration {
         errorHandler.setAckAfterHandle(false);
         factory.setCommonErrorHandler(errorHandler);
         return factory;
+    }
+
+    static ConsumerFactory<String, String> createPinnedTelemetryConsumerFactory(KafkaProperties properties) {
+        Map<String, Object> consumerProperties = new HashMap<>(properties.buildConsumerProperties(null));
+        // Issue #222 safety pins: producer publishes transactionally; consumer must not see aborted records.
+        consumerProperties.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, READ_COMMITTED);
+        consumerProperties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        DefaultKafkaConsumerFactory<String, String> factory = new DefaultKafkaConsumerFactory<>(consumerProperties);
+        enforceTransactionalVisibilityInvariants(factory);
+        return factory;
+    }
+
+    static void enforceTransactionalVisibilityInvariants(ConsumerFactory<?, ?> consumerFactory) {
+        if (!(consumerFactory instanceof DefaultKafkaConsumerFactory<?, ?> defaultFactory)) {
+            throw new IllegalStateException(
+                    "Telemetry Kafka consumer factory must be a DefaultKafkaConsumerFactory so "
+                            + "isolation.level=read_committed and enable.auto.commit=false can be guaranteed"
+            );
+        }
+        Map<String, Object> effective = defaultFactory.getConfigurationProperties();
+        Object isolation = effective.get(ConsumerConfig.ISOLATION_LEVEL_CONFIG);
+        if (!READ_COMMITTED.equals(String.valueOf(isolation))) {
+            throw new IllegalStateException(
+                    "Telemetry Kafka consumer requires isolation.level=read_committed; effective value="
+                            + isolation
+            );
+        }
+        Object autoCommit = effective.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG);
+        if (!isExplicitlyFalse(autoCommit)) {
+            throw new IllegalStateException(
+                    "Telemetry Kafka consumer requires enable.auto.commit=false; effective value="
+                            + autoCommit
+            );
+        }
+    }
+
+    private static boolean isExplicitlyFalse(Object value) {
+        if (value instanceof Boolean bool) {
+            return !bool;
+        }
+        return value != null && "false".equalsIgnoreCase(String.valueOf(value).trim());
     }
 }

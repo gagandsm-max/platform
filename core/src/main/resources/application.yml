@@ -52,6 +52,11 @@ spring:
     consumer:
       group-id: platform-core-group
       auto-offset-reset: earliest
+      # Issue #222: transactional producer requires read_committed; manual ACK requires no auto-commit.
+      # IngestionKafkaConfiguration re-pins these after binding so hostile overrides cannot weaken them.
+      enable-auto-commit: false
+      properties:
+        isolation.level: read_committed
     listener:
       auto-startup: ${SPRING_KAFKA_LISTENER_AUTO_STARTUP:false}
 
