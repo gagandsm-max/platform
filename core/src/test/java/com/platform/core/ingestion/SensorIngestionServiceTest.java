@@ -710,14 +710,17 @@ class SensorIngestionServiceTest {
         assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", mixedEx.getCode());
         assertTrue(mixedEx.getMessage().contains("unsupported telemetry payload shape"));
 
-        // Reverse array order (ICMP seq=1 after SNMP seq=2) — equivalent fail-closed.
+        // Authentic Go spool ascending wire order: ICMP seq=1 then SNMP seq=2 (ICMP-first vs mixed above).
+        // CURRENT LIMITATION: characterization only — does not certify typed ICMP delivery.
         String icmpFirst = build020IcmpRecordJson(1);
         String snmpSecond = snmpNumericGoStyleRecordJson(2, 67890);
-        String reverseChecksum = sha256Of(snmpSecond, icmpFirst);
+        String reverseChecksum = sha256Of(icmpFirst, snmpSecond);
         String reverseJson = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
                 + "\"batchId\":\"b-icmp-rev\",\"firstSequence\":1,\"lastSequence\":2,\"checksum\":\""
-                + reverseChecksum + "\",\"records\":[" + snmpSecond + "," + icmpFirst + "]}";
+                + reverseChecksum + "\",\"records\":[" + icmpFirst + "," + snmpSecond + "]}";
         TelemetryBatchRequest reverseReq = mapper.readValue(reverseJson, TelemetryBatchRequest.class);
+        assertEquals("icmp_observation_v1", reverseReq.records().get(0).path("type").asText(),
+                "records[] must be ascending spool order [icmpFirst, snmpSecond]");
 
         IngestionException reverseEx = assertThrows(IngestionException.class, () ->
                 realService.ingestTelemetry(reverseJson.getBytes(StandardCharsets.UTF_8), reverseReq, "b-icmp-rev", cert));
