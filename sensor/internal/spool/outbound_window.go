@@ -12,7 +12,7 @@ import (
 )
 
 // outboundWindow is a versioned sidecar that freezes the exact [first,last]
-// range selected for network transmission until durable ACK, explicit poison abandon, or verified pre-reservation size rejection.
+// range selected for network transmission until durable ACK or explicit poison abandon.
 // It is spool metadata, not a telemetry record. Older recover() scanners ignore it
 // because it is not named record-*.json and is not state.json.
 type outboundWindow struct {
@@ -20,7 +20,7 @@ type outboundWindow struct {
 	StreamID      string `json:"streamId"`
 	FirstSequence uint64 `json:"firstSequence"`
 	LastSequence  uint64 `json:"lastSequence"`
-	SizeRejected  bool   `json:"sizeRejected,omitempty"`
+	SizeRejected  bool   `json:"sizeRejected,omitempty"` // Legacy diagnostic; never suppresses replay.
 }
 
 // ReadOrReserveOutboundBatch returns the currently frozen outbound range, or
@@ -109,12 +109,9 @@ func (s *DiskSpool) AbandonOutboundBatch() error {
 	return s.clearOutboundWindowLocked()
 }
 
-// RebatchOutboundBatch replaces only the expected frozen metadata after the caller
-// proves ERR_BATCH_TOO_LARGE/413 occurred before Core reservation. The caller must
-// serialize delivery: no request for the old range may still be in flight.
-// Atomic replacement preserves either the old or smaller prefix across a crash;
-// no record, stream identity or ACK watermark is changed. A singleton is durably
-// marked blocked rather than repeatedly sent or treated as poison.
+// RebatchOutboundBatch is disabled: a current size rejection does not prove
+// that an earlier identical request was never accepted. Without an authoritative
+// Core receipt/fencing protocol, changing frozen identity can prevent ACK recovery.
 func (s *DiskSpool) RebatchOutboundBatch(first, last uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -131,22 +128,12 @@ func (s *DiskSpool) RebatchOutboundBatch(first, last uint64) error {
 	if _, err := s.readExactRangeLocked(first, last, 1, 1); err != nil {
 		return err
 	}
-	if first == last {
-		win.SizeRejected = true
-	} else {
-		// Strictly reduce record count, including odd ranges, without splitting records.
-		win.LastSequence = first + (last-first+1)/2 - 1
-	}
-	raw, err := json.Marshal(win)
-	if err != nil {
-		return newError(CodeOutboundWindow, "failed encoding rebatch metadata", err)
-	}
-	return atomicWriteFile(s.outboundWindowPath(), raw, 0640)
+	return newError(CodeOutboundWindow, "automatic rebatching disabled; restore Core compatibility and replay the original frozen batch", nil)
 }
 
-// OutboundBatchSizeRejected reports the durable singleton size block. Records
-// remain readable for diagnostics; automatic delivery must stop pending governed
-// recovery of this record or the Core limit, rather than silently clearing it.
+// OutboundBatchSizeRejected reports legacy diagnostic metadata only. A flagged
+// window remains eligible for the same bounded replay and ordinary ACK as any
+// other frozen window; this flag must never authorize suppression or deletion.
 func (s *DiskSpool) OutboundBatchSizeRejected() (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

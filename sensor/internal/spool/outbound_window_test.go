@@ -230,7 +230,7 @@ func checksumRecords(recs []Record) string {
 	return h
 }
 
-func TestRebatchOutboundWindowConservationAndExpectedRange(t *testing.T) {
+func TestRebatchOutboundWindowDisabledPreservesIdentity(t *testing.T) {
 	s := openTest(t, 1024)
 	for i := 0; i < 5; i++ {
 		add(t, s, fmt.Sprintf("p%d", i))
@@ -239,35 +239,44 @@ func TestRebatchOutboundWindowConservationAndExpectedRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RebatchOutboundBatch(1, 4); CodeOf(err) != CodeOutboundWindow {
-		t.Fatalf("stale range: %v", err)
+	path := filepath.Join(s.dir, outboundWindowFileName)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []uint64{2, 1, 1} {
-		current, err := s.ReadOrReserveOutboundBatch(5, 1024)
-		if err != nil {
-			t.Fatal(err)
+	for _, last := range []uint64{4, 5} {
+		if err := s.RebatchOutboundBatch(1, last); CodeOf(err) != CodeOutboundWindow {
+			t.Fatalf("rebatching allowed: %v", err)
 		}
-		if err := s.RebatchOutboundBatch(current.FirstSequence, current.LastSequence); err != nil {
-			t.Fatal(err)
+		after, err := os.ReadFile(path)
+		if err != nil || string(before) != string(after) {
+			t.Fatal("sidecar changed")
 		}
-		got, err := s.ReadOrReserveOutboundBatch(5, 1024)
-		if err != nil || got.FirstSequence != 1 || got.LastSequence != want {
-			t.Fatalf("range: %+v %v", got, err)
+		got, err := s.ReadOrReserveOutboundBatch(1, 1)
+		if err != nil || got.FirstSequence != 1 || got.LastSequence != 5 || checksumRecords(got.Records) != checksumRecords(original.Records) {
+			t.Fatal("source identity drift")
 		}
-		st, err := s.Stats()
-		if err != nil || st.RecordCount != 5 {
-			t.Fatalf("lost records: %+v %v", st, err)
-		}
+	}
+	if err := s.CompleteOutboundBatch(2); CodeOf(err) != CodeOutboundWindow {
+		t.Fatal("split ACK accepted")
+	}
+	if err := s.CompleteOutboundBatch(5); err != nil {
+		t.Fatal(err)
+	}
+	// The singleton path must also refuse mutation.
+	add(t, s, "singleton")
+	one, err := s.ReadOrReserveOutboundBatch(1, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RebatchOutboundBatch(one.FirstSequence, one.LastSequence); CodeOf(err) != CodeOutboundWindow {
+		t.Fatal("singleton mutation allowed")
 	}
 	blocked, err := s.OutboundBatchSizeRejected()
-	if err != nil || !blocked {
-		t.Fatalf("singleton not blocked: %v", err)
+	if err != nil || blocked {
+		t.Fatal("new permanent flag")
 	}
-	all, err := s.ReadBatch(5, 1024)
-	if err != nil || checksumRecords(all.Records) != checksumRecords(original.Records) {
-		t.Fatal("source drift")
-	}
-	if err := s.CompleteOutboundBatch(5); CodeOf(err) != CodeOutboundWindow {
-		t.Fatalf("old ACK accepted: %v", err)
+	if err := s.CompleteOutboundBatch(one.LastSequence); err != nil {
+		t.Fatal(err)
 	}
 }

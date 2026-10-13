@@ -95,8 +95,6 @@ type Transport interface {
 type Spool interface {
 	ReadOrReserveOutboundBatch(int, int) (spool.Batch, error)
 	CompleteOutboundBatch(uint64) error
-	RebatchOutboundBatch(uint64, uint64) error
-	OutboundBatchSizeRejected() (bool, error)
 	AbandonOutboundBatch() error
 	AcknowledgeThrough(uint64) error
 	Stats() (spool.Stats, error)
@@ -138,7 +136,7 @@ type Drain struct {
 	poisonSync   func(f *os.File) error
 	poisonRename func(oldpath, newpath string) error
 
-	runMu     sync.Mutex // Serializes selection, upload, rebatch and ACK within this drain.
+	runMu     sync.Mutex // Serializes selection, upload and ACK within this drain.
 	mu        sync.Mutex
 	cancel    context.CancelFunc
 	started   bool
@@ -275,15 +273,6 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		}
 	}
 
-	blocked, err := d.spool.OutboundBatchSizeRejected()
-	if err != nil {
-		return false, codeErr(CodeSpool, "failed reading outbound size block", err, false)
-	}
-	if blocked {
-		return false, d.retainBlocked(ctx, batch, "ERR_BATCH_TOO_LARGE",
-			&coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413})
-	}
-
 	req, err := d.makeRequest(batch)
 	if err != nil {
 		// Only a locally identified malformed singleton can authorize parking.
@@ -322,15 +311,9 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 
-	// Both Core size guards reject before reserveBatch, publication and ACK.
-	// Status alone, proxy 413s, and other request/record errors are insufficient.
-	var api *coreclient.CoreAPIError
-	if errors.As(err, &api) && api.Code == "ERR_BATCH_TOO_LARGE" && api.HTTPStatus == 413 {
-		if rerr := d.spool.RebatchOutboundBatch(batch.FirstSequence, batch.LastSequence); rerr != nil {
-			return false, codeErr(CodeSpool, "failed persisting pre-reservation size rebatch; records retained", rerr, false)
-		}
-		return false, d.retainBlocked(ctx, batch, api.Code, err)
-	}
+	// A current 413 cannot disprove earlier acceptance with a lost ACK. Keep
+	// the exact frozen request eligible for replay, including legacy singleton
+	// SizeRejected windows. Request-size errors use the paced retainBlocked path.
 
 	if isRecordAttributableCoreError(err) {
 		code := terminalCode(err)
@@ -381,8 +364,17 @@ func (d *Drain) retainBlocked(ctx context.Context, batch spool.Batch, reason str
 			"first_sequence": batch.FirstSequence, "last_sequence": batch.LastSequence,
 			"record_count":         len(batch.Records),
 			"singleton_size_block": reason == "ERR_BATCH_TOO_LARGE" && len(batch.Records) == 1,
+			"retry_delay_ms":       d.cfg.MaxBackoff.Milliseconds(),
 		})
-	_ = d.wait(ctx, d.cfg.MaxBackoff)
+	if reason == "ERR_BATCH_TOO_LARGE" || reason == "ERR_REQUEST_TOO_LARGE" {
+		d.logger.Warn("Restore Core request-size compatibility; exact frozen request will be retried",
+			"event_code", sanitizeReason(reason), "retry_delay_ms", d.cfg.MaxBackoff.Milliseconds())
+	}
+	if err := d.wait(ctx, d.cfg.MaxBackoff); err != nil {
+		if cerr := ctxErr(ctx); cerr != nil {
+			return cerr
+		}
+	}
 	return codeErr(CodeTransport, "agent-telemetry delivery blocked; spool retained", cause, false)
 }
 
