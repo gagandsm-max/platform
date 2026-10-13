@@ -128,7 +128,10 @@ public class IngestionKafkaConfiguration {
 
     static void enforceTelemetryNumericTopicContract(String configuredTopic) {
         String expected = KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC;
-        if (configuredTopic == null || !expected.equals(configuredTopic.trim())) {
+        // Exact raw-string equality: @KafkaListener consumes the untrimmed property value while
+        // KafkaTelemetryProducer hardcodes the canonical topic. Trimming here would accept
+        // whitespace-altered names the listener would still subscribe to verbatim.
+        if (configuredTopic == null || !expected.equals(configuredTopic)) {
             throw new IllegalStateException(
                     "Telemetry numeric Kafka topic must be exactly '" + expected
                             + "' to match KafkaTelemetryProducer; configured platform.ingestion.kafka.topic="

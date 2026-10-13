@@ -144,6 +144,44 @@ class IngestionKafkaConfigurationTest {
     }
 
     @Test
+    void enforceRejectsLeadingWhitespaceTopic() {
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> IngestionKafkaConfiguration.enforceTelemetryNumericTopicContract(
+                        " " + KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC
+                )
+        );
+        assertTrue(ex.getMessage().contains(KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC));
+    }
+
+    @Test
+    void enforceRejectsTrailingWhitespaceTopic() {
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> IngestionKafkaConfiguration.enforceTelemetryNumericTopicContract(
+                        KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC + " "
+                )
+        );
+        assertTrue(ex.getMessage().contains(KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC));
+    }
+
+    @Test
+    void enforceRejectsBlankAndNullTopic() {
+        assertThrows(
+                IllegalStateException.class,
+                () -> IngestionKafkaConfiguration.enforceTelemetryNumericTopicContract("")
+        );
+        assertThrows(
+                IllegalStateException.class,
+                () -> IngestionKafkaConfiguration.enforceTelemetryNumericTopicContract("   ")
+        );
+        assertThrows(
+                IllegalStateException.class,
+                () -> IngestionKafkaConfiguration.enforceTelemetryNumericTopicContract(null)
+        );
+    }
+
+    @Test
     void enforceAcceptsCanonicalTelemetryNumericTopic() {
         IngestionKafkaConfiguration.enforceTelemetryNumericTopicContract(
                 KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC
@@ -152,9 +190,45 @@ class IngestionKafkaConfigurationTest {
 
     @Test
     void unsupportedTopicPropertyFailsContextStartup() {
+        assertTopicPropertyFailsContextStartup("hostile.redirect.v1");
+    }
+
+    @Test
+    void leadingWhitespaceTopicPropertyFailsContextStartup() {
+        assertTopicPropertyFailsContextStartup(" " + KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC);
+    }
+
+    @Test
+    void trailingWhitespaceTopicPropertyFailsContextStartup() {
+        assertTopicPropertyFailsContextStartup(KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC + " ");
+    }
+
+    @Test
+    void blankTopicPropertyFailsContextStartup() {
+        assertTopicPropertyFailsContextStartup("   ");
+    }
+
+    @Test
+    void canonicalTopicPropertyAllowsContextStartup() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
             MockEnvironment env = new MockEnvironment();
-            env.setProperty("platform.ingestion.kafka.topic", "hostile.redirect.v1");
+            env.setProperty("platform.ingestion.kafka.topic", KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC);
+            context.setEnvironment(env);
+            context.registerBean(KafkaProperties.class, KafkaProperties::new);
+            context.register(IngestionKafkaConfiguration.class);
+            context.refresh();
+
+            assertEquals(
+                    KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC,
+                    context.getBean("telemetryNumericTopicContract", String.class)
+            );
+        }
+    }
+
+    private static void assertTopicPropertyFailsContextStartup(String configuredTopic) {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            MockEnvironment env = new MockEnvironment();
+            env.setProperty("platform.ingestion.kafka.topic", configuredTopic);
             context.setEnvironment(env);
             context.registerBean(KafkaProperties.class, KafkaProperties::new);
             context.register(IngestionKafkaConfiguration.class);
