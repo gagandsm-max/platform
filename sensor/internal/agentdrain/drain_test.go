@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2159,5 +2161,172 @@ func TestDeliveryHealthCancellationPreservesBlockedClaim(t *testing.T) {
 	}
 	if snap := d.Snapshot(); !snap.Blocked {
 		t.Fatalf("shutdown must not invent recovery: %+v", snap)
+	}
+}
+
+// seedLegacySizeRejectedSidecar reserves the outbound window and stamps the
+// pre-65fe619 sizeRejected diagnostic flag without suppressing replay.
+func seedLegacySizeRejectedSidecar(t *testing.T, s *spool.DiskSpool, dir string) {
+	t.Helper()
+	if _, err := s.ReadOrReserveOutboundBatch(1, 1024*1024); err != nil {
+		t.Fatal(err)
+	}
+	sidecar := filepath.Join(dir, "outbound-window.json")
+	raw, err := os.ReadFile(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var win map[string]any
+	if err := json.Unmarshal(raw, &win); err != nil {
+		t.Fatal(err)
+	}
+	win["sizeRejected"] = true
+	raw, err = json.Marshal(win)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, raw, 0640); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestDeliveryHealthStaleLegacyObservationCannotReassertAfterAck proves the
+// Codex P2 race: Snapshot observes legacy sizeRejected+pending, RunOnce
+// completes a durable ACK and clears deliveryBlocked, then the stale observer
+// must not reassert DEGRADED on an empty backlog.
+func TestDeliveryHealthStaleLegacyObservationCannotReassertAfterAck(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	observed := make(chan struct{})
+	release := make(chan struct{})
+	d.afterLegacySizeObserve = func() {
+		close(observed)
+		<-release
+	}
+
+	var snap DeliveryStatus
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		snap = d.Snapshot()
+	}()
+
+	select {
+	case <-observed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for legacy size observation barrier")
+	}
+
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		close(release)
+		wg.Wait()
+		t.Fatalf("durable ACK during stale observation: ok=%v err=%v", ok, err)
+	}
+	close(release)
+	wg.Wait()
+
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" {
+		t.Fatalf("stale legacy observation reasserted blocked health: %+v", snap)
+	}
+	if snap.PendingRecords != 0 {
+		t.Fatalf("expected zero backlog after ACK, got pending=%d", snap.PendingRecords)
+	}
+	if snap.DurableAcks != 1 {
+		t.Fatalf("durable acks=%d want 1", snap.DurableAcks)
+	}
+
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.PendingRecords != 0 {
+		t.Fatalf("post-ACK healthy state lost: %+v", final)
+	}
+}
+
+func TestDeliveryHealthLegacySidecarRemainsDegradedWithoutAck(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, &sizeRejectingTransport{limit: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("legitimate legacy size rejection must stay DEGRADED: %+v", snap)
+	}
+	if snap.PendingRecords < 1 {
+		t.Fatalf("backlog missing under legitimate block: %+v", snap)
+	}
+}
+
+func TestDeliveryHealthConcurrentSnapshotAndAckRace(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+
+	var calls atomic.Uint64
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls.Add(1)
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 64; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+			t.Errorf("ACK under concurrent Snapshot: ok=%v err=%v", ok, err)
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.PendingRecords != 0 {
+		t.Fatalf("concurrent Snapshot/ACK left stale degradation: %+v", snap)
+	}
+	if snap.DurableAcks != 1 || calls.Load() != 1 {
+		t.Fatalf("acks=%d calls=%d", snap.DurableAcks, calls.Load())
 	}
 }

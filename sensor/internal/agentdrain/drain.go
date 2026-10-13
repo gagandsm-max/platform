@@ -179,6 +179,16 @@ type Drain struct {
 	blockedSince    time.Time
 	blockedFirstSeq uint64
 	blockedLastSeq  uint64
+	// deliveryGen advances on every durable-ACK clear so a Snapshot that
+	// observed a pre-ACK legacy sizeRejected sidecar cannot reassert DEGRADED
+	// after recovery. Observations sample gen before spool I/O and re-check
+	// under deliveryMu before marking.
+	deliveryGen uint64
+
+	// Optional test-only seam. Nil in production. Invoked after a positive
+	// legacy sizeRejected+pending observation and before the generation-gated
+	// mark attempt, so barrier tests can interleave a durable ACK.
+	afterLegacySizeObserve func()
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
@@ -304,13 +314,24 @@ func (d *Drain) clearDeliveryBlocked() {
 	d.blockedSince = time.Time{}
 	d.blockedFirstSeq = 0
 	d.blockedLastSeq = 0
+	d.deliveryGen++
 }
 
 // observeLegacySizeBlock surfaces durable pre-65fe619 sizeRejected sidecars as
 // delivery degradation before the next upload attempt, without suppressing replay.
+// Spool observation stays outside deliveryMu (lock order: spool then delivery;
+// never hold deliveryMu across spool I/O). A sampled deliveryGen must still
+// match under the write lock or the observation is discarded as stale vs ACK.
 func (d *Drain) observeLegacySizeBlock() {
 	reporter, ok := d.spool.(sizeRejectedReporter)
 	if !ok {
+		return
+	}
+	d.deliveryMu.RLock()
+	gen := d.deliveryGen
+	already := d.deliveryBlocked
+	d.deliveryMu.RUnlock()
+	if already {
 		return
 	}
 	blocked, err := reporter.OutboundBatchSizeRejected()
@@ -320,13 +341,37 @@ func (d *Drain) observeLegacySizeBlock() {
 	if d.metrics.PendingRecords.Load() <= 0 {
 		return
 	}
-	d.deliveryMu.RLock()
-	already := d.deliveryBlocked
-	d.deliveryMu.RUnlock()
-	if already {
+	if d.afterLegacySizeObserve != nil {
+		d.afterLegacySizeObserve()
+	}
+	d.markLegacyDeliveryBlocked(gen, "ERR_BATCH_TOO_LARGE")
+}
+
+// markLegacyDeliveryBlocked applies a legacy sizeRejected observation only when
+// deliveryGen is unchanged since the observation began. A concurrent durable ACK
+// that called clearDeliveryBlocked advances deliveryGen and wins.
+func (d *Drain) markLegacyDeliveryBlocked(gen uint64, reason string) {
+	if d == nil {
 		return
 	}
-	d.markDeliveryBlocked("ERR_BATCH_TOO_LARGE", spool.Batch{})
+	sanitized := sanitizeReason(reason)
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	if d.deliveryGen != gen || d.deliveryBlocked {
+		return
+	}
+	// Pending may already be zero after an ACK that has not yet advanced gen in
+	// an alternate interleaving; never reassert a block with an empty backlog.
+	if d.metrics.PendingRecords.Load() <= 0 {
+		return
+	}
+	if !d.deliveryBlocked {
+		d.blockedSince = time.Now().UTC()
+	}
+	d.deliveryBlocked = true
+	d.deliveryReason = sanitized
+	d.blockedFirstSeq = 0
+	d.blockedLastSeq = 0
 }
 
 func (d *Drain) Start(parent context.Context) error {
