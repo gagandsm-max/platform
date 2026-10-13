@@ -14,7 +14,7 @@ endif
 include $(ENV_FILE)
 export
 
-.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs test test-unit test-static-contracts test-integration test-contract test-security-smoke test-telemetry-pipeline test-clickhouse-replay-migration test-agent-runtime-e2e evidence clean dev-reset certs post-reboot-verify dev-disk-check dev-hygiene
+.PHONY: help doctor dev-build dev-up dev-down dev-restart dev-status dev-logs kafka-provision-fresh test test-unit test-static-contracts test-integration test-contract test-security-smoke test-telemetry-pipeline test-clickhouse-replay-migration test-agent-runtime-e2e evidence clean dev-reset certs post-reboot-verify dev-disk-check dev-hygiene
 
 help: ## Show available Makefile targets
 	@echo "========================================================================"
@@ -64,18 +64,23 @@ dev-build: certs ## Build all Platform container images
 	@echo "==> Building Platform containers..."
 	@docker compose build
 
-dev-up: certs ## Start Platform development services in background
+dev-up: ## Start explicitly provisioned guarded Platform services
+	@bash deploy/docker/kafka/deployment-preflight.sh check
+	@$(MAKE) certs
 	@echo "==> Starting Platform services (profile: dev)..."
-	@docker compose up -d
+	@bash deploy/docker/kafka/deployment-preflight.sh up
 	@echo "==> Services initiated. Run 'make dev-status' to verify health."
 
 dev-down: ## Stop Platform development services gracefully (preserves named volumes)
 	@echo "==> Stopping Platform services..."
-	@docker compose down --remove-orphans
+	@bash deploy/docker/kafka/deployment-preflight.sh down
 
 dev-restart: ## Restart Platform services
 	@echo "==> Restarting Platform services..."
-	@docker compose restart
+	@bash deploy/docker/kafka/deployment-preflight.sh restart
+
+kafka-provision-fresh: ## One-time authorized NEW Kafka volume provisioning (see migration runbook)
+	@bash deploy/docker/kafka/deployment-preflight.sh provision
 
 dev-status: ## Display status and health of Platform services
 	@docker compose ps

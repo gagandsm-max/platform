@@ -31,15 +31,49 @@ names `/tmp/kraft-combined-logs`; neither path is the intended persistent mount.
 `KAFKA_CLUSTER_ID` becomes a broker property, not the format tool's `CLUSTER_ID`.
 **Do not substitute the old Compose value for a captured stored cluster ID.**
 
-Compose now overrides the entrypoint. `guarded-start.sh` builds the bounded
+Only the explicit `compose.kafka-guarded.yaml` overlay overrides the entrypoint.
+Default `compose.yaml` retains the exact pre-PR Kafka service configuration;
+applying this source patch alone cannot introduce a legacy service recreation.
+`guarded-start.sh` builds the bounded
 existing broker configuration itself and invokes `kafka-server-start.sh`
 directly. Neither normal startup nor validation invokes vendor setup or format.
 Both `log.dirs` and `metadata.log.dir` are `/var/lib/kafka/data/logs`. This stores
 KRaft metadata, topic segments, consumer offsets and transaction state together
-inside the existing named volume. Listener ports, network, profiles, replication
+inside the explicitly provisioned/migrated external named volume. Listener ports,
+network, profiles, replication
 settings and image are retained. Unknown broker tuning requires a separately
 reviewed change to the explicit configuration mapping; mounted vendor config
 files are not applied by this path.
+
+## Host gate and staged deployment
+
+Use Compose **5.5.0**, whose `!reset null` environment merge behavior is tested:
+the overlay removes inherited `KAFKA_CLUSTER_ID` entirely. An empty string or an
+additional `CLUSTER_ID` alongside the inherited key is not equivalent.
+No host installation/version change is performed by this work. The host gate
+uses the existing governed `node:20-alpine` tooling image as a networkless JSON
+parser with CPU/memory bounds, not a host Node runtime or a new dependency.
+Docker may fetch these already approved images on a fresh host; it never installs
+host runtimes. Unused image-declared config/secrets volumes are backed by tmpfs
+in the guarded service and helpers, avoiding unlabelled anonymous-volume cleanup.
+
+`deployment-preflight.sh check|provision|up|restart|down|cleanup` accepts Compose
+global options after the action. `.env`/`COMPOSE_FILE` selection also works.
+Every governed startup checks the exact rendered configuration first. The gate
+inspects both project/service and fixed-name container identities (running or
+stopped), mounted volume, stored cluster/node/directory seal, effective properties,
+legacy overlay metadata and deployment/volume ownership. Unknown configuration,
+missing storage, any legacy container or mismatched identity rejects before
+Compose mutation. A separate read-only inspector container uses the approved
+Kafka image and a read-only data mount; it cannot format or consume first-start
+authorization. Neither telemetry topic offsets nor destination emptiness proves
+that an installation is fresh. Inspection never removes a container.
+
+Direct ungoverned `docker compose up` cannot be made safe by an in-container
+guard. Do not apply this overlay to an existing installation until the separate
+verified cold migration/cutover below is accepted. One deployment operator/writer
+must hold exclusive lifecycle ownership throughout check and mutation; a Docker
+administrator racing mounts/labels/source edits is outside this gate's authority.
 
 ## Identity and failure behavior
 
@@ -86,19 +120,32 @@ This is not a signature, an effect-store ACK proof, or a substitute for backups.
    ownership, and confirm no broker mounts it. Retain intended cluster/node/storage
    identities outside the volume. Set the three PLATFORM_KAFKA_* values above in
    deployment configuration. Do not use defaults from the former Compose file.
-2. Use the approved Compose project/profile. Explicitly authorize the identity:
+   Generate the new cluster UUID without selecting or mounting any broker state:
 
    ```sh
-   docker compose run -T --rm --no-deps \
-     -e PLATFORM_KAFKA_NEW_VOLUME_CONFIRM="$PLATFORM_KAFKA_STORAGE_ID" \
-     --entrypoint /bin/bash kafka /platform-kafka/provision-fresh.sh --new-empty-volume
-   docker compose run -T --rm --no-deps --entrypoint /bin/bash kafka \
-     /platform-kafka/guarded-start.sh --check
-   docker compose up -d kafka
+   docker run --rm --network none --tmpfs /etc/kafka/secrets \
+     --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data --entrypoint /bin/bash apache/kafka:3.8.0 \
+     -c '/opt/kafka/bin/kafka-storage.sh random-uuid'
    ```
 
-   The confirmation variable must be exported/set in the invoking shell as well
-   as recorded in deployment configuration. Provisioning formats only an empty
+   Retain the returned UUID and a separately generated storage identity in `.env`.
+2. Set `COMPOSE_FILE=compose.yaml:compose.kafka-guarded.yaml` in `.env`, with
+   the retained unique identities and Compose project. The target volume must
+   **not exist**. Explicitly authorize its creation and provisioning:
+
+   ```sh
+   PLATFORM_KAFKA_NEW_VOLUME_CONFIRM=<retained-new-storage-identity> make kafka-provision-fresh
+   bash deploy/docker/kafka/deployment-preflight.sh check
+   make dev-up
+   ```
+
+   The confirmation variable is a deliberate invoking-shell authorization;
+   it is not a saved default or ordinary startup action. The host gate refuses
+   existing volumes/containers, then creates the volume with exact
+   `issue223.owner`, `platform.kafka.project`, `platform.kafka.storage-id` and
+   `platform.kafka.resource` labels. It checks ownership before initializing
+   permissions and invokes the explicit provisioner as UID/GID 1000:1000.
+   Provisioning formats only an empty
    mounted root after explicit authorization, without `--ignore-formatted`, then
    validates and seals identity. Any nonempty volume is rejected without mutation.
 3. Confirm readiness, cluster/node identity, persistent metadata path, and initial
@@ -167,16 +214,29 @@ same named volume and identities; no provisioning hook runs on container recreat
 
 ### Seal and guarded start
 
+The cold target must have the four deployment ownership labels described above,
+with a separately retained NEW storage identity and the captured ACTUAL cluster
+and node IDs. Establish these as part of the independently approved offline copy,
+never by adopting arbitrary unlabelled existing storage in the fresh provisioner.
+Before cutover, retain the stopped legacy container and all original bytes for
+rollback. A reviewed cutover may archive/rename that stopped container and select
+a distinct Compose project, retaining the original project/config/identity record;
+do not delete it. The host gate intentionally refuses any remaining legacy broker
+under the requested project/service/name or any foreign mount of the target.
+Archival/cutover is a separate approved operation, not an automatic preflight action.
+
 9. Set external expected cluster ID to the **captured actual stored value**, node
    ID to the captured node, and storage ID to a new retained migration identity.
    With source/target brokers stopped and no other writers, run:
 
    ```sh
-   docker compose run -T --rm --no-deps --entrypoint /bin/bash kafka \
+   # Only after approved cold-copy/provenance validation and source archival:
+   # explicitly select the guarded overlay and the NEW deployment project.
+   docker compose -f compose.yaml -f compose.kafka-guarded.yaml \
+     run -T --rm --no-deps --entrypoint /bin/bash kafka \
      /platform-kafka/guarded-start.sh --seal-migration
-   docker compose run -T --rm --no-deps --entrypoint /bin/bash kafka \
-     /platform-kafka/guarded-start.sh --check
-   docker compose up -d kafka
+   bash deploy/docker/kafka/deployment-preflight.sh check
+   make dev-up
    ```
 
    Sealing validates identity, presence of KRaft logs, and exact cold-copy manifest
@@ -224,9 +284,18 @@ project, no host broker ports, and only uniquely named owner-labelled disposable
 volumes. It tests fresh authorization, nonempty rejection without byte mutation,
 identity/path/mount/permission failures, restart/recreation, topic IDs, committed
 record readback, committed offsets and transaction ID/producer ID/epoch/state.
+It kills an actual disposable provisioner after reservation using a paused
+format-tool fixture and proves the retained pending state prevents startup.
 It also verifies cold-copy sealing rejects incomplete inventories and corrupted
 files, and verifies readback after sealing. Cleanup is limited to its project.
 No developer, customer or running CI broker is selected by the harness.
+It rejects a pre-existing primary name and verifies exact owner/project/resource/
+storage labels before any volume removal. Teardown never uses `down -v` or global
+prune. A foreign-provenance fixture proves refusal before independently verified
+fixture cleanup. CI uses the same explicit provisioning and preflight contract,
+run/attempt-scoped identities and non-volume-deleting teardown; each volume is
+removed only after exact provenance and no remaining container attachments.
+Incomplete/unattested provisioning is retained for review, not silently cleaned up.
 
 Full Platform CI and the existing 20-test suite must run on the proposed commit
 in an isolated CI job. Native packaging, host reboot/crash/fsync durability,

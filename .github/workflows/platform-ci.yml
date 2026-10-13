@@ -377,17 +377,18 @@ jobs:
             echo "[ERROR] Fresh CI Kafka volume already exists; refusing provisioning."
             exit 1
           fi
-          CLUSTER_ID=$(docker compose run -T --rm --no-deps --entrypoint /bin/bash kafka \
+          CLUSTER_ID=$(docker run --rm --network none --tmpfs /etc/kafka/secrets \
+            --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data --entrypoint /bin/bash apache/kafka:3.8.0 \
             -c '/opt/kafka/bin/kafka-storage.sh random-uuid')
           [[ "${CLUSTER_ID}" =~ ^[A-Za-z0-9_-]{22}$ ]]
           STORAGE_ID="ci_${RUN_IDENTITY}_kafka_identity"
           printf '\nPLATFORM_KAFKA_CLUSTER_ID=%s\nPLATFORM_KAFKA_STORAGE_ID=%s\n' \
             "${CLUSTER_ID}" "${STORAGE_ID}" >> .env
-          docker compose run -T --rm --no-deps \
-            -e "PLATFORM_KAFKA_NEW_VOLUME_CONFIRM=${STORAGE_ID}" \
-            --entrypoint /bin/bash kafka /platform-kafka/provision-fresh.sh --new-empty-volume
-          docker compose run -T --rm --no-deps --entrypoint /bin/bash kafka \
-            /platform-kafka/guarded-start.sh --check
+          printf 'COMPOSE_FILE=compose.yaml:compose.kafka-guarded.yaml\nCOMPOSE_PROJECT_NAME=ci_%s\n' \
+            "${RUN_IDENTITY}" >> .env
+          PLATFORM_KAFKA_NEW_VOLUME_CONFIRM="${STORAGE_ID}" \
+            bash deploy/docker/kafka/deployment-preflight.sh provision
+          bash deploy/docker/kafka/deployment-preflight.sh check
 
       - name: Prove ClickHouse legacy upgrade and replay-safe canonical reads
         run: make test-clickhouse-replay-migration
@@ -412,10 +413,26 @@ jobs:
 
       - name: Clean CI stack
         if: always()
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          if [ -f .env ] && grep -q '^PLATFORM_PG_DATA_VOLUME=ci_' .env 2>/dev/null; then
-            echo "==> Verified CI-owned configuration; tearing down CI stack and CI volumes..."
-            docker compose down -v --remove-orphans || true
-          else
-            echo "[WARN] .env does not contain verified CI volume markers; skipping docker compose down -v to protect local data."
-          fi
+          set -euo pipefail
+          RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
+          PROJECT="ci_${RUN_IDENTITY}"
+          grep -Fxq "COMPOSE_PROJECT_NAME=${PROJECT}" .env || exit 1
+          grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=ci_${RUN_IDENTITY}_kafka_data" .env || exit 1
+          PLATFORM_KAFKA_DISPOSABLE_CONFIRM="ci_${RUN_IDENTITY}_kafka_identity" \
+            bash deploy/docker/kafka/deployment-preflight.sh cleanup
+          # Non-volume-deleting teardown above; each other volume needs exact provenance.
+          for pair in platform_pg_data:pg_data platform_ch_data:ch_data \
+              platform_valkey_data:valkey_data platform_sensor_net_spool:sensor_net_spool \
+              platform_sensor_infra_spool:sensor_infra_spool; do
+            resource=${pair%%:*}; volume="ci_${RUN_IDENTITY}_${pair#*:}"
+            if docker volume inspect "$volume" >/dev/null 2>&1; then
+              labels=$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$volume")
+              [[ "$labels" == "$PROJECT|$resource" ]] || exit 1
+              [[ -z $(docker ps -aq --filter "volume=$volume") ]] || exit 1
+              docker volume rm "$volume"
+            fi
+          done

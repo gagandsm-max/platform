@@ -1,0 +1,24 @@
+# Explicit opt-in only. Never apply to an unmigrated legacy container.
+# Governed launches: deploy/docker/kafka/deployment-preflight.sh
+services:
+  kafka:
+    entrypoint: ["/bin/bash", "/platform-kafka/guarded-start.sh"]
+    command: []
+    # Image-declared config/secrets volumes are unused by this direct launcher.
+    # Keep them ephemeral instead of allocating unlabelled anonymous volumes.
+    tmpfs:
+      - /etc/kafka/secrets
+      - /mnt/shared/config
+    environment:
+      # Compose v5.5.0: remove the inherited property, rather than merging it.
+      KAFKA_CLUSTER_ID: !reset null
+      CLUSTER_ID: ${PLATFORM_KAFKA_CLUSTER_ID:-}
+      PLATFORM_KAFKA_STORAGE_ID: ${PLATFORM_KAFKA_STORAGE_ID:-}
+      KAFKA_LOG_DIRS: /var/lib/kafka/data/logs
+      KAFKA_METADATA_LOG_DIR: /var/lib/kafka/data/logs
+    volumes:
+      - ./deploy/docker/kafka:/platform-kafka:ro
+volumes:
+  platform_kafka_data:
+    external: true
+    name: ${PLATFORM_KAFKA_DATA_VOLUME:-platform_kafka_data}

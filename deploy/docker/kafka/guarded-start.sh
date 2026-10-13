@@ -42,7 +42,7 @@ check_mount() {
     mountpoint -q "$ROOT" || fail KAFKA_MOUNT_MISSING 'Persistent Kafka mount is absent'
     # Reject a second mount below the root: files could otherwise escape this volume.
     ! awk -v p="$ROOT/" 'index($5,p)==1 {found=1} END {exit !found}' /proc/self/mountinfo || fail KAFKA_NESTED_MOUNT 'Unexpected nested Kafka mount'
-    [[ -r $ROOT && -w $ROOT && -x $ROOT ]] || fail KAFKA_STORAGE_INACCESSIBLE 'Kafka volume is inaccessible to broker user'
+    [[ -r $ROOT && -x $ROOT ]] && { [[ ${READ_ONLY:-0} == 1 ]] || [[ -w $ROOT ]]; } || fail KAFKA_STORAGE_INACCESSIBLE 'Kafka volume is inaccessible to broker user'
 }
 
 check_files() {
@@ -50,7 +50,7 @@ check_files() {
     local invalid
     invalid=$(timeout 60 find "$LOGS" -type l -print -quit) || fail KAFKA_STORAGE_INACCESSIBLE 'Cannot inspect persistent files within startup bound'
     [[ -z $invalid ]] || fail KAFKA_STORAGE_INACCESSIBLE 'Persistent storage contains links or inaccessible files'
-    timeout 60 bash -o pipefail -c 'find "$1" -print0 | while IFS= read -r -d "" p; do [[ -r $p && -w $p ]] && { [[ ! -d $p ]] || [[ -x $p ]]; } || exit 1; done' bash "$LOGS" || fail KAFKA_STORAGE_INACCESSIBLE 'Persistent files are inaccessible to broker user'
+    timeout 60 bash -o pipefail -c 'find "$1" -print0 | while IFS= read -r -d "" p; do [[ -r $p ]] && { [[ $2 == 1 ]] || [[ -w $p ]]; } && { [[ ! -d $p ]] || [[ -x $p ]]; } || exit 1; done' bash "$LOGS" "${READ_ONLY:-0}" || fail KAFKA_STORAGE_INACCESSIBLE 'Persistent files are inaccessible to broker user'
     [[ -f $LOGS/meta.properties && -s $LOGS/bootstrap.checkpoint ]] || fail KAFKA_METADATA_MISSING 'Kafka format metadata or bootstrap checkpoint is missing'
     local key wanted actual
     for key in cluster.id node.id version directory.id; do
@@ -120,13 +120,14 @@ seal_migration() {
 }
 
 main() {
-    [[ $# -le 1 ]] || fail KAFKA_ARGUMENT_INVALID 'Guard accepts only --check or --seal-migration'
+    [[ ${1:-} != --inspect ]] || READ_ONLY=1
+    [[ $# -le 1 ]] || fail KAFKA_ARGUMENT_INVALID 'Guard accepts only --check, --inspect or --seal-migration'
     configure
     check_mount
     case ${1:-} in
         --seal-migration) seal_migration; return;;
-        ''|--check) ;;
-        *) fail KAFKA_ARGUMENT_INVALID 'Guard accepts only --check or --seal-migration';;
+        ''|--check|--inspect) ;;
+        *) fail KAFKA_ARGUMENT_INVALID 'Guard accepts only --check, --inspect or --seal-migration';;
     esac
     [[ ! -e $IDENTITY.pending ]] || fail KAFKA_PROVISION_INCOMPLETE 'Interrupted provisioning or migration requires operator review'
     check_files
@@ -140,7 +141,7 @@ main() {
     else
         require_metadata_log
     fi
-    [[ ${1:-} != --check ]] || return 0
+    [[ ${1:-} != --check && ${1:-} != --inspect ]] || return 0
     # Consume the explicit one-time permission before starting. A crash before
     # KRaft log creation fails closed on retry; never infer freshness again.
     if [[ -e $ROOT/.fresh ]]; then
