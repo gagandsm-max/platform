@@ -99,10 +99,18 @@ func (c *Component) recordFailure(code string, spoolFailure bool) {
 	c.mu.Lock()
 	c.lastFailure = c.now().UTC()
 	c.lastErrorCode = code
-	if spoolFailure {
+	// Spool failure and collector-unusable protocol sources degrade the ICMP
+	// component. Transient target timeouts/unreachable/transport stay evidence-only.
+	if spoolFailure || collectorUnusable(code) {
 		c.degraded = true
 	}
 	c.mu.Unlock()
+}
+
+// collectorUnusable identifies Sensor-local ICMP socket capability failures.
+// These must degrade component readiness without inventing DEVICE_DOWN.
+func collectorUnusable(code string) bool {
+	return code == string(protocolicmp.CodePermission) || code == string(protocolicmp.CodeProtocol)
 }
 
 func Register(rt *runtime.Runtime, registry *runtime.ExecutorRegistry, executor *Executor) error {

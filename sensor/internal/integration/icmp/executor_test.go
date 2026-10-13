@@ -73,7 +73,7 @@ func readEvidence(t *testing.T, disk *spool.DiskSpool) (observation.Envelope, Ev
 	return env, evidence
 }
 func TestFixtureLossAndUnknownObservations(t *testing.T) {
-	for _, tc := range []string{"partial_loss", "all_loss", "unreachable", "permission", "transport"} {
+	for _, tc := range []string{"partial_loss", "all_loss", "unreachable", "permission", "protocol", "transport"} {
 		t.Run(tc, func(t *testing.T) {
 			base := fixtureExecutor{result: fixtureResult()}
 			switch tc {
@@ -88,27 +88,72 @@ func TestFixtureLossAndUnknownObservations(t *testing.T) {
 				base.result.Samples[1].ErrorCode = protocolicmp.CodeUnreachable
 			case "permission":
 				base.err = scheduler.Permanent(&protocolicmp.Error{Code: protocolicmp.CodePermission})
+			case "protocol":
+				base.err = scheduler.Permanent(&protocolicmp.Error{Code: protocolicmp.CodeProtocol})
 			case "transport":
 				base.err = scheduler.Transient(&protocolicmp.Error{Code: protocolicmp.CodeTransport})
 			}
 			e, disk := integrationFixture(t, base)
+			e.component.markRegistered()
 			_, err := e.Execute(context.Background(), fixtureJob())
 			if (err != nil) != (base.err != nil) {
 				t.Fatalf("err=%v", err)
 			}
 			env, obs := readEvidence(t, disk)
-			if tc == "permission" || tc == "transport" {
-				if env.Status != "COLLECTION_FAILED" || env.Quality != "UNKNOWN" || obs.ErrorCode == "" || obs.PacketLossPct != nil || obs.AvgRTTMicros != nil || len(obs.Samples) != 0 || e.Component().Snapshot().Successful != 0 {
-					t.Fatalf("env=%+v obs=%+v", env, obs)
+			snap := e.Component().Snapshot()
+			if tc == "permission" || tc == "protocol" || tc == "transport" {
+				if env.Status != "COLLECTION_FAILED" || env.Quality != "UNKNOWN" || obs.ErrorCode == "" || obs.PacketLossPct != nil || obs.AvgRTTMicros != nil || len(obs.Samples) != 0 || snap.Successful != 0 {
+					t.Fatalf("env=%+v obs=%+v snap=%+v", env, obs, snap)
+				}
+				wantDegraded := tc == "permission" || tc == "protocol"
+				if snap.Degraded != wantDegraded || snap.SpoolWriteFailures != 0 {
+					t.Fatalf("collector health snap=%+v wantDegraded=%v", snap, wantDegraded)
+				}
+				if wantDegraded {
+					if err := e.Component().Ready(context.Background()); err == nil || !strings.Contains(err.Error(), "ICMP_COMPONENT_DEGRADED") {
+						t.Fatalf("ready err=%v", err)
+					}
+					if snap.LastErrorCode != obs.ErrorCode {
+						t.Fatalf("lastError=%q obs=%q", snap.LastErrorCode, obs.ErrorCode)
+					}
+				} else if err := e.Component().Ready(context.Background()); err != nil {
+					t.Fatalf("transient transport must not degrade Ready: %v", err)
 				}
 			} else if tc == "unreachable" {
-				if env.Quality != "UNKNOWN" || env.Status != "PARTIAL" || obs.PacketLossPct != nil {
-					t.Fatalf("%+v %+v", env, obs)
+				if env.Quality != "UNKNOWN" || env.Status != "PARTIAL" || obs.PacketLossPct != nil || snap.Degraded {
+					t.Fatalf("%+v %+v snap=%+v", env, obs, snap)
 				}
-			} else if env.Quality != "PARTIAL" || obs.PacketLossPct == nil || *obs.PacketLossPct != base.result.PacketLossPct || (tc == "all_loss" && obs.AvgRTTMicros != nil) {
-				t.Fatalf("%+v %+v", env, obs)
+			} else if env.Quality != "PARTIAL" || obs.PacketLossPct == nil || *obs.PacketLossPct != base.result.PacketLossPct || (tc == "all_loss" && obs.AvgRTTMicros != nil) || snap.Degraded {
+				t.Fatalf("%+v %+v snap=%+v", env, obs, snap)
 			}
 		})
+	}
+}
+
+func TestCollectorUnusableDegradesAndRecovers(t *testing.T) {
+	e, _ := integrationFixture(t, fixtureExecutor{
+		err: scheduler.Permanent(&protocolicmp.Error{Code: protocolicmp.CodePermission}),
+	})
+	e.component.markRegistered()
+	if _, err := e.Execute(context.Background(), fixtureJob()); err == nil {
+		t.Fatal("permission failure expected")
+	}
+	if snap := e.Component().Snapshot(); !snap.Degraded || snap.LastErrorCode != string(protocolicmp.CodePermission) || snap.SpoolWriteFailures != 0 {
+		t.Fatalf("permission snap=%+v", snap)
+	}
+	if err := e.Component().Ready(context.Background()); err == nil {
+		t.Fatal("permission must fail Ready")
+	}
+	e.base = fixtureExecutor{result: fixtureResult()}
+	if _, err := e.Execute(context.Background(), fixtureJob()); err != nil {
+		t.Fatal(err)
+	}
+	snap := e.Component().Snapshot()
+	if snap.Degraded || snap.Successful != 1 || snap.LastErrorCode != "" {
+		t.Fatalf("recovery snap=%+v", snap)
+	}
+	if err := e.Component().Ready(context.Background()); err != nil {
+		t.Fatalf("ready after recovery: %v", err)
 	}
 }
 func TestMalformedResultsFailClosed(t *testing.T) {

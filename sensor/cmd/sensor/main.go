@@ -185,6 +185,9 @@ func main() {
 		health.WithIdentity(sensorVersion, serviceInstanceID))
 	healthServer.SetScheduler(prodScheduler)
 	healthServer.SetControl(controlStatus)
+	if bootstrap.Runtime != nil {
+		healthServer.SetRuntime(runtimeHealthAdapter{rt: bootstrap.Runtime})
+	}
 	go func() {
 		if err := healthServer.Start(); err != nil {
 			logger.Error("Health server encountered error",

@@ -37,6 +37,12 @@ type fakeControlStatusProvider struct {
 
 func (f *fakeControlStatusProvider) Snapshot() control.Status { return f.status }
 
+type fakeRuntimeStatusProvider struct {
+	health RuntimeHealth
+}
+
+func (f *fakeRuntimeStatusProvider) Snapshot() RuntimeHealth { return f.health }
+
 type fakeStorageStatusProvider struct {
 	pct float64
 	err error
@@ -318,6 +324,56 @@ func TestReadyzControlStateMatrix(t *testing.T) {
 				}
 			} else if body["reason_code"] != tc.reasonCode {
 				t.Fatalf("reason=%v want=%s", body["reason_code"], tc.reasonCode)
+			}
+		})
+	}
+}
+
+func TestReadyzRuntimeHealthMatrix(t *testing.T) {
+	cases := []struct {
+		name       string
+		runtime    *fakeRuntimeStatusProvider
+		code       int
+		status     string
+		ready      bool
+		reasonCode string
+		dep        string
+	}{
+		{"absent_preserves_legacy", nil, 200, "UP", true, "", ""},
+		{"ready", &fakeRuntimeStatusProvider{health: RuntimeHealth{State: "READY"}}, 200, "UP", true, "", "UP"},
+		{"degraded", &fakeRuntimeStatusProvider{health: RuntimeHealth{State: "DEGRADED"}}, 503, "DEGRADED", false, reasonRuntimeDegraded, "DEGRADED"},
+		{"failed", &fakeRuntimeStatusProvider{health: RuntimeHealth{State: "FAILED"}}, 503, "NOT_READY", false, reasonRuntimeNotReady, "DOWN"},
+		{"stopped", &fakeRuntimeStatusProvider{health: RuntimeHealth{State: "STOPPED"}}, 503, "NOT_READY", false, reasonRuntimeNotReady, "DOWN"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hs := newTestHealth(t, trustedPack())
+			if tc.runtime != nil {
+				hs.SetRuntime(tc.runtime)
+			}
+			rr, body := request(t, hs, "/readyz")
+			if rr.Code != tc.code || body["status"] != tc.status || body["ready"] != tc.ready {
+				t.Fatalf("readyz code=%d body=%v", rr.Code, body)
+			}
+			if tc.reasonCode == "" {
+				if _, ok := body["reason_code"]; ok {
+					t.Fatalf("unexpected reason=%v", body["reason_code"])
+				}
+			} else if body["reason_code"] != tc.reasonCode {
+				t.Fatalf("reason=%v want=%s", body["reason_code"], tc.reasonCode)
+			}
+			rr, body = request(t, hs, "/health")
+			deps, _ := body["dependency_status"].(map[string]any)
+			if tc.dep == "" {
+				if _, ok := deps["runtime"]; ok {
+					t.Fatalf("legacy readiness must omit runtime dependency: %v", deps)
+				}
+			} else if deps["runtime"] != tc.dep {
+				t.Fatalf("runtime dependency=%v want=%s body=%v", deps["runtime"], tc.dep, body)
+			}
+			rr, body = request(t, hs, "/livez")
+			if rr.Code != http.StatusOK || body["status"] != "UP" {
+				t.Fatalf("runtime health must not kill liveness: %d body=%v", rr.Code, body)
 			}
 		})
 	}

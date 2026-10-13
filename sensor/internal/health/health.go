@@ -37,6 +37,8 @@ const (
 	reasonControlAbsent   = "SENSOR_CONTROL_UNAVAILABLE"
 	reasonControlUntrust  = "SENSOR_CONTROL_STATE_UNTRUSTED"
 	reasonControlDegraded = "SENSOR_CONTROL_DEGRADED"
+	reasonRuntimeDegraded = "SENSOR_RUNTIME_DEGRADED"
+	reasonRuntimeNotReady = "SENSOR_RUNTIME_NOT_READY"
 )
 
 type storageStatusProvider interface {
@@ -53,6 +55,16 @@ type schedulerStatusProvider interface {
 
 type controlStatusProvider interface {
 	Snapshot() control.Status
+}
+
+// RuntimeHealth is a compact readiness view of the Universal Sensor runtime.
+// Nil providers are skipped so INFRASTRUCTURE/legacy roles keep scheduler-only readiness.
+type RuntimeHealth struct {
+	State string
+}
+
+type runtimeStatusProvider interface {
+	Snapshot() RuntimeHealth
 }
 
 type Option func(*HealthServer)
@@ -77,6 +89,7 @@ type HealthServer struct {
 	packSync   packSyncStatusProvider
 	scheduler  schedulerStatusProvider
 	control    controlStatusProvider
+	runtime    runtimeStatusProvider
 	mu         sync.RWMutex
 	logger     *slog.Logger
 
@@ -129,6 +142,14 @@ func (hs *HealthServer) ListenAddr() string {
 	return hs.server.Addr
 }
 
+// Handler exposes the health HTTP mux for in-process probes (tests and local wiring).
+func (hs *HealthServer) Handler() http.Handler {
+	if hs == nil || hs.server == nil || hs.server.Handler == nil {
+		return http.NotFoundHandler()
+	}
+	return hs.server.Handler
+}
+
 // SetAgentSpool optionally wires the dedicated Agent ingress spool into readiness checks.
 func (hs *HealthServer) SetAgentSpool(agentSpool *spool.DiskSpool) {
 	hs.mu.Lock()
@@ -160,6 +181,14 @@ func (hs *HealthServer) SetControl(provider controlStatusProvider) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 	hs.control = provider
+}
+
+// SetRuntime optionally attaches Universal Sensor runtime readiness. Nil clears
+// the provider and preserves INFRASTRUCTURE/legacy scheduler-only readiness.
+func (hs *HealthServer) SetRuntime(provider runtimeStatusProvider) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	hs.runtime = provider
 }
 
 // MarkShuttingDown changes only process/readiness semantics. It does not infer
@@ -200,6 +229,8 @@ type evaluation struct {
 	schedulerPresent     bool
 	control              control.Status
 	controlPresent       bool
+	runtime              RuntimeHealth
+	runtimePresent       bool
 }
 
 func (e *evaluation) degrade(reason string) {
@@ -260,6 +291,7 @@ func (hs *HealthServer) evaluate() evaluation {
 	packSync := hs.packSync
 	schedulerProvider := hs.scheduler
 	controlProvider := hs.control
+	runtimeProvider := hs.runtime
 	hs.mu.RUnlock()
 
 	if agentSpool != nil {
@@ -323,6 +355,23 @@ func (hs *HealthServer) evaluate() evaluation {
 			// healthy
 		default:
 			ev.degrade(reasonControlDegraded)
+		}
+	}
+
+	// Optional: NETWORK runtime with activated protocol components. Absent on
+	// INFRASTRUCTURE/legacy roles so existing readiness contracts stay intact.
+	if runtimeProvider != nil {
+		ev.runtimePresent = true
+		ev.runtime = runtimeProvider.Snapshot()
+		switch ev.runtime.State {
+		case "READY":
+			// healthy
+		case "DEGRADED":
+			// Activated protocol component is unusable; surface degradation and
+			// withhold readiness without collapsing monitored targets to DOWN.
+			ev.degradedNotReady(reasonRuntimeDegraded)
+		default:
+			ev.notReady(reasonRuntimeNotReady)
 		}
 	}
 
@@ -447,6 +496,16 @@ func dependencyStatus(ev evaluation) map[string]string {
 		out["control"] = "DOWN"
 	default:
 		out["control"] = "UNKNOWN"
+	}
+	if ev.runtimePresent {
+		switch ev.runtime.State {
+		case "READY":
+			out["runtime"] = "UP"
+		case "DEGRADED":
+			out["runtime"] = "DEGRADED"
+		default:
+			out["runtime"] = "DOWN"
+		}
 	}
 	return out
 }
