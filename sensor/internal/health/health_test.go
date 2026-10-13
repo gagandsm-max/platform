@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"platform/sensor/internal/agentdrain"
 	"platform/sensor/internal/control"
 	"platform/sensor/internal/packsync"
 	"platform/sensor/internal/scheduler"
@@ -508,5 +509,165 @@ func TestSupportEvidenceCarriesBoundedCountersAndTimestamps(t *testing.T) {
 	if !ok || stamps["pack_last_successful_sync"] == "" ||
 		stamps["control_last_successful_reconcile"] == "" {
 		t.Fatalf("state_timestamps=%v", body["state_timestamps"])
+	}
+}
+
+type fakeAgentDeliveryStatusProvider struct {
+	status agentdrain.DeliveryStatus
+}
+
+func (f *fakeAgentDeliveryStatusProvider) Snapshot() agentdrain.DeliveryStatus { return f.status }
+
+func TestAgentDeliveryBlockedDegradesWhileAgentSpoolRemainsUp(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	hs.agentSpool = &fakeStorageStatusProvider{pct: 10}
+	hs.SetAgentDelivery(&fakeAgentDeliveryStatusProvider{status: agentdrain.DeliveryStatus{
+		State:          agentdrain.DeliveryStateDegraded,
+		Blocked:        true,
+		ReasonCode:     "ERR_BATCH_TOO_LARGE",
+		PendingRecords: 1,
+		PendingBytes:   128,
+		FailuresPerm:   3,
+		BlockedSince:   time.Now().UTC().Add(-time.Minute),
+	}})
+
+	rr, body := request(t, hs, "/readyz")
+	if rr.Code != http.StatusOK || body["status"] != "DEGRADED" || body["ready"] != true ||
+		body["reason_code"] != reasonAgentDeliveryBlocked {
+		t.Fatalf("readyz must stay ready while delivery degrades: %d %v", rr.Code, body)
+	}
+
+	rr, body = request(t, hs, "/health")
+	deps, ok := body["dependency_status"].(map[string]any)
+	if !ok {
+		t.Fatalf("deps missing: %v", body)
+	}
+	if rr.Code != http.StatusOK || body["component_state"] != "DEGRADED" ||
+		deps["agent_spool"] != "UP" || deps["agent_delivery"] != "DEGRADED" {
+		t.Fatalf("delivery vs spool split failed: %d body=%v", rr.Code, body)
+	}
+	if body["agent_delivery_status"] != "DEGRADED" || body["agent_delivery_reason_code"] != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("delivery support fields=%v", body)
+	}
+	counters, _ := body["counters"].(map[string]any)
+	if counters["agent_delivery_pending_records"] != float64(1) ||
+		counters["agent_delivery_failures_permanent"] != float64(3) {
+		t.Fatalf("delivery counters=%v", counters)
+	}
+	stamps, _ := body["state_timestamps"].(map[string]any)
+	if stamps["agent_delivery_blocked_since"] == nil || stamps["agent_delivery_blocked_since"] == "" {
+		t.Fatalf("blocked_since missing: %v", stamps)
+	}
+
+	raw := strings.ToLower(rr.Body.String())
+	for _, forbidden := range []string{"device_down", "password", "token", "secret", "bearer", "payload"} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("leaked %q: %s", forbidden, rr.Body.String())
+		}
+	}
+}
+
+func TestAgentDeliveryClearsOnlyWhenProviderReportsUp(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	provider := &fakeAgentDeliveryStatusProvider{status: agentdrain.DeliveryStatus{
+		State: agentdrain.DeliveryStateDegraded, Blocked: true, ReasonCode: "ERR_BATCH_TOO_LARGE",
+	}}
+	hs.SetAgentDelivery(provider)
+	rr, body := request(t, hs, "/health")
+	deps := body["dependency_status"].(map[string]any)
+	if body["component_state"] != "DEGRADED" || deps["agent_delivery"] != "DEGRADED" {
+		t.Fatalf("blocked=%v", body)
+	}
+
+	provider.status = agentdrain.DeliveryStatus{
+		State: agentdrain.DeliveryStateUp, DurableAcks: 1, LastSuccessTime: time.Now().UTC(),
+	}
+	rr, body = request(t, hs, "/health")
+	deps = body["dependency_status"].(map[string]any)
+	if rr.Code != http.StatusOK || body["component_state"] != "UP" || deps["agent_delivery"] != "UP" {
+		t.Fatalf("recovery=%d body=%v", rr.Code, body)
+	}
+	if _, ok := body["agent_delivery_reason_code"]; ok {
+		t.Fatalf("reason must clear: %v", body["agent_delivery_reason_code"])
+	}
+}
+
+func TestDisabledAgentReceiverOmitsDeliveryDependency(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	hs.SetAgentDelivery(nil)
+	rr, body := request(t, hs, "/health")
+	deps, ok := body["dependency_status"].(map[string]any)
+	if rr.Code != http.StatusOK || !ok {
+		t.Fatalf("health=%d body=%v", rr.Code, body)
+	}
+	if _, exists := deps["agent_delivery"]; exists {
+		t.Fatalf("disabled receiver invented agent_delivery: %v", deps)
+	}
+	if _, exists := deps["agent_spool"]; exists {
+		t.Fatalf("disabled receiver invented agent_spool: %v", deps)
+	}
+	if _, exists := body["agent_delivery_status"]; exists {
+		t.Fatalf("disabled receiver invented agent_delivery_status: %v", body)
+	}
+	if body["component_state"] != "UP" {
+		t.Fatalf("false degraded: %v", body["component_state"])
+	}
+}
+
+func TestNilTypedDrainProviderDoesNotDegrade(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	var drain *agentdrain.Drain
+	hs.SetAgentDelivery(drain)
+	rr, body := request(t, hs, "/health")
+	deps := body["dependency_status"].(map[string]any)
+	if rr.Code != http.StatusOK || body["component_state"] != "UP" {
+		t.Fatalf("nil typed drain degraded health: %d %v", rr.Code, body)
+	}
+	if _, exists := deps["agent_delivery"]; exists {
+		t.Fatalf("nil typed drain invented dependency: %v", deps)
+	}
+}
+
+func TestAgentDeliveryDoesNotReportDeviceDown(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	hs.agentSpool = &fakeStorageStatusProvider{pct: 5}
+	hs.SetAgentDelivery(&fakeAgentDeliveryStatusProvider{status: agentdrain.DeliveryStatus{
+		State: agentdrain.DeliveryStateDegraded, Blocked: true, ReasonCode: "ERR_BATCH_TOO_LARGE",
+	}})
+	for _, path := range []string{"/health", "/readyz", "/livez"} {
+		rr, body := request(t, hs, path)
+		raw := strings.ToUpper(rr.Body.String())
+		if strings.Contains(raw, "DEVICE_DOWN") {
+			t.Fatalf("%s reported DEVICE_DOWN: %s", path, rr.Body.String())
+		}
+		if path == "/livez" && (rr.Code != http.StatusOK || body["status"] != "UP") {
+			t.Fatalf("liveness changed by delivery block: %d %v", rr.Code, body)
+		}
+	}
+}
+
+func TestAgentDeliveryConcurrentHealthReads(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	hs.SetAgentDelivery(&fakeAgentDeliveryStatusProvider{status: agentdrain.DeliveryStatus{
+		State: agentdrain.DeliveryStateDegraded, Blocked: true, ReasonCode: "ERR_REQUEST_TOO_LARGE",
+		PendingRecords: 2,
+	}})
+	done := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for j := 0; j < 40; j++ {
+				rr, body := request(t, hs, "/health")
+				deps, _ := body["dependency_status"].(map[string]any)
+				if rr.Code != http.StatusOK || body["component_state"] != "DEGRADED" ||
+					deps["agent_delivery"] != "DEGRADED" {
+					t.Errorf("concurrent health=%d body=%v", rr.Code, body)
+					return
+				}
+			}
+		}()
+	}
+	for i := 0; i < 8; i++ {
+		<-done
 	}
 }

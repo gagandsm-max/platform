@@ -123,6 +123,33 @@ func (m *Metrics) LastSuccessAge() time.Duration {
 	return time.Since(time.Unix(sec, 0))
 }
 
+// Delivery health states for Sensor supportability. Distinct from agent_spool
+// filesystem capacity: blocked Core delivery can coexist with a writable spool.
+const (
+	DeliveryStateUp       = "UP"
+	DeliveryStateDegraded = "DEGRADED"
+)
+
+// DeliveryStatus is a bounded Agent drain delivery snapshot (no payloads/secrets).
+type DeliveryStatus struct {
+	State           string
+	ReasonCode      string
+	Blocked         bool
+	PendingRecords  int64
+	PendingBytes    int64
+	OldestAgeSecs   int64
+	FailuresPerm    uint64
+	DurableAcks     uint64
+	BlockedSince    time.Time
+	LastSuccessTime time.Time
+	FirstSequence   uint64
+	LastSequence    uint64
+}
+
+type sizeRejectedReporter interface {
+	OutboundBatchSizeRejected() (bool, error)
+}
+
 type Drain struct {
 	cfg       Config
 	spool     Spool
@@ -145,6 +172,13 @@ type Drain struct {
 	stopOnce  sync.Once
 	wait      func(context.Context, time.Duration) error
 	jitter    func(time.Duration, float64) time.Duration
+
+	deliveryMu      sync.RWMutex
+	deliveryBlocked bool
+	deliveryReason  string
+	blockedSince    time.Time
+	blockedFirstSeq uint64
+	blockedLastSeq  uint64
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
@@ -209,6 +243,91 @@ func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
 }
 
 func (d *Drain) Metrics() *Metrics { return d.metrics }
+
+// Snapshot returns the current Agent delivery-health view for Sensor supportability.
+// It never infers monitored-device failure and never exposes payloads or Core bodies.
+func (d *Drain) Snapshot() DeliveryStatus {
+	if d == nil {
+		return DeliveryStatus{State: DeliveryStateUp}
+	}
+	d.refreshStats()
+	d.observeLegacySizeBlock()
+
+	d.deliveryMu.RLock()
+	defer d.deliveryMu.RUnlock()
+	st := DeliveryStatus{
+		State:          DeliveryStateUp,
+		PendingRecords: d.metrics.PendingRecords.Load(),
+		PendingBytes:   d.metrics.PendingBytes.Load(),
+		OldestAgeSecs:  d.metrics.OldestAgeSeconds.Load(),
+		FailuresPerm:   d.metrics.FailuresPermanent.Load(),
+		DurableAcks:    d.metrics.DurableAcks.Load(),
+	}
+	if sec := d.metrics.LastSuccessUnix.Load(); sec > 0 {
+		st.LastSuccessTime = time.Unix(sec, 0).UTC()
+	}
+	if d.deliveryBlocked {
+		st.State = DeliveryStateDegraded
+		st.Blocked = true
+		st.ReasonCode = d.deliveryReason
+		st.BlockedSince = d.blockedSince
+		st.FirstSequence = d.blockedFirstSeq
+		st.LastSequence = d.blockedLastSeq
+	}
+	return st
+}
+
+func (d *Drain) markDeliveryBlocked(reason string, batch spool.Batch) {
+	if d == nil {
+		return
+	}
+	sanitized := sanitizeReason(reason)
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	if !d.deliveryBlocked {
+		d.blockedSince = time.Now().UTC()
+	}
+	d.deliveryBlocked = true
+	d.deliveryReason = sanitized
+	d.blockedFirstSeq = batch.FirstSequence
+	d.blockedLastSeq = batch.LastSequence
+}
+
+func (d *Drain) clearDeliveryBlocked() {
+	if d == nil {
+		return
+	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	d.deliveryBlocked = false
+	d.deliveryReason = ""
+	d.blockedSince = time.Time{}
+	d.blockedFirstSeq = 0
+	d.blockedLastSeq = 0
+}
+
+// observeLegacySizeBlock surfaces durable pre-65fe619 sizeRejected sidecars as
+// delivery degradation before the next upload attempt, without suppressing replay.
+func (d *Drain) observeLegacySizeBlock() {
+	reporter, ok := d.spool.(sizeRejectedReporter)
+	if !ok {
+		return
+	}
+	blocked, err := reporter.OutboundBatchSizeRejected()
+	if err != nil || !blocked {
+		return
+	}
+	if d.metrics.PendingRecords.Load() <= 0 {
+		return
+	}
+	d.deliveryMu.RLock()
+	already := d.deliveryBlocked
+	d.deliveryMu.RUnlock()
+	if already {
+		return
+	}
+	d.markDeliveryBlocked("ERR_BATCH_TOO_LARGE", spool.Batch{})
+}
 
 func (d *Drain) Start(parent context.Context) error {
 	if parent == nil {
@@ -307,6 +426,7 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		d.metrics.Successes.Add(1)
 		d.metrics.DurableAcks.Add(1)
 		d.metrics.LastSuccessUnix.Store(time.Now().Unix())
+		d.clearDeliveryBlocked()
 		d.refreshStats()
 		return true, nil
 	}
@@ -358,6 +478,7 @@ func singleDelivery(raw json.RawMessage) bool {
 func (d *Drain) retainBlocked(ctx context.Context, batch spool.Batch, reason string, cause error) error {
 	d.metrics.FailuresPermanent.Add(1)
 	d.metrics.Backpressure.Add(1)
+	d.markDeliveryBlocked(reason, batch)
 	d.logger.Warn("Agent-ingress delivery blocked; spool retained",
 		"event_code", sanitizeReason(reason),
 		"safe_context", map[string]any{
@@ -365,6 +486,7 @@ func (d *Drain) retainBlocked(ctx context.Context, batch spool.Batch, reason str
 			"record_count":         len(batch.Records),
 			"singleton_size_block": reason == "ERR_BATCH_TOO_LARGE" && len(batch.Records) == 1,
 			"retry_delay_ms":       d.cfg.MaxBackoff.Milliseconds(),
+			"delivery_health":      DeliveryStateDegraded,
 		})
 	if reason == "ERR_BATCH_TOO_LARGE" || reason == "ERR_REQUEST_TOO_LARGE" {
 		d.logger.Warn("Restore Core request-size compatibility; exact frozen request will be retried",
