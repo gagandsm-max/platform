@@ -894,7 +894,7 @@ Phase 1 API/event contracts require ICMP availability evidence as a versioned ty
 
 ### 13.8 Change Assurance / NCM phase envelope
 
-Change Assurance APIs and NCM privileged-execution contracts retain maker-checker, exact plan/hash/target/window binding and audit. Phase 1 independently certifiable surfaces are backup/version/diff/compliance plus controlled manual CLI when security gates pass. Mass push/canary/automated remediation API enablement defaults to **Phase 1.5** unless Founder change control promotes them.
+Change Assurance APIs and NCM privileged-execution contracts retain maker-checker, exact plan/hash/target/window binding and audit. Phase 1 independently certifiable surfaces are backup/version/diff/compliance/golden-state plus controlled manual CLI when security gates pass. Mass push/canary/automated remediation API enablement defaults to **Phase 1.5** unless Founder change control promotes them.
 
 ---
 

@@ -1427,7 +1427,7 @@ ncm_job_target
 
 NCM executor receives a short-lived signed job token referencing credentials, never long-lived plaintext secrets.
 
-**Phase 1 / Phase 1.5 NCM envelope (Issue #200):** `BACKUP|DIFF|COMPLIANCE` (and controlled manual `COMMAND`/CLI when RBAC/credential brokering/audit are certified) are the Phase 1 independently certifiable subset. Mass `PUSH`, canary/staged automated privileged execution, maker-checker automation defaults and automated remediation belong to **Phase 1.5** unless Founder change control promotes them. Schema presence of PUSH/ROLLBACK types does not imply Phase 1 certification.
+**Phase 1 / Phase 1.5 NCM envelope (Issue #200):** Phase 1 independently certifiable NCM subset remains config backup/version/diff/compliance/golden-state (job types `BACKUP|DIFF|COMPLIANCE`, and controlled manual `COMMAND`/CLI when RBAC/credential brokering/audit are certified). Golden-state/desired-configuration comparison is a Phase 1 requirement contract and is not depicted by DF-025. Mass `PUSH`, canary/staged automated privileged execution, maker-checker automation defaults and automated remediation belong to **Phase 1.5** unless Founder change control promotes them. Schema presence of PUSH/ROLLBACK types does not imply Phase 1 certification or physical implementation.
 
 ---
 
