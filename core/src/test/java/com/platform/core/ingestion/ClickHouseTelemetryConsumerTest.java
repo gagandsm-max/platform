@@ -25,7 +25,6 @@ import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.ListenerExecutionFailedException;
 import org.springframework.kafka.listener.MessageListenerContainer;
 import org.springframework.kafka.support.Acknowledgment;
-import org.springframework.util.backoff.FixedBackOff;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -182,44 +181,16 @@ class ClickHouseTelemetryConsumerTest {
                     "payload byte length must be logged"
             );
 
-            // Mirror IngestionKafkaConfiguration DefaultErrorHandler setup exactly, then force
-            // immediate recovery via setBackOffFunction so handleOne invokes the recoverer without
-            // multi-attempt seeks (production uses FixedBackOff(500L, 3L) on the handler itself).
-            DefaultErrorHandler errorHandler = new DefaultErrorHandler((rec, exception) -> {
-                throw new KafkaException(
-                        "Exhausted retries for record at topic=" + rec.topic()
-                                + " partition=" + rec.partition()
-                                + " offset=" + rec.offset()
-                                + "; halting partition progression",
-                        exception
-                );
-            }, new FixedBackOff(500L, 3L));
-            errorHandler.setAckAfterHandle(false);
-            errorHandler.setBackOffFunction((rec, exception) -> new FixedBackOff(0L, 0L));
-
+            // Exercise the supported stopping handler without asynchronous unit-test threads.
+            var errorHandler = new org.springframework.kafka.listener.CommonContainerStoppingErrorHandler(Runnable::run);
             ListenerExecutionFailedException listenerFailed = new ListenerExecutionFailedException(
                     "Listener method threw exception", ex);
-            @SuppressWarnings("unchecked")
             Consumer<String, String> kafkaConsumer = mock(Consumer.class);
             MessageListenerContainer container = mock(MessageListenerContainer.class);
-            when(container.getListenerId()).thenReturn("telemetry-test-listener");
-
-            // Recoverer throws KafkaException; DefaultErrorHandler catches, logs the failure chain,
-            // and returns without rethrowing. Capture that log path (same recoverer as production).
-            boolean remaining = errorHandler.handleOne(listenerFailed, record, kafkaConsumer, container);
-            assertFalse(remaining, "poison recovery must not treat the record as successfully handled");
-
-            String errorHandlerLogs = loggingEventsIncludingThrowables(appenders.get(1));
-            assertTrue(
-                    errorHandlerLogs.contains("Failed to handle")
-                            || errorHandlerLogs.contains("Exhausted retries"),
-                    "DefaultErrorHandler recovery path must be exercised; got: " + errorHandlerLogs
-            );
-            assertFalse(errorHandlerLogs.contains(SUPER_SECRET_SENTINEL_DO_NOT_LOG),
-                    "sentinel must not appear in DefaultErrorHandler recovery logs: " + errorHandlerLogs);
-            assertFalse(errorHandlerLogs.contains(poisonPayload),
-                    "raw poison payload must not appear in DefaultErrorHandler recovery logs: "
-                            + errorHandlerLogs);
+            assertThrows(KafkaException.class, () -> errorHandler.handleRemaining(
+                    listenerFailed, List.of(record), kafkaConsumer, container));
+            verify(container).stopAbnormally(any(Runnable.class));
+            verifyNoInteractions(kafkaConsumer);
 
             String allFrameworkLogs = appenders.stream()
                     .skip(1)
@@ -378,6 +349,18 @@ class ClickHouseTelemetryConsumerTest {
             logger.detachAppender(appender);
             logger.setLevel(previous);
             appender.stop();
+        }
+    }
+
+    @Test
+    void retryConfigurationCannotDisablePersistenceOrCreateUnboundedRetryDelay() {
+        for (int attempts : new int[] {0, -1, 6, Integer.MAX_VALUE}) {
+            assertThrows(IllegalArgumentException.class, () ->
+                    new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, attempts, 200));
+        }
+        for (long delay : new long[] {0, -1, 1001, Long.MAX_VALUE}) {
+            assertThrows(IllegalArgumentException.class, () ->
+                    new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, 5, delay));
         }
     }
 

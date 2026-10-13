@@ -16,8 +16,7 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
-import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.util.backoff.FixedBackOff;
+import org.springframework.kafka.listener.CommonContainerStoppingErrorHandler;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -101,17 +100,14 @@ public class IngestionKafkaConfiguration {
         factory.setConsumerFactory(consumerFactory);
         // Manual immediate acknowledgement ensures offsets ONLY commit after ClickHouse persistence succeeds
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
-        // Default error handler with fail-closed recoverer: halts offset progression without skipping failed records
-        DefaultErrorHandler errorHandler = new DefaultErrorHandler((record, exception) -> {
-            throw new org.springframework.kafka.KafkaException(
-                    "Exhausted retries for record at topic=" + record.topic()
-                            + " partition=" + record.partition()
-                            + " offset=" + record.offset()
-                            + "; halting partition progression",
-                    exception
-            );
-        }, new FixedBackOff(500L, 3L));
-        errorHandler.setAckAfterHandle(false);
+        // Spring Kafka 3.2.4 resets DefaultErrorHandler retry state when recovery throws.
+        // The consumer already bounds transient ClickHouse retries; on exhaustion or poison,
+        // stop abnormally instead of starting another retry cycle. No recovery/skip/commit.
+        // Existing IngestionMetrics/TelemetryConsumerHealthIndicator remain degraded until
+        // successful persistence. After fixing the cause, an operator explicitly restarts
+        // the Core service (or this registry listener); the same group replays from its
+        // unchanged committed offset. No automatic listener restart is configured here.
+        CommonContainerStoppingErrorHandler errorHandler = new CommonContainerStoppingErrorHandler();
         factory.setCommonErrorHandler(errorHandler);
         return factory;
     }

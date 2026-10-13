@@ -45,6 +45,9 @@ public class ClickHouseTelemetryConsumer {
             @Value("${platform.telemetry.consumer.max-retries:5}") int maxRetries,
             @Value("${platform.telemetry.consumer.backoff-ms:200}") long backoffMs
     ) {
+        if (maxRetries < 1 || maxRetries > 5 || backoffMs < 1 || backoffMs > 1_000) {
+            throw new IllegalArgumentException("Telemetry consumer requires 1..5 attempts and 1..1000ms backoff");
+        }
         this.clickHouseClient = clickHouseClient;
         this.objectMapper = objectMapper;
         this.metrics = metrics;
@@ -53,6 +56,8 @@ public class ClickHouseTelemetryConsumer {
     }
 
     @KafkaListener(
+            id = "telemetryNumericListener",
+            idIsGroup = false,
             topics = "${platform.ingestion.kafka.topic:telemetry.numeric.v1}",
             groupId = "${spring.kafka.consumer.group-id:platform-core-group}",
             autoStartup = "${platform.telemetry.consumer.enabled:false}",
@@ -69,7 +74,7 @@ public class ClickHouseTelemetryConsumer {
                     : record.value().getBytes(StandardCharsets.UTF_8).length;
             SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.TELEMETRY_POISON_EVENT, () ->
                     log.error(
-                            "Poison/malformed telemetry message from Kafka topic={} partition={} offset={} failureClass={} payloadBytes={} code={}",
+                            "Poison/malformed telemetry message from Kafka topic={} partition={} offset={} failureClass={} payloadBytes={} code={}. Listener stopping; record retained. Correct the cause before explicit operator restart.",
                             record.topic(),
                             record.partition(),
                             record.offset(),
@@ -115,7 +120,8 @@ public class ClickHouseTelemetryConsumer {
                         Thread.sleep(backoffMs * (1L << (attempt - 1)));
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
-                        throw new RuntimeException("Consumer retry interrupted", ie);
+                        metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
+                        throw new RuntimeException("Consumer retry interrupted");
                     }
                 }
             }
@@ -127,7 +133,7 @@ public class ClickHouseTelemetryConsumer {
                 : lastException.getClass().getSimpleName();
         SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.TELEMETRY_RETRIES_EXHAUSTED, () ->
                 log.error(
-                        "ClickHouse retries exhausted for topic={} partition={} offset={} attempts={} failureClass={}. Offset will NOT progress.",
+                        "ClickHouse retries exhausted for topic={} partition={} offset={} attempts={} failureClass={}. Listener stopping; record retained and offset will NOT progress. Restore persistence before explicit operator restart.",
                         record.topic(),
                         record.partition(),
                         record.offset(),
@@ -136,8 +142,7 @@ public class ClickHouseTelemetryConsumer {
                 )
         );
         throw new RuntimeException(
-                "ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset(),
-                lastException
+                "ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset()
         );
     }
 

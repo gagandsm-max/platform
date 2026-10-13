@@ -15,11 +15,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
-import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.listener.AcknowledgingMessageListener;
-import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.kafka.annotation.EnableKafka;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
+import org.springframework.kafka.listener.MessageListenerContainer;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.EmbeddedKafkaKraftBroker;
@@ -60,6 +63,12 @@ class TelemetryKafkaTransactionVisibilityTest {
 
     private EmbeddedKafkaBroker embeddedKafka;
     private DefaultKafkaProducerFactory<String, String> producerFactory;
+    private AnnotationConfigApplicationContext context;
+
+    @Configuration
+    @EnableKafka
+    static class ListenerInfrastructure { }
+
 
     @BeforeEach
     void startBroker() {
@@ -72,6 +81,7 @@ class TelemetryKafkaTransactionVisibilityTest {
 
     @AfterEach
     void stopBroker() {
+        if (context != null) { context.close(); context = null; }
         // Deterministic producer cleanup before broker teardown (success, failure, timeout).
         destroyProducerFactory();
         if (embeddedKafka != null) {
@@ -81,41 +91,23 @@ class TelemetryKafkaTransactionVisibilityTest {
     }
 
     @Test
-    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    @Timeout(value = 180, unit = TimeUnit.SECONDS)
     void actualListenerContainerHonorsReadCommittedAckAndFailClosedOffsets() throws Exception {
         String bootstrap = embeddedKafka.getBrokersAsString();
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
         KafkaTemplate<String, String> kafkaTemplate = createTransactionalTemplate(bootstrap);
-        ConcurrentKafkaListenerContainerFactory<String, String> listenerFactory =
-                createApplicationListenerFactory(bootstrap);
-
-        // 7 — actual application container factory pins.
-        assertEquals(
-                ContainerProperties.AckMode.MANUAL_IMMEDIATE,
-                listenerFactory.getContainerProperties().getAckMode()
-        );
-        Map<String, Object> effectiveConsumer =
-                ((DefaultKafkaConsumerFactory<String, String>) listenerFactory.getConsumerFactory())
-                        .getConfigurationProperties();
-        assertEquals("read_committed", effectiveConsumer.get(ConsumerConfig.ISOLATION_LEVEL_CONFIG));
-        assertEquals(false, effectiveConsumer.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
-        IngestionKafkaConfiguration.enforceTransactionalVisibilityInvariants(
-                listenerFactory.getConsumerFactory()
-        );
-
         String groupId = "issue222-listener-" + UUID.randomUUID();
         ClickHouseClient clickHouseClient = mock(ClickHouseClient.class);
         IngestionMetrics metrics = new IngestionMetrics();
-        // Single CH attempt per delivery so Kafka-level redelivery is observable after throw.
-        ClickHouseTelemetryConsumer telemetryConsumer =
-                new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, 1, 1);
-
         List<String> deliveredSequenceIds = new CopyOnWriteArrayList<>();
         CountDownLatch committedInsertLatch = new CountDownLatch(1);
+        CountDownLatch failedAttemptBarrier = new CountDownLatch(1);
+        CountDownLatch releaseFailure = new CountDownLatch(1);
+        CountDownLatch recoveryBarrier = new CountDownLatch(1);
+        CountDownLatch allowRecovery = new CountDownLatch(1);
         CountDownLatch redeliverySuccessLatch = new CountDownLatch(1);
         AtomicInteger redeliveryInsertAttempts = new AtomicInteger();
-        AtomicInteger poisonDeliveries = new AtomicInteger();
 
         CanonicalObservation abortedObs = observation("seq-aborted-" + UUID.randomUUID());
         CanonicalObservation committedObs = observation("seq-committed-" + UUID.randomUUID());
@@ -136,27 +128,35 @@ class TelemetryKafkaTransactionVisibilityTest {
             }
             if (redeliveryObs.sequenceId().equals(seq)) {
                 int attempt = redeliveryInsertAttempts.incrementAndGet();
-                if (attempt < 3) {
-                    throw new RuntimeException(
-                            "intentional ClickHouse failure for redelivery proof attempt=" + attempt
-                    );
+                if (attempt == 1) {
+                    throw new RuntimeException("intentional transient ClickHouse failure");
                 }
+                if (attempt == 2) {
+                    failedAttemptBarrier.countDown();
+                    assertTrue(releaseFailure.await(30, TimeUnit.SECONDS), "release failed insertion");
+                    throw new RuntimeException("intentional exhausted ClickHouse failure");
+                }
+                recoveryBarrier.countDown();
+                assertTrue(allowRecovery.await(30, TimeUnit.SECONDS), "allow recovered insertion");
                 redeliverySuccessLatch.countDown();
                 return null;
             }
             throw new RuntimeException("unexpected observation sequenceId=" + seq);
         }).when(clickHouseClient).insertNumericBatch(anyList());
 
-        ConcurrentMessageListenerContainer<String, String> container =
-                listenerFactory.createContainer(TOPIC);
-        container.setBeanName("issue222-telemetry-listener");
-        container.getContainerProperties().setGroupId(groupId);
-        container.setupMessageListener((AcknowledgingMessageListener<String, String>) (record, acknowledgment) -> {
-            if (poisonPayload.equals(record.value())) {
-                poisonDeliveries.incrementAndGet();
-            }
-            telemetryConsumer.consume(record, acknowledgment);
-        });
+        context = createListenerContext(bootstrap, groupId, clickHouseClient, objectMapper, metrics);
+        var listenerFactory = context.getBean(
+                IngestionKafkaConfiguration.TELEMETRY_KAFKA_LISTENER_CONTAINER_FACTORY,
+                ConcurrentKafkaListenerContainerFactory.class);
+        assertEquals(ContainerProperties.AckMode.MANUAL_IMMEDIATE,
+                listenerFactory.getContainerProperties().getAckMode());
+        Map<String, Object> effectiveConsumer = listenerFactory.getConsumerFactory().getConfigurationProperties();
+        assertEquals("read_committed", effectiveConsumer.get(ConsumerConfig.ISOLATION_LEVEL_CONFIG));
+        assertEquals(false, effectiveConsumer.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
+        MessageListenerContainer container = registeredListener();
+        assertEquals(groupId, container.getContainerProperties().getGroupId());
+        assertEquals(List.of(TOPIC), List.of(container.getContainerProperties().getTopics()));
+        assertFalse(container.isRunning(), "annotation autoStartup=false is resolved");
 
         try {
             // 1/2 — abort then commit; aborted must be invisible to the real listener.
@@ -201,6 +201,7 @@ class TelemetryKafkaTransactionVisibilityTest {
             );
             assertNotNull(afterCommitted, "group offset must advance after successful ClickHouse + ACK");
             assertTrue(afterCommitted > 0);
+            System.out.println("PR227_OFFSET persisted=" + afterCommitted);
 
             // 6 — Kafka-level redelivery after ClickHouse failure; offset advances only on success.
             long offsetBeforeRedelivery = afterCommitted;
@@ -209,16 +210,40 @@ class TelemetryKafkaTransactionVisibilityTest {
                 return true;
             });
 
-            assertTrue(
-                    redeliverySuccessLatch.await(60, TimeUnit.SECONDS),
-                    "ClickHouse must eventually succeed after Kafka redelivery; attempts="
-                            + redeliveryInsertAttempts.get()
-            );
-            assertTrue(
-                    redeliveryInsertAttempts.get() >= 3,
-                    "failure must be retried via Kafka redelivery; attempts="
-                            + redeliveryInsertAttempts.get()
-            );
+            assertTrue(failedAttemptBarrier.await(30, TimeUnit.SECONDS));
+            // Attempt one has failed; attempt two cannot succeed or ACK at this barrier.
+            assertEquals(offsetBeforeRedelivery, committedOffset(bootstrap, groupId));
+            System.out.println("PR227_OFFSET failing=" + committedOffset(bootstrap, groupId)
+                    + " recoveryPermitted=false");
+            releaseFailure.countDown();
+            awaitCondition(() -> !registeredListener().isRunning()
+                    && !registeredListener().isInExpectedState(), 30, "exhaustion must stop abnormally");
+            assertTrue(metrics.isConsumerDegraded());
+            assertEquals(2, redeliveryInsertAttempts.get(), "bounded local attempts, no Kafka retry loop");
+            assertEquals(offsetBeforeRedelivery, committedOffset(bootstrap, groupId));
+            Thread.sleep(1_500);
+            assertEquals(2, redeliveryInsertAttempts.get(), "exhaustion stays stopped until operator restart");
+            System.out.println("PR227_EXHAUSTION attempts=" + redeliveryInsertAttempts.get()
+                    + " running=" + registeredListener().isRunning()
+                    + " expectedState=" + registeredListener().isInExpectedState()
+                    + " offset=" + committedOffset(bootstrap, groupId));
+            context.close();
+            context = null;
+            assertEquals(offsetBeforeRedelivery, committedOffset(bootstrap, groupId),
+                    "shutdown must not commit the failed record");
+            System.out.println("PR227_OFFSET shutdown=" + committedOffset(bootstrap, groupId));
+
+            // A fresh annotated consumer, same group, must replay the uncommitted record.
+            context = createListenerContext(bootstrap, groupId, clickHouseClient, objectMapper, metrics);
+            container = registeredListener();
+            container.start();
+            assertTrue(recoveryBarrier.await(30, TimeUnit.SECONDS));
+            assertEquals(3, redeliveryInsertAttempts.get());
+            assertEquals(offsetBeforeRedelivery, committedOffset(bootstrap, groupId),
+                    "restart/redelivery must not ACK before persistence returns");
+            System.out.println("PR227_OFFSET restartedBeforePersistence=" + committedOffset(bootstrap, groupId));
+            allowRecovery.countDown();
+            assertTrue(redeliverySuccessLatch.await(30, TimeUnit.SECONDS));
             Long afterRedelivery = awaitCommittedOffset(
                     bootstrap,
                     groupId,
@@ -227,6 +252,8 @@ class TelemetryKafkaTransactionVisibilityTest {
             );
             assertNotNull(afterRedelivery, "offset must advance only after successful redelivery processing");
             assertTrue(afterRedelivery > offsetBeforeRedelivery);
+            assertFalse(metrics.isConsumerDegraded(), "successful persistence clears degradation");
+            System.out.println("PR227_OFFSET recovered=" + afterRedelivery);
 
             // 5 — poison/ClickHouse-path failure must not silently commit an unprocessed offset.
             long offsetBeforePoison = afterRedelivery;
@@ -235,22 +262,37 @@ class TelemetryKafkaTransactionVisibilityTest {
                 return true;
             });
 
-            awaitCondition(
-                    () -> poisonDeliveries.get() >= 1 && metrics.getConsumerPoisonEvents() >= 1,
-                    45,
-                    "poison must be delivered to the listener without ACK"
-            );
-            // Allow error-handler seeks/retries; commit must remain unchanged.
-            Thread.sleep(2_500);
-            assertEquals(
-                    offsetBeforePoison,
-                    committedOffset(bootstrap, groupId),
-                    "poison/fail-closed path must not advance the group offset"
-            );
+            awaitCondition(() -> metrics.getConsumerPoisonEvents() == 1
+                    && !registeredListener().isRunning() && !registeredListener().isInExpectedState(),
+                    30, "poison must stop the annotated listener abnormally");
+            assertTrue(metrics.isConsumerDegraded());
+            assertEquals(com.platform.core.logging.CoreSupportabilityEventCodes.TELEMETRY_POISON_EVENT,
+                    metrics.getConsumerDegradedReason());
+            assertEquals(offsetBeforePoison, committedOffset(bootstrap, groupId));
+            Thread.sleep(1_500);
+            assertEquals(1, metrics.getConsumerPoisonEvents(), "no automatic restart or poison error storm");
+            // Later valid traffic must remain blocked behind the retained poison record.
+            kafkaTemplate.executeInTransaction(ops -> {
+                sendSync(ops, TOPIC, "blocked-key", committedJson);
+                return true;
+            });
+            // Explicit operator restart retries the same poison; it never skips to later data.
+            context.close();
+            context = null;
+            context = createListenerContext(bootstrap, groupId, clickHouseClient, objectMapper, metrics);
+            registeredListener().start();
+            awaitCondition(() -> metrics.getConsumerPoisonEvents() == 2
+                    && !registeredListener().isRunning(), 30, "poison replay on explicit restart");
+            assertEquals(offsetBeforePoison, committedOffset(bootstrap, groupId));
+            System.out.println("PR227_POISON events=" + metrics.getConsumerPoisonEvents()
+                    + " offset=" + committedOffset(bootstrap, groupId) + " laterRecordBlocked=true");
+            verify(clickHouseClient, times(4)).insertNumericBatch(anyList());
             // Still no aborted observation visibility after subsequent traffic.
             assertFalse(deliveredSequenceIds.contains(abortedObs.sequenceId()));
         } finally {
-            stopContainerQuietly(container);
+            releaseFailure.countDown();
+            allowRecovery.countDown();
+            if (context != null) { context.close(); context = null; }
             // Ensure producer resources are released even if assertions fail before @AfterEach.
             destroyProducerFactory();
         }
@@ -282,21 +324,45 @@ class TelemetryKafkaTransactionVisibilityTest {
         return kafkaTemplate;
     }
 
-    private ConcurrentKafkaListenerContainerFactory<String, String> createApplicationListenerFactory(
-            String bootstrap
+    private AnnotationConfigApplicationContext createListenerContext(
+            String bootstrap, String groupId, ClickHouseClient client, ObjectMapper mapper, IngestionMetrics metrics
     ) {
-        KafkaProperties consumerProps = new KafkaProperties();
-        consumerProps.setBootstrapServers(List.of(bootstrap));
-        consumerProps.getConsumer().setAutoOffsetReset("earliest");
-        consumerProps.getConsumer().setKeyDeserializer(StringDeserializer.class);
-        consumerProps.getConsumer().setValueDeserializer(StringDeserializer.class);
-        // Hostile overrides must remain pinned closed by the application factory.
-        consumerProps.getConsumer().setEnableAutoCommit(true);
-        consumerProps.getConsumer().getProperties().put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_uncommitted");
+        KafkaProperties props = new KafkaProperties();
+        props.setBootstrapServers(List.of(bootstrap));
+        props.getConsumer().setAutoOffsetReset("earliest");
+        props.getConsumer().setKeyDeserializer(StringDeserializer.class);
+        props.getConsumer().setValueDeserializer(StringDeserializer.class);
+        props.getConsumer().setEnableAutoCommit(true); // hostile overrides are pinned
+        props.getConsumer().getProperties().put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_uncommitted");
+        AnnotationConfigApplicationContext application = new AnnotationConfigApplicationContext();
+        application.getEnvironment().getPropertySources().addFirst(new MapPropertySource("listener-test", Map.of(
+                "spring.kafka.consumer.group-id", groupId,
+                "platform.ingestion.kafka.topic", TOPIC,
+                "platform.telemetry.consumer.enabled", "false",
+                "platform.telemetry.consumer.max-retries", "2",
+                "platform.telemetry.consumer.backoff-ms", "100")));
+        application.getDefaultListableBeanFactory().registerSingleton("kafkaProperties", props);
+        application.getDefaultListableBeanFactory().registerSingleton("clickHouseClient", client);
+        application.getDefaultListableBeanFactory().registerSingleton("objectMapper", mapper);
+        application.getDefaultListableBeanFactory().registerSingleton("ingestionMetrics", metrics);
+        application.register(ListenerInfrastructure.class, IngestionKafkaConfiguration.class,
+                ClickHouseTelemetryConsumer.class);
+        try {
+            application.refresh();
+            assertEquals(Set.of("telemetryNumericListener"),
+                    application.getBean(KafkaListenerEndpointRegistry.class).getListenerContainerIds());
+            return application;
+        } catch (Throwable failure) {
+            application.close();
+            throw failure;
+        }
+    }
 
-        IngestionKafkaConfiguration configuration = new IngestionKafkaConfiguration();
-        var consumerFactory = configuration.telemetryKafkaConsumerFactory(consumerProps);
-        return configuration.telemetryKafkaListenerContainerFactory(consumerFactory);
+    private MessageListenerContainer registeredListener() {
+        MessageListenerContainer listener = context.getBean(KafkaListenerEndpointRegistry.class)
+                .getListenerContainer("telemetryNumericListener");
+        assertNotNull(listener, "Spring must discover the production @KafkaListener");
+        return listener;
     }
 
     private void destroyProducerFactory() {
@@ -305,16 +371,6 @@ class TelemetryKafkaTransactionVisibilityTest {
                 producerFactory.destroy();
             } finally {
                 producerFactory = null;
-            }
-        }
-    }
-
-    private static void stopContainerQuietly(ConcurrentMessageListenerContainer<String, String> container) {
-        if (container != null) {
-            try {
-                container.stop();
-            } catch (Exception ignored) {
-                // best-effort cleanup before broker destroy
             }
         }
     }

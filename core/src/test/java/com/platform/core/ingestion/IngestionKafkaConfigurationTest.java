@@ -31,6 +31,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class IngestionKafkaConfigurationTest {
 
     @Test
+    void pinnedDefaultHandlerResetsFiniteRetriesWhenRecovererThrows() {
+        var deliveries = new java.util.ArrayList<Integer>();
+        var recoveries = new java.util.concurrent.atomic.AtomicInteger();
+        var handler = new org.springframework.kafka.listener.DefaultErrorHandler((record, failure) -> {
+            recoveries.incrementAndGet();
+            throw new IllegalStateException("recovery failed");
+        }, new org.springframework.util.backoff.FixedBackOff(0, 1));
+        handler.setRetryListeners((record, failure, attempt) -> deliveries.add(attempt));
+        var record = new org.apache.kafka.clients.consumer.ConsumerRecord<>("telemetry.numeric.v1", 0, 0L, "key", "{}");
+        var failure = new IllegalStateException("permanent failure");
+        var consumer = org.mockito.Mockito.mock(org.apache.kafka.clients.consumer.Consumer.class);
+        var container = org.mockito.Mockito.mock(org.springframework.kafka.listener.MessageListenerContainer.class);
+        for (int attempt = 0; attempt < 4; attempt++) {
+            assertFalse(handler.handleOne(failure, record, consumer, container));
+        }
+        assertEquals(java.util.List.of(1, 2, 1, 2), deliveries);
+        assertEquals(2, recoveries.get(), "finite backoff restarts after each failed recovery");
+    }
+
+    @Test
     void pinsIdempotenceAcksAndTransactionTimeoutAgainstHostileOverrides() {
         KafkaProperties properties = new KafkaProperties();
         properties.getProducer().getProperties().put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "false");
