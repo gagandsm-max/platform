@@ -17,6 +17,7 @@ import javax.security.auth.x500.X500Principal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
+import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -824,32 +825,35 @@ class IngestionValidatorTest {
     // =========================================================================
     // ISSUE #218 — BUILD-020 icmp_observation_v1 CHARACTERIZATION (numeric-only Core)
     //
-    // These tests document CURRENT rejection of source-faithful ICMP structured
-    // evidence produced by sensor/internal/integration/icmp/executor.go
+    // CURRENT IMPLEMENTATION CHARACTERIZATION ONLY — not intended permanent
+    // product behavior. These tests document CURRENT rejection of source-faithful
+    // ICMP structured evidence produced by icmpintegration.Executor
     // (RecordType=icmp_observation_v1; Evidence has target/ipVersion/received/
     // packetLossPct/RTT/samples/errorCode — NO observations[] and NO metric_id+value).
     //
-    // CHARACTERIZATION ONLY: rejection is an implementation limitation of the
-    // existing numeric-only Core extractor, NOT the intended durable product
-    // contract. When approved typed Core ICMP ingestion lands, replace these
-    // expected-rejection assertions with typed-acceptance + complete-accounting
-    // tests. Do not permanently freeze numeric-only behavior.
+    // Wire fixtures mirror Go spool.Record ([]byte payload → base64) + uploader
+    // makeBatch checksum over exact json.Marshal(record) bytes so Core's textual/
+    // base64 decoding path is exercised. Keep helpers reusable for the future
+    // typed-acceptance implementation.
     //
-    // Generic unsupported STATE/EVENT/TRAP/SYSLOG/FLOW coverage already exists
-    // (e.g. testUnsupportedRecordTypeRejectedWithoutAck); do not duplicate it.
+    // When approved typed Core ICMP ingestion lands, replace expected-rejection
+    // assertions with typed-acceptance + complete-accounting tests. Do not
+    // permanently freeze numeric-only behavior.
     // =========================================================================
+
+    private static final String GO_SPOOL_CREATED_AT = "2026-10-11T14:00:00Z";
 
     /**
      * Source-faithful BUILD-020 observation.Envelope + Evidence protocolPayload
-     * as written by icmpintegration.Executor (PR #217 /
-     * 4b126e03303585c75715ff9852bd588c1d1a95dc).
+     * as written by icmpintegration.Executor (PR #217). RTT/loss values are
+     * authentic successful-collection Evidence fields, not Core numeric facts.
      */
     private String build020IcmpObservationEnvelopePayload() {
         return "{"
                 + "\"schemaVersion\":1,"
                 + "\"batchId\":\"icmp-aabbccddeeff00112233445566778899\","
                 + "\"recordType\":\"icmp_observation_v1\","
-                + "\"collectedAt\":\"2026-10-11T14:00:00Z\","
+                + "\"collectedAt\":\"" + GO_SPOOL_CREATED_AT + "\","
                 + "\"sensorId\":\"sensor-net-01\","
                 + "\"tenantId\":\"" + tenantId + "\","
                 + "\"entityId\":\"" + entityId + "\","
@@ -866,7 +870,7 @@ class IngestionValidatorTest {
                 + "\"ipVersion\":4,"
                 + "\"source\":\"SENSOR_PING_SOCKET\","
                 + "\"startedAt\":\"2026-10-11T13:59:59.900Z\","
-                + "\"completedAt\":\"2026-10-11T14:00:00Z\","
+                + "\"completedAt\":\"" + GO_SPOOL_CREATED_AT + "\","
                 + "\"requestedSamples\":2,"
                 + "\"received\":2,"
                 + "\"packetLossPct\":0.0,"
@@ -881,22 +885,120 @@ class IngestionValidatorTest {
                 + "}";
     }
 
-    private String build020IcmpSpoolRecordJson(long sequence) {
-        return "{\"sequence\":" + sequence + ",\"type\":\"icmp_observation_v1\",\"payload\":"
-                + build020IcmpObservationEnvelopePayload() + "}";
-    }
-
-    private String validSnmpNumericRecordJson(long sequence, long unsignedValue) {
-        return "{\"sequence\":" + sequence + ",\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{"
+    /**
+     * Authentic observation.Envelope carrying SNMP numeric observations[], matching
+     * field order from sensor/internal/observation/envelope.go for future reuse.
+     */
+    private String snmpNumericObservationEnvelopePayload(long unsignedValue) {
+        return "{"
+                + "\"schemaVersion\":1,"
+                + "\"batchId\":\"snmp-aabbccddeeff00112233445566778899\","
+                + "\"recordType\":\"SNMP_OBSERVATION_BATCH\","
+                + "\"collectedAt\":\"" + GO_SPOOL_CREATED_AT + "\","
+                + "\"sensorId\":\"sensor-net-01\","
                 + "\"tenantId\":\"" + tenantId + "\","
                 + "\"entityId\":\"" + entityId + "\","
-                + "\"collectedAt\":\"2026-10-11T14:00:00Z\","
+                + "\"job\":{\"jobId\":\"snmp-job-1\",\"assignmentKey\":\"snmp-assign-1\",\"assignmentVersion\":1,\"attempt\":1},"
                 + "\"protocol\":\"SNMP\","
+                + "\"protocolVersion\":\"2c\","
+                + "\"operation\":\"GET\","
+                + "\"status\":\"COLLECTED\","
                 + "\"quality\":\"GOOD\","
-                + "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":"
-                + unsignedValue + "}}]}}}";
+                + "\"protocolSchemaVersion\":1,"
+                + "\"protocolPayload\":{"
+                + "\"schemaVersion\":1,"
+                + "\"version\":\"2c\","
+                + "\"operation\":\"GET\","
+                + "\"collectedAt\":\"" + GO_SPOOL_CREATED_AT + "\","
+                + "\"observations\":[{"
+                + "\"oid\":\".1.3.6.1.2.1.1.3.0\","
+                + "\"sourceOid\":\".1.3.6.1.2.1.1.3.0\","
+                + "\"berType\":66,"
+                + "\"berTypeName\":\"Gauge32\","
+                + "\"collectedAt\":\"" + GO_SPOOL_CREATED_AT + "\","
+                + "\"quality\":\"GOOD\","
+                + "\"status\":\"VALUE\","
+                + "\"value\":{\"kind\":\"UNSIGNED\",\"unsigned\":" + unsignedValue + "}"
+                + "}]"
+                + "}"
+                + "}";
     }
 
+    /**
+     * Faithful Go spool.Record wire JSON (sensor/internal/spool/types.go Record +
+     * Append checksum/id contract). Payload []byte serializes as base64; record
+     * checksum is SHA-256 of the original unencoded payload bytes; id is
+     * rec-%020d-%016x-prefix. Field order matches Go encoding/json struct order.
+     */
+    private String goStyleSpoolRecordJson(long sequence, String recordType, byte[] payloadBytes)
+            throws Exception {
+        String payloadChecksum = sha256Hex(payloadBytes);
+        String recordId = String.format("rec-%020d-%s", sequence, payloadChecksum.substring(0, 16));
+        String payloadB64 = Base64.getEncoder().encodeToString(payloadBytes);
+        return "{"
+                + "\"schemaVersion\":1,"
+                + "\"sequence\":" + sequence + ","
+                + "\"id\":\"" + recordId + "\","
+                + "\"class\":\"METRIC\","
+                + "\"type\":\"" + recordType + "\","
+                + "\"createdAt\":\"" + GO_SPOOL_CREATED_AT + "\","
+                + "\"contentLength\":" + payloadBytes.length + ","
+                + "\"checksum\":\"" + payloadChecksum + "\","
+                + "\"payload\":\"" + payloadB64 + "\""
+                + "}";
+    }
+
+    private String goStyleSpoolRecordJson(long sequence, String recordType, String payloadUtf8)
+            throws Exception {
+        return goStyleSpoolRecordJson(sequence, recordType, payloadUtf8.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Reusable BUILD-020 ICMP spool wire record for typed-acceptance later. */
+    private String build020IcmpSpoolRecordJson(long sequence) throws Exception {
+        return goStyleSpoolRecordJson(sequence, "icmp_observation_v1", build020IcmpObservationEnvelopePayload());
+    }
+
+    /** Positive SNMP numeric control using the same Go-style spool serialization. */
+    private String validSnmpNumericGoStyleSpoolRecordJson(long sequence, long unsignedValue)
+            throws Exception {
+        return goStyleSpoolRecordJson(
+                sequence, "SNMP_OBSERVATION_BATCH", snmpNumericObservationEnvelopePayload(unsignedValue));
+    }
+
+    /**
+     * Negative control: same Go spool metadata shape with deliberately corrupt
+     * base64 so failure is ERR_MALFORMED_RECORD_PAYLOAD, not unsupported ICMP.
+     */
+    private String corruptBase64GoStyleSpoolRecordJson(long sequence) throws Exception {
+        byte[] authenticPayload = build020IcmpObservationEnvelopePayload().getBytes(StandardCharsets.UTF_8);
+        String payloadChecksum = sha256Hex(authenticPayload);
+        String recordId = String.format("rec-%020d-%s", sequence, payloadChecksum.substring(0, 16));
+        // Invalid base64 alphabet — cannot decode and is not JSON text either.
+        String corruptB64 = "!!!not-valid-base64!!!";
+        return "{"
+                + "\"schemaVersion\":1,"
+                + "\"sequence\":" + sequence + ","
+                + "\"id\":\"" + recordId + "\","
+                + "\"class\":\"METRIC\","
+                + "\"type\":\"icmp_observation_v1\","
+                + "\"createdAt\":\"" + GO_SPOOL_CREATED_AT + "\","
+                + "\"contentLength\":" + authenticPayload.length + ","
+                + "\"checksum\":\"" + payloadChecksum + "\","
+                + "\"payload\":\"" + corruptB64 + "\""
+                + "}";
+    }
+
+    private String sha256Hex(byte[] bytes) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(bytes);
+        StringBuilder sb = new StringBuilder(hash.length * 2);
+        for (byte b : hash) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    /** Outer upload checksum = SHA-256 over concatenated exact serialized spool record bytes. */
     private String checksumOfRecords(String... recordJsons) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         for (String recordJson : recordJsons) {
@@ -909,10 +1011,61 @@ class IngestionValidatorTest {
         return sb.toString();
     }
 
+    private void assertUnsupportedIcmpCharacterization(IngestionException ex) {
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode(),
+                "CHARACTERIZATION: authentic Go-wire ICMP must reach typed-shape rejection, not earlier decode/identity failures.");
+        assertTrue(ex.getMessage().contains("unsupported telemetry payload shape"));
+        assertNotEquals("ERR_MALFORMED_RECORD_PAYLOAD", ex.getCode());
+        assertNotEquals("ERR_CHECKSUM_MISMATCH", ex.getCode());
+        assertNotEquals("ERR_CHECKSUM_REQUIRED", ex.getCode());
+        assertNotEquals("ERR_ENTITY_ID_REQUIRED", ex.getCode());
+        assertNotEquals("ERR_ENTITY_SCOPE_UNAUTHORIZED", ex.getCode());
+        assertNotEquals("ERR_TENANT_SCOPE_MISMATCH", ex.getCode());
+        assertNotEquals("ERR_INVALID_TIMESTAMP", ex.getCode());
+        assertNotEquals("ERR_MISSING_PROTOCOL", ex.getCode());
+    }
+
+    @Test
+    void issue218_goStyleSnmpNumericControlAcceptedThroughRealValidator() throws Exception {
+        // Positive control: authentic Go-style spool + base64 path accepts SNMP numeric.
+        String snmp = validSnmpNumericGoStyleSpoolRecordJson(1, 12345);
+        String checksum = checksumOfRecords(snmp);
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
+                + "\"batchId\":\"b-snmp-gostyle\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + checksum + "\",\"records\":[" + snmp + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        TelemetryObservationBatch batch = validator.validateAndExtract(
+                json.getBytes(StandardCharsets.UTF_8), req, testScope);
+        assertEquals(1, batch.numericObservations().size());
+        assertEquals(12345.0, batch.numericObservations().get(0).value());
+        assertEquals(".1.3.6.1.2.1.1.3.0", batch.numericObservations().get(0).metricId());
+    }
+
+    @Test
+    void issue218_corruptBase64PayloadFailsDifferentlyFromUnsupportedIcmp() throws Exception {
+        // Negative control: malformed base64 must not masquerade as ICMP characterization.
+        String corrupt = corruptBase64GoStyleSpoolRecordJson(1);
+        String checksum = checksumOfRecords(corrupt);
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
+                + "\"batchId\":\"b-corrupt-b64\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + checksum + "\",\"records\":[" + corrupt + "]}";
+        TelemetryBatchRequest req = objectMapper.readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
+        assertEquals("ERR_MALFORMED_RECORD_PAYLOAD", ex.getCode(),
+                "Corrupt base64 must fail at decode, proving authentic ICMP rejection is not a fixture artifact.");
+        assertNotEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode());
+    }
+
     @Test
     void issue218_sourceFaithfulIcmpObservationRejectedByNumericOnlyCore() throws Exception {
-        // MANDATORY #1: valid BUILD-020 icmp_observation_v1 evidence is rejected today.
+        // CURRENT CHARACTERIZATION: valid Go-wire BUILD-020 icmp_observation_v1 is rejected today.
         String icmp = build020IcmpSpoolRecordJson(1);
+        assertTrue(icmp.contains("\"payload\":\""), "payload must be textual/base64 on the wire");
+        assertFalse(icmp.contains("\"payload\":{"), "must not embed JSON object under payload");
         String checksum = checksumOfRecords(icmp);
         String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
                 + "\"batchId\":\"b-icmp-alone\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
@@ -921,17 +1074,13 @@ class IngestionValidatorTest {
 
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
-        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
-        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode(),
-                "CHARACTERIZATION: current Core only accepts SNMP observations[] or metric_id+numeric value; "
-                        + "BUILD-020 ICMP Evidence lacks both. Replace with typed acceptance when implemented.");
-        assertTrue(ex.getMessage().contains("unsupported telemetry payload shape"));
+        assertUnsupportedIcmpCharacterization(ex);
     }
 
     @Test
     void issue218_mixedNumericSnmpThenIcmpBatchRejectedWithoutPartialSiblingPublish() throws Exception {
-        // MANDATORY #2: mixed numeric/SNMP + ICMP rejects the whole batch (no sibling leak).
-        String snmp = validSnmpNumericRecordJson(1, 12345);
+        // CURRENT CHARACTERIZATION: mixed SNMP + ICMP rejects the whole batch (no sibling leak).
+        String snmp = validSnmpNumericGoStyleSpoolRecordJson(1, 12345);
         String icmp = build020IcmpSpoolRecordJson(2);
         String checksum = checksumOfRecords(snmp, icmp);
         String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
@@ -941,17 +1090,14 @@ class IngestionValidatorTest {
 
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
-        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
-        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode(),
-                "CHARACTERIZATION: entire frozen outbound batch must fail closed; valid SNMP sibling must not "
-                        + "be extracted/ACKed while ICMP remains unsupported.");
+        assertUnsupportedIcmpCharacterization(ex);
     }
 
     @Test
     void issue218_reverseOrderIcmpThenNumericBatchRejectedEquivalently() throws Exception {
-        // MANDATORY #3: reverse-order ICMP + numeric exhibits equivalent atomic rejection.
+        // CURRENT CHARACTERIZATION: reverse-order ICMP + SNMP exhibits equivalent atomic rejection.
         String icmp = build020IcmpSpoolRecordJson(1);
-        String snmp = validSnmpNumericRecordJson(2, 67890);
+        String snmp = validSnmpNumericGoStyleSpoolRecordJson(2, 67890);
         String checksum = checksumOfRecords(icmp, snmp);
         String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
                 + "\"batchId\":\"b-mixed-icmp-snmp-rev\",\"firstSequence\":1,\"lastSequence\":2,\"checksum\":\""
@@ -960,8 +1106,6 @@ class IngestionValidatorTest {
 
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 validator.validateAndExtract(json.getBytes(StandardCharsets.UTF_8), req, testScope));
-        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
-        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode(),
-                "CHARACTERIZATION: reverse record order must not create a partial-accept path.");
+        assertUnsupportedIcmpCharacterization(ex);
     }
 }

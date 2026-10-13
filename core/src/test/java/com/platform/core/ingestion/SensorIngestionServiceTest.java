@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -438,11 +439,13 @@ class SensorIngestionServiceTest {
     // =========================================================================
     // ISSUE #218 — BUILD-020 icmp_observation_v1 CHARACTERIZATION (service path)
     //
-    // CHARACTERIZATION ONLY of current numeric-only Core limitation. Validation
-    // fails before reserve/finalize/Kafka/ACK. When typed ICMP ingestion is
-    // approved and implemented, replace these expected-rejection tests with
-    // durable typed-acceptance + complete-accounting coverage.
+    // CURRENT IMPLEMENTATION CHARACTERIZATION ONLY — not intended permanent
+    // product behavior. Validation fails before reserve/finalize/Kafka/ACK when
+    // authentic Go spool.Record wire (base64 payload) carries icmp_observation_v1.
+    // Helpers mirror Sensor uploader serialization for future typed-acceptance reuse.
     // =========================================================================
+
+    private static final String GO_SPOOL_CREATED_AT = "2026-10-11T14:00:00Z";
 
     private SensorIngestionService serviceWithRealValidator() {
         TestSensorAuthorityResolver realResolver = new TestSensorAuthorityResolver();
@@ -456,12 +459,12 @@ class SensorIngestionServiceTest {
      * Source-faithful BUILD-020 Envelope+Evidence as produced by
      * sensor/internal/integration/icmp/executor.go (icmp_observation_v1).
      */
-    private String build020IcmpRecordJson(long sequence) {
-        String envelope = "{"
+    private String build020IcmpObservationEnvelopePayload() {
+        return "{"
                 + "\"schemaVersion\":1,"
                 + "\"batchId\":\"icmp-aabbccddeeff00112233445566778899\","
                 + "\"recordType\":\"icmp_observation_v1\","
-                + "\"collectedAt\":\"2026-10-11T14:00:00Z\","
+                + "\"collectedAt\":\"" + GO_SPOOL_CREATED_AT + "\","
                 + "\"sensorId\":\"sensor-net-01\","
                 + "\"tenantId\":\"" + tenantId + "\","
                 + "\"entityId\":\"" + entityId + "\","
@@ -478,7 +481,7 @@ class SensorIngestionServiceTest {
                 + "\"ipVersion\":4,"
                 + "\"source\":\"SENSOR_PING_SOCKET\","
                 + "\"startedAt\":\"2026-10-11T13:59:59.900Z\","
-                + "\"completedAt\":\"2026-10-11T14:00:00Z\","
+                + "\"completedAt\":\"" + GO_SPOOL_CREATED_AT + "\","
                 + "\"requestedSamples\":2,"
                 + "\"received\":2,"
                 + "\"packetLossPct\":0.0,"
@@ -491,18 +494,101 @@ class SensorIngestionServiceTest {
                 + "]"
                 + "}"
                 + "}";
-        return "{\"sequence\":" + sequence + ",\"type\":\"icmp_observation_v1\",\"payload\":" + envelope + "}";
     }
 
-    private String snmpNumericRecordJson(long sequence, long unsignedValue) {
-        return "{\"sequence\":" + sequence + ",\"type\":\"SNMP_OBSERVATION_BATCH\",\"payload\":{"
+    private String snmpNumericObservationEnvelopePayload(long unsignedValue) {
+        return "{"
+                + "\"schemaVersion\":1,"
+                + "\"batchId\":\"snmp-aabbccddeeff00112233445566778899\","
+                + "\"recordType\":\"SNMP_OBSERVATION_BATCH\","
+                + "\"collectedAt\":\"" + GO_SPOOL_CREATED_AT + "\","
+                + "\"sensorId\":\"sensor-net-01\","
                 + "\"tenantId\":\"" + tenantId + "\","
                 + "\"entityId\":\"" + entityId + "\","
-                + "\"collectedAt\":\"2026-10-11T14:00:00Z\","
+                + "\"job\":{\"jobId\":\"snmp-job-1\",\"assignmentKey\":\"snmp-assign-1\",\"assignmentVersion\":1,\"attempt\":1},"
                 + "\"protocol\":\"SNMP\","
+                + "\"protocolVersion\":\"2c\","
+                + "\"operation\":\"GET\","
+                + "\"status\":\"COLLECTED\","
                 + "\"quality\":\"GOOD\","
-                + "\"protocolPayload\":{\"observations\":[{\"oid\":\".1.3.6.1.2.1.1.3.0\",\"status\":\"VALUE\",\"value\":{\"unsigned\":"
-                + unsignedValue + "}}]}}}";
+                + "\"protocolSchemaVersion\":1,"
+                + "\"protocolPayload\":{"
+                + "\"schemaVersion\":1,"
+                + "\"version\":\"2c\","
+                + "\"operation\":\"GET\","
+                + "\"collectedAt\":\"" + GO_SPOOL_CREATED_AT + "\","
+                + "\"observations\":[{"
+                + "\"oid\":\".1.3.6.1.2.1.1.3.0\","
+                + "\"sourceOid\":\".1.3.6.1.2.1.1.3.0\","
+                + "\"berType\":66,"
+                + "\"berTypeName\":\"Gauge32\","
+                + "\"collectedAt\":\"" + GO_SPOOL_CREATED_AT + "\","
+                + "\"quality\":\"GOOD\","
+                + "\"status\":\"VALUE\","
+                + "\"value\":{\"kind\":\"UNSIGNED\",\"unsigned\":" + unsignedValue + "}"
+                + "}]"
+                + "}"
+                + "}";
+    }
+
+    /**
+     * Faithful Go spool.Record wire JSON. Payload is base64; checksum is SHA-256
+     * of unencoded payload bytes; id follows rec-%020d-%s. Outer batch checksum
+     * hashes these exact serialized record bytes (uploader.makeBatch).
+     */
+    private String goStyleSpoolRecordJson(long sequence, String recordType, String payloadUtf8)
+            throws Exception {
+        byte[] payloadBytes = payloadUtf8.getBytes(StandardCharsets.UTF_8);
+        String payloadChecksum = sha256Hex(payloadBytes);
+        String recordId = String.format("rec-%020d-%s", sequence, payloadChecksum.substring(0, 16));
+        String payloadB64 = Base64.getEncoder().encodeToString(payloadBytes);
+        return "{"
+                + "\"schemaVersion\":1,"
+                + "\"sequence\":" + sequence + ","
+                + "\"id\":\"" + recordId + "\","
+                + "\"class\":\"METRIC\","
+                + "\"type\":\"" + recordType + "\","
+                + "\"createdAt\":\"" + GO_SPOOL_CREATED_AT + "\","
+                + "\"contentLength\":" + payloadBytes.length + ","
+                + "\"checksum\":\"" + payloadChecksum + "\","
+                + "\"payload\":\"" + payloadB64 + "\""
+                + "}";
+    }
+
+    private String build020IcmpRecordJson(long sequence) throws Exception {
+        return goStyleSpoolRecordJson(sequence, "icmp_observation_v1", build020IcmpObservationEnvelopePayload());
+    }
+
+    private String snmpNumericGoStyleRecordJson(long sequence, long unsignedValue) throws Exception {
+        return goStyleSpoolRecordJson(
+                sequence, "SNMP_OBSERVATION_BATCH", snmpNumericObservationEnvelopePayload(unsignedValue));
+    }
+
+    private String corruptBase64GoStyleRecordJson(long sequence) throws Exception {
+        byte[] authenticPayload = build020IcmpObservationEnvelopePayload().getBytes(StandardCharsets.UTF_8);
+        String payloadChecksum = sha256Hex(authenticPayload);
+        String recordId = String.format("rec-%020d-%s", sequence, payloadChecksum.substring(0, 16));
+        return "{"
+                + "\"schemaVersion\":1,"
+                + "\"sequence\":" + sequence + ","
+                + "\"id\":\"" + recordId + "\","
+                + "\"class\":\"METRIC\","
+                + "\"type\":\"icmp_observation_v1\","
+                + "\"createdAt\":\"" + GO_SPOOL_CREATED_AT + "\","
+                + "\"contentLength\":" + authenticPayload.length + ","
+                + "\"checksum\":\"" + payloadChecksum + "\","
+                + "\"payload\":\"!!!not-valid-base64!!!\""
+                + "}";
+    }
+
+    private String sha256Hex(byte[] bytes) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(bytes);
+        StringBuilder sb = new StringBuilder(hash.length * 2);
+        for (byte b : hash) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 
     private String sha256Of(String... recordJsons) throws Exception {
@@ -518,7 +604,7 @@ class SensorIngestionServiceTest {
     }
 
     private void assertNoDurableSideEffects() {
-        // MANDATORY #4/#5/#6: no durable ACK path, no PG reserve/finalize, no Kafka.
+        // Zero PG reservation/finalization, zero Kafka publication, zero Core ACK path.
         verify(kafkaProducer, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
         verify(watermarkStore, never()).reserveBatch(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
@@ -530,12 +616,68 @@ class SensorIngestionServiceTest {
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
     }
 
+    private void assertUnsupportedIcmpBeforeDurableSideEffects(IngestionException ex) {
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode(),
+                "CURRENT CHARACTERIZATION: authentic Go-wire ICMP rejected after decode/identity, before durable side effects.");
+        assertTrue(ex.getMessage().contains("unsupported telemetry payload shape"));
+        assertNotEquals("ERR_MALFORMED_RECORD_PAYLOAD", ex.getCode());
+        assertNotEquals("ERR_CHECKSUM_MISMATCH", ex.getCode());
+        assertNotEquals("ERR_ENTITY_ID_REQUIRED", ex.getCode());
+        assertNotEquals("ERR_INVALID_TIMESTAMP", ex.getCode());
+        assertNoDurableSideEffects();
+    }
+
+    @Test
+    void issue218_goStyleSnmpNumericControlAcceptedWithNoIcmpRegression() throws Exception {
+        SensorIngestionService realService = serviceWithRealValidator();
+        X509Certificate cert = createMockCert("sensor-net-01");
+
+        String snmp = snmpNumericGoStyleRecordJson(1, 12345);
+        String checksum = sha256Of(snmp);
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
+                + "\"batchId\":\"b-snmp-gostyle-svc\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + checksum + "\",\"records\":[" + snmp + "]}";
+        TelemetryBatchRequest req = new ObjectMapper().readValue(json, TelemetryBatchRequest.class);
+
+        // @BeforeEach already stubs reserved()+claimed(); prove Go-style SNMP still reaches durable ACK.
+        TelemetryAckResponse ack = realService.ingestTelemetry(
+                json.getBytes(StandardCharsets.UTF_8), req, "b-snmp-gostyle-svc", cert);
+        assertEquals("ACCEPTED", ack.status());
+        verify(kafkaProducer, times(1)).publishBatchTransactionally(any(TelemetryObservationBatch.class));
+        verify(watermarkStore, times(1)).reserveBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString());
+        verify(watermarkStore, times(1)).finalizeReservedBatch(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), any(), anyLong());
+    }
+
+    @Test
+    void issue218_corruptBase64PayloadFailsDifferentlyFromUnsupportedIcmpOnServicePath() throws Exception {
+        SensorIngestionService realService = serviceWithRealValidator();
+        X509Certificate cert = createMockCert("sensor-net-01");
+
+        String corrupt = corruptBase64GoStyleRecordJson(1);
+        String checksum = sha256Of(corrupt);
+        String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
+                + "\"batchId\":\"b-corrupt-b64-svc\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
+                + checksum + "\",\"records\":[" + corrupt + "]}";
+        TelemetryBatchRequest req = new ObjectMapper().readValue(json, TelemetryBatchRequest.class);
+
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                realService.ingestTelemetry(json.getBytes(StandardCharsets.UTF_8), req, "b-corrupt-b64-svc", cert));
+        assertEquals("ERR_MALFORMED_RECORD_PAYLOAD", ex.getCode());
+        assertNotEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode());
+        assertNoDurableSideEffects();
+    }
+
     @Test
     void issue218_sourceFaithfulIcmpBatchRejectedWithNoAckNoPgAdvanceNoKafka() throws Exception {
         SensorIngestionService realService = serviceWithRealValidator();
         X509Certificate cert = createMockCert("sensor-net-01");
 
         String icmp = build020IcmpRecordJson(1);
+        assertTrue(icmp.contains("\"payload\":\""), "Go wire payload must be base64 text");
+        assertFalse(icmp.contains("\"payload\":{"), "must not embed JSON object under payload");
         String checksum = sha256Of(icmp);
         String json = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
                 + "\"batchId\":\"b-icmp-svc\",\"firstSequence\":1,\"lastSequence\":1,\"checksum\":\""
@@ -545,10 +687,7 @@ class SensorIngestionServiceTest {
 
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 realService.ingestTelemetry(rawBody, req, "b-icmp-svc", cert));
-        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
-        assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", ex.getCode(),
-                "CHARACTERIZATION: no Core durable ACK for BUILD-020 icmp_observation_v1 under numeric-only Core");
-        assertNoDurableSideEffects();
+        assertUnsupportedIcmpBeforeDurableSideEffects(ex);
     }
 
     @Test
@@ -557,8 +696,8 @@ class SensorIngestionServiceTest {
         X509Certificate cert = createMockCert("sensor-net-01");
         ObjectMapper mapper = new ObjectMapper();
 
-        // Mixed: SNMP numeric sibling first, ICMP second — whole batch rejected.
-        String snmpFirst = snmpNumericRecordJson(1, 12345);
+        // Mixed permutation: SNMP numeric sibling first, ICMP second — whole batch rejected.
+        String snmpFirst = snmpNumericGoStyleRecordJson(1, 12345);
         String icmpSecond = build020IcmpRecordJson(2);
         String mixedChecksum = sha256Of(snmpFirst, icmpSecond);
         String mixedJson = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
@@ -569,10 +708,11 @@ class SensorIngestionServiceTest {
         IngestionException mixedEx = assertThrows(IngestionException.class, () ->
                 realService.ingestTelemetry(mixedJson.getBytes(StandardCharsets.UTF_8), mixedReq, "b-icmp-mixed", cert));
         assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", mixedEx.getCode());
+        assertTrue(mixedEx.getMessage().contains("unsupported telemetry payload shape"));
 
-        // Reverse sequence order on the wire (ICMP seq=1 after SNMP seq=2 in array).
+        // Reverse array order (ICMP seq=1 after SNMP seq=2) — equivalent fail-closed.
         String icmpFirst = build020IcmpRecordJson(1);
-        String snmpSecond = snmpNumericRecordJson(2, 67890);
+        String snmpSecond = snmpNumericGoStyleRecordJson(2, 67890);
         String reverseChecksum = sha256Of(snmpSecond, icmpFirst);
         String reverseJson = "{\"schemaVersion\":1,\"sensorId\":\"sensor-net-01\",\"bootEpoch\":\"epoch-1\","
                 + "\"batchId\":\"b-icmp-rev\",\"firstSequence\":1,\"lastSequence\":2,\"checksum\":\""
@@ -582,6 +722,7 @@ class SensorIngestionServiceTest {
         IngestionException reverseEx = assertThrows(IngestionException.class, () ->
                 realService.ingestTelemetry(reverseJson.getBytes(StandardCharsets.UTF_8), reverseReq, "b-icmp-rev", cert));
         assertEquals("ERR_UNSUPPORTED_RECORD_TYPE", reverseEx.getCode());
+        assertTrue(reverseEx.getMessage().contains("unsupported telemetry payload shape"));
 
         assertNoDurableSideEffects();
     }
