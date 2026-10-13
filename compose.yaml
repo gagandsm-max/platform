@@ -142,6 +142,8 @@ services:
     image: apache/kafka:3.8.0
     container_name: platform-kafka
     restart: unless-stopped
+    entrypoint: ["/bin/bash", "/platform-kafka/guarded-start.sh"]
+    command: []
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: "broker,controller"
@@ -155,9 +157,14 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_NUM_PARTITIONS: 3
-      KAFKA_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      # No default identity: retain these outside the data volume. See migration runbook.
+      CLUSTER_ID: ${PLATFORM_KAFKA_CLUSTER_ID:-}
+      PLATFORM_KAFKA_STORAGE_ID: ${PLATFORM_KAFKA_STORAGE_ID:-}
+      KAFKA_LOG_DIRS: /var/lib/kafka/data/logs
+      KAFKA_METADATA_LOG_DIR: /var/lib/kafka/data/logs
     volumes:
       - platform_kafka_data:/var/lib/kafka/data
+      - ./deploy/docker/kafka:/platform-kafka:ro
     networks:
       - platform_net
     healthcheck:

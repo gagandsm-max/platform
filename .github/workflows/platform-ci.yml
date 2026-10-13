@@ -360,6 +360,35 @@ jobs:
           print("[OK] Rendered Compose safety gate PASSED: 6 isolated CI volumes and 6 CI ports verified.")
           PY
 
+      - name: Prove isolated guarded Kafka storage contract
+        run: ./tests/run-kafka-storage-contract-test.sh
+
+      - name: Explicitly provision fresh run-scoped Kafka storage
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
+          EXPECTED_VOLUME="ci_${RUN_IDENTITY}_kafka_data"
+          grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=${EXPECTED_VOLUME}" .env
+          # Never adopt an existing volume, including a partial earlier attempt.
+          if docker volume inspect "${EXPECTED_VOLUME}" >/dev/null 2>&1; then
+            echo "[ERROR] Fresh CI Kafka volume already exists; refusing provisioning."
+            exit 1
+          fi
+          CLUSTER_ID=$(docker compose run -T --rm --no-deps --entrypoint /bin/bash kafka \
+            -c '/opt/kafka/bin/kafka-storage.sh random-uuid')
+          [[ "${CLUSTER_ID}" =~ ^[A-Za-z0-9_-]{22}$ ]]
+          STORAGE_ID="ci_${RUN_IDENTITY}_kafka_identity"
+          printf '\nPLATFORM_KAFKA_CLUSTER_ID=%s\nPLATFORM_KAFKA_STORAGE_ID=%s\n' \
+            "${CLUSTER_ID}" "${STORAGE_ID}" >> .env
+          docker compose run -T --rm --no-deps \
+            -e "PLATFORM_KAFKA_NEW_VOLUME_CONFIRM=${STORAGE_ID}" \
+            --entrypoint /bin/bash kafka /platform-kafka/provision-fresh.sh --new-empty-volume
+          docker compose run -T --rm --no-deps --entrypoint /bin/bash kafka \
+            /platform-kafka/guarded-start.sh --check
+
       - name: Prove ClickHouse legacy upgrade and replay-safe canonical reads
         run: make test-clickhouse-replay-migration
 
