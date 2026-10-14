@@ -724,6 +724,19 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 		return codeErr(CodePoison, "failed syncing poison directory", err, true)
 	}
 	if err := d.spool.AcknowledgeThrough(head.Sequence); err != nil {
+		// DiskSpool may return after durably advancing AckedThrough when later
+		// record cleanup or final directory fsync fails. Reconcile delivery
+		// health from authoritative spool state; never invent a Core ACK.
+		if d.reconcileDeliveryAfterPartialParkAck(head.Sequence) {
+			d.metrics.PoisonCount.Add(1)
+			if isAuthorityPoisonCode(reason) {
+				d.metrics.AuthorityPoisonCount.Add(1)
+			}
+			d.logger.Warn("Parked terminal agent-ingress record; spool watermark durable but cleanup failed",
+				"event_code", string(reason),
+				"safe_context", map[string]any{"sequence": head.Sequence, "partial_spool_ack": true})
+			return codeErr(CodeSpool, "parked record watermark durable but spool cleanup failed", err, false)
+		}
 		return codeErr(CodeSpool, "failed removing parked record from spool", err, false)
 	}
 	d.metrics.PoisonCount.Add(1)
@@ -734,6 +747,26 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 		"event_code", string(reason),
 		"safe_context", map[string]any{"sequence": head.Sequence})
 	return nil
+}
+
+// reconcileDeliveryAfterPartialParkAck clears obsolete delivery-block health only
+// when durable spool state proves AcknowledgeThrough committed parkedSeq even
+// though a post-commit cleanup/fsync error was returned. Pre-commit failures and
+// uncertain Stats inspection retain the prior block. Storage/IO failure remains
+// surfaced by the caller; this never increments DurableAcks.
+func (d *Drain) reconcileDeliveryAfterPartialParkAck(parkedSeq uint64) bool {
+	st, err := d.spool.Stats()
+	if err != nil {
+		return false
+	}
+	if st.AckedThrough < parkedSeq {
+		return false
+	}
+	// Logical pending excludes sequences at or below AckedThrough even if an
+	// orphaned record file remains after a failed cleanup.
+	d.clearDeliveryBlocked()
+	d.refreshStats()
+	return true
 }
 
 func (d *Drain) refreshStats() {
