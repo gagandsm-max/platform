@@ -335,10 +335,9 @@ class ClickHouseTelemetryConsumerTest {
         Level previous = logger.getLevel();
         logger.setLevel(Level.TRACE);
         try {
-            assertThrows(RuntimeException.class, () -> consumer.consume(record, ack));
-            String logs = appender.list.stream()
-                    .map(ILoggingEvent::getFormattedMessage)
-                    .collect(Collectors.joining("\n"));
+            var failure = assertThrows(RuntimeException.class, () -> consumer.consume(record, ack));
+            String logs = loggingEventsIncludingThrowables(appender);
+            assertNoSecretInThrowableChain(failure, json);
             assertFalse(logs.contains(bearer), logs);
             assertFalse(logs.contains(password), logs);
             assertFalse(logs.contains(url), logs);
@@ -353,14 +352,84 @@ class ClickHouseTelemetryConsumerTest {
     }
 
     @Test
-    void retryConfigurationCannotDisablePersistenceOrCreateUnboundedRetryDelay() {
-        for (int attempts : new int[] {0, -1, 6, Integer.MAX_VALUE}) {
-            assertThrows(IllegalArgumentException.class, () ->
-                    new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, attempts, 200));
+    void retryConfigurationAcceptsExistingPositiveRangesAndZeroDelay() {
+        for (int attempts : new int[] {1, 6, 64, Integer.MAX_VALUE}) {
+            for (long delay : new long[] {0, 1001, Long.MAX_VALUE}) {
+                assertDoesNotThrow(() -> new ClickHouseTelemetryConsumer(
+                        clickHouseClient, objectMapper, metrics, attempts, delay));
+            }
         }
-        for (long delay : new long[] {0, -1, 1001, Long.MAX_VALUE}) {
-            assertThrows(IllegalArgumentException.class, () ->
-                    new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, 5, delay));
+        for (int attempts : new int[] {0, -1}) {
+            assertThrows(IllegalArgumentException.class, () -> new ClickHouseTelemetryConsumer(
+                    clickHouseClient, objectMapper, metrics, attempts, 0));
+        }
+        assertThrows(IllegalArgumentException.class, () -> new ClickHouseTelemetryConsumer(
+                clickHouseClient, objectMapper, metrics, 1, -1));
+    }
+
+    @Test
+    void exhaustionPreservesSanitizedCausalEvidence() throws Exception {
+        var source = new java.net.ConnectException(SUPER_SECRET_SENTINEL_DO_NOT_LOG);
+        source.addSuppressed(new IllegalStateException(SUPER_SECRET_SENTINEL_DO_NOT_LOG));
+        doThrow(source).when(clickHouseClient).insertNumericBatch(anyList());
+        var record = new ConsumerRecord<String, String>("telemetry.numeric.v1", 0, 100L, "key",
+                objectMapper.writeValueAsString(new CanonicalObservation(
+                        "tenant-1", "entity-1", "oid", "sensor", Instant.now(), 1, 1, 0, "1", "snmp")));
+        var failure = assertThrows(RuntimeException.class, () -> consumer.consume(record, mock(Acknowledgment.class)));
+        assertNotNull(failure.getCause(), "retain sanitized cause rather than discard diagnosis");
+        assertTrue(failure.getCause().getCause().getMessage().contains("java.net.ConnectException"));
+        assertArrayEquals(java.util.Arrays.copyOf(source.getStackTrace(), Math.min(source.getStackTrace().length, 32)),
+                failure.getCause().getCause().getStackTrace());
+        assertNoSecretInThrowableChain(failure, record.value());
+        assertEquals(0, failure.getCause().getCause().getSuppressed().length);
+    }
+
+    @Test
+    void retryArithmeticSaturatesWithoutWrappingAndAcceptsZeroDelay() {
+        assertEquals(0, ClickHouseTelemetryConsumer.retryBackoffMs(0, Integer.MAX_VALUE));
+        assertEquals(1001, ClickHouseTelemetryConsumer.retryBackoffMs(1001, 1));
+        assertEquals(8008, ClickHouseTelemetryConsumer.retryBackoffMs(1001, 4));
+        assertEquals(1L << 62, ClickHouseTelemetryConsumer.retryBackoffMs(1, 63));
+        for (long attempt : new long[] {2, 63, 64, 65, Integer.MAX_VALUE}) {
+            assertEquals(Long.MAX_VALUE, ClickHouseTelemetryConsumer.retryBackoffMs(Long.MAX_VALUE, attempt));
+        }
+        assertEquals(Long.MAX_VALUE, ClickHouseTelemetryConsumer.retryBackoffMs(1, 64));
+        assertEquals(Long.MAX_VALUE, ClickHouseTelemetryConsumer.retryBackoffMs(1, 65));
+    }
+
+    @Test
+    void zeroDelayCanExhaustMoreThanFiveAttemptsWithoutAcknowledging() throws Exception {
+        var extended = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, 7, 0);
+        doThrow(new java.net.ConnectException("not available")).when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        var record = new ConsumerRecord<String, String>("telemetry.numeric.v1", 0, 100L, "key",
+                objectMapper.writeValueAsString(new CanonicalObservation(
+                        "tenant-1", "entity-1", "oid", "sensor", Instant.now(), 1, 1, 0, "1", "snmp")));
+        assertThrows(RuntimeException.class, () -> extended.consume(record, ack));
+        verify(clickHouseClient, times(7)).insertNumericBatch(anyList());
+        verifyNoInteractions(ack);
+        assertTrue(metrics.isConsumerDegraded());
+    }
+
+    @Test
+    void interruptedLargeBackoffRetainsSafeCauseAndDoesNotAcknowledge() throws Exception {
+        var extended = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, Integer.MAX_VALUE, Long.MAX_VALUE);
+        doThrow(new java.net.ConnectException(SUPER_SECRET_SENTINEL_DO_NOT_LOG)).when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        var record = new ConsumerRecord<String, String>("telemetry.numeric.v1", 0, 100L, "key",
+                objectMapper.writeValueAsString(new CanonicalObservation(
+                        "tenant-1", "entity-1", "oid", "sensor", Instant.now(), 1, 1, 0, "1", "snmp")));
+        Thread.currentThread().interrupt();
+        try {
+            var failure = assertThrows(RuntimeException.class, () -> extended.consume(record, ack));
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertTrue(failure.getCause().getMessage().contains("InterruptedException"));
+            assertNoSecretInThrowableChain(failure, record.value());
+            verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
+            verifyNoInteractions(ack);
+            assertTrue(metrics.isConsumerDegraded());
+        } finally {
+            Thread.interrupted();
         }
     }
 

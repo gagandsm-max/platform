@@ -17,6 +17,10 @@ import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
 
 @Component
 public class ClickHouseTelemetryConsumer {
@@ -45,8 +49,8 @@ public class ClickHouseTelemetryConsumer {
             @Value("${platform.telemetry.consumer.max-retries:5}") int maxRetries,
             @Value("${platform.telemetry.consumer.backoff-ms:200}") long backoffMs
     ) {
-        if (maxRetries < 1 || maxRetries > 5 || backoffMs < 1 || backoffMs > 1_000) {
-            throw new IllegalArgumentException("Telemetry consumer requires 1..5 attempts and 1..1000ms backoff");
+        if (maxRetries < 1 || backoffMs < 0) {
+            throw new IllegalArgumentException("Telemetry consumer requires positive attempts and nonnegative backoff");
         }
         this.clickHouseClient = clickHouseClient;
         this.objectMapper = objectMapper;
@@ -92,7 +96,8 @@ public class ClickHouseTelemetryConsumer {
         }
 
         Exception lastException = null;
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        // long avoids counter wrap even when maxRetries is Integer.MAX_VALUE.
+        for (long attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 insert.run();
                 if (acknowledgment != null) {
@@ -102,7 +107,7 @@ public class ClickHouseTelemetryConsumer {
                 return;
             } catch (Exception e) {
                 lastException = e;
-                final int attemptNumber = attempt;
+                final long attemptNumber = attempt;
                 final String failureClass = e.getClass().getSimpleName();
                 SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.CLICKHOUSE_INSERT_FAILED, () ->
                         log.warn(
@@ -112,16 +117,17 @@ public class ClickHouseTelemetryConsumer {
                                 record.topic(),
                                 record.partition(),
                                 record.offset(),
-                                failureClass
+                                failureClass,
+                                sanitizedCause(e)
                         )
                 );
                 if (attempt < maxRetries) {
                     try {
-                        Thread.sleep(backoffMs * (1L << (attempt - 1)));
+                        Thread.sleep(retryBackoffMs(backoffMs, attempt));
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
-                        throw new RuntimeException("Consumer retry interrupted");
+                        throw new RuntimeException("Consumer retry interrupted", sanitizedCause(ie));
                     }
                 }
             }
@@ -142,8 +148,40 @@ public class ClickHouseTelemetryConsumer {
                 )
         );
         throw new RuntimeException(
-                "ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset()
+                "ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset(),
+                sanitizedCause(lastException)
         );
+    }
+
+    // Saturate before shifting/multiplying; Java masks large shift distances and signed
+    // overflow would otherwise produce negative sleeps or unexpectedly restart backoff.
+    static long retryBackoffMs(long baseMs, long failedAttempt) {
+        if (baseMs == 0) {
+            return 0;
+        }
+        long exponent = failedAttempt - 1;
+        if (exponent >= 63 || baseMs > (Long.MAX_VALUE >> exponent)) {
+            return Long.MAX_VALUE;
+        }
+        return baseMs << exponent;
+    }
+
+    // Never attach the raw persistence cause: ClickHouse/Jackson messages and suppressed
+    // exceptions may contain credentials or payloads. Retain bounded class/stack evidence.
+    private static Throwable sanitizedCause(Throwable failure) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        return sanitizedCause(failure, seen, 0);
+    }
+
+    private static Throwable sanitizedCause(Throwable failure, Set<Throwable> seen, int depth) {
+        if (failure == null || depth >= 8 || !seen.add(failure)) {
+            return null;
+        }
+        var safe = new RuntimeException(failure.getClass().getName() + " [details redacted]",
+                sanitizedCause(failure.getCause(), seen, depth + 1));
+        StackTraceElement[] frames = failure.getStackTrace();
+        safe.setStackTrace(Arrays.copyOf(frames, Math.min(frames.length, 32)));
+        return safe;
     }
 
     private Runnable resolveInsert(String payload) throws Exception {

@@ -157,6 +157,10 @@ class TelemetryKafkaTransactionVisibilityTest {
         assertEquals(groupId, container.getContainerProperties().getGroupId());
         assertEquals(List.of(TOPIC), List.of(container.getContainerProperties().getTopics()));
         assertFalse(container.isRunning(), "annotation autoStartup=false is resolved");
+        assertEquals(org.springframework.boot.actuate.health.Status.UP,
+                context.getBean(TelemetryConsumerHealthIndicator.class).health().getStatus(),
+                "intentionally disabled startup is not an abnormal failure");
+        assertEquals("STOPPED", context.getBean(TelemetryConsumerHealthIndicator.class).health().getDetails().get("status"));
 
         try {
             // 1/2 — abort then commit; aborted must be invisible to the real listener.
@@ -252,7 +256,9 @@ class TelemetryKafkaTransactionVisibilityTest {
             );
             assertNotNull(afterRedelivery, "offset must advance only after successful redelivery processing");
             assertTrue(afterRedelivery > offsetBeforeRedelivery);
-            assertFalse(metrics.isConsumerDegraded(), "successful persistence clears degradation");
+            awaitCondition(() -> !metrics.isConsumerDegraded(), 30, "successful persistence clears degradation after ACK");
+            assertEquals(org.springframework.boot.actuate.health.Status.UP,
+                    context.getBean(TelemetryConsumerHealthIndicator.class).health().getStatus());
             System.out.println("PR227_OFFSET recovered=" + afterRedelivery);
 
             // 5 — poison/ClickHouse-path failure must not silently commit an unprocessed offset.
@@ -282,7 +288,7 @@ class TelemetryKafkaTransactionVisibilityTest {
             context = createListenerContext(bootstrap, groupId, clickHouseClient, objectMapper, metrics);
             registeredListener().start();
             awaitCondition(() -> metrics.getConsumerPoisonEvents() == 2
-                    && !registeredListener().isRunning(), 30, "poison replay on explicit restart");
+                    && !registeredListener().isRunning() && !registeredListener().isInExpectedState(), 30, "poison replay on explicit restart");
             assertEquals(offsetBeforePoison, committedOffset(bootstrap, groupId));
             System.out.println("PR227_POISON events=" + metrics.getConsumerPoisonEvents()
                     + " offset=" + committedOffset(bootstrap, groupId) + " laterRecordBlocked=true");
@@ -295,6 +301,68 @@ class TelemetryKafkaTransactionVisibilityTest {
             if (context != null) { context.close(); context = null; }
             // Ensure producer resources are released even if assertions fail before @AfterEach.
             destroyProducerFactory();
+        }
+    }
+
+    @Test
+    @Timeout(value = 180, unit = TimeUnit.SECONDS)
+    void stoppedListenerHealthSurvivesConcurrentSuccessfulPartition() throws Exception {
+        embeddedKafka.destroy();
+        var broker = new EmbeddedKafkaKraftBroker(1, 2, TOPIC);
+        broker.brokerProperty("transaction.state.log.replication.factor", "1");
+        broker.brokerProperty("transaction.state.log.min.isr", "1");
+        broker.afterPropertiesSet();
+        embeddedKafka = broker;
+        String bootstrap = broker.getBrokersAsString();
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var client = mock(ClickHouseClient.class);
+        var metrics = new IngestionMetrics();
+        var insertionEntered = new CountDownLatch(1);
+        var releaseInsertion = new CountDownLatch(1);
+        var insertionReturned = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            insertionEntered.countDown();
+            assertTrue(releaseInsertion.await(30, TimeUnit.SECONDS));
+            insertionReturned.countDown();
+            return null;
+        }).when(client).insertNumericBatch(anyList());
+        context = createListenerContext(bootstrap, "health-race-" + UUID.randomUUID(), client, mapper, metrics);
+        var container = (org.springframework.kafka.listener.ConcurrentMessageListenerContainer<?, ?>) registeredListener();
+        container.setConcurrency(2);
+        var template = createTransactionalTemplate(bootstrap);
+        String healthyJson = mapper.writeValueAsString(observation("healthy"));
+        try {
+            container.start();
+            // Total assignment count can briefly be two on the first child while the
+            // second joins. Require distinct one-partition ownership before blocking one.
+            awaitCondition(() -> container.getContainers().size() == 2
+                    && container.getContainers().stream().allMatch(child ->
+                            child.getAssignedPartitions() != null && child.getAssignedPartitions().size() == 1)
+                    && container.getContainers().stream().flatMap(child -> child.getAssignedPartitions().stream())
+                            .collect(java.util.stream.Collectors.toSet())
+                            .equals(Set.of(PARTITION, new TopicPartition(TOPIC, 1))),
+                    30, "both children must own distinct partitions before the health race");
+            template.executeInTransaction(ops -> {
+                sendPartition(ops, 0, "healthy", healthyJson);
+                return true;
+            });
+            assertTrue(insertionEntered.await(30, TimeUnit.SECONDS));
+            template.executeInTransaction(ops -> {
+                sendPartition(ops, 1, "poison", "{invalid");
+                return true;
+            });
+            awaitCondition(() -> metrics.getConsumerPoisonEvents() == 1 && !container.isRunning(),
+                    30, "poison stops parent while other partition insertion is in flight");
+            releaseInsertion.countDown();
+            assertTrue(insertionReturned.await(30, TimeUnit.SECONDS));
+            awaitCondition(() -> !metrics.isConsumerDegraded(), 30, "late success clears shared metrics");
+            System.out.println("PR227_HEALTH_RACE running=" + container.isRunning()
+                    + " expectedState=" + container.isInExpectedState() + " metricsDegraded=" + metrics.isConsumerDegraded()
+                    + " health=" + context.getBean(TelemetryConsumerHealthIndicator.class).health().getStatus());
+            assertEquals(org.springframework.boot.actuate.health.Status.DOWN,
+                    context.getBean(TelemetryConsumerHealthIndicator.class).health().getStatus());
+        } finally {
+            releaseInsertion.countDown();
         }
     }
 
@@ -346,7 +414,7 @@ class TelemetryKafkaTransactionVisibilityTest {
         application.getDefaultListableBeanFactory().registerSingleton("objectMapper", mapper);
         application.getDefaultListableBeanFactory().registerSingleton("ingestionMetrics", metrics);
         application.register(ListenerInfrastructure.class, IngestionKafkaConfiguration.class,
-                ClickHouseTelemetryConsumer.class);
+                ClickHouseTelemetryConsumer.class, TelemetryConsumerHealthIndicator.class);
         try {
             application.refresh();
             assertEquals(Set.of("telemetryNumericListener"),
@@ -444,6 +512,15 @@ class TelemetryKafkaTransactionVisibilityTest {
             ops.send(topic, key, value).get(20, TimeUnit.SECONDS);
         } catch (Exception e) {
             throw new IllegalStateException("failed to send key=" + key, e);
+        }
+    }
+
+    private static void sendPartition(org.springframework.kafka.core.KafkaOperations<String, String> ops,
+                                      int partition, String key, String value) {
+        try {
+            ops.send(TOPIC, partition, key, value).get(20, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new IllegalStateException("test send failed", e);
         }
     }
 
