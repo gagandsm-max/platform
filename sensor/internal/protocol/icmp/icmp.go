@@ -265,39 +265,23 @@ func (c *Collector) verifyFamily(ctx context.Context, version int) error {
 	if err := contextErr(ctx); err != nil {
 		return err
 	}
-	type result struct {
-		session probeSession
-		err     error
+	// Open/close synchronously. A factory goroutine plus post-cancel cleanup
+	// goroutine can strand both on a blocked ListenPacket; cancellation is
+	// checked around the call instead of racing it with detached work.
+	s, err := c.factory(Request{IPVersion: version})
+	if err != nil {
+		if version == 6 && unsupportedIPFamily(err) {
+			return nil
+		}
+		return classify(ctx, err)
 	}
-	done := make(chan result, 1)
-	go func() {
-		s, err := c.factory(Request{IPVersion: version})
-		done <- result{session: s, err: err}
-	}()
-	select {
-	case <-ctx.Done():
-		go func() {
-			r := <-done
-			if r.session != nil {
-				_ = r.session.Close()
-			}
-		}()
-		return contextErr(ctx)
-	case r := <-done:
-		if r.err != nil {
-			if version == 6 && unsupportedIPFamily(r.err) {
-				return nil
-			}
-			return classify(ctx, r.err)
-		}
-		if r.session == nil {
-			return newError(CodeProtocol, "ICMP ping socket factory returned nil session", nil, false)
-		}
-		if err := r.session.Close(); err != nil {
-			return classify(ctx, err)
-		}
-		return nil
+	if s == nil {
+		return newError(CodeProtocol, "ICMP ping socket factory returned nil session", nil, false)
 	}
+	if err := s.Close(); err != nil {
+		return classify(ctx, err)
+	}
+	return contextErr(ctx)
 }
 
 func unsupportedIPFamily(err error) bool {
@@ -415,6 +399,13 @@ func classify(ctx context.Context, err error) error {
 	}
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		return newError(CodePermission, "ICMP socket permission denied; configure supported ping socket capability/policy", err, false)
+	}
+	if unsupportedIPFamily(err) {
+		// Match VerifyLocalCapability skip semantics: unsupported family is a
+		// permanent local capability gap (no retry), not transient transport.
+		// CodeProtocol would latch collector DEGRADED on a later IPv6 job even
+		// when IPv4 remains usable; keep this permanent and non-collector-unusable.
+		return newError(CodeTransport, "ICMP address family or protocol unsupported", err, false)
 	}
 	if errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) {
 		return newError(CodeUnreachable, "ICMP target/network unreachable", err, true)

@@ -46,11 +46,22 @@ func startProductionBootstrap(ctx context.Context, cfg config.RuntimeConfig, sin
 			"safe_context", map[string]any{"sensor_role": string(cfg.Role), "runtime_activated": false, "reason_class": "interim_role_compatibility"})
 		return &snmpBootstrap{Scheduler: sched, registry: registry}, nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	b, err := newSNMPBootstrap(cfg, sink, logger)
 	if err != nil {
 		return nil, err
 	}
 	if err := b.Runtime.Start(ctx); err != nil {
+		// Cancelled/deadline startup must not activate a runtime that continued
+		// on its separate root context. Tear down before returning.
+		if cerr := ctx.Err(); cerr != nil {
+			return nil, errors.Join(cerr, shutdownBootstrap(b, cfg.Scheduler.ShutdownGracePeriod))
+		}
 		// Collector-local DEGRADED (for example ICMP ping-socket denial) is a
 		// truthful readiness outcome, not a bootstrap abort. Only hard FAILED
 		// startup tears the NETWORK runtime down.
@@ -61,14 +72,24 @@ func startProductionBootstrap(ctx context.Context, cfg config.RuntimeConfig, sin
 				"safe_context", map[string]any{"sensor_role": string(cfg.Role), "runtime_activated": true, "reason_class": "collector_capability"})
 			return b, nil
 		}
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Scheduler.ShutdownGracePeriod)
-		defer cancel()
-		return nil, errors.Join(err, b.shutdown(shutdownCtx))
+		return nil, errors.Join(err, shutdownBootstrap(b, cfg.Scheduler.ShutdownGracePeriod))
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(err, shutdownBootstrap(b, cfg.Scheduler.ShutdownGracePeriod))
 	}
 	logger.Info("NETWORK Sensor runtime activated",
 		"event_code", "SENSOR_RUNTIME_STARTED",
 		"safe_context", map[string]any{"sensor_role": string(cfg.Role), "runtime_activated": true})
 	return b, nil
+}
+
+func shutdownBootstrap(b *snmpBootstrap, grace time.Duration) error {
+	if b == nil {
+		return nil
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	return b.shutdown(shutdownCtx)
 }
 
 func (b *snmpBootstrap) shutdown(ctx context.Context) error {

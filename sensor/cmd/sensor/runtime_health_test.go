@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"platform/sensor/internal/health"
 	"platform/sensor/internal/observation"
 	sensorruntime "platform/sensor/internal/runtime"
 	"platform/sensor/internal/scheduler"
@@ -71,6 +73,39 @@ func TestRuntimeHealthAdapterReflectsComponentDegradationAndRecovery(t *testing.
 	comp.degraded.Store(false)
 	if got := adapter.Snapshot(); got.State != string(sensorruntime.StateReady) {
 		t.Fatalf("recovered=%+v", got)
+	}
+}
+
+func TestRuntimeHealthAdapterDoesNotAdvertiseFalseTimeoutInterrupt(t *testing.T) {
+	// A Ready that ignores context and blocks cannot be interrupted without a
+	// detached timeout goroutine (forbidden — leaks). Snapshot must still
+	// complete promptly for contract-compliant Ready paths.
+	registry := sensorruntime.NewExecutorRegistry()
+	rt, err := sensorruntime.New(sensorruntime.Config{
+		Role:                sensorruntime.RoleNetwork,
+		EnabledCapabilities: []sensorruntime.Capability{sensorruntime.CapabilityICMP},
+	}, stubScheduler{}, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+	comp := &stubRuntimeComponent{name: "icmp", capability: sensorruntime.CapabilityICMP}
+	if err := rt.RegisterComponent(comp); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	adapter := runtimeHealthAdapter{rt: rt}
+	done := make(chan health.RuntimeHealth, 1)
+	go func() { done <- adapter.Snapshot() }()
+	select {
+	case got := <-done:
+		if got.State != string(sensorruntime.StateReady) {
+			t.Fatalf("snapshot=%+v", got)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Snapshot hung despite non-blocking Ready contract")
 	}
 }
 

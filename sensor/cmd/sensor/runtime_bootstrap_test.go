@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -331,6 +332,59 @@ func TestProductionBootstrapUnsupportedNetworkFailsClosed(t *testing.T) {
 	}
 	if len(cfg.EnabledCapabilities) != 3 {
 		t.Fatal("capability silently filtered")
+	}
+}
+
+func TestProductionBootstrapCancelledContextDoesNotActivateRuntime(t *testing.T) {
+	cfg := testRuntime()
+	cfg.EnabledCapabilities = []sensorruntime.Capability{sensorruntime.CapabilitySNMP, sensorruntime.CapabilityICMP}
+	disk, err := spool.Open(spool.Config{Dir: t.TempDir(), MaxRecordBytes: 1 << 20, Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = disk.Close() })
+	sink, err := observation.NewDiskSink(disk, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	b, err := startProductionBootstrap(ctx, cfg, sink, slog.Default())
+	if b != nil {
+		t.Fatalf("cancelled startup activated bootstrap: runtime=%v state=%v", b.Runtime != nil, func() string {
+			if b.Runtime == nil {
+				return ""
+			}
+			return string(b.Runtime.Snapshot().State)
+		}())
+	}
+	if err == nil || (!errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "canceled") && !strings.Contains(err.Error(), "cancelled")) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestProductionBootstrapDeadlineDuringStartTearsDown(t *testing.T) {
+	cfg := testRuntime()
+	cfg.EnabledCapabilities = []sensorruntime.Capability{sensorruntime.CapabilitySNMP, sensorruntime.CapabilityICMP}
+	cfg.Scheduler.ShutdownGracePeriod = time.Second
+	disk, err := spool.Open(spool.Config{Dir: t.TempDir(), MaxRecordBytes: 1 << 20, Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = disk.Close() })
+	sink, err := observation.NewDiskSink(disk, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	time.Sleep(2 * time.Millisecond)
+	b, err := startProductionBootstrap(ctx, cfg, sink, slog.Default())
+	if b != nil {
+		t.Fatal("deadline startup must not return activated bootstrap")
+	}
+	if err == nil {
+		t.Fatal("expected deadline/cancel error")
 	}
 }
 
