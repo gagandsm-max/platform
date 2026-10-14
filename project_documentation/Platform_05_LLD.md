@@ -7,7 +7,7 @@
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_06_Dataflow.md`, `Platform_07_OSS_Catalog.md`, `Platform_08_Requirements_Traceability.md`, `Platform_17_API_Event_and_Data_Model_Contracts.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
+**Last reconciliation:** 2026-10-12 — Issue #200/#203 Tranche B Phase 1/1.5 certification-envelope reconciliation (LLD/ACK/ICMP/NCM/HA); prior Issue #142 Phase-1 observability closure retained
 
 **Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
@@ -554,7 +554,14 @@ Illustrative historical `boot_epoch` prose aliases the v1 wire field `bootEpoch`
 
 ### 7.2 Ack semantics
 
-A Sensor deletes a local segment only after Core returns a durable acceptance acknowledgment consistent with the certified HA design.
+A Sensor deletes a local segment only after Core returns a durable acceptance acknowledgment consistent with the **active certification envelope** (Phase 1 standalone matrix or Phase 1.5 HA matrix). Architecture target ≠ implementation ≠ certified.
+
+**Deletion-authorizing ACK durability (Issue #200 / Platform_03):**
+
+1. **Phase 1 standalone:** if Core issues an ACK authorizing Sensor durable-spool deletion, that telemetry must survive the certified standalone failure matrix (application/process/service crash/restart, governed host reboot and other explicitly certified recoverable failures). Catastrophic destruction/loss of the single Core/storage is **not** Phase-1 zero-RPO HA; recovery uses backup/restore and the declared Phase-1 DR profile.
+2. **Phase 1.5 HA:** if Core issues an ACK authorizing Sensor durable-spool deletion, that telemetry must survive every failure in the certified permanent single-Core HA failure matrix (`ACKED-FOR-DELETION TELEMETRY RPO = 0` for those HA scenarios; distinct from site/DR RPO).
+
+Physical HA durability mechanisms remain unselected (`HA_DURABILITY_DESIGN_GATE` / BUILD-120–124).
 
 **CURRENT_IMPLEMENTED_V1 Sensor→Core telemetry ACK boundary:**
 
@@ -566,7 +573,7 @@ A Sensor deletes a local segment only after Core returns a durable acceptance ac
 6. Core returns `accepted_through_sequence` (+ `sensor_identity`).
 7. Sensor marks/deletes acknowledged segments only after validating that ACK.
 
-ClickHouse insertion is asynchronous and **must not** gate the Sensor ACK.
+ClickHouse insertion is asynchronous and **must not** gate the Sensor ACK. CURRENT_IMPLEMENTED_V1 does not by itself certify Phase 1 standalone durability-matrix evidence or Phase 1.5 HA ACK RPO=0.
 
 **CURRENT_IMPLEMENTED_V1 Sensor→Core agent-ingress** remains **at-least-once** (Kafka publish + PostgreSQL ingress watermark; no V009-equivalent pending reservation yet). **BUILD-003** owns reservation/conflict/first-batch hardening.
 
@@ -983,6 +990,10 @@ Probe results include:
 - change signature vs prior path.
 
 Raw sockets/capabilities should use minimal Linux capabilities rather than running the entire Sensor as root.
+
+**Typed ICMP observation architecture (Phase 1 mandatory contract):** ICMP evidence is a protocol-aware typed observation (not a free-form log line). Required semantic outcomes include reachable/unreachable, packet-loss versus hard-unreachable, RTT sample provenance, source/vantage identity and quality states such as `GOOD` / `PARTIAL` / `UNKNOWN`. Missing, stale or degraded ICMP evidence must not collapse into DEVICE_DOWN when corroborating SNMP/path/Agent evidence remains credible (`No Data != Device Down`). Intermediate hop unresponsiveness remains path quality evidence, not sole target-down proof.
+
+**Implementation gap — Issue #218 (SOURCE_FACT / NOT CLOSED):** BUILD-020 Sensor `icmp_observation_v1` envelopes are currently rejected by Core `IngestionValidator` numeric-only acceptance (`protocolPayload.observations` or `metric_id`+numeric `value`). Architecture still requires a governed Core protocol-aware ICMP acceptance path (or an approved lossless numeric projection plus separately governed raw evidence) before recurring ICMP may be treated as end-to-end ingested. Do not describe unresolved Core acceptance as implemented, benchmarked or certified.
 
 ---
 
@@ -1415,6 +1426,8 @@ ncm_job_target
 ```
 
 NCM executor receives a short-lived signed job token referencing credentials, never long-lived plaintext secrets.
+
+**Phase 1 / Phase 1.5 NCM envelope (Issue #200):** Phase 1 independently certifiable NCM subset remains config backup/version/diff/compliance/golden-state (job types `BACKUP|DIFF|COMPLIANCE`, and controlled manual `COMMAND`/CLI when RBAC/credential brokering/audit are certified). Golden-state/desired-configuration comparison is a Phase 1 requirement contract and is not depicted by DF-025. Mass `PUSH`, canary/staged automated privileged execution, maker-checker automation defaults and automated remediation belong to **Phase 1.5** unless Founder change control promotes them. Schema presence of PUSH/ROLLBACK types does not imply Phase 1 certification or physical implementation.
 
 ---
 
@@ -1902,7 +1915,9 @@ Core authenticates Agent and returns current Sensor assignment/failover endpoint
 
 ## 44. HA Manager LLD
 
-**Maturity / Issue #92:** Exactly-two-Core Active/Standby required; active authority/fencing/stateful failover/rejoin remains OPEN P0 / NOT PRODUCTION CERTIFIED.
+**Certification envelope / Issue #200:** Exactly-two-Core Active/Standby is the **Phase 1.5** HA certification envelope. Phase 1 uses one authoritative standalone Core and makes no Core-HA availability claim. HA ≠ DR.
+
+**Maturity / Issue #92:** Exactly-two-Core Active/Standby required; active authority/fencing/stateful failover/rejoin remains OPEN P0 / NOT PRODUCTION CERTIFIED. No mandatory third Core, witness, replicated ingress journal or new coordinator service is selected here.
 
 
 ### 44.1 Heartbeats
@@ -2662,6 +2677,8 @@ propose dependency
 
 ## 82. Two-Core HA invariants
 
+**Certification envelope / Issue #200:** These invariants govern the **Phase 1.5** exactly-two-Core Active/Standby envelope. Phase 1 multi-Sensor assignment generation/fencing/stale-work rejection remains mandatory under standalone Core and must not be deferred solely because Core HA is Phase 1.5.
+
 **Maturity / Issue #92:** HA fencing/failover/rejoin remains OPEN P0 / NOT PRODUCTION CERTIFIED.
 
 The exact internal replication technology is P0 spike, but code must satisfy these invariants:
@@ -2673,7 +2690,8 @@ The exact internal replication technology is P0 spike, but code must satisfy the
 - Sensor telemetry carries monotonic source sequence/observation IDs sufficient for idempotent replay/dedup;
 - every Core state mutation is durable at the authoritative persistence boundary before acknowledged where required;
 - split-brain test must prove that network partition cannot create two externally authoritative control planes;
-- failover certification measures UI/API recovery, ingestion recovery and backlog replay separately.
+- failover certification measures UI/API recovery, ingestion recovery and backlog replay separately;
+- Phase 1.5 deletion-ACK certified matrix target remains `ACKED-FOR-DELETION TELEMETRY RPO = 0` (distinct from Phase 1 standalone deletion-ACK durability and from site/DR RPO).
 
 ## 83. License timer implementation
 
@@ -3219,3 +3237,14 @@ These exact IDs are governed by the concrete v3.3 contracts in §94.
 - `REQ-CMDB-002` — ExternalBinding carries tenant/connector/internal entity/external identity plus match evidence/confidence, mapping/authority profile, external version and synchronization state; it must not create duplicate Platform entities.
 - `REQ-INT-009` — Echo-loop prevention combines external event/object/version, Platform correlation/operation/hash, origin and prior outbound lineage; one source marker is insufficient.
 - `REQ-NCM-007` — Change Assurance Record binds immutable plan/version, exact targets/configuration hashes, approved window, risk/blast evidence and execution/postcheck/stabilization/rollback/outcome evidence; material plan mutation stales approval.
+
+---
+
+## 95. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #203
+
+Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified ≠ deployed. Mother Reference set version remains **3.3.0** through Tranche B; v3.4.0 is reserved for gated Tranche D.
+
+| Envelope | LLD ownership emphasis | ACK / replay | Security / tenancy | Explicit nonclaims |
+|---|---|---|---|---|
+| **Phase 1** | Standalone Core; multi-Sensor leases/assignment fencing; SNMP/ICMP typed observations; backup/restore + site-loss DR hooks | Standalone deletion-ACK for certified recoverable failures; ClickHouse not Sensor ACK gate; replay/idempotency retained | Tenant-aware schemas/APIs/events/mTLS/RBAC/audit mandatory; no MSP isolation cert claim | No Core-HA continuity claim; catastrophic single-Core loss is DR/backup, not HA RPO=0; Issue #218 Core ICMP acceptance gap remains open |
+| **Phase 1.5** | Exactly-two-Core HA Manager/PG/Kafka/ClickHouse continuity; Sensor reconnect/re-anchor; privileged NCM automation defaults | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures | MSP/shared-tenant adversarial isolation + noisy-neighbor certification | Physical fencing/replication mechanisms remain P0 unselected; no third Core/witness/journal preselected |

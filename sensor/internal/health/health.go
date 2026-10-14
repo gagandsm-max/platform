@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"platform/sensor/internal/agentdrain"
 	"platform/sensor/internal/control"
 	"platform/sensor/internal/packsync"
 	"platform/sensor/internal/scheduler"
@@ -19,26 +20,27 @@ import (
 )
 
 const (
-	componentName         = "platform-sensor"
-	defaultVersion        = "0.1.0-dev"
-	hardStoragePercent    = 80.0
-	reasonShuttingDown    = "SENSOR_SHUTTING_DOWN"
-	reasonSpoolCheck      = "SENSOR_SPOOL_UNWRITABLE"
-	reasonSpoolPressure   = "SENSOR_SPOOL_HARD_PRESSURE"
-	reasonAgentSpoolCheck = "SENSOR_AGENT_SPOOL_UNWRITABLE"
-	reasonAgentSpoolHard  = "SENSOR_AGENT_SPOOL_HARD_PRESSURE"
-	reasonPackUnavailable = "SENSOR_PACK_SYNC_UNAVAILABLE"
-	reasonPackTrust       = "SENSOR_PACK_TRUST_NOT_ESTABLISHED"
-	reasonPackAuthority   = "SENSOR_PACK_CORE_AUTHORITY_NOT_ESTABLISHED"
-	reasonPackDegraded    = "SENSOR_PACK_DEGRADED"
-	reasonSchedulerAbsent = "SENSOR_SCHEDULER_UNAVAILABLE"
-	reasonSchedulerState  = "SENSOR_SCHEDULER_NOT_RUNNING"
-	reasonSchedulerQueue  = "SENSOR_SCHEDULER_QUEUE_SATURATED"
-	reasonControlAbsent   = "SENSOR_CONTROL_UNAVAILABLE"
-	reasonControlUntrust  = "SENSOR_CONTROL_STATE_UNTRUSTED"
-	reasonControlDegraded = "SENSOR_CONTROL_DEGRADED"
-	reasonRuntimeDegraded = "SENSOR_RUNTIME_DEGRADED"
-	reasonRuntimeNotReady = "SENSOR_RUNTIME_NOT_READY"
+	componentName              = "platform-sensor"
+	defaultVersion             = "0.1.0-dev"
+	hardStoragePercent         = 80.0
+	reasonShuttingDown         = "SENSOR_SHUTTING_DOWN"
+	reasonSpoolCheck           = "SENSOR_SPOOL_UNWRITABLE"
+	reasonSpoolPressure        = "SENSOR_SPOOL_HARD_PRESSURE"
+	reasonAgentSpoolCheck      = "SENSOR_AGENT_SPOOL_UNWRITABLE"
+	reasonAgentSpoolHard       = "SENSOR_AGENT_SPOOL_HARD_PRESSURE"
+	reasonAgentDeliveryBlocked = "SENSOR_AGENT_DELIVERY_BLOCKED"
+	reasonPackUnavailable      = "SENSOR_PACK_SYNC_UNAVAILABLE"
+	reasonPackTrust            = "SENSOR_PACK_TRUST_NOT_ESTABLISHED"
+	reasonPackAuthority        = "SENSOR_PACK_CORE_AUTHORITY_NOT_ESTABLISHED"
+	reasonPackDegraded         = "SENSOR_PACK_DEGRADED"
+	reasonSchedulerAbsent      = "SENSOR_SCHEDULER_UNAVAILABLE"
+	reasonSchedulerState       = "SENSOR_SCHEDULER_NOT_RUNNING"
+	reasonSchedulerQueue       = "SENSOR_SCHEDULER_QUEUE_SATURATED"
+	reasonControlAbsent        = "SENSOR_CONTROL_UNAVAILABLE"
+	reasonControlUntrust       = "SENSOR_CONTROL_STATE_UNTRUSTED"
+	reasonControlDegraded      = "SENSOR_CONTROL_DEGRADED"
+	reasonRuntimeDegraded      = "SENSOR_RUNTIME_DEGRADED"
+	reasonRuntimeNotReady      = "SENSOR_RUNTIME_NOT_READY"
 )
 
 type storageStatusProvider interface {
@@ -67,6 +69,10 @@ type runtimeStatusProvider interface {
 	Snapshot() RuntimeHealth
 }
 
+type agentDeliveryStatusProvider interface {
+	Snapshot() agentdrain.DeliveryStatus
+}
+
 type Option func(*HealthServer)
 
 // WithIdentity binds health/supportability responses to the same immutable
@@ -83,15 +89,16 @@ func WithIdentity(version, serviceInstanceID string) Option {
 }
 
 type HealthServer struct {
-	server     *http.Server
-	spool      storageStatusProvider
-	agentSpool storageStatusProvider
-	packSync   packSyncStatusProvider
-	scheduler  schedulerStatusProvider
-	control    controlStatusProvider
-	runtime    runtimeStatusProvider
-	mu         sync.RWMutex
-	logger     *slog.Logger
+	server        *http.Server
+	spool         storageStatusProvider
+	agentSpool    storageStatusProvider
+	agentDelivery agentDeliveryStatusProvider
+	packSync      packSyncStatusProvider
+	scheduler     schedulerStatusProvider
+	control       controlStatusProvider
+	runtime       runtimeStatusProvider
+	mu            sync.RWMutex
+	logger        *slog.Logger
 
 	version           string
 	serviceInstanceID string
@@ -157,6 +164,19 @@ func (hs *HealthServer) SetAgentSpool(agentSpool *spool.DiskSpool) {
 	hs.agentSpool = agentSpool
 }
 
+// SetAgentDelivery optionally wires Agent drain delivery health. Nil clears the
+// provider (disabled Agent Receiver must not invent a degraded dependency).
+// Delivery health is distinct from agent_spool filesystem capacity.
+func (hs *HealthServer) SetAgentDelivery(provider agentDeliveryStatusProvider) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	if provider == nil || provider == (*agentdrain.Drain)(nil) {
+		hs.agentDelivery = nil
+		return
+	}
+	hs.agentDelivery = provider
+}
+
 // SetPackSync optionally wires Capability Pack sync status (no secrets).
 func (hs *HealthServer) SetPackSync(syncer packSyncStatusProvider) {
 	hs.mu.Lock()
@@ -218,11 +238,13 @@ type evaluation struct {
 	httpStatus int
 	reason     string
 
-	storagePercent      float64
-	storageKnown        bool
-	agentStoragePercent float64
-	agentStoragePresent bool
-	agentStorageKnown   bool
+	storagePercent       float64
+	storageKnown         bool
+	agentStoragePercent  float64
+	agentStoragePresent  bool
+	agentStorageKnown    bool
+	agentDeliveryPresent bool
+	agentDelivery        agentdrain.DeliveryStatus
 	pack                 packsync.Status
 	packPresent          bool
 	scheduler            scheduler.Snapshot
@@ -288,6 +310,7 @@ func (hs *HealthServer) evaluate() evaluation {
 
 	hs.mu.RLock()
 	agentSpool := hs.agentSpool
+	agentDelivery := hs.agentDelivery
 	packSync := hs.packSync
 	schedulerProvider := hs.scheduler
 	controlProvider := hs.control
@@ -311,6 +334,16 @@ func (hs *HealthServer) evaluate() evaluation {
 			if pct >= hardStoragePercent {
 				ev.notReady(reasonAgentSpoolHard)
 			}
+		}
+	}
+
+	// Delivery health never flips readiness/liveness and never asserts device DOWN.
+	// A frozen Agent batch with a writable spool reports DEGRADED delivery only.
+	if agentDelivery != nil {
+		ev.agentDeliveryPresent = true
+		ev.agentDelivery = agentDelivery.Snapshot()
+		if ev.agentDelivery.Blocked || ev.agentDelivery.State == agentdrain.DeliveryStateDegraded {
+			ev.degrade(reasonAgentDeliveryBlocked)
 		}
 	}
 
@@ -429,6 +462,12 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	if ev.controlPresent {
 		body["control_reconciliation_status"] = controlSupportStatus(ev.control.State)
 	}
+	if ev.agentDeliveryPresent {
+		body["agent_delivery_status"] = agentDeliverySupportStatus(ev.agentDelivery)
+		if ev.agentDelivery.ReasonCode != "" {
+			body["agent_delivery_reason_code"] = ev.agentDelivery.ReasonCode
+		}
+	}
 
 	counters := supportCounters(ev)
 	if len(counters) != 0 {
@@ -463,6 +502,13 @@ func dependencyStatus(ev evaluation) map[string]string {
 			out["agent_spool"] = "DOWN"
 		default:
 			out["agent_spool"] = "UP"
+		}
+	}
+	if ev.agentDeliveryPresent {
+		if ev.agentDelivery.Blocked || ev.agentDelivery.State == agentdrain.DeliveryStateDegraded {
+			out["agent_delivery"] = "DEGRADED"
+		} else {
+			out["agent_delivery"] = "UP"
 		}
 	}
 	switch {
@@ -527,7 +573,20 @@ func supportCounters(ev evaluation) map[string]uint64 {
 		out["control_durable_store_failures"] = safeCounter(ev.control.DurableStoreFailures)
 		out["control_ack_failures"] = safeCounter(ev.control.AckFailures)
 	}
+	if ev.agentDeliveryPresent {
+		out["agent_delivery_pending_records"] = safeCounter(uint64(maxInt64Zero(ev.agentDelivery.PendingRecords)))
+		out["agent_delivery_pending_bytes"] = safeCounter(uint64(maxInt64Zero(ev.agentDelivery.PendingBytes)))
+		out["agent_delivery_failures_permanent"] = safeCounter(ev.agentDelivery.FailuresPerm)
+		out["agent_delivery_durable_acks"] = safeCounter(ev.agentDelivery.DurableAcks)
+	}
 	return out
+}
+
+func maxInt64Zero(v int64) int64 {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 func safeCounter(v uint64) uint64 {
@@ -546,7 +605,22 @@ func supportTimestamps(ev evaluation) map[string]string {
 	if ev.controlPresent && !ev.control.LastSuccessfulReconcile.IsZero() {
 		out["control_last_successful_reconcile"] = ev.control.LastSuccessfulReconcile.UTC().Format(time.RFC3339Nano)
 	}
+	if ev.agentDeliveryPresent {
+		if !ev.agentDelivery.BlockedSince.IsZero() {
+			out["agent_delivery_blocked_since"] = ev.agentDelivery.BlockedSince.UTC().Format(time.RFC3339Nano)
+		}
+		if !ev.agentDelivery.LastSuccessTime.IsZero() {
+			out["agent_delivery_last_success"] = ev.agentDelivery.LastSuccessTime.UTC().Format(time.RFC3339Nano)
+		}
+	}
 	return out
+}
+
+func agentDeliverySupportStatus(st agentdrain.DeliveryStatus) string {
+	if st.Blocked || st.State == agentdrain.DeliveryStateDegraded {
+		return agentdrain.DeliveryStateDegraded
+	}
+	return agentdrain.DeliveryStateUp
 }
 
 func schedulerQueueSaturated(snap scheduler.Snapshot) bool {

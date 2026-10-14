@@ -277,6 +277,7 @@ func main() {
 				"safe_context", map[string]any{"reason_class": "initialization_failed"})
 			os.Exit(1)
 		}
+		attachAgentDeliveryHealth(healthServer, agentDrain)
 		if err := agentDrain.Start(ctx); err != nil {
 			logger.Error("Failed to start Agent drain",
 				"error_code", "SENSOR_AGENT_DRAIN_START_FAILED",
@@ -455,6 +456,15 @@ func runControlReconcileLoop(
 			runOnce()
 		}
 	}
+}
+
+// attachAgentDeliveryHealth wires Agent drain delivery state into Sensor health.
+// A nil drain (Agent Receiver disabled) leaves no agent_delivery dependency.
+func attachAgentDeliveryHealth(hs *health.HealthServer, drain *agentdrain.Drain) {
+	if hs == nil {
+		return
+	}
+	hs.SetAgentDelivery(drain)
 }
 
 func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *slog.Logger) (*agentreceiver.Server, *spool.DiskSpool, error) {

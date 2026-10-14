@@ -7,7 +7,7 @@
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_08_Requirements_Traceability.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142)
+**Last reconciliation:** 2026-10-12 — Issue #200/#203 Tranche B Phase 1/1.5 certification-envelope reconciliation (dataflow/HA/DR/NCM/ACK); prior Issue #142 Phase-1 observability closure retained
 
 **Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Logical design here is not physical implementation evidence.
 
@@ -55,6 +55,8 @@ sequenceDiagram
 
 Failure behavior: installer never reports success if required Core data services are unhealthy.
 
+**Certification envelope / Issue #200:** DF-001 is the **Phase 1** standalone Core installation path (one authoritative Core). Tenant-aware identity/contracts remain mandatory even for single-customer enterprise. Completing DF-001 does not certify Core HA, MSP isolation or Phase 1.5 continuity.
+
 ---
 
 ## 3. Flow DF-002 — Two-Core HA installation and pairing
@@ -83,6 +85,8 @@ sequenceDiagram
 ```
 
 The one-time pairing token is invalidated after successful pairing.
+
+**Certification envelope / Issue #200:** DF-002 is the **Phase 1.5** exactly-two-Core Active/Standby installation/pairing path. It is fixed architecture and must not be downgraded, but a Phase 1 standalone certificate must not imply this flow is certified. HA ≠ DR. Physical fencing/replication selections remain OPEN P0.
 
 ---
 
@@ -371,6 +375,8 @@ sequenceDiagram
 A single unsupported optional OID may produce explicit `NO_SUCH_OBJECT/INSTANCE` quality evidence without forcing unrelated valid observations in the same logical poll to become invalid. Pack policy decides whether a mandatory OID failure degrades the monitor.
 
 Raw Counter64 remains exact through acceptance/persistence; floating-point rate/utilization is derived only after exact delta/reset/discontinuity logic. Normal scheduled SNMP operational metrics default to **5 minutes** unless a more specific inherited policy/monitor definition overrides; that default does not poll every available OID every five minutes.
+
+Typed SNMP/ICMP observations retain quality/provenance. Collection/transport/ingestion failure, missing samples or `UNKNOWN`/`PARTIAL` quality must not automatically assert DEVICE_DOWN (`No Data != Device Down`). **Issue #218:** Core numeric-only ingestion currently rejects Sensor `icmp_observation_v1` shapes before durable Kafka/ACK; architecture still requires governed Core acceptance of typed ICMP evidence. Do not treat unresolved Core acceptance as implemented or certified.
 
 ---
 
@@ -738,6 +744,8 @@ sequenceDiagram
   end
 ```
 
+**Phase 1 / Phase 1.5 NCM envelope (Issue #200):** Phase 1 independently certifiable NCM subset remains config backup/version/diff/compliance/golden-state; controlled manual CLI remains Phase 1 only when RBAC/credential/audit contracts are certified. DF-025 depicts configuration backup and version storage only—not comparison, compliance or golden-state evaluation. DF-026 depicts one approved configuration push with pre-check, validation and optional rollback—not mass deployment, canary execution or the full controlled-remediation workflow. Mass push / canary / automated privileged remediation defaults to **Phase 1.5** unless Founder change control promotes it. Schema presence of push/rollback paths is not Phase 1 certification.
+
 ---
 
 ## 28. Flow DF-027 — Browser CLI session
@@ -1063,7 +1071,7 @@ sequenceDiagram
   end
 ```
 
-Certified safe failure cases must restore Core service in <60 seconds.
+Certified safe failure cases must restore Core service in <60 seconds under the **Phase 1.5** HA envelope. Ambiguous partition remains fail-closed (`SPLIT_BRAIN_PREVENTED`). Sensors continue collecting/buffering while capacity permits; Phase 1.5 deletion-ACK target for permanent one-Core HA failures is `ACKED-FOR-DELETION TELEMETRY RPO = 0` (distinct from Phase 1 standalone deletion-ACK durability and from site/DR RPO). Physical mechanisms remain unselected.
 
 ---
 
@@ -1308,6 +1316,8 @@ sequenceDiagram
 ```
 
 Exact automation, node count and RPO/RTO remain TBD.
+
+**Certification envelope / Issue #200:** DF-048 is **Phase 1 mandatory** site-loss DR / restore activation for the declared Phase-1 DR profile. HA ≠ DR. Completing Phase 1.5 two-Core HA certification does not replace backup/restore or site-loss DR evidence, and a Phase 1 DR certificate does not imply Active/Standby HA continuity.
 
 ---
 
@@ -2453,3 +2463,14 @@ ITSM approval is necessary where policy requires but is never sufficient to bypa
 
 - `REQ-INT-007` — Outbound integration flow is domain transaction -> PostgreSQL transactional outbox -> connector worker -> vendor API with deterministic operation identity, idempotency, retry/backoff+jitter, rate limits, quarantine/DLQ, pause/drain/replay, per-tenant quotas and lineage.
 - `REQ-INT-008` — Inbound flow is authenticated vendor event/webhook -> connector/tenant binding -> replay/idempotency validation -> PostgreSQL inbox -> normalized governed event; bounded updated-since/cursor polling is fallback when events are inadequate.
+
+---
+
+## 115. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #203
+
+Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified ≠ deployed. Mother Reference set version remains **3.3.0** through Tranche B; v3.4.0 is reserved for gated Tranche D.
+
+| Envelope | Authoritative flows | Continuity / ACK | Explicit nonclaims |
+|---|---|---|---|
+| **Phase 1** | DF-001 standalone Core; multi-Sensor enrollment/assignment/fencing; SNMP typed ingestion; DF-025 NCM backup subset; DF-047/048 backup/DR | Standalone deletion-ACK for certified recoverable failures; Sensors continue collect/buffer during Core unavailability within storage protection | No Core-HA claim from DF-001; no MSP isolation cert; Issue #218 ICMP Core acceptance gap open; DF-ACP-005 mass/canary privileged NCM automation not Phase 1 certified |
+| **Phase 1.5** | DF-002 HA pairing; DF-037/038 failover/rejoin; PG/Kafka/ClickHouse continuity; DF-ACP-005 NCM Change Assurance privileged automation; DF-026 single approved push | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures; Sensor reconnect/re-anchor + push continuity | Physical fencing/replication unselected; HA does not replace DR; no third Core/witness/journal preselected |

@@ -2,22 +2,29 @@ package com.platform.core.ingestion.agentingress;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.platform.core.agentcontrol.AgentAssignmentStatus;
 import com.platform.core.agentcontrol.AgentControlRepository;
 import com.platform.core.agentcontrol.AgentSensorAssignment;
 import com.platform.core.domain.inventory.EntityIdentifier;
 import com.platform.core.ingestion.IngestionException;
 import com.platform.core.ingestion.IngestionMetrics;
+import com.platform.core.ingestion.KafkaTelemetryProducer;
 import com.platform.core.ingestion.agentingress.dto.AgentIngressRecord;
 import com.platform.core.ingestion.agentingress.dto.AgentTelemetryBatchRequest;
 import com.platform.core.ingestion.authority.SensorScope;
+import com.platform.core.ingestion.authority.SensorAuthorityResolver;
 import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
+import com.platform.core.ingestion.replay.PublisherClaimResult;
+import com.platform.core.ingestion.replay.ReplayReservation;
 import com.platform.core.persistence.EntityIdentifierRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
 import java.math.BigDecimal;
+import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -100,6 +107,168 @@ class AgentIngestionValidatorTest {
                 UUID.randomUUID(), tenantId, entityId, "HOST_ID", "platform.agent",
                 "host-abc", BigDecimal.ONE, Instant.now(), Instant.now()
         )));
+    }
+
+    // Deliberately unsupported logical evidence, not an approved BUILD-016 wire schema.
+    private JsonNode processNetworkPayload(boolean withHostId) throws Exception {
+        JsonNode payload = objectMapper.readTree("""
+                {"evidenceType":"ProcessNetworkEvidence","schemaVersion":1,
+                 "sourceProvenance":"agent.linux.process_network.ebpf",
+                 "bucketStartAt":"2026-09-11T10:00:00Z",
+                 "bucketEndAt":"2026-09-11T10:00:30Z",
+                 "workload":{"serviceName":"nginx.service"},
+                 "remoteIP":"192.0.2.10","remotePort":443,"protocol":"TCP",
+                 "bytesTx":1024,"quality":"COMPLETE"}
+                """);
+        if (withHostId) {
+            ((ObjectNode) payload).put("hostId", "host-abc");
+        }
+        return payload;
+    }
+
+    private AgentIngressRecord withPayload(AgentIngressRecord scalar, JsonNode payload) {
+        JsonNode delivery = scalar.records().get(0).deepCopy();
+        ((ObjectNode) delivery).set("payload", payload);
+        return new AgentIngressRecord(
+                scalar.sensorIngressSequence(), scalar.sensorIngressRecordId(), scalar.tenantId(), scalar.agentId(),
+                scalar.acceptingSensorId(), scalar.assignmentGeneration(), scalar.agentFirstSequence(),
+                scalar.agentLastSequence(), scalar.agentBatchId(), scalar.correlationId(), scalar.acceptedAt(),
+                List.of(delivery)
+        );
+    }
+
+    private void assertRejectedBeforeCoreAck(List<AgentIngressRecord> records, String code) throws Exception {
+        stubAssignment(1, "sensor-infra-01");
+        stubEntity();
+        AgentTelemetryBatchRequest batch = new AgentTelemetryBatchRequest(
+                2, "sensor-infra-01", STREAM, "batch-1", 1, records.size(), records.size(),
+                AgentIngestionValidator.calculateStableChecksum(records), "corr-batch", records
+        );
+        SensorAuthorityResolver authority = mock(SensorAuthorityResolver.class);
+        X509Certificate cert = mock(X509Certificate.class);
+        when(authority.resolve(cert)).thenReturn(scope);
+        AgentIngestionValidator realValidator = new AgentIngestionValidator(
+                objectMapper, authority, agentRepo, identifierRepo, metrics
+        );
+        AgentIngressWatermarkStore watermarks = mock(AgentIngressWatermarkStore.class);
+        KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
+        AgentIngestionService service = new AgentIngestionService(realValidator, watermarks, kafka, metrics);
+        byte[] rawBody = objectMapper.writeValueAsBytes(batch);
+
+        // Real extraction must throw before reservation, publication, finalization or an ACCEPTED ACK.
+        IngestionException ex = assertThrows(IngestionException.class, () ->
+                service.ingestAgentTelemetry(rawBody, batch, batch.batchId(), cert));
+        assertEquals(code, ex.getCode());
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verify(authority).resolve(cert);
+        verify(agentRepo, atLeastOnce()).findAssignmentByGeneration(tenantId, "agent-1", 1);
+        verifyNoInteractions(watermarks, kafka);
+    }
+
+    @Test
+    void typedProcessNetworkWithoutHostIdRejectedBeforeCoreAck() throws Exception {
+        assertRejectedBeforeCoreAck(List.of(withPayload(
+                sampleRecord(1, "sensor-infra-01", 1), processNetworkPayload(false)
+        )), "ERR_AGENT_HOST_ID_REQUIRED");
+        verifyNoInteractions(identifierRepo);
+    }
+
+    @Test
+    void typedProcessNetworkWithResolvedHostButNoObservationsRejectedBeforeCoreAck() throws Exception {
+        assertRejectedBeforeCoreAck(List.of(withPayload(
+                sampleRecord(1, "sensor-infra-01", 1), processNetworkPayload(true)
+        )), "ERR_NON_NUMERIC_RECORD");
+        verify(identifierRepo).findByResolutionKey(tenantId, "platform.agent", "HOST_ID", "host-abc");
+    }
+
+    @Test
+    void typedProcessNetworkWithEmptyObservationsRejectedBeforeCoreAck() throws Exception {
+        JsonNode typed = processNetworkPayload(true);
+        ((ObjectNode) typed).putArray("observations");
+        assertRejectedBeforeCoreAck(List.of(withPayload(
+                sampleRecord(1, "sensor-infra-01", 1), typed
+        )), "ERR_NON_NUMERIC_RECORD");
+    }
+
+    @Test
+    void typedObjectCannotMasqueradeAsNumericObservation() throws Exception {
+        JsonNode payload = objectMapper.readTree("""
+                {"hostId":"host-abc","observations":[{
+                 "metricKey":"process.network","observedAt":"2026-09-11T10:00:00Z"}]}
+                """);
+        ((ObjectNode) payload.path("observations").get(0))
+                .set("value", processNetworkPayload(true));
+        assertRejectedBeforeCoreAck(List.of(withPayload(
+                sampleRecord(1, "sensor-infra-01", 1), payload
+        )), "ERR_NON_NUMERIC_RECORD");
+    }
+
+    @Test
+    void mixedScalarThenTypedIngressRejectsWholeBatchBeforeCoreAck() throws Exception {
+        assertRejectedBeforeCoreAck(List.of(
+                sampleRecord(1, "sensor-infra-01", 1),
+                withPayload(sampleRecord(2, "sensor-infra-01", 1), processNetworkPayload(true))
+        ), "ERR_NON_NUMERIC_RECORD");
+    }
+
+    @Test
+    void mixedTypedThenScalarIngressRejectsWholeBatchBeforeCoreAck() throws Exception {
+        assertRejectedBeforeCoreAck(List.of(
+                withPayload(sampleRecord(1, "sensor-infra-01", 1), processNetworkPayload(true)),
+                sampleRecord(2, "sensor-infra-01", 1)
+        ), "ERR_NON_NUMERIC_RECORD");
+    }
+
+    @Test
+    void mixedScalarAndTypedDeliveriesInsideOneIngressRejectBeforeCoreAck() throws Exception {
+        AgentIngressRecord scalar = sampleRecord(1, "sensor-infra-01", 1);
+        JsonNode typedDelivery = withPayload(scalar, processNetworkPayload(true)).records().get(0);
+        ((ObjectNode) typedDelivery).put("sequence", 11).put("id", "rec-11");
+        AgentIngressRecord mixed = new AgentIngressRecord(
+                scalar.sensorIngressSequence(), scalar.sensorIngressRecordId(), scalar.tenantId(), scalar.agentId(),
+                scalar.acceptingSensorId(), scalar.assignmentGeneration(), 10, 11,
+                scalar.agentBatchId(), scalar.correlationId(), scalar.acceptedAt(),
+                List.of(scalar.records().get(0), typedDelivery)
+        );
+        assertRejectedBeforeCoreAck(List.of(mixed), "ERR_NON_NUMERIC_RECORD");
+    }
+
+    @Test
+    void scalarCollectionWithTypedSiblingCurrentlyAcksOnlyScalarSemantics() throws Exception {
+        // Existing extraction ignores unrecognized collection fields. Document this
+        // unsafe future-enablement shortcut rather than asserting an invented rejection.
+        AgentIngressRecord scalar = sampleRecord(1, "sensor-infra-01", 1);
+        JsonNode payload = scalar.records().get(0).path("payload").deepCopy();
+        ((ObjectNode) payload).set("processNetworkEvidence", processNetworkPayload(true));
+        AgentTelemetryBatchRequest batch = batchWith(withPayload(scalar, payload), "sensor-infra-01");
+        stubAssignment(1, "sensor-infra-01");
+        stubEntity();
+        SensorAuthorityResolver authority = mock(SensorAuthorityResolver.class);
+        X509Certificate cert = mock(X509Certificate.class);
+        when(authority.resolve(cert)).thenReturn(scope);
+        AgentIngestionValidator realValidator = new AgentIngestionValidator(
+                objectMapper, authority, agentRepo, identifierRepo, metrics
+        );
+        AgentIngressWatermarkStore watermarks = mock(AgentIngressWatermarkStore.class);
+        KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
+        UUID owner = UUID.fromString("018f0e0a-0000-7000-8000-00000000beef");
+        when(watermarks.reserveBatch(any(), anyString(), anyString(), anyLong(), anyLong(),
+                anyString(), anyString(), anyString())).thenReturn(ReplayReservation.reserved(0));
+        when(watermarks.claimPublisherLease(any(), anyString(), anyString(), anyLong(), anyLong(),
+                anyString(), anyString(), anyString())).thenReturn(PublisherClaimResult.claimed(owner, 1L));
+        AgentIngestionService service = new AgentIngestionService(realValidator, watermarks, kafka, metrics);
+
+        var ack = service.ingestAgentTelemetry(objectMapper.writeValueAsBytes(batch), batch, batch.batchId(), cert);
+        assertEquals("ACCEPTED", ack.status());
+        assertEquals(1L, ack.acceptedThroughIngressSequence());
+        var published = org.mockito.ArgumentCaptor.forClass(TelemetryObservationBatch.class);
+        verify(kafka).publishBatchTransactionally(published.capture());
+        assertEquals(1, published.getValue().numericObservations().size());
+        assertTrue(published.getValue().counterObservations().isEmpty());
+        assertEquals("cpu.util", published.getValue().numericObservations().get(0).metricId());
+        assertEquals(42.5, published.getValue().numericObservations().get(0).value());
+        verify(watermarks).finalizeReservedBatch(tenantId, "sensor-infra-01", STREAM, 1L, 1L,
+                batch.checksum(), batch.batchId(), batch.correlationId(), owner, 1L);
     }
 
     @Test

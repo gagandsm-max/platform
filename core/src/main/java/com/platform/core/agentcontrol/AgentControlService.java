@@ -93,6 +93,9 @@ public class AgentControlService {
     public AgentCertificateCredential bindCertificate(String agentId, X509Certificate certificate) {
         Objects.requireNonNull(certificate, "certificate");
         AgentPrincipal principal = requirePrincipal(agentId);
+        // Serialize with rotate/revoke/disable; re-read lifecycle under the principal row lock.
+        principal = requireActivePrincipalForCredentialIssuance(
+                repository.lockPrincipalForUpdate(principal.tenantId(), principal.agentId()));
         Instant now = Instant.now();
         Instant notBefore = certificate.getNotBefore().toInstant();
         Instant notAfter = certificate.getNotAfter().toInstant();
@@ -134,6 +137,9 @@ public class AgentControlService {
     public AgentCertificateCredential rotateCertificate(String agentId, X509Certificate newCertificate) {
         AgentPrincipal principal = requirePrincipal(agentId);
         Objects.requireNonNull(newCertificate, "newCertificate");
+        // Serialize credential mutations; re-read lifecycle under the principal row lock.
+        principal = requireActivePrincipalForCredentialIssuance(
+                repository.lockPrincipalForUpdate(principal.tenantId(), principal.agentId()));
         Instant now = Instant.now();
         Instant notBefore = newCertificate.getNotBefore().toInstant();
         Instant notAfter = newCertificate.getNotAfter().toInstant();
@@ -184,6 +190,7 @@ public class AgentControlService {
                 .orElseThrow(() -> new AgentControlException(
                         AgentControlException.ERR_AGENT_CREDENTIAL_NOT_FOUND,
                         "Credential fingerprint not found"));
+        repository.lockPrincipalForUpdate(credential.tenantId(), credential.agentId());
         Instant now = Instant.now();
         repository.updateCredentialStatus(
                 credential.credentialId(), AgentCredentialStatus.REVOKED, now, now);
@@ -200,6 +207,8 @@ public class AgentControlService {
     @Transactional("transactionManager")
     public AgentPrincipal disableAgent(String agentId) {
         AgentPrincipal principal = requirePrincipal(agentId);
+        // Same principal lock order as bind/rotate/revoke so disable cannot race past credential issuance.
+        principal = repository.lockPrincipalForUpdate(principal.tenantId(), principal.agentId());
         Instant now = Instant.now();
         repository.updatePrincipalStatus(principal.agentId(), AgentLifecycleStatus.DISABLED, now);
         auditEmitter.emitControlEvent(
@@ -216,6 +225,7 @@ public class AgentControlService {
     @Transactional("transactionManager")
     public AgentPrincipal revokeAgent(String agentId) {
         AgentPrincipal principal = requirePrincipal(agentId);
+        principal = repository.lockPrincipalForUpdate(principal.tenantId(), principal.agentId());
         Instant now = Instant.now();
         repository.updatePrincipalStatus(principal.agentId(), AgentLifecycleStatus.REVOKED, now);
         List<AgentCertificateCredential> active =
@@ -429,6 +439,18 @@ public class AgentControlService {
         return repository.findPrincipalById(requireAgentId(agentId))
                 .orElseThrow(() -> new AgentControlException(
                         AgentControlException.ERR_AGENT_NOT_FOUND, "Agent not found"));
+    }
+
+    /**
+     * Credential bind/rotate may issue ACTIVE credentials only for ACTIVE principals.
+     * Must be evaluated on the principal row read under {@code FOR UPDATE}.
+     */
+    private static AgentPrincipal requireActivePrincipalForCredentialIssuance(AgentPrincipal principal) {
+        if (principal.status() != AgentLifecycleStatus.ACTIVE) {
+            throw new AgentControlException(AgentControlException.ERR_AGENT_STATE_INVALID,
+                    "Agent is not ACTIVE");
+        }
+        return principal;
     }
 
     private AgentPrincipal requireActiveAgent(UUID tenantId, String agentId) {

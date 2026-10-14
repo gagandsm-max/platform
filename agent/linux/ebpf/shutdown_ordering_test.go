@@ -273,6 +273,27 @@ func TestDrainIdleBeforeQuiesceNeverClean(t *testing.T) {
 var errDetachCause = errors.New("link close failed")
 
 // TestDetachFailureTypedIncompleteEvidence covers device detach error → never nil Stop.
+//
+// The production readLoop arms a 200ms ReadRaw deadline and fakeEventReader's
+// uninterruptible sleep is not woken by runtime cancel. A Stop budget equal to
+// that deadline can therefore expire before detach runs, returning only
+// ErrBackendStopDeadline — correct caller-bounded behavior when detach has not
+// completed. This fixture therefore:
+//  1. waits until ReadRaw is armed on an interruptible block (no startup race
+//     against the Stop budget),
+//  2. interrupts with sticky interruption so a later SetDeadline cannot lose
+//     the wakeup,
+//  3. waits until recorded shutdownFlushErr contains the typed quiesce
+//     evidence (noteShutdownEvidence after detachFn returns) — not merely
+//     detach callback entry — before asserting StopContext identities.
+//
+// Interleaving: closing a barrier inside detachProbesFn before return only
+// proves callback ENTRY. If the worker is descheduled between entry/return and
+// noteShutdownEvidence, finishStop can snapshot only ErrBackendStopDeadline
+// under the short caller budget. Evidence rendezvous inspects b.mu-guarded
+// shutdownFlushErr so the typed assertion is scheduling-independent.
+// Bounded-deadline-without-detach remains covered by
+// TestStalledDetachStopReturnsWithinDeadline.
 func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	agg, _ := testAgg(t)
 	b, err := NewBackend(BackendConfig{
@@ -282,7 +303,12 @@ func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rd := &fakeEventReader{records: [][]byte{putEventV1(t, nil)}}
+	block := make(chan struct{})
+	armed := make(chan struct{})
+	rd := &fakeEventReader{
+		block:   block,
+		onBlock: armed,
+	}
 	b.detachProbesFn = func(*kernelHandles) error {
 		return errDetachCause
 	}
@@ -292,13 +318,60 @@ func TestDetachFailureTypedIncompleteEvidence(t *testing.T) {
 	go b.readLoop(runtimeCtx)
 	go b.ingestLoop(runtimeCtx)
 
-	// Short budget: failed detach leaves producersQuiesced=false so drain will
-	// not accept idle-as-empty and exits via the governed shutdown deadline.
+	select {
+	case <-armed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReadRaw never armed on interruptible block")
+	}
+
+	// Short budget starts only after the reader is blocked, so interrupt→detach
+	// is not racing ordinary startup against the same 200ms envelope.
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer stopCancel()
-	err = b.StopContext(stopCtx)
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- b.StopContext(stopCtx) }()
+
+	waitUntil := time.After(2 * time.Second)
+	for !b.isStopRequested() {
+		select {
+		case <-waitUntil:
+			t.Fatal("stopRequested was not published")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	// Wake the armed ReadRaw so shutdownReadPath runs while stop budget remains.
+	rd.interruptRead()
+
+	// Rendezvous on recorded quiesce evidence — callback entry/return is not
+	// sufficient (see comment above). Polling is bounded; no busy-spin.
+	evidenceDeadline := time.After(2 * time.Second)
+	for {
+		b.mu.Lock()
+		flushErr := b.shutdownFlushErr
+		b.mu.Unlock()
+		if errors.Is(flushErr, ErrBackendProducerQuiesceIncomplete) && errors.Is(flushErr, errDetachCause) {
+			break
+		}
+		select {
+		case <-evidenceDeadline:
+			t.Fatal("recorded ErrBackendProducerQuiesceIncomplete/errDetachCause never observed")
+		case <-time.After(time.Millisecond):
+		}
+	}
+
+	err = <-stopDone
 	if err == nil {
 		t.Fatal("detach failure must not yield clean Stop")
+	}
+	// First Stop may legitimately carry only ErrBackendStopDeadline when the
+	// caller budget expired between detachFn and noteShutdownEvidence. After
+	// the evidence barrier, a retained Stop must expose both typed identities.
+	if !errors.Is(err, ErrBackendProducerQuiesceIncomplete) || !errors.Is(err, errDetachCause) {
+		err = b.StopContext(context.Background())
+	}
+	if err == nil {
+		t.Fatal("detach failure must not yield clean Stop after retained evidence")
 	}
 	if !errors.Is(err, ErrBackendProducerQuiesceIncomplete) {
 		t.Fatalf("want ErrBackendProducerQuiesceIncomplete, got %v", err)

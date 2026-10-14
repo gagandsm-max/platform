@@ -6,7 +6,7 @@
 **Normalization state:** TRANSITIONAL_LEGACY. BUILD-000 freezes a bounded edge/control contract subsection below; the remainder awaits later normalization.
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Consolidation rule:** This v3.3.0 document preserves the normative content of the listed v3.1 source documents (via v3.2) and adds the approved v3.2.2 NOC troubleshooting plus enterprise-SNMP correctness API/event/data contracts. Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
-**Last reconciliation:** 2026-09-30 — Unified Network & Infrastructure Observability Phase-1 closure and eBPF integration (Issue #142); document remains TRANSITIONAL_LEGACY.
+**Last reconciliation:** 2026-10-12 — Issue #200/#203 Tranche B Phase 1/1.5 certification-envelope reconciliation (API/event/ACK/ICMP/tenant contracts); prior Issue #142 Phase-1 observability closure retained; document remains TRANSITIONAL_LEGACY.
 
 ## 1. Purpose
 
@@ -281,7 +281,12 @@ validate complete source batch
 
 Semantics are **at-least-once**, not exactly-once. Duplicate Kafka publication of the same stable logical observation identity is tolerated; canonical ClickHouse reads must not expose duplicate logical numeric observations. Concurrent exact HTTP retries while a reservation is `RETRY_PENDING` may amplify republish volume; that is a recorded **P1** hardening concern under the normal serialized Sensor uploader path. No distributed publisher lease/service is introduced by this documentation baseline.
 
-**Deletion-authorizing ACK HA durability invariant:** If Core issues an ACK that authorizes the Sensor to delete acknowledged telemetry from its durable spool, that telemetry must survive every failure in the certified single-Core HA failure matrix (`ACKED-FOR-DELETION TELEMETRY RPO = 0` for those scenarios; not site/DR RPO). Conceptual lifecycle: Sensor durable spool → Core acceptance → certified HA durability barrier → deletion-authorizing ACK → Sensor may delete acknowledged segment. Physical HA mechanisms remain unselected; closure belongs to `HA_DURABILITY_DESIGN_GATE` / BUILD-120–124.
+**Deletion-authorizing ACK durability (Issue #200 — shared contract shape, envelope-specific matrices):**
+
+1. **Phase 1 standalone:** If Core issues an ACK authorizing Sensor durable-spool deletion, that telemetry must survive the certified standalone failure matrix (application/process/service crash/restart, governed host reboot and other explicitly certified recoverable failures). Catastrophic destruction/loss of the single Core/storage is **not** Phase-1 zero-RPO HA; recovery uses backup/restore and the declared Phase-1 DR profile.
+2. **Phase 1.5 HA:** If Core issues an ACK authorizing Sensor durable-spool deletion, that telemetry must survive every failure in the certified permanent single-Core HA failure matrix (`ACKED-FOR-DELETION TELEMETRY RPO = 0` for those HA scenarios; not site/DR RPO).
+
+Conceptual lifecycle: Sensor durable spool → Core acceptance → certified durability barrier for the active envelope (standalone matrix or HA matrix) → deletion-authorizing ACK → Sensor may delete acknowledged segment. Physical HA mechanisms remain unselected; closure belongs to `HA_DURABILITY_DESIGN_GATE` / BUILD-120–124. Tenant-aware identity on the ACK path remains mandatory in Phase 1; MSP/shared-tenant adversarial isolation certification remains Phase 1.5.
 
 ## 8. Unified correlation / RCA contract supplement — v3.2.2
 
@@ -544,7 +549,7 @@ Agent `hostId` is evidence. Agent-supplied `entityId` is not authoritative. Core
 
 ### 10.8 Monitoring correctness
 
-Collection/transport/credential/Agent/Sensor/Core/queue/ingestion failure, no telemetry, stale telemetry MUST NOT automatically assert monitored target DOWN. `No Data != Device Down` (**FROZEN_BUILD_000_INVARIANT** / B000-D012).
+Collection/transport/credential/Agent/Sensor/Core/queue/ingestion failure, no telemetry, stale telemetry MUST NOT automatically assert monitored target DOWN. `No Data != Device Down` (**FROZEN_BUILD_000_INVARIANT** / B000-D012). Phase 1 monitoring-quality contracts preserve `UNKNOWN` / `PARTIAL` / degraded semantic states rather than collapsing them into DOWN.
 
 ### 10.9 Standard error
 
@@ -880,3 +885,24 @@ Metrics/logs preserve OpenTelemetry Resource and Instrumentation Scope metadata 
 ### 13.6 Endpoint/access-port relationship evidence — Phase 1.5
 
 Attachment observations map mutable MAC/IP/user-when-available/AP/switch/port/VLAN evidence to canonical entities/graph with source, observed time, confidence/quality and history. PID/MAC/IP/user labels are not silently promoted to permanent global identity without reconciliation evidence.
+
+### 13.7 ICMP typed observation contract and Issue #218 gap
+
+Phase 1 API/event contracts require ICMP availability evidence as a versioned typed observation family (Sensor→Core durable batch) carrying target, IP version, sent/received, loss, RTT samples, error/quality codes and provenance. Quality values such as `GOOD` / `PARTIAL` / `UNKNOWN` are first-class. Incomplete or rejected ICMP evidence must not authorize DEVICE_DOWN solely by absence of numeric projection.
+
+**Issue #218 (SOURCE_FACT / NOT CLOSED):** Current Core `IngestionValidator` accepts SNMP `protocolPayload.observations` arrays or generic `metric_id`+numeric `value` shapes and rejects other protocol payloads with `ERR_UNSUPPORTED_RECORD_TYPE` before durable Kafka/ACK. Sensor `icmp_observation_v1` therefore fails end-to-end acceptance today. Architecture/contracts remain typed-ICMP; unresolved Core acceptance must not be documented as implemented, benchmarked or certified. Mixed-batch starvation risk from whole-batch rejection is a recorded integrity concern for gated Core remediation.
+
+### 13.8 Change Assurance / NCM phase envelope
+
+Change Assurance APIs and NCM privileged-execution contracts retain maker-checker, exact plan/hash/target/window binding and audit. Phase 1 independently certifiable surfaces are backup/version/diff/compliance/golden-state plus controlled manual CLI when security gates pass. Mass push/canary/automated remediation API enablement defaults to **Phase 1.5** unless Founder change control promotes them.
+
+---
+
+## 14. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #203
+
+Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified ≠ deployed. Mother Reference set version remains **3.3.0** through Tranche B; v3.4.0 is reserved for gated Tranche D. This document remains TRANSITIONAL_LEGACY except where BUILD-000 edge freeze applies.
+
+| Envelope | API / event / schema emphasis | ACK / tenancy | Explicit nonclaims |
+|---|---|---|---|
+| **Phase 1** | Tenant-scoped APIs/events; Sensor/Agent mTLS identity; assignment/fencing generations; SNMP typed + ICMP typed observation contracts; `No Data != Device Down` | Standalone deletion-ACK durability matrix; tenant-aware contracts without MSP isolation cert claim | Issue #218 Core ICMP acceptance open; no Core-HA continuity claim; NCM automation not Phase 1 default |
+| **Phase 1.5** | Same contracts under two-Core HA continuity and MSP adversarial isolation certification | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures | Physical HA mechanisms unselected; no new journal/witness/database invented by this contract note |

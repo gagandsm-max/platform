@@ -199,21 +199,24 @@ public class AgentControlRepository {
     }
 
     /**
-     * Row-lock the agent principal so assign-after-revoke serializes when no ACTIVE assignment exists.
+     * Row-lock the agent principal so assign-after-revoke and credential rotate/revoke/bind
+     * serialize when operating on the same principal. Returns the locked row so callers can
+     * re-evaluate lifecycle state after acquiring the lock.
      */
-    public void lockPrincipalForUpdate(UUID tenantId, String agentId) {
-        List<String> rows = jdbc.query("""
-                SELECT agent_id FROM platform.agent
+    public AgentPrincipal lockPrincipalForUpdate(UUID tenantId, String agentId) {
+        List<AgentPrincipal> rows = jdbc.query("""
+                SELECT * FROM platform.agent
                  WHERE tenant_id = :tenantId AND agent_id = :agentId
                  FOR UPDATE
                 """,
                 new MapSqlParameterSource()
                         .addValue("tenantId", tenantId)
                         .addValue("agentId", agentId),
-                (rs, rowNum) -> rs.getString("agent_id"));
+                PRINCIPAL_MAPPER);
         if (rows.isEmpty()) {
             throw new AgentControlException(AgentControlException.ERR_AGENT_NOT_FOUND, "Agent not found");
         }
+        return rows.get(0);
     }
 
     public Optional<AgentSensorAssignment> findActiveAssignmentForAgent(UUID tenantId, String agentId) {
