@@ -20,6 +20,7 @@ type outboundWindow struct {
 	StreamID      string `json:"streamId"`
 	FirstSequence uint64 `json:"firstSequence"`
 	LastSequence  uint64 `json:"lastSequence"`
+	SizeRejected  bool   `json:"sizeRejected,omitempty"` // Legacy diagnostic; never suppresses replay.
 }
 
 // ReadOrReserveOutboundBatch returns the currently frozen outbound range, or
@@ -108,6 +109,41 @@ func (s *DiskSpool) AbandonOutboundBatch() error {
 	return s.clearOutboundWindowLocked()
 }
 
+// RebatchOutboundBatch is disabled: a current size rejection does not prove
+// that an earlier identical request was never accepted. Without an authoritative
+// Core receipt/fencing protocol, changing frozen identity can prevent ACK recovery.
+func (s *DiskSpool) RebatchOutboundBatch(first, last uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return newError(CodeClosed, "spool is closed", nil)
+	}
+	win, exists, err := s.loadOutboundWindowLocked()
+	if err != nil {
+		return err
+	}
+	if !exists || win.FirstSequence != first || win.LastSequence != last {
+		return newError(CodeOutboundWindow, "rebatch range must equal frozen outbound window", nil)
+	}
+	if _, err := s.readExactRangeLocked(first, last, 1, 1); err != nil {
+		return err
+	}
+	return newError(CodeOutboundWindow, "automatic rebatching disabled; restore Core compatibility and replay the original frozen batch", nil)
+}
+
+// OutboundBatchSizeRejected reports legacy diagnostic metadata only. A flagged
+// window remains eligible for the same bounded replay and ordinary ACK as any
+// other frozen window; this flag must never authorize suppression or deletion.
+func (s *DiskSpool) OutboundBatchSizeRejected() (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false, newError(CodeClosed, "spool is closed", nil)
+	}
+	win, exists, err := s.loadOutboundWindowLocked()
+	return exists && win.SizeRejected, err
+}
+
 func (s *DiskSpool) outboundWindowPath() string {
 	return filepath.Join(s.dir, outboundWindowFileName)
 }
@@ -161,6 +197,9 @@ func (s *DiskSpool) validateOutboundWindowLocked(win outboundWindow) error {
 	}
 	if win.FirstSequence == 0 || win.LastSequence < win.FirstSequence {
 		return newError(CodeOutboundWindow, "outbound window sequence range is impossible", nil)
+	}
+	if win.SizeRejected && win.FirstSequence != win.LastSequence {
+		return newError(CodeOutboundWindow, "size block requires a singleton window", nil)
 	}
 	if win.FirstSequence > MaxSafeSequence || win.LastSequence > MaxSafeSequence {
 		return newError(CodeOutboundWindow, "outbound window sequence exceeds MAX_SAFE_SEQUENCE", nil)

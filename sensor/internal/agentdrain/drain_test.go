@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -406,27 +410,28 @@ func TestDrainParksRecordTooLarge(t *testing.T) {
 	}
 }
 
-func TestIsTerminalCoreError(t *testing.T) {
+func TestIsRecordAttributableCoreError(t *testing.T) {
 	for _, code := range []string{
-		"ERR_MALFORMED_JSON",
 		"ERR_MALFORMED_RECORD",
 		"ERR_MALFORMED_RECORD_PAYLOAD",
-		"ERR_UNSUPPORTED_SCHEMA_VERSION",
-		"ERR_CHECKSUM_MISMATCH",
 		"ERR_AGENT_HOST_ID_REQUIRED",
 		"ERR_RECORD_TOO_LARGE",
-		"ERR_BATCH_TOO_LARGE",
-		"ERR_REQUEST_TOO_LARGE",
 		"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED",
 		"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID",
 		"ERR_REVOKED_ASSIGNMENT_ACCEPTED_BEFORE_ACTIVATION",
 		"ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION",
 	} {
-		if !isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 400}) {
+		if !isRecordAttributableCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 400}) {
 			t.Fatalf("expected poison allowlist terminal for %s", code)
 		}
 	}
 	for _, code := range []string{
+		"ERR_MALFORMED_JSON",
+		"ERR_UNSUPPORTED_SCHEMA_VERSION",
+		"ERR_CHECKSUM_MISMATCH",
+		"ERR_BATCH_TOO_LARGE",
+		"ERR_REQUEST_TOO_LARGE",
+		"ERR_NON_NUMERIC_RECORD",
 		"ERR_AGENT_ENTITY_UNRESOLVED",
 		"ERR_AGENT_ASSIGNMENT_UNKNOWN",
 		"ERR_AUTH_IDENTITY_MISMATCH",
@@ -447,17 +452,146 @@ func TestIsTerminalCoreError(t *testing.T) {
 		"ERR_OTHER_CONTRACT",
 		"ERR_UNKNOWN_APPLICATION",
 	} {
-		if isTerminalCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 403}) {
+		if isRecordAttributableCoreError(&coreclient.CoreAPIError{Code: code, HTTPStatus: 403}) {
 			t.Fatalf("%s must not be poison-terminal", code)
 		}
 	}
 	for _, status := range []int{400, 401, 403, 409, 413, 422} {
-		if isTerminalCoreError(&coreclient.CoreAPIError{Code: "ERR_UNKNOWN_APP", HTTPStatus: status}) {
+		if isRecordAttributableCoreError(&coreclient.CoreAPIError{Code: "ERR_UNKNOWN_APP", HTTPStatus: status}) {
 			t.Fatalf("unknown HTTP %d must not be poison-terminal by status alone", status)
 		}
 	}
-	if isTerminalCoreError(errors.New("other")) {
+	if isRecordAttributableCoreError(errors.New("other")) {
 		t.Fatal("generic error must not be terminal")
+	}
+}
+
+// Hypothetical typed payloads only: these fixtures do not enable a typed producer.
+func appendCompatibilityPayload(t *testing.T, s *spool.DiskSpool, collection string) spool.Record {
+	t.Helper()
+	payload := durableBatchPayload{
+		TenantID: "018f0e0a-0000-7000-8000-000000000001", AgentID: "agent-1",
+		SensorID: "sensor-infra-01", Generation: 1, FirstSequence: 10, LastSequence: 10,
+		RecordIDs: []string{"r-10"}, BatchChecksum: "chk", BatchID: "ab-1", CorrelationID: "corr-1",
+		Timestamp: time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
+		Envelope:  json.RawMessage(`{"records":[{"sequence":10,"id":"r-10","checksum":"c1","payload":` + collection + `}]}`),
+	}
+	enc, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := s.Append(spool.AppendRequest{
+		Class: spool.ClassOperational, Type: agentBatchRecordType, Payload: enc, CreatedAt: payload.Timestamp,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+func TestDrainTypedCompatibilityRejectionDoesNotInventCoreAck(t *testing.T) {
+	const typed = `{"hostId":"h1","evidenceType":"ProcessNetworkEvidence","remoteIP":"192.0.2.10","remotePort":443,"protocol":"TCP","bytesTx":1024}`
+	const scalar = `{"hostId":"h1","observations":[{"metricKey":"cpu.util","value":42.5,"observedAt":"2026-09-11T10:00:00Z"}]}`
+	cases := []struct {
+		name     string
+		code     string
+		payloads []string
+		poison   bool
+	}{
+		{"typed_without_host", "ERR_AGENT_HOST_ID_REQUIRED", []string{`{"evidenceType":"ProcessNetworkEvidence","bytesTx":1024}`}, true},
+		{"typed_with_host", "ERR_NON_NUMERIC_RECORD", []string{typed}, false},
+		{"scalar_then_typed", "ERR_NON_NUMERIC_RECORD", []string{scalar, typed}, false},
+		{"typed_then_scalar", "ERR_NON_NUMERIC_RECORD", []string{typed, scalar}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, dir := openSpool(t)
+			var source []spool.Record
+			for _, payload := range tc.payloads {
+				source = append(source, appendCompatibilityPayload(t, s, payload))
+			}
+			// Core semantics are exercised by AgentIngestionValidatorTest; this seam
+			// exercises real HTTP-error classification and durable Sensor drain behavior.
+			tr := &fakeTransport{err: coreclient.ClassifyAgentTelemetryFailure(400,
+				[]byte(`{"status":"REJECTED","code":"`+tc.code+`","message":"unsupported typed evidence"}`))}
+			d, err := New(Config{
+				SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
+				MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+				RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
+				IdleInterval: time.Millisecond, ShutdownGrace: time.Second, JitterFraction: 0,
+			}, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ok, err := d.RunOnce(context.Background())
+			var drainErr *Error
+			if ok || !errors.As(err, &drainErr) || drainErr.Transient() || !coreclient.IsCoreAPICode(err, tc.code) {
+				t.Fatalf("expected classified non-transient rejection, ok=%v err=%v", ok, err)
+			}
+			if len(tr.last.Records) != len(source) {
+				t.Fatalf("forwarded records=%d want=%d", len(tr.last.Records), len(source))
+			}
+			for i, payload := range tc.payloads {
+				var deliveries []struct {
+					Payload json.RawMessage `json:"payload"`
+				}
+				if err := json.Unmarshal(tr.last.Records[i].Records, &deliveries); err != nil {
+					t.Fatal(err)
+				}
+				if len(deliveries) != 1 || string(deliveries[0].Payload) != payload {
+					t.Fatalf("Sensor must forward original payload without scalar conversion: %s", tr.last.Records[i].Records)
+				}
+			}
+			st, err := s.Stats()
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(filepath.Join(dir, poisonDirName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.poison {
+				if drainErr.Code != CodePoison || st.RecordCount != 0 || len(entries) != 1 || d.Metrics().PoisonCount.Load() != 1 {
+					t.Fatalf("host-id failure must park the head, stats=%+v entries=%v err=%v", st, entries, drainErr)
+				}
+				artifact, err := os.ReadFile(filepath.Join(dir, poisonDirName, entries[0].Name()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				parts := strings.SplitN(string(artifact), "\n", 2)
+				if len(parts) != 2 || !strings.Contains(parts[0], tc.code) || parts[1] != string(source[0].Payload) {
+					t.Fatalf("poison artifact must preserve reason and exact source payload: %s", artifact)
+				}
+			} else {
+				if drainErr.Code != CodeTransport || st.RecordCount != len(source) || len(entries) != 0 || d.Metrics().PoisonCount.Load() != 0 {
+					t.Fatalf("non-numeric rejection must retain hot spool without poison, stats=%+v entries=%v", st, entries)
+				}
+				frozen := tr.last
+				// A later scalar record cannot bypass the rejected frozen outbound window.
+				appendCompatibilityPayload(t, s, scalar)
+				ok, err = d.RunOnce(context.Background())
+				if ok || !coreclient.IsCoreAPICode(err, tc.code) || tr.last.BatchID != frozen.BatchID ||
+					tr.last.Checksum != frozen.Checksum || tr.last.LastIngressSequence != frozen.LastIngressSequence {
+					t.Fatalf("retry must retain identical rejected batch, ok=%v err=%v", ok, err)
+				}
+				retained, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+				if err != nil || len(retained.Records) != len(source) {
+					t.Fatalf("frozen records not retained: %+v err=%v", retained, err)
+				}
+				for i, rec := range retained.Records {
+					if rec.Sequence != source[i].Sequence || string(rec.Payload) != string(source[i].Payload) {
+						t.Fatal("retained payload/sequence changed")
+					}
+				}
+				st, err = s.Stats()
+				if err != nil || st.RecordCount != len(source)+1 || d.Metrics().FailuresPermanent.Load() != 2 {
+					t.Fatalf("scalar backlog must remain visible after repeated rejection: %+v err=%v", st, err)
+				}
+			}
+			if d.Metrics().Successes.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 || d.Metrics().LastSuccessUnix.Load() != 0 {
+				t.Fatal("unsupported typed rejection must never report successful Core ingestion")
+			}
+		})
 	}
 }
 
@@ -728,6 +862,7 @@ func TestDrainFrozenWindowSurvivesGrowthRestartAndExactIdentity(t *testing.T) {
 }
 
 func TestDrainPoisonAbandonsWindowBeforeHeadAck(t *testing.T) {
+	// Poison attribution requires a singleton outbound window, even with backlog.
 	s, dir := openSpool(t)
 	appendNDurable(t, s, 3)
 	tr := &fakeTransport{err: &coreclient.CoreAPIError{
@@ -735,7 +870,7 @@ func TestDrainPoisonAbandonsWindowBeforeHeadAck(t *testing.T) {
 	}}
 	d, err := New(Config{
 		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
-		MaxBatchRecords: 3, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		MaxBatchRecords: 1, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond,
 		JitterFraction: 0, IdleInterval: time.Hour, ShutdownGrace: time.Second,
 	}, s, tr)
@@ -805,7 +940,7 @@ func TestAuthorityPoisonQuarantineAdvancesPastHead(t *testing.T) {
 			tr.err = &coreclient.CoreAPIError{Code: code, Message: "revoked temporal", HTTPStatus: 422}
 			d, err := New(Config{
 				SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
-				MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+				MaxBatchRecords: 1, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 				RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 				IdleInterval: time.Millisecond, ShutdownGrace: time.Second, JitterFraction: 0,
 			}, s, tr)
@@ -1102,5 +1237,1096 @@ func TestAuthorityPoisonSuccessfulLogOmitsPathAndPayload(t *testing.T) {
 		if strings.Contains(logOutput, e.Name()) {
 			t.Fatalf("log must not contain poison file name %s: %s", e.Name(), logOutput)
 		}
+	}
+}
+
+// Issue #216: a request-level rejection does not identify the poison spool head.
+func TestIssue216AmbiguousPoisonRetainsFrozenBatch(t *testing.T) {
+	const scalar = `{"hostId":"h1","observations":[{"metricKey":"cpu.util","value":42.5,"observedAt":"2026-09-11T10:00:00Z"}]}`
+	const typed = `{"evidenceType":"ProcessNetworkEvidence","bytesTx":1024}`
+	for _, name := range []string{"scalar_then_typed", "typed_then_scalar", "nested_scalar_then_typed", "nested_typed_then_scalar", "invalid_non_head_durable", "invalid_head_durable", "singleton_request_bound"} {
+		t.Run(name, func(t *testing.T) {
+			s, dir := openSpool(t)
+			switch name {
+			case "scalar_then_typed":
+				appendCompatibilityPayload(t, s, scalar)
+				appendCompatibilityPayload(t, s, typed)
+			case "typed_then_scalar":
+				appendCompatibilityPayload(t, s, typed)
+				appendCompatibilityPayload(t, s, scalar)
+			case "nested_scalar_then_typed", "nested_typed_then_scalar":
+				first, second := scalar, typed
+				if name == "nested_typed_then_scalar" {
+					first, second = typed, scalar
+				}
+				rec := appendCompatibilityPayload(t, s, first)
+				var payload durableBatchPayload
+				if err := json.Unmarshal(rec.Payload, &payload); err != nil {
+					t.Fatal(err)
+				}
+				// Use a separate spool so the nested envelope occupies exactly one record.
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+				s, dir = openSpool(t)
+				payload.LastSequence = 11
+				payload.Envelope = json.RawMessage(`{"records":[{"sequence":10,"id":"r-10","checksum":"c1","payload":` + first + `},{"sequence":11,"id":"r-11","checksum":"c2","payload":` + second + `}]}`)
+				raw, err := json.Marshal(payload)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Append(spool.AppendRequest{Class: spool.ClassOperational, Type: agentBatchRecordType, Payload: raw}); err != nil {
+					t.Fatal(err)
+				}
+			case "invalid_non_head_durable", "invalid_head_durable":
+				if name == "invalid_non_head_durable" {
+					appendCompatibilityPayload(t, s, scalar)
+				}
+				if _, err := s.Append(spool.AppendRequest{Class: spool.ClassOperational, Type: agentBatchRecordType, Payload: []byte(`{"tenantId":"incomplete"}`)}); err != nil {
+					t.Fatal(err)
+				}
+				if name == "invalid_head_durable" {
+					appendCompatibilityPayload(t, s, scalar)
+				}
+			case "singleton_request_bound":
+				appendCompatibilityPayload(t, s, scalar)
+			}
+			tr := &fakeTransport{err: coreclient.ClassifyAgentTelemetryFailure(400, []byte(`{"status":"REJECTED","code":"ERR_AGENT_HOST_ID_REQUIRED","message":"Agent hostId is required for entity resolution"}`))}
+			var logs strings.Builder
+			cfg := Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, MaxBatchRecords: 10, InitialBackoff: time.Millisecond, MaxBackoff: 7 * time.Millisecond, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+			if name == "singleton_request_bound" {
+				cfg.MaxRequestBytes = 1
+			}
+			d, err := New(cfg, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waits := 0
+			d.wait = func(_ context.Context, delay time.Duration) error {
+				waits++
+				if delay != cfg.MaxBackoff {
+					t.Fatalf("unbounded retry delay=%v", delay)
+				}
+				return nil
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				ok, err := d.RunOnce(context.Background())
+				if ok || err == nil {
+					t.Fatalf("rejected batch claimed success: ok=%v err=%v", ok, err)
+				}
+				if !strings.Contains(name, "durable") && name != "singleton_request_bound" && !coreclient.IsCoreAPICode(err, "ERR_AGENT_HOST_ID_REQUIRED") {
+					t.Fatalf("lost Core rejection: %v", err)
+				}
+				st, err := s.Stats()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if st.RecordCount != len(before.Records) {
+					t.Fatalf("NO CORE ACK: valid telemetry removed from replay: count=%d want=%d poison=%d", st.RecordCount, len(before.Records), d.metrics.PoisonCount.Load())
+				}
+				after, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("sequence/checksum/payload or frozen window changed: before=%+v after=%+v err=%v", before, after, err)
+				}
+			}
+			entries, err := os.ReadDir(d.poisonDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 || d.metrics.PoisonCount.Load() != 0 || d.metrics.AuthorityPoisonCount.Load() != 0 || d.metrics.Successes.Load() != 0 || d.metrics.DurableAcks.Load() != 0 || d.metrics.LastSuccessUnix.Load() != 0 {
+				t.Fatal("ambiguous rejection must not archive/ACK/claim ingestion")
+			}
+			if waits != 2 || d.metrics.FailuresPermanent.Load() != 2 || d.metrics.Backpressure.Load() != 2 || d.metrics.PendingRecords.Load() != int64(len(before.Records)) {
+				t.Fatalf("blocked status/backoff absent: waits=%d permanent=%d pressure=%d", waits, d.metrics.FailuresPermanent.Load(), d.metrics.Backpressure.Load())
+			}
+			if !strings.Contains(logs.String(), "spool retained") || strings.Contains(logs.String(), "bytesTx") || strings.Contains(logs.String(), "tenantId") {
+				t.Fatalf("missing safe blocked log: %s", logs.String())
+			}
+			// Restart and backlog growth must not thaw or reorder the rejected window.
+			appendCompatibilityPayload(t, s, scalar)
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			restarted, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close()
+			after, err := restarted.ReadOrReserveOutboundBatch(10, 1024*1024)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("restart changed frozen replay: %v", err)
+			}
+			d2, err := New(cfg, restarted, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d2.wait = d.wait
+			if ok, err := d2.RunOnce(context.Background()); ok || err == nil {
+				t.Fatalf("restart bypassed rejection: %v %v", ok, err)
+			}
+			if !strings.Contains(name, "durable") && name != "singleton_request_bound" {
+				original, err := d.makeRequest(before)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(original, tr.last) {
+					t.Fatal("restart/growth changed outbound identity/checksum")
+				}
+			}
+		})
+	}
+}
+
+func TestIssue216SingletonMalformedDurableArchive(t *testing.T) {
+	s, dir := openSpool(t)
+	payload := []byte(`{"tenantId":"incomplete"}`)
+	rec, err := s.Append(spool.AppendRequest{Class: spool.ClassOperational, Type: agentBatchRecordType, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendDurable(t, s, 2)
+	tr := &fakeTransport{}
+	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, MaxBatchRecords: 1}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := d.RunOnce(context.Background())
+	var de *Error
+	if ok || !errors.As(err, &de) || de.Code != CodePoison {
+		t.Fatalf("singleton malformed payload not parked: %v %v", ok, err)
+	}
+	if d.metrics.Attempts.Load() != 0 || d.metrics.Successes.Load() != 0 || d.metrics.DurableAcks.Load() != 0 || d.metrics.PoisonCount.Load() != 1 {
+		t.Fatal("quarantine must not claim ingestion")
+	}
+	files, err := os.ReadDir(d.poisonDir)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("archive missing: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(d.poisonDir, files[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.SplitN(string(raw), "\n", 2)
+	var meta struct {
+		Reason   string `json:"reason"`
+		Sequence uint64 `json:"sequence"`
+	}
+	if len(parts) != 2 {
+		t.Fatal("archive incomplete")
+	}
+	if err := json.Unmarshal([]byte(parts[0]), &meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta.Reason != "ERR_MALFORMED_DURABLE_PAYLOAD" || meta.Sequence != rec.Sequence || parts[1] != string(payload) {
+		t.Fatal("archive lost reason/sequence/exact durable payload")
+	}
+	next, err := s.ReadOrReserveOutboundBatch(1, 1024*1024)
+	if err != nil || next.FirstSequence != 2 || next.LastSequence != 2 {
+		t.Fatalf("singleton quarantine broke continuity: %+v %v", next, err)
+	}
+	d.transport = &echoTransport{inner: tr}
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		t.Fatalf("next valid ACK failed: %v %v", ok, err)
+	}
+	st, err := s.Stats()
+	if err != nil || st.RecordCount != 0 || d.metrics.DurableAcks.Load() != 1 {
+		t.Fatalf("ACK deletion failed: %+v %v", st, err)
+	}
+}
+
+func TestIssue216PermanentErrorsDoNotAttributeBatchHead(t *testing.T) {
+	for _, code := range []string{"ERR_MALFORMED_JSON", "ERR_MALFORMED_RECORD", "ERR_MALFORMED_RECORD_PAYLOAD", "ERR_UNSUPPORTED_SCHEMA_VERSION", "ERR_CHECKSUM_MISMATCH", "ERR_AGENT_HOST_ID_REQUIRED", "ERR_RECORD_TOO_LARGE", "ERR_BATCH_TOO_LARGE", "ERR_REQUEST_TOO_LARGE", "ERR_NON_NUMERIC_RECORD", "ERR_FUTURE_APPLICATION_ERROR", "ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED", "ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID", "ERR_REVOKED_ASSIGNMENT_ACCEPTED_BEFORE_ACTIVATION", "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION"} {
+		t.Run(code, func(t *testing.T) {
+			s, dir := openSpool(t)
+			appendNDurable(t, s, 2)
+			tr := &fakeTransport{err: &coreclient.CoreAPIError{Code: code, Message: "untrusted message SECRET_SENTINEL", HTTPStatus: 400}}
+			var logs strings.Builder
+			d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.wait = func(context.Context, time.Duration) error { return nil }
+			ok, err := d.RunOnce(context.Background())
+			if ok || !coreclient.IsCoreAPICode(err, code) {
+				t.Fatalf("original error lost: %v %v", ok, err)
+			}
+			st, err := s.Stats()
+			if err != nil || st.RecordCount != 2 || d.metrics.PoisonCount.Load() != 0 || d.metrics.DurableAcks.Load() != 0 {
+				t.Fatalf("batch head attributed: %+v %v", st, err)
+			}
+			if !strings.Contains(logs.String(), code) || strings.Contains(logs.String(), "SECRET_SENTINEL") {
+				t.Fatalf("unsafe/missing error log: %s", logs.String())
+			}
+		})
+	}
+}
+
+func testIssue216BlockedLoopCancellation(t *testing.T, code string, count int) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, count)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{Code: code, HTTPStatus: 400}}
+	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, MaxBackoff: time.Hour}, s, &captureTransport{inner: tr, onCall: func(coreclient.AgentTelemetryBatch) { cancel() }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	shutdown, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	// Await cancellation inside the upload, then shut down the paced loop.
+	select {
+	case <-ctx.Done():
+	case <-shutdown.Done():
+		t.Fatal("drain did not reach upload")
+	}
+	if err := d.Shutdown(shutdown); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.Stats()
+	if err != nil || st.RecordCount != count || d.metrics.Attempts.Load() != 1 || d.metrics.FailuresPermanent.Load() != 1 || d.metrics.DurableAcks.Load() != 0 {
+		t.Fatalf("cancellation lost data or spun retries: %+v %v", st, err)
+	}
+}
+
+func TestIssue216SingletonRequestFailuresRetainFrozenReplay(t *testing.T) {
+	const scalar = `{"hostId":"h1","observations":[{"metricKey":"cpu.util","value":42.5,"observedAt":"2026-09-11T10:00:00Z"}]}`
+	for _, code := range []string{"ERR_CHECKSUM_MISMATCH", "ERR_UNSUPPORTED_SCHEMA_VERSION", "ERR_MALFORMED_JSON", "ERR_REQUEST_TOO_LARGE"} {
+		t.Run(code, func(t *testing.T) {
+			s, dir := openSpool(t)
+			appendCompatibilityPayload(t, s, scalar)
+			status := 400
+			if code == "ERR_BATCH_TOO_LARGE" || code == "ERR_REQUEST_TOO_LARGE" {
+				status = 413
+			}
+			tr := &fakeTransport{err: coreclient.ClassifyAgentTelemetryFailure(status, []byte(`{"status":"REJECTED","code":"`+code+`","message":"request rejected"}`))}
+			var logs strings.Builder
+			cfg := Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, MaxBatchRecords: 10, MaxBackoff: 7 * time.Millisecond, InitialBackoff: time.Millisecond, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+			d, err := New(cfg, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, err := d.makeRequest(before)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waits := 0
+			wait := func(_ context.Context, delay time.Duration) error {
+				waits++
+				if delay != cfg.MaxBackoff {
+					t.Fatalf("retry delay=%v", delay)
+				}
+				return nil
+			}
+			d.wait = wait
+			assertRetained := func(d *Drain, s *spool.DiskSpool, count int) {
+				t.Helper()
+				ok, err := d.RunOnce(context.Background())
+				var de *Error
+				if ok || !errors.As(err, &de) || de.Code != CodeTransport || !coreclient.IsCoreAPICode(err, code) {
+					t.Fatalf("rejection lost: ok=%v err=%v", ok, err)
+				}
+				st, err := s.Stats()
+				if err != nil || st.RecordCount != count {
+					t.Fatalf("NO CORE ACK: spool count=%d want=%d err=%v", st.RecordCount, count, err)
+				}
+				after, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+				if err != nil || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(original, tr.last) {
+					t.Fatalf("frozen sequence/checksum/payload/replay identity changed: %v", err)
+				}
+				entries, err := os.ReadDir(d.poisonDir)
+				if err != nil || len(entries) != 0 || d.metrics.PoisonCount.Load() != 0 || d.metrics.AuthorityPoisonCount.Load() != 0 || d.metrics.Successes.Load() != 0 || d.metrics.DurableAcks.Load() != 0 || d.metrics.LastSuccessUnix.Load() != 0 {
+					t.Fatal("request rejection archived or falsely ACKed")
+				}
+				if d.metrics.Backpressure.Load() == 0 || d.metrics.FailuresPermanent.Load() == 0 {
+					t.Fatal("blocked status absent")
+				}
+			}
+			assertRetained(d, s, 1)
+			assertRetained(d, s, 1)
+			appendCompatibilityPayload(t, s, scalar)
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			restarted, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close()
+			d2, err := New(cfg, restarted, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d2.wait = wait
+			assertRetained(d2, restarted, 2)
+			if waits != 3 || d.metrics.Attempts.Load() != 2 || d2.metrics.Attempts.Load() != 1 {
+				t.Fatal("retry accounting incorrect")
+			}
+			if !strings.Contains(logs.String(), code) || !strings.Contains(logs.String(), "spool retained") {
+				t.Fatal("visible blocked log absent")
+			}
+			tr.err = nil
+			d2.transport = &echoTransport{inner: tr}
+			if ok, err := d2.RunOnce(context.Background()); !ok || err != nil {
+				t.Fatalf("valid singleton ACK failed: %v %v", ok, err)
+			}
+			remaining, err := restarted.ReadOrReserveOutboundBatch(10, 1024*1024)
+			if err != nil || len(remaining.Records) != 1 || remaining.FirstSequence != 2 {
+				t.Fatalf("ACK crossed frozen window: %+v %v", remaining, err)
+			}
+			if d2.metrics.Successes.Load() != 1 || d2.metrics.DurableAcks.Load() != 1 || d2.metrics.LastSuccessUnix.Load() == 0 {
+				t.Fatal("valid ACK accounting incorrect")
+			}
+			if ok, err := d2.RunOnce(context.Background()); !ok || err != nil {
+				t.Fatalf("backlog ACK failed: %v %v", ok, err)
+			}
+			st, err := restarted.Stats()
+			if err != nil || st.RecordCount != 0 {
+				t.Fatalf("ACK failed to drain: %+v %v", st, err)
+			}
+		})
+	}
+}
+
+func TestIssue216BlockedLoopCancellation(t *testing.T) {
+	testIssue216BlockedLoopCancellation(t, "ERR_AGENT_HOST_ID_REQUIRED", 2)
+}
+func TestIssue216SingletonRequestFailureCancellation(t *testing.T) {
+	for _, code := range []string{"ERR_CHECKSUM_MISMATCH", "ERR_UNSUPPORTED_SCHEMA_VERSION", "ERR_MALFORMED_JSON", "ERR_BATCH_TOO_LARGE", "ERR_REQUEST_TOO_LARGE"} {
+		t.Run(code, func(t *testing.T) { testIssue216BlockedLoopCancellation(t, code, 1) })
+	}
+}
+
+// Simulates the current Core size guard; successful ACKs echo the exact range.
+// A size rejection conveys no information about earlier attempts.
+type sizeRejectingTransport struct {
+	requests  []coreclient.AgentTelemetryBatch
+	limit     int
+	byteLimit int
+}
+
+func (s *sizeRejectingTransport) UploadAgentTelemetry(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+	s.requests = append(s.requests, b)
+	encoded, err := json.Marshal(b)
+	if err != nil {
+		return coreclient.AgentTelemetryAck{}, err
+	}
+	if b.RecordCount > s.limit || (s.byteLimit > 0 && len(encoded) > s.byteLimit) {
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+	}
+	return coreclient.AgentTelemetryAck{Status: "ACCEPTED", SensorID: b.SensorID, BatchID: b.BatchID, CorrelationID: b.CorrelationID, AcceptedThroughIngressSequence: b.LastIngressSequence}, nil
+}
+
+// Models Core's exact-range watermark: first acceptance loses its ACK, size
+// guards run before replay lookup, and only the original request recovers ACK.
+func TestP1LostAckThenLowerLimitPreservesExactReplay(t *testing.T) {
+	s, dir := openSpool(t)
+	for i := 0; i < 4; i++ {
+		appendCompatibilityPayload(t, s, `{"hostId":"h1","observations":[{"metricKey":"cpu.util","value":42.5}]}`)
+	}
+	original, err := s.ReadOrReserveOutboundBatch(4, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var accepted coreclient.AgentTelemetryBatch
+	calls := 0
+	compatible := true
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls++
+		if calls == 1 {
+			accepted = b
+			return coreclient.AgentTelemetryAck{}, errors.New("ACK lost after Core acceptance")
+		}
+		if !reflect.DeepEqual(b, accepted) {
+			t.Fatal("exact replay identity changed")
+		}
+		if !compatible {
+			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+		}
+		return coreclient.AgentTelemetryAck{Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence}, nil
+	})
+	cfg := Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, MaxBatchRecords: 4, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}
+	newDrain := func() *Drain {
+		d, err := New(cfg, s, tr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.wait = func(context.Context, time.Duration) error { return nil }
+		return d
+	}
+	d := newDrain()
+	if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("lost ACK: %v %v", ok, err)
+	}
+	compatible = false
+	for i := 0; i < 2; i++ {
+		appendCompatibilityPayload(t, s, `{"hostId":"h1","observations":[{"metricKey":"cpu.util","value":42.5}]}`)
+	}
+	for i := 0; i < 3; i++ {
+		if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+			t.Fatalf("size rejection: %v %v", ok, err)
+		}
+		frozen, err := s.ReadOrReserveOutboundBatch(1, 1)
+		if err != nil || !reflect.DeepEqual(frozen, original) {
+			t.Fatalf("frozen source drift: %v", err)
+		}
+		st, err := s.Stats()
+		if err != nil || st.RecordCount != 6 || d.metrics.DurableAcks.Load() != 0 || d.metrics.PoisonCount.Load() != 0 {
+			t.Fatalf("false ACK/loss: %+v %v", st, err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		s, err = spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d = newDrain()
+	}
+	defer s.Close()
+	compatible = true
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		t.Fatalf("original ACK recovery: %v %v", ok, err)
+	}
+	remaining, err := s.ReadOrReserveOutboundBatch(4, 1024*1024)
+	if err != nil || remaining.FirstSequence != 5 || remaining.LastSequence != 6 || len(remaining.Records) != 2 || d.metrics.DurableAcks.Load() != 1 {
+		t.Fatalf("backlog reordered/lost: %+v %v", remaining, err)
+	}
+}
+
+func TestP1SingletonSizeRejectionRetriesAcrossRestart(t *testing.T) {
+	s, dir := openSpool(t)
+	appendCompatibilityPayload(t, s, `{"hostId":"h1","observations":[{"metricKey":"cpu.util","value":42.5}]}`)
+	original, err := s.ReadOrReserveOutboundBatch(1, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Compatibility with sidecars written by the previous singleton dead-end.
+	sidecar := filepath.Join(dir, "outbound-window.json")
+	raw, err := os.ReadFile(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var win map[string]any
+	if err := json.Unmarshal(raw, &win); err != nil {
+		t.Fatal(err)
+	}
+	win["sizeRejected"] = true
+	raw, err = json.Marshal(win)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, raw, 0640); err != nil {
+		t.Fatal(err)
+	}
+	tr := &sizeRejectingTransport{limit: 0}
+	cfg := Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}
+	for i := 0; i < 3; i++ {
+		d, err := New(cfg, s, tr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.wait = func(context.Context, time.Duration) error { return nil }
+		if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+			t.Fatalf("retry: %v %v", ok, err)
+		}
+		frozen, err := s.ReadOrReserveOutboundBatch(1, 1)
+		if err != nil || !reflect.DeepEqual(frozen, original) {
+			t.Fatal("singleton source changed")
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		s, err = spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer s.Close()
+	if len(tr.requests) != 3 {
+		t.Fatalf("hidden suppression: %d", len(tr.requests))
+	}
+	for _, b := range tr.requests {
+		if !reflect.DeepEqual(b, tr.requests[0]) {
+			t.Fatal("singleton identity drift")
+		}
+	}
+	tr.limit = 1
+	d, err := New(cfg, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		t.Fatalf("corrected limit: %v %v", ok, err)
+	}
+	st, err := s.Stats()
+	if err != nil || st.RecordCount != 0 || d.metrics.DurableAcks.Load() != 1 || d.metrics.PoisonCount.Load() != 0 {
+		t.Fatalf("ACK not applied: %+v %v", st, err)
+	}
+}
+
+func TestP2RebatchAllowlistFailsClosed(t *testing.T) {
+	for _, failure := range []struct {
+		code   string
+		status int
+	}{
+		{"ERR_BATCH_TOO_LARGE", 400}, {"ERR_REQUEST_TOO_LARGE", 413}, {"", 413}, {"ERR_CHECKSUM_MISMATCH", 413}, {"ERR_AUTH_IDENTITY_MISMATCH", 413}, {"ERR_PREVIOUS_BATCH_PENDING", 409},
+	} {
+		t.Run(failure.code+fmt.Sprint(failure.status), func(t *testing.T) {
+			s, dir := openSpool(t)
+			appendNDurable(t, s, 2)
+			before, err := s.ReadOrReserveOutboundBatch(2, 1024*1024)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tr := &fakeTransport{err: &coreclient.CoreAPIError{Code: failure.code, HTTPStatus: failure.status}}
+			d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir}, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.wait = func(context.Context, time.Duration) error { return nil }
+			if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+				t.Fatalf("%v %v", ok, err)
+			}
+			after, err := s.ReadOrReserveOutboundBatch(1, 1)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("ambiguous range changed")
+			}
+			blocked, err := s.OutboundBatchSizeRejected()
+			if err != nil || blocked {
+				t.Fatal("unproven size block")
+			}
+		})
+	}
+}
+
+func TestP1ConcurrentRunOncePreservesRejectedRange(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 4)
+	tr := &sizeRejectingTransport{limit: 2}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	calls := 0
+	transport := p2TransportFunc(func(ctx context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls++
+		if calls == 1 {
+			close(entered)
+			<-release
+		}
+		return tr.UploadAgentTelemetry(ctx, b)
+	})
+	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir}, s, transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	results := make(chan error, 2)
+	go func() { _, err := d.RunOnce(context.Background()); results <- err }()
+	<-entered
+	secondStarted := make(chan struct{})
+	go func() { close(secondStarted); _, err := d.RunOnce(context.Background()); results <- err }()
+	<-secondStarted
+	close(release)
+	firstErr, secondErr := <-results, <-results
+	if firstErr == nil || secondErr == nil {
+		t.Fatalf("want both original requests size rejected: %v %v", firstErr, secondErr)
+	}
+	if len(tr.requests) != 2 || tr.requests[0].RecordCount != 4 || tr.requests[1].RecordCount != 4 {
+		t.Fatalf("frozen range changed: %+v", tr.requests)
+	}
+	st, err := s.Stats()
+	if err != nil || st.RecordCount != 4 || d.metrics.DurableAcks.Load() != 0 {
+		t.Fatalf("size rejection changed records: %+v %v", st, err)
+	}
+}
+
+type p2TransportFunc func(context.Context, coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error)
+
+func (f p2TransportFunc) UploadAgentTelemetry(ctx context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+	return f(ctx, b)
+}
+
+func TestP1SizeRetryPacingAndShutdown(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	calls := make(chan time.Time, 8)
+	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls <- time.Now()
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+	})
+	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, InitialBackoff: time.Millisecond, MaxBackoff: 80 * time.Millisecond, IdleInterval: time.Millisecond}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Exercise direct callers: each rejected attempt waits before returning.
+	for i := 0; i < 3; i++ {
+		if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+			t.Fatalf("%v %v", ok, err)
+		}
+	}
+	previous := <-calls
+	for i := 0; i < 2; i++ {
+		next := <-calls
+		if next.Sub(previous) < d.cfg.MaxBackoff {
+			t.Fatalf("retry storm: %v", next.Sub(previous))
+		}
+		previous = next
+	}
+	if d.metrics.PendingRecords.Load() != 1 || d.metrics.Backpressure.Load() != 3 || d.metrics.DurableAcks.Load() != 0 {
+		t.Fatal("blocked diagnostics incorrect")
+	}
+	d.cfg.MaxBackoff = time.Hour
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-calls:
+	case <-time.After(time.Second):
+		t.Fatal("production loop suppressed retry")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := d.Shutdown(ctx); err != nil {
+		t.Fatalf("backoff delayed shutdown: %v", err)
+	}
+	st, err := s.Stats()
+	if err != nil || st.RecordCount != 1 {
+		t.Fatal("cancellation lost record")
+	}
+}
+
+func TestDeliveryHealthBlocked413SmallBacklog(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	if snap := d.Snapshot(); snap.State != DeliveryStateUp || snap.Blocked {
+		t.Fatalf("startup must not claim blocked: %+v", snap)
+	}
+	if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+		t.Fatalf("want size block: ok=%v err=%v", ok, err)
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("delivery health=%+v", snap)
+	}
+	if snap.PendingRecords < 1 {
+		t.Fatalf("backlog missing: %+v", snap)
+	}
+	if snap.BlockedSince.IsZero() {
+		t.Fatal("blocked_since transition evidence missing")
+	}
+	raw := fmt.Sprintf("%+v", snap)
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer", "payload"} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+func TestDeliveryHealthRecoversOnVerifiedAck(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	calls := 0
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls++
+		if calls == 1 {
+			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+		}
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("first block: %v %v", ok, err)
+	}
+	if snap := d.Snapshot(); !snap.Blocked {
+		t.Fatal("expected degraded before recovery")
+	}
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		t.Fatalf("ack recovery: %v %v", ok, err)
+	}
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" {
+		t.Fatalf("delivery must clear after ACK: %+v", snap)
+	}
+	if snap.DurableAcks != 1 {
+		t.Fatalf("durable acks=%d", snap.DurableAcks)
+	}
+	if snap.LastSuccessTime.IsZero() {
+		t.Fatal("last success transition evidence missing")
+	}
+}
+
+func TestDeliveryHealthPersistentRejectionStaysDegraded(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 2)
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{Code: "ERR_REQUEST_TOO_LARGE", HTTPStatus: 413}}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 2, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	var since time.Time
+	for i := 0; i < 3; i++ {
+		if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_REQUEST_TOO_LARGE") {
+			t.Fatalf("attempt %d: %v %v", i, ok, err)
+		}
+		snap := d.Snapshot()
+		if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_REQUEST_TOO_LARGE" {
+			t.Fatalf("attempt %d health=%+v", i, snap)
+		}
+		if i == 0 {
+			since = snap.BlockedSince
+		} else if !snap.BlockedSince.Equal(since) {
+			t.Fatalf("blocked_since reset across persistent rejection: %v -> %v", since, snap.BlockedSince)
+		}
+	}
+}
+
+func TestDeliveryHealthRestartWithFrozenBatch(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	tr := &sizeRejectingTransport{limit: 0}
+	cfg := Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}
+	d, err := New(cfg, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("seed block: %v %v", ok, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	d2, err := New(cfg, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2.wait = func(context.Context, time.Duration) error { return nil }
+	// In-memory health resets on restart; first observed retention re-degrades.
+	if snap := d2.Snapshot(); snap.Blocked {
+		t.Fatalf("stale blocked claim before observation: %+v", snap)
+	}
+	if ok, err := d2.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("replay block: %v %v", ok, err)
+	}
+	snap := d2.Snapshot()
+	if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.PendingRecords < 1 {
+		t.Fatalf("restart frozen batch health=%+v", snap)
+	}
+}
+
+func TestDeliveryHealthLegacySizeRejectedSidecar(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	if _, err := s.ReadOrReserveOutboundBatch(1, 1024*1024); err != nil {
+		t.Fatal(err)
+	}
+	sidecar := filepath.Join(dir, "outbound-window.json")
+	raw, err := os.ReadFile(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var win map[string]any
+	if err := json.Unmarshal(raw, &win); err != nil {
+		t.Fatal(err)
+	}
+	win["sizeRejected"] = true
+	raw, err = json.Marshal(win)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, raw, 0640); err != nil {
+		t.Fatal(err)
+	}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, &sizeRejectingTransport{limit: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("legacy sizeRejected must surface delivery degradation: %+v", snap)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+		t.Fatalf("legacy sidecar must still retry exact batch: %v %v", ok, err)
+	}
+}
+
+func TestDeliveryHealthConcurrentSnapshotReads(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("block: %v %v", ok, err)
+	}
+	done := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for j := 0; j < 50; j++ {
+				snap := d.Snapshot()
+				if snap.State != DeliveryStateDegraded || !snap.Blocked {
+					t.Errorf("concurrent snap=%+v", snap)
+					return
+				}
+			}
+		}()
+	}
+	for i := 0; i < 8; i++ {
+		<-done
+	}
+}
+
+func TestDeliveryHealthCancellationPreservesBlockedClaim(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	tr := &fakeTransport{err: &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Hour,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	d.wait = func(ctx context.Context, _ time.Duration) error {
+		cancel()
+		return ctx.Err()
+	}
+	if ok, err := d.RunOnce(ctx); ok || err == nil {
+		t.Fatalf("cancelled block: %v %v", ok, err)
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.State != DeliveryStateDegraded {
+		t.Fatalf("cancellation must not clear blocked delivery: %+v", snap)
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer shutdownCancel()
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if snap := d.Snapshot(); !snap.Blocked {
+		t.Fatalf("shutdown must not invent recovery: %+v", snap)
+	}
+}
+
+// seedLegacySizeRejectedSidecar reserves the outbound window and stamps the
+// pre-65fe619 sizeRejected diagnostic flag without suppressing replay.
+func seedLegacySizeRejectedSidecar(t *testing.T, s *spool.DiskSpool, dir string) {
+	t.Helper()
+	if _, err := s.ReadOrReserveOutboundBatch(1, 1024*1024); err != nil {
+		t.Fatal(err)
+	}
+	sidecar := filepath.Join(dir, "outbound-window.json")
+	raw, err := os.ReadFile(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var win map[string]any
+	if err := json.Unmarshal(raw, &win); err != nil {
+		t.Fatal(err)
+	}
+	win["sizeRejected"] = true
+	raw, err = json.Marshal(win)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, raw, 0640); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestDeliveryHealthStaleLegacyObservationCannotReassertAfterAck proves the
+// Codex P2 race: Snapshot observes legacy sizeRejected+pending, RunOnce
+// completes a durable ACK and clears deliveryBlocked, then the stale observer
+// must not reassert DEGRADED on an empty backlog.
+func TestDeliveryHealthStaleLegacyObservationCannotReassertAfterAck(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	observed := make(chan struct{})
+	release := make(chan struct{})
+	d.afterLegacySizeObserve = func() {
+		close(observed)
+		<-release
+	}
+
+	var snap DeliveryStatus
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		snap = d.Snapshot()
+	}()
+
+	select {
+	case <-observed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for legacy size observation barrier")
+	}
+
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		close(release)
+		wg.Wait()
+		t.Fatalf("durable ACK during stale observation: ok=%v err=%v", ok, err)
+	}
+	close(release)
+	wg.Wait()
+
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" {
+		t.Fatalf("stale legacy observation reasserted blocked health: %+v", snap)
+	}
+	if snap.PendingRecords != 0 {
+		t.Fatalf("expected zero backlog after ACK, got pending=%d", snap.PendingRecords)
+	}
+	if snap.DurableAcks != 1 {
+		t.Fatalf("durable acks=%d want 1", snap.DurableAcks)
+	}
+
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.PendingRecords != 0 {
+		t.Fatalf("post-ACK healthy state lost: %+v", final)
+	}
+}
+
+func TestDeliveryHealthLegacySidecarRemainsDegradedWithoutAck(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, &sizeRejectingTransport{limit: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("legitimate legacy size rejection must stay DEGRADED: %+v", snap)
+	}
+	if snap.PendingRecords < 1 {
+		t.Fatalf("backlog missing under legitimate block: %+v", snap)
+	}
+}
+
+func TestDeliveryHealthConcurrentSnapshotAndAckRace(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+
+	var calls atomic.Uint64
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls.Add(1)
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 64; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+			t.Errorf("ACK under concurrent Snapshot: ok=%v err=%v", ok, err)
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.PendingRecords != 0 {
+		t.Fatalf("concurrent Snapshot/ACK left stale degradation: %+v", snap)
+	}
+	if snap.DurableAcks != 1 || calls.Load() != 1 {
+		t.Fatalf("acks=%d calls=%d", snap.DurableAcks, calls.Load())
 	}
 }

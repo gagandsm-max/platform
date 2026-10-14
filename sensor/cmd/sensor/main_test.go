@@ -2,15 +2,22 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	"platform/sensor/internal/agentdrain"
 	"platform/sensor/internal/config"
 	"platform/sensor/internal/control"
+	"platform/sensor/internal/coreclient"
+	"platform/sensor/internal/health"
 	sensorruntime "platform/sensor/internal/runtime"
 	"platform/sensor/internal/scheduler"
+	"platform/sensor/internal/spool"
 )
 
 func testRuntime() config.RuntimeConfig {
@@ -285,4 +292,83 @@ func TestControlShutdownWaitBounds(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAttachAgentDeliveryHealthDisabledReceiverNoPanic(t *testing.T) {
+	attachAgentDeliveryHealth(nil, nil)
+
+	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := health.NewHealthServer(":0", disk, slog.Default())
+	attachAgentDeliveryHealth(hs, nil)
+	var drain *agentdrain.Drain
+	attachAgentDeliveryHealth(hs, drain)
+}
+
+func TestAttachAgentDeliveryHealthWiresLiveDrain(t *testing.T) {
+	disk, err := spool.NewDiskSpool(t.TempDir(), 80, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := health.NewHealthServer(":0", disk, slog.Default())
+
+	dir := t.TempDir()
+	sp, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sp.Close() })
+
+	payload, err := json.Marshal(map[string]any{
+		"tenantId": "018f0e0a-0000-7000-8000-000000000001", "agentId": "agent-1",
+		"sensorId": "sensor-infra-01", "assignmentGeneration": 1,
+		"firstSequence": 10, "lastSequence": 10, "recordIds": []string{"r-10"},
+		"batchChecksum": "chk", "batchId": "ab-1", "correlationId": "corr-1",
+		"timestamp": time.Now().UTC(),
+		"envelope":  json.RawMessage(`{"records":[{"sequence":10,"id":"r-10","checksum":"c1","payload":{"hostId":"h1","observations":[]}}]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sp.Append(spool.AppendRequest{
+		Class: spool.ClassOperational, Type: "agent.delivery.batch",
+		Payload: payload, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tr := &mainAgentDrainTransport{err: &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}}
+	d, err := agentdrain.New(agentdrain.Config{
+		SensorID: "sensor-infra-01", StreamID: sp.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, sp, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachAgentDeliveryHealth(hs, d)
+
+	if snap := d.Snapshot(); snap.Blocked {
+		t.Fatalf("idle wired drain must not be blocked: %+v", snap)
+	}
+	if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("expected retained size rejection: ok=%v err=%v", ok, err)
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.State != agentdrain.DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("wired drain delivery health=%+v", snap)
+	}
+	raw := strings.ToUpper(fmt.Sprintf("%+v", snap))
+	if strings.Contains(raw, "DEVICE_DOWN") {
+		t.Fatalf("false DEVICE_DOWN in %+v", snap)
+	}
+}
+
+type mainAgentDrainTransport struct {
+	err error
+}
+
+func (t *mainAgentDrainTransport) UploadAgentTelemetry(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+	return coreclient.AgentTelemetryAck{}, t.err
 }

@@ -123,6 +123,33 @@ func (m *Metrics) LastSuccessAge() time.Duration {
 	return time.Since(time.Unix(sec, 0))
 }
 
+// Delivery health states for Sensor supportability. Distinct from agent_spool
+// filesystem capacity: blocked Core delivery can coexist with a writable spool.
+const (
+	DeliveryStateUp       = "UP"
+	DeliveryStateDegraded = "DEGRADED"
+)
+
+// DeliveryStatus is a bounded Agent drain delivery snapshot (no payloads/secrets).
+type DeliveryStatus struct {
+	State           string
+	ReasonCode      string
+	Blocked         bool
+	PendingRecords  int64
+	PendingBytes    int64
+	OldestAgeSecs   int64
+	FailuresPerm    uint64
+	DurableAcks     uint64
+	BlockedSince    time.Time
+	LastSuccessTime time.Time
+	FirstSequence   uint64
+	LastSequence    uint64
+}
+
+type sizeRejectedReporter interface {
+	OutboundBatchSizeRejected() (bool, error)
+}
+
 type Drain struct {
 	cfg       Config
 	spool     Spool
@@ -136,6 +163,7 @@ type Drain struct {
 	poisonSync   func(f *os.File) error
 	poisonRename func(oldpath, newpath string) error
 
+	runMu     sync.Mutex // Serializes selection, upload and ACK within this drain.
 	mu        sync.Mutex
 	cancel    context.CancelFunc
 	started   bool
@@ -144,6 +172,23 @@ type Drain struct {
 	stopOnce  sync.Once
 	wait      func(context.Context, time.Duration) error
 	jitter    func(time.Duration, float64) time.Duration
+
+	deliveryMu      sync.RWMutex
+	deliveryBlocked bool
+	deliveryReason  string
+	blockedSince    time.Time
+	blockedFirstSeq uint64
+	blockedLastSeq  uint64
+	// deliveryGen advances on every durable-ACK clear so a Snapshot that
+	// observed a pre-ACK legacy sizeRejected sidecar cannot reassert DEGRADED
+	// after recovery. Observations sample gen before spool I/O and re-check
+	// under deliveryMu before marking.
+	deliveryGen uint64
+
+	// Optional test-only seam. Nil in production. Invoked after a positive
+	// legacy sizeRejected+pending observation and before the generation-gated
+	// mark attempt, so barrier tests can interleave a durable ACK.
+	afterLegacySizeObserve func()
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
@@ -209,6 +254,126 @@ func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
 
 func (d *Drain) Metrics() *Metrics { return d.metrics }
 
+// Snapshot returns the current Agent delivery-health view for Sensor supportability.
+// It never infers monitored-device failure and never exposes payloads or Core bodies.
+func (d *Drain) Snapshot() DeliveryStatus {
+	if d == nil {
+		return DeliveryStatus{State: DeliveryStateUp}
+	}
+	d.refreshStats()
+	d.observeLegacySizeBlock()
+
+	d.deliveryMu.RLock()
+	defer d.deliveryMu.RUnlock()
+	st := DeliveryStatus{
+		State:          DeliveryStateUp,
+		PendingRecords: d.metrics.PendingRecords.Load(),
+		PendingBytes:   d.metrics.PendingBytes.Load(),
+		OldestAgeSecs:  d.metrics.OldestAgeSeconds.Load(),
+		FailuresPerm:   d.metrics.FailuresPermanent.Load(),
+		DurableAcks:    d.metrics.DurableAcks.Load(),
+	}
+	if sec := d.metrics.LastSuccessUnix.Load(); sec > 0 {
+		st.LastSuccessTime = time.Unix(sec, 0).UTC()
+	}
+	if d.deliveryBlocked {
+		st.State = DeliveryStateDegraded
+		st.Blocked = true
+		st.ReasonCode = d.deliveryReason
+		st.BlockedSince = d.blockedSince
+		st.FirstSequence = d.blockedFirstSeq
+		st.LastSequence = d.blockedLastSeq
+	}
+	return st
+}
+
+func (d *Drain) markDeliveryBlocked(reason string, batch spool.Batch) {
+	if d == nil {
+		return
+	}
+	sanitized := sanitizeReason(reason)
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	if !d.deliveryBlocked {
+		d.blockedSince = time.Now().UTC()
+	}
+	d.deliveryBlocked = true
+	d.deliveryReason = sanitized
+	d.blockedFirstSeq = batch.FirstSequence
+	d.blockedLastSeq = batch.LastSequence
+}
+
+func (d *Drain) clearDeliveryBlocked() {
+	if d == nil {
+		return
+	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	d.deliveryBlocked = false
+	d.deliveryReason = ""
+	d.blockedSince = time.Time{}
+	d.blockedFirstSeq = 0
+	d.blockedLastSeq = 0
+	d.deliveryGen++
+}
+
+// observeLegacySizeBlock surfaces durable pre-65fe619 sizeRejected sidecars as
+// delivery degradation before the next upload attempt, without suppressing replay.
+// Spool observation stays outside deliveryMu (lock order: spool then delivery;
+// never hold deliveryMu across spool I/O). A sampled deliveryGen must still
+// match under the write lock or the observation is discarded as stale vs ACK.
+func (d *Drain) observeLegacySizeBlock() {
+	reporter, ok := d.spool.(sizeRejectedReporter)
+	if !ok {
+		return
+	}
+	d.deliveryMu.RLock()
+	gen := d.deliveryGen
+	already := d.deliveryBlocked
+	d.deliveryMu.RUnlock()
+	if already {
+		return
+	}
+	blocked, err := reporter.OutboundBatchSizeRejected()
+	if err != nil || !blocked {
+		return
+	}
+	if d.metrics.PendingRecords.Load() <= 0 {
+		return
+	}
+	if d.afterLegacySizeObserve != nil {
+		d.afterLegacySizeObserve()
+	}
+	d.markLegacyDeliveryBlocked(gen, "ERR_BATCH_TOO_LARGE")
+}
+
+// markLegacyDeliveryBlocked applies a legacy sizeRejected observation only when
+// deliveryGen is unchanged since the observation began. A concurrent durable ACK
+// that called clearDeliveryBlocked advances deliveryGen and wins.
+func (d *Drain) markLegacyDeliveryBlocked(gen uint64, reason string) {
+	if d == nil {
+		return
+	}
+	sanitized := sanitizeReason(reason)
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	if d.deliveryGen != gen || d.deliveryBlocked {
+		return
+	}
+	// Pending may already be zero after an ACK that has not yet advanced gen in
+	// an alternate interleaving; never reassert a block with an empty backlog.
+	if d.metrics.PendingRecords.Load() <= 0 {
+		return
+	}
+	if !d.deliveryBlocked {
+		d.blockedSince = time.Now().UTC()
+	}
+	d.deliveryBlocked = true
+	d.deliveryReason = sanitized
+	d.blockedFirstSeq = 0
+	d.blockedLastSeq = 0
+}
+
 func (d *Drain) Start(parent context.Context) error {
 	if parent == nil {
 		return codeErr(CodeInvalidConfig, "context must not be nil", nil, false)
@@ -250,6 +415,8 @@ func (d *Drain) loop(ctx context.Context) {
 }
 
 func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
+	d.runMu.Lock()
+	defer d.runMu.Unlock()
 	if err := ctxErr(ctx); err != nil {
 		return false, err
 	}
@@ -272,7 +439,18 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 
 	req, err := d.makeRequest(batch)
 	if err != nil {
-		// Malformed durable payload is terminal for the head record — abandon frozen window, then park.
+		// Only a locally identified malformed singleton can authorize parking.
+		// A failure elsewhere in a frozen batch (or a request/configuration limit)
+		// does not identify the head as poison.
+		var malformed *Error
+		isMalformed := errors.As(err, &malformed) && malformed.Code == CodePoison
+		if len(batch.Records) != 1 || !isMalformed {
+			reason := "ERR_AGENT_REQUEST_BUILD_FAILED"
+			if isMalformed {
+				reason = "ERR_MALFORMED_DURABLE_PAYLOAD"
+			}
+			return false, d.retainBlocked(ctx, batch, reason, err)
+		}
 		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
 			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
 		}
@@ -293,14 +471,23 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		d.metrics.Successes.Add(1)
 		d.metrics.DurableAcks.Add(1)
 		d.metrics.LastSuccessUnix.Store(time.Now().Unix())
+		d.clearDeliveryBlocked()
 		d.refreshStats()
 		return true, nil
 	}
 
-	if isTerminalCoreError(err) {
+	// A current 413 cannot disprove earlier acceptance with a lost ACK. Keep
+	// the exact frozen request eligible for replay, including legacy singleton
+	// SizeRejected windows. Request-size errors use the paced retainBlocked path.
+
+	if isRecordAttributableCoreError(err) {
 		code := terminalCode(err)
-		// Explicit poison allowlist: Core rejected before durable reservation.
-		// Abandon local outbound window before acknowledging the poison head.
+		// Core rejects the whole request without identifying an offending record.
+		// Even one Sensor record may contain several independent Agent deliveries.
+		if len(req.Records) != 1 || !singleDelivery(req.Records[0].Records) {
+			return false, d.retainBlocked(ctx, batch, code, err)
+		}
+		// Only a record-attributable singleton rejection may abandon and durably park.
 		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
 			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
 		}
@@ -321,8 +508,41 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		return false, codeErr(CodeTransport, "transient Core agent-telemetry failure; spool retained", err, true)
 	}
 
+	return false, d.retainBlocked(ctx, batch, terminalCode(err), err)
+}
+
+// singleDelivery deliberately fails closed on missing, empty or malformed arrays.
+func singleDelivery(raw json.RawMessage) bool {
+	var records []json.RawMessage
+	return json.Unmarshal(raw, &records) == nil && len(records) == 1
+}
+
+// retainBlocked preserves the frozen range and reports the original cause without
+// logging payloads or untrusted Core messages. Pace RunOnce as well as the loop:
+// direct callers must not spin on an ambiguous permanent rejection.
+func (d *Drain) retainBlocked(ctx context.Context, batch spool.Batch, reason string, cause error) error {
 	d.metrics.FailuresPermanent.Add(1)
-	return false, codeErr(CodeTransport, "permanent Core agent-telemetry failure; spool retained", err, false)
+	d.metrics.Backpressure.Add(1)
+	d.markDeliveryBlocked(reason, batch)
+	d.logger.Warn("Agent-ingress delivery blocked; spool retained",
+		"event_code", sanitizeReason(reason),
+		"safe_context", map[string]any{
+			"first_sequence": batch.FirstSequence, "last_sequence": batch.LastSequence,
+			"record_count":         len(batch.Records),
+			"singleton_size_block": reason == "ERR_BATCH_TOO_LARGE" && len(batch.Records) == 1,
+			"retry_delay_ms":       d.cfg.MaxBackoff.Milliseconds(),
+			"delivery_health":      DeliveryStateDegraded,
+		})
+	if reason == "ERR_BATCH_TOO_LARGE" || reason == "ERR_REQUEST_TOO_LARGE" {
+		d.logger.Warn("Restore Core request-size compatibility; exact frozen request will be retried",
+			"event_code", sanitizeReason(reason), "retry_delay_ms", d.cfg.MaxBackoff.Milliseconds())
+	}
+	if err := d.wait(ctx, d.cfg.MaxBackoff); err != nil {
+		if cerr := ctxErr(ctx); cerr != nil {
+			return cerr
+		}
+	}
+	return codeErr(CodeTransport, "agent-telemetry delivery blocked; spool retained", cause, false)
 }
 
 func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, error) {
@@ -330,16 +550,16 @@ func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, 
 	h := sha256.New()
 	for _, rec := range batch.Records {
 		if rec.Type != agentBatchRecordType {
-			return coreclient.AgentTelemetryBatch{}, fmt.Errorf("unexpected spool record type %q", rec.Type)
+			return coreclient.AgentTelemetryBatch{}, codeErr(CodePoison, "unexpected durable spool record type", nil, false)
 		}
 		var payload durableBatchPayload
 		if err := json.Unmarshal(rec.Payload, &payload); err != nil {
-			return coreclient.AgentTelemetryBatch{}, fmt.Errorf("corrupt durable agent payload: %w", err)
+			return coreclient.AgentTelemetryBatch{}, codeErr(CodePoison, "corrupt durable agent payload", err, false)
 		}
 		if strings.TrimSpace(payload.TenantID) == "" || strings.TrimSpace(payload.AgentID) == "" ||
 			strings.TrimSpace(payload.SensorID) == "" || payload.Generation < 1 ||
 			payload.FirstSequence == 0 || payload.LastSequence < payload.FirstSequence {
-			return coreclient.AgentTelemetryBatch{}, fmt.Errorf("incomplete durable agent payload")
+			return coreclient.AgentTelemetryBatch{}, codeErr(CodePoison, "incomplete durable agent payload", nil, false)
 		}
 		var env envelopeLite
 		deliveryRecords := json.RawMessage("[]")
@@ -542,21 +762,18 @@ func (d *Drain) Shutdown(ctx context.Context) error {
 	}
 }
 
-func isTerminalCoreError(err error) bool {
-	// BUILD-003: poison parking is an EXPLICIT allowlist of genuinely malformed /
-	// intrinsically un-ingestable durable payloads. Default for unknown/application/
-	// authority/assignment/state Core errors is retain spool and fail closed.
+func isRecordAttributableCoreError(err error) bool {
+	// Poison parking requires an explicit record-attributable Core contract plus
+	// a singleton Sensor record and Agent delivery. Request JSON, schema, batch
+	// checksum and batch/request size failures cannot identify record poison,
+	// even for a singleton; they retain the frozen window via retainBlocked.
+	// Unknown/application/authority/assignment/state errors also fail closed.
 	// HTTP status alone must never authorize AcknowledgeThrough.
-	// BUILD-004 Slice 4: add only the four revoked-temporal authority codes below.
-	return coreclient.IsCoreAPICode(err, "ERR_MALFORMED_JSON") ||
-		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD") ||
+	// BUILD-004 Slice 4 retains the four revoked-temporal authority codes.
+	return coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD") ||
 		coreclient.IsCoreAPICode(err, "ERR_MALFORMED_RECORD_PAYLOAD") ||
-		coreclient.IsCoreAPICode(err, "ERR_UNSUPPORTED_SCHEMA_VERSION") ||
-		coreclient.IsCoreAPICode(err, "ERR_CHECKSUM_MISMATCH") ||
 		coreclient.IsCoreAPICode(err, "ERR_AGENT_HOST_ID_REQUIRED") ||
 		coreclient.IsCoreAPICode(err, "ERR_RECORD_TOO_LARGE") ||
-		coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") ||
-		coreclient.IsCoreAPICode(err, "ERR_REQUEST_TOO_LARGE") ||
 		isAuthorityPoisonError(err)
 }
 
