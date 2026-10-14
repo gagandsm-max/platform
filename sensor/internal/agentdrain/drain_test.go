@@ -2859,8 +2859,9 @@ func TestIssue230PartialAckPostCommitRemoveClearsObsoleteBlock(t *testing.T) {
 		t.Fatalf("poison=%d DurableAcks=%d (no false Core ACK)", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
 	}
 	snap := d.Snapshot()
-	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 0 {
-		t.Fatalf("obsolete ERR_BATCH_TOO_LARGE must clear after durable watermark: %+v", snap)
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete ERR_BATCH_TOO_LARGE must not remain: %+v", snap)
 	}
 	if snap.DurableAcks != 0 {
 		t.Fatalf("snapshot must not report Core ACK: %+v", snap)
@@ -2893,8 +2894,9 @@ func TestIssue230PartialAckPostCommitFsyncClearsObsoleteBlock(t *testing.T) {
 		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
 	}
 	snap := d.Snapshot()
-	if snap.Blocked || snap.State != DeliveryStateUp || snap.PendingRecords != 0 {
-		t.Fatalf("final dir fsync post-commit must clear obsolete delivery block: %+v", snap)
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete delivery block must clear while cleanup fault remains: %+v", snap)
 	}
 }
 
@@ -2939,8 +2941,9 @@ func TestIssue230PartialAckPostCommitWithReplayableTail(t *testing.T) {
 		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
 	}
 	snap := d.Snapshot()
-	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 1 {
-		t.Fatalf("head partial-ack must clear block and preserve tail: %+v", snap)
+	assertCleanupFaultDegraded(t, snap, 1)
+	if snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete 413 must clear while cleanup fault and tail remain: %+v", snap)
 	}
 	// Disarm wrapper so tail Core ACK uses real spool acknowledgement.
 	d.spool = s
@@ -2953,7 +2956,9 @@ func TestIssue230PartialAckPostCommitWithReplayableTail(t *testing.T) {
 		t.Fatalf("tail replay ACK: ok=%v err=%v", ok, err)
 	}
 	final := d.Snapshot()
-	if final.Blocked || final.PendingRecords != 0 || final.DurableAcks != 1 {
+	// Recovery runs at RunOnce start (orphan cleanup + dir sync); tail ACK must not
+	// be the sole reason health recovered.
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 0 || final.DurableAcks != 1 {
 		t.Fatalf("tail ACK health=%+v", final)
 	}
 }
@@ -2993,8 +2998,13 @@ func TestIssue230PartialAckRestartAfterPostCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := d2.Snapshot()
-	if snap.Blocked || snap.State != DeliveryStateUp || snap.PendingRecords != 0 || snap.DurableAcks != 0 {
-		t.Fatalf("restart after partial ack must not resurrect delivery block or invent Core ACK: %+v", snap)
+	if snap.Blocked || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" || snap.PendingRecords != 0 || snap.DurableAcks != 0 {
+		t.Fatalf("restart after fsync partial ack must not resurrect delivery block or invent Core ACK: %+v", snap)
+	}
+	// No orphaned record files after successful remove+injected fsync: cleanup fault
+	// is process-local and correctly absent after restart.
+	if snap.State != DeliveryStateUp || snap.ReasonCode != "" {
+		t.Fatalf("fsync-class restart without orphans must be UP: %+v", snap)
 	}
 	poisonEntries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
 	if len(poisonEntries) == 0 {
@@ -3039,8 +3049,9 @@ func TestIssue230PartialAckConcurrentSnapshotAndQuarantine(t *testing.T) {
 		t.Fatalf("concurrent partial ack state acked=%d count=%d", st.AckedThrough, st.RecordCount)
 	}
 	snap := d.Snapshot()
-	if snap.Blocked || snap.State != DeliveryStateUp || snap.PendingRecords != 0 || snap.DurableAcks != 0 {
-		t.Fatalf("concurrent Snapshot/partial-quarantine left stale degradation: %+v", snap)
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.DurableAcks != 0 || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("concurrent Snapshot/partial-quarantine health=%+v", snap)
 	}
 	if d.Metrics().PoisonCount.Load() != 1 {
 		t.Fatalf("poison=%d", d.Metrics().PoisonCount.Load())
@@ -3075,8 +3086,9 @@ func TestIssue230PartialAckLegacySizeRejectedObservation(t *testing.T) {
 		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
 	}
 	snap := d.Snapshot()
-	if snap.Blocked || snap.State != DeliveryStateUp || snap.PendingRecords != 0 {
-		t.Fatalf("legacy block must clear after durable partial park: %+v", snap)
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("legacy delivery block must clear; cleanup fault must remain: %+v", snap)
 	}
 }
 
@@ -3098,7 +3110,168 @@ func TestIssue230PartialAckEmptyLogicalBacklogNoFalseCoreAck(t *testing.T) {
 		t.Fatalf("empty logical backlog expected: %+v", st)
 	}
 	snap := d.Snapshot()
-	if snap.Blocked || snap.DurableAcks != 0 || snap.State != DeliveryStateUp {
-		t.Fatalf("empty backlog health after partial ack: %+v", snap)
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.DurableAcks != 0 {
+		t.Fatalf("empty backlog must not invent Core ACK: %+v", snap)
+	}
+}
+
+func assertCleanupFaultDegraded(t *testing.T, snap DeliveryStatus, pending int64) {
+	t.Helper()
+	if snap.State != DeliveryStateDegraded || snap.ReasonCode != reasonSpoolCleanupFailed {
+		t.Fatalf("want cleanup DEGRADED/%s, got %+v", reasonSpoolCleanupFailed, snap)
+	}
+	if snap.Blocked {
+		t.Fatalf("cleanup fault must not claim Core delivery Blocked: %+v", snap)
+	}
+	if snap.PendingRecords != pending {
+		t.Fatalf("pending=%d want %d in %+v", snap.PendingRecords, pending, snap)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+func TestIssue230CleanupFaultSurvivesUnrelatedUpload(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	orphan := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(1)))
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("orphan required for this case: %v", err)
+	}
+
+	// Block recovery fsync so tryRecoverCleanupFault cannot clear the fault
+	// even if orphan removal already succeeded.
+	d.syncDir = func(path string) error {
+		if path == d.cfg.AgentSpoolDir {
+			return errors.New("injected spool-dir recovery fsync failure")
+		}
+		return defaultSyncDir(path)
+	}
+	d.spool = s
+	appendNDurable(t, s, 1)
+	d.transport = p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		t.Fatalf("unrelated upload ACK: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("DurableAcks=%d", d.Metrics().DurableAcks.Load())
+	}
+	// Empty backlog + successful unrelated upload must not clear cleanup fault.
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+
+	// Proven recovery: directory sync succeeds (orphans already removable/absent).
+	d.syncDir = nil
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("idle recovery RunOnce: ok=%v err=%v", ok, err)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("recovery must leave no acked orphan, err=%v", err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 0 {
+		t.Fatalf("cleanup recovery must clear fault: %+v", final)
+	}
+}
+
+func TestIssue230CleanupFaultRestartReassertsForOrphan(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
+	streamID := s.StreamID()
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	acked, err := s.AckedThrough()
+	if err != nil || acked < 1 {
+		t.Fatalf("watermark: acked=%d err=%v", acked, err)
+	}
+	orphan := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(1)))
+	raw, err := os.ReadFile(orphan)
+	if err != nil {
+		t.Fatalf("orphan must exist before restart: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	// DiskSpool.recover removes acked orphans on Open when removal succeeds.
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("spool recover should remove acked orphan when possible, err=%v", err)
+	}
+	d2, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: streamID, AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, reopened, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	healed := d2.Snapshot()
+	if healed.Blocked || healed.State != DeliveryStateUp || healed.ReasonCode != "" || healed.DurableAcks != 0 {
+		t.Fatalf("restart after successful spool orphan recover must be UP: %+v", healed)
+	}
+	// Plant an acked orphan that appears after Open to prove Snapshot re-detects it.
+	if err := os.WriteFile(orphan, raw, 0640); err != nil {
+		t.Fatal(err)
+	}
+	snap := d2.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.DurableAcks != 0 {
+		t.Fatalf("orphan observation must not invent Core ACK: %+v", snap)
+	}
+	// Recovery RunOnce removes the planted orphan and clears the fault.
+	if ok, err := d2.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("recovery after planted orphan: ok=%v err=%v", ok, err)
+	}
+	final := d2.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" {
+		t.Fatalf("post-restart recovery must clear: %+v", final)
+	}
+}
+
+func TestIssue230CleanupFaultClearsAfterFsyncRecovery(t *testing.T) {
+	d, s, _, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_fsync")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	d.spool = s
+	// Empty backlog: recovery is orphan cleanup (none) + spool dir sync only.
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("recovery RunOnce: ok=%v err=%v", ok, err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" {
+		t.Fatalf("fsync recovery must clear cleanup fault: %+v", final)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("recovery must not invent Core ACK: %d", d.Metrics().DurableAcks.Load())
+	}
+}
+
+func TestIssue230CleanupFaultNotClearedBySnapshotAlone(t *testing.T) {
+	d, _, _, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_fsync")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	for i := 0; i < 8; i++ {
+		assertCleanupFaultDegraded(t, d.Snapshot(), 0)
 	}
 }

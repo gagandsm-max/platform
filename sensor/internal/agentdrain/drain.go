@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,10 @@ import (
 const (
 	agentBatchRecordType = "agent.delivery.batch"
 	poisonDirName        = "agent-poison"
+	// reasonSpoolCleanupFailed is reported when durable AckedThrough advanced but
+	// record removal or final spool-directory fsync did not complete. Distinct from
+	// Core delivery blockage (e.g. ERR_BATCH_TOO_LARGE).
+	reasonSpoolCleanupFailed = "ERR_SPOOL_CLEANUP_FAILED"
 )
 
 type ErrorCode string
@@ -185,6 +190,14 @@ type Drain struct {
 	// under deliveryMu before marking.
 	deliveryGen uint64
 
+	// cleanupFault is independent of deliveryBlocked. It remains set after a
+	// partial AcknowledgeThrough (watermark durable, cleanup/fsync failed) until
+	// orphan removal + spool-directory sync succeed. Empty backlog and unrelated
+	// Core uploads must not clear it.
+	cleanupFault      bool
+	cleanupFaultSince time.Time
+	cleanupFaultSeq   uint64
+
 	// Optional test-only seam. Nil in production. Invoked after a positive
 	// legacy sizeRejected+pending observation and before the generation-gated
 	// mark attempt, so barrier tests can interleave a durable ACK.
@@ -262,6 +275,7 @@ func (d *Drain) Snapshot() DeliveryStatus {
 	}
 	d.refreshStats()
 	d.observeLegacySizeBlock()
+	d.observeOrphanedCleanupFault()
 
 	d.deliveryMu.RLock()
 	defer d.deliveryMu.RUnlock()
@@ -283,6 +297,17 @@ func (d *Drain) Snapshot() DeliveryStatus {
 		st.BlockedSince = d.blockedSince
 		st.FirstSequence = d.blockedFirstSeq
 		st.LastSequence = d.blockedLastSeq
+		return st
+	}
+	if d.cleanupFault {
+		// Storage cleanup failure is not a Core delivery block: Blocked stays false
+		// so operators can distinguish obsolete 413 blockage from unresolved I/O.
+		st.State = DeliveryStateDegraded
+		st.Blocked = false
+		st.ReasonCode = reasonSpoolCleanupFailed
+		st.BlockedSince = d.cleanupFaultSince
+		st.FirstSequence = d.cleanupFaultSeq
+		st.LastSequence = d.cleanupFaultSeq
 	}
 	return st
 }
@@ -315,6 +340,32 @@ func (d *Drain) clearDeliveryBlocked() {
 	d.blockedFirstSeq = 0
 	d.blockedLastSeq = 0
 	d.deliveryGen++
+	// Intentionally does not clear cleanupFault: durable Core ACK / poison park
+	// success must not hide an unresolved spool cleanup failure.
+}
+
+func (d *Drain) markCleanupFault(seq uint64) {
+	if d == nil {
+		return
+	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	if !d.cleanupFault {
+		d.cleanupFaultSince = time.Now().UTC()
+	}
+	d.cleanupFault = true
+	d.cleanupFaultSeq = seq
+}
+
+func (d *Drain) clearCleanupFault() {
+	if d == nil {
+		return
+	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	d.cleanupFault = false
+	d.cleanupFaultSince = time.Time{}
+	d.cleanupFaultSeq = 0
 }
 
 // observeLegacySizeBlock surfaces durable pre-65fe619 sizeRejected sidecars as
@@ -421,6 +472,9 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	d.refreshStats()
+	// Attempt cleanup recovery before selecting work. Success requires orphan
+	// removal + spool-directory sync; empty backlog alone does not clear.
+	d.tryRecoverCleanupFault()
 	batch, err := d.spool.ReadOrReserveOutboundBatch(d.cfg.MaxBatchRecords, d.cfg.MaxBatchPayloadBytes)
 	if err != nil {
 		return false, codeErr(CodeSpool, "failed reading agent spool batch", err, false)
@@ -752,8 +806,10 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 // reconcileDeliveryAfterPartialParkAck clears obsolete delivery-block health only
 // when durable spool state proves AcknowledgeThrough committed parkedSeq even
 // though a post-commit cleanup/fsync error was returned. Pre-commit failures and
-// uncertain Stats inspection retain the prior block. Storage/IO failure remains
-// surfaced by the caller; this never increments DurableAcks.
+// uncertain Stats inspection retain the prior block. After clearing the obsolete
+// Core delivery reason, an unresolved storage-cleanup fault remains visible as
+// DEGRADED (ERR_SPOOL_CLEANUP_FAILED) until orphan cleanup + directory sync
+// succeed. This never increments DurableAcks.
 func (d *Drain) reconcileDeliveryAfterPartialParkAck(parkedSeq uint64) bool {
 	st, err := d.spool.Stats()
 	if err != nil {
@@ -765,8 +821,113 @@ func (d *Drain) reconcileDeliveryAfterPartialParkAck(parkedSeq uint64) bool {
 	// Logical pending excludes sequences at or below AckedThrough even if an
 	// orphaned record file remains after a failed cleanup.
 	d.clearDeliveryBlocked()
+	d.markCleanupFault(parkedSeq)
 	d.refreshStats()
 	return true
+}
+
+// observeOrphanedCleanupFault reasserts cleanup degradation after restart when
+// acked record files remain on disk. Spool I/O stays outside deliveryMu.
+func (d *Drain) observeOrphanedCleanupFault() {
+	if d == nil {
+		return
+	}
+	d.deliveryMu.RLock()
+	already := d.cleanupFault
+	d.deliveryMu.RUnlock()
+	if already {
+		return
+	}
+	st, err := d.spool.Stats()
+	if err != nil || st.AckedThrough == 0 {
+		return
+	}
+	orphans, err := d.listAckedOrphans(st.AckedThrough)
+	if err != nil || len(orphans) == 0 {
+		return
+	}
+	d.markCleanupFault(st.AckedThrough)
+}
+
+// tryRecoverCleanupFault clears ERR_SPOOL_CLEANUP_FAILED only after durable
+// Stats prove the fault sequence is covered and orphan removal plus spool
+// directory fsync succeed. Unrelated upload success does not call this clear.
+func (d *Drain) tryRecoverCleanupFault() {
+	if d == nil {
+		return
+	}
+	d.deliveryMu.RLock()
+	faulted := d.cleanupFault
+	faultSeq := d.cleanupFaultSeq
+	d.deliveryMu.RUnlock()
+	if !faulted {
+		return
+	}
+	st, err := d.spool.Stats()
+	if err != nil || st.AckedThrough < faultSeq {
+		return
+	}
+	if err := d.cleanupAckedOrphans(st.AckedThrough); err != nil {
+		return
+	}
+	syncFn := d.syncDir
+	if syncFn == nil {
+		syncFn = defaultSyncDir
+	}
+	if err := syncFn(d.cfg.AgentSpoolDir); err != nil {
+		return
+	}
+	d.clearCleanupFault()
+	d.refreshStats()
+}
+
+func (d *Drain) listAckedOrphans(ackedThrough uint64) ([]string, error) {
+	entries, err := os.ReadDir(d.cfg.AgentSpoolDir)
+	if err != nil {
+		return nil, err
+	}
+	var orphans []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		seq, ok := parseRecordFileSeq(e.Name())
+		if !ok || seq > ackedThrough {
+			continue
+		}
+		orphans = append(orphans, filepath.Join(d.cfg.AgentSpoolDir, e.Name()))
+	}
+	return orphans, nil
+}
+
+func (d *Drain) cleanupAckedOrphans(ackedThrough uint64) error {
+	orphans, err := d.listAckedOrphans(ackedThrough)
+	if err != nil {
+		return err
+	}
+	for _, path := range orphans {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseRecordFileSeq(name string) (uint64, bool) {
+	const prefix = "record-"
+	const suffix = ".json"
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+		return 0, false
+	}
+	seqStr := strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)
+	if len(seqStr) != 20 {
+		return 0, false
+	}
+	seq, err := strconv.ParseUint(seqStr, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return seq, true
 }
 
 func (d *Drain) refreshStats() {
