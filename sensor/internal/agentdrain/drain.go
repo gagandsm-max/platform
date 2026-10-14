@@ -457,6 +457,10 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		if parkErr := d.parkHead(batch, "ERR_MALFORMED_DURABLE_PAYLOAD", err); parkErr != nil {
 			return false, parkErr
 		}
+		// Durable quarantine is not a Core ACK, but the obsolete delivery-block
+		// reason no longer applies once the poisoned head is parked and removed.
+		d.clearDeliveryBlocked()
+		d.refreshStats()
 		return false, codeErr(CodePoison, "parked malformed durable agent batch", err, false)
 	}
 
@@ -495,6 +499,10 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 			return false, parkErr
 		}
 		d.metrics.FailuresPermanent.Add(1)
+		// Clear only after durable poison publish + spool removal succeeded.
+		// Poison quarantine must not increment DurableAcks.
+		d.clearDeliveryBlocked()
+		d.refreshStats()
 		return false, codeErr(CodePoison, "parked terminal agent-telemetry failure", err, false)
 	}
 

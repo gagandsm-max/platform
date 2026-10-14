@@ -2330,3 +2330,381 @@ func TestDeliveryHealthConcurrentSnapshotAndAckRace(t *testing.T) {
 		t.Fatalf("acks=%d calls=%d", snap.DurableAcks, calls.Load())
 	}
 }
+
+// Issue #230 repro: after Core 413 retainBlocked → DEGRADED, an exact-replay
+// singleton ERR_MALFORMED_RECORD parks successfully but health stays DEGRADED.
+func TestIssue230QuarantineClearsStaleDeliveryDegraded(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	var calls atomic.Uint64
+	var firstBatchID string
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		n := calls.Add(1)
+		if n == 1 {
+			firstBatchID = b.BatchID
+			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+		}
+		if b.BatchID != firstBatchID || len(b.Records) != 1 {
+			t.Errorf("exact frozen replay broken: call=%d batchID=%q first=%q records=%d", n, b.BatchID, firstBatchID, len(b.Records))
+		}
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+		t.Fatalf("first 413: ok=%v err=%v", ok, err)
+	}
+	if snap := d.Snapshot(); !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("expected DEGRADED after 413: %+v", snap)
+	}
+
+	ok, parkErr := d.RunOnce(context.Background())
+	if ok || parkErr == nil {
+		t.Fatalf("singleton quarantine: ok=%v err=%v", ok, parkErr)
+	}
+	var de *Error
+	if !errors.As(parkErr, &de) || de.Code != CodePoison {
+		t.Fatalf("want poison park error, got %v", parkErr)
+	}
+
+	st, statsErr := s.Stats()
+	if statsErr != nil {
+		t.Fatal(statsErr)
+	}
+	if st.RecordCount != 0 {
+		t.Fatalf("poisoned record must leave spool, count=%d", st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 {
+		t.Fatalf("poison count=%d", d.Metrics().PoisonCount.Load())
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("quarantine must not count DurableAcks, got %d", d.Metrics().DurableAcks.Load())
+	}
+
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 0 {
+		t.Fatalf("Issue #230: delivery must recover after durable quarantine: %+v", snap)
+	}
+	if snap.DurableAcks != 0 {
+		t.Fatalf("snapshot DurableAcks=%d", snap.DurableAcks)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+// ackFailSpool fails AcknowledgeThrough when armed so poison publish can succeed
+// while spool removal fails closed.
+type ackFailSpool struct {
+	Spool
+	failAck bool
+}
+
+func (a *ackFailSpool) AcknowledgeThrough(seq uint64) error {
+	if a.failAck {
+		return errors.New("injected AcknowledgeThrough failure")
+	}
+	return a.Spool.AcknowledgeThrough(seq)
+}
+
+func TestIssue230PoisonFailuresNeverFalselyRecover(t *testing.T) {
+	cases := []struct {
+		name  string
+		arm   func(*Drain)
+		disarm func(*Drain)
+	}{
+		{
+			name: "poison_dir_fsync",
+			arm: func(d *Drain) {
+				d.syncDir = func(string) error { return errors.New("injected poison dir fsync failure") }
+			},
+			disarm: func(d *Drain) { d.syncDir = nil },
+		},
+		{
+			name: "poison_file_publish",
+			arm: func(d *Drain) {
+				d.poisonRename = func(string, string) error {
+					return errors.New("injected poison rename failure")
+				}
+			},
+			disarm: func(d *Drain) { d.poisonRename = nil },
+		},
+		{
+			name: "acknowledge_through",
+			arm: func(d *Drain) {
+				d.spool = &ackFailSpool{Spool: d.spool, failAck: true}
+			},
+			disarm: func(d *Drain) {
+				if w, ok := d.spool.(*ackFailSpool); ok {
+					d.spool = w.Spool
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, dir := openSpool(t)
+			appendNDurable(t, s, 1)
+			calls := 0
+			tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+				calls++
+				if calls == 1 {
+					return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+				}
+				return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+			})
+			d, err := New(Config{
+				SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+				InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+			}, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.wait = func(context.Context, time.Duration) error { return nil }
+			if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+				t.Fatalf("413 setup: ok=%v err=%v", ok, err)
+			}
+			if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+				t.Fatalf("precondition DEGRADED missing: %+v", snap)
+			}
+			tc.arm(d)
+			ok, err := d.RunOnce(context.Background())
+			tc.disarm(d)
+			if ok || err == nil {
+				t.Fatalf("poison failure must surface: ok=%v err=%v", ok, err)
+			}
+			st, _ := s.Stats()
+			if st.RecordCount != 1 {
+				t.Fatalf("failed poison must retain spool head, count=%d", st.RecordCount)
+			}
+			if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+				t.Fatalf("failed poison must not advance counts: poison=%d acks=%d",
+					d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+			}
+			snap := d.Snapshot()
+			if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+				t.Fatalf("poison failure must retain prior DEGRADED: %+v", snap)
+			}
+			if snap.PendingRecords != 1 {
+				t.Fatalf("pending after failed poison=%d", snap.PendingRecords)
+			}
+		})
+	}
+}
+
+func TestIssue230LocalMalformedQuarantineClearsPreexistingBlock(t *testing.T) {
+	// Atypical but reachable: delivery already DEGRADED from a prior retainBlocked,
+	// then a locally recognized malformed singleton is durably parked.
+	s, dir := openSpool(t)
+	payload := []byte(`{"tenantId":"incomplete"}`)
+	rec, err := s.Append(spool.AppendRequest{Class: spool.ClassOperational, Type: agentBatchRecordType, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.markDeliveryBlocked("ERR_BATCH_TOO_LARGE", spool.Batch{FirstSequence: rec.Sequence, LastSequence: rec.Sequence})
+	if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("preexisting block missing: %+v", snap)
+	}
+
+	ok, err := d.RunOnce(context.Background())
+	var de *Error
+	if ok || !errors.As(err, &de) || de.Code != CodePoison {
+		t.Fatalf("local malformed park: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 || d.Metrics().Attempts.Load() != 0 {
+		t.Fatalf("local quarantine counters: poison=%d acks=%d attempts=%d",
+			d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load(), d.Metrics().Attempts.Load())
+	}
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 0 {
+		t.Fatalf("local quarantine must clear obsolete block: %+v", snap)
+	}
+}
+
+func TestIssue230HeadOnlyQuarantineRetainsReplayableTail(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 2)
+	calls := 0
+	var firstHeadSeq uint64
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls++
+		switch calls {
+		case 1:
+			firstHeadSeq = b.FirstIngressSequence
+			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+		case 2:
+			if b.FirstIngressSequence != firstHeadSeq || len(b.Records) != 1 {
+				t.Errorf("quarantine attempt identity drift: %+v", b)
+			}
+			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+		default:
+			return coreclient.AgentTelemetryAck{
+				Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+			}, nil
+		}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+		t.Fatalf("413: ok=%v err=%v", ok, err)
+	}
+	ok, err := d.RunOnce(context.Background())
+	var de *Error
+	if ok || !errors.As(err, &de) || de.Code != CodePoison {
+		t.Fatalf("head quarantine: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 1 {
+		t.Fatalf("after head quarantine health=%+v", snap)
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 1 {
+		t.Fatalf("tail must remain, count=%d", st.RecordCount)
+	}
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		t.Fatalf("tail replay ACK: ok=%v err=%v", ok, err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.PendingRecords != 0 || final.DurableAcks != 1 {
+		t.Fatalf("tail ACK health=%+v", final)
+	}
+}
+
+func TestIssue230StaleLegacyObservationCannotReassertAfterQuarantine(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 2)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+
+	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	observed := make(chan struct{})
+	release := make(chan struct{})
+	d.afterLegacySizeObserve = func() {
+		close(observed)
+		<-release
+	}
+
+	var snap DeliveryStatus
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		snap = d.Snapshot()
+	}()
+	select {
+	case <-observed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for legacy size observation barrier")
+	}
+
+	ok, err := d.RunOnce(context.Background())
+	var de *Error
+	if ok || !errors.As(err, &de) || de.Code != CodePoison {
+		close(release)
+		wg.Wait()
+		t.Fatalf("quarantine during stale observation: ok=%v err=%v", ok, err)
+	}
+	close(release)
+	wg.Wait()
+
+	if snap.Blocked || snap.State != DeliveryStateUp {
+		t.Fatalf("stale legacy observation reasserted after quarantine: %+v", snap)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.PendingRecords != 1 {
+		t.Fatalf("post-quarantine health=%+v", final)
+	}
+}
+
+func TestIssue230ConcurrentSnapshotAndQuarantineRace(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+
+	var calls atomic.Uint64
+	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls.Add(1)
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 64; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		ok, err := d.RunOnce(context.Background())
+		var de *Error
+		if ok || !errors.As(err, &de) || de.Code != CodePoison {
+			t.Errorf("quarantine under concurrent Snapshot: ok=%v err=%v", ok, err)
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.PendingRecords != 0 {
+		t.Fatalf("concurrent Snapshot/quarantine left stale degradation: %+v", snap)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || snap.DurableAcks != 0 || calls.Load() != 1 {
+		t.Fatalf("poison=%d acks=%d calls=%d", d.Metrics().PoisonCount.Load(), snap.DurableAcks, calls.Load())
+	}
+}
