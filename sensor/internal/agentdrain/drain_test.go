@@ -2468,6 +2468,26 @@ func (p *partialAckSpool) Stats() (spool.Stats, error) {
 	return p.Spool.Stats()
 }
 
+func (p *partialAckSpool) ReconcileAckedCleanup() error {
+	type reconciler interface {
+		ReconcileAckedCleanup() error
+	}
+	if r, ok := p.Spool.(reconciler); ok {
+		return r.ReconcileAckedCleanup()
+	}
+	return errors.New("ReconcileAckedCleanup unavailable on wrapped spool")
+}
+
+func (p *partialAckSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	type reporter interface {
+		UnresolvedAckedCleanup() (bool, uint64, error)
+	}
+	if r, ok := p.Spool.(reporter); ok {
+		return r.UnresolvedAckedCleanup()
+	}
+	return false, 0, nil
+}
+
 func TestIssue230PoisonFailuresNeverFalselyRecover(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -3185,7 +3205,7 @@ func TestIssue230CleanupFaultSurvivesUnrelatedUpload(t *testing.T) {
 	}
 }
 
-func TestIssue230CleanupFaultRestartReassertsForOrphan(t *testing.T) {
+func TestIssue230CleanupFaultRestartOpenRecoversOrphan(t *testing.T) {
 	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
 	streamID := s.StreamID()
 	ok, err := d.RunOnce(context.Background())
@@ -3198,8 +3218,7 @@ func TestIssue230CleanupFaultRestartReassertsForOrphan(t *testing.T) {
 		t.Fatalf("watermark: acked=%d err=%v", acked, err)
 	}
 	orphan := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(1)))
-	raw, err := os.ReadFile(orphan)
-	if err != nil {
+	if _, err := os.Stat(orphan); err != nil {
 		t.Fatalf("orphan must exist before restart: %v", err)
 	}
 	if err := s.Close(); err != nil {
@@ -3210,7 +3229,7 @@ func TestIssue230CleanupFaultRestartReassertsForOrphan(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
-	// DiskSpool.recover removes acked orphans on Open when removal succeeds.
+	// DiskSpool.recover removes validated acked orphans on Open when removal succeeds.
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Fatalf("spool recover should remove acked orphan when possible, err=%v", err)
 	}
@@ -3225,22 +3244,240 @@ func TestIssue230CleanupFaultRestartReassertsForOrphan(t *testing.T) {
 	if healed.Blocked || healed.State != DeliveryStateUp || healed.ReasonCode != "" || healed.DurableAcks != 0 {
 		t.Fatalf("restart after successful spool orphan recover must be UP: %+v", healed)
 	}
-	// Plant an acked orphan that appears after Open to prove Snapshot re-detects it.
-	if err := os.WriteFile(orphan, raw, 0640); err != nil {
+}
+
+func TestIssue230SnapshotDoesNotScanPlantedAckedOrphans(t *testing.T) {
+	s, dir := openSpool(t)
+	r := appendDurable(t, s, 1)
+	recordPath := filepath.Join(dir, fmt.Sprintf("record-%020d.json", r.Sequence))
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
 		t.Fatal(err)
 	}
-	snap := d2.Snapshot()
-	assertCleanupFaultDegraded(t, snap, 0)
+	if err := s.AcknowledgeThrough(r.Sequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recordPath, raw, 0640); err != nil {
+		t.Fatal(err)
+	}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap := d.Snapshot(); snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.DurableAcks != 0 {
+		t.Fatalf("Snapshot must not directory-scan planted orphans into DEGRADED or invent ACK: %+v", snap)
+	}
+	if _, err := os.Stat(recordPath); err != nil {
+		t.Fatalf("Snapshot must not delete planted orphan: %v", err)
+	}
+}
+
+func TestIssue230UnresolvedCleanupReporterReassertsCheaply(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	wrap := &unresolvedCleanupSpool{Spool: s, unresolved: true, seq: 1}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 1)
 	if snap.DurableAcks != 0 {
-		t.Fatalf("orphan observation must not invent Core ACK: %+v", snap)
+		t.Fatalf("unresolved cleanup must not invent Core ACK: %+v", snap)
 	}
-	// Recovery RunOnce removes the planted orphan and clears the fault.
-	if ok, err := d2.RunOnce(context.Background()); ok || err != nil {
-		t.Fatalf("recovery after planted orphan: ok=%v err=%v", ok, err)
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
 	}
-	final := d2.Snapshot()
-	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" {
-		t.Fatalf("post-restart recovery must clear: %+v", final)
+}
+
+func TestIssue230CleanupReconcilePreservesPendingAndQuarantinesUnsafe(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	ackedOrphan := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(1)))
+	if _, err := os.Stat(ackedOrphan); err != nil {
+		t.Fatalf("acked orphan required: %v", err)
+	}
+	pending := appendDurable(t, s, 2)
+	pendingPath := filepath.Join(dir, fmt.Sprintf("record-%020d.json", pending.Sequence))
+	pendingRaw, err := os.ReadFile(pendingPath)
+	if err != nil {
+		t.Fatalf("pending telemetry required: %v", err)
+	}
+
+	zeroPath := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(0)))
+	if err := os.WriteFile(zeroPath, []byte(`{"not":"a-record"}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	badName := filepath.Join(dir, "record-not-a-sequence.json")
+	if err := os.WriteFile(badName, []byte("garbage"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink must not use a pending-looking record sequence name: Stats() would
+	// fail-closed on unsafe pending paths before cleanup recovery can run.
+	symlinkPath := filepath.Join(dir, "unsafe-acked-looking-link")
+	target := filepath.Join(dir, "outside-target")
+	if err := os.WriteFile(target, []byte("secret"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	d.spool = s
+	// Recover cleanup without selecting/uploading pending work.
+	d.tryRecoverCleanupFault()
+	if _, err := os.Stat(ackedOrphan); !os.IsNotExist(err) {
+		t.Fatalf("validated acked orphan must be removed by DiskSpool, err=%v", err)
+	}
+	if _, err := os.Stat(zeroPath); !os.IsNotExist(err) {
+		t.Fatalf("sequence-zero artifact must be quarantined, err=%v", err)
+	}
+	if _, err := os.Stat(badName); !os.IsNotExist(err) {
+		t.Fatalf("invalid-name artifact must be quarantined, err=%v", err)
+	}
+	if _, err := os.Lstat(symlinkPath); !os.IsNotExist(err) {
+		t.Fatalf("symlink artifact must be quarantined, err=%v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("symlink target must not be deleted: %v", err)
+	}
+	gotPending, err := os.ReadFile(pendingPath)
+	if err != nil || !reflect.DeepEqual(gotPending, pendingRaw) {
+		t.Fatalf("pending valid telemetry must remain intact")
+	}
+	qEntries, err := os.ReadDir(filepath.Join(dir, "quarantine"))
+	if err != nil || len(qEntries) < 3 {
+		t.Fatalf("expected quarantined unsafe artifacts, got %d err=%v", len(qEntries), err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 1 || final.DurableAcks != 0 {
+		t.Fatalf("after safe reconcile health=%+v", final)
+	}
+}
+
+type unresolvedCleanupSpool struct {
+	Spool
+	unresolved bool
+	seq        uint64
+}
+
+func (u *unresolvedCleanupSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	return u.unresolved, u.seq, nil
+}
+
+func (u *unresolvedCleanupSpool) ReconcileAckedCleanup() error {
+	type reconciler interface {
+		ReconcileAckedCleanup() error
+	}
+	if r, ok := u.Spool.(reconciler); ok {
+		return r.ReconcileAckedCleanup()
+	}
+	return errors.New("ReconcileAckedCleanup unavailable")
+}
+
+type countingUnresolvedSpool struct {
+	Spool
+	unresolved      bool
+	seq             uint64
+	unresolvedCalls atomic.Uint64
+	reconcileCalls  atomic.Uint64
+}
+
+func (u *countingUnresolvedSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	u.unresolvedCalls.Add(1)
+	return u.unresolved, u.seq, nil
+}
+
+func (u *countingUnresolvedSpool) ReconcileAckedCleanup() error {
+	u.reconcileCalls.Add(1)
+	type reconciler interface {
+		ReconcileAckedCleanup() error
+	}
+	if r, ok := u.Spool.(reconciler); ok {
+		return r.ReconcileAckedCleanup()
+	}
+	return errors.New("ReconcileAckedCleanup unavailable")
+}
+
+func TestIssue230SnapshotCleanupObservationIsO1NotDirectoryScan(t *testing.T) {
+	s, dir := openSpool(t)
+	const backlog = 200
+	appendNDurable(t, s, backlog)
+	wrap := &countingUnresolvedSpool{Spool: s, unresolved: true, seq: 1}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 25; i++ {
+		snap := d.Snapshot()
+		assertCleanupFaultDegraded(t, snap, int64(backlog))
+		if snap.DurableAcks != 0 || strings.Contains(fmt.Sprintf("%+v", snap), "DEVICE_DOWN") {
+			t.Fatalf("health must stay truthful under backlog: %+v", snap)
+		}
+	}
+	if wrap.reconcileCalls.Load() != 0 {
+		t.Fatalf("Snapshot must not invoke ReconcileAckedCleanup (got %d)", wrap.reconcileCalls.Load())
+	}
+	if wrap.unresolvedCalls.Load() < 1 {
+		t.Fatal("Snapshot must use O(1) UnresolvedAckedCleanup reporter")
+	}
+	st, err := s.Stats()
+	if err != nil || st.RecordCount != backlog {
+		t.Fatalf("pending backlog must remain intact: %+v err=%v", st, err)
+	}
+}
+
+func TestIssue230CleanupFaultConcurrentSnapshotAndSpoolOps(t *testing.T) {
+	d, s, _, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	d.spool = s
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 40; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for j := 0; j < 8; j++ {
+			_, _ = s.Stats()
+			_ = s.ReconcileAckedCleanup()
+		}
+	}()
+	close(start)
+	wg.Wait()
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("recovery after concurrent ops: ok=%v err=%v", ok, err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.DurableAcks != 0 {
+		t.Fatalf("concurrent cleanup recovery health=%+v", final)
 	}
 }
 

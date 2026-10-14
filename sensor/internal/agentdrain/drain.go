@@ -11,7 +11,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -153,6 +152,18 @@ type DeliveryStatus struct {
 
 type sizeRejectedReporter interface {
 	OutboundBatchSizeRejected() (bool, error)
+}
+
+// ackedCleanupReconciler is implemented by DiskSpool. Drain never deletes
+// record-like files by filename; cleanup stays under spool lock/validation.
+type ackedCleanupReconciler interface {
+	ReconcileAckedCleanup() error
+}
+
+// unresolvedCleanupReporter is an O(1) spool signal for unresolved post-ACK
+// cleanup/fsync failure. Snapshot must not scan the spool directory.
+type unresolvedCleanupReporter interface {
+	UnresolvedAckedCleanup() (bool, uint64, error)
 }
 
 type Drain struct {
@@ -826,8 +837,9 @@ func (d *Drain) reconcileDeliveryAfterPartialParkAck(parkedSeq uint64) bool {
 	return true
 }
 
-// observeOrphanedCleanupFault reasserts cleanup degradation after restart when
-// acked record files remain on disk. Spool I/O stays outside deliveryMu.
+// observeOrphanedCleanupFault reasserts cleanup degradation from the spool's
+// O(1) unresolved-cleanup flag (set when AcknowledgeThrough advances the
+// watermark but removal/fsync fails). Snapshot must not scan the spool directory.
 func (d *Drain) observeOrphanedCleanupFault() {
 	if d == nil {
 		return
@@ -838,20 +850,20 @@ func (d *Drain) observeOrphanedCleanupFault() {
 	if already {
 		return
 	}
-	st, err := d.spool.Stats()
-	if err != nil || st.AckedThrough == 0 {
+	reporter, ok := d.spool.(unresolvedCleanupReporter)
+	if !ok {
 		return
 	}
-	orphans, err := d.listAckedOrphans(st.AckedThrough)
-	if err != nil || len(orphans) == 0 {
+	unresolved, seq, err := reporter.UnresolvedAckedCleanup()
+	if err != nil || !unresolved {
 		return
 	}
-	d.markCleanupFault(st.AckedThrough)
+	d.markCleanupFault(seq)
 }
 
 // tryRecoverCleanupFault clears ERR_SPOOL_CLEANUP_FAILED only after durable
-// Stats prove the fault sequence is covered and orphan removal plus spool
-// directory fsync succeed. Unrelated upload success does not call this clear.
+// Stats prove the fault sequence is covered and DiskSpool-owned reconcile plus
+// spool directory fsync succeed. Unrelated upload success does not clear it.
 func (d *Drain) tryRecoverCleanupFault() {
 	if d == nil {
 		return
@@ -867,7 +879,11 @@ func (d *Drain) tryRecoverCleanupFault() {
 	if err != nil || st.AckedThrough < faultSeq {
 		return
 	}
-	if err := d.cleanupAckedOrphans(st.AckedThrough); err != nil {
+	reconciler, ok := d.spool.(ackedCleanupReconciler)
+	if !ok {
+		return
+	}
+	if err := reconciler.ReconcileAckedCleanup(); err != nil {
 		return
 	}
 	syncFn := d.syncDir
@@ -879,55 +895,6 @@ func (d *Drain) tryRecoverCleanupFault() {
 	}
 	d.clearCleanupFault()
 	d.refreshStats()
-}
-
-func (d *Drain) listAckedOrphans(ackedThrough uint64) ([]string, error) {
-	entries, err := os.ReadDir(d.cfg.AgentSpoolDir)
-	if err != nil {
-		return nil, err
-	}
-	var orphans []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		seq, ok := parseRecordFileSeq(e.Name())
-		if !ok || seq > ackedThrough {
-			continue
-		}
-		orphans = append(orphans, filepath.Join(d.cfg.AgentSpoolDir, e.Name()))
-	}
-	return orphans, nil
-}
-
-func (d *Drain) cleanupAckedOrphans(ackedThrough uint64) error {
-	orphans, err := d.listAckedOrphans(ackedThrough)
-	if err != nil {
-		return err
-	}
-	for _, path := range orphans {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return nil
-}
-
-func parseRecordFileSeq(name string) (uint64, bool) {
-	const prefix = "record-"
-	const suffix = ".json"
-	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
-		return 0, false
-	}
-	seqStr := strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)
-	if len(seqStr) != 20 {
-		return 0, false
-	}
-	seq, err := strconv.ParseUint(seqStr, 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return seq, true
 }
 
 func (d *Drain) refreshStats() {

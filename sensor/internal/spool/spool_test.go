@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -408,5 +409,158 @@ func TestControlDirectoryCoexistsWithSpoolRecovery(t *testing.T) {
 		if strings.Contains(e.Name(), "applied-state") || strings.Contains(e.Name(), "control") {
 			t.Fatalf("control artifact quarantined: %s", e.Name())
 		}
+	}
+}
+
+func TestReconcileAckedCleanupQuarantinesUnsafeDoesNotBlindDelete(t *testing.T) {
+	s := openTest(t, 1024)
+	defer s.Close()
+	r1 := add(t, s, "acked-body")
+	r2 := add(t, s, "pending-body")
+	orphanPath := filepath.Join(s.dir, recordFileName(r1.Sequence))
+	validOrphan, err := os.ReadFile(orphanPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingPath := filepath.Join(s.dir, recordFileName(r2.Sequence))
+	pendingRaw, err := os.ReadFile(pendingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcknowledgeThrough(r1.Sequence); err != nil {
+		t.Fatal(err)
+	}
+
+	zeroPath := filepath.Join(s.dir, fmt.Sprintf("record-%020d.json", uint64(0)))
+	if err := os.WriteFile(zeroPath, []byte(`{"sequence":0}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	badName := filepath.Join(s.dir, "record-not-a-sequence.json")
+	if err := os.WriteFile(badName, []byte("nope"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt acknowledged-looking body at seq 1 (must quarantine, never blind-delete).
+	if err := os.WriteFile(orphanPath, []byte(`{"sequence":1,"not":"valid"}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(s.dir, "unsafe-acked-looking-link")
+	target := filepath.Join(s.dir, "outside-target")
+	if err := os.WriteFile(target, []byte("secret"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ReconcileAckedCleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
+		t.Fatalf("corrupt acked-looking record must be quarantined, err=%v", err)
+	}
+	if _, err := os.Stat(zeroPath); !os.IsNotExist(err) {
+		t.Fatalf("sequence-zero name must be quarantined, err=%v", err)
+	}
+	if _, err := os.Stat(badName); !os.IsNotExist(err) {
+		t.Fatalf("invalid-name must be quarantined, err=%v", err)
+	}
+	if _, err := os.Lstat(symlinkPath); !os.IsNotExist(err) {
+		t.Fatalf("symlink must be quarantined, err=%v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("symlink target must survive: %v", err)
+	}
+	gotPending, err := os.ReadFile(pendingPath)
+	if err != nil || string(gotPending) != string(pendingRaw) {
+		t.Fatalf("pending record must remain intact")
+	}
+	// Restore a validated acked orphan and prove only then is it removed.
+	if err := os.WriteFile(orphanPath, validOrphan, 0640); err != nil {
+		t.Fatal(err)
+	}
+	s.cleanupUnresolved = true
+	if err := s.ReconcileAckedCleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
+		t.Fatalf("validated acked orphan must be removed, err=%v", err)
+	}
+	unresolved, _, err := s.UnresolvedAckedCleanup()
+	if err != nil || unresolved {
+		t.Fatalf("successful reconcile must clear unresolved flag: unresolved=%v err=%v", unresolved, err)
+	}
+	qEntries, err := os.ReadDir(s.quarantineDir)
+	if err != nil || len(qEntries) < 3 {
+		t.Fatalf("expected quarantines, got %d err=%v", len(qEntries), err)
+	}
+}
+
+func TestReconcileAckedCleanupFailedRemoveSetsUnresolvedFlag(t *testing.T) {
+	s := openTest(t, 1024)
+	defer s.Close()
+	r := add(t, s, "body")
+	path := filepath.Join(s.dir, recordFileName(r.Sequence))
+	encoded, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcknowledgeThrough(r.Sequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, encoded, 0640); err != nil {
+		t.Fatal(err)
+	}
+	s.removeFile = func(string) error { return errors.New("injected record remove failure") }
+
+	if err := s.ReconcileAckedCleanup(); err == nil {
+		t.Fatal("expected reconcile failure when record removal is denied")
+	}
+	unresolved, seq, err := s.UnresolvedAckedCleanup()
+	if err != nil || !unresolved || seq < r.Sequence {
+		t.Fatalf("cleanup failure must set unresolved flag: unresolved=%v seq=%d err=%v", unresolved, seq, err)
+	}
+	acked, err := s.AckedThrough()
+	if err != nil || acked != r.Sequence {
+		t.Fatalf("watermark must stay durable: acked=%d err=%v", acked, err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("failed remove must leave orphan intact: %v", err)
+	}
+}
+
+func TestAcknowledgeThroughRemoveFailureSetsUnresolvedFlag(t *testing.T) {
+	s := openTest(t, 1024)
+	defer s.Close()
+	r := add(t, s, "body")
+	s.removeFile = func(string) error { return errors.New("injected ack remove failure") }
+	if err := s.AcknowledgeThrough(r.Sequence); err == nil {
+		t.Fatal("expected AcknowledgeThrough cleanup failure")
+	}
+	unresolved, seq, err := s.UnresolvedAckedCleanup()
+	if err != nil || !unresolved || seq != r.Sequence {
+		t.Fatalf("post-commit remove failure must set unresolved: unresolved=%v seq=%d err=%v", unresolved, seq, err)
+	}
+	acked, err := s.AckedThrough()
+	if err != nil || acked != r.Sequence {
+		t.Fatalf("watermark must remain durable after cleanup failure: acked=%d err=%v", acked, err)
+	}
+	if _, err := os.Stat(filepath.Join(s.dir, recordFileName(r.Sequence))); err != nil {
+		t.Fatalf("failed ack cleanup must leave record file: %v", err)
+	}
+}
+
+func TestUnresolvedAckedCleanupIsO1Flag(t *testing.T) {
+	s := openTest(t, 1024)
+	defer s.Close()
+	s.state.AckedThrough = 7
+	s.cleanupUnresolved = true
+	unresolved, seq, err := s.UnresolvedAckedCleanup()
+	if err != nil || !unresolved || seq != 7 {
+		t.Fatalf("flag read failed: unresolved=%v seq=%d err=%v", unresolved, seq, err)
+	}
+	s.cleanupUnresolved = false
+	unresolved, _, err = s.UnresolvedAckedCleanup()
+	if err != nil || unresolved {
+		t.Fatalf("cleared flag must read false: unresolved=%v err=%v", unresolved, err)
 	}
 }
