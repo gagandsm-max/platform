@@ -113,6 +113,8 @@ public final class IcmpObservationDecoder {
                     "ICMP observation envelope must be a JSON object"
             );
         }
+        // JsonNode callers must not bypass the documented envelope size bound.
+        enforceEnvelopeByteBound(envelopeNode);
         rejectUnknownFields(envelopeNode, ENVELOPE_FIELDS, IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, "envelope");
 
         int schemaVersion = requirePositiveInt(envelopeNode, "schemaVersion",
@@ -202,6 +204,7 @@ public final class IcmpObservationDecoder {
         }
 
         IcmpEvidence evidence = decodeEvidence(payload);
+        validateCollectedAtCompletedAt(collectedAt, evidence.completedAt());
         validateEnvelopeEvidenceAgreement(protocolVersion, status, quality, evidence);
 
         return new IcmpObservationV1(
@@ -221,6 +224,36 @@ public final class IcmpObservationDecoder {
                 protocolSchemaVersion,
                 evidence
         );
+    }
+
+    private void enforceEnvelopeByteBound(JsonNode envelopeNode) {
+        final byte[] encoded;
+        try {
+            encoded = objectMapper.writeValueAsBytes(envelopeNode);
+        } catch (Exception ex) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
+                    "ICMP observation envelope cannot be measured for size bounds",
+                    ex
+            );
+        }
+        if (encoded.length > MAX_ENVELOPE_BYTES) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
+                    "ICMP observation envelope exceeds maximum of " + MAX_ENVELOPE_BYTES + " bytes"
+            );
+        }
+    }
+
+    private static void validateCollectedAtCompletedAt(Instant collectedAt, Instant completedAt) {
+        // Sensor icmpintegration sets Envelope.CollectedAt = Evidence.CompletedAt.
+        // Consistency only — Sensor-authored timestamps are not Core grant authority.
+        if (!collectedAt.equals(completedAt)) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                    "ICMP collectedAt must equal evidence completedAt"
+            );
+        }
     }
 
     private IcmpJobCorrelation decodeJob(JsonNode jobNode) {
@@ -382,11 +415,10 @@ public final class IcmpObservationDecoder {
                             "Successful ICMP sample sequence " + sequence + " must not carry errorCode"
                     );
                 }
+                // Go Sample.RTTMicros uses omitempty: sub-microsecond success serializes without
+                // rttMicros. Preserve wire zero — never invent a positive RTT.
                 if (rttMicros == null) {
-                    throw new IcmpDecodeException(
-                            IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
-                            "Successful ICMP sample sequence " + sequence + " requires rttMicros"
-                    );
+                    rttMicros = 0L;
                 }
             } else {
                 if (rttMicros != null) {
@@ -546,21 +578,101 @@ public final class IcmpObservationDecoder {
                             + "' must match evidence ipVersion " + evidence.ipVersion()
             );
         }
-        if ("COLLECTION_FAILED".equals(status)) {
-            if (quality != IcmpQuality.UNKNOWN) {
-                throw new IcmpDecodeException(
-                        IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY,
-                        "COLLECTION_FAILED ICMP observations require quality UNKNOWN"
-                );
+
+        boolean hasUnreachable = evidence.samples().stream()
+                .anyMatch(s -> "ICMP_UNREACHABLE".equals(s.errorCode()));
+        boolean observedLoss = evidence.requestedSamples() != null
+                && evidence.received() < evidence.requestedSamples();
+        boolean lossPctPositive = evidence.packetLossPct() != null && evidence.packetLossPct() > 0.0d;
+
+        // Preserve BUILD-020 icmpintegration status/quality producer matrix. Never translate
+        // missing evidence into DEVICE_DOWN (already rejected by quality/status allow-lists).
+        switch (status) {
+            case "COLLECTION_FAILED" -> {
+                if (quality != IcmpQuality.UNKNOWN) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY,
+                            "COLLECTION_FAILED ICMP observations require quality UNKNOWN"
+                    );
+                }
+                if (evidence.requestedSamples() != null || evidence.errorCode() == null) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                            "COLLECTION_FAILED requires omitted requestedSamples and a present errorCode"
+                    );
+                }
             }
-            if (evidence.requestedSamples() != null || evidence.errorCode() == null) {
-                throw new IcmpDecodeException(
-                        IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
-                        "COLLECTION_FAILED requires omitted requestedSamples and a present errorCode"
-                );
+            case "COLLECTED" -> {
+                if (quality != IcmpQuality.GOOD) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY,
+                            "COLLECTED ICMP observations require quality GOOD"
+                    );
+                }
+                if (evidence.requestedSamples() == null) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                            "COLLECTED requires requestedSamples/sent"
+                    );
+                }
+                if (hasUnreachable || observedLoss || lossPctPositive) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                            "COLLECTED/GOOD is incompatible with observed loss or unreachable samples"
+                    );
+                }
             }
+            case "COLLECTED_WITH_LOSS" -> {
+                if (quality != IcmpQuality.PARTIAL) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY,
+                            "COLLECTED_WITH_LOSS ICMP observations require quality PARTIAL"
+                    );
+                }
+                if (evidence.requestedSamples() == null) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                            "COLLECTED_WITH_LOSS requires requestedSamples/sent"
+                    );
+                }
+                if (hasUnreachable) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                            "ICMP_UNREACHABLE samples require status PARTIAL with quality UNKNOWN"
+                    );
+                }
+                if (!observedLoss) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                            "COLLECTED_WITH_LOSS requires received < requestedSamples/sent"
+                    );
+                }
+            }
+            case "PARTIAL" -> {
+                if (quality != IcmpQuality.UNKNOWN) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY,
+                            "PARTIAL ICMP status requires quality UNKNOWN"
+                    );
+                }
+                if (evidence.requestedSamples() == null) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                            "PARTIAL status requires requestedSamples/sent"
+                    );
+                }
+                if (!hasUnreachable) {
+                    throw new IcmpDecodeException(
+                            IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                            "PARTIAL status requires at least one ICMP_UNREACHABLE sample"
+                    );
+                }
+            }
+            default -> throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
+                    "Unsupported ICMP status '" + status + "'"
+            );
         }
-        // Never invent or accept DEVICE_DOWN as quality/status — already rejected by enums/sets.
     }
 
     private static void validateTarget(String target, int ipVersion) {

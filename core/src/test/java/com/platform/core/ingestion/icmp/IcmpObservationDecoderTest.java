@@ -124,6 +124,77 @@ class IcmpObservationDecoderTest {
     }
 
     @Test
+    void acceptsSourceFaithfulZeroMicrosecondSuccessOmitempty() {
+        // Go Sample.RTTMicros omitempty: RTT < 1µs serializes without rttMicros.
+        IcmpObservationV1 obs = decoder.decode(zeroMicrosecondOmitemptyEnvelopeJson());
+        assertEquals("COLLECTED", obs.status());
+        assertEquals(IcmpQuality.GOOD, obs.quality());
+        assertEquals(1, obs.evidence().received());
+        assertEquals(0L, obs.evidence().minRttMicros());
+        assertEquals(0L, obs.evidence().avgRttMicros());
+        assertEquals(0L, obs.evidence().maxRttMicros());
+        IcmpSample sample = obs.evidence().samples().get(0);
+        assertTrue(sample.success());
+        assertEquals(0L, sample.rttMicros());
+        assertNull(sample.errorCode());
+    }
+
+    @Test
+    void rejectsGoodQualityDespiteObservedLoss() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(partialLossEnvelopeJson());
+        root.put("status", "COLLECTED");
+        root.put("quality", "GOOD");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+    }
+
+    @Test
+    void rejectsGoodQualityWithUnreachableSample() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(unreachableEnvelopeJson());
+        root.put("status", "COLLECTED");
+        root.put("quality", "GOOD");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+    }
+
+    @Test
+    void rejectsCollectedWithLossWithIncompatibleQuality() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(partialLossEnvelopeJson());
+        root.put("quality", "GOOD");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY, ex.getCode());
+
+        root.put("quality", "UNKNOWN");
+        ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY, ex.getCode());
+    }
+
+    @Test
+    void rejectsCollectionFailedWithoutUnknownQuality() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(collectionFailedEnvelopeJson());
+        root.put("quality", "PARTIAL");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY, ex.getCode());
+    }
+
+    @Test
+    void rejectsJsonNodeEnvelopeLargerThanBound() throws Exception {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("pad", "x".repeat(IcmpObservationDecoder.MAX_ENVELOPE_BYTES));
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+    }
+
+    @Test
+    void rejectsCollectedAtNotEqualToCompletedAt() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        root.put("collectedAt", "2026-10-11T14:00:01Z");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+        assertTrue(ex.getMessage().contains("collectedAt"));
+    }
+
+    @Test
     void rejectsMalformedEnvelopeJson() {
         IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode("{not-json"));
         assertEquals(IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, ex.getCode());
@@ -265,6 +336,38 @@ class IcmpObservationDecoderTest {
                   "samples":[
                     {"sequence":1,"success":true,"rttMicros":120},
                     {"sequence":2,"success":true,"rttMicros":180}
+                  ]
+                }
+                """.formatted(STARTED_AT, COLLECTED_AT)
+        );
+    }
+
+    /**
+     * Source-faithful Go wire: successful Echo Reply with RTT &lt; 1µs omits
+     * {@code rttMicros} via {@code omitempty}; Evidence pointer aggregates still
+     * emit explicit zeros when received &gt; 0.
+     */
+    private String zeroMicrosecondOmitemptyEnvelopeJson() {
+        return envelope(
+                "COLLECTED",
+                "GOOD",
+                "4",
+                """
+                {
+                  "schemaVersion":1,
+                  "target":"127.0.0.1",
+                  "ipVersion":4,
+                  "source":"SENSOR_PING_SOCKET",
+                  "startedAt":"%s",
+                  "completedAt":"%s",
+                  "requestedSamples":1,
+                  "received":1,
+                  "packetLossPct":0.0,
+                  "minRttMicros":0,
+                  "avgRttMicros":0,
+                  "maxRttMicros":0,
+                  "samples":[
+                    {"sequence":1,"success":true}
                   ]
                 }
                 """.formatted(STARTED_AT, COLLECTED_AT)
