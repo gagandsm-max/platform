@@ -25,33 +25,74 @@ type HealthSnapshot struct {
 	Degraded           bool      `json:"degraded"`
 }
 
+// localCapabilityCheck opens/closes local ping sockets once at Start. It must
+// not send probe traffic to a customer target and must not run from Ready.
+type localCapabilityCheck func(context.Context) error
+
+const localCapabilityTimeout = 2 * time.Second
+
 type Component struct {
-	executor      *Executor
-	executions    atomic.Uint64
-	successful    atomic.Uint64
-	failed        atomic.Uint64
-	spoolFailures atomic.Uint64
-	mu            sync.RWMutex
-	registered    bool
-	lastSuccess   time.Time
-	lastFailure   time.Time
-	lastErrorCode string
-	degraded      bool
-	now           func() time.Time
+	executor       *Executor
+	executions     atomic.Uint64
+	successful     atomic.Uint64
+	failed         atomic.Uint64
+	spoolFailures  atomic.Uint64
+	mu             sync.RWMutex
+	registered     bool
+	lastSuccess    time.Time
+	lastFailure    time.Time
+	lastErrorCode  string
+	degraded       bool
+	now            func() time.Time
+	capability     localCapabilityCheck
+	capabilityOnce sync.Once
 }
 
 func newComponent(executor *Executor) *Component {
 	return &Component{executor: executor, now: time.Now}
 }
+
+// SetLocalCapabilityCheck installs an optional one-time startup verifier.
+// Nil clears the check. Safe before Start; ignored after the first Start run.
+func (c *Component) SetLocalCapabilityCheck(check localCapabilityCheck) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.capability = check
+	c.mu.Unlock()
+}
+
 func (c *Component) Name() string                   { return "icmp" }
 func (c *Component) Capability() runtime.Capability { return runtime.CapabilityICMP }
-func (c *Component) Start(context.Context) error {
+func (c *Component) Start(ctx context.Context) error {
 	c.mu.RLock()
 	registered := c.registered
+	check := c.capability
 	c.mu.RUnlock()
 	if !registered {
 		return fmt.Errorf("ICMP_COMPONENT_NOT_REGISTERED: ICMP executor route is not registered")
 	}
+	c.capabilityOnce.Do(func() {
+		if check == nil {
+			return
+		}
+		parent := ctx
+		if parent == nil {
+			parent = context.Background()
+		}
+		verifyCtx, cancel := context.WithTimeout(parent, localCapabilityTimeout)
+		defer cancel()
+		if err := check(verifyCtx); err != nil {
+			code := string(protocolicmp.CodeOf(err))
+			if !collectorUnusable(code) {
+				// Timeouts and unexpected local open failures are Sensor-local
+				// capability gaps, not target reachability.
+				code = string(protocolicmp.CodeProtocol)
+			}
+			c.markCollectorUnusable(code)
+		}
+	})
 	return nil
 }
 func (c *Component) Ready(context.Context) error {
@@ -104,6 +145,16 @@ func (c *Component) recordFailure(code string, spoolFailure bool) {
 	if spoolFailure || collectorUnusable(code) {
 		c.degraded = true
 	}
+	c.mu.Unlock()
+}
+
+// markCollectorUnusable latches startup/local socket unusability without
+// counting an execution. Ready becomes DEGRADED; DEVICE_DOWN is never invented.
+func (c *Component) markCollectorUnusable(code string) {
+	c.mu.Lock()
+	c.lastFailure = c.now().UTC()
+	c.lastErrorCode = code
+	c.degraded = true
 	c.mu.Unlock()
 }
 

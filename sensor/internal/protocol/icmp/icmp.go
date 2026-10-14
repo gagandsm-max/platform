@@ -241,6 +241,69 @@ func (c *Collector) newSession(r Request) (probeSession, error) {
 	return &realSession{conn: conn, version: r.IPVersion, id: id}, nil
 }
 
+// VerifyLocalCapability performs a one-time open/close of the ping datagram
+// sockets used by Collect. It does not send Echo requests or address a customer
+// target. IPv4 is required; IPv6 is attempted and skipped only when the local
+// address family/protocol is unsupported.
+func (c *Collector) VerifyLocalCapability(ctx context.Context) error {
+	if c == nil || c.factory == nil {
+		return newError(CodeInvalidRequest, "ICMP collector is not initialized", nil, false)
+	}
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+	if err := c.verifyFamily(ctx, 4); err != nil {
+		return err
+	}
+	if err := c.verifyFamily(ctx, 6); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Collector) verifyFamily(ctx context.Context, version int) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+	type result struct {
+		session probeSession
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		s, err := c.factory(Request{IPVersion: version})
+		done <- result{session: s, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		go func() {
+			r := <-done
+			if r.session != nil {
+				_ = r.session.Close()
+			}
+		}()
+		return contextErr(ctx)
+	case r := <-done:
+		if r.err != nil {
+			if version == 6 && unsupportedIPFamily(r.err) {
+				return nil
+			}
+			return classify(ctx, r.err)
+		}
+		if r.session == nil {
+			return newError(CodeProtocol, "ICMP ping socket factory returned nil session", nil, false)
+		}
+		if err := r.session.Close(); err != nil {
+			return classify(ctx, err)
+		}
+		return nil
+	}
+}
+
+func unsupportedIPFamily(err error) bool {
+	return errors.Is(err, syscall.EAFNOSUPPORT) || errors.Is(err, syscall.EPROTONOSUPPORT)
+}
+
 // Linux ping sockets bind the Echo identifier as the UDP address port.
 // The kernel replaces the marshalled ID with this value for both IP families.
 func effectiveEchoID(addr net.Addr, goos string) (int, error) {

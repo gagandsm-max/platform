@@ -51,6 +51,16 @@ func startProductionBootstrap(ctx context.Context, cfg config.RuntimeConfig, sin
 		return nil, err
 	}
 	if err := b.Runtime.Start(ctx); err != nil {
+		// Collector-local DEGRADED (for example ICMP ping-socket denial) is a
+		// truthful readiness outcome, not a bootstrap abort. Only hard FAILED
+		// startup tears the NETWORK runtime down.
+		if b.Runtime.Snapshot().State == sensorruntime.StateDegraded {
+			logger.Warn("NETWORK Sensor runtime activated degraded",
+				"event_code", "SENSOR_RUNTIME_STARTED_DEGRADED",
+				"error_code", "SENSOR_RUNTIME_DEGRADED",
+				"safe_context", map[string]any{"sensor_role": string(cfg.Role), "runtime_activated": true, "reason_class": "collector_capability"})
+			return b, nil
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Scheduler.ShutdownGracePeriod)
 		defer cancel()
 		return nil, errors.Join(err, b.shutdown(shutdownCtx))
@@ -102,6 +112,9 @@ func newSNMPBootstrap(cfg config.RuntimeConfig, sink observation.Sink, logger *s
 			if err != nil {
 				return nil, errors.Join(err, rt.Shutdown(context.Background()))
 			}
+			// One-time local ping-socket open/close at Component.Start — no
+			// customer probe traffic and no per-/readyz privilege checks.
+			exec.Component().SetLocalCapabilityCheck(collector.VerifyLocalCapability)
 			b.ICMP = exec.Component()
 			continue
 		}

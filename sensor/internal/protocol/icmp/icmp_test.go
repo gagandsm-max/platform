@@ -148,6 +148,68 @@ func TestFactoryFailureClassification(t *testing.T) {
 	}
 }
 
+func TestVerifyLocalCapabilityPermissionAndNoProbe(t *testing.T) {
+	c, _ := NewCollector(testLimits())
+	var opens, probes, closes int
+	c.factory = func(r Request) (probeSession, error) {
+		opens++
+		if r.IPVersion == 6 {
+			return nil, syscall.EAFNOSUPPORT
+		}
+		return nil, syscall.EPERM
+	}
+	err := c.VerifyLocalCapability(context.Background())
+	if CodeOf(err) != CodePermission {
+		t.Fatalf("err=%v", err)
+	}
+	if opens != 1 {
+		t.Fatalf("opens=%d want 1 (IPv4 fail before IPv6)", opens)
+	}
+	if probes != 0 || closes != 0 {
+		t.Fatalf("probes=%d closes=%d", probes, closes)
+	}
+
+	session := &fakeSession{}
+	opens, probes, closes = 0, 0, 0
+	c.factory = func(r Request) (probeSession, error) {
+		opens++
+		if r.IPVersion == 6 {
+			return nil, syscall.EAFNOSUPPORT
+		}
+		return session, nil
+	}
+	if err := c.VerifyLocalCapability(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if opens != 2 || session.calls != 0 || session.closed != 1 {
+		t.Fatalf("opens=%d probes=%d closed=%d", opens, session.calls, session.closed)
+	}
+}
+
+func TestVerifyLocalCapabilityProtocolUnsupported(t *testing.T) {
+	c, _ := NewCollector(testLimits())
+	c.factory = func(Request) (probeSession, error) {
+		return nil, newError(CodeProtocol, "ping socket Echo identifier semantics unsupported", nil, false)
+	}
+	if err := c.VerifyLocalCapability(context.Background()); CodeOf(err) != CodeProtocol {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestVerifyLocalCapabilityRespectsContext(t *testing.T) {
+	c, _ := NewCollector(testLimits())
+	c.factory = func(Request) (probeSession, error) {
+		time.Sleep(50 * time.Millisecond)
+		return &fakeSession{}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	err := c.VerifyLocalCapability(ctx)
+	if CodeOf(err) != CodeDeadline {
+		t.Fatalf("%v", err)
+	}
+}
+
 func TestUnknownSchedulerFieldRejected(t *testing.T) {
 	c := collectorWith(&fakeSession{})
 	e := NewExecutor(c)
