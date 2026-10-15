@@ -1,8 +1,11 @@
 package com.platform.core.ingestion.icmp;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.net.InetAddress;
@@ -33,6 +36,14 @@ public final class IcmpObservationDecoder {
     public static final int MAX_PROTOCOL_FIELD_CHARS = 64;
     public static final int MAX_ERROR_CODE_CHARS = 128;
     public static final int MAX_SOURCE_CHARS = 128;
+    /**
+     * Mother B000-D016 / Platform_05 §7.0: JSON-carried assignment/config/policy/generation
+     * counters MUST NOT exceed {@code MAX_SAFE_SEQUENCE} ({@code 2^53-1}). Do not widen to
+     * full Go {@code uint64} wire range contrary to that governing bound.
+     */
+    public static final long MAX_ASSIGNMENT_VERSION = 9007199254740991L;
+    /** Sensor {@code observation.JobCorrelation.Attempt} is {@code uint32}. */
+    public static final long MAX_ATTEMPT = 4_294_967_295L;
     public static final String EXPECTED_SOURCE = "SENSOR_PING_SOCKET";
     public static final String EXPECTED_OPERATION = "ECHO";
 
@@ -83,8 +94,16 @@ public final class IcmpObservationDecoder {
                     "ICMP observation envelope exceeds maximum of " + MAX_ENVELOPE_BYTES + " bytes"
             );
         }
-        try {
-            return decode(objectMapper.readTree(utf8Json));
+        try (JsonParser parser = objectMapper.createParser(utf8Json)) {
+            JsonNode tree = objectMapper.readTree(parser);
+            // Match Sensor observation.DecodeBounded: require EOF after one value.
+            if (parser.nextToken() != null) {
+                throw new IcmpDecodeException(
+                        IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
+                        "ICMP observation envelope contains trailing JSON data"
+                );
+            }
+            return decode(tree);
         } catch (IcmpDecodeException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -227,22 +246,32 @@ public final class IcmpObservationDecoder {
     }
 
     private void enforceEnvelopeByteBound(JsonNode envelopeNode) {
-        final byte[] encoded;
+        // Count serialized UTF-8 bytes without retaining an arbitrarily large copy.
+        BoundingOutputStream bound = new BoundingOutputStream(MAX_ENVELOPE_BYTES);
         try {
-            encoded = objectMapper.writeValueAsBytes(envelopeNode);
+            objectMapper.writeValue(bound, envelopeNode);
         } catch (Exception ex) {
+            if (isBoundExceeded(ex)) {
+                throw new IcmpDecodeException(
+                        IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
+                        "ICMP observation envelope exceeds maximum of " + MAX_ENVELOPE_BYTES + " bytes"
+                );
+            }
             throw new IcmpDecodeException(
                     IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
                     "ICMP observation envelope cannot be measured for size bounds",
                     ex
             );
         }
-        if (encoded.length > MAX_ENVELOPE_BYTES) {
-            throw new IcmpDecodeException(
-                    IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
-                    "ICMP observation envelope exceeds maximum of " + MAX_ENVELOPE_BYTES + " bytes"
-            );
+    }
+
+    private static boolean isBoundExceeded(Throwable ex) {
+        for (Throwable cursor = ex; cursor != null; cursor = cursor.getCause()) {
+            if (cursor instanceof BoundExceededException) {
+                return true;
+            }
         }
+        return false;
     }
 
     private static void validateCollectedAtCompletedAt(Instant collectedAt, Instant completedAt) {
@@ -268,10 +297,10 @@ public final class IcmpObservationDecoder {
                 IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE);
         String assignmentKey = requireBoundedText(jobNode, "assignmentKey", 1, MAX_IDENTITY_CHARS,
                 IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE);
-        long assignmentVersion = requireNonNegativeLong(jobNode, "assignmentVersion",
-                IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, "assignmentVersion");
-        long attempt = requireNonNegativeLong(jobNode, "attempt",
-                IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, "attempt");
+        long assignmentVersion = requireWireCounter(jobNode, "assignmentVersion", MAX_ASSIGNMENT_VERSION,
+                IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, "assignmentVersion");
+        long attempt = requireWireCounter(jobNode, "attempt", MAX_ATTEMPT,
+                IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, "attempt");
         return new IcmpJobCorrelation(jobId, assignmentKey, assignmentVersion, attempt);
     }
 
@@ -541,6 +570,13 @@ public final class IcmpObservationDecoder {
             }
         }
 
+        if (errorCode != null) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                    "ICMP collection-level errorCode is reserved for collection failures"
+            );
+        }
+
         if (received == 0) {
             if (minRtt != null || avgRtt != null || maxRtt != null) {
                 throw new IcmpDecodeException(
@@ -561,6 +597,58 @@ public final class IcmpObservationDecoder {
                         "ICMP RTT aggregates must satisfy min <= avg <= max"
                 );
             }
+            validateRttSummariesAgainstSamples(minRtt, avgRtt, maxRtt, samples);
+        }
+    }
+
+    /**
+     * Sensor derives min/max/avg from raw {@code time.Duration} nanoseconds, then truncates
+     * each published microsecond field via {@code Duration.Microseconds()}. Sample
+     * {@code rttMicros} values are already truncated, so avg may differ from the integer
+     * mean of sample micros by at most the residual sub-microsecond budget — never reject
+     * that Sensor-faithful rounding window.
+     */
+    private static void validateRttSummariesAgainstSamples(
+            long minRtt,
+            long avgRtt,
+            long maxRtt,
+            List<IcmpSample> samples
+    ) {
+        long sampleMin = Long.MAX_VALUE;
+        long sampleMax = Long.MIN_VALUE;
+        long sumMicros = 0L;
+        int successCount = 0;
+        for (IcmpSample sample : samples) {
+            if (!sample.success()) {
+                continue;
+            }
+            long rtt = sample.rttMicros() != null ? sample.rttMicros() : 0L;
+            sampleMin = Math.min(sampleMin, rtt);
+            sampleMax = Math.max(sampleMax, rtt);
+            sumMicros += rtt;
+            successCount++;
+        }
+        if (successCount == 0) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                    "ICMP RTT aggregates require at least one successful sample"
+            );
+        }
+        if (minRtt != sampleMin || maxRtt != sampleMax) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                    "ICMP min/max RTT must match successful sample rttMicros"
+            );
+        }
+        // Reconstruct the inclusive avg window from truncated sample micros:
+        // raw_ns_i ∈ [si*1000, si*1000+999], so avg_us ∈ [low, high] below.
+        long avgLow = (sumMicros * 1000L / successCount) / 1000L;
+        long avgHigh = ((sumMicros * 1000L + 999L * successCount) / successCount) / 1000L;
+        if (avgRtt < avgLow || avgRtt > avgHigh) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
+                    "ICMP avgRttMicros is inconsistent with successful sample rttMicros"
+            );
         }
     }
 
@@ -676,7 +764,25 @@ public final class IcmpObservationDecoder {
     }
 
     private static void validateTarget(String target, int ipVersion) {
-        if (target.indexOf('/') >= 0 || target.indexOf(' ') >= 0 || !isIpLiteralText(target)) {
+        // Match Go net.ParseIP: reject scoped IPv6 (%zone) and ambiguous IPv4 (leading zeros).
+        if (target.indexOf('%') >= 0
+                || target.indexOf('/') >= 0
+                || target.indexOf(' ') >= 0) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET,
+                    "ICMP target must be an IP literal"
+            );
+        }
+        if (ipVersion == 4) {
+            if (!isStrictIpv4Literal(target)) {
+                throw new IcmpDecodeException(
+                        IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET,
+                        "ICMP target must be an IP literal"
+                );
+            }
+            return;
+        }
+        if (!isStrictIpv6LiteralShape(target)) {
             throw new IcmpDecodeException(
                     IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET,
                     "ICMP target must be an IP literal"
@@ -693,21 +799,9 @@ public final class IcmpObservationDecoder {
             );
         }
         byte[] raw = address.getAddress();
-        if (raw == null) {
-            throw new IcmpDecodeException(
-                    IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET,
-                    "ICMP target must be an IP literal"
-            );
-        }
-        boolean ipv4 = raw.length == 4;
-        boolean ipv6 = raw.length == 16;
-        if (ipVersion == 4 && !ipv4) {
-            throw new IcmpDecodeException(
-                    IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET,
-                    "ICMP target does not match IPv4 selection"
-            );
-        }
-        if (ipVersion == 6 && (!ipv6 || target.indexOf(':') < 0)) {
+        // Require a true 16-byte IPv6 result; reject forms Java collapses to Inet4Address
+        // (aligned with Go validate rejecting ip.To4() != nil for IPVersion 6).
+        if (raw == null || raw.length != 16) {
             throw new IcmpDecodeException(
                     IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET,
                     "ICMP target does not match IPv6 selection"
@@ -715,16 +809,17 @@ public final class IcmpObservationDecoder {
         }
     }
 
-    private static boolean isIpLiteralText(String target) {
-        if (target.indexOf(':') >= 0) {
-            return true;
-        }
-        String[] parts = target.split("\\.");
+    /** Go {@code net.ParseIP} IPv4: dotted-decimal, no leading zeros per octet. */
+    private static boolean isStrictIpv4Literal(String target) {
+        String[] parts = target.split("\\.", -1);
         if (parts.length != 4) {
             return false;
         }
         for (String part : parts) {
             if (part.isEmpty() || part.length() > 3) {
+                return false;
+            }
+            if (part.length() > 1 && part.charAt(0) == '0') {
                 return false;
             }
             for (int i = 0; i < part.length(); i++) {
@@ -735,6 +830,25 @@ public final class IcmpObservationDecoder {
             }
             int value = Integer.parseInt(part);
             if (value < 0 || value > 255) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Character-class gate before InetAddress; rejects zones and non-literal text. */
+    private static boolean isStrictIpv6LiteralShape(String target) {
+        if (target.indexOf(':') < 0) {
+            return false;
+        }
+        for (int i = 0; i < target.length(); i++) {
+            char c = target.charAt(i);
+            boolean ok = (c >= '0' && c <= '9')
+                    || (c >= 'a' && c <= 'f')
+                    || (c >= 'A' && c <= 'F')
+                    || c == ':'
+                    || c == '.';
+            if (!ok) {
                 return false;
             }
         }
@@ -867,16 +981,70 @@ public final class IcmpObservationDecoder {
         return (int) value;
     }
 
-    private static long requireNonNegativeLong(JsonNode node, String field, IcmpDecodeException.Code code, String label) {
+    private static long requireWireCounter(
+            JsonNode node,
+            String field,
+            long maxInclusive,
+            IcmpDecodeException.Code boundsCode,
+            String label
+    ) {
         JsonNode child = node.get(field);
-        if (child == null || child.isNull() || !child.isIntegralNumber() || child.isBigInteger()) {
-            throw new IcmpDecodeException(code, label + " must be a non-negative JSON integer");
+        if (child == null || child.isNull() || !child.isIntegralNumber()) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
+                    label + " must be a non-negative JSON integer"
+            );
+        }
+        // BigInteger implies value outside signed int64 — still outside B000-D016 / uint32 caps.
+        if (child.isBigInteger()) {
+            throw new IcmpDecodeException(
+                    boundsCode,
+                    label + " exceeds governing wire-counter maximum of " + maxInclusive
+            );
         }
         long value = child.asLong();
-        if (value < 0) {
-            throw new IcmpDecodeException(code, label + " must be a non-negative integer");
+        if (value < 0 || value > maxInclusive) {
+            throw new IcmpDecodeException(
+                    boundsCode,
+                    label + " must be within 0.." + maxInclusive
+            );
         }
         return value;
+    }
+
+    /** Discards serialized bytes while enforcing {@link #MAX_ENVELOPE_BYTES}. */
+    private static final class BoundingOutputStream extends OutputStream {
+        private final int maxBytes;
+        private int count;
+
+        BoundingOutputStream(int maxBytes) {
+            this.maxBytes = maxBytes;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            count++;
+            if (count > maxBytes) {
+                throw new BoundExceededException();
+            }
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            if (len < 0) {
+                throw new IndexOutOfBoundsException();
+            }
+            count += len;
+            if (count > maxBytes) {
+                throw new BoundExceededException();
+            }
+        }
+    }
+
+    private static final class BoundExceededException extends IOException {
+        BoundExceededException() {
+            super("envelope byte bound exceeded");
+        }
     }
 
     private static Long optionalNonNegativeLong(JsonNode node, String field, IcmpDecodeException.Code code) {
