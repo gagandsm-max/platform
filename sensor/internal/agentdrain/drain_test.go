@@ -4105,6 +4105,153 @@ func TestIssue230CoreAckPartialCompleteRecordCleanupClearsObsolete413(t *testing
 	}
 }
 
+// TestIssue230BlockedToCleanupTransitionAtomicUnderDeliveryMu reproduces the
+// P2 non-atomic health race with deterministic barriers: previously
+// clearDeliveryBlocked unlocked before markCleanupFault, so a concurrent
+// Snapshot could briefly observe both flags false and advertise UP while
+// cleanup remained unresolved. The blocked→cleanup transition must complete
+// under one deliveryMu critical section (no spool I/O while holding it).
+func TestIssue230BlockedToCleanupTransitionAtomicUnderDeliveryMu(t *testing.T) {
+	d, s, dir, _ := setupIssue230CoreAckPartialComplete(t, 1, "post_commit_sidecar")
+
+	inTransition := make(chan struct{})
+	release := make(chan struct{})
+	d.duringBlockedToCleanupTransition = func() {
+		close(inTransition)
+		<-release
+	}
+
+	var runOK bool
+	var runErr error
+	var runDone sync.WaitGroup
+	runDone.Add(1)
+	go func() {
+		defer runDone.Done()
+		runOK, runErr = d.RunOnce(context.Background())
+	}()
+
+	select {
+	case <-inTransition:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for blocked-to-cleanup transition barrier")
+	}
+
+	// Snapshot starts while deliveryMu is held mid-transition. It must block
+	// until cleanupFault is latched; it must never publish UP for the gap.
+	var snap DeliveryStatus
+	var snapDone sync.WaitGroup
+	snapDone.Add(1)
+	go func() {
+		defer snapDone.Done()
+		snap = d.Snapshot()
+	}()
+
+	close(release)
+	snapDone.Wait()
+	runDone.Wait()
+
+	if runOK || runErr == nil {
+		t.Fatalf("sidecar clear failure must surface: ok=%v err=%v", runOK, runErr)
+	}
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.Blocked || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete 413 must not remain after atomic transition: %+v", snap)
+	}
+	sidecar := filepath.Join(dir, "outbound-window.json")
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("stale outbound-window sidecar must remain: %v", err)
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 {
+		t.Fatalf("durable watermark must remain: %+v", st)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("exact Core ACK must count once: %d", d.Metrics().DurableAcks.Load())
+	}
+	final := d.Snapshot()
+	assertCleanupFaultDegraded(t, final, 0)
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+// TestIssue230DelayedPartialAckReconcileUsesAtomicTransition covers the paced
+// tryReconcilePendingPartialAck path sharing transitionBlockedToCleanupFault.
+// Inspector recovery must clear obsolete 413 without advertising a Core delivery
+// block; cleanupFault remains until verified orphan/sidecar reconcile.
+func TestIssue230DelayedPartialAckReconcileUsesAtomicTransition(t *testing.T) {
+	d, s, _, wrap := setupIssue230CoreAckPartialComplete(t, 1, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("inspect-fail partial complete must surface: ok=%v err=%v", ok, err)
+	}
+	if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("fail closed must retain 413: %+v", snap)
+	}
+
+	// Prevent same-RunOnce cleanup recovery from clearing the fault before Snapshot.
+	wrap.failInspect.Store(false)
+	d.spool = &failingReconcileSpool{
+		Spool:   wrap,
+		failErr: errors.New("injected ReconcileAckedCleanup failure"),
+	}
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+
+	inTransition := make(chan struct{})
+	release := make(chan struct{})
+	d.duringBlockedToCleanupTransition = func() {
+		close(inTransition)
+		<-release
+	}
+
+	var runOK bool
+	var runErr error
+	var runDone sync.WaitGroup
+	runDone.Add(1)
+	go func() {
+		defer runDone.Done()
+		runOK, runErr = d.RunOnce(context.Background())
+	}()
+
+	select {
+	case <-inTransition:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for delayed reconcile transition barrier")
+	}
+
+	var snap DeliveryStatus
+	var snapDone sync.WaitGroup
+	snapDone.Add(1)
+	go func() {
+		defer snapDone.Done()
+		snap = d.Snapshot()
+	}()
+
+	close(release)
+	snapDone.Wait()
+	runDone.Wait()
+
+	if runOK || runErr != nil {
+		t.Fatalf("delayed recovery RunOnce: ok=%v err=%v", runOK, runErr)
+	}
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.Blocked || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete 413 must not remain after atomic delayed transition: %+v", snap)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("delayed recovery must count exact Core ACK once: %d", d.Metrics().DurableAcks.Load())
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 || st.RecordCount != 0 {
+		t.Fatalf("delayed recovery spool state acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+}
+
 func TestIssue230CoreAckPartialCompleteSidecarCleanupClearsObsolete413(t *testing.T) {
 	d, s, dir, _ := setupIssue230CoreAckPartialComplete(t, 1, "post_commit_sidecar")
 	ok, err := d.RunOnce(context.Background())

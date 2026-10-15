@@ -243,6 +243,11 @@ type Drain struct {
 	// unresolved-cleanup observation and before the generation-gated mark,
 	// so barrier tests can interleave clearCleanupFault.
 	afterCleanupUnresolvedObserve func()
+	// Optional test-only seam. Nil in production. Invoked while deliveryMu is
+	// held inside transitionBlockedToCleanupFault after clearing the obsolete
+	// delivery block and before latching cleanupFault, so barrier tests can
+	// prove Snapshot never observes a transient UP window.
+	duringBlockedToCleanupTransition func()
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
@@ -394,6 +399,36 @@ func (d *Drain) markCleanupFault(seq uint64) {
 	if !d.cleanupFault {
 		d.cleanupFaultSince = time.Now().UTC()
 		// Fresh fault: allow an immediate first recovery attempt.
+		d.cleanupRetryAfter = time.Time{}
+		d.cleanupRetryBackoff = 0
+	}
+	d.cleanupFault = true
+	d.cleanupFaultSeq = seq
+}
+
+// transitionBlockedToCleanupFault atomically clears an obsolete Core delivery
+// block and latches cleanupFault under one deliveryMu critical section so a
+// concurrent Snapshot cannot observe a transient UP window (both flags false).
+// Advances deliveryGen for legacy-size observation fencing. Does not clear
+// pending reconcile intent, does not fabricate Core ACK, and must not be called
+// while holding deliveryMu or across spool filesystem I/O.
+func (d *Drain) transitionBlockedToCleanupFault(seq uint64) {
+	if d == nil {
+		return
+	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	d.deliveryBlocked = false
+	d.deliveryReason = ""
+	d.blockedSince = time.Time{}
+	d.blockedFirstSeq = 0
+	d.blockedLastSeq = 0
+	d.deliveryGen++
+	if d.duringBlockedToCleanupTransition != nil {
+		d.duringBlockedToCleanupTransition()
+	}
+	if !d.cleanupFault {
+		d.cleanupFaultSince = time.Now().UTC()
 		d.cleanupRetryAfter = time.Time{}
 		d.cleanupRetryBackoff = 0
 	}
@@ -956,8 +991,7 @@ func (d *Drain) reconcileAfterPartialSpoolCommit(seq uint64, coreACK bool) bool 
 	// Logical pending excludes sequences at or below AckedThrough even if an
 	// orphaned record file or stale outbound-window sidecar remains.
 	d.clearPendingPartialAckReconcile()
-	d.clearDeliveryBlocked()
-	d.markCleanupFault(seq)
+	d.transitionBlockedToCleanupFault(seq)
 	d.refreshStats()
 	return true
 }
@@ -1016,8 +1050,7 @@ func (d *Drain) tryReconcilePendingPartialAck() {
 		return
 	}
 	d.clearPendingPartialAckReconcile()
-	d.clearDeliveryBlocked()
-	d.markCleanupFault(seq)
+	d.transitionBlockedToCleanupFault(seq)
 	if coreACK {
 		// Count the original Core ACK once after durable proof; not a second ACK.
 		d.metrics.Successes.Add(1)

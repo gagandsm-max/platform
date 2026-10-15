@@ -549,6 +549,61 @@ func TestAcknowledgeThroughRemoveFailureSetsUnresolvedFlag(t *testing.T) {
 	}
 }
 
+// TestAcknowledgeThroughRecordRemoveFailureDegradesWithoutRewrite is the
+// negative record-removal case: inject os.Remove failure via the DiskSpool
+// seam during AcknowledgeThrough (no rewrite of an already-deleted file).
+// Watermark stays durable, orphan remains, storage is DEGRADED, and only a
+// successful ReconcileAckedCleanup + directory sync clears the fault.
+func TestAcknowledgeThroughRecordRemoveFailureDegradesWithoutRewrite(t *testing.T) {
+	s := openTest(t, 1024)
+	defer s.Close()
+	acked := add(t, s, "acked-body")
+	pending := add(t, s, "pending-body")
+	path := filepath.Join(s.dir, recordFileName(acked.Sequence))
+	s.removeFile = func(string) error {
+		return errors.New("injected record remove failure")
+	}
+	if err := s.AcknowledgeThrough(acked.Sequence); err == nil {
+		t.Fatal("expected AcknowledgeThrough record remove failure")
+	}
+	unresolved, seq, err := s.UnresolvedAckedCleanup()
+	if err != nil || !unresolved || seq != acked.Sequence {
+		t.Fatalf("remove failure must latch unresolved: unresolved=%v seq=%d err=%v", unresolved, seq, err)
+	}
+	st, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.ProtectionState != ProtectionDegraded || !st.CorruptionDetected {
+		t.Fatalf("remove failure must degrade storage: %+v", st)
+	}
+	if st.AckedThrough != acked.Sequence || st.RecordCount != 1 {
+		t.Fatalf("watermark/pending must hold: %+v", st)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("failed remove must leave orphan record: %v", err)
+	}
+	pendingPath := filepath.Join(s.dir, recordFileName(pending.Sequence))
+	if _, err := os.Stat(pendingPath); err != nil {
+		t.Fatalf("unacked record must remain: %v", err)
+	}
+
+	s.removeFile = nil
+	if err := s.ReconcileAckedCleanup(); err != nil {
+		t.Fatalf("reconcile must remove orphan after verified unlink+sync: %v", err)
+	}
+	unresolved, _, err = s.UnresolvedAckedCleanup()
+	if err != nil || unresolved {
+		t.Fatalf("verified cleanup must clear unresolved: unresolved=%v err=%v", unresolved, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("orphan must be removed after reconcile, err=%v", err)
+	}
+	if _, err := os.Stat(pendingPath); err != nil {
+		t.Fatalf("pending record must survive reconcile: %v", err)
+	}
+}
+
 func TestUnresolvedAckedCleanupIsO1Flag(t *testing.T) {
 	s := openTest(t, 1024)
 	defer s.Close()

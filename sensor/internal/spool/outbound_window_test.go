@@ -180,6 +180,111 @@ func TestOutboundWindowStaleAfterAckSelfReconciles(t *testing.T) {
 	}
 }
 
+// TestReadOrReserveOutboundBatchRestartSidecarClearFailureLatchesUnresolved
+// reproduces restart after a post-commit sidecar unlink failure: Open recover
+// clears the in-memory unresolved flag, but a continuing clear failure on the
+// next ReadOrReserveOutboundBatch must re-latch cleanupUnresolved + degraded
+// without inventing ACK progress or touching unacked records / active windows.
+func TestReadOrReserveOutboundBatchRestartSidecarClearFailureLatchesUnresolved(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Dir: dir, MaxRecordBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.space = func(int64) (spaceStatus, error) { return spaceStatus{1000000, 1000, .1}, nil }
+	add(t, s, "acked-body")
+	add(t, s, "pending-body")
+	batch, err := s.ReadOrReserveOutboundBatch(1, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch.FirstSequence != 1 || batch.LastSequence != 1 {
+		t.Fatalf("frozen window=%#v", batch)
+	}
+	sidecar := filepath.Join(dir, outboundWindowFileName)
+	s.removeOutboundWindow = func(string) error {
+		return errors.New("injected outbound window sidecar clear failure")
+	}
+	if err := s.CompleteOutboundBatch(batch.LastSequence); err == nil {
+		t.Fatal("expected CompleteOutboundBatch sidecar clear failure")
+	}
+	unresolved, seq, err := s.UnresolvedAckedCleanup()
+	if err != nil || !unresolved || seq != batch.LastSequence {
+		t.Fatalf("pre-restart latch missing: unresolved=%v seq=%d err=%v", unresolved, seq, err)
+	}
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("stale sidecar must survive crash window: %v", err)
+	}
+	pendingPath := filepath.Join(dir, recordFileName(2))
+	if _, err := os.Stat(pendingPath); err != nil {
+		t.Fatalf("unacked record must survive: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(Config{Dir: dir, MaxRecordBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	reopened.space = func(int64) (spaceStatus, error) { return spaceStatus{1000000, 1000, .1}, nil }
+	// recover() clears the in-memory flag; continuing sidecar unlink failure
+	// after restart must surface storage degradation again.
+	unresolved, _, err = reopened.UnresolvedAckedCleanup()
+	if err != nil || unresolved {
+		t.Fatalf("Open recover clears in-memory unresolved; got unresolved=%v err=%v", unresolved, err)
+	}
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("stale fully-acked sidecar must remain after restart: %v", err)
+	}
+	reopened.removeOutboundWindow = func(string) error {
+		return errors.New("injected outbound window sidecar clear failure after restart")
+	}
+	if _, err := reopened.ReadOrReserveOutboundBatch(10, 1024); err == nil {
+		t.Fatal("restart sidecar clear failure must surface")
+	}
+	unresolved, seq, err = reopened.UnresolvedAckedCleanup()
+	if err != nil || !unresolved || seq < 1 {
+		t.Fatalf("restart clear failure must latch unresolved: unresolved=%v seq=%d err=%v", unresolved, seq, err)
+	}
+	st, err := reopened.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.ProtectionState != ProtectionDegraded {
+		t.Fatalf("continuing unlink failure must degrade storage: %+v", st)
+	}
+	if st.AckedThrough < 1 || st.RecordCount != 1 {
+		t.Fatalf("watermark and unacked identity must hold: %+v", st)
+	}
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("failed restart clear must leave sidecar intact: %v", err)
+	}
+	if _, err := os.Stat(pendingPath); err != nil {
+		t.Fatalf("unacked record must remain after failed restart clear: %v", err)
+	}
+
+	reopened.removeOutboundWindow = nil
+	if err := reopened.ReconcileAckedCleanup(); err != nil {
+		t.Fatalf("reconcile must clear stale sidecar after verified unlink+sync: %v", err)
+	}
+	if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+		t.Fatalf("stale sidecar must be removed after reconcile, err=%v", err)
+	}
+	unresolved, _, err = reopened.UnresolvedAckedCleanup()
+	if err != nil || unresolved {
+		t.Fatalf("verified cleanup must clear unresolved: unresolved=%v err=%v", unresolved, err)
+	}
+	next, err := reopened.ReadOrReserveOutboundBatch(10, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.FirstSequence != 2 || next.LastSequence != 2 || len(next.Records) != 1 {
+		t.Fatalf("pending window identity after cleanup: %#v", next)
+	}
+}
+
 // TestCompleteOutboundBatchSidecarClearFailureLatchesUnresolved proves that
 // after durable ACK, outbound-window sidecar unlink failure latches
 // cleanupUnresolved and ReconcileAckedCleanup repairs the stale sidecar.

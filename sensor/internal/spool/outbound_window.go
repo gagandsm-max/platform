@@ -43,7 +43,11 @@ func (s *DiskSpool) ReadOrReserveOutboundBatch(maxRecords, maxPayloadBytes int) 
 	if exists {
 		if win.LastSequence <= s.state.AckedThrough {
 			// Crash after durable ACK but before sidecar deletion: reconcile safely.
+			// Continuing unlink/fsync failure after restart must latch unresolved
+			// cleanup so Sensor health stays DEGRADED until verified clear+sync.
 			if err := s.clearOutboundWindowLocked(); err != nil {
+				s.degraded = true
+				s.cleanupUnresolved = true
 				return Batch{}, err
 			}
 		} else {
