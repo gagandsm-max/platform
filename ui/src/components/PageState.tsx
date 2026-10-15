@@ -28,7 +28,8 @@ export const PageState: React.FC<PageStateProps> = ({
   diagnosticLabel,
   onDiagnostic,
 }) => {
-  const urgent = kind === 'error' || kind === 'monitoring-degraded';
+  const urgent =
+    kind === 'error' || kind === 'monitoring-degraded' || kind === 'source-unavailable';
   const hasActions = Boolean((actionLabel && onAction) || (diagnosticLabel && onDiagnostic));
 
   return (
