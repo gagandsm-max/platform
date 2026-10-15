@@ -95,7 +95,15 @@ func (s *DiskSpool) CompleteOutboundBatch(ackedThrough uint64) error {
 	if err := s.acknowledgeThroughLocked(ackedThrough); err != nil {
 		return err
 	}
-	return s.clearOutboundWindowLocked()
+	// Sidecar clear/fsync can fail after the durable watermark advanced. Latch
+	// unresolved cleanup so Sensor health and ReconcileAckedCleanup can repair
+	// the stale window without inventing a second Core ACK.
+	if err := s.clearOutboundWindowLocked(); err != nil {
+		s.degraded = true
+		s.cleanupUnresolved = true
+		return err
+	}
+	return nil
 }
 
 // AbandonOutboundBatch clears a frozen outbound window without acknowledging records.
@@ -244,7 +252,11 @@ func (s *DiskSpool) clearOutboundWindowLocked() error {
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return newError(CodeUnsafePath, "refusing to clear unsafe outbound window path", nil)
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	removeFn := s.removeOutboundWindow
+	if removeFn == nil {
+		removeFn = os.Remove
+	}
+	if err := removeFn(path); err != nil && !os.IsNotExist(err) {
 		return newError(CodeIO, "failed to clear outbound window sidecar", err)
 	}
 	return syncDir(s.dir)

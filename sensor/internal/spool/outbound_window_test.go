@@ -2,6 +2,7 @@ package spool
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -176,6 +177,72 @@ func TestOutboundWindowStaleAfterAckSelfReconciles(t *testing.T) {
 	}
 	if next.FirstSequence != 2 || next.LastSequence != 2 {
 		t.Fatalf("stale fully-ACKed sidecar must reconcile; got %#v", next)
+	}
+}
+
+// TestCompleteOutboundBatchSidecarClearFailureLatchesUnresolved proves that
+// after durable ACK, outbound-window sidecar unlink failure latches
+// cleanupUnresolved and ReconcileAckedCleanup repairs the stale sidecar.
+func TestCompleteOutboundBatchSidecarClearFailureLatchesUnresolved(t *testing.T) {
+	s := openTest(t, 1024)
+	add(t, s, "body")
+	batch, err := s.ReadOrReserveOutboundBatch(1, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sidecar := filepath.Join(s.dir, outboundWindowFileName)
+	s.removeOutboundWindow = func(string) error {
+		return errors.New("injected outbound window sidecar clear failure")
+	}
+	if err := s.CompleteOutboundBatch(batch.LastSequence); err == nil {
+		t.Fatal("expected CompleteOutboundBatch sidecar clear failure")
+	}
+	acked, err := s.AckedThrough()
+	if err != nil || acked != batch.LastSequence {
+		t.Fatalf("watermark must be durable after sidecar clear failure: acked=%d err=%v", acked, err)
+	}
+	unresolved, seq, err := s.UnresolvedAckedCleanup()
+	if err != nil || !unresolved || seq != batch.LastSequence {
+		t.Fatalf("sidecar clear failure must latch unresolved: unresolved=%v seq=%d err=%v", unresolved, seq, err)
+	}
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("failed sidecar clear must leave sidecar intact: %v", err)
+	}
+	s.removeOutboundWindow = nil
+	if err := s.ReconcileAckedCleanup(); err != nil {
+		t.Fatalf("reconcile must clear stale sidecar: %v", err)
+	}
+	if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+		t.Fatalf("stale sidecar must be removed, err=%v", err)
+	}
+	unresolved, _, err = s.UnresolvedAckedCleanup()
+	if err != nil || unresolved {
+		t.Fatalf("reconcile must clear unresolved: unresolved=%v err=%v", unresolved, err)
+	}
+}
+
+func TestReconcileAckedCleanupPreservesActiveOutboundWindow(t *testing.T) {
+	s := openTest(t, 1024)
+	add(t, s, "a")
+	add(t, s, "b")
+	batch, err := s.ReadOrReserveOutboundBatch(1, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cleanupUnresolved = true
+	if err := s.ReconcileAckedCleanup(); err != nil {
+		t.Fatal(err)
+	}
+	sidecar := filepath.Join(s.dir, outboundWindowFileName)
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("active frozen window must survive reconcile: %v", err)
+	}
+	next, err := s.ReadOrReserveOutboundBatch(1, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.FirstSequence != batch.FirstSequence || next.LastSequence != batch.LastSequence {
+		t.Fatalf("frozen window identity changed: got %#v want %#v", next, batch)
 	}
 }
 

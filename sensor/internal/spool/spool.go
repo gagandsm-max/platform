@@ -255,7 +255,10 @@ func (s *DiskSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
 // acknowledged and unsafe spool artifacts: symlinks/partials/invalid names and
 // corrupt records are quarantined; only validated records at or below
 // AckedThrough are removed. Pending (unacked) records are left intact without
-// being read. Clears cleanupUnresolved only after successful directory fsync.
+// being read. Also clears a stale outbound-window sidecar whose last sequence
+// is already covered by AckedThrough (crash between durable ACK and sidecar
+// unlink/fsync). Active frozen windows for unacked ranges are left untouched.
+// Clears cleanupUnresolved only after successful directory fsync.
 func (s *DiskSpool) ReconcileAckedCleanup() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -267,6 +270,11 @@ func (s *DiskSpool) ReconcileAckedCleanup() error {
 		s.cleanupUnresolved = true
 		return err
 	}
+	if err := s.reconcileStaleOutboundWindowLocked(); err != nil {
+		s.degraded = true
+		s.cleanupUnresolved = true
+		return err
+	}
 	if err := syncDir(s.dir); err != nil {
 		s.degraded = true
 		s.cleanupUnresolved = true
@@ -274,6 +282,19 @@ func (s *DiskSpool) ReconcileAckedCleanup() error {
 	}
 	s.cleanupUnresolved = false
 	return nil
+}
+
+// reconcileStaleOutboundWindowLocked removes an outbound-window sidecar only when
+// its entire frozen range is already covered by AckedThrough. Callers must hold mu.
+func (s *DiskSpool) reconcileStaleOutboundWindowLocked() error {
+	win, exists, err := s.loadOutboundWindowLocked()
+	if err != nil {
+		return err
+	}
+	if !exists || win.LastSequence > s.state.AckedThrough {
+		return nil
+	}
+	return s.clearOutboundWindowLocked()
 }
 
 func (s *DiskSpool) Close() error {
