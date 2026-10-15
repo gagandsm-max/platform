@@ -16,6 +16,7 @@ enum TelemetryConsumerFailure {
     SCHEMA("ERR_CLICKHOUSE_SCHEMA", false),
     CONFIGURATION("ERR_CLICKHOUSE_CONFIGURATION", false),
     PERMANENT("ERR_CLICKHOUSE_PERMANENT", false),
+    UNKNOWN("ERR_CLICKHOUSE_UNKNOWN", false),
     POISON(CoreSupportabilityEventCodes.TELEMETRY_POISON_EVENT, false),
     ACK_UNCERTAIN("ERR_KAFKA_ACK_UNCERTAIN", false),
     MEMBERSHIP_LOST("ERR_KAFKA_GROUP_MEMBERSHIP_LOST", false),
@@ -71,7 +72,7 @@ enum TelemetryConsumerFailure {
             try {
                 code = Integer.parseInt(exceptionCode);
             } catch (NumberFormatException invalid) {
-                return PERMANENT;
+                return UNKNOWN;
             }
             // ClickHouse 24.8 numeric error codes. Do not parse or retain response text.
             if (code != 0) return switch (code) {
@@ -79,18 +80,25 @@ enum TelemetryConsumerFailure {
                 case 7, 8, 10, 16, 20, 27, 41, 43, 44, 47, 50, 53, 60, 62, 70, 72, 81, 117, 122 -> SCHEMA;
                 case 36, 115, 137, 318 -> CONFIGURATION;
                 case 159, 202, 203, 209, 210, 279 -> DEPENDENCY;
-                default -> PERMANENT;
+                default -> UNKNOWN;
             };
         }
         return switch (status) {
             case 429, 502, 503, 504 -> DEPENDENCY;
             case 400, 404, 422 -> SCHEMA;
             case 405 -> CONFIGURATION;
-            default -> PERMANENT;
+            default -> UNKNOWN;
         };
     }
 
-    /** Carries only an allowlisted reason and numeric status, never response headers/body or raw causes. */
+    // Only the HttpClient.send catch site may grant generic IOException transport provenance.
+    // Jackson/local IOException never enters this method. Preserve TLS/configuration distinctions.
+    static TelemetryConsumerFailure transport(java.io.IOException failure) {
+        var known = insertion(failure);
+        return known == PERMANENT ? DEPENDENCY : known;
+    }
+
+    /** Carries an allowlisted reason/status, never response text. Transport causes require consumer redaction. */
     static final class InsertFailure extends RuntimeException {
         final TelemetryConsumerFailure reason;
         final int httpStatus;

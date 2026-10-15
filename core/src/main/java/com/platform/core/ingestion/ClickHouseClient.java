@@ -126,7 +126,8 @@ public class ClickHouseClient {
     }
 
     private void postInsert(String table, String jsonEachRowBody, int count, long startTime) throws Exception {
-        URI uri = URI.create(baseUrl + "/?query=INSERT+INTO+" + table + "+FORMAT+JSONEachRow");
+        URI uri = URI.create(baseUrl + "/?wait_end_of_query=1&async_insert=0&query=INSERT+INTO+"
+                + table + "+FORMAT+JSONEachRow");
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(uri)
                 .timeout(Duration.ofMillis(INSERT_REQUEST_TIMEOUT_MS))
@@ -135,12 +136,21 @@ public class ClickHouseClient {
                 .POST(HttpRequest.BodyPublishers.ofString(jsonEachRowBody, StandardCharsets.UTF_8))
                 .build();
 
-        // Error bodies can contain SQL, payloads and credentials; classification needs metadata only.
-        final HttpResponse<Void> response;
+        // This fixed synchronous INSERT has no result rows: success is an empty, completed body.
+        // wait_end_of_query is defense in depth, not a success oracle. Never retain response text.
+        final HttpResponse<Boolean> response;
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS
+                .toNanos(INSERT_REQUEST_TIMEOUT_MS);
         try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
-        } catch (java.io.IOException | InterruptedException failure) {
-            metrics.recordClickHouseFailure(TelemetryConsumerFailure.insertion(failure).reasonCode);
+            response = httpClient.send(request, info -> new EmptyInsertResponse(deadline));
+        } catch (java.io.IOException failure) {
+            var reason = TelemetryConsumerFailure.transport(failure);
+            metrics.recordClickHouseFailure(reason.reasonCode);
+            var typed = new TelemetryConsumerFailure.InsertFailure(reason, 0);
+            typed.initCause(failure); // Consumer redacts class/stack evidence before logging.
+            throw typed;
+        } catch (InterruptedException failure) {
+            metrics.recordClickHouseFailure(TelemetryConsumerFailure.SHUTDOWN.reasonCode);
             throw failure;
         }
         String exceptionCode = response.headers().firstValue("X-ClickHouse-Exception-Code").orElse(null);
@@ -150,9 +160,59 @@ public class ClickHouseClient {
             throw new TelemetryConsumerFailure.InsertFailure(reason, response.statusCode());
         }
 
+        if (response.body()) {
+            metrics.recordClickHouseFailure(TelemetryConsumerFailure.UNKNOWN.reasonCode);
+            throw new TelemetryConsumerFailure.InsertFailure(TelemetryConsumerFailure.UNKNOWN, response.statusCode());
+        }
+
         long durationMs = System.currentTimeMillis() - startTime;
         metrics.recordClickHouseInsert(count, durationMs);
         log.debug("Successfully inserted {} observations into ClickHouse {} ({}ms)",
                 count, table, durationMs);
+    }
+
+    /** Constant retained space. Any byte is unexpected; cancel instead of draining arbitrary data. */
+    private static final class EmptyInsertResponse implements HttpResponse.BodySubscriber<Boolean> {
+        private final java.util.concurrent.CompletableFuture<Boolean> body = new java.util.concurrent.CompletableFuture<>();
+        private final long deadline;
+        private java.util.concurrent.Flow.Subscription subscription;
+
+        EmptyInsertResponse(long deadline) {
+            this.deadline = deadline;
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<Boolean> getBody() {
+            return body;
+        }
+
+        @Override
+        public void onSubscribe(java.util.concurrent.Flow.Subscription subscription) {
+            this.subscription = subscription;
+            // HttpRequest.timeout alone must not be relied on after response headers arrive.
+            body.orTimeout(Math.max(1, deadline - System.nanoTime()), java.util.concurrent.TimeUnit.NANOSECONDS)
+                    .whenComplete((value, failure) -> {
+                        if (failure != null) subscription.cancel();
+                    });
+            subscription.request(Long.MAX_VALUE);
+        }
+
+        @Override
+        public void onNext(List<java.nio.ByteBuffer> buffers) {
+            if (buffers.stream().anyMatch(java.nio.ByteBuffer::hasRemaining)) {
+                body.complete(true);
+                subscription.cancel();
+            }
+        }
+
+        @Override
+        public void onError(Throwable failure) {
+            body.completeExceptionally(failure);
+        }
+
+        @Override
+        public void onComplete() {
+            body.complete(false);
+        }
     }
 }

@@ -466,7 +466,7 @@ class ClickHouseTelemetryConsumerTest {
     @Test
     void permanentHttpFailuresNeverRetryAndServiceFailureCanRecover() throws Exception {
         for (var reason : List.of(TelemetryConsumerFailure.AUTHORIZATION, TelemetryConsumerFailure.SCHEMA,
-                TelemetryConsumerFailure.CONFIGURATION, TelemetryConsumerFailure.PERMANENT)) {
+                TelemetryConsumerFailure.CONFIGURATION, TelemetryConsumerFailure.PERMANENT, TelemetryConsumerFailure.UNKNOWN)) {
             var client = mock(ClickHouseClient.class);
             var localMetrics = new IngestionMetrics();
             var local = new ClickHouseTelemetryConsumer(client, objectMapper, localMetrics, 3, 0);

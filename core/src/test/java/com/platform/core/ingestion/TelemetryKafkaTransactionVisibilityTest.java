@@ -92,6 +92,66 @@ class TelemetryKafkaTransactionVisibilityTest {
     }
 
     @Test
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void lateHttp200ExceptionRetainsBrokerOffsetUntilExplicitReplaySucceeds() throws Exception {
+        var reject = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var payloads = new CopyOnWriteArrayList<String>();
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            payloads.add(new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+            if (reject.get()) {
+                exchange.sendResponseHeaders(200, 0);
+                exchange.getResponseBody().flush();
+                exchange.getResponseBody().write("Code: 60. DB::Exception: PRIVATE_SENTINEL".getBytes());
+            } else {
+                exchange.sendResponseHeaders(200, -1);
+            }
+            exchange.close();
+        });
+        server.start();
+        try {
+            var bootstrap = embeddedKafka.getBrokersAsString();
+            var mapper = new ObjectMapper().findAndRegisterModules();
+            var metrics = new IngestionMetrics();
+            var client = new ClickHouseClient("127.0.0.1", server.getAddress().getPort(), "user", "secret", mapper, metrics);
+            var group = "k11-late-" + UUID.randomUUID();
+            var template = createTransactionalTemplate(bootstrap);
+            context = createListenerContext(bootstrap, group, client, mapper, metrics);
+            var listener = registeredListener();
+            listener.start();
+            String baseline = mapper.writeValueAsString(observation("baseline"));
+            template.executeInTransaction(ops -> {
+                sendSync(ops, TOPIC, "same-key", baseline);
+                return null;
+            });
+            Long before = awaitCommittedOffset(bootstrap, group, n -> n != null && n == 1, 30);
+            assertNotNull(before);
+            assertEquals(1, metrics.getClickHouseInserts());
+            reject.set(true);
+            String retained = mapper.writeValueAsString(observation("retained"));
+            template.executeInTransaction(ops -> { sendSync(ops, TOPIC, "same-key", retained); return null; });
+            awaitCondition(() -> !listener.isRunning(), 30, "late exception must stop registered listener");
+            assertEquals(before, committedOffset(bootstrap, group), "late HTTP error cannot commit Kafka offset");
+            assertEquals(1, metrics.getClickHouseInserts(), "only the initial genuine success counts");
+            assertEquals(1, metrics.getClickHouseFailures());
+            assertEquals("ERR_CLICKHOUSE_UNKNOWN", metrics.getConsumerDegradedReason());
+            assertEquals(2, payloads.size(), "UNKNOWN must not trigger insertion retries");
+            reject.set(false);
+            listener.start(); // Explicit operator recovery only; K2 is not implemented.
+            Long after = awaitCommittedOffset(bootstrap, group, n -> n != null && n > before, 30);
+            assertNotNull(after);
+            assertEquals(3L, after); // Second data record is offset 2, following the first transaction marker.
+            assertEquals(2, metrics.getClickHouseInserts());
+            assertEquals(payloads.get(1), payloads.get(2), "replay must preserve exact insertion identity/body");
+            System.out.printf("K11_OFFSET before=%d late_error=%d explicit_replay=%d inserts=2 failures=1%n",
+                    before, before, after);
+        } finally {
+            if (context != null) { context.close(); context = null; }
+            server.stop(0);
+        }
+    }
+
+    @Test
     @Timeout(value = 180, unit = TimeUnit.SECONDS)
     void actualListenerContainerHonorsReadCommittedAckAndFailClosedOffsets() throws Exception {
         String bootstrap = embeddedKafka.getBrokersAsString();
