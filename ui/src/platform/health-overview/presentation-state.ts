@@ -10,6 +10,7 @@ export const HEALTH_OVERVIEW_PRESENTATION_STATES: readonly HealthOverviewPresent
   'partial',
   'stale',
   'permission-restricted',
+  'not-licensed',
   'query-limited',
   'error',
   'monitoring-degraded',
@@ -25,6 +26,7 @@ export const HEALTH_OVERVIEW_STATE_LABELS: Readonly<
   partial: 'Partial evidence',
   stale: 'Stale data',
   'permission-restricted': 'Permission restricted',
+  'not-licensed': 'Not licensed',
   'query-limited': 'Query limited',
   error: 'Error',
   'monitoring-degraded': 'Monitoring degraded',
@@ -114,6 +116,16 @@ export const buildHealthOverviewStateCopy = (
         title: 'Permission restricted',
         explanation: `The current presentation context cannot show this ${domain.toLowerCase()} health scope. UI filtering is not security enforcement.`,
         nextAction: 'Request the required workspace permission from an authorized administrator; Core authz remains authoritative.',
+        evidence,
+        retryAvailable: false,
+        diagnosticAvailable: false,
+      };
+    case 'not-licensed':
+      return {
+        kind,
+        title: 'Not licensed',
+        explanation: `This ${domain.toLowerCase()} health capability is not licensed for the current tenant. Not Licensed is distinct from Permission Restricted and must not ask the operator to request workspace permission.`,
+        nextAction: 'Review licence entitlement with an authorized administrator; Core licence authority remains authoritative.',
         evidence,
         retryAvailable: false,
         diagnosticAvailable: false,

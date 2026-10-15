@@ -16,6 +16,7 @@ export type HealthOverviewPresentationState =
   | 'partial'
   | 'stale'
   | 'permission-restricted'
+  | 'not-licensed'
   | 'query-limited'
   | 'error'
   | 'monitoring-degraded'
@@ -144,7 +145,7 @@ export const screenDataStateToHealthPresentation = (
     case 'permission-restricted':
       return 'permission-restricted';
     case 'not-licensed':
-      return 'permission-restricted';
+      return 'not-licensed';
     case 'query-limited':
       return 'query-limited';
     case 'error':

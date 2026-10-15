@@ -139,7 +139,7 @@ test('screen data states map into health presentation without inventing Normal a
   assert.equal(screenDataStateToHealthPresentation('partial'), 'partial');
   assert.equal(screenDataStateToHealthPresentation('stale'), 'stale');
   assert.equal(screenDataStateToHealthPresentation('permission-restricted'), 'permission-restricted');
-  assert.equal(screenDataStateToHealthPresentation('not-licensed'), 'permission-restricted');
+  assert.equal(screenDataStateToHealthPresentation('not-licensed'), 'not-licensed');
   assert.equal(screenDataStateToHealthPresentation('query-limited'), 'query-limited');
   assert.equal(screenDataStateToHealthPresentation('error'), 'error');
   assert.equal(screenDataStateToHealthPresentation('monitoring-degraded'), 'monitoring-degraded');

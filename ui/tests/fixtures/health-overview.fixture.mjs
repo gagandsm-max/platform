@@ -64,6 +64,7 @@ export const ALL_PRESENTATION_STATES = Object.freeze([
   'partial',
   'stale',
   'permission-restricted',
+  'not-licensed',
   'query-limited',
   'error',
   'monitoring-degraded',
