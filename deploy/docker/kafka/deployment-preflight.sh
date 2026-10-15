@@ -5,7 +5,7 @@ REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 fail() { printf 'KAFKA_DEPLOYMENT_%s: %s\n' "$1" "$2" >&2; exit 1; }
 ACTION=${1:-check}; shift || true
 DC=(docker compose "$@")
-case $ACTION in check|provision|up|restart|down|cleanup) ;; *) fail ARGUMENT 'Use check/provision/up/restart/down/cleanup followed by Compose global options';; esac
+case $ACTION in check|provision|up|restart|down) ;; *) fail ARGUMENT 'Use check/provision/up/restart/down followed by Compose global options';; esac
 [[ $(docker compose version --short) == 5.5.0 ]] || fail COMPOSE_VERSION 'Validated Compose version is 5.5.0; do not upgrade/downgrade the host automatically'
 # Use the already governed Node tooling image, never install a host parser.
 # Rendering and this networkless parser do not create/use Kafka resources.
@@ -113,13 +113,7 @@ case $ACTION in
     check) ;;
     up) "${DC[@]}" up -d;;
     restart) "${DC[@]}" restart;;
-    down|cleanup)
-        [[ $ACTION != cleanup || ${PLATFORM_KAFKA_DISPOSABLE_CONFIRM:-} == "$STORAGE" ]] || fail AUTHORIZATION 'Explicit disposable storage identity required for cleanup'
-        # No down -v. Unknown/foreign volumes are never candidates for removal.
-        "${DC[@]}" down
-        if [[ $ACTION == cleanup ]]; then
-            inspect_volume
-            [[ -z $(docker ps -aq --filter "volume=$VOLUME") ]] || fail IN_USE 'Volume still associated with a container; refuse deletion'
-            docker volume rm "$VOLUME"
-        fi;;
+    # Non-deleting teardown only. Volume removal is never a production preflight
+    # action: matching STORAGE identity/labels is not disposable-resource authority.
+    down) "${DC[@]}" down;;
 esac

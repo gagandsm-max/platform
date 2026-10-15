@@ -180,6 +180,23 @@ if PLATFORM_KAFKA_NEW_VOLUME_CONFIRM=$PLATFORM_KAFKA_STORAGE_ID gate provision >
 grep -q KAFKA_DEPLOYMENT_COLLISION "$TASK/collision-provision.log"
 echo 'PASS explicit provisioning and primary volume collision rejection'
 echo 'PASS CI-scoped volume name and exact deployment ownership'
+# Negative: production-labeled volume + correct STORAGE identity is NOT deletion auth.
+# cleanup is not a supported production preflight action; confirm cannot revive it.
+! grep -E 'cleanup|docker volume rm|PLATFORM_KAFKA_DISPOSABLE_CONFIRM' \
+    "$REPO/deploy/docker/kafka/deployment-preflight.sh" | grep -v '^[[:space:]]*#'
+if gate cleanup > "$TASK/cleanup-reject.log" 2>&1; then echo 'cleanup must be rejected' >&2; exit 1; fi
+grep -q KAFKA_DEPLOYMENT_ARGUMENT "$TASK/cleanup-reject.log"
+if PLATFORM_KAFKA_DISPOSABLE_CONFIRM="$PLATFORM_KAFKA_STORAGE_ID" gate cleanup > "$TASK/cleanup-confirm-reject.log" 2>&1; then
+    echo 'confirm must not authorize cleanup' >&2; exit 1
+fi
+grep -q KAFKA_DEPLOYMENT_ARGUMENT "$TASK/cleanup-confirm-reject.log"
+owned_volume "$VOLUME"
+docker volume inspect "$VOLUME" >/dev/null
+gate down
+docker volume inspect "$VOLUME" >/dev/null
+owned_volume "$VOLUME"
+echo 'PASS production preflight rejects cleanup; matching STORAGE identity does not delete volume'
+echo 'PASS down is non-deleting; owned volume retained after teardown'
 # Stopped, not-yet-started container: desired env alone is not effective evidence.
 "${DC[@]}" create kafka
 UNKNOWN_ID=$(docker inspect -f '{{.Id}}' "$PROJECT-kafka")

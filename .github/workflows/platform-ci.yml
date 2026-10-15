@@ -418,13 +418,28 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          # CI-only disposable fixture cleanup. Production preflight has no volume-rm path.
+          [[ "${GITHUB_ACTIONS:-}" == "true" ]] || { echo "[ERROR] Kafka volume cleanup requires GitHub Actions."; exit 1; }
+          [[ "${RUN_ID}" =~ ^[0-9]+$ && "${RUN_ATTEMPT}" =~ ^[0-9]+$ ]] || exit 1
           RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
           PROJECT="ci_${RUN_IDENTITY}"
+          KAFKA_VOLUME="ci_${RUN_IDENTITY}_kafka_data"
+          KAFKA_STORAGE="ci_${RUN_IDENTITY}_kafka_identity"
           grep -Fxq "COMPOSE_PROJECT_NAME=${PROJECT}" .env || exit 1
-          grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=ci_${RUN_IDENTITY}_kafka_data" .env || exit 1
-          PLATFORM_KAFKA_DISPOSABLE_CONFIRM="ci_${RUN_IDENTITY}_kafka_identity" \
-            bash deploy/docker/kafka/deployment-preflight.sh cleanup
-          # Non-volume-deleting teardown above; each other volume needs exact provenance.
+          grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=${KAFKA_VOLUME}" .env || exit 1
+          # Non-deleting host gate only; never call a production cleanup/volume-rm action.
+          bash deploy/docker/kafka/deployment-preflight.sh down
+          # Kafka volume: positive disposable provenance = this Actions run identity +
+          # exact ownership labels + no remaining attachments. Matching STORAGE alone
+          # is not deletion authorization.
+          if docker volume inspect "${KAFKA_VOLUME}" >/dev/null 2>&1; then
+            [[ "${KAFKA_VOLUME}" =~ ^ci_[0-9]+_[0-9]+_kafka_data$ ]] || exit 1
+            kafka_labels=$(docker volume inspect -f '{{index .Labels "issue223.owner"}}|{{index .Labels "platform.kafka.project"}}|{{index .Labels "platform.kafka.storage-id"}}|{{index .Labels "platform.kafka.resource"}}' "${KAFKA_VOLUME}")
+            [[ "${kafka_labels}" == "${PROJECT}|${PROJECT}|${KAFKA_STORAGE}|platform_kafka_data" ]] || exit 1
+            [[ -z $(docker ps -aq --filter "volume=${KAFKA_VOLUME}") ]] || exit 1
+            docker volume rm "${KAFKA_VOLUME}"
+          fi
+          # Non-Kafka CI volumes: exact Compose project/volume provenance + no attachments.
           for pair in platform_pg_data:pg_data platform_ch_data:ch_data \
               platform_valkey_data:valkey_data platform_sensor_net_spool:sensor_net_spool \
               platform_sensor_infra_spool:sensor_infra_spool; do

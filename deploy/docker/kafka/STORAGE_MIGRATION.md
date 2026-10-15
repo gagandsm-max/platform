@@ -57,8 +57,10 @@ Docker may fetch these already approved images on a fresh host; it never install
 host runtimes. Unused image-declared config/secrets volumes are backed by tmpfs
 in the guarded service and helpers, avoiding unlabelled anonymous-volume cleanup.
 
-`deployment-preflight.sh check|provision|up|restart|down|cleanup` accepts Compose
+`deployment-preflight.sh check|provision|up|restart|down` accepts Compose
 global options after the action. `.env`/`COMPOSE_FILE` selection also works.
+Volume deletion is **not** a production preflight action: matching ownership
+labels or `PLATFORM_KAFKA_STORAGE_ID` is never deletion authorization.
 Every governed startup checks the exact rendered configuration first. The gate
 inspects both project/service and fixed-name container identities (running or
 stopped), mounted volume, stored cluster/node/directory seal, effective properties,
@@ -67,7 +69,8 @@ missing storage, any legacy container or mismatched identity rejects before
 Compose mutation. A separate read-only inspector container uses the approved
 Kafka image and a read-only data mount; it cannot format or consume first-start
 authorization. Neither telemetry topic offsets nor destination emptiness proves
-that an installation is fresh. Inspection never removes a container.
+that an installation is fresh. Inspection never removes a container. `down`
+tears down Compose services without removing the external Kafka volume.
 
 Direct ungoverned `docker compose up` cannot be made safe by an in-container
 guard. Do not apply this overlay to an existing installation until the separate
@@ -291,11 +294,17 @@ files, and verifies readback after sealing. Cleanup is limited to its project.
 No developer, customer or running CI broker is selected by the harness.
 It rejects a pre-existing primary name and verifies exact owner/project/resource/
 storage labels before any volume removal. Teardown never uses `down -v` or global
-prune. A foreign-provenance fixture proves refusal before independently verified
-fixture cleanup. CI uses the same explicit provisioning and preflight contract,
-run/attempt-scoped identities and non-volume-deleting teardown; each volume is
-removed only after exact provenance and no remaining container attachments.
+prune. Negative coverage proves `cleanup` is rejected by the production host gate
+even when `PLATFORM_KAFKA_DISPOSABLE_CONFIRM` equals the retained storage identity,
+and that `down` leaves the owned volume intact. A foreign-provenance fixture proves
+refusal before independently verified fixture cleanup. CI uses the same explicit
+provisioning and non-deleting preflight (`check|provision|up|restart|down`) with
+run/attempt-scoped identities; Kafka and other CI volumes are removed only by
+strictly CI-scoped job logic after `GITHUB_ACTIONS` proof, exact run identity
+binding, ownership/Compose provenance and no remaining container attachments.
 Incomplete/unattested provisioning is retained for review, not silently cleaned up.
+Archival disposal of a real installation remains a separate reviewed operator
+procedure outside `deployment-preflight.sh`.
 
 Full Platform CI and the existing 20-test suite must run on the proposed commit
 in an isolated CI job. Native packaging, host reboot/crash/fsync durability,
