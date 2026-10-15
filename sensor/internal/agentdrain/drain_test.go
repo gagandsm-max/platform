@@ -3512,3 +3512,232 @@ func TestIssue230CleanupFaultNotClearedBySnapshotAlone(t *testing.T) {
 		assertCleanupFaultDegraded(t, d.Snapshot(), 0)
 	}
 }
+
+// TestIssue230StaleCleanupObservationCannotReassertAfterClear proves the P2-1
+// race: Snapshot observes unresolved cleanup, concurrent recovery clears the
+// fault (cleanupGen advances), then the stale observer must not reassert
+// DEGRADED.
+func TestIssue230StaleCleanupObservationCannotReassertAfterClear(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	wrap := &unresolvedCleanupSpool{Spool: s, unresolved: true, seq: 1}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	observed := make(chan struct{})
+	release := make(chan struct{})
+	d.afterCleanupUnresolvedObserve = func() {
+		close(observed)
+		<-release
+	}
+
+	var snap DeliveryStatus
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		snap = d.Snapshot()
+	}()
+
+	select {
+	case <-observed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for cleanup unresolved observation barrier")
+	}
+
+	// Concurrent recovery: spool flag cleared and drain generation advanced.
+	wrap.unresolved = false
+	d.clearCleanupFault()
+	close(release)
+	wg.Wait()
+
+	if snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.Blocked {
+		t.Fatalf("stale cleanup observation reasserted DEGRADED: %+v", snap)
+	}
+	final := d.Snapshot()
+	if final.State != DeliveryStateUp || final.ReasonCode != "" || final.Blocked {
+		t.Fatalf("post-clear healthy state lost: %+v", final)
+	}
+}
+
+// TestIssue230CleanupObservationStillAssertsTrueFault ensures generation fencing
+// does not suppress a live unresolved-cleanup signal after a prior clear.
+func TestIssue230CleanupObservationStillAssertsTrueFault(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	wrap := &unresolvedCleanupSpool{Spool: s, unresolved: false, seq: 0}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.markCleanupFault(1)
+	d.clearCleanupFault()
+	wrap.unresolved = true
+	wrap.seq = 2
+	assertCleanupFaultDegraded(t, d.Snapshot(), 1)
+}
+
+// TestIssue230CleanupRecoveryBackoffPacesExpensiveRetries proves P2-2: under
+// persistent reconcile failure, RunOnce does not rescan every IdleInterval.
+// Skipped attempts leave the fault set and must not invent Core ACKs.
+func TestIssue230CleanupRecoveryBackoffPacesExpensiveRetries(t *testing.T) {
+	s, dir := openSpool(t)
+	wrap := &failingReconcileSpool{Spool: s, failErr: errors.New("injected reconcile failure")}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Hour, MaxBackoff: time.Hour, JitterFraction: 0,
+		IdleInterval: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	// faultSeq 0 is covered by an empty AckedThrough watermark so recovery
+	// reaches the expensive reconcile path without a prior partial ACK.
+	d.markCleanupFault(0)
+
+	const iterations = 25
+	for i := 0; i < iterations; i++ {
+		ok, err := d.RunOnce(context.Background())
+		if ok || err != nil {
+			t.Fatalf("iteration %d: ok=%v err=%v", i, ok, err)
+		}
+	}
+	calls := wrap.reconcileCalls.Load()
+	if calls != 1 {
+		t.Fatalf("expensive reconcile paced calls=%d want 1 across %d RunOnce", calls, iterations)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("paced recovery must not invent Core ACK: %d", d.Metrics().DurableAcks.Load())
+	}
+
+	// Elapse the paced window: next RunOnce must attempt again, still fail, still faulted.
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("retry after pace: ok=%v err=%v", ok, err)
+	}
+	if got := wrap.reconcileCalls.Load(); got != 2 {
+		t.Fatalf("after pace window reconcileCalls=%d want 2", got)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+}
+
+// TestIssue230CleanupRecoveryBackoffKeepsPendingDeliveryOperational proves
+// paced cleanup recovery does not block pending telemetry delivery under fault.
+func TestIssue230CleanupRecoveryBackoffKeepsPendingDeliveryOperational(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 3)
+	wrap := &failingReconcileSpool{Spool: s, failErr: errors.New("injected reconcile failure")}
+	var uploads atomic.Uint64
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		uploads.Add(1)
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 10, InitialBackoff: time.Hour, MaxBackoff: time.Hour, JitterFraction: 0,
+	}, wrap, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	d.markCleanupFault(0)
+
+	delivered := false
+	for i := 0; i < 5; i++ {
+		ok, err := d.RunOnce(context.Background())
+		if err != nil {
+			t.Fatalf("delivery under cleanup fault: ok=%v err=%v", ok, err)
+		}
+		if ok {
+			delivered = true
+			break
+		}
+	}
+	if !delivered || uploads.Load() == 0 {
+		t.Fatalf("pending delivery must proceed under paced cleanup fault: delivered=%v uploads=%d", delivered, uploads.Load())
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	if wrap.reconcileCalls.Load() != 1 {
+		t.Fatalf("reconcileCalls=%d want 1 (paced)", wrap.reconcileCalls.Load())
+	}
+}
+
+// TestIssue230CleanupRecoveryBackoffUnderLargeBacklog verifies paced recovery
+// still avoids repeated directory reconcile while a large pending backlog exists.
+func TestIssue230CleanupRecoveryBackoffUnderLargeBacklog(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 200)
+	wrap := &failingReconcileSpool{Spool: s, failErr: errors.New("injected reconcile failure")}
+	// Retain the backlog: transient upload failure keeps pending without deliveryBlocked
+	// masking the independent cleanup-fault health signal.
+	tr := &fakeTransport{err: transientErr{}}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Hour, MaxBackoff: time.Hour, JitterFraction: 0,
+	}, wrap, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	d.markCleanupFault(0)
+
+	for i := 0; i < 40; i++ {
+		_, _ = d.RunOnce(context.Background())
+	}
+	if got := wrap.reconcileCalls.Load(); got != 1 {
+		t.Fatalf("large-backlog paced reconcileCalls=%d want 1", got)
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 200)
+	if snap.PendingRecords != 200 {
+		t.Fatalf("pending backlog disturbed: %+v", snap)
+	}
+}
+
+// failingReconcileSpool forces ReconcileAckedCleanup failures while counting calls.
+type failingReconcileSpool struct {
+	Spool
+	failErr        error
+	reconcileCalls atomic.Uint64
+}
+
+func (f *failingReconcileSpool) ReconcileAckedCleanup() error {
+	f.reconcileCalls.Add(1)
+	if f.failErr != nil {
+		return f.failErr
+	}
+	type reconciler interface {
+		ReconcileAckedCleanup() error
+	}
+	if r, ok := f.Spool.(reconciler); ok {
+		return r.ReconcileAckedCleanup()
+	}
+	return errors.New("ReconcileAckedCleanup unavailable")
+}
+
+func (f *failingReconcileSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	type reporter interface {
+		UnresolvedAckedCleanup() (bool, uint64, error)
+	}
+	if r, ok := f.Spool.(reporter); ok {
+		return r.UnresolvedAckedCleanup()
+	}
+	return false, 0, nil
+}

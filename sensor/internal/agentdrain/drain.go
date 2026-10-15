@@ -208,11 +208,24 @@ type Drain struct {
 	cleanupFault      bool
 	cleanupFaultSince time.Time
 	cleanupFaultSeq   uint64
+	// cleanupGen advances on every clearCleanupFault so a Snapshot that read a
+	// positive unresolved-cleanup flag cannot reassert DEGRADED after recovery.
+	// Observations sample gen before spool I/O and re-check under deliveryMu.
+	cleanupGen uint64
+	// cleanupRetryAfter / cleanupRetryBackoff pace expensive ReconcileAckedCleanup
+	// + directory fsync under persistent cleanup failure. Skipping a paced attempt
+	// must never clear the fault; pending telemetry delivery continues.
+	cleanupRetryAfter   time.Time
+	cleanupRetryBackoff time.Duration
 
 	// Optional test-only seam. Nil in production. Invoked after a positive
 	// legacy sizeRejected+pending observation and before the generation-gated
 	// mark attempt, so barrier tests can interleave a durable ACK.
 	afterLegacySizeObserve func()
+	// Optional test-only seam. Nil in production. Invoked after a positive
+	// unresolved-cleanup observation and before the generation-gated mark,
+	// so barrier tests can interleave clearCleanupFault.
+	afterCleanupUnresolvedObserve func()
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
@@ -363,9 +376,31 @@ func (d *Drain) markCleanupFault(seq uint64) {
 	defer d.deliveryMu.Unlock()
 	if !d.cleanupFault {
 		d.cleanupFaultSince = time.Now().UTC()
+		// Fresh fault: allow an immediate first recovery attempt.
+		d.cleanupRetryAfter = time.Time{}
+		d.cleanupRetryBackoff = 0
 	}
 	d.cleanupFault = true
 	d.cleanupFaultSeq = seq
+}
+
+// markObservedCleanupFault applies a Snapshot unresolved-cleanup observation only
+// when cleanupGen is unchanged since the observation began. A concurrent recovery
+// that called clearCleanupFault advances cleanupGen and wins.
+func (d *Drain) markObservedCleanupFault(gen uint64, seq uint64) {
+	if d == nil {
+		return
+	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	if d.cleanupGen != gen || d.cleanupFault {
+		return
+	}
+	d.cleanupFaultSince = time.Now().UTC()
+	d.cleanupFault = true
+	d.cleanupFaultSeq = seq
+	d.cleanupRetryAfter = time.Time{}
+	d.cleanupRetryBackoff = 0
 }
 
 func (d *Drain) clearCleanupFault() {
@@ -377,6 +412,46 @@ func (d *Drain) clearCleanupFault() {
 	d.cleanupFault = false
 	d.cleanupFaultSince = time.Time{}
 	d.cleanupFaultSeq = 0
+	d.cleanupRetryAfter = time.Time{}
+	d.cleanupRetryBackoff = 0
+	d.cleanupGen++
+}
+
+// scheduleCleanupRetry paces the next expensive cleanup recovery under deliveryMu.
+// It never clears cleanupFault. Callers must not hold deliveryMu.
+func (d *Drain) scheduleCleanupRetry() {
+	if d == nil {
+		return
+	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	if !d.cleanupFault {
+		return
+	}
+	base := d.cleanupRetryBackoff
+	if base <= 0 {
+		base = d.cfg.InitialBackoff
+	}
+	jitterFn := d.jitter
+	if jitterFn == nil {
+		jitterFn = jitterDuration
+	}
+	backoff := jitterFn(base, d.cfg.JitterFraction)
+	if backoff > d.cfg.MaxBackoff {
+		backoff = d.cfg.MaxBackoff
+	}
+	if backoff < d.cfg.InitialBackoff {
+		backoff = d.cfg.InitialBackoff
+	}
+	d.cleanupRetryAfter = time.Now().Add(backoff)
+	next := base * 2
+	if next < d.cfg.InitialBackoff {
+		next = d.cfg.InitialBackoff
+	}
+	if next > d.cfg.MaxBackoff {
+		next = d.cfg.MaxBackoff
+	}
+	d.cleanupRetryBackoff = next
 }
 
 // observeLegacySizeBlock surfaces durable pre-65fe619 sizeRejected sidecars as
@@ -840,11 +915,15 @@ func (d *Drain) reconcileDeliveryAfterPartialParkAck(parkedSeq uint64) bool {
 // observeOrphanedCleanupFault reasserts cleanup degradation from the spool's
 // O(1) unresolved-cleanup flag (set when AcknowledgeThrough advances the
 // watermark but removal/fsync fails). Snapshot must not scan the spool directory.
+// Spool observation stays outside deliveryMu (never hold deliveryMu across spool
+// I/O). A sampled cleanupGen must still match under the write lock or the
+// observation is discarded as stale vs a concurrent clearCleanupFault.
 func (d *Drain) observeOrphanedCleanupFault() {
 	if d == nil {
 		return
 	}
 	d.deliveryMu.RLock()
+	gen := d.cleanupGen
 	already := d.cleanupFault
 	d.deliveryMu.RUnlock()
 	if already {
@@ -858,12 +937,18 @@ func (d *Drain) observeOrphanedCleanupFault() {
 	if err != nil || !unresolved {
 		return
 	}
-	d.markCleanupFault(seq)
+	if d.afterCleanupUnresolvedObserve != nil {
+		d.afterCleanupUnresolvedObserve()
+	}
+	d.markObservedCleanupFault(gen, seq)
 }
 
 // tryRecoverCleanupFault clears ERR_SPOOL_CLEANUP_FAILED only after durable
 // Stats prove the fault sequence is covered and DiskSpool-owned reconcile plus
 // spool directory fsync succeed. Unrelated upload success does not clear it.
+// Under persistent failure, recovery is paced via InitialBackoff/MaxBackoff so
+// RunOnce does not rescan the spool directory every IdleInterval; skipped
+// attempts leave the fault set and do not block pending telemetry delivery.
 func (d *Drain) tryRecoverCleanupFault() {
 	if d == nil {
 		return
@@ -871,8 +956,13 @@ func (d *Drain) tryRecoverCleanupFault() {
 	d.deliveryMu.RLock()
 	faulted := d.cleanupFault
 	faultSeq := d.cleanupFaultSeq
+	retryAfter := d.cleanupRetryAfter
 	d.deliveryMu.RUnlock()
 	if !faulted {
+		return
+	}
+	if !retryAfter.IsZero() && time.Now().Before(retryAfter) {
+		// Paced skip: fault remains DEGRADED; delivery path continues.
 		return
 	}
 	st, err := d.spool.Stats()
@@ -884,6 +974,7 @@ func (d *Drain) tryRecoverCleanupFault() {
 		return
 	}
 	if err := reconciler.ReconcileAckedCleanup(); err != nil {
+		d.scheduleCleanupRetry()
 		return
 	}
 	syncFn := d.syncDir
@@ -891,6 +982,7 @@ func (d *Drain) tryRecoverCleanupFault() {
 		syncFn = defaultSyncDir
 	}
 	if err := syncFn(d.cfg.AgentSpoolDir); err != nil {
+		d.scheduleCleanupRetry()
 		return
 	}
 	d.clearCleanupFault()
