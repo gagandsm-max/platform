@@ -166,6 +166,14 @@ type unresolvedCleanupReporter interface {
 	UnresolvedAckedCleanup() (bool, uint64, error)
 }
 
+// ackedThroughReporter is an O(1) durable watermark reader. Prefer this over
+// Stats() when proving post-commit AcknowledgeThrough advancement: Stats scans
+// pending records and filesystem capacity and can fail transiently after the
+// watermark is already durable.
+type ackedThroughReporter interface {
+	AckedThrough() (uint64, error)
+}
+
 type Drain struct {
 	cfg       Config
 	spool     Spool
@@ -892,16 +900,15 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 // reconcileDeliveryAfterPartialParkAck clears obsolete delivery-block health only
 // when durable spool state proves AcknowledgeThrough committed parkedSeq even
 // though a post-commit cleanup/fsync error was returned. Pre-commit failures and
-// uncertain Stats inspection retain the prior block. After clearing the obsolete
-// Core delivery reason, an unresolved storage-cleanup fault remains visible as
-// DEGRADED (ERR_SPOOL_CLEANUP_FAILED) until orphan cleanup + directory sync
-// succeed. This never increments DurableAcks.
+// lack of authoritative watermark proof retain the prior block. After clearing
+// the obsolete Core delivery reason, an unresolved storage-cleanup fault remains
+// visible as DEGRADED (ERR_SPOOL_CLEANUP_FAILED) until orphan cleanup + directory
+// sync succeed. A transient Stats() failure must not retain Core 413 once
+// AckedThrough (or UnresolvedAckedCleanup's watermark) proves the commit.
+// This never increments DurableAcks.
 func (d *Drain) reconcileDeliveryAfterPartialParkAck(parkedSeq uint64) bool {
-	st, err := d.spool.Stats()
-	if err != nil {
-		return false
-	}
-	if st.AckedThrough < parkedSeq {
+	acked, proven := d.provenAckedThrough()
+	if !proven || acked < parkedSeq {
 		return false
 	}
 	// Logical pending excludes sequences at or below AckedThrough even if an
@@ -910,6 +917,33 @@ func (d *Drain) reconcileDeliveryAfterPartialParkAck(parkedSeq uint64) bool {
 	d.markCleanupFault(parkedSeq)
 	d.refreshStats()
 	return true
+}
+
+// provenAckedThrough returns the durable AckedThrough watermark using O(1)
+// reporters when available. Stats() is only a compatibility fallback for test
+// spools that lack those reporters. A transient Stats() failure must not be
+// treated as disproof when AckedThrough or UnresolvedAckedCleanup succeeds.
+func (d *Drain) provenAckedThrough() (uint64, bool) {
+	if d == nil || d.spool == nil {
+		return 0, false
+	}
+	if reporter, ok := d.spool.(ackedThroughReporter); ok {
+		if acked, err := reporter.AckedThrough(); err == nil {
+			return acked, true
+		}
+		// Fall through: AckedThrough inspect can fail independently of the
+		// durable watermark exposed by UnresolvedAckedCleanup.
+	}
+	if reporter, ok := d.spool.(unresolvedCleanupReporter); ok {
+		if _, acked, err := reporter.UnresolvedAckedCleanup(); err == nil {
+			return acked, true
+		}
+	}
+	st, err := d.spool.Stats()
+	if err != nil {
+		return 0, false
+	}
+	return st.AckedThrough, true
 }
 
 // observeOrphanedCleanupFault reasserts cleanup degradation from the spool's
@@ -965,8 +999,8 @@ func (d *Drain) tryRecoverCleanupFault() {
 		// Paced skip: fault remains DEGRADED; delivery path continues.
 		return
 	}
-	st, err := d.spool.Stats()
-	if err != nil || st.AckedThrough < faultSeq {
+	acked, proven := d.provenAckedThrough()
+	if !proven || acked < faultSeq {
 		return
 	}
 	reconciler, ok := d.spool.(ackedCleanupReconciler)

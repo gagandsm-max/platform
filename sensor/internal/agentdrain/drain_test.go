@@ -2424,7 +2424,9 @@ type partialAckSpool struct {
 	dir            string
 	mode           string // pre_commit | post_commit_remove | post_commit_fsync | post_commit_stats_uncertain
 	ackedAttempted bool
-	failStats      bool
+	// failStats is atomic so concurrent Snapshot refreshStats cannot race the
+	// post_commit_stats_uncertain AcknowledgeThrough arming path.
+	failStats atomic.Bool
 }
 
 func (p *partialAckSpool) AcknowledgeThrough(seq uint64) error {
@@ -2452,7 +2454,7 @@ func (p *partialAckSpool) AcknowledgeThrough(seq uint64) error {
 			return errors.New("acknowledged record metadata is durable but file cleanup failed")
 		}
 		if p.mode == "post_commit_stats_uncertain" {
-			p.failStats = true
+			p.failStats.Store(true)
 			return errors.New("injected post-commit cleanup failure with uncertain stats")
 		}
 		return errors.New("injected final spool directory fsync failure")
@@ -2462,7 +2464,7 @@ func (p *partialAckSpool) AcknowledgeThrough(seq uint64) error {
 }
 
 func (p *partialAckSpool) Stats() (spool.Stats, error) {
-	if p.failStats {
+	if p.failStats.Load() {
 		return spool.Stats{}, errors.New("injected Stats failure after partial acknowledgement")
 	}
 	return p.Spool.Stats()
@@ -2486,6 +2488,34 @@ func (p *partialAckSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
 		return r.UnresolvedAckedCleanup()
 	}
 	return false, 0, nil
+}
+
+func (p *partialAckSpool) AckedThrough() (uint64, error) {
+	type reporter interface {
+		AckedThrough() (uint64, error)
+	}
+	if r, ok := p.Spool.(reporter); ok {
+		return r.AckedThrough()
+	}
+	return 0, errors.New("AckedThrough unavailable on wrapped spool")
+}
+
+// noWatermarkProofSpool forces every watermark inspector to fail so reconcile
+// cannot clear a Core delivery block without inventing durable ACK proof.
+type noWatermarkProofSpool struct {
+	*partialAckSpool
+}
+
+func (n *noWatermarkProofSpool) AckedThrough() (uint64, error) {
+	return 0, errors.New("injected AckedThrough failure")
+}
+
+func (n *noWatermarkProofSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	return false, 0, errors.New("injected UnresolvedAckedCleanup failure")
+}
+
+func (n *noWatermarkProofSpool) Stats() (spool.Stats, error) {
+	return spool.Stats{}, errors.New("injected Stats failure")
 }
 
 func TestIssue230PoisonFailuresNeverFalselyRecover(t *testing.T) {
@@ -2920,30 +2950,144 @@ func TestIssue230PartialAckPostCommitFsyncClearsObsoleteBlock(t *testing.T) {
 	}
 }
 
-func TestIssue230PartialAckUncertainStatsRetainsDegraded(t *testing.T) {
-	d, s, _, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+// TestIssue230PartialAckStatsFailureClearsObsolete413WithAckedThrough proves the
+// P2 recovery defect: after durable post-commit AcknowledgeThrough, a transient
+// Stats() failure must not retain Core 413. O(1) AckedThrough is authoritative.
+func TestIssue230PartialAckStatsFailureClearsObsolete413WithAckedThrough(t *testing.T) {
+	d, s, _, wrap := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
 	ok, err := d.RunOnce(context.Background())
 	if ok || err == nil {
-		t.Fatalf("uncertain inspect must still surface spool error: ok=%v err=%v", ok, err)
+		t.Fatalf("post-commit cleanup/inspect failure must surface: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeSpool {
+		t.Fatalf("want CodeSpool, got %v", err)
+	}
+	if !strings.Contains(de.msg, "watermark durable but spool cleanup failed") {
+		t.Fatalf("want reconciled partial-ack message, got %q", de.msg)
+	}
+	if acked, err := s.AckedThrough(); err != nil || acked < 1 {
+		t.Fatalf("fixture expected durable watermark underneath Stats failure: acked=%d err=%v", acked, err)
+	}
+	if _, statsErr := wrap.Stats(); statsErr == nil {
+		t.Fatal("fixture must keep Stats failing so AckedThrough is the proof path")
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d DurableAcks=%d (no false Core ACK)", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	assertCleanupFaultDespiteStatsFailure(t, d.Snapshot())
+}
+
+// TestIssue230PartialAckStatsFailureRecoversOnSubsequentEmptyRunOnce proves that
+// after post-watermark ACK + Stats failure, later RunOnce calls (empty logical
+// backlog) clear cleanup DEGRADED without inventing a Core ACK.
+func TestIssue230PartialAckStatsFailureRecoversOnSubsequentEmptyRunOnce(t *testing.T) {
+	d, s, _, wrap := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	assertCleanupFaultDespiteStatsFailure(t, d.Snapshot())
+	// Keep Stats failing: recovery must use O(1) AckedThrough, not directory Stats.
+	if _, statsErr := wrap.Stats(); statsErr == nil {
+		t.Fatal("Stats must remain failing during empty-backlog recovery")
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 0 {
+		t.Fatalf("logical backlog must be empty for this recovery case: %+v", st)
+	}
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("empty recovery RunOnce: ok=%v err=%v", ok, err)
+	}
+	// Disarm Stats only to read accurate pending metrics after recovery proof.
+	wrap.failStats.Store(false)
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 0 {
+		t.Fatalf("empty-backlog recovery must clear cleanup fault: %+v", final)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 || final.DurableAcks != 0 {
+		t.Fatalf("recovery must not invent Core ACK: metrics=%d snap=%+v", d.Metrics().DurableAcks.Load(), final)
+	}
+}
+
+// TestIssue230PartialAckNoWatermarkProofRetainsDegraded is the negative case:
+// when every watermark inspector fails, obsolete 413 must remain (no invented proof).
+func TestIssue230PartialAckNoWatermarkProofRetainsDegraded(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+	wrap := &noWatermarkProofSpool{partialAckSpool: &partialAckSpool{
+		Spool: s, dir: dir, mode: "post_commit_stats_uncertain",
+	}}
+	d.spool = wrap
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("no-proof path must surface spool error: ok=%v err=%v", ok, err)
 	}
 	var de *Error
 	if !errors.As(err, &de) || de.Code != CodeSpool {
 		t.Fatalf("want CodeSpool, got %v", err)
 	}
 	if strings.Contains(de.msg, "watermark durable but spool cleanup failed") {
-		t.Fatalf("uncertain Stats must not claim reconciled recovery: %q", de.msg)
+		t.Fatalf("no watermark proof must not claim reconciled recovery: %q", de.msg)
 	}
-	// Underlying watermark may be durable, but health must not clear without proof.
+	// Underlying DiskSpool watermark may be durable, but Drain must not clear
+	// without an authoritative inspector succeeding.
 	if acked, err := s.AckedThrough(); err != nil || acked < 1 {
-		t.Fatalf("fixture expected durable watermark underneath uncertain inspect: acked=%d err=%v", acked, err)
+		t.Fatalf("fixture expected durable watermark underneath failed inspectors: acked=%d err=%v", acked, err)
 	}
 	if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
-		t.Fatalf("uncertain path must not count poison recovery: poison=%d acks=%d",
+		t.Fatalf("no-proof path must not count poison recovery: poison=%d acks=%d",
 			d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
 	}
 	snap := d.Snapshot()
 	if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
-		t.Fatalf("uncertain persistence must retain DEGRADED: %+v", snap)
+		t.Fatalf("no watermark proof must retain DEGRADED 413: %+v", snap)
+	}
+}
+
+// TestIssue230PartialAckStatsFailureConcurrentSnapshot preserves deliveryGen /
+// cleanupGen fencing while Stats fails after durable partial ACK.
+func TestIssue230PartialAckStatsFailureConcurrentSnapshot(t *testing.T) {
+	d, s, _, wrap := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 64; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	var parkErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		var ok bool
+		ok, parkErr = d.RunOnce(context.Background())
+		if ok || parkErr == nil {
+			t.Errorf("partial quarantine must return cleanup error: ok=%v err=%v", ok, parkErr)
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	var de *Error
+	if !errors.As(parkErr, &de) || de.Code != CodeSpool || !strings.Contains(de.msg, "watermark durable") {
+		t.Fatalf("want reconciled CodeSpool partial ack, got %v", parkErr)
+	}
+	if _, statsErr := wrap.Stats(); statsErr == nil {
+		t.Fatal("Stats must still fail after concurrent park")
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 || st.RecordCount != 0 {
+		t.Fatalf("concurrent stats-failure partial ack state acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+	assertCleanupFaultDespiteStatsFailure(t, d.Snapshot())
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
 	}
 }
 
@@ -3154,6 +3298,27 @@ func assertCleanupFaultDegraded(t *testing.T, snap DeliveryStatus, pending int64
 	}
 }
 
+// assertCleanupFaultDespiteStatsFailure checks cleanup DEGRADED / cleared-413 while
+// PendingRecords may be stale because refreshStats cannot complete under injected
+// Stats failure. Does not invent Core ACK or DEVICE_DOWN semantics.
+func assertCleanupFaultDespiteStatsFailure(t *testing.T, snap DeliveryStatus) {
+	t.Helper()
+	if snap.State != DeliveryStateDegraded || snap.ReasonCode != reasonSpoolCleanupFailed {
+		t.Fatalf("want cleanup DEGRADED/%s, got %+v", reasonSpoolCleanupFailed, snap)
+	}
+	if snap.Blocked || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete Core 413 must not remain under Stats failure: %+v", snap)
+	}
+	if snap.DurableAcks != 0 {
+		t.Fatalf("must not invent Core ACK: %+v", snap)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
 func TestIssue230CleanupFaultSurvivesUnrelatedUpload(t *testing.T) {
 	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
 	ok, err := d.RunOnce(context.Background())
@@ -3192,7 +3357,11 @@ func TestIssue230CleanupFaultSurvivesUnrelatedUpload(t *testing.T) {
 	assertCleanupFaultDegraded(t, snap, 0)
 
 	// Proven recovery: directory sync succeeds (orphans already removable/absent).
+	// Elapse the paced retry window scheduled by the injected fsync failure above.
 	d.syncDir = nil
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
 	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
 		t.Fatalf("idle recovery RunOnce: ok=%v err=%v", ok, err)
 	}
