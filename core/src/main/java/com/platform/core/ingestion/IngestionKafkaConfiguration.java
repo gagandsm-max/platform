@@ -79,6 +79,16 @@ public class IngestionKafkaConfiguration {
         return createPinnedTelemetryConsumerFactory(properties);
     }
 
+    @Bean
+    TelemetryProcessingBudget telemetryProcessingBudget(
+            @Qualifier(TELEMETRY_KAFKA_CONSUMER_FACTORY) ConsumerFactory<String, String> consumerFactory,
+            @Value("${platform.telemetry.consumer.max-retries:5}") int attempts,
+            @Value("${platform.telemetry.consumer.backoff-ms:200}") long backoffMs
+    ) {
+        enforceTransactionalVisibilityInvariants(consumerFactory);
+        return new TelemetryProcessingBudget(consumerFactory.getConfigurationProperties(), attempts, backoffMs);
+    }
+
     /**
      * Platform-owned telemetry listener container factory.
      * Not {@code @ConditionalOnMissingBean}: a replacing bean would bypass
@@ -100,6 +110,12 @@ public class IngestionKafkaConfiguration {
         factory.setConsumerFactory(consumerFactory);
         // Manual immediate acknowledgement ensures offsets ONLY commit after ClickHouse persistence succeeds
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        factory.getContainerProperties().setPollTimeout(TelemetryProcessingBudget.POLL_TIMEOUT_MS);
+        factory.getContainerProperties().setSyncCommits(true);
+        factory.getContainerProperties().setSyncCommitTimeout(
+                java.time.Duration.ofMillis(TelemetryProcessingBudget.COMMIT_TIMEOUT_MS));
+        // A commit failure stops/replays instead of consuming an unbudgeted series of blocking retries.
+        factory.getContainerProperties().setCommitRetries(0);
         // Spring Kafka 3.2.4 resets DefaultErrorHandler retry state when recovery throws.
         // The consumer already bounds transient ClickHouse retries; on exhaustion or poison,
         // stop abnormally instead of starting another retry cycle. No recovery/skip/commit.
@@ -117,6 +133,8 @@ public class IngestionKafkaConfiguration {
         // Issue #222 safety pins: producer publishes transactionally; consumer must not see aborted records.
         consumerProperties.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, READ_COMMITTED);
         consumerProperties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        // One record per poll by default; explicit larger batches are preserved and budget-validated.
+        consumerProperties.putIfAbsent(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1);
         DefaultKafkaConsumerFactory<String, String> factory = new DefaultKafkaConsumerFactory<>(consumerProperties);
         enforceTransactionalVisibilityInvariants(factory);
         return factory;

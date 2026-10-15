@@ -21,6 +21,7 @@ import org.springframework.mock.env.MockEnvironment;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -321,6 +322,36 @@ class IngestionKafkaConfigurationTest {
             );
             IngestionKafkaConfiguration.enforceTransactionalVisibilityInvariants(consumerFactory);
         }
+    }
+
+    @Test
+    void unsafeRetryPropertiesFailContextStartupEvenWhenListenerDisabled() {
+        try (var context = new AnnotationConfigApplicationContext()) {
+            var env = new MockEnvironment();
+            env.setProperty("platform.telemetry.consumer.enabled", "false");
+            env.setProperty("platform.telemetry.consumer.max-retries", "2147483647");
+            env.setProperty("platform.telemetry.consumer.backoff-ms", "9223372036854775807");
+            context.setEnvironment(env);
+            context.registerBean(KafkaProperties.class, KafkaProperties::new);
+            context.register(IngestionKafkaConfiguration.class);
+            var failure = assertThrows(BeanCreationException.class, context::refresh);
+            assertTrue(rootCause(failure).getMessage().contains("ERR_KAFKA_POLL_BUDGET"));
+        }
+    }
+
+    @Test
+    void explicitSafeBatchSizeIsPreservedAndCommitWaitIsBounded() {
+        var properties = new KafkaProperties();
+        properties.getConsumer().setMaxPollRecords(4);
+        var config = new IngestionKafkaConfiguration();
+        var consumerFactory = config.telemetryKafkaConsumerFactory(properties);
+        assertEquals(4, consumerFactory.getConfigurationProperties().get(ConsumerConfig.MAX_POLL_RECORDS_CONFIG));
+        assertDoesNotThrow(() -> config.telemetryProcessingBudget(consumerFactory, 5, 200));
+        var container = config.telemetryKafkaListenerContainerFactory(consumerFactory).getContainerProperties();
+        assertTrue(container.isSyncCommits());
+        assertEquals(java.time.Duration.ofMillis(TelemetryProcessingBudget.COMMIT_TIMEOUT_MS), container.getSyncCommitTimeout());
+        assertEquals(0, container.getCommitRetries());
+        assertEquals(TelemetryProcessingBudget.POLL_TIMEOUT_MS, container.getPollTimeout());
     }
 
     private static Throwable rootCause(Throwable throwable) {

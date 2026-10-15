@@ -23,6 +23,7 @@ import java.util.Objects;
 
 @Component
 public class ClickHouseClient {
+    static final long INSERT_REQUEST_TIMEOUT_MS = 10_000;
     private static final Logger log = LoggerFactory.getLogger(ClickHouseClient.class);
     private static final DateTimeFormatter CH_TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
             .withZone(java.time.ZoneOffset.UTC);
@@ -128,7 +129,7 @@ public class ClickHouseClient {
         URI uri = URI.create(baseUrl + "/?query=INSERT+INTO+" + table + "+FORMAT+JSONEachRow");
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(uri)
-                .timeout(Duration.ofSeconds(10))
+                .timeout(Duration.ofMillis(INSERT_REQUEST_TIMEOUT_MS))
                 .header("Authorization", authHeader)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonEachRowBody, StandardCharsets.UTF_8))

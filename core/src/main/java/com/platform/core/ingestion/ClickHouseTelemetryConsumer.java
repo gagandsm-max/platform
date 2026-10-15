@@ -10,7 +10,6 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
@@ -32,6 +31,8 @@ public class ClickHouseTelemetryConsumer {
     private final IngestionMetrics metrics;
     private final int maxRetries;
     private final long backoffMs;
+    private final long recordProcessingMs;
+    private final java.util.function.LongSupplier nanoTime;
 
     public ClickHouseTelemetryConsumer(
             ClickHouseClient clickHouseClient,
@@ -41,22 +42,35 @@ public class ClickHouseTelemetryConsumer {
         this(clickHouseClient, objectMapper, metrics, 5, 200);
     }
 
-    @Autowired
     public ClickHouseTelemetryConsumer(
             ClickHouseClient clickHouseClient,
             ObjectMapper objectMapper,
             IngestionMetrics metrics,
-            @Value("${platform.telemetry.consumer.max-retries:5}") int maxRetries,
-            @Value("${platform.telemetry.consumer.backoff-ms:200}") long backoffMs
+            int maxRetries,
+            long backoffMs
     ) {
-        if (maxRetries < 1 || backoffMs < 0) {
-            throw new IllegalArgumentException("Telemetry consumer requires positive attempts and nonnegative backoff");
-        }
+        this(clickHouseClient, objectMapper, metrics,
+                new TelemetryProcessingBudget(java.util.Map.of(
+                        org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1),
+                        maxRetries, backoffMs), System::nanoTime);
+    }
+
+    @Autowired
+    public ClickHouseTelemetryConsumer(ClickHouseClient clickHouseClient, ObjectMapper objectMapper,
+                                      IngestionMetrics metrics, TelemetryProcessingBudget budget) {
+        this(clickHouseClient, objectMapper, metrics, budget, System::nanoTime);
+    }
+
+    ClickHouseTelemetryConsumer(ClickHouseClient clickHouseClient, ObjectMapper objectMapper,
+                               IngestionMetrics metrics, TelemetryProcessingBudget budget,
+                               java.util.function.LongSupplier nanoTime) {
         this.clickHouseClient = clickHouseClient;
         this.objectMapper = objectMapper;
         this.metrics = metrics;
-        this.maxRetries = maxRetries;
-        this.backoffMs = backoffMs;
+        this.maxRetries = budget.attempts;
+        this.backoffMs = budget.backoffMs;
+        this.recordProcessingMs = budget.recordProcessingMs;
+        this.nanoTime = nanoTime;
     }
 
     @KafkaListener(
@@ -68,6 +82,7 @@ public class ClickHouseTelemetryConsumer {
             containerFactory = "telemetryKafkaListenerContainerFactory"
     )
     public void consume(ConsumerRecord<String, String> record, Acknowledgment acknowledgment) {
+        long started = nanoTime.getAsLong();
         final Runnable insert;
         try {
             insert = resolveInsert(record.value());
@@ -96,15 +111,14 @@ public class ClickHouseTelemetryConsumer {
         }
 
         Exception lastException = null;
+        boolean persisted = false;
         // long avoids counter wrap even when maxRetries is Integer.MAX_VALUE.
         for (long attempt = 1; attempt <= maxRetries; attempt++) {
+            requireProcessingTime(started, ClickHouseClient.INSERT_REQUEST_TIMEOUT_MS);
             try {
                 insert.run();
-                if (acknowledgment != null) {
-                    acknowledgment.acknowledge();
-                }
-                metrics.recordConsumerHealthy();
-                return;
+                persisted = true;
+                break;
             } catch (Exception e) {
                 lastException = e;
                 final long attemptNumber = attempt;
@@ -123,7 +137,9 @@ public class ClickHouseTelemetryConsumer {
                 );
                 if (attempt < maxRetries) {
                     try {
-                        Thread.sleep(retryBackoffMs(backoffMs, attempt));
+                        long delay = retryBackoffMs(backoffMs, attempt);
+                        requireProcessingTime(started, delay + ClickHouseClient.INSERT_REQUEST_TIMEOUT_MS);
+                        Thread.sleep(delay);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
@@ -133,6 +149,20 @@ public class ClickHouseTelemetryConsumer {
             }
         }
 
+        if (persisted) {
+            // Commit exceptions are terminal, never another persistence attempt or a healthy result.
+            requireProcessingTime(started, 0);
+            try {
+                if (acknowledgment != null) {
+                    acknowledgment.acknowledge();
+                }
+            } catch (Exception commitFailure) {
+                metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
+                throw new RuntimeException("Telemetry ACK failed; record retained for replay", sanitizedCause(commitFailure));
+            }
+            metrics.recordConsumerHealthy();
+            return;
+        }
         metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
         final String exhaustedFailureClass = lastException == null
                 ? "unknown"
@@ -151,6 +181,14 @@ public class ClickHouseTelemetryConsumer {
                 "ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset(),
                 sanitizedCause(lastException)
         );
+    }
+
+    private void requireProcessingTime(long started, long requiredMs) {
+        long elapsedMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - started);
+        if (elapsedMs >= recordProcessingMs || requiredMs > recordProcessingMs - elapsedMs) {
+            metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
+            throw new IllegalStateException("ERR_KAFKA_POLL_BUDGET: processing deadline exceeded; listener stopping, record retained");
+        }
     }
 
     // Saturate before shifting/multiplying; Java masks large shift distances and signed

@@ -366,6 +366,64 @@ class TelemetryKafkaTransactionVisibilityTest {
         }
     }
 
+    @Test
+    void smallPollIntervalWithLongBackoffRejectedBeforeListenerStarts() {
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(Exception.class, () ->
+                createListenerContext(embeddedKafka.getBrokersAsString(), "unsafe-poll-budget", mock(ClickHouseClient.class),
+                        new ObjectMapper(), new IngestionMetrics(),
+                        Map.of(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "500"), "2", "2000"));
+        assertTrue(containsMessage(failure, "ERR_KAFKA_POLL_BUDGET"));
+    }
+
+    @Test
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void membershipLossDuringLatePersistenceCannotProduceAck() throws Exception {
+        String bootstrap = embeddedKafka.getBrokersAsString();
+        String group = "poll-overrun-" + UUID.randomUUID();
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var client = mock(ClickHouseClient.class);
+        var metrics = new IngestionMetrics();
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            entered.countDown();
+            assertTrue(release.await(60, TimeUnit.SECONDS));
+            return null; // A late success must not acknowledge after losing membership.
+        }).when(client).insertNumericBatch(anyList());
+        context = createListenerContext(bootstrap, group, client, mapper, metrics,
+                Map.of(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "25000"), "1", "0");
+        var template = createTransactionalTemplate(bootstrap);
+        String json = mapper.writeValueAsString(observation("late-success"));
+        try (var admin = org.apache.kafka.clients.admin.AdminClient.create(Map.of("bootstrap.servers", bootstrap))) {
+            registeredListener().start();
+            template.executeInTransaction(ops -> {
+                sendSync(ops, TOPIC, "slow", json);
+                return true;
+            });
+            assertTrue(entered.await(30, TimeUnit.SECONDS));
+            awaitCondition(() -> admin.describeConsumerGroups(List.of(group)).all().get()
+                    .get(group).members().isEmpty(), 40, "poll timeout must evict blocked listener");
+            assertEquals(null, committedOffset(bootstrap, group));
+            release.countDown();
+            awaitCondition(() -> !registeredListener().isRunning() && !registeredListener().isInExpectedState(),
+                    20, "late return must fail-stop instead of ACK");
+            assertEquals(null, committedOffset(bootstrap, group));
+            assertTrue(metrics.isConsumerDegraded());
+            assertEquals(org.springframework.boot.actuate.health.Status.DOWN,
+                    context.getBean(TelemetryConsumerHealthIndicator.class).health().getStatus());
+            System.out.println("PR227_POLL_OVERRUN members=0 offset=null latePersistence=success health=DOWN");
+            context.close();
+            context = null;
+            // Only explicit restart can replay and acknowledge the retained record.
+            context = createListenerContext(bootstrap, group, client, mapper, metrics);
+            registeredListener().start();
+            assertNotNull(awaitCommittedOffset(bootstrap, group, offset -> offset != null && offset > 0, 30));
+            System.out.println("PR227_POLL_OVERRUN restartedOffset=" + committedOffset(bootstrap, group));
+        } finally {
+            release.countDown();
+        }
+    }
+
     private KafkaTemplate<String, String> createTransactionalTemplate(String bootstrap) throws Exception {
         KafkaProperties producerProps = new KafkaProperties();
         producerProps.setBootstrapServers(List.of(bootstrap));
@@ -395,7 +453,15 @@ class TelemetryKafkaTransactionVisibilityTest {
     private AnnotationConfigApplicationContext createListenerContext(
             String bootstrap, String groupId, ClickHouseClient client, ObjectMapper mapper, IngestionMetrics metrics
     ) {
+        return createListenerContext(bootstrap, groupId, client, mapper, metrics, Map.of(), "2", "100");
+    }
+
+    private AnnotationConfigApplicationContext createListenerContext(
+            String bootstrap, String groupId, ClickHouseClient client, ObjectMapper mapper, IngestionMetrics metrics,
+            Map<String, String> consumerProperties, String attempts, String backoff
+    ) {
         KafkaProperties props = new KafkaProperties();
+        props.getConsumer().getProperties().putAll(consumerProperties);
         props.setBootstrapServers(List.of(bootstrap));
         props.getConsumer().setAutoOffsetReset("earliest");
         props.getConsumer().setKeyDeserializer(StringDeserializer.class);
@@ -407,8 +473,8 @@ class TelemetryKafkaTransactionVisibilityTest {
                 "spring.kafka.consumer.group-id", groupId,
                 "platform.ingestion.kafka.topic", TOPIC,
                 "platform.telemetry.consumer.enabled", "false",
-                "platform.telemetry.consumer.max-retries", "2",
-                "platform.telemetry.consumer.backoff-ms", "100")));
+                "platform.telemetry.consumer.max-retries", attempts,
+                "platform.telemetry.consumer.backoff-ms", backoff)));
         application.getDefaultListableBeanFactory().registerSingleton("kafkaProperties", props);
         application.getDefaultListableBeanFactory().registerSingleton("clickHouseClient", client);
         application.getDefaultListableBeanFactory().registerSingleton("objectMapper", mapper);

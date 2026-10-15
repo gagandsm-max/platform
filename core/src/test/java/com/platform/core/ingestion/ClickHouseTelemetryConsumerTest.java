@@ -353,18 +353,58 @@ class ClickHouseTelemetryConsumerTest {
 
     @Test
     void retryConfigurationAcceptsExistingPositiveRangesAndZeroDelay() {
-        for (int attempts : new int[] {1, 6, 64, Integer.MAX_VALUE}) {
-            for (long delay : new long[] {0, 1001, Long.MAX_VALUE}) {
+        for (int attempts : new int[] {1, 6}) {
+            for (long delay : new long[] {0, 1001}) {
                 assertDoesNotThrow(() -> new ClickHouseTelemetryConsumer(
                         clickHouseClient, objectMapper, metrics, attempts, delay));
             }
         }
+        // An unused backoff is safe even at Long.MAX_VALUE; unsafe used delays fail closed.
+        assertDoesNotThrow(() -> new ClickHouseTelemetryConsumer(
+                clickHouseClient, objectMapper, metrics, 1, Long.MAX_VALUE));
+        assertThrows(IllegalArgumentException.class, () -> new ClickHouseTelemetryConsumer(
+                clickHouseClient, objectMapper, metrics, 2, Long.MAX_VALUE));
+        assertThrows(IllegalArgumentException.class, () -> new ClickHouseTelemetryConsumer(
+                clickHouseClient, objectMapper, metrics, Integer.MAX_VALUE, 0));
         for (int attempts : new int[] {0, -1}) {
             assertThrows(IllegalArgumentException.class, () -> new ClickHouseTelemetryConsumer(
                     clickHouseClient, objectMapper, metrics, attempts, 0));
         }
         assertThrows(IllegalArgumentException.class, () -> new ClickHouseTelemetryConsumer(
                 clickHouseClient, objectMapper, metrics, 1, -1));
+    }
+
+    @Test
+    void latePersistenceReturnNeverAcknowledges() throws Exception {
+        var clock = new java.util.concurrent.atomic.AtomicLong();
+        var budget = new TelemetryProcessingBudget(Map.of(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1), 1, 0);
+        var guarded = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, budget, clock::get);
+        doAnswer(invocation -> {
+            clock.set(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(budget.recordProcessingMs));
+            return null;
+        }).when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        assertThrows(RuntimeException.class, () -> guarded.consume(validRecord(), ack));
+        verify(ack, never()).acknowledge();
+        assertTrue(metrics.isConsumerDegraded());
+    }
+
+    @Test
+    void commitFailureNeverRetriesPersistenceOrReportsHealthy() throws Exception {
+        var ack = mock(Acknowledgment.class);
+        doThrow(new org.apache.kafka.clients.consumer.CommitFailedException(SUPER_SECRET_SENTINEL_DO_NOT_LOG))
+                .when(ack).acknowledge();
+        var failure = assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+        verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
+        verify(ack, times(1)).acknowledge();
+        assertTrue(metrics.isConsumerDegraded());
+        assertNoSecretInThrowableChain(failure, "unused");
+    }
+
+    private ConsumerRecord<String, String> validRecord() throws Exception {
+        return new ConsumerRecord<>("telemetry.numeric.v1", 0, 100L, "key",
+                objectMapper.writeValueAsString(new CanonicalObservation(
+                        "tenant-1", "entity-1", "oid", "sensor", Instant.now(), 1, 1, 0, "1", "snmp")));
     }
 
     @Test
@@ -413,7 +453,7 @@ class ClickHouseTelemetryConsumerTest {
 
     @Test
     void interruptedLargeBackoffRetainsSafeCauseAndDoesNotAcknowledge() throws Exception {
-        var extended = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, Integer.MAX_VALUE, Long.MAX_VALUE);
+        var extended = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, 2, 1001);
         doThrow(new java.net.ConnectException(SUPER_SECRET_SENTINEL_DO_NOT_LOG)).when(clickHouseClient).insertNumericBatch(anyList());
         var ack = mock(Acknowledgment.class);
         var record = new ConsumerRecord<String, String>("telemetry.numeric.v1", 0, 100L, "key",
@@ -440,7 +480,8 @@ class ClickHouseTelemetryConsumerTest {
         context.getDefaultListableBeanFactory().registerSingleton("clickHouseClient", clickHouseClient);
         context.getDefaultListableBeanFactory().registerSingleton("objectMapper", objectMapper);
         context.getDefaultListableBeanFactory().registerSingleton("ingestionMetrics", metrics);
-        context.register(ClickHouseTelemetryConsumer.class);
+        context.registerBean(KafkaProperties.class, KafkaProperties::new);
+        context.register(IngestionKafkaConfiguration.class, ClickHouseTelemetryConsumer.class);
         assertDoesNotThrow(context::refresh);
         assertNotNull(context.getBean(ClickHouseTelemetryConsumer.class));
         context.close();
