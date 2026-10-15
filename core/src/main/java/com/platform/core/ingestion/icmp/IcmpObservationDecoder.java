@@ -38,6 +38,14 @@ public final class IcmpObservationDecoder {
     public static final int MAX_ERROR_CODE_CHARS = 128;
     public static final int MAX_SOURCE_CHARS = 128;
     /**
+     * Maximum positive RTT in microseconds that Go {@code time.Duration} can publish via
+     * {@code Duration.Microseconds()}. Sensor ICMP sample and aggregate RTT fields are
+     * produced exclusively from {@code time.Duration} nanoseconds
+     * ({@code sensor/internal/protocol/icmp/icmp.go}); values above this bound are outside
+     * the source representation domain (not an operational timeout policy).
+     */
+    public static final long MAX_RTT_MICROS = Long.MAX_VALUE / 1000L;
+    /**
      * Mother B000-D016 / Platform_05 §7.0: JSON-carried assignment/config/policy/generation
      * counters MUST NOT exceed {@code MAX_SAFE_SEQUENCE} ({@code 2^53-1}). Do not widen to
      * full Go {@code uint64} wire range contrary to that governing bound.
@@ -1071,6 +1079,14 @@ public final class IcmpObservationDecoder {
         long value = child.asLong();
         if (value < 0) {
             throw new IcmpDecodeException(code, "Field '" + field + "' must be non-negative");
+        }
+        // Zero remains valid (Go omitempty sub-µs success and explicit wire zeros).
+        if (value > MAX_RTT_MICROS) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
+                    "Field '" + field + "' exceeds maximum representable Sensor RTT of "
+                            + MAX_RTT_MICROS + " microseconds"
+            );
         }
         return value;
     }

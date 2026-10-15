@@ -376,12 +376,14 @@ class IcmpObservationDecoderTest {
     }
 
     /**
-     * High-value RTTs where {@code sumMicros * 1000} overflows signed long.
-     * Exact BigInteger sum must still accept Sensor-faithful avg bounds.
+     * High-value RTTs still inside the Go {@code time.Duration} microsecond domain where
+     * {@code sumMicros * 1000} overflows signed long. Exact BigInteger sum must still
+     * accept Sensor-faithful avg bounds.
      */
     @Test
     void acceptsHighValueRttAvgWhenSignedLongProductWouldOverflow() throws Exception {
         // sum = 16e15; sum*1000 exceeds Long.MAX_VALUE. True avg window [5333333333333333, 5333333333333334].
+        // Both sample values remain <= MAX_RTT_MICROS (9223372036854775).
         long low = 5_000_000_000_000_000L;
         long high = 6_000_000_000_000_000L;
         long avgLow = 5_333_333_333_333_333L;
@@ -412,11 +414,12 @@ class IcmpObservationDecoderTest {
     }
 
     /**
-     * Eight equal near-max samples: signed long sum overflows; exact sum must accept.
+     * Eight equal maximum-domain samples: signed long {@code sumMicros * 1000} overflows;
+     * exact BigInteger path must accept the Sensor-faithful average.
      */
     @Test
-    void acceptsEightSampleHighValueRttWhenSignedLongSumWouldOverflow() throws Exception {
-        long rtt = 2_000_000_000_000_000_000L;
+    void acceptsEightSampleMaxDomainRttWhenNanosecondProductWouldOverflow() throws Exception {
+        long rtt = IcmpObservationDecoder.MAX_RTT_MICROS;
         ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
         ObjectNode payload = (ObjectNode) root.get("protocolPayload");
         payload.put("requestedSamples", 8);
@@ -433,6 +436,8 @@ class IcmpObservationDecoderTest {
         IcmpObservationV1 obs = decoder.decode(root);
         assertEquals(rtt, obs.evidence().avgRttMicros());
         assertEquals(8, obs.evidence().samples().size());
+        assertEquals(IcmpQuality.GOOD, obs.quality());
+        assertEquals("SENSOR_PING_SOCKET", obs.evidence().source());
     }
 
     /**
@@ -465,12 +470,98 @@ class IcmpObservationDecoderTest {
     }
 
     /**
-     * UNKNOWN quality with a high-value successful sample must not collapse to DOWN
-     * and must still validate RTT summaries without signed overflow.
+     * Single-sample maximum representable Sensor RTT must decode; provenance and GOOD preserved.
+     */
+    @Test
+    void acceptsMaximumRepresentableSampleRttMicros() throws Exception {
+        long rtt = IcmpObservationDecoder.MAX_RTT_MICROS;
+        assertEquals(9_223_372_036_854_775L, rtt);
+
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 1);
+        payload.put("received", 1);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", rtt);
+        payload.put("avgRttMicros", rtt);
+        payload.put("maxRttMicros", rtt);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", rtt);
+
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(rtt, obs.evidence().avgRttMicros());
+        assertEquals(rtt, obs.evidence().samples().get(0).rttMicros());
+        assertEquals(IcmpQuality.GOOD, obs.quality());
+        assertEquals("SENSOR_PING_SOCKET", obs.evidence().source());
+    }
+
+    /**
+     * Positive RTT one microsecond above Go {@code time.Duration.Microseconds()} max
+     * is outside the source representation domain.
+     */
+    @Test
+    void rejectsSampleRttMicrosAboveGoDurationBound() throws Exception {
+        long overMax = IcmpObservationDecoder.MAX_RTT_MICROS + 1L;
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 1);
+        payload.put("received", 1);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", overMax);
+        payload.put("avgRttMicros", overMax);
+        payload.put("maxRttMicros", overMax);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", overMax);
+
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+        assertTrue(ex.getMessage().contains("rttMicros")
+                || ex.getMessage().contains("minRttMicros")
+                || ex.getMessage().contains("avgRttMicros")
+                || ex.getMessage().contains("maxRttMicros"));
+    }
+
+    /**
+     * Eight-sample domain-valid aggregate: avg inside min..max but outside the
+     * Go nanosecond truncation window must still reject.
+     */
+    @Test
+    void rejectsInvalidAverageForEightSampleHighValueAggregate() throws Exception {
+        long low = 5_000_000_000_000_000L;
+        long high = 6_000_000_000_000_000L;
+        // 6*low + 2*high => exact avg window is [5250000000000000, 5250000000000000].
+        long inconsistentAvg = low;
+
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 8);
+        payload.put("received", 8);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", low);
+        payload.put("avgRttMicros", inconsistentAvg);
+        payload.put("maxRttMicros", high);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        for (int i = 1; i <= 6; i++) {
+            samples.addObject().put("sequence", i).put("success", true).put("rttMicros", low);
+        }
+        samples.addObject().put("sequence", 7).put("success", true).put("rttMicros", high);
+        samples.addObject().put("sequence", 8).put("success", true).put("rttMicros", high);
+
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+        assertTrue(ex.getMessage().contains("avgRttMicros"));
+    }
+
+    /**
+     * UNKNOWN quality with a domain-max successful sample must not collapse to DOWN
+     * and must still validate RTT summaries via BigInteger.
      */
     @Test
     void preservesUnknownQualityWithHighValueSuccessfulSampleRtt() throws Exception {
-        long rtt = 9_223_372_036_854_776L; // Long.MAX_VALUE/1000 + 1 — *1000 overflows long
+        long rtt = IcmpObservationDecoder.MAX_RTT_MICROS;
         ObjectNode root = (ObjectNode) objectMapper.readTree(unreachableEnvelopeJson());
         ObjectNode payload = (ObjectNode) root.get("protocolPayload");
         payload.put("minRttMicros", rtt);
@@ -485,6 +576,7 @@ class IcmpObservationDecoderTest {
         assertEquals(IcmpQuality.UNKNOWN, obs.quality());
         assertEquals("PARTIAL", obs.status());
         assertEquals(rtt, obs.evidence().avgRttMicros());
+        assertEquals("SENSOR_PING_SOCKET", obs.evidence().source());
         assertNotEquals("DEVICE_DOWN", obs.status());
         assertNotEquals("DOWN", obs.quality().name());
     }
