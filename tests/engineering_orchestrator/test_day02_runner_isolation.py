@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -73,6 +74,37 @@ class Day02RunnerIsolationTests(unittest.TestCase):
         self.assertNotIn("chmod -R 777", text)
         self.assertNotIn("sudo rm -rf ${GITHUB_WORKSPACE}", text)
         self.assertNotIn("-v \"${GITHUB_WORKSPACE}:/workspace\"", text)
+
+    def test_workflow_volume_user_inspection_is_fail_closed(self) -> None:
+        """Failed docker ps must not authorize CI volume deletion (Issue #223 P2)."""
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertNotIn('[[ -z $(docker ps -aq --filter "volume=', text)
+        self.assertIn(
+            'users=$(docker ps -aq --filter "volume=${KAFKA_VOLUME}") || exit 1',
+            text,
+        )
+        self.assertIn(
+            'users=$(docker ps -aq --filter "volume=$volume") || exit 1',
+            text,
+        )
+        self.assertGreaterEqual(text.count('[[ -z "$users" ]] || exit 1'), 2)
+
+        # Behavioral: exit-nonzero empty-stdout inspection must abort before delete.
+        script = r"""
+set -euo pipefail
+docker() { return 42; }
+users=$(docker ps -aq --filter "volume=ci_1_1_kafka_data") || exit 1
+[[ -z "$users" ]] || exit 1
+echo REACHED_DELETE
+"""
+        result = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("REACHED_DELETE", result.stdout)
 
 
 if __name__ == "__main__":
