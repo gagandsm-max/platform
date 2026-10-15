@@ -270,8 +270,8 @@ class ClickHouseTelemetryConsumerTest {
         Acknowledgment ack = mock(Acknowledgment.class);
 
         // Fail first 2 attempts, succeed on 3rd
-        doThrow(new RuntimeException("ClickHouse 503"))
-                .doThrow(new RuntimeException("ClickHouse timeout"))
+        doThrow(new java.net.ConnectException("unavailable"))
+                .doThrow(new java.net.http.HttpTimeoutException("timeout"))
                 .doNothing()
                 .when(clickHouseClient).insertNumericBatch(anyList());
 
@@ -294,7 +294,7 @@ class ClickHouseTelemetryConsumerTest {
         );
         Acknowledgment ack = mock(Acknowledgment.class);
 
-        doThrow(new RuntimeException("ClickHouse connection refused"))
+        doThrow(new java.net.ConnectException("connection refused"))
                 .when(clickHouseClient).insertNumericBatch(anyList());
 
         RuntimeException ex = assertThrows(RuntimeException.class, () ->
@@ -387,6 +387,7 @@ class ClickHouseTelemetryConsumerTest {
         assertThrows(RuntimeException.class, () -> guarded.consume(validRecord(), ack));
         verify(ack, never()).acknowledge();
         assertTrue(metrics.isConsumerDegraded());
+        assertEquals("ERR_KAFKA_POLL_BUDGET", metrics.getConsumerDegradedReason());
     }
 
     @Test
@@ -399,6 +400,126 @@ class ClickHouseTelemetryConsumerTest {
         verify(ack, times(1)).acknowledge();
         assertTrue(metrics.isConsumerDegraded());
         assertNoSecretInThrowableChain(failure, "unused");
+        assertEquals("ERR_KAFKA_GROUP_MEMBERSHIP_LOST", metrics.getConsumerDegradedReason());
+    }
+
+    @Test
+    void unknownInsertionFailureStopsWithoutRetry() throws Exception {
+        doThrow(new IllegalStateException(SUPER_SECRET_SENTINEL_DO_NOT_LOG))
+                .when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+        verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
+        verifyNoInteractions(ack);
+        assertEquals("ERR_CLICKHOUSE_PERMANENT", metrics.getConsumerDegradedReason());
+    }
+
+    @Test
+    void successfulSiblingPartitionDoesNotClearBlockedPartition() throws Exception {
+        doThrow(new java.net.ConnectException("unavailable"))
+                .when(clickHouseClient).insertNumericBatch(anyList());
+        var blocked = validRecord();
+        assertThrows(RuntimeException.class, () -> consumer.consume(blocked, mock(Acknowledgment.class)));
+        doNothing().when(clickHouseClient).insertNumericBatch(anyList());
+        var sibling = new ConsumerRecord<>(blocked.topic(), 1, blocked.offset(), blocked.key(), blocked.value());
+        consumer.consume(sibling, mock(Acknowledgment.class));
+        assertTrue(metrics.isConsumerDegraded(), "sibling success cannot prove blocked record recovery");
+        consumer.consume(blocked, mock(Acknowledgment.class));
+        assertFalse(metrics.isConsumerDegraded(), "exact retained record can recover after persistence and ACK");
+    }
+
+    @Test
+    void missingRequiredNumericAndCounterFieldsArePoisonBeforeInsertion() throws Exception {
+        var numeric = objectMapper.readTree(validRecord().value());
+        var counter = numeric.deepCopy();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) counter).remove("value");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) counter).put("observationKind", "COUNTER64");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) counter).put("counterValue", "18446744073709551615");
+        for (var source : List.of(numeric, counter)) {
+            for (String field : List.of("tenantId", "entityId", "metricId", "sensorId", "timestamp",
+                    "sequenceId", "sourceProtocol", "quality", "flags",
+                    source.has("value") ? "value" : "counterValue")) {
+                var missing = (com.fasterxml.jackson.databind.node.ObjectNode) source.deepCopy();
+                missing.remove(field);
+                var record = new ConsumerRecord<String, String>("telemetry.numeric.v1", 0, 100L, "key", missing.toString());
+                var ack = mock(Acknowledgment.class);
+                var failure = assertThrows(IngestionException.class, () -> consumer.consume(record, ack), field);
+                assertEquals("ERR_KAFKA_POISON_EVENT", failure.getCode());
+                verifyNoInteractions(ack);
+            }
+        }
+        verifyNoInteractions(clickHouseClient);
+    }
+
+    @Test
+    void timeoutRemainsRecoverableWithoutExposingDetails() throws Exception {
+        doThrow(new java.net.http.HttpTimeoutException(SUPER_SECRET_SENTINEL_DO_NOT_LOG))
+                .when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        var failure = assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+        assertNoSecretInThrowableChain(failure, "unused");
+        verify(clickHouseClient, times(3)).insertNumericBatch(anyList());
+        verifyNoInteractions(ack);
+        assertEquals(TelemetryConsumerFailure.DEPENDENCY.reasonCode, metrics.getConsumerDegradedReason());
+    }
+
+    @Test
+    void permanentHttpFailuresNeverRetryAndServiceFailureCanRecover() throws Exception {
+        for (var reason : List.of(TelemetryConsumerFailure.AUTHORIZATION, TelemetryConsumerFailure.SCHEMA,
+                TelemetryConsumerFailure.CONFIGURATION, TelemetryConsumerFailure.PERMANENT)) {
+            var client = mock(ClickHouseClient.class);
+            var localMetrics = new IngestionMetrics();
+            var local = new ClickHouseTelemetryConsumer(client, objectMapper, localMetrics, 3, 0);
+            doThrow(new TelemetryConsumerFailure.InsertFailure(reason, 500)).when(client).insertNumericBatch(anyList());
+            var ack = mock(Acknowledgment.class);
+            var failure = assertThrows(RuntimeException.class, () -> local.consume(validRecord(), ack));
+            verify(client, times(1)).insertNumericBatch(anyList());
+            verifyNoInteractions(ack);
+            assertEquals(reason.reasonCode, localMetrics.getConsumerDegradedReason());
+            assertNoSecretInThrowableChain(failure, "unused");
+        }
+        doThrow(new TelemetryConsumerFailure.InsertFailure(TelemetryConsumerFailure.DEPENDENCY, 503))
+                .doNothing().when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        consumer.consume(validRecord(), ack);
+        verify(clickHouseClient, times(2)).insertNumericBatch(anyList());
+        verify(ack).acknowledge();
+    }
+
+    @Test
+    void ambiguousCommitAfterPersistenceNeverReinserts() throws Exception {
+        var ack = mock(Acknowledgment.class);
+        doThrow(new org.apache.kafka.common.errors.TimeoutException(SUPER_SECRET_SENTINEL_DO_NOT_LOG))
+                .when(ack).acknowledge();
+        var failure = assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+        verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
+        verify(ack, times(1)).acknowledge();
+        assertEquals(TelemetryConsumerFailure.ACK_UNCERTAIN.reasonCode, metrics.getConsumerDegradedReason());
+        assertNoSecretInThrowableChain(failure, "unused");
+    }
+
+    @Test
+    void interruptedInsertionIsShutdownWithoutRetry() throws Exception {
+        doThrow(new InterruptedException(SUPER_SECRET_SENTINEL_DO_NOT_LOG))
+                .when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        try {
+            var failure = assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(TelemetryConsumerFailure.SHUTDOWN.reasonCode, metrics.getConsumerDegradedReason());
+            assertNoSecretInThrowableChain(failure, "unused");
+            verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
+            verifyNoInteractions(ack);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void missingAcknowledgmentCannotDeclareRecovery() throws Exception {
+        assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), null));
+        verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
+        assertEquals(TelemetryConsumerFailure.ACK_UNCERTAIN.reasonCode, metrics.getConsumerDegradedReason());
     }
 
     private ConsumerRecord<String, String> validRecord() throws Exception {

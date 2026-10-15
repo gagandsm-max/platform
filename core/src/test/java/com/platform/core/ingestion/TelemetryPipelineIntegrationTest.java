@@ -339,7 +339,10 @@ public class TelemetryPipelineIntegrationTest {
 
             verify(clickHouseClient, times(1)).insertNumericBatch(List.of(obs));
             verify(ack, times(1)).acknowledge();
-            assertEquals(Status.UP, healthIndicator.health().getStatus());
+            assertFalse(metrics.isConsumerDegraded());
+            // This fixture has no Spring listener registration; insertion alone cannot prove listener health.
+            assertEquals(Status.UNKNOWN, healthIndicator.health().getStatus());
+            assertEquals("UNAVAILABLE", healthIndicator.health().getDetails().get("status"));
         }
 
         @Test
@@ -364,7 +367,10 @@ public class TelemetryPipelineIntegrationTest {
 
             verify(clickHouseClient, times(1)).insertCounterBatch(List.of(counter));
             verify(ack, times(1)).acknowledge();
-            assertEquals(Status.UP, healthIndicator.health().getStatus());
+            assertFalse(metrics.isConsumerDegraded());
+            // This fixture has no Spring listener registration; insertion alone cannot prove listener health.
+            assertEquals(Status.UNKNOWN, healthIndicator.health().getStatus());
+            assertEquals("UNAVAILABLE", healthIndicator.health().getDetails().get("status"));
         }
 
         @Test
@@ -433,7 +439,7 @@ public class TelemetryPipelineIntegrationTest {
             String jsonPayload = objectMapper.writeValueAsString(obs);
             ConsumerRecord<String, String> record = new ConsumerRecord<>("platform.telemetry.canonical", 0, 100L, entityId.toString(), jsonPayload);
 
-            doThrow(new RuntimeException("ClickHouse connection refused"))
+            doThrow(new java.net.ConnectException("ClickHouse connection refused"))
                     .when(clickHouseClient).insertNumericBatch(anyList());
 
             RuntimeException ex = assertThrows(RuntimeException.class, () ->

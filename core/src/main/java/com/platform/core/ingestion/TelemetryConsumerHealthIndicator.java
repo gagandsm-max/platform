@@ -1,6 +1,5 @@
 package com.platform.core.ingestion;
 
-import com.platform.core.logging.CoreSupportabilityEventCodes;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
@@ -29,15 +28,14 @@ public class TelemetryConsumerHealthIndicator implements HealthIndicator {
 
     @Override
     public Health health() {
-        // Query the actual Spring registration lazily. A successful partition can clear
-        // shared metrics while a sibling's poison/exhaustion stops the whole listener.
+        // Query the actual registration; metrics alone cannot prove listener lifecycle health.
         var registry = registryProvider == null ? null : registryProvider.getIfAvailable();
         var listener = registry == null ? null : registry.getListenerContainer("telemetryNumericListener");
         boolean listenerFailed = listener != null && !listener.isInExpectedState();
         if (listenerFailed || metrics.isConsumerDegraded()) {
             String reasonCode = metrics.getConsumerDegradedReason();
             if (reasonCode == null || reasonCode.isBlank()) {
-                reasonCode = CoreSupportabilityEventCodes.TELEMETRY_CONSUMER_DEGRADED;
+                reasonCode = TelemetryConsumerFailure.CONSUMER_FAILED.reasonCode;
             }
             return Health.down()
                     .withDetail("status", "DEGRADED")
@@ -48,9 +46,23 @@ public class TelemetryConsumerHealthIndicator implements HealthIndicator {
                     .build();
         }
 
+        if (listener != null && !listener.isRunning()) {
+            var reason = listener.isAutoStartup() ? TelemetryConsumerFailure.SHUTDOWN : TelemetryConsumerFailure.DISABLED;
+            return (reason == TelemetryConsumerFailure.DISABLED ? Health.unknown() : Health.down())
+                    .withDetail("status", reason == TelemetryConsumerFailure.DISABLED ? "DISABLED" : "STOPPED")
+                    .withDetail("reasonCode", reason.reasonCode)
+                    .withDetail("listenerFailed", false)
+                    .build();
+        }
+
+        if (listener == null) {
+            return Health.unknown().withDetail("status", "UNAVAILABLE")
+                    .withDetail("reasonCode", TelemetryConsumerFailure.CONSUMER_FAILED.reasonCode).build();
+        }
+
         Instant lastPersistence = metrics.getLastPersistenceTimestamp();
         Health.Builder builder = Health.up()
-                .withDetail("status", listener != null && !listener.isRunning() ? "STOPPED" : "RUNNING")
+                .withDetail("status", "RUNNING")
                 .withDetail("recordsAccepted", metrics.getRecordsAccepted())
                 .withDetail("clickHouseInserts", metrics.getClickHouseInserts());
 

@@ -135,10 +135,19 @@ public class ClickHouseClient {
                 .POST(HttpRequest.BodyPublishers.ofString(jsonEachRowBody, StandardCharsets.UTF_8))
                 .build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200) {
-            metrics.recordClickHouseFailure(com.platform.core.logging.CoreSupportabilityEventCodes.CLICKHOUSE_INSERT_FAILED);
-            throw new RuntimeException("ClickHouse insert failed with status " + response.statusCode());
+        // Error bodies can contain SQL, payloads and credentials; classification needs metadata only.
+        final HttpResponse<Void> response;
+        try {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+        } catch (java.io.IOException | InterruptedException failure) {
+            metrics.recordClickHouseFailure(TelemetryConsumerFailure.insertion(failure).reasonCode);
+            throw failure;
+        }
+        String exceptionCode = response.headers().firstValue("X-ClickHouse-Exception-Code").orElse(null);
+        if (response.statusCode() != 200 || (exceptionCode != null && !"0".equals(exceptionCode))) {
+            var reason = TelemetryConsumerFailure.http(response.statusCode(), exceptionCode);
+            metrics.recordClickHouseFailure(reason.reasonCode);
+            throw new TelemetryConsumerFailure.InsertFailure(reason, response.statusCode());
         }
 
         long durationMs = System.currentTimeMillis() - startTime;

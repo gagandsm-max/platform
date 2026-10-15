@@ -102,6 +102,7 @@ public class ClickHouseTelemetryConsumer {
                             ERR_KAFKA_POISON_EVENT
                     )
             );
+            metrics.recordConsumerFailure(record, TelemetryConsumerFailure.POISON);
             metrics.recordConsumerPoisonEvent(record.topic(), record.offset(), failureClass);
             throw new IngestionException(
                     org.springframework.http.HttpStatus.BAD_REQUEST,
@@ -114,36 +115,42 @@ public class ClickHouseTelemetryConsumer {
         boolean persisted = false;
         // long avoids counter wrap even when maxRetries is Integer.MAX_VALUE.
         for (long attempt = 1; attempt <= maxRetries; attempt++) {
-            requireProcessingTime(started, ClickHouseClient.INSERT_REQUEST_TIMEOUT_MS);
+            requireProcessingTime(record, started, ClickHouseClient.INSERT_REQUEST_TIMEOUT_MS);
             try {
                 insert.run();
                 persisted = true;
                 break;
             } catch (Exception e) {
                 lastException = e;
+                var reason = TelemetryConsumerFailure.insertion(e);
+                metrics.recordConsumerFailure(record, reason);
+                if (!reason.retryableInsert) {
+                    if (reason == TelemetryConsumerFailure.SHUTDOWN) Thread.currentThread().interrupt();
+                    throw terminalFailure(record, reason, "Insertion stopped; record retained", e);
+                }
                 final long attemptNumber = attempt;
                 final String failureClass = e.getClass().getSimpleName();
                 SupportabilityMdc.withEventCode(CoreSupportabilityEventCodes.CLICKHOUSE_INSERT_FAILED, () ->
                         log.warn(
-                                "ClickHouse insert attempt {}/{} failed for topic={} partition={} offset={} failureClass={}",
+                                "ClickHouse insert attempt {}/{} failed for topic={} partition={} offset={} failureClass={} reasonCode={}",
                                 attemptNumber,
                                 maxRetries,
                                 record.topic(),
                                 record.partition(),
                                 record.offset(),
                                 failureClass,
+                                reason.reasonCode,
                                 sanitizedCause(e)
                         )
                 );
                 if (attempt < maxRetries) {
                     try {
                         long delay = retryBackoffMs(backoffMs, attempt);
-                        requireProcessingTime(started, delay + ClickHouseClient.INSERT_REQUEST_TIMEOUT_MS);
+                        requireProcessingTime(record, started, delay + ClickHouseClient.INSERT_REQUEST_TIMEOUT_MS);
                         Thread.sleep(delay);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
-                        metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
-                        throw new RuntimeException("Consumer retry interrupted", sanitizedCause(ie));
+                        throw terminalFailure(record, TelemetryConsumerFailure.SHUTDOWN, "Consumer retry interrupted", ie);
                     }
                 }
             }
@@ -151,19 +158,20 @@ public class ClickHouseTelemetryConsumer {
 
         if (persisted) {
             // Commit exceptions are terminal, never another persistence attempt or a healthy result.
-            requireProcessingTime(started, 0);
+            requireProcessingTime(record, started, 0);
             try {
-                if (acknowledgment != null) {
-                    acknowledgment.acknowledge();
+                if (acknowledgment == null) {
+                    throw new IllegalStateException("Kafka acknowledgment unavailable");
                 }
+                acknowledgment.acknowledge();
             } catch (Exception commitFailure) {
-                metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
-                throw new RuntimeException("Telemetry ACK failed; record retained for replay", sanitizedCause(commitFailure));
+                var reason = TelemetryConsumerFailure.acknowledgment(commitFailure);
+                if (reason == TelemetryConsumerFailure.SHUTDOWN) Thread.currentThread().interrupt();
+                throw terminalFailure(record, reason, "Telemetry ACK failed; persistence succeeded, commit uncertain", commitFailure);
             }
-            metrics.recordConsumerHealthy();
+            metrics.recordConsumerHealthy(record);
             return;
         }
-        metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
         final String exhaustedFailureClass = lastException == null
                 ? "unknown"
                 : lastException.getClass().getSimpleName();
@@ -177,18 +185,28 @@ public class ClickHouseTelemetryConsumer {
                         exhaustedFailureClass
                 )
         );
-        throw new RuntimeException(
-                "ClickHouse persistence unavailable; stopping offset progression at offset " + record.offset(),
-                sanitizedCause(lastException)
-        );
+        throw terminalFailure(record, TelemetryConsumerFailure.insertion(lastException),
+                "ClickHouse persistence unavailable; stopping offset progression", lastException);
     }
 
-    private void requireProcessingTime(long started, long requiredMs) {
+    private void requireProcessingTime(ConsumerRecord<String, String> record, long started, long requiredMs) {
         long elapsedMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(nanoTime.getAsLong() - started);
         if (elapsedMs >= recordProcessingMs || requiredMs > recordProcessingMs - elapsedMs) {
-            metrics.recordConsumerDegraded(CoreSupportabilityEventCodes.TELEMETRY_CLICKHOUSE_UNAVAILABLE);
-            throw new IllegalStateException("ERR_KAFKA_POLL_BUDGET: processing deadline exceeded; listener stopping, record retained");
+            throw terminalFailure(record, TelemetryConsumerFailure.POLL_BUDGET,
+                    "Processing deadline exceeded; listener stopping, record retained", null);
         }
+    }
+
+    private RuntimeException terminalFailure(ConsumerRecord<String, String> record, TelemetryConsumerFailure reason,
+                                             String message, Throwable cause) {
+        // Classify first: sanitized causes intentionally no longer have their original Java types.
+        metrics.recordConsumerFailure(record, reason);
+        Throwable safeCause = sanitizedCause(cause);
+        SupportabilityMdc.withEventCode(reason.reasonCode, () ->
+                log.error("Telemetry consumer stopped topic={} partition={} offset={} reasonCode={} retryableInsert={} failureClass={}",
+                        record.topic(), record.partition(), record.offset(), reason.reasonCode,
+                        reason.retryableInsert, cause == null ? "unknown" : cause.getClass().getSimpleName(), safeCause));
+        return new RuntimeException(reason.reasonCode + ": " + message + " at offset " + record.offset(), safeCause);
     }
 
     // Saturate before shifting/multiplying; Java masks large shift distances and signed
@@ -215,7 +233,9 @@ public class ClickHouseTelemetryConsumer {
         if (failure == null || depth >= 8 || !seen.add(failure)) {
             return null;
         }
-        var safe = new RuntimeException(failure.getClass().getName() + " [details redacted]",
+        String details = failure instanceof TelemetryConsumerFailure.InsertFailure typed
+                ? typed.reason.reasonCode + "; HTTP status=" + typed.httpStatus : "details redacted";
+        var safe = new RuntimeException(failure.getClass().getName() + " [" + details + "]",
                 sanitizedCause(failure.getCause(), seen, depth + 1));
         StackTraceElement[] frames = failure.getStackTrace();
         safe.setStackTrace(Arrays.copyOf(frames, Math.min(frames.length, 32)));
@@ -226,6 +246,13 @@ public class ClickHouseTelemetryConsumer {
         JsonNode root = objectMapper.readTree(payload);
         if (root == null || !root.isObject()) {
             throw new IllegalArgumentException("telemetry payload is not a JSON object");
+        }
+
+        for (String field : List.of("tenantId", "entityId", "metricId", "sensorId", "timestamp",
+                "sequenceId", "sourceProtocol", "quality", "flags")) {
+            if (!root.hasNonNull(field)) {
+                throw new IllegalArgumentException("telemetry payload missing required field");
+            }
         }
 
         String kind = root.path("observationKind").asText("").trim();

@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Timeout;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Configuration;
@@ -129,12 +130,12 @@ class TelemetryKafkaTransactionVisibilityTest {
             if (redeliveryObs.sequenceId().equals(seq)) {
                 int attempt = redeliveryInsertAttempts.incrementAndGet();
                 if (attempt == 1) {
-                    throw new RuntimeException("intentional transient ClickHouse failure");
+                    throw new java.net.ConnectException("intentional transient ClickHouse failure");
                 }
                 if (attempt == 2) {
                     failedAttemptBarrier.countDown();
                     assertTrue(releaseFailure.await(30, TimeUnit.SECONDS), "release failed insertion");
-                    throw new RuntimeException("intentional exhausted ClickHouse failure");
+                    throw new java.net.ConnectException("intentional exhausted ClickHouse failure");
                 }
                 recoveryBarrier.countDown();
                 assertTrue(allowRecovery.await(30, TimeUnit.SECONDS), "allow recovered insertion");
@@ -157,10 +158,10 @@ class TelemetryKafkaTransactionVisibilityTest {
         assertEquals(groupId, container.getContainerProperties().getGroupId());
         assertEquals(List.of(TOPIC), List.of(container.getContainerProperties().getTopics()));
         assertFalse(container.isRunning(), "annotation autoStartup=false is resolved");
-        assertEquals(org.springframework.boot.actuate.health.Status.UP,
+        assertEquals(org.springframework.boot.actuate.health.Status.UNKNOWN,
                 context.getBean(TelemetryConsumerHealthIndicator.class).health().getStatus(),
                 "intentionally disabled startup is not an abnormal failure");
-        assertEquals("STOPPED", context.getBean(TelemetryConsumerHealthIndicator.class).health().getDetails().get("status"));
+        assertEquals("DISABLED", context.getBean(TelemetryConsumerHealthIndicator.class).health().getDetails().get("status"));
 
         try {
             // 1/2 — abort then commit; aborted must be invisible to the real listener.
@@ -215,6 +216,7 @@ class TelemetryKafkaTransactionVisibilityTest {
             });
 
             assertTrue(failedAttemptBarrier.await(30, TimeUnit.SECONDS));
+            assertTrue(metrics.isConsumerDegraded(), "dependency failure remains visible during bounded retry");
             // Attempt one has failed; attempt two cannot succeed or ACK at this barrier.
             assertEquals(offsetBeforeRedelivery, committedOffset(bootstrap, groupId));
             System.out.println("PR227_OFFSET failing=" + committedOffset(bootstrap, groupId)
@@ -329,6 +331,13 @@ class TelemetryKafkaTransactionVisibilityTest {
         context = createListenerContext(bootstrap, "health-race-" + UUID.randomUUID(), client, mapper, metrics);
         var container = (org.springframework.kafka.listener.ConcurrentMessageListenerContainer<?, ?>) registeredListener();
         container.setConcurrency(2);
+        var childrenStopped = new CountDownLatch(2);
+        context.addApplicationListener(event -> {
+            if (event instanceof org.springframework.kafka.event.ConsumerStoppedEvent stopped
+                    && stopped.getContainer(MessageListenerContainer.class) == container) {
+                childrenStopped.countDown();
+            }
+        });
         var template = createTransactionalTemplate(bootstrap);
         String healthyJson = mapper.writeValueAsString(observation("healthy"));
         try {
@@ -355,7 +364,10 @@ class TelemetryKafkaTransactionVisibilityTest {
                     30, "poison stops parent while other partition insertion is in flight");
             releaseInsertion.countDown();
             assertTrue(insertionReturned.await(30, TimeUnit.SECONDS));
-            awaitCondition(() -> !metrics.isConsumerDegraded(), 30, "late success clears shared metrics");
+            assertTrue(childrenStopped.await(30, TimeUnit.SECONDS), "observe both callbacks finish before health assertion");
+            assertTrue(metrics.isConsumerDegraded(), "late sibling success must retain poison degradation");
+            assertEquals(com.platform.core.logging.CoreSupportabilityEventCodes.TELEMETRY_POISON_EVENT,
+                    metrics.getConsumerDegradedReason());
             System.out.println("PR227_HEALTH_RACE running=" + container.isRunning()
                     + " expectedState=" + container.isInExpectedState() + " metricsDegraded=" + metrics.isConsumerDegraded()
                     + " health=" + context.getBean(TelemetryConsumerHealthIndicator.class).health().getStatus());
@@ -364,6 +376,60 @@ class TelemetryKafkaTransactionVisibilityTest {
         } finally {
             releaseInsertion.countDown();
         }
+    }
+
+    @Test
+    @Timeout(value = 90, unit = TimeUnit.SECONDS)
+    @SuppressWarnings("unchecked")
+    void registeredListenerCommitFailureAfterPersistenceDoesNotReinsert() throws Exception {
+        String bootstrap = embeddedKafka.getBrokersAsString();
+        String group = "ack-failure-" + UUID.randomUUID();
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var client = mock(ClickHouseClient.class);
+        var metrics = new IngestionMetrics();
+        var persisted = new java.util.concurrent.atomic.AtomicBoolean();
+        var inserts = new AtomicInteger();
+        var commitFailures = new AtomicInteger();
+        doAnswer(invocation -> {
+            inserts.incrementAndGet();
+            persisted.set(true);
+            return null;
+        }).when(client).insertNumericBatch(anyList());
+        context = createListenerContext(bootstrap, group, client, mapper, metrics);
+        var factory = (DefaultKafkaConsumerFactory<String, String>) context.getBean(
+                IngestionKafkaConfiguration.TELEMETRY_KAFKA_CONSUMER_FACTORY);
+        // Keep the real broker consumer; inject only at the synchronous commit boundary.
+        factory.addPostProcessor(delegate -> (Consumer<String, String>) java.lang.reflect.Proxy.newProxyInstance(
+                Consumer.class.getClassLoader(), new Class<?>[] {Consumer.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("commitSync") && persisted.get()) {
+                        commitFailures.incrementAndGet();
+                        throw new org.apache.kafka.clients.consumer.CommitFailedException("fixture membership loss");
+                    }
+                    try {
+                        return method.invoke(delegate, args);
+                    } catch (java.lang.reflect.InvocationTargetException invocation) {
+                        throw invocation.getCause();
+                    }
+                }));
+        var container = registeredListener();
+        container.start();
+        awaitCondition(() -> container.getAssignedPartitions() != null
+                && container.getAssignedPartitions().contains(PARTITION), 30, "real partition assigned");
+        Long before = committedOffset(bootstrap, group);
+        String payload = mapper.writeValueAsString(observation("ack-failure"));
+        createTransactionalTemplate(bootstrap).executeInTransaction(ops -> {
+            sendSync(ops, TOPIC, "ack-failure", payload);
+            return true;
+        });
+        awaitCondition(() -> commitFailures.get() > 0 && !container.isRunning() && !container.isInExpectedState(),
+                30, "commit failure stops registered listener");
+        assertEquals(1, inserts.get(), "ACK failure cannot trigger another ClickHouse insertion");
+        assertEquals(before, committedOffset(bootstrap, group), "failed commit cannot advance broker offset");
+        assertEquals(TelemetryConsumerFailure.MEMBERSHIP_LOST.reasonCode, metrics.getConsumerDegradedReason());
+        assertEquals(org.springframework.boot.actuate.health.Status.DOWN,
+                context.getBean(TelemetryConsumerHealthIndicator.class).health().getStatus());
+        System.out.println("PR227_ACK_FAILURE inserts=" + inserts.get() + " offset=" + committedOffset(bootstrap, group)
+                + " reason=" + metrics.getConsumerDegradedReason());
     }
 
     @Test

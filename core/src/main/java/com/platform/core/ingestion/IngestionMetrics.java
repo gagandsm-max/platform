@@ -25,6 +25,10 @@ public class IngestionMetrics {
     private final AtomicLong consumerPoisonEvents = new AtomicLong(0);
     private final AtomicBoolean consumerDegraded = new AtomicBoolean(false);
     private final AtomicReference<String> consumerDegradedReason = new AtomicReference<>("");
+    // One retained failure per blocked partition. A sibling's success cannot clear it.
+    private record ConsumerFailure(long offset, TelemetryConsumerFailure reason) { }
+    private final java.util.Map<org.apache.kafka.common.TopicPartition, ConsumerFailure> consumerFailures =
+            new java.util.LinkedHashMap<>();
 
     private final AtomicLong previousBatchPending = new AtomicLong(0);
     private final AtomicLong replayConflicts = new AtomicLong(0);
@@ -95,6 +99,22 @@ public class IngestionMetrics {
         consumerDegradedReason.set("");
     }
 
+    synchronized void recordConsumerFailure(org.apache.kafka.clients.consumer.ConsumerRecord<?, ?> record,
+                                            TelemetryConsumerFailure reason) {
+        consumerFailures.compute(new org.apache.kafka.common.TopicPartition(record.topic(), record.partition()),
+                (key, blocked) -> blocked == null || blocked.offset() == record.offset()
+                        ? new ConsumerFailure(record.offset(), reason) : blocked);
+        lastError.set(reason.reasonCode);
+    }
+
+    synchronized void recordConsumerHealthy(org.apache.kafka.clients.consumer.ConsumerRecord<?, ?> record) {
+        var key = new org.apache.kafka.common.TopicPartition(record.topic(), record.partition());
+        var blocked = consumerFailures.get(key);
+        // Only successful persistence AND ACK of the exact retained record proves recovery.
+        if (blocked != null && blocked.offset() == record.offset()) consumerFailures.remove(key);
+        if (consumerFailures.isEmpty()) recordConsumerHealthy();
+    }
+
     public void recordPreviousBatchPending() { previousBatchPending.incrementAndGet(); }
     public void recordReplayConflict() { replayConflicts.incrementAndGet(); }
     public void recordSequenceGap() { sequenceGaps.incrementAndGet(); }
@@ -121,8 +141,11 @@ public class IngestionMetrics {
     public long getClickHouseFailures() { return clickHouseFailures.get(); }
 
     public long getConsumerPoisonEvents() { return consumerPoisonEvents.get(); }
-    public boolean isConsumerDegraded() { return consumerDegraded.get(); }
-    public String getConsumerDegradedReason() { return consumerDegradedReason.get(); }
+    public synchronized boolean isConsumerDegraded() { return !consumerFailures.isEmpty() || consumerDegraded.get(); }
+    public synchronized String getConsumerDegradedReason() {
+        return consumerFailures.isEmpty() ? consumerDegradedReason.get()
+                : consumerFailures.values().iterator().next().reason().reasonCode;
+    }
 
     public long getPreviousBatchPending() { return previousBatchPending.get(); }
     public long getReplayConflicts() { return replayConflicts.get(); }
