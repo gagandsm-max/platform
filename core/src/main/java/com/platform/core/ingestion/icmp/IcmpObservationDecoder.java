@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.math.MathContext;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -616,7 +617,9 @@ public final class IcmpObservationDecoder {
     ) {
         long sampleMin = Long.MAX_VALUE;
         long sampleMax = Long.MIN_VALUE;
-        long sumMicros = 0L;
+        // Exact sum — signed long addition / *1000 can overflow for large but
+        // representable sample RTT values across up to MAX_SAMPLES successes.
+        BigInteger sumMicros = BigInteger.ZERO;
         int successCount = 0;
         for (IcmpSample sample : samples) {
             if (!sample.success()) {
@@ -625,7 +628,7 @@ public final class IcmpObservationDecoder {
             long rtt = sample.rttMicros() != null ? sample.rttMicros() : 0L;
             sampleMin = Math.min(sampleMin, rtt);
             sampleMax = Math.max(sampleMax, rtt);
-            sumMicros += rtt;
+            sumMicros = sumMicros.add(BigInteger.valueOf(rtt));
             successCount++;
         }
         if (successCount == 0) {
@@ -642,8 +645,14 @@ public final class IcmpObservationDecoder {
         }
         // Reconstruct the inclusive avg window from truncated sample micros:
         // raw_ns_i ∈ [si*1000, si*1000+999], so avg_us ∈ [low, high] below.
-        long avgLow = (sumMicros * 1000L / successCount) / 1000L;
-        long avgHigh = ((sumMicros * 1000L + 999L * successCount) / successCount) / 1000L;
+        // Matches Go time.Duration nanosecond→microsecond truncation
+        // (Duration.Microseconds / integer division toward zero).
+        BigInteger n = BigInteger.valueOf(successCount);
+        BigInteger thousand = BigInteger.valueOf(1000L);
+        BigInteger sumNanosLow = sumMicros.multiply(thousand);
+        BigInteger sumNanosHigh = sumNanosLow.add(BigInteger.valueOf(999L).multiply(n));
+        long avgLow = sumNanosLow.divide(n).divide(thousand).longValueExact();
+        long avgHigh = sumNanosHigh.divide(n).divide(thousand).longValueExact();
         if (avgRtt < avgLow || avgRtt > avgHigh) {
             throw new IcmpDecodeException(
                     IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES,
@@ -1023,10 +1032,12 @@ public final class IcmpObservationDecoder {
 
         @Override
         public void write(int b) throws IOException {
-            count++;
-            if (count > maxBytes) {
+            // Check before increment so count cannot wrap past Integer.MAX_VALUE
+            // before the 512 KiB bound is applied.
+            if (count >= maxBytes) {
                 throw new BoundExceededException();
             }
+            count++;
         }
 
         @Override
@@ -1034,10 +1045,12 @@ public final class IcmpObservationDecoder {
             if (len < 0) {
                 throw new IndexOutOfBoundsException();
             }
-            count += len;
-            if (count > maxBytes) {
+            // Remaining-capacity check avoids int overflow of count += len when len
+            // is large (e.g. near Integer.MAX_VALUE) before the bound is applied.
+            if (len > maxBytes - count) {
                 throw new BoundExceededException();
             }
+            count += len;
         }
     }
 

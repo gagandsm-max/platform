@@ -375,6 +375,120 @@ class IcmpObservationDecoderTest {
         assertEquals(2L, obs.evidence().avgRttMicros());
     }
 
+    /**
+     * High-value RTTs where {@code sumMicros * 1000} overflows signed long.
+     * Exact BigInteger sum must still accept Sensor-faithful avg bounds.
+     */
+    @Test
+    void acceptsHighValueRttAvgWhenSignedLongProductWouldOverflow() throws Exception {
+        // sum = 16e15; sum*1000 exceeds Long.MAX_VALUE. True avg window [5333333333333333, 5333333333333334].
+        long low = 5_000_000_000_000_000L;
+        long high = 6_000_000_000_000_000L;
+        long avgLow = 5_333_333_333_333_333L;
+        long avgHigh = 5_333_333_333_333_334L;
+
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 3);
+        payload.put("received", 3);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", low);
+        payload.put("avgRttMicros", avgLow);
+        payload.put("maxRttMicros", high);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", low);
+        samples.addObject().put("sequence", 2).put("success", true).put("rttMicros", low);
+        samples.addObject().put("sequence", 3).put("success", true).put("rttMicros", high);
+
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(avgLow, obs.evidence().avgRttMicros());
+        assertEquals(low, obs.evidence().minRttMicros());
+        assertEquals(high, obs.evidence().maxRttMicros());
+
+        payload.put("avgRttMicros", avgHigh);
+        obs = decoder.decode(root);
+        assertEquals(avgHigh, obs.evidence().avgRttMicros());
+    }
+
+    /**
+     * Eight equal near-max samples: signed long sum overflows; exact sum must accept.
+     */
+    @Test
+    void acceptsEightSampleHighValueRttWhenSignedLongSumWouldOverflow() throws Exception {
+        long rtt = 2_000_000_000_000_000_000L;
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 8);
+        payload.put("received", 8);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", rtt);
+        payload.put("avgRttMicros", rtt);
+        payload.put("maxRttMicros", rtt);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        for (int i = 1; i <= 8; i++) {
+            samples.addObject().put("sequence", i).put("success", true).put("rttMicros", rtt);
+        }
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(rtt, obs.evidence().avgRttMicros());
+        assertEquals(8, obs.evidence().samples().size());
+    }
+
+    /**
+     * High-value RTTs with avg inside min..max but outside the Go truncation window.
+     */
+    @Test
+    void rejectsHighValueAvgOutsideNanosecondTruncationWindow() throws Exception {
+        long low = 5_000_000_000_000_000L;
+        long high = 6_000_000_000_000_000L;
+        // min <= avg <= max holds, but avg is outside [5333333333333333, 5333333333333334].
+        long inconsistentAvg = low;
+
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 3);
+        payload.put("received", 3);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", low);
+        payload.put("avgRttMicros", inconsistentAvg);
+        payload.put("maxRttMicros", high);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", low);
+        samples.addObject().put("sequence", 2).put("success", true).put("rttMicros", low);
+        samples.addObject().put("sequence", 3).put("success", true).put("rttMicros", high);
+
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+        assertTrue(ex.getMessage().contains("avgRttMicros"));
+    }
+
+    /**
+     * UNKNOWN quality with a high-value successful sample must not collapse to DOWN
+     * and must still validate RTT summaries without signed overflow.
+     */
+    @Test
+    void preservesUnknownQualityWithHighValueSuccessfulSampleRtt() throws Exception {
+        long rtt = 9_223_372_036_854_776L; // Long.MAX_VALUE/1000 + 1 — *1000 overflows long
+        ObjectNode root = (ObjectNode) objectMapper.readTree(unreachableEnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("minRttMicros", rtt);
+        payload.put("avgRttMicros", rtt);
+        payload.put("maxRttMicros", rtt);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", rtt);
+        samples.addObject().put("sequence", 2).put("success", false).put("errorCode", "ICMP_UNREACHABLE");
+
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(IcmpQuality.UNKNOWN, obs.quality());
+        assertEquals("PARTIAL", obs.status());
+        assertEquals(rtt, obs.evidence().avgRttMicros());
+        assertNotEquals("DEVICE_DOWN", obs.status());
+        assertNotEquals("DOWN", obs.quality().name());
+    }
+
     @Test
     void rejectsCollectionLevelErrorCodeOnSuccessfulStatuses() throws Exception {
         ObjectNode good = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
