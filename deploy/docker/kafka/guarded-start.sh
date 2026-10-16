@@ -76,16 +76,28 @@ log_path_accessible() {
     return 1
 }
 
+# Live log-tree producer only. GNU findutils may exit nonzero when retention deletes an
+# entry between readdir and lstat; -ignore_readdir_race suppresses that false failure.
+# BusyBox find (apache/kafka:3.8.0) rejects the option and already continues on ENOENT —
+# probe before use. Never apply to cold-migration inventory hashing.
+live_logs_find() {
+    local find_race=()
+    if find "$LOGS" -ignore_readdir_race -maxdepth 0 -print -quit >/dev/null 2>&1; then
+        find_race=(-ignore_readdir_race)
+    fi
+    find "$LOGS" "${find_race[@]}" "$@"
+}
+
 check_files() {
     [[ -d $LOGS && ! -L $LOGS ]] || fail KAFKA_STORAGE_UNFORMATTED 'Persistent logs directory is missing'
     local invalid
-    invalid=$(timeout 60 find "$LOGS" -type l -print -quit) || fail KAFKA_STORAGE_INACCESSIBLE 'Cannot inspect persistent files within startup bound'
+    invalid=$(timeout 60 live_logs_find -type l -print -quit) || fail KAFKA_STORAGE_INACCESSIBLE 'Cannot inspect persistent files within startup bound'
     [[ -z $invalid ]] || fail KAFKA_STORAGE_INACCESSIBLE 'Persistent storage contains links or inaccessible files'
     # Single bounded walk (no rescans/retries). Vanished mutable entries are skipped;
     # EACCES, present-but-unreadable paths and symlinks still fail closed.
     timeout 60 bash -o pipefail -c '
         source "$1"
-        find "$LOGS" -print0 | while IFS= read -r -d "" p; do
+        live_logs_find -print0 | while IFS= read -r -d "" p; do
             log_path_accessible "$p" "$2" || exit 1
         done
     ' bash "${BASH_SOURCE[0]}" "${READ_ONLY:-0}" || fail KAFKA_STORAGE_INACCESSIBLE 'Persistent files are inaccessible to broker user'

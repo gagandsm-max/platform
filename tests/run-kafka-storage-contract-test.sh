@@ -184,6 +184,33 @@ echo 'PASS CI-scoped volume name and exact deployment ownership'
 # cleanup is not a supported production preflight action; confirm cannot revive it.
 ! grep -E 'cleanup|docker volume rm|PLATFORM_KAFKA_DISPOSABLE_CONFIRM' \
     "$REPO/deploy/docker/kafka/deployment-preflight.sh" | grep -v '^[[:space:]]*#'
+# Live find producer readdir race (Codex P2): only the two check_files walks may use
+# GNU -ignore_readdir_race via live_logs_find; cold-migration inventory must stay strict.
+bash -n "$REPO/deploy/docker/kafka/guarded-start.sh"
+guard=$REPO/deploy/docker/kafka/guarded-start.sh
+grep -q '^live_logs_find()' "$guard"
+[[ $(grep -c 'live_logs_find ' "$guard") == 2 ]]
+grep -A6 '^verify_migration_manifest()' "$guard" | grep -Fq 'find logs -type f -print0'
+! grep -A6 '^verify_migration_manifest()' "$guard" | grep -q ignore_readdir_race
+! grep -A6 '^require_metadata_log()' "$guard" | grep -q ignore_readdir_race
+# Host GNU findutils (when present): option is accepted and present EACCES still fails closed.
+# Timed readdir→lstat deletion races are non-deterministic; do not invent a storm harness.
+if find /tmp -ignore_readdir_race -maxdepth 0 -print -quit >/dev/null 2>&1; then
+    host_eacces=$(mktemp -d)
+    mkdir -p "$host_eacces/parent"
+    echo retained > "$host_eacces/parent/kafka.log"
+    chmod 000 "$host_eacces/parent"
+    if find "$host_eacces" -ignore_readdir_race -print >/dev/null 2>"$TASK/host-find-eacces.err"; then
+        chmod 700 "$host_eacces/parent"; rm -rf "$host_eacces"
+        echo 'host GNU find -ignore_readdir_race must not mask EACCES' >&2
+        exit 1
+    fi
+    grep -qi 'Permission denied' "$TASK/host-find-eacces.err"
+    chmod 700 "$host_eacces/parent"
+    rm -rf "$host_eacces"
+    echo 'PASS host GNU find -ignore_readdir_race preserves EACCES fail-closed'
+fi
+echo 'PASS live_logs_find gates readdir race; cold migration find unchanged'
 if gate cleanup > "$TASK/cleanup-reject.log" 2>&1; then echo 'cleanup must be rejected' >&2; exit 1; fi
 grep -q KAFKA_DEPLOYMENT_ARGUMENT "$TASK/cleanup-reject.log"
 if PLATFORM_KAFKA_DISPOSABLE_CONFIRM="$PLATFORM_KAFKA_STORAGE_ID" gate cleanup > "$TASK/cleanup-confirm-reject.log" 2>&1; then
@@ -351,7 +378,17 @@ run -c '
   " bash /platform-kafka/guarded-start.sh 1 "$list"
   /platform-kafka/guarded-start.sh --inspect
 '
+# Producer readdir→lstat race is distinct from the stale-list vanish cases above.
+# live_logs_find must succeed whether the image find is BusyBox (no option) or GNU
+# findutils (option accepted); unconditional -ignore_readdir_race would break BusyBox.
+run -c '
+  set -euo pipefail
+  source /platform-kafka/guarded-start.sh
+  live_logs_find -maxdepth 0 -print -quit | grep -Fxq "$LOGS"
+  /platform-kafka/guarded-start.sh --inspect
+'
 echo 'PASS parent EACCES rejected; vanished file/dir tolerated; symlink still rejected'
+echo 'PASS live_logs_find producer walk succeeds under image find capability gate'
 
 gate up
 ready
