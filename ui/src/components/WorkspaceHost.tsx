@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { PageState } from './PageState';
+import { InfrastructureHealthOverview } from './health-overview/InfrastructureHealthOverview';
+import { NetworkHealthOverview } from './health-overview/NetworkHealthOverview';
 import {
   AccessContext,
   WorkspaceDefinition,
@@ -9,7 +11,8 @@ import {
   workspaceTabDomId,
   workspaceTabPanelDomId,
 } from '../platform/navigation';
-import type { ScreenDataState } from '../platform/screen-state';
+import { resolveHealthOverviewHostDataState } from '../platform/health-overview';
+import type { PageStateKind, ScreenDataState } from '../platform/screen-state';
 
 interface WorkspaceHostProps {
   workspace: WorkspaceDefinition;
@@ -56,8 +59,11 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
   };
 
   const capabilityPending = workspace.backendCapability === 'PENDING_BACKEND';
-  const resolvedDataState: ScreenDataState = dataState
-    ?? foundationDataStateForCapability(workspace.backendCapability);
+  const isHealthOverview = workspace.id === 'ui-009' || workspace.id === 'ui-029';
+  // UI-009/UI-029 unbound preview is Source Unavailable; other workspaces keep foundation empty.
+  const resolvedDataState: PageStateKind = isHealthOverview
+    ? resolveHealthOverviewHostDataState(dataState)
+    : (dataState ?? foundationDataStateForCapability(workspace.backendCapability));
 
   return (
     <div className="workspace-host" data-workspace-id={workspace.id} data-ui-code={workspace.uiCode}>
@@ -169,26 +175,42 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
         data-data-state={resolvedDataState}
         data-capability={workspace.backendCapability}
       >
-        <PageState
-          kind={resolvedDataState}
-          title={
-            dataState
-              ? `${workspace.label}`
-              : 'No live data-state provider bound'
-          }
-          message={
-            dataState
-              ? `Authoritative data state for this workspace is ${resolvedDataState}.`
-              : `Capability status (${workspace.backendCapability}) is independent of screen/data state. This foundation does not fabricate Normal operational health from capability integration alone.${activeTabLabel ? ` Active view metadata: ${activeTabLabel}.` : ''}`
-          }
-          evidence={[
-            `Capability availability: ${workspace.backendCapability}`,
-            `Resolved data state: ${resolvedDataState}`,
-            workspace.valueClaimSensitive
-              ? 'Value/MTTR claims are prohibited until the Platform Value evidence engine is integrated.'
-              : 'Operational panels will bind to versioned Core APIs when a data-state provider is available.',
-          ]}
-        />
+        {workspace.id === 'ui-009' ? (
+          <NetworkHealthOverview
+            workspace={workspace}
+            activeTab={activeTabLabel}
+            dataState={dataState}
+            dataBound={dataState !== undefined}
+          />
+        ) : workspace.id === 'ui-029' ? (
+          <InfrastructureHealthOverview
+            workspace={workspace}
+            activeTab={activeTabLabel}
+            dataState={dataState}
+            dataBound={dataState !== undefined}
+          />
+        ) : (
+          <PageState
+            kind={resolvedDataState}
+            title={
+              dataState
+                ? `${workspace.label}`
+                : 'No live data-state provider bound'
+            }
+            message={
+              dataState
+                ? `Authoritative data state for this workspace is ${resolvedDataState}.`
+                : `Capability status (${workspace.backendCapability}) is independent of screen/data state. This foundation does not fabricate Normal operational health from capability integration alone.${activeTabLabel ? ` Active view metadata: ${activeTabLabel}.` : ''}`
+            }
+            evidence={[
+              `Capability availability: ${workspace.backendCapability}`,
+              `Resolved data state: ${resolvedDataState}`,
+              workspace.valueClaimSensitive
+                ? 'Value/MTTR claims are prohibited until the Platform Value evidence engine is integrated.'
+                : 'Operational panels will bind to versioned Core APIs when a data-state provider is available.',
+            ]}
+          />
+        )}
       </section>
 
       {workspace.oivRelevant ? (
