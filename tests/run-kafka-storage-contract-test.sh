@@ -280,6 +280,38 @@ mutate 'chmod 600 /var/lib/kafka/data/logs/meta.properties'
 mutate 'ln -s /var/lib/kafka/data/logs/meta.properties /var/lib/kafka/data/logs/issue223-symlink'
 reject KAFKA_STORAGE_INACCESSIBLE /platform-kafka/guarded-start.sh --inspect
 mutate 'rm /var/lib/kafka/data/logs/issue223-symlink'
+# Parent-dir EACCES must not be mistaken for a vanished mutable file: find may have
+# emitted the leaf while the parent was still traversable; Bash -e/-L are then both false.
+run -c '
+  set -euo pipefail
+  source /platform-kafka/guarded-start.sh
+  parent=/var/lib/kafka/data/logs/issue223-eacces-parent
+  leaf=$parent/kafka.log
+  mkdir -p "$parent"
+  echo retained > "$leaf"
+  list=/tmp/issue223-eacces-stale-paths
+  find "$LOGS" -print0 > "$list"
+  tr "\0" "\n" < "$list" | grep -Fq "issue223-eacces-parent/kafka.log"
+  chmod 000 "$parent"
+  # Leaf-only stale path (Master counterexample): must fail closed, not accept as vanished.
+  ! log_path_accessible "$leaf" 1
+  # Full stale inventory that still contains the leaf must also fail closed.
+  if timeout 60 bash -o pipefail -c "
+    source \"\$1\"
+    while IFS= read -r -d \"\" p; do
+      log_path_accessible \"\$p\" \"\$2\" || exit 1
+    done < \"\$3\"
+  " bash /platform-kafka/guarded-start.sh 1 "$list"; then
+    echo "parent EACCES incorrectly accepted as vanished" >&2
+    exit 1
+  fi
+  chmod 700 "$parent"
+  rm -rf "$parent"
+'
+# Live find walk / --inspect must also fail closed when a log subdirectory denies traverse.
+mutate 'mkdir -p /var/lib/kafka/data/logs/issue223-eacces-parent; echo retained > /var/lib/kafka/data/logs/issue223-eacces-parent/kafka.log; chmod 000 /var/lib/kafka/data/logs/issue223-eacces-parent'
+reject KAFKA_STORAGE_INACCESSIBLE /platform-kafka/guarded-start.sh --inspect
+mutate 'chmod 700 /var/lib/kafka/data/logs/issue223-eacces-parent; rm -rf /var/lib/kafka/data/logs/issue223-eacces-parent'
 # Deterministic vanish race: find listed the path, then retention deleted it before access.
 # Classifier and the bounded check_files walk must not raise KAFKA_STORAGE_INACCESSIBLE.
 run -c '
@@ -299,7 +331,27 @@ run -c '
   " bash /platform-kafka/guarded-start.sh 1 "$list"
   /platform-kafka/guarded-start.sh --inspect
 '
-echo 'PASS vanished mutable log path does not fail inspection; symlink still rejected'
+# Deleted containing directory (retention removed the subtree) remains safe absence.
+run -c '
+  set -euo pipefail
+  source /platform-kafka/guarded-start.sh
+  parent=/var/lib/kafka/data/logs/issue223-dir-vanish
+  leaf=$parent/segment.log
+  mkdir -p "$parent"
+  touch "$leaf"
+  list=/tmp/issue223-dir-vanish-paths
+  find "$LOGS" -print0 > "$list"
+  tr "\0" "\n" < "$list" | grep -Fq "issue223-dir-vanish/segment.log"
+  rm -rf "$parent"
+  timeout 60 bash -o pipefail -c "
+    source \"\$1\"
+    while IFS= read -r -d \"\" p; do
+      log_path_accessible \"\$p\" \"\$2\" || exit 1
+    done < \"\$3\"
+  " bash /platform-kafka/guarded-start.sh 1 "$list"
+  /platform-kafka/guarded-start.sh --inspect
+'
+echo 'PASS parent EACCES rejected; vanished file/dir tolerated; symlink still rejected'
 
 gate up
 ready

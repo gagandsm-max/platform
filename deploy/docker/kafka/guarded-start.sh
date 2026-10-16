@@ -47,13 +47,32 @@ check_mount() {
 
 # Distinguish retention/compaction ENOENT from true inaccessibility.
 # A path listed by find may vanish before the access check; that is not corrupt storage.
-# Existing paths that fail -r/-w/-x, and symlinks (-L), remain fail-closed.
+# Bash [[ -e ]]/[[ -L ]] are false for both ENOENT and parent-dir EACCES, so apparent
+# absence is accepted only after a traversable ancestor confirms the next component is gone.
+# Present-but-unreadable paths, symlinks (-L), and inaccessible parents remain fail-closed.
 log_path_accessible() {
-    local p=$1 read_only=${2:-0}
+    local p=$1 read_only=${2:-0} cur parent depth
+    # -r/-w follow symlinks; reject link substitution before any access probe.
+    [[ ! -L $p ]] || return 1
     if [[ -r $p ]] && { [[ $read_only == 1 ]] || [[ -w $p ]]; } && { [[ ! -d $p ]] || [[ -x $p ]]; }; then
         return 0
     fi
-    [[ -e $p || -L $p ]] || return 0
+    if [[ -e $p ]]; then
+        return 1
+    fi
+    cur=$p
+    for ((depth = 0; depth < 64; depth++)); do
+        parent=$(dirname -- "$cur")
+        [[ $parent != "$cur" ]] || return 1
+        [[ ! -L $parent ]] || return 1
+        if [[ -d $parent && -x $parent ]]; then
+            [[ ! -e $cur && ! -L $cur ]] || return 1
+            return 0
+        fi
+        # Parent exists but is not traversable: EACCES / non-directory — not safe absence.
+        [[ ! -e $parent ]] || return 1
+        cur=$parent
+    done
     return 1
 }
 
