@@ -194,6 +194,20 @@ export const resolveHealthOverviewProviderBinding = (
   };
 };
 
+/**
+ * Host chrome data-state for UI-009/UI-029 only.
+ * Unbound production routes must show source-unavailable (not foundation empty).
+ * Does not change foundationDataStateForCapability for other workspaces.
+ */
+export const resolveHealthOverviewHostDataState = (
+  dataState?: ScreenDataState,
+): ScreenDataState | 'source-unavailable' => {
+  if (dataState !== undefined) {
+    return dataState;
+  }
+  return 'source-unavailable';
+};
+
 export const ENTITY_EVIDENCE_STATUS_LABELS: Readonly<Record<EntityEvidenceStatus, string>> = {
   UNKNOWN: 'Unknown',
   STALE: 'Stale',

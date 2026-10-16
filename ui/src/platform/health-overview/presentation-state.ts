@@ -40,8 +40,11 @@ const baseEvidence = (
   domain: 'Network' | 'Infrastructure',
   input: HealthOverviewBuildInput,
 ): string[] => {
+  const bindingNote = input.dataBound
+    ? `${domain} health overview is presenting a bound provider data-state. Panel metrics remain placeholders until authenticated tenant-scoped Core evidence is returned (Issue #105); binding alone is not live customer telemetry.`
+    : `${domain} health overview is presentation-only until a tenant-scoped Core read API is bound.`;
   const evidence = [
-    `${domain} health overview is presentation-only until a tenant-scoped Core read API is bound.`,
+    bindingNote,
     'FOUNDATION_ACCESS is not authorization; server-side tenant/RBAC remains authoritative.',
     'Missing collector or telemetry evidence must not be presented as device or host down.',
   ];
@@ -56,6 +59,10 @@ const baseEvidence = (
   }
   return evidence;
 };
+
+/** Recovery controls stay non-interactive until Core handlers exist (#105). */
+const recoveryNotInteractive =
+  'Retry and platform diagnostics remain non-interactive until Core recovery handlers are bound.';
 
 export const buildHealthOverviewStateCopy = (
   domain: 'Network' | 'Infrastructure',
@@ -72,7 +79,7 @@ export const buildHealthOverviewStateCopy = (
         kind,
         title: `Loading ${domain.toLowerCase()} health`,
         explanation: `Requesting authorized ${subject} evidence. No operational conclusion is drawn while the query is in flight.`,
-        nextAction: 'Wait for the bounded server query to complete, or cancel and retry.',
+        nextAction: 'Wait for the bounded server query to complete. Cancel/retry controls appear only when Core recovery handlers are bound.',
         evidence,
         retryAvailable: false,
         diagnosticAvailable: false,
@@ -82,9 +89,10 @@ export const buildHealthOverviewStateCopy = (
         kind,
         title: 'No monitoring data',
         explanation: `No ${subject} rows are available for the current presentation scope. This is not an outage assertion.`,
-        nextAction: 'Confirm onboarding/discovery and monitoring assignment once Core inventory APIs are available.',
+        nextAction: `Confirm onboarding/discovery and monitoring assignment once Core inventory APIs are available. ${recoveryNotInteractive}`,
         evidence,
-        retryAvailable: true,
+        // No interactive Retry until Core handlers exist (#105).
+        retryAvailable: false,
         diagnosticAvailable: false,
       };
     case 'partial':
@@ -92,25 +100,25 @@ export const buildHealthOverviewStateCopy = (
         kind,
         title: 'Partial evidence',
         explanation: `Some ${subject} sources returned incomplete evidence. Incomplete panels remain visible and labelled; missing sources are not treated as target failure.`,
-        nextAction: 'Inspect the affected Sensor/Agent source before asserting resource health.',
+        nextAction: `Inspect the affected Sensor/Agent source before asserting resource health. ${recoveryNotInteractive}`,
         evidence: [
           ...evidence,
           input.affectedSource
             ? `Partial source identified: ${input.affectedSource}`
             : 'Affected source identity will come from the Core query contract when bound.',
         ],
-        retryAvailable: true,
-        diagnosticAvailable: true,
+        retryAvailable: false,
+        diagnosticAvailable: false,
       };
     case 'stale':
       return {
         kind,
         title: 'Stale data',
         explanation: `Cached or last-known ${subject} evidence is older than the freshness contract. Stale evidence remains visible and labelled; it is not refreshed into a fabricated healthy zero.`,
-        nextAction: 'Re-query when Core freshness metadata is available, or investigate collector lag.',
+        nextAction: `Re-query when Core freshness metadata is available, or investigate collector lag. ${recoveryNotInteractive}`,
         evidence,
-        retryAvailable: true,
-        diagnosticAvailable: true,
+        retryAvailable: false,
+        diagnosticAvailable: false,
       };
     case 'permission-restricted':
       return {
@@ -137,9 +145,9 @@ export const buildHealthOverviewStateCopy = (
         kind,
         title: 'Query limited',
         explanation: `The ${domain.toLowerCase()} health query hit a bounded row/scan limit. Results are truncated intentionally to protect large-estate browsers.`,
-        nextAction: 'Narrow filters/site scope once server-side query contracts exist (see Issue #105).',
+        nextAction: `Narrow filters/site scope once server-side query contracts exist (see Issue #105). ${recoveryNotInteractive}`,
         evidence,
-        retryAvailable: true,
+        retryAvailable: false,
         diagnosticAvailable: false,
       };
     case 'error':
@@ -147,30 +155,30 @@ export const buildHealthOverviewStateCopy = (
         kind,
         title: `${domain} health query error`,
         explanation: `The ${subject} request failed. No device or host down conclusion is inferred from this transport/query failure alone.`,
-        nextAction: 'Retry the query or open platform diagnostics with the correlation/error identifiers when present.',
+        nextAction: `Retain correlation/error identifiers for support. ${recoveryNotInteractive}`,
         evidence,
-        retryAvailable: true,
-        diagnosticAvailable: true,
+        retryAvailable: false,
+        diagnosticAvailable: false,
       };
     case 'monitoring-degraded':
       return {
         kind,
         title: 'Monitoring degraded',
         explanation: `Collector or telemetry quality for ${subject} is degraded. Monitoring degradation is distinct from target DOWN and must remain a first-class state.`,
-        nextAction: 'Inspect Sensor/Agent health and evidence quality before changing operational severity.',
+        nextAction: `Inspect Sensor/Agent health and evidence quality before changing operational severity. ${recoveryNotInteractive}`,
         evidence,
-        retryAvailable: true,
-        diagnosticAvailable: true,
+        retryAvailable: false,
+        diagnosticAvailable: false,
       };
     case 'normal':
       return {
         kind,
         title: 'Data available / query normal',
         explanation: `Authorized ${subject} query completed normally. Data available / query normal is not a DEVICE_UP, HOST_UP, availability-success, or healthy-metrics claim; per-entity operational status requires corroborating source evidence.`,
-        nextAction: 'Inspect entity evidence rows and collector freshness before asserting target health.',
+        nextAction: `Inspect entity evidence rows and collector freshness before asserting target health. ${recoveryNotInteractive}`,
         evidence,
         retryAvailable: false,
-        diagnosticAvailable: true,
+        diagnosticAvailable: false,
       };
     case 'source-unavailable':
       return {
@@ -187,10 +195,10 @@ export const buildHealthOverviewStateCopy = (
         kind,
         title: 'Unknown health evidence',
         explanation: `Evidence quality for ${subject} is insufficient to classify operational state. UNKNOWN remains explicit and must not collapse into DOWN.`,
-        nextAction: 'Gather corroborating collector and reachability evidence before asserting failure.',
+        nextAction: `Gather corroborating collector and reachability evidence before asserting failure. ${recoveryNotInteractive}`,
         evidence,
-        retryAvailable: true,
-        diagnosticAvailable: true,
+        retryAvailable: false,
+        diagnosticAvailable: false,
       };
     default: {
       const _exhaustive: never = kind;

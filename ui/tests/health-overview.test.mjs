@@ -15,11 +15,14 @@ import {
   buildInfrastructureHealthOverviewVm,
   buildNetworkHealthOverviewVm,
   isDeviceDownFabrication,
+  resolveHealthOverviewHostDataState,
   resolveHealthOverviewProviderBinding,
   resolveUnboundHealthPresentation,
   screenDataStateToHealthPresentation,
 } from '../.test-dist/platform/health-overview/index.js';
 import { findWorkspaceByPath } from '../.test-dist/platform/navigation.js';
+import { isAssertivePageState } from '../.test-dist/platform/screen-state.js';
+import { foundationDataStateForCapability } from '../.test-dist/platform/workspace-host-state.js';
 
 test('health-overview fixture is explicitly non-production', () => {
   assert.equal(FIXTURE_PROVENANCE.kind, 'NON_PRODUCTION_TEST_FIXTURE');
@@ -218,6 +221,44 @@ test('unbound path without provider retains Source Unavailable', () => {
   assert.equal(unbound.presentationState, undefined);
   assert.equal(buildNetworkHealthOverviewVm().presentationState, 'source-unavailable');
   assert.equal(buildInfrastructureHealthOverviewVm().presentationState, 'source-unavailable');
+});
+
+test('UI-009/UI-029 host chrome resolves unbound to source-unavailable, not foundation empty', () => {
+  assert.equal(foundationDataStateForCapability('PENDING_BACKEND'), 'empty');
+  assert.equal(resolveHealthOverviewHostDataState(undefined), 'source-unavailable');
+  assert.equal(resolveHealthOverviewHostDataState('not-licensed'), 'not-licensed');
+  assert.equal(resolveHealthOverviewHostDataState('normal'), 'normal');
+  assert.notEqual(
+    resolveHealthOverviewHostDataState(undefined),
+    foundationDataStateForCapability('PENDING_BACKEND'),
+  );
+});
+
+test('source-unavailable is polite status, not assertive alert', () => {
+  assert.equal(isAssertivePageState('source-unavailable'), false);
+  assert.equal(isAssertivePageState('unknown'), false);
+  assert.equal(isAssertivePageState('error'), true);
+  assert.equal(isAssertivePageState('monitoring-degraded'), true);
+});
+
+test('bound provider evidence must not claim the API is unbound', () => {
+  const bound = buildHealthOverviewStateCopy('Network', 'normal', { dataBound: true });
+  assert.equal(bound.evidence.some((item) => /until a tenant-scoped Core read API is bound/i.test(item)), false);
+  assert.ok(bound.evidence.some((item) => /bound provider data-state/i.test(item)));
+  assert.ok(bound.evidence.some((item) => /not live customer telemetry/i.test(item)));
+
+  const unbound = buildHealthOverviewStateCopy('Network', 'source-unavailable', { dataBound: false });
+  assert.ok(unbound.evidence.some((item) => /until a tenant-scoped Core read API is bound/i.test(item)));
+});
+
+test('recovery actions stay non-interactive without inventing handlers', () => {
+  for (const kind of ['error', 'partial', 'stale', 'monitoring-degraded', 'normal', 'empty']) {
+    const copy = buildHealthOverviewStateCopy('Network', kind, { dataBound: true });
+    assert.equal(copy.retryAvailable, false);
+    assert.equal(copy.diagnosticAvailable, false);
+    assert.match(copy.nextAction, /non-interactive until Core recovery handlers are bound/i);
+    assert.equal(/\bRetry the query\b/i.test(copy.nextAction), false);
+  }
 });
 
 test('dataBound without explicit state remains unknown, never Normal', () => {

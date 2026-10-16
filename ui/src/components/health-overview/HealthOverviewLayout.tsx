@@ -86,12 +86,17 @@ export const HealthOverviewLayout: React.FC<HealthOverviewLayoutProps> = ({
         message={model.stateCopy.explanation}
         context={model.stateCopy.nextAction}
         evidence={model.stateCopy.evidence}
-        actionLabel={model.stateCopy.retryAvailable ? 'Retry when API is bound' : undefined}
-        onAction={model.stateCopy.retryAvailable ? onRetry : undefined}
+        // Do not invent handlers; only expose controls when callers supply them.
+        actionLabel={onRetry && model.stateCopy.retryAvailable ? 'Retry' : undefined}
+        onAction={onRetry && model.stateCopy.retryAvailable ? onRetry : undefined}
         diagnosticLabel={
-          model.stateCopy.diagnosticAvailable ? 'Open platform diagnostics' : undefined
+          onDiagnostic && model.stateCopy.diagnosticAvailable
+            ? 'Open platform diagnostics'
+            : undefined
         }
-        onDiagnostic={model.stateCopy.diagnosticAvailable ? onDiagnostic : undefined}
+        onDiagnostic={
+          onDiagnostic && model.stateCopy.diagnosticAvailable ? onDiagnostic : undefined
+        }
       />
 
       <section className="health-overview__panels" aria-label={`${model.domain} health summary panels`}>

@@ -19,6 +19,7 @@ export type {
 export {
   ENTITY_EVIDENCE_STATUS_LABELS,
   isDeviceDownFabrication,
+  resolveHealthOverviewHostDataState,
   resolveHealthOverviewProviderBinding,
   screenDataStateToHealthPresentation,
 } from './types.js';

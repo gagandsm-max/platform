@@ -11,7 +11,8 @@ import {
   workspaceTabDomId,
   workspaceTabPanelDomId,
 } from '../platform/navigation';
-import type { ScreenDataState } from '../platform/screen-state';
+import { resolveHealthOverviewHostDataState } from '../platform/health-overview';
+import type { PageStateKind, ScreenDataState } from '../platform/screen-state';
 
 interface WorkspaceHostProps {
   workspace: WorkspaceDefinition;
@@ -58,8 +59,11 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
   };
 
   const capabilityPending = workspace.backendCapability === 'PENDING_BACKEND';
-  const resolvedDataState: ScreenDataState = dataState
-    ?? foundationDataStateForCapability(workspace.backendCapability);
+  const isHealthOverview = workspace.id === 'ui-009' || workspace.id === 'ui-029';
+  // UI-009/UI-029 unbound preview is Source Unavailable; other workspaces keep foundation empty.
+  const resolvedDataState: PageStateKind = isHealthOverview
+    ? resolveHealthOverviewHostDataState(dataState)
+    : (dataState ?? foundationDataStateForCapability(workspace.backendCapability));
 
   return (
     <div className="workspace-host" data-workspace-id={workspace.id} data-ui-code={workspace.uiCode}>

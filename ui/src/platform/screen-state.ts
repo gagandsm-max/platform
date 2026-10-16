@@ -50,6 +50,13 @@ export const SCREEN_STATE_LABELS: Readonly<Record<PageStateKind, string>> = {
   unknown: 'Unknown',
 };
 
+/**
+ * Page states that interrupt with assertive live regions.
+ * Static unbound `source-unavailable` preview must remain polite/status.
+ */
+export const isAssertivePageState = (kind: PageStateKind): boolean =>
+  kind === 'error' || kind === 'monitoring-degraded';
+
 export interface ScreenStateModel {
   kind: PageStateKind;
   title: string;

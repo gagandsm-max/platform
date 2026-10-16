@@ -82,7 +82,7 @@ const unboundPanels = (): readonly HealthOverviewPanelDescriptor[] => [
     title: 'Telemetry freshness',
     purpose: 'Host metric freshness and quality.',
     valueLabel: 'Unknown',
-    evidenceNote: 'Freshness metadata is server-derived; unbound UI stays Unknown.',
+    evidenceNote: 'Freshness metadata is server-derived; without Core freshness evidence this panel stays Unknown.',
   },
   {
     id: 'collector',

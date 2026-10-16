@@ -835,6 +835,7 @@ kbd {
 .workspace-host {
   display: grid;
   gap: 1rem;
+  min-width: 0;
 }
 
 .workspace-header {
@@ -842,6 +843,11 @@ kbd {
   justify-content: space-between;
   gap: 1rem;
   align-items: flex-start;
+  min-width: 0;
+}
+
+.workspace-header > div {
+  min-width: 0;
 }
 
 .workspace-header__badges {
@@ -853,7 +859,9 @@ kbd {
 
 .workspace-description {
   max-width: 52rem;
+  min-width: 0;
   color: var(--text-muted, #5b6472);
+  overflow-wrap: anywhere;
 }
 
 .workspace-roles {
@@ -963,6 +971,7 @@ kbd {
 }
 
 .workspace-state-region {
+  min-width: 0;
   min-height: 12rem;
 }
 
@@ -983,6 +992,7 @@ kbd {
 .health-overview {
   display: grid;
   gap: 1rem;
+  min-width: 0;
 }
 
 .health-overview__state-banner {
@@ -1053,6 +1063,7 @@ kbd {
 }
 
 .health-overview__table-region {
+  min-width: 0;
   padding: var(--density-surface-padding);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1069,9 +1080,12 @@ kbd {
   color: var(--text-muted);
   font-size: 0.88rem;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .health-overview__table-scroll {
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
