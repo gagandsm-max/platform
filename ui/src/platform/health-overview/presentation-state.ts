@@ -14,6 +14,7 @@ export const HEALTH_OVERVIEW_PRESENTATION_STATES: readonly HealthOverviewPresent
   'query-limited',
   'error',
   'monitoring-degraded',
+  'normal',
   'source-unavailable',
   'unknown',
 ] as const;
@@ -30,6 +31,7 @@ export const HEALTH_OVERVIEW_STATE_LABELS: Readonly<
   'query-limited': 'Query limited',
   error: 'Error',
   'monitoring-degraded': 'Monitoring degraded',
+  normal: 'Data available',
   'source-unavailable': 'Source unavailable',
   unknown: 'Unknown',
 };
@@ -158,6 +160,16 @@ export const buildHealthOverviewStateCopy = (
         nextAction: 'Inspect Sensor/Agent health and evidence quality before changing operational severity.',
         evidence,
         retryAvailable: true,
+        diagnosticAvailable: true,
+      };
+    case 'normal':
+      return {
+        kind,
+        title: 'Data available / query normal',
+        explanation: `Authorized ${subject} query completed normally. Data available / query normal is not a DEVICE_UP, HOST_UP, availability-success, or healthy-metrics claim; per-entity operational status requires corroborating source evidence.`,
+        nextAction: 'Inspect entity evidence rows and collector freshness before asserting target health.',
+        evidence,
+        retryAvailable: false,
         diagnosticAvailable: true,
       };
     case 'source-unavailable':

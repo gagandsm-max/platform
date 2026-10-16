@@ -176,12 +176,14 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
             workspace={workspace}
             activeTab={activeTabLabel}
             dataState={dataState}
+            dataBound={dataState !== undefined}
           />
         ) : workspace.id === 'ui-029' ? (
           <InfrastructureHealthOverview
             workspace={workspace}
             activeTab={activeTabLabel}
             dataState={dataState}
+            dataBound={dataState !== undefined}
           />
         ) : (
           <PageState

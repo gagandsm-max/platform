@@ -20,6 +20,8 @@ export type HealthOverviewPresentationState =
   | 'query-limited'
   | 'error'
   | 'monitoring-degraded'
+  /** Bound provider query completed normally — not DEVICE_UP / HOST_UP / healthy metrics. */
+  | 'normal'
   | 'source-unavailable'
   | 'unknown';
 
@@ -153,13 +155,43 @@ export const screenDataStateToHealthPresentation = (
     case 'monitoring-degraded':
       return 'monitoring-degraded';
     case 'normal':
-      // Normal live health requires a bound provider; unbound paths stay unknown.
-      return 'unknown';
+      // Bound query-normal / data-available only — never target UP or healthy metrics.
+      return 'normal';
     default: {
       const _exhaustive: never = state;
       return _exhaustive;
     }
   }
+};
+
+export interface HealthOverviewProviderBindingInput {
+  readonly dataBound?: boolean;
+  readonly dataState?: ScreenDataState;
+  readonly presentationState?: HealthOverviewPresentationState;
+}
+
+export interface HealthOverviewProviderBinding {
+  readonly dataBound: boolean;
+  readonly presentationState: HealthOverviewPresentationState | undefined;
+}
+
+/**
+ * Resolves trusted provider binding for UI-009/UI-029 wrappers.
+ * Presence of `dataState` means an explicit provider is bound; absence keeps the unbound path.
+ */
+export const resolveHealthOverviewProviderBinding = (
+  input: HealthOverviewProviderBindingInput,
+): HealthOverviewProviderBinding => {
+  const trustedBound = Boolean(input.dataBound) || input.dataState !== undefined;
+  const presentationState =
+    input.presentationState
+    ?? (input.dataState !== undefined
+      ? screenDataStateToHealthPresentation(input.dataState)
+      : undefined);
+  return {
+    dataBound: trustedBound,
+    presentationState,
+  };
 };
 
 export const ENTITY_EVIDENCE_STATUS_LABELS: Readonly<Record<EntityEvidenceStatus, string>> = {

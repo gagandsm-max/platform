@@ -15,6 +15,7 @@ import {
   buildInfrastructureHealthOverviewVm,
   buildNetworkHealthOverviewVm,
   isDeviceDownFabrication,
+  resolveHealthOverviewProviderBinding,
   resolveUnboundHealthPresentation,
   screenDataStateToHealthPresentation,
 } from '../.test-dist/platform/health-overview/index.js';
@@ -143,8 +144,80 @@ test('screen data states map into health presentation without inventing Normal a
   assert.equal(screenDataStateToHealthPresentation('query-limited'), 'query-limited');
   assert.equal(screenDataStateToHealthPresentation('error'), 'error');
   assert.equal(screenDataStateToHealthPresentation('monitoring-degraded'), 'monitoring-degraded');
-  // Bound-absent Normal screen state must not become a healthy dashboard claim.
-  assert.equal(screenDataStateToHealthPresentation('normal'), 'unknown');
+  // Bound provider may represent query-normal / data-available; never DEVICE_UP / HOST_UP.
+  assert.equal(screenDataStateToHealthPresentation('normal'), 'normal');
+});
+
+test('WorkspaceHost-supplied dataState without dataBound is preserved (provider binding)', () => {
+  // Regression: wrappers defaulted dataBound=false and ignored dataState via (dataBound && dataState).
+  for (const state of [
+    'not-licensed',
+    'permission-restricted',
+    'loading',
+    'error',
+    'stale',
+    'monitoring-degraded',
+  ]) {
+    const binding = resolveHealthOverviewProviderBinding({ dataState: state });
+    assert.equal(binding.dataBound, true);
+    assert.equal(binding.presentationState, state);
+    const network = buildNetworkHealthOverviewVm({
+      dataBound: binding.dataBound,
+      presentationState: binding.presentationState,
+    });
+    const infra = buildInfrastructureHealthOverviewVm({
+      dataBound: binding.dataBound,
+      presentationState: binding.presentationState,
+    });
+    assert.equal(network.presentationState, state);
+    assert.equal(infra.presentationState, state);
+    assert.equal(network.dataBound, true);
+    assert.equal(infra.dataBound, true);
+  }
+});
+
+test('bound normal is data-available / query-normal, not target UP or healthy metrics', () => {
+  const binding = resolveHealthOverviewProviderBinding({ dataState: 'normal' });
+  assert.equal(binding.dataBound, true);
+  assert.equal(binding.presentationState, 'normal');
+
+  const network = buildNetworkHealthOverviewVm({
+    dataBound: binding.dataBound,
+    presentationState: binding.presentationState,
+  });
+  assert.equal(network.presentationState, 'normal');
+  assert.equal(HEALTH_OVERVIEW_STATE_LABELS.normal, 'Data available');
+  assert.match(network.stateCopy.title, /data available|query normal/i);
+  assert.match(network.stateCopy.explanation, /query normal|data available/i);
+  assert.match(network.stateCopy.explanation, /not a DEVICE_UP, HOST_UP/i);
+  assert.match(network.stateCopy.explanation, /healthy-metrics claim/i);
+  assert.equal(/\bis (DEVICE_UP|HOST_UP)\b/i.test(network.stateCopy.explanation), false);
+  assert.equal(/\bdevices?\s+are\s+healthy\b/i.test(network.stateCopy.explanation), false);
+  assert.equal(network.rows.length, 0);
+  assert.ok(
+    network.panels.every((panel) =>
+      ['Not connected', 'Unknown', 'Source unavailable'].includes(panel.valueLabel)),
+  );
+});
+
+test('Not Licensed remains distinct from Permission Restricted', () => {
+  const licensed = buildHealthOverviewStateCopy('Network', 'not-licensed');
+  const restricted = buildHealthOverviewStateCopy('Network', 'permission-restricted');
+  assert.equal(licensed.kind, 'not-licensed');
+  assert.equal(restricted.kind, 'permission-restricted');
+  assert.equal(licensed.title, 'Not licensed');
+  assert.equal(restricted.title, 'Permission restricted');
+  assert.notEqual(licensed.title, restricted.title);
+  assert.equal(/request workspace permission/i.test(licensed.nextAction), false);
+  assert.match(restricted.nextAction, /workspace permission/i);
+});
+
+test('unbound path without provider retains Source Unavailable', () => {
+  const unbound = resolveHealthOverviewProviderBinding({});
+  assert.equal(unbound.dataBound, false);
+  assert.equal(unbound.presentationState, undefined);
+  assert.equal(buildNetworkHealthOverviewVm().presentationState, 'source-unavailable');
+  assert.equal(buildInfrastructureHealthOverviewVm().presentationState, 'source-unavailable');
 });
 
 test('dataBound without explicit state remains unknown, never Normal', () => {

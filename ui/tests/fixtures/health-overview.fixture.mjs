@@ -68,6 +68,7 @@ export const ALL_PRESENTATION_STATES = Object.freeze([
   'query-limited',
   'error',
   'monitoring-degraded',
+  'normal',
   'source-unavailable',
   'unknown',
 ]);

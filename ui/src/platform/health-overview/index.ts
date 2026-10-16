@@ -5,6 +5,8 @@ export type {
   HealthOverviewColumn,
   HealthOverviewPanelDescriptor,
   HealthOverviewPresentationState,
+  HealthOverviewProviderBinding,
+  HealthOverviewProviderBindingInput,
   HealthOverviewRowPlaceholder,
   HealthOverviewStateCopy,
   HealthOverviewVm,
@@ -17,6 +19,7 @@ export type {
 export {
   ENTITY_EVIDENCE_STATUS_LABELS,
   isDeviceDownFabrication,
+  resolveHealthOverviewProviderBinding,
   screenDataStateToHealthPresentation,
 } from './types.js';
 

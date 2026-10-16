@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import {
   buildInfrastructureHealthOverviewVm,
-  screenDataStateToHealthPresentation,
+  resolveHealthOverviewProviderBinding,
   type HealthOverviewPresentationState,
 } from '../../platform/health-overview';
 import type { ScreenDataState } from '../../platform/screen-state';
@@ -25,27 +25,26 @@ export const InfrastructureHealthOverview: React.FC<InfrastructureHealthOverview
   presentationState,
   dataBound = false,
 }) => {
-  const model = useMemo(
-    () =>
-      buildInfrastructureHealthOverviewVm({
-        activeTab: activeTab ?? workspace.tabs[0] ?? 'Overview',
-        capabilityStatus: workspace.backendCapability,
-        dataBound,
-        presentationState:
-          presentationState
-          ?? (dataBound && dataState
-            ? screenDataStateToHealthPresentation(dataState)
-            : undefined),
-      }),
-    [
-      activeTab,
+  const model = useMemo(() => {
+    const binding = resolveHealthOverviewProviderBinding({
       dataBound,
       dataState,
       presentationState,
-      workspace.backendCapability,
-      workspace.tabs,
-    ],
-  );
+    });
+    return buildInfrastructureHealthOverviewVm({
+      activeTab: activeTab ?? workspace.tabs[0] ?? 'Overview',
+      capabilityStatus: workspace.backendCapability,
+      dataBound: binding.dataBound,
+      presentationState: binding.presentationState,
+    });
+  }, [
+    activeTab,
+    dataBound,
+    dataState,
+    presentationState,
+    workspace.backendCapability,
+    workspace.tabs,
+  ]);
 
   return <HealthOverviewLayout model={model} />;
 };
