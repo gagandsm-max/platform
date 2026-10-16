@@ -205,6 +205,10 @@ run_analytics_stress() {
 }
 
 ensure_compose() {
+  if ! bash deploy/docker/kafka/deployment-preflight.sh check; then
+    fail_hard "Kafka deployment preflight rejected startup; explicit provisioning or verified migration required"
+    return 1
+  fi
   log "Ensuring Compose runtime for probe soak..."
   local live_port file_port env_name core_up=0
   live_port="$(docker port platform-core 8443 2>/dev/null | head -n1 | awk -F: '{print $NF}' | tr -d '\r' || true)"

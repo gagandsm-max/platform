@@ -11,6 +11,9 @@ cd "${ROOT_DIR}"
 
 source .env 2>/dev/null || true
 
+# Before build/up/down or any broker lifecycle action; no implicit provisioning.
+bash deploy/docker/kafka/deployment-preflight.sh check || exit 1
+
 PASS_COUNT=0
 FAIL_COUNT=0
 TOTAL_TESTS=20
@@ -102,7 +105,7 @@ fi
 TEST_NUM=6
 TEST_DESC="Platform Dev Stack Startup & Health Convergence"
 echo "Starting dev stack..."
-docker compose up -d
+bash deploy/docker/kafka/deployment-preflight.sh up || exit 1
 echo "Waiting for services to become healthy (up to 60s)..."
 START_TIMEOUT=60
 ELAPSED=0
@@ -466,8 +469,8 @@ snapshot_foreign_container_states() {
 }
 FOREIGN_BEFORE=$(snapshot_foreign_container_states)
 # Restart stack
-docker compose down > /dev/null 2>&1
-docker compose up -d > /dev/null 2>&1
+bash deploy/docker/kafka/deployment-preflight.sh down > /dev/null 2>&1 || exit 1
+bash deploy/docker/kafka/deployment-preflight.sh up > /dev/null 2>&1 || exit 1
 
 # Wait for healthy
 for i in $(seq 1 45); do
