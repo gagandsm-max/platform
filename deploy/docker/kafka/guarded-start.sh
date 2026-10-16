@@ -91,7 +91,8 @@ live_logs_find() {
 check_files() {
     [[ -d $LOGS && ! -L $LOGS ]] || fail KAFKA_STORAGE_UNFORMATTED 'Persistent logs directory is missing'
     local invalid
-    invalid=$(timeout 60 live_logs_find -type l -print -quit) || fail KAFKA_STORAGE_INACCESSIBLE 'Cannot inspect persistent files within startup bound'
+    # timeout(1) execs a binary; wrap the bash function rather than naming it directly.
+    invalid=$(timeout 60 bash -c 'source "$1"; live_logs_find -type l -print -quit' bash "${BASH_SOURCE[0]}") || fail KAFKA_STORAGE_INACCESSIBLE 'Cannot inspect persistent files within startup bound'
     [[ -z $invalid ]] || fail KAFKA_STORAGE_INACCESSIBLE 'Persistent storage contains links or inaccessible files'
     # Single bounded walk (no rescans/retries). Vanished mutable entries are skipped;
     # EACCES, present-but-unreadable paths and symlinks still fail closed.
