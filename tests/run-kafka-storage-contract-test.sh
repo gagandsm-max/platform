@@ -276,6 +276,30 @@ mutate 'rm /var/lib/kafka/data/.platform-storage.pending'
 mutate 'chmod 000 /var/lib/kafka/data/logs/meta.properties'
 reject KAFKA_STORAGE_INACCESSIBLE /platform-kafka/guarded-start.sh
 mutate 'chmod 600 /var/lib/kafka/data/logs/meta.properties'
+# Symlink inside log tree remains fail-closed (not treated as a vanished path).
+mutate 'ln -s /var/lib/kafka/data/logs/meta.properties /var/lib/kafka/data/logs/issue223-symlink'
+reject KAFKA_STORAGE_INACCESSIBLE /platform-kafka/guarded-start.sh --inspect
+mutate 'rm /var/lib/kafka/data/logs/issue223-symlink'
+# Deterministic vanish race: find listed the path, then retention deleted it before access.
+# Classifier and the bounded check_files walk must not raise KAFKA_STORAGE_INACCESSIBLE.
+run -c '
+  set -euo pipefail
+  source /platform-kafka/guarded-start.sh
+  vanish=/var/lib/kafka/data/logs/issue223-vanish-race.dat
+  touch "$vanish"
+  list=/tmp/issue223-stale-paths
+  find "$LOGS" -print0 > "$list"
+  tr "\0" "\n" < "$list" | grep -Fq "issue223-vanish-race.dat"
+  rm -f "$vanish"
+  timeout 60 bash -o pipefail -c "
+    source \"\$1\"
+    while IFS= read -r -d \"\" p; do
+      log_path_accessible \"\$p\" \"\$2\" || exit 1
+    done < \"\$3\"
+  " bash /platform-kafka/guarded-start.sh 1 "$list"
+  /platform-kafka/guarded-start.sh --inspect
+'
+echo 'PASS vanished mutable log path does not fail inspection; symlink still rejected'
 
 gate up
 ready
@@ -296,6 +320,26 @@ grep -q 'CompleteCommit' "$TASK/transaction-before"
 cli kafka-topics.sh --describe --topic issue223-records > "$TASK/topic-before"
 "${DC[@]}" exec -T kafka sha256sum /var/lib/kafka/data/logs/meta.properties /var/lib/kafka/data/logs/bootstrap.checkpoint > "$TASK/identity-before"
 "${DC[@]}" exec -T kafka bash -c 'test -s /var/lib/kafka/data/logs/meta.properties; test -d /var/lib/kafka/data/logs/__cluster_metadata-0; test -d /var/lib/kafka/data/logs/issue223-records-0; compgen -G "/var/lib/kafka/data/logs/__consumer_offsets-*"; compgen -G "/var/lib/kafka/data/logs/__transaction_state-*"; test ! -e /tmp/kafka-logs; test ! -e /tmp/kraft-combined-logs' > "$TASK/physical-paths"
+# Live valid broker: stale find list with a retention-deleted mutable path must not
+# block host inspect (the same path used before down/restart/up).
+run -c '
+  set -euo pipefail
+  source /platform-kafka/guarded-start.sh
+  vanish=/var/lib/kafka/data/logs/issue223-live-vanish.dat
+  touch "$vanish"
+  list=/tmp/issue223-live-stale-paths
+  find "$LOGS" -print0 > "$list"
+  tr "\0" "\n" < "$list" | grep -Fq "issue223-live-vanish.dat"
+  rm -f "$vanish"
+  timeout 60 bash -o pipefail -c "
+    source \"\$1\"
+    while IFS= read -r -d \"\" p; do
+      log_path_accessible \"\$p\" \"\$2\" || exit 1
+    done < \"\$3\"
+  " bash /platform-kafka/guarded-start.sh 1 "$list"
+'
+gate check
+echo 'PASS live-broker host inspect tolerates vanished mutable log path'
 gate restart
 ready
 "${DC[@]}" exec -T kafka sha256sum /var/lib/kafka/data/logs/meta.properties /var/lib/kafka/data/logs/bootstrap.checkpoint > "$TASK/identity-restart"

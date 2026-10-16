@@ -45,12 +45,31 @@ check_mount() {
     [[ -r $ROOT && -x $ROOT ]] && { [[ ${READ_ONLY:-0} == 1 ]] || [[ -w $ROOT ]]; } || fail KAFKA_STORAGE_INACCESSIBLE 'Kafka volume is inaccessible to broker user'
 }
 
+# Distinguish retention/compaction ENOENT from true inaccessibility.
+# A path listed by find may vanish before the access check; that is not corrupt storage.
+# Existing paths that fail -r/-w/-x, and symlinks (-L), remain fail-closed.
+log_path_accessible() {
+    local p=$1 read_only=${2:-0}
+    if [[ -r $p ]] && { [[ $read_only == 1 ]] || [[ -w $p ]]; } && { [[ ! -d $p ]] || [[ -x $p ]]; }; then
+        return 0
+    fi
+    [[ -e $p || -L $p ]] || return 0
+    return 1
+}
+
 check_files() {
     [[ -d $LOGS && ! -L $LOGS ]] || fail KAFKA_STORAGE_UNFORMATTED 'Persistent logs directory is missing'
     local invalid
     invalid=$(timeout 60 find "$LOGS" -type l -print -quit) || fail KAFKA_STORAGE_INACCESSIBLE 'Cannot inspect persistent files within startup bound'
     [[ -z $invalid ]] || fail KAFKA_STORAGE_INACCESSIBLE 'Persistent storage contains links or inaccessible files'
-    timeout 60 bash -o pipefail -c 'find "$1" -print0 | while IFS= read -r -d "" p; do [[ -r $p ]] && { [[ $2 == 1 ]] || [[ -w $p ]]; } && { [[ ! -d $p ]] || [[ -x $p ]]; } || exit 1; done' bash "$LOGS" "${READ_ONLY:-0}" || fail KAFKA_STORAGE_INACCESSIBLE 'Persistent files are inaccessible to broker user'
+    # Single bounded walk (no rescans/retries). Vanished mutable entries are skipped;
+    # EACCES, present-but-unreadable paths and symlinks still fail closed.
+    timeout 60 bash -o pipefail -c '
+        source "$1"
+        find "$LOGS" -print0 | while IFS= read -r -d "" p; do
+            log_path_accessible "$p" "$2" || exit 1
+        done
+    ' bash "${BASH_SOURCE[0]}" "${READ_ONLY:-0}" || fail KAFKA_STORAGE_INACCESSIBLE 'Persistent files are inaccessible to broker user'
     [[ -f $LOGS/meta.properties && -s $LOGS/bootstrap.checkpoint ]] || fail KAFKA_METADATA_MISSING 'Kafka format metadata or bootstrap checkpoint is missing'
     local key wanted actual
     for key in cluster.id node.id version directory.id; do
