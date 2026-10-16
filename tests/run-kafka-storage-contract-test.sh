@@ -451,6 +451,43 @@ cmp "$TASK/offsets-before" "$TASK/offsets-after"
 transaction > "$TASK/transaction-after"
 cmp "$TASK/transaction-before" "$TASK/transaction-after"
 echo 'PASS recreation: topic ID, committed records, consumer offsets and transaction producer ID/epoch/state'
+# Task-owned SIGKILL of the live disposable broker (process crash), then reopen.
+# Distinct from gate restart / down-up above. Not host power loss, not fsync proof.
+# Foreign-volume retention is already proven by the later FOREIGN cleanup fixture.
+[[ $(docker inspect -f '{{index .Config.Labels "issue223.owner"}}|{{index .Config.Labels "com.docker.compose.project"}}|{{.State.Running}}' "$PROJECT-kafka") == "$PROJECT|$PROJECT|true" ]]
+"${DC[@]}" exec -T kafka grep -E '^(cluster\.id|node\.id)=' /var/lib/kafka/data/logs/meta.properties \
+    | LC_ALL=C sort > "$TASK/meta-identity-before-sigkill"
+grep -Eq '^cluster\.id=' "$TASK/meta-identity-before-sigkill"
+grep -Eq '^node\.id=' "$TASK/meta-identity-before-sigkill"
+docker kill --signal=SIGKILL "$PROJECT-kafka" >/dev/null
+for ((i=0; i<30; i++)); do
+    [[ $(docker inspect -f '{{.State.Running}}' "$PROJECT-kafka" 2>/dev/null) != true ]] && break
+    sleep 1
+done
+[[ $(docker inspect -f '{{.State.Running}}' "$PROJECT-kafka") != true ]]
+owned_volume "$VOLUME"
+docker volume inspect "$VOLUME" >/dev/null
+gate up
+ready
+"${DC[@]}" exec -T kafka sha256sum /var/lib/kafka/data/logs/meta.properties /var/lib/kafka/data/logs/bootstrap.checkpoint > "$TASK/identity-sigkill"
+cmp "$TASK/identity-before" "$TASK/identity-sigkill"
+"${DC[@]}" exec -T kafka grep -E '^(cluster\.id|node\.id)=' /var/lib/kafka/data/logs/meta.properties \
+    | LC_ALL=C sort > "$TASK/meta-identity-after-sigkill"
+cmp "$TASK/meta-identity-before-sigkill" "$TASK/meta-identity-after-sigkill"
+read_records issue223-records 2 "$TASK/records-sigkill"
+cmp "$TASK/consumed-before" "$TASK/records-sigkill"
+read_records issue223-transactions 8 "$TASK/transactions-sigkill"
+cmp "$TASK/transactions-before" "$TASK/transactions-sigkill"
+offsets > "$TASK/offsets-sigkill"
+cmp "$TASK/offsets-before" "$TASK/offsets-sigkill"
+grep -q '^issue223-records 0 2 2$' "$TASK/offsets-sigkill"
+transaction > "$TASK/transaction-sigkill"
+cmp "$TASK/transaction-before" "$TASK/transaction-sigkill"
+grep -q 'CompleteCommit' "$TASK/transaction-sigkill"
+"${DC[@]}" logs --no-color > "$TASK/broker-sigkill.log"
+! grep -q 'Formatting' "$TASK/broker-sigkill.log"
+cat "$TASK/broker-sigkill.log" >> "$TASK/broker.log"
+echo 'PASS SIGKILL live broker: no format; identity/records/offsets/txn preserved'
 "${DC[@]}" stop kafka
 reject KAFKA_PROVISION_NONEMPTY /platform-kafka/provision-fresh.sh --new-empty-volume
 mutate 'mv /var/lib/kafka/data/logs/__cluster_metadata-0 /var/lib/kafka/data/metadata.saved'
