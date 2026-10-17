@@ -131,6 +131,9 @@ class TelemetryKafkaTransactionVisibilityTest {
             String retained = mapper.writeValueAsString(observation("retained"));
             template.executeInTransaction(ops -> { sendSync(ops, TOPIC, "same-key", retained); return null; });
             awaitCondition(() -> !listener.isRunning(), 30, "late exception must stop registered listener");
+            awaitCondition(() -> metrics.getConsumerTerminalStop() != null
+                    && metrics.getConsumerTerminalStop().stopCompleted(), 30, "observe unknown-failure stop completion");
+            assertEquals("INELIGIBLE_STOP", metrics.getConsumerTerminalStop().status());
             assertEquals(before, committedOffset(bootstrap, group), "late HTTP error cannot commit Kafka offset");
             assertEquals(1, metrics.getClickHouseInserts(), "only the initial genuine success counts");
             assertEquals(1, metrics.getClickHouseFailures());
@@ -284,6 +287,12 @@ class TelemetryKafkaTransactionVisibilityTest {
             releaseFailure.countDown();
             awaitCondition(() -> !registeredListener().isRunning()
                     && !registeredListener().isInExpectedState(), 30, "exhaustion must stop abnormally");
+            awaitCondition(() -> metrics.getConsumerTerminalStop() != null
+                    && metrics.getConsumerTerminalStop().stopCompleted(), 30, "observe dependency stop completion");
+            assertEquals("RECOVERABLE_DEPENDENCY_STOP", metrics.getConsumerTerminalStop().status());
+            assertEquals(TelemetryConsumerFailure.DEPENDENCY, metrics.getConsumerTerminalStop().failure().reason());
+            assertEquals("RECOVERABLE_DEPENDENCY_STOP", context.getBean(TelemetryConsumerHealthIndicator.class)
+                    .health().getDetails().get("terminalStopStatus"));
             assertTrue(metrics.isConsumerDegraded());
             assertEquals(2, redeliveryInsertAttempts.get(), "bounded local attempts, no Kafka retry loop");
             assertEquals(offsetBeforeRedelivery, committedOffset(bootstrap, groupId));
@@ -295,6 +304,7 @@ class TelemetryKafkaTransactionVisibilityTest {
                     + " offset=" + committedOffset(bootstrap, groupId));
             context.close();
             context = null;
+            assertEquals("INELIGIBLE_STOP", metrics.getConsumerTerminalStop().status(), "shutdown vetoes recovery candidate");
             assertEquals(offsetBeforeRedelivery, committedOffset(bootstrap, groupId),
                     "shutdown must not commit the failed record");
             System.out.println("PR227_OFFSET shutdown=" + committedOffset(bootstrap, groupId));
@@ -333,6 +343,10 @@ class TelemetryKafkaTransactionVisibilityTest {
             awaitCondition(() -> metrics.getConsumerPoisonEvents() == 1
                     && !registeredListener().isRunning() && !registeredListener().isInExpectedState(),
                     30, "poison must stop the annotated listener abnormally");
+            awaitCondition(() -> metrics.getConsumerTerminalStop() != null
+                    && metrics.getConsumerTerminalStop().stopCompleted(), 30, "observe poison stop completion");
+            assertEquals("INELIGIBLE_STOP", metrics.getConsumerTerminalStop().status());
+            assertEquals(TelemetryConsumerFailure.POISON, metrics.getConsumerTerminalStop().failure().reason());
             assertTrue(metrics.isConsumerDegraded());
             assertEquals(com.platform.core.logging.CoreSupportabilityEventCodes.TELEMETRY_POISON_EVENT,
                     metrics.getConsumerDegradedReason());
@@ -363,6 +377,81 @@ class TelemetryKafkaTransactionVisibilityTest {
             if (context != null) { context.close(); context = null; }
             // Ensure producer resources are released even if assertions fail before @AfterEach.
             destroyProducerFactory();
+        }
+    }
+
+    @Test
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void incompleteStopThenOperatorRestartCannotRetainOldTerminalAuthority() throws Exception {
+        assertRestartGenerationIsolation(false);
+    }
+
+    @Test
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void queuedOldStopCannotStopNewRegisteredListenerGeneration() throws Exception {
+        assertRestartGenerationIsolation(true);
+    }
+
+    private void assertRestartGenerationIsolation(boolean exerciseQueuedAction) throws Exception {
+        embeddedKafka.destroy();
+        var broker = new EmbeddedKafkaKraftBroker(1, 2, TOPIC);
+        broker.brokerProperty("transaction.state.log.replication.factor", "1");
+        broker.brokerProperty("transaction.state.log.min.isr", "1");
+        broker.afterPropertiesSet();
+        embeddedKafka = broker;
+        String bootstrap = broker.getBrokersAsString();
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var metrics = new IngestionMetrics();
+        var group = "k2a-generation-" + UUID.randomUUID();
+        context = createListenerContext(bootstrap, group, mock(ClickHouseClient.class), mapper, metrics);
+        var container = (org.springframework.kafka.listener.ConcurrentMessageListenerContainer<?, ?>) registeredListener();
+        container.setConcurrency(2);
+        var queuedStops = new java.util.concurrent.LinkedBlockingQueue<Runnable>();
+        container.setCommonErrorHandler(IngestionKafkaConfiguration.terminalStoppingErrorHandler(metrics, queuedStops::add));
+        var originalPublisher = container.getApplicationEventPublisher();
+        var dropOneCompletion = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var observedCompletions = new AtomicInteger();
+        container.setApplicationEventPublisher(event -> {
+            if (event instanceof org.springframework.kafka.event.ConsumerStoppedEvent) {
+                observedCompletions.incrementAndGet();
+                // Inject loss at the real child publication boundary, not a fabricated child identity.
+                if (dropOneCompletion.compareAndSet(true, false)) return;
+            }
+            originalPublisher.publishEvent(event);
+        });
+        container.start();
+        awaitCondition(() -> container.getContainers().size() == 2
+                && container.getAssignedPartitions() != null && container.getAssignedPartitions().size() == 2,
+                30, "first registered generation owns both partitions");
+        var oldChildren = List.copyOf(container.getContainers());
+        createTransactionalTemplate(bootstrap).executeInTransaction(ops -> {
+            sendPartition(ops, 0, "poison", "{invalid");
+            return true;
+        });
+        var oldStop = queuedStops.poll(30, TimeUnit.SECONDS);
+        assertNotNull(oldStop, "hold an actual typed handler stop before executor delivery");
+        long oldEpoch = metrics.getConsumerTerminalStop().failure().stopEpoch();
+        var retainedOffset = committedOffset(bootstrap, group);
+        container.stop(); // Explicit operator stop; both consumers close, one completion is unobserved.
+        awaitCondition(() -> observedCompletions.get() == 2, 30, "actual old consumers closed");
+        assertFalse(metrics.getConsumerTerminalStop().stopCompleted(), "missing completion is not proof");
+        assertTrue(metrics.isConsumerDegraded(), "operator stop must retain blocked poison evidence");
+        container.start(); // The real parent constructs fresh child-container objects.
+        assertTrue(container.getContainers().stream().noneMatch(oldChildren::contains));
+        var newStop = queuedStops.poll(30, TimeUnit.SECONDS);
+        assertNotNull(newStop, "new generation replays retained poison through the registered listener");
+        assertTrue(metrics.isConsumerDegraded(), "restart alone is not persistence plus ACK");
+        assertEquals(retainedOffset, committedOffset(bootstrap, group));
+        if (exerciseQueuedAction) {
+            oldStop.run();
+            assertTrue(container.isRunning(), "queued previous-generation stop must not stop the new generation");
+        } else {
+            var current = metrics.getConsumerTerminalStop();
+            assertNotNull(current);
+            assertTrue(current.failure().stopEpoch() > oldEpoch,
+                    "old incomplete terminal authority must not masquerade as the new generation");
+            assertFalse(current.stopCompleted());
+            assertEquals(TelemetryConsumerFailure.POISON, current.failure().reason());
         }
     }
 
@@ -425,6 +514,9 @@ class TelemetryKafkaTransactionVisibilityTest {
             releaseInsertion.countDown();
             assertTrue(insertionReturned.await(30, TimeUnit.SECONDS));
             assertTrue(childrenStopped.await(30, TimeUnit.SECONDS), "observe both callbacks finish before health assertion");
+            awaitCondition(() -> metrics.getConsumerTerminalStop() != null
+                    && metrics.getConsumerTerminalStop().stopCompleted(), 30, "observe all sibling completions");
+            assertEquals("INELIGIBLE_STOP", metrics.getConsumerTerminalStop().status());
             assertTrue(metrics.isConsumerDegraded(), "late sibling success must retain poison degradation");
             assertEquals(com.platform.core.logging.CoreSupportabilityEventCodes.TELEMETRY_POISON_EVENT,
                     metrics.getConsumerDegradedReason());
@@ -483,6 +575,9 @@ class TelemetryKafkaTransactionVisibilityTest {
         });
         awaitCondition(() -> commitFailures.get() > 0 && !container.isRunning() && !container.isInExpectedState(),
                 30, "commit failure stops registered listener");
+        awaitCondition(() -> metrics.getConsumerTerminalStop() != null
+                && metrics.getConsumerTerminalStop().stopCompleted(), 30, "observe commit-failure stop completion");
+        assertEquals("INELIGIBLE_STOP", metrics.getConsumerTerminalStop().status());
         assertEquals(1, inserts.get(), "ACK failure cannot trigger another ClickHouse insertion");
         assertEquals(before, committedOffset(bootstrap, group), "failed commit cannot advance broker offset");
         assertEquals(TelemetryConsumerFailure.MEMBERSHIP_LOST.reasonCode, metrics.getConsumerDegradedReason());

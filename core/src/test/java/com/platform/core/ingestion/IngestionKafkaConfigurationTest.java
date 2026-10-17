@@ -108,7 +108,7 @@ class IngestionKafkaConfigurationTest {
                 configuration.telemetryKafkaConsumerFactory(properties);
 
         ConcurrentKafkaListenerContainerFactory<String, String> listenerFactory =
-                configuration.telemetryKafkaListenerContainerFactory(consumerFactory);
+                configuration.telemetryKafkaListenerContainerFactory(consumerFactory, new IngestionMetrics(), event -> { });
 
         assertSame(consumerFactory, listenerFactory.getConsumerFactory());
         assertEquals(
@@ -236,6 +236,7 @@ class IngestionKafkaConfigurationTest {
             env.setProperty("platform.ingestion.kafka.topic", KafkaTelemetryProducer.TOPIC_TELEMETRY_NUMERIC);
             context.setEnvironment(env);
             context.registerBean(KafkaProperties.class, KafkaProperties::new);
+            context.registerBean(IngestionMetrics.class, IngestionMetrics::new);
             context.register(IngestionKafkaConfiguration.class);
             context.refresh();
 
@@ -252,6 +253,7 @@ class IngestionKafkaConfigurationTest {
             env.setProperty("platform.ingestion.kafka.topic", configuredTopic);
             context.setEnvironment(env);
             context.registerBean(KafkaProperties.class, KafkaProperties::new);
+            context.registerBean(IngestionMetrics.class, IngestionMetrics::new);
             context.register(IngestionKafkaConfiguration.class);
 
             BeanCreationException ex = assertThrows(BeanCreationException.class, context::refresh);
@@ -269,6 +271,7 @@ class IngestionKafkaConfigurationTest {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
             context.registerBean(KafkaProperties.class, KafkaProperties::new);
             context.register(UnsafeTelemetryConsumerFactoryOverride.class);
+            context.registerBean(IngestionMetrics.class, IngestionMetrics::new);
             context.register(IngestionKafkaConfiguration.class);
 
             BeanCreationException ex = assertThrows(BeanCreationException.class, context::refresh);
@@ -288,6 +291,7 @@ class IngestionKafkaConfigurationTest {
             context.setAllowBeanDefinitionOverriding(false);
             context.registerBean(KafkaProperties.class, KafkaProperties::new);
             context.register(HostileListenerFactoryOverride.class);
+            context.registerBean(IngestionMetrics.class, IngestionMetrics::new);
             context.register(IngestionKafkaConfiguration.class);
 
             assertThrows(BeanDefinitionStoreException.class, context::refresh);
@@ -298,6 +302,7 @@ class IngestionKafkaConfigurationTest {
     void safeTelemetryConsumerBeansWireTogether() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
             context.registerBean(KafkaProperties.class, KafkaProperties::new);
+            context.registerBean(IngestionMetrics.class, IngestionMetrics::new);
             context.register(IngestionKafkaConfiguration.class);
             context.refresh();
 
@@ -333,6 +338,7 @@ class IngestionKafkaConfigurationTest {
             env.setProperty("platform.telemetry.consumer.backoff-ms", "9223372036854775807");
             context.setEnvironment(env);
             context.registerBean(KafkaProperties.class, KafkaProperties::new);
+            context.registerBean(IngestionMetrics.class, IngestionMetrics::new);
             context.register(IngestionKafkaConfiguration.class);
             var failure = assertThrows(BeanCreationException.class, context::refresh);
             assertTrue(rootCause(failure).getMessage().contains("ERR_KAFKA_POLL_BUDGET"));
@@ -347,7 +353,7 @@ class IngestionKafkaConfigurationTest {
         var consumerFactory = config.telemetryKafkaConsumerFactory(properties);
         assertEquals(4, consumerFactory.getConfigurationProperties().get(ConsumerConfig.MAX_POLL_RECORDS_CONFIG));
         assertDoesNotThrow(() -> config.telemetryProcessingBudget(consumerFactory, 5, 200));
-        var container = config.telemetryKafkaListenerContainerFactory(consumerFactory).getContainerProperties();
+        var container = config.telemetryKafkaListenerContainerFactory(consumerFactory, new IngestionMetrics(), event -> { }).getContainerProperties();
         assertTrue(container.isSyncCommits());
         assertEquals(java.time.Duration.ofMillis(TelemetryProcessingBudget.COMMIT_TIMEOUT_MS), container.getSyncCommitTimeout());
         assertEquals(0, container.getCommitRetries());

@@ -37,13 +37,26 @@ public class TelemetryConsumerHealthIndicator implements HealthIndicator {
             if (reasonCode == null || reasonCode.isBlank()) {
                 reasonCode = TelemetryConsumerFailure.CONSUMER_FAILED.reasonCode;
             }
-            return Health.down()
+            var health = Health.down()
                     .withDetail("status", "DEGRADED")
                     .withDetail("reasonCode", reasonCode)
                     .withDetail("poisonEvents", metrics.getConsumerPoisonEvents())
                     .withDetail("clickHouseFailures", metrics.getClickHouseFailures())
-                    .withDetail("listenerFailed", listenerFailed)
-                    .build();
+                    .withDetail("listenerFailed", listenerFailed);
+            var stop = metrics.getConsumerTerminalStop();
+            if (stop != null) {
+                var failure = stop.failure();
+                health.withDetail("terminalStopStatus", stop.status())
+                        .withDetail("terminalStopCompleted", stop.stopCompleted())
+                        .withDetail("terminalStopEpoch", failure.stopEpoch())
+                        .withDetail("terminalListener", failure.listener())
+                        .withDetail("terminalChild", failure.child())
+                        .withDetail("terminalTopic", failure.topic())
+                        .withDetail("terminalPartition", failure.partition())
+                        .withDetail("terminalOffset", failure.offset())
+                        .withDetail("terminalReasonCode", failure.reason().reasonCode);
+            }
+            return health.build();
         }
 
         if (listener != null && !listener.isRunning()) {

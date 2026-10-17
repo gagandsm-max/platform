@@ -104,11 +104,13 @@ public class ClickHouseTelemetryConsumer {
             );
             metrics.recordConsumerFailure(record, TelemetryConsumerFailure.POISON);
             metrics.recordConsumerPoisonEvent(record.topic(), record.offset(), failureClass);
-            throw new IngestionException(
+            var failure = new IngestionException(
                     org.springframework.http.HttpStatus.BAD_REQUEST,
                     ERR_KAFKA_POISON_EVENT,
                     "Malformed Kafka telemetry message at offset " + record.offset()
             );
+            metrics.recordTerminalFailure(record, TelemetryConsumerFailure.POISON, failure);
+            throw failure;
         }
 
         Exception lastException = null;
@@ -206,7 +208,9 @@ public class ClickHouseTelemetryConsumer {
                 log.error("Telemetry consumer stopped topic={} partition={} offset={} reasonCode={} retryableInsert={} failureClass={}",
                         record.topic(), record.partition(), record.offset(), reason.reasonCode,
                         reason.retryableInsert, cause == null ? "unknown" : cause.getClass().getSimpleName(), safeCause));
-        return new RuntimeException(reason.reasonCode + ": " + message + " at offset " + record.offset(), safeCause);
+        var failure = new RuntimeException(reason.reasonCode + ": " + message + " at offset " + record.offset(), safeCause);
+        metrics.recordTerminalFailure(record, reason, failure);
+        return failure;
     }
 
     // Saturate before shifting/multiplying; Java masks large shift distances and signed

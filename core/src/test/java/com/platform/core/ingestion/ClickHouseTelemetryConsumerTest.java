@@ -99,7 +99,7 @@ class ClickHouseTelemetryConsumerTest {
         ConsumerFactory<String, String> consumerFactory =
                 configuration.telemetryKafkaConsumerFactory(new KafkaProperties());
         ConcurrentKafkaListenerContainerFactory<String, String> listenerFactory =
-                configuration.telemetryKafkaListenerContainerFactory(consumerFactory);
+                configuration.telemetryKafkaListenerContainerFactory(consumerFactory, metrics, event -> { });
 
         assertSame(consumerFactory, listenerFactory.getConsumerFactory());
         assertEquals(

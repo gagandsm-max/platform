@@ -100,13 +100,22 @@ public class IngestionKafkaConfiguration {
      */
     @Bean(name = TELEMETRY_KAFKA_LISTENER_CONTAINER_FACTORY)
     public ConcurrentKafkaListenerContainerFactory<String, String> telemetryKafkaListenerContainerFactory(
-            @Qualifier(TELEMETRY_KAFKA_CONSUMER_FACTORY) ConsumerFactory<String, String> consumerFactory
+            @Qualifier(TELEMETRY_KAFKA_CONSUMER_FACTORY) ConsumerFactory<String, String> consumerFactory,
+            IngestionMetrics metrics, org.springframework.context.ApplicationEventPublisher publisher
     ) {
         // Re-validate at listener wiring so a replaced telemetryKafkaConsumerFactory bean cannot
         // silently expose aborted transactional records or auto-commit offsets.
         enforceTransactionalVisibilityInvariants(consumerFactory);
 
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>() {
+            @Override
+            protected org.springframework.kafka.listener.ConcurrentMessageListenerContainer<String, String> createContainerInstance(
+                    org.springframework.kafka.config.KafkaListenerEndpoint endpoint) {
+                // Delegate topic/partition/pattern selection to the resolved Spring factory.
+                var properties = super.createContainerInstance(endpoint).getContainerProperties();
+                return new ProvenanceListenerContainer(getConsumerFactory(), properties);
+            }
+        };
         factory.setConsumerFactory(consumerFactory);
         // Manual immediate acknowledgement ensures offsets ONLY commit after ClickHouse persistence succeeds
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
@@ -123,9 +132,93 @@ public class IngestionKafkaConfiguration {
         // successful persistence. After fixing the cause, an operator explicitly restarts
         // the Core service (or this registry listener); the same group replays from its
         // unchanged committed offset. No automatic listener restart is configured here.
-        CommonContainerStoppingErrorHandler errorHandler = new CommonContainerStoppingErrorHandler();
+        CommonContainerStoppingErrorHandler errorHandler = terminalStoppingErrorHandler(metrics,
+                new org.springframework.core.task.SimpleAsyncTaskExecutor("containerStop-"));
         factory.setCommonErrorHandler(errorHandler);
+        factory.setContainerCustomizer(container -> {
+            if ("telemetryNumericListener".equals(container.getListenerId())) {
+                var provenance = metrics.trackTerminalStops(container);
+                ((ProvenanceListenerContainer) container).provenance = provenance;
+                // Children inherit this publisher in 3.2.4. Correlate on the publishing
+                // consumer thread even when the application's multicaster is asynchronous.
+                container.setApplicationEventPublisher(event -> {
+                    provenance.onEvent(event);
+                    publisher.publishEvent(event);
+                });
+            }
+        });
         return factory;
+    }
+
+    /** The actual parent's lifecycle lock serializes start boundaries and queued stop delivery. */
+    static final class ProvenanceListenerContainer
+            extends org.springframework.kafka.listener.ConcurrentMessageListenerContainer<String, String> {
+        private IngestionMetrics.TerminalStopProvenance provenance;
+
+        ProvenanceListenerContainer(ConsumerFactory<? super String, ? super String> factory, ContainerProperties properties) {
+            super(factory, properties);
+        }
+
+        @Override
+        protected void doStart() {
+            // AbstractMessageListenerContainer.start() invokes this once under lifecycleLock.
+            // This is an actual start boundary, never a child-side isRunning() heuristic.
+            if (provenance != null) provenance.beginGeneration();
+            try {
+                super.doStart();
+            } finally {
+                // Spring starts each child BEFORE adding it to this collection. Validate
+                // provisional events only after the parent has constructed its children.
+                if (provenance != null) provenance.establishChildren(getContainers());
+            }
+        }
+
+        @Override
+        protected void doStop(Runnable callback, boolean normal) {
+            lifecycleLock.lock();
+            try {
+                if (provenance != null) provenance.parentStopping(normal);
+                super.doStop(callback, normal);
+            } finally {
+                lifecycleLock.unlock();
+            }
+        }
+
+        void runIfCurrent(IngestionMetrics.StopRequest request, Runnable stop) {
+            lifecycleLock.lock();
+            try {
+                if (provenance != null && provenance.isCurrent(request)) stop.run();
+            } finally {
+                lifecycleLock.unlock();
+            }
+        }
+    }
+
+    static CommonContainerStoppingErrorHandler terminalStoppingErrorHandler(IngestionMetrics metrics,
+                                                                            java.util.concurrent.Executor executor) {
+        return new CommonContainerStoppingErrorHandler(stop -> {
+            var request = metrics.captureStopRequest();
+            executor.execute(() -> metrics.runStopRequest(request, stop));
+        }) {
+            @Override
+            public void handleRemaining(Exception failure,
+                                        java.util.List<org.apache.kafka.clients.consumer.ConsumerRecord<?, ?>> records,
+                                        org.apache.kafka.clients.consumer.Consumer<?, ?> consumer,
+                                        org.springframework.kafka.listener.MessageListenerContainer container) {
+                metrics.bindTerminalStop(failure, records, container);
+                super.handleRemaining(failure, records, consumer, container);
+            }
+
+            @Override
+            public void handleOtherException(Exception failure,
+                                            org.apache.kafka.clients.consumer.Consumer<?, ?> consumer,
+                                            org.springframework.kafka.listener.MessageListenerContainer container,
+                                            boolean batchListener) {
+                // Poll/auth/rebalance/commit failures have no application terminal record.
+                metrics.bindTerminalStop(failure, java.util.List.of(), container);
+                super.handleOtherException(failure, consumer, container, batchListener);
+            }
+        };
     }
 
     static ConsumerFactory<String, String> createPinnedTelemetryConsumerFactory(KafkaProperties properties) {
