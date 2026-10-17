@@ -27,6 +27,10 @@ const (
 	// record removal or final spool-directory fsync did not complete. Distinct from
 	// Core delivery blockage (e.g. ERR_BATCH_TOO_LARGE).
 	reasonSpoolCleanupFailed = "ERR_SPOOL_CLEANUP_FAILED"
+	// reasonSpoolAckUncertain is reported while a bounded pending partial-ack
+	// reconcile intent exists and watermark commitment has not yet been proved
+	// or disproved. Distinct from proven cleanup failure and from Core 413 blocks.
+	reasonSpoolAckUncertain = "ERR_SPOOL_ACK_UNCERTAIN"
 )
 
 type ErrorCode string
@@ -227,13 +231,19 @@ type Drain struct {
 	cleanupRetryAfter   time.Time
 	cleanupRetryBackoff time.Duration
 
-	// pendingPartialAckSeq retains bounded reconciliation intent when a partial
-	// AcknowledgeThrough/CompleteOutboundBatch error could not be classified
-	// because every watermark inspector failed. Fail closed immediately (retain
-	// prior delivery block); later successful inspection recovers health,
-	// including with an empty logical backlog. Zero means no pending intent.
-	pendingPartialAckSeq     uint64
-	pendingPartialAckCoreACK bool // true => Core ACK path; false => poison park
+	// pendingPartialAckSeq retains one bounded reconciliation intent when a
+	// partial AcknowledgeThrough/CompleteOutboundBatch error could not be
+	// classified because every watermark inspector failed. Fail closed
+	// immediately (retain prior delivery block when present); later successful
+	// inspection recovers health, including with an empty logical backlog.
+	// Zero means no pending intent. While set, RunOnce must not select another
+	// batch — only unresolved watermark proof is a delivery barrier; a proven
+	// watermark with cleanupFault alone must still allow later delivery.
+	// pendingPartialAckCoreACK / pendingPartialAckAuthorityPoison classify the
+	// original operation for one-shot deferred counting (never overwritten).
+	pendingPartialAckSeq             uint64
+	pendingPartialAckCoreACK         bool // true => Core ACK path; false => poison park
+	pendingPartialAckAuthorityPoison bool // poison park only; derived from isAuthorityPoisonCode
 
 	// Optional test-only seam. Nil in production. Invoked after a positive
 	// legacy sizeRejected+pending observation and before the generation-gated
@@ -244,9 +254,9 @@ type Drain struct {
 	// so barrier tests can interleave clearCleanupFault.
 	afterCleanupUnresolvedObserve func()
 	// Optional test-only seam. Nil in production. Invoked while deliveryMu is
-	// held inside transitionBlockedToCleanupFault after clearing the obsolete
-	// delivery block and before latching cleanupFault, so barrier tests can
-	// prove Snapshot never observes a transient UP window.
+	// held inside installProvenCleanupAfterPartialAck after clearing obsolete
+	// delivery block / pending intent and before latching cleanupFault, so
+	// barrier tests can prove Snapshot never observes a transient UP window.
 	duringBlockedToCleanupTransition func()
 }
 
@@ -345,6 +355,16 @@ func (d *Drain) Snapshot() DeliveryStatus {
 		st.LastSequence = d.blockedLastSeq
 		return st
 	}
+	if d.pendingPartialAckSeq != 0 {
+		// Pending watermark proof alone is truthful DEGRADED uncertainty — not a
+		// Core delivery block and not a proven cleanup failure.
+		st.State = DeliveryStateDegraded
+		st.Blocked = false
+		st.ReasonCode = reasonSpoolAckUncertain
+		st.FirstSequence = d.pendingPartialAckSeq
+		st.LastSequence = d.pendingPartialAckSeq
+		return st
+	}
 	if d.cleanupFault {
 		// Storage cleanup failure is not a Core delivery block: Blocked stays false
 		// so operators can distinguish obsolete 413 blockage from unresolved I/O.
@@ -406,18 +426,22 @@ func (d *Drain) markCleanupFault(seq uint64) {
 	d.cleanupFaultSeq = seq
 }
 
-// transitionBlockedToCleanupFault atomically clears an obsolete Core delivery
-// block and latches cleanupFault under one deliveryMu critical section so a
-// concurrent Snapshot cannot observe a transient UP window (both flags false).
-// Advances deliveryGen for legacy-size observation fencing. Does not clear
-// pending reconcile intent, does not fabricate Core ACK, and must not be called
-// while holding deliveryMu or across spool filesystem I/O.
-func (d *Drain) transitionBlockedToCleanupFault(seq uint64) {
+// installProvenCleanupAfterPartialAck atomically consumes pending reconcile
+// intent (if any), clears an obsolete Core delivery block, and latches
+// cleanupFault under one deliveryMu critical section so a concurrent Snapshot
+// cannot observe a transient UP window (pending-only DEGRADED → UP → cleanup,
+// or blocked → UP → cleanup). Advances deliveryGen for legacy-size observation
+// fencing. Does not fabricate Core ACK, performs no spool filesystem I/O, and
+// must not be called while holding deliveryMu.
+func (d *Drain) installProvenCleanupAfterPartialAck(seq uint64) {
 	if d == nil {
 		return
 	}
 	d.deliveryMu.Lock()
 	defer d.deliveryMu.Unlock()
+	d.pendingPartialAckSeq = 0
+	d.pendingPartialAckCoreACK = false
+	d.pendingPartialAckAuthorityPoison = false
 	d.deliveryBlocked = false
 	d.deliveryReason = ""
 	d.blockedSince = time.Time{}
@@ -434,6 +458,43 @@ func (d *Drain) transitionBlockedToCleanupFault(seq uint64) {
 	}
 	d.cleanupFault = true
 	d.cleanupFaultSeq = seq
+}
+
+// consumePendingPartialAckInstallCleanup consumes a matching pending intent and
+// installs proven cleanup degradation atomically. Returns the original operation
+// classification for one-shot deferred counting. consumed=false when no matching
+// intent remains (lost/cleared). No spool I/O under deliveryMu.
+func (d *Drain) consumePendingPartialAckInstallCleanup(seq uint64) (coreACK bool, authorityPoison bool, consumed bool) {
+	if d == nil {
+		return false, false, false
+	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	if d.pendingPartialAckSeq == 0 || d.pendingPartialAckSeq != seq {
+		return false, false, false
+	}
+	coreACK = d.pendingPartialAckCoreACK
+	authorityPoison = d.pendingPartialAckAuthorityPoison
+	d.pendingPartialAckSeq = 0
+	d.pendingPartialAckCoreACK = false
+	d.pendingPartialAckAuthorityPoison = false
+	d.deliveryBlocked = false
+	d.deliveryReason = ""
+	d.blockedSince = time.Time{}
+	d.blockedFirstSeq = 0
+	d.blockedLastSeq = 0
+	d.deliveryGen++
+	if d.duringBlockedToCleanupTransition != nil {
+		d.duringBlockedToCleanupTransition()
+	}
+	if !d.cleanupFault {
+		d.cleanupFaultSince = time.Now().UTC()
+		d.cleanupRetryAfter = time.Time{}
+		d.cleanupRetryBackoff = 0
+	}
+	d.cleanupFault = true
+	d.cleanupFaultSeq = seq
+	return coreACK, authorityPoison, true
 }
 
 // markObservedCleanupFault applies a Snapshot unresolved-cleanup observation only
@@ -614,9 +675,14 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 	d.refreshStats()
 	// Attempt deferred partial-ack health reconcile (when inspectors previously
 	// failed) and cleanup recovery before selecting work. Empty backlog alone
-	// does not clear an unresolved storage-cleanup fault.
+	// does not clear an unresolved storage-cleanup fault. Unresolved watermark
+	// proof is a hard barrier: do not select/upload/ack/park another batch while
+	// intent remains. Proven cleanupFault alone must still allow delivery.
 	d.tryReconcilePendingPartialAck()
 	d.tryRecoverCleanupFault()
+	if d.hasUnresolvedPendingPartialAck() {
+		return false, nil
+	}
 	batch, err := d.spool.ReadOrReserveOutboundBatch(d.cfg.MaxBatchRecords, d.cfg.MaxBatchPayloadBytes)
 	if err != nil {
 		return false, codeErr(CodeSpool, "failed reading agent spool batch", err, false)
@@ -670,7 +736,7 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 			// CompleteOutboundBatch may fail after durably advancing AckedThrough
 			// (record cleanup or outbound-window sidecar unlink/fsync). Reconcile
 			// only from authoritative durable proof; never invent a second Core ACK.
-			if d.reconcileAfterPartialSpoolCommit(accepted, true) {
+			if d.reconcileAfterPartialSpoolCommit(accepted, true, false) {
 				d.metrics.Successes.Add(1)
 				d.metrics.DurableAcks.Add(1)
 				d.metrics.LastSuccessUnix.Store(time.Now().Unix())
@@ -684,7 +750,9 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 			}
 			return false, codeErr(CodeSpool, "failed applying durable agent ACK to spool", aerr, false)
 		}
-		d.clearPendingPartialAckReconcile()
+		// Full CompleteOutboundBatch success proves commitment for accepted; clear
+		// only a matching pending intent (never erase a different older intent).
+		d.clearPendingPartialAckReconcileMatching(accepted)
 		d.metrics.Successes.Add(1)
 		d.metrics.DurableAcks.Add(1)
 		d.metrics.LastSuccessUnix.Store(time.Now().Unix())
@@ -940,9 +1008,10 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 		// DiskSpool may return after durably advancing AckedThrough when later
 		// record cleanup or final directory fsync fails. Reconcile delivery
 		// health from authoritative spool state; never invent a Core ACK.
-		if d.reconcileAfterPartialSpoolCommit(head.Sequence, false) {
+		authorityPoison := isAuthorityPoisonCode(reason)
+		if d.reconcileAfterPartialSpoolCommit(head.Sequence, false, authorityPoison) {
 			d.metrics.PoisonCount.Add(1)
-			if isAuthorityPoisonCode(reason) {
+			if authorityPoison {
 				d.metrics.AuthorityPoisonCount.Add(1)
 			}
 			d.logger.Warn("Parked terminal agent-ingress record; spool watermark durable but cleanup failed",
@@ -962,53 +1031,59 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 	return nil
 }
 
-// reconcileDeliveryAfterPartialParkAck is the poison-park entry point for
-// post-commit AcknowledgeThrough reconciliation (no Core ACK counters).
+// reconcileDeliveryAfterPartialParkAck is the generic poison-park entry point for
+// post-commit AcknowledgeThrough reconciliation (no Core ACK; no authority class).
 func (d *Drain) reconcileDeliveryAfterPartialParkAck(parkedSeq uint64) bool {
-	return d.reconcileAfterPartialSpoolCommit(parkedSeq, false)
+	return d.reconcileAfterPartialSpoolCommit(parkedSeq, false, false)
 }
 
 // reconcileAfterPartialSpoolCommit clears obsolete delivery-block health only
 // when durable spool state proves AcknowledgeThrough/CompleteOutboundBatch
 // committed seq even though a post-commit cleanup/sidecar/fsync error was
 // returned. Pre-commit failures retain the prior block. When every watermark
-// inspector fails, fail closed but retain bounded reconciliation intent so a
-// later successful inspection can recover — including with zero pending
-// records — without retaining obsolete 413 forever. After clearing the
-// obsolete Core delivery reason, an unresolved storage-cleanup fault remains
-// visible as DEGRADED (ERR_SPOOL_CLEANUP_FAILED) until orphan/sidecar cleanup
-// + directory sync succeed. Callers that own a real Core ACK must count
-// DurableAcks themselves; this helper never fabricates one.
-func (d *Drain) reconcileAfterPartialSpoolCommit(seq uint64, coreACK bool) bool {
+// inspector fails, fail closed but retain one bounded reconciliation intent
+// (including authority-poison classification) so a later successful inspection
+// can recover — including with zero pending records — without retaining
+// obsolete 413 forever and without allowing a second delivery to overwrite the
+// intent. After clearing the obsolete Core delivery reason, an unresolved
+// storage-cleanup fault remains visible as DEGRADED (ERR_SPOOL_CLEANUP_FAILED)
+// until orphan/sidecar cleanup + directory sync succeed. Callers that own a
+// real Core ACK must count DurableAcks themselves; this helper never fabricates
+// one. authorityPoison is meaningful only for poison-park paths.
+func (d *Drain) reconcileAfterPartialSpoolCommit(seq uint64, coreACK bool, authorityPoison bool) bool {
 	acked, proven := d.provenAckedThrough()
 	if !proven {
-		d.markPendingPartialAckReconcile(seq, coreACK)
+		d.markPendingPartialAckReconcile(seq, coreACK, authorityPoison)
 		return false
 	}
 	if acked < seq {
+		// Authoritative non-commit proof: clear matching intent without counting.
+		d.clearPendingPartialAckReconcileMatching(seq)
 		return false
 	}
 	// Logical pending excludes sequences at or below AckedThrough even if an
 	// orphaned record file or stale outbound-window sidecar remains.
-	d.clearPendingPartialAckReconcile()
-	d.transitionBlockedToCleanupFault(seq)
+	d.installProvenCleanupAfterPartialAck(seq)
 	d.refreshStats()
 	return true
 }
 
-func (d *Drain) markPendingPartialAckReconcile(seq uint64, coreACK bool) {
+func (d *Drain) markPendingPartialAckReconcile(seq uint64, coreACK bool, authorityPoison bool) {
 	if d == nil || seq == 0 {
 		return
 	}
 	d.deliveryMu.Lock()
 	defer d.deliveryMu.Unlock()
-	if d.pendingPartialAckSeq == 0 {
-		// Fresh intent: allow an immediate first recovery attempt.
-		d.cleanupRetryAfter = time.Time{}
-		d.cleanupRetryBackoff = 0
+	if d.pendingPartialAckSeq != 0 {
+		// Never overwrite a retained bounded intent (including classification).
+		return
 	}
+	// Fresh intent: allow an immediate first recovery attempt.
+	d.cleanupRetryAfter = time.Time{}
+	d.cleanupRetryBackoff = 0
 	d.pendingPartialAckSeq = seq
 	d.pendingPartialAckCoreACK = coreACK
+	d.pendingPartialAckAuthorityPoison = authorityPoison
 }
 
 func (d *Drain) clearPendingPartialAckReconcile() {
@@ -1019,6 +1094,30 @@ func (d *Drain) clearPendingPartialAckReconcile() {
 	defer d.deliveryMu.Unlock()
 	d.pendingPartialAckSeq = 0
 	d.pendingPartialAckCoreACK = false
+	d.pendingPartialAckAuthorityPoison = false
+}
+
+func (d *Drain) clearPendingPartialAckReconcileMatching(seq uint64) {
+	if d == nil || seq == 0 {
+		return
+	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	if d.pendingPartialAckSeq != seq {
+		return
+	}
+	d.pendingPartialAckSeq = 0
+	d.pendingPartialAckCoreACK = false
+	d.pendingPartialAckAuthorityPoison = false
+}
+
+func (d *Drain) hasUnresolvedPendingPartialAck() bool {
+	if d == nil {
+		return false
+	}
+	d.deliveryMu.RLock()
+	defer d.deliveryMu.RUnlock()
+	return d.pendingPartialAckSeq != 0
 }
 
 // tryReconcilePendingPartialAck applies deferred health reconciliation after a
@@ -1030,7 +1129,6 @@ func (d *Drain) tryReconcilePendingPartialAck() {
 	}
 	d.deliveryMu.RLock()
 	seq := d.pendingPartialAckSeq
-	coreACK := d.pendingPartialAckCoreACK
 	retryAfter := d.cleanupRetryAfter
 	d.deliveryMu.RUnlock()
 	if seq == 0 {
@@ -1046,11 +1144,14 @@ func (d *Drain) tryReconcilePendingPartialAck() {
 	}
 	if acked < seq {
 		// Authoritative proof that the attempted commit never landed.
+		// Preserve applicable delivery blocks; permit retry of the same work.
 		d.clearPendingPartialAckReconcile()
 		return
 	}
-	d.clearPendingPartialAckReconcile()
-	d.transitionBlockedToCleanupFault(seq)
+	coreACK, authorityPoison, consumed := d.consumePendingPartialAckInstallCleanup(seq)
+	if !consumed {
+		return
+	}
 	if coreACK {
 		// Count the original Core ACK once after durable proof; not a second ACK.
 		d.metrics.Successes.Add(1)
@@ -1058,6 +1159,9 @@ func (d *Drain) tryReconcilePendingPartialAck() {
 		d.metrics.LastSuccessUnix.Store(time.Now().Unix())
 	} else {
 		d.metrics.PoisonCount.Add(1)
+		if authorityPoison {
+			d.metrics.AuthorityPoisonCount.Add(1)
+		}
 	}
 	d.refreshStats()
 }

@@ -4178,7 +4178,7 @@ func TestIssue230BlockedToCleanupTransitionAtomicUnderDeliveryMu(t *testing.T) {
 }
 
 // TestIssue230DelayedPartialAckReconcileUsesAtomicTransition covers the paced
-// tryReconcilePendingPartialAck path sharing transitionBlockedToCleanupFault.
+// tryReconcilePendingPartialAck path sharing installProvenCleanupAfterPartialAck.
 // Inspector recovery must clear obsolete 413 without advertising a Core delivery
 // block; cleanupFault remains until verified orphan/sidecar reconcile.
 func TestIssue230DelayedPartialAckReconcileUsesAtomicTransition(t *testing.T) {
@@ -4510,5 +4510,555 @@ func TestIssue230CoreAckPartialCompleteConcurrentSnapshot(t *testing.T) {
 	assertCleanupFaultDegraded(t, snap, 0)
 	if snap.Blocked || strings.Contains(snap.ReasonCode, "DEVICE_DOWN") {
 		t.Fatalf("concurrent snapshot health=%+v", snap)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Issue230 pending-intent correction regressions (conditional P2 accounting/health)
+// ---------------------------------------------------------------------------
+
+var issue230AuthorityPoisonCodes = []string{
+	"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED",
+	"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID",
+	"ERR_REVOKED_ASSIGNMENT_ACCEPTED_BEFORE_ACTIVATION",
+	"ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION",
+}
+
+func assertPendingAckUncertain(t *testing.T, snap DeliveryStatus, seq uint64) {
+	t.Helper()
+	if snap.State != DeliveryStateDegraded || snap.ReasonCode != reasonSpoolAckUncertain {
+		t.Fatalf("want pending-ack DEGRADED/%s, got %+v", reasonSpoolAckUncertain, snap)
+	}
+	if snap.Blocked {
+		t.Fatalf("pending-ack uncertainty must not claim Core delivery Blocked: %+v", snap)
+	}
+	if seq != 0 && (snap.FirstSequence != seq || snap.LastSequence != seq) {
+		t.Fatalf("pending-ack seq mismatch want=%d got first=%d last=%d", seq, snap.FirstSequence, snap.LastSequence)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer", reasonSpoolCleanupFailed} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+// setupIssue230PendingIntentNoPrior413 arms a normal Core ACK (no prior 413) with
+// CompleteOutboundBatch wrapping and optional inspector failure.
+func setupIssue230PendingIntentNoPrior413(t *testing.T, mode string) (*Drain, *spool.DiskSpool, string, *partialCompleteSpool) {
+	t.Helper()
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+		JitterFraction: 0,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	wrap := &partialCompleteSpool{Spool: s, dir: dir, mode: mode}
+	d.spool = wrap
+	return d, s, dir, wrap
+}
+
+// setupIssue230AuthorityPoisonPartialPark stages a singleton authority-poison Core
+// reject with AcknowledgeThrough wrapping under real DiskSpool.
+func setupIssue230AuthorityPoisonPartialPark(t *testing.T, poisonCode, mode string) (*Drain, *spool.DiskSpool, string, *partialAckSpool) {
+	t.Helper()
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: poisonCode, Message: "authority", HTTPStatus: 422}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+		JitterFraction: 0,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	wrap := &partialAckSpool{Spool: s, dir: dir, mode: mode}
+	d.spool = wrap
+	return d, s, dir, wrap
+}
+
+func TestIssue230PendingIntentAuthorityPoisonCodesConserveOnce(t *testing.T) {
+	for _, code := range issue230AuthorityPoisonCodes {
+		t.Run(code, func(t *testing.T) {
+			d, s, dir, _ := setupIssue230AuthorityPoisonPartialPark(t, code, "post_commit_stats_uncertain")
+			wrap := &noWatermarkProofSpool{partialAckSpool: &partialAckSpool{
+				Spool: s, dir: dir, mode: "post_commit_stats_uncertain",
+			}}
+			d.spool = wrap
+			ok, err := d.RunOnce(context.Background())
+			if ok || err == nil {
+				t.Fatalf("no-proof authority poison park must surface: ok=%v err=%v", ok, err)
+			}
+			if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().AuthorityPoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+				t.Fatalf("uncertain park must not count yet: poison=%d auth=%d acks=%d",
+					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load(), d.Metrics().DurableAcks.Load())
+			}
+			d.deliveryMu.RLock()
+			intent, coreACK, auth := d.pendingPartialAckSeq, d.pendingPartialAckCoreACK, d.pendingPartialAckAuthorityPoison
+			d.deliveryMu.RUnlock()
+			if intent == 0 || coreACK || !auth {
+				t.Fatalf("intent must retain authority-poison class: seq=%d coreACK=%v auth=%v", intent, coreACK, auth)
+			}
+			assertPendingAckUncertain(t, d.Snapshot(), intent)
+
+			// Barrier: repeated RunOnce must not select/upload/park or double-count.
+			for i := 0; i < 5; i++ {
+				ok, err := d.RunOnce(context.Background())
+				if ok || err != nil {
+					t.Fatalf("barrier iteration %d: ok=%v err=%v", i, ok, err)
+				}
+			}
+			if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().AuthorityPoisonCount.Load() != 0 {
+				t.Fatalf("barrier must not count while unproven: poison=%d auth=%d",
+					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
+			}
+
+			d.spool = s
+			d.deliveryMu.Lock()
+			d.cleanupRetryAfter = time.Time{}
+			d.deliveryMu.Unlock()
+			if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+				t.Fatalf("deferred authority recovery: ok=%v err=%v", ok, err)
+			}
+			if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+				t.Fatalf("authority poison must count once: poison=%d auth=%d acks=%d",
+					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load(), d.Metrics().DurableAcks.Load())
+			}
+			// Repeat Snapshot/RunOnce must not duplicate counts.
+			for i := 0; i < 3; i++ {
+				_ = d.Snapshot()
+				d.deliveryMu.Lock()
+				d.cleanupRetryAfter = time.Time{}
+				d.deliveryMu.Unlock()
+				if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+					t.Fatalf("post-recovery iteration %d: ok=%v err=%v", i, ok, err)
+				}
+			}
+			if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 1 {
+				t.Fatalf("no duplicate authority counts: poison=%d auth=%d",
+					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
+			}
+		})
+	}
+}
+
+func TestIssue230PendingIntentGenericPoisonDoesNotAuthorityCount(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+	wrap := &noWatermarkProofSpool{partialAckSpool: &partialAckSpool{
+		Spool: s, dir: dir, mode: "post_commit_stats_uncertain",
+	}}
+	d.spool = wrap
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("no-proof generic poison must surface: ok=%v err=%v", ok, err)
+	}
+	d.deliveryMu.RLock()
+	intent, coreACK, auth := d.pendingPartialAckSeq, d.pendingPartialAckCoreACK, d.pendingPartialAckAuthorityPoison
+	d.deliveryMu.RUnlock()
+	if intent == 0 || coreACK || auth {
+		t.Fatalf("generic poison intent: seq=%d coreACK=%v auth=%v", intent, coreACK, auth)
+	}
+	// With prior 413, Snapshot retains Core block (fail closed); intent still present.
+	if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("prior 413 must remain visible while intent pending: %+v", snap)
+	}
+
+	d.spool = s
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("deferred generic poison recovery: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("generic poison: poison=%d auth=%d acks=%d",
+			d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+}
+
+func TestIssue230PendingIntentUnknownProofBlocksSecondDelivery(t *testing.T) {
+	d, s, _, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	trCalls := atomic.Uint64{}
+	d.transport = p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		trCalls.Add(1)
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK must surface: ok=%v err=%v", ok, err)
+	}
+	if trCalls.Load() != 1 {
+		t.Fatalf("first attempt upload count=%d", trCalls.Load())
+	}
+	if d.Metrics().DurableAcks.Load() != 0 || d.Metrics().PoisonCount.Load() != 0 {
+		t.Fatalf("unknown proof must not count: acks=%d poison=%d",
+			d.Metrics().DurableAcks.Load(), d.Metrics().PoisonCount.Load())
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+
+	// Append a second durable record that must NOT be selected while intent pending.
+	appendNDurable(t, s, 1)
+	for i := 0; i < 8; i++ {
+		ok, err := d.RunOnce(context.Background())
+		if ok || err != nil {
+			t.Fatalf("barrier iteration %d: ok=%v err=%v", i, ok, err)
+		}
+	}
+	if trCalls.Load() != 1 {
+		t.Fatalf("barrier must not upload a second batch: uploads=%d", trCalls.Load())
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 {
+		t.Fatalf("first watermark must remain durable underneath: %+v", st)
+	}
+}
+
+func TestIssue230PendingIntentNeverOverwrittenByLaterSuccessPath(t *testing.T) {
+	d, s, dir, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK must surface: ok=%v err=%v", ok, err)
+	}
+	d.deliveryMu.RLock()
+	origSeq, origCore, origAuth := d.pendingPartialAckSeq, d.pendingPartialAckCoreACK, d.pendingPartialAckAuthorityPoison
+	d.deliveryMu.RUnlock()
+	if origSeq == 0 || !origCore || origAuth {
+		t.Fatalf("Core ACK intent: seq=%d core=%v auth=%v", origSeq, origCore, origAuth)
+	}
+
+	// Attempt to overwrite via markPendingPartialAckReconcile with different class.
+	d.markPendingPartialAckReconcile(999, false, true)
+	d.deliveryMu.RLock()
+	seq, coreACK, auth := d.pendingPartialAckSeq, d.pendingPartialAckCoreACK, d.pendingPartialAckAuthorityPoison
+	d.deliveryMu.RUnlock()
+	if seq != origSeq || coreACK != origCore || auth != origAuth {
+		t.Fatalf("intent overwritten: got seq=%d core=%v auth=%v want seq=%d core=%v auth=%v",
+			seq, coreACK, auth, origSeq, origCore, origAuth)
+	}
+
+	// Matching clear of a different seq must not erase the original intent.
+	d.clearPendingPartialAckReconcileMatching(999)
+	d.deliveryMu.RLock()
+	seq = d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if seq != origSeq {
+		t.Fatalf("non-matching clear erased intent: %d", seq)
+	}
+	_ = dir
+	_ = s
+}
+
+func TestIssue230PendingIntentPreCommitUncertaintyThenNonCommitRetry(t *testing.T) {
+	d, s, _, wrap := setupIssue230PendingIntentNoPrior413(t, "pre_commit")
+	// Force inspectors to fail on the pre-commit error path so intent is retained,
+	// then restore proof showing non-commit and allow one successful count.
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("pre-commit uncertain must surface: ok=%v err=%v", ok, err)
+	}
+	// pre_commit CompleteOutboundBatch never advances watermark; with inspectors
+	// failing, markPending retains intent. Snapshot must be uncertain DEGRADED.
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("pre-commit must not count: %d", d.Metrics().DurableAcks.Load())
+	}
+	d.deliveryMu.RLock()
+	intent := d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if intent == 0 {
+		t.Fatal("pre-commit inspector failure must retain pending intent")
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), intent)
+
+	// Authoritative non-commit proof clears intent without counting; permits retry.
+	wrap.failInspect.Store(false)
+	wrap.mode = "pre_commit"
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	ok, err = d.RunOnce(context.Background())
+	// Barrier clears on non-commit then selects batch again in same RunOnce —
+	// second CompleteOutboundBatch still pre_commit fails with proof => no pending.
+	if ok || err == nil {
+		t.Fatalf("retry pre-commit must surface: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("non-commit must not count: %d", d.Metrics().DurableAcks.Load())
+	}
+	d.deliveryMu.RLock()
+	intent = d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if intent != 0 {
+		t.Fatalf("authoritative non-commit must clear intent, got %d", intent)
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough != 0 || st.RecordCount != 1 {
+		t.Fatalf("record must remain for retry: %+v", st)
+	}
+
+	// One successful Core ACK path counts once.
+	wrap.mode = ""
+	d.spool = s
+	ok, err = d.RunOnce(context.Background())
+	if !ok || err != nil {
+		t.Fatalf("successful retry: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 || d.Metrics().Successes.Load() != 1 {
+		t.Fatalf("one success count: acks=%d successes=%d",
+			d.Metrics().DurableAcks.Load(), d.Metrics().Successes.Load())
+	}
+}
+
+func TestIssue230PendingIntentCoreAckConservationVsPoison(t *testing.T) {
+	d, _, _, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK: ok=%v err=%v", ok, err)
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+	wrap.failInspect.Store(false)
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	// Keep cleanup unresolved so deferred path installs cleanupFault after counting.
+	d.spool = &failingReconcileSpool{
+		Spool:   wrap,
+		failErr: errors.New("injected ReconcileAckedCleanup failure"),
+	}
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("deferred Core ACK recovery: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 || d.Metrics().PoisonCount.Load() != 0 || d.Metrics().AuthorityPoisonCount.Load() != 0 {
+		t.Fatalf("Core ACK conservation: acks=%d poison=%d auth=%d",
+			d.Metrics().DurableAcks.Load(), d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+}
+
+func TestIssue230ProvenCleanupFaultContinuesDelivery(t *testing.T) {
+	d, s, dir, _ := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("sidecar cleanup failure must surface: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("proven cleanup must count Core ACK once: %d", d.Metrics().DurableAcks.Load())
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	d.deliveryMu.RLock()
+	intent := d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if intent != 0 {
+		t.Fatalf("proven path must not leave pending intent: %d", intent)
+	}
+
+	// Second record must still be deliverable under proven cleanupFault.
+	appendNDurable(t, s, 1)
+	// Use real spool CompleteOutboundBatch for the second delivery; retain cleanupFault.
+	d.spool = s
+	// Prevent cleanup recovery from clearing fault before we prove delivery continues.
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Now().Add(time.Hour)
+	d.deliveryMu.Unlock()
+	ok, err = d.RunOnce(context.Background())
+	if !ok || err != nil {
+		t.Fatalf("delivery must continue under proven cleanupFault: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 2 {
+		t.Fatalf("second delivery DurableAcks=%d", d.Metrics().DurableAcks.Load())
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	sidecar := filepath.Join(dir, "outbound-window.json")
+	if _, err := os.Stat(sidecar); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("sidecar stat: %v", err)
+	}
+}
+
+func TestIssue230PendingOnlyDegradedAndAtomicHealthTransition(t *testing.T) {
+	d, _, _, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK: ok=%v err=%v", ok, err)
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+
+	wrap.failInspect.Store(false)
+	d.spool = &failingReconcileSpool{
+		Spool:   wrap,
+		failErr: errors.New("injected ReconcileAckedCleanup failure"),
+	}
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+
+	inTransition := make(chan struct{})
+	release := make(chan struct{})
+	d.duringBlockedToCleanupTransition = func() {
+		close(inTransition)
+		<-release
+	}
+
+	var runOK bool
+	var runErr error
+	var runDone sync.WaitGroup
+	runDone.Add(1)
+	go func() {
+		defer runDone.Done()
+		runOK, runErr = d.RunOnce(context.Background())
+	}()
+
+	select {
+	case <-inTransition:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pending→cleanup transition barrier")
+	}
+
+	var snap DeliveryStatus
+	var snapDone sync.WaitGroup
+	snapDone.Add(1)
+	go func() {
+		defer snapDone.Done()
+		snap = d.Snapshot()
+	}()
+
+	close(release)
+	snapDone.Wait()
+	runDone.Wait()
+
+	if runOK || runErr != nil {
+		t.Fatalf("atomic pending recovery RunOnce: ok=%v err=%v", runOK, runErr)
+	}
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.ReasonCode == reasonSpoolAckUncertain {
+		t.Fatalf("Snapshot must not observe pending-uncertain after consume: %+v", snap)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("atomic transition DurableAcks=%d", d.Metrics().DurableAcks.Load())
+	}
+}
+
+func TestIssue230PendingIntentCancellationAndRetryPacing(t *testing.T) {
+	d, _, _, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	d.cfg.InitialBackoff = time.Hour
+	d.cfg.MaxBackoff = time.Hour
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK: ok=%v err=%v", ok, err)
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+
+	// Prime one deferred reconcile attempt so scheduleCleanupRetry latches Hour backoff.
+	ok, err = d.RunOnce(context.Background())
+	if ok || err != nil {
+		t.Fatalf("prime paced reconcile: ok=%v err=%v", ok, err)
+	}
+	d.deliveryMu.RLock()
+	retryAfter := d.cleanupRetryAfter
+	d.deliveryMu.RUnlock()
+	if retryAfter.IsZero() || !time.Now().Before(retryAfter) {
+		t.Fatalf("pending reconcile must schedule future backoff, got %v", retryAfter)
+	}
+
+	before := wrap.inspectCalls.Load()
+	for i := 0; i < 10; i++ {
+		ok, err := d.RunOnce(context.Background())
+		if ok || err != nil {
+			t.Fatalf("paced barrier iteration %d: ok=%v err=%v", i, ok, err)
+		}
+	}
+	delta := wrap.inspectCalls.Load() - before
+	// Under Hour backoff, tryReconcile must not re-probe O(1) inspectors.
+	// refreshStats may still call Stats once per RunOnce (~10); unpaced reconcile
+	// would add ~2 O(1) probes per iteration on top of Stats.
+	if delta > 14 {
+		t.Fatalf("pending reconcile O(1) inspection must be paced under backoff: delta=%d", delta)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ok, err = d.RunOnce(ctx)
+	if ok || err == nil {
+		t.Fatalf("cancelled RunOnce must surface: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeCancelled {
+		t.Fatalf("want CodeCancelled, got %v", err)
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("cancellation must not invent Core ACK: %d", d.Metrics().DurableAcks.Load())
+	}
+}
+
+func TestIssue230PendingIntentGenerationConcurrencyControls(t *testing.T) {
+	d, _, _, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK: ok=%v err=%v", ok, err)
+	}
+	d.deliveryMu.RLock()
+	genBefore := d.deliveryGen
+	d.deliveryMu.RUnlock()
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 30; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for j := 0; j < 10; j++ {
+			_, _ = d.RunOnce(context.Background())
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+	d.deliveryMu.RLock()
+	genAfter := d.deliveryGen
+	intent := d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if intent == 0 {
+		t.Fatal("concurrent barrier must retain pending intent")
+	}
+	if genAfter < genBefore {
+		t.Fatalf("deliveryGen must not regress: before=%d after=%d", genBefore, genAfter)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("concurrency must not invent Core ACK: %d", d.Metrics().DurableAcks.Load())
 	}
 }
