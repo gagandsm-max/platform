@@ -54,7 +54,9 @@ public class TelemetryConsumerHealthIndicator implements HealthIndicator {
                         .withDetail("terminalTopic", failure.topic())
                         .withDetail("terminalPartition", failure.partition())
                         .withDetail("terminalOffset", failure.offset())
-                        .withDetail("terminalReasonCode", failure.reason().reasonCode);
+                        .withDetail("terminalReasonCode", failure.reason().reasonCode)
+                        .withDetail("terminalInsertCompleted", failure.completion().insertCompleted())
+                        .withDetail("terminalPersistenceUncertain", failure.completion().persistenceUncertain());
             }
             return health.build();
         }

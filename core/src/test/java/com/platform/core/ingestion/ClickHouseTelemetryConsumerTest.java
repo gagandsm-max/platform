@@ -38,6 +38,181 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.*;
 
 class ClickHouseTelemetryConsumerTest {
+    private void observeTerminalStart() {
+        var parent = mock(org.springframework.kafka.listener.ConcurrentMessageListenerContainer.class);
+        when(parent.getListenerId()).thenReturn("telemetryNumericListener");
+        when(parent.getConcurrency()).thenReturn(1);
+        var child = mock(org.springframework.kafka.listener.KafkaMessageListenerContainer.class);
+        when(child.getListenerId()).thenReturn("telemetryNumericListener-0");
+        var tracker = metrics.trackTerminalStops(parent);
+        tracker.beginGeneration();
+        tracker.establishChildren(List.of(child));
+        tracker.onEvent(new org.springframework.kafka.event.ConsumerStartingEvent(child, parent));
+    }
+
+    @Test
+    void terminalFactsRetainUnprovenInsertBeforeDifferentFinalReason() throws Exception {
+        observeTerminalStart();
+        doThrow(new java.net.http.HttpTimeoutException(SUPER_SECRET_SENTINEL_DO_NOT_LOG))
+                .doThrow(new TelemetryConsumerFailure.InsertFailure(TelemetryConsumerFailure.SCHEMA, 422))
+                .when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        var failure = assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+        verify(clickHouseClient, times(2)).insertNumericBatch(anyList());
+        verifyNoInteractions(ack);
+        assertEquals(TelemetryConsumerFailure.SCHEMA, metrics.getConsumerTerminalStop().failure().reason());
+        var health = new TelemetryConsumerHealthIndicator(metrics).health();
+        assertEquals(Boolean.TRUE, health.getDetails().get("terminalPersistenceUncertain"),
+                "a different final reason cannot discard an earlier unproven INSERT");
+        assertEquals(Boolean.FALSE, health.getDetails().get("terminalInsertCompleted"));
+        assertNoSecretInThrowableChain(failure, "unused");
+        assertFalse(health.toString().contains(SUPER_SECRET_SENTINEL_DO_NOT_LOG));
+    }
+
+    @Test
+    void successfulInsertThenFailedAckRetainsCompletionWithoutNoWriteClaim() throws Exception {
+        observeTerminalStart();
+        var ack = mock(Acknowledgment.class);
+        doThrow(new org.apache.kafka.clients.consumer.CommitFailedException("membership lost"))
+                .when(ack).acknowledge();
+        assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+        verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
+        var health = new TelemetryConsumerHealthIndicator(metrics).health();
+        assertEquals(Boolean.TRUE, health.getDetails().get("terminalInsertCompleted"));
+        assertEquals(Boolean.TRUE, health.getDetails().get("terminalPersistenceUncertain"),
+                "this successful invocation does not prove a redelivered record had no earlier write");
+        assertEquals(TelemetryConsumerFailure.MEMBERSHIP_LOST, metrics.getConsumerTerminalStop().failure().reason());
+    }
+
+    private void assertCompletion(ConsumerRecord<?, ?> record, boolean completed) {
+        var facts = metrics.consumerInsertCompletion(record);
+        assertEquals(completed, facts.insertCompleted());
+        assertTrue(facts.persistenceUncertain(), "unavailable prior history cannot prove no write");
+    }
+
+    static java.util.stream.Stream<Exception> unprovenInsertFailures() {
+        return java.util.stream.Stream.of(new java.net.http.HttpTimeoutException("timeout"),
+                new java.io.EOFException("EOF"), new java.io.IOException("send failed"));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("unprovenInsertFailures")
+    void thrownClientInvocationNeverProvesNoWrite(Exception thrown) throws Exception {
+        observeTerminalStart();
+        doThrow(thrown).when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+        verifyNoInteractions(ack);
+        assertCompletion(validRecord(), false);
+        assertTrue(metrics.getConsumerTerminalStop().failure().completion().persistenceUncertain());
+        assertFalse(metrics.getConsumerTerminalStop().failure().completion().insertCompleted());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = TelemetryConsumerFailure.class,
+            names = {"AUTHORIZATION", "SCHEMA", "CONFIGURATION", "UNKNOWN", "PERMANENT"})
+    void unprovenFirstAttemptSurvivesAnotherTerminalReason(TelemetryConsumerFailure reason) throws Exception {
+        observeTerminalStart();
+        doThrow(new java.io.EOFException("unproven"))
+                .doThrow(new TelemetryConsumerFailure.InsertFailure(reason, 500))
+                .when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+        verify(clickHouseClient, times(2)).insertNumericBatch(anyList());
+        verifyNoInteractions(ack);
+        assertCompletion(validRecord(), false);
+        assertEquals(reason, metrics.getConsumerTerminalStop().failure().reason());
+        assertTrue(metrics.getConsumerTerminalStop().failure().completion().persistenceUncertain());
+    }
+
+    static java.util.stream.Stream<RuntimeException> unprovenAcknowledgments() {
+        return java.util.stream.Stream.of(
+                new org.apache.kafka.clients.consumer.CommitFailedException("commit"),
+                new org.apache.kafka.common.errors.RebalanceInProgressException("rebalance"),
+                new org.apache.kafka.common.errors.FencedInstanceIdException("fenced"),
+                new org.apache.kafka.common.errors.AuthenticationException("authentication"),
+                new IllegalStateException("unknown commit result"));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("unprovenAcknowledgments")
+    void successfulRetryThenFailedAckRetainsBothFacts(RuntimeException thrown) throws Exception {
+        observeTerminalStart();
+        doThrow(new java.net.http.HttpTimeoutException("unproven")).doNothing()
+                .when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        doThrow(thrown).when(ack).acknowledge();
+        assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+        verify(clickHouseClient, times(2)).insertNumericBatch(anyList());
+        verify(ack).acknowledge();
+        assertCompletion(validRecord(), true);
+        var terminal = metrics.getConsumerTerminalStop().failure();
+        assertTrue(terminal.completion().insertCompleted());
+        assertTrue(terminal.completion().persistenceUncertain());
+        assertEquals(TelemetryConsumerFailure.acknowledgment(thrown), terminal.reason());
+    }
+
+    @Test
+    void missingAckRetainsSuccessfulInsertAndUncertainHistory() throws Exception {
+        observeTerminalStart();
+        assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), null));
+        verify(clickHouseClient).insertNumericBatch(anyList());
+        assertCompletion(validRecord(), true);
+        assertEquals(TelemetryConsumerFailure.ACK_UNCERTAIN, metrics.getConsumerTerminalStop().failure().reason());
+    }
+
+    @Test
+    void budgetBeforeFirstInvocationIsNotNoWriteProofForRedelivery() throws Exception {
+        observeTerminalStart();
+        var budget = new TelemetryProcessingBudget(Map.of(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1), 1, 0);
+        var clock = new java.util.concurrent.atomic.AtomicLong();
+        var guarded = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, budget,
+                () -> clock.getAndAdd(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(budget.recordProcessingMs)));
+        var ack = mock(Acknowledgment.class);
+        assertThrows(RuntimeException.class, () -> guarded.consume(validRecord(), ack));
+        verifyNoInteractions(clickHouseClient, ack);
+        assertCompletion(validRecord(), false);
+        assertEquals(TelemetryConsumerFailure.POLL_BUDGET, metrics.getConsumerTerminalStop().failure().reason());
+    }
+
+    @Test
+    void budgetAfterUnprovenInvocationPreservesUncertainty() throws Exception {
+        observeTerminalStart();
+        var budget = new TelemetryProcessingBudget(Map.of(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1), 2, 1);
+        var clock = new java.util.concurrent.atomic.AtomicLong();
+        var guarded = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, budget, clock::get);
+        doAnswer(invocation -> {
+            clock.set(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(budget.recordProcessingMs));
+            throw new java.io.EOFException("unproven");
+        }).when(clickHouseClient).insertNumericBatch(anyList());
+        var ack = mock(Acknowledgment.class);
+        assertThrows(RuntimeException.class, () -> guarded.consume(validRecord(), ack));
+        verify(clickHouseClient).insertNumericBatch(anyList());
+        verifyNoInteractions(ack);
+        assertCompletion(validRecord(), false);
+        assertEquals(TelemetryConsumerFailure.POLL_BUDGET, metrics.getConsumerTerminalStop().failure().reason());
+    }
+
+    @Test
+    void sameRecordRedeliveryRetainsSuccessfulCompletionUntilActualInsertAndAck() throws Exception {
+        var ack = mock(Acknowledgment.class);
+        doThrow(new IllegalStateException("uncertain ACK")).when(ack).acknowledge();
+        assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), ack));
+        assertCompletion(validRecord(), true);
+        doThrow(new TelemetryConsumerFailure.InsertFailure(TelemetryConsumerFailure.SCHEMA, 422))
+                .when(clickHouseClient).insertNumericBatch(anyList());
+        assertThrows(RuntimeException.class, () -> consumer.consume(validRecord(), mock(Acknowledgment.class)));
+        assertCompletion(validRecord(), true);
+        metrics.recordConsumerHealthy(validRecord());
+        metrics.recordConsumerHealthy();
+        assertTrue(metrics.isConsumerDegraded(), "legacy/generic health cannot clear retained facts");
+        doNothing().when(clickHouseClient).insertNumericBatch(anyList());
+        var provenAck = mock(Acknowledgment.class);
+        consumer.consume(validRecord(), provenAck);
+        verify(provenAck).acknowledge();
+        assertFalse(metrics.isConsumerDegraded());
+        assertFalse(metrics.consumerInsertCompletion(validRecord()).insertCompleted(), "cleared slot has no completion history");
+    }
 
     private static final String SUPER_SECRET_SENTINEL_DO_NOT_LOG = "SUPER_SECRET_SENTINEL_DO_NOT_LOG";
 
@@ -376,6 +551,7 @@ class ClickHouseTelemetryConsumerTest {
 
     @Test
     void latePersistenceReturnNeverAcknowledges() throws Exception {
+        observeTerminalStart();
         var clock = new java.util.concurrent.atomic.AtomicLong();
         var budget = new TelemetryProcessingBudget(Map.of(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1), 1, 0);
         var guarded = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, budget, clock::get);
@@ -388,6 +564,8 @@ class ClickHouseTelemetryConsumerTest {
         verify(ack, never()).acknowledge();
         assertTrue(metrics.isConsumerDegraded());
         assertEquals("ERR_KAFKA_POLL_BUDGET", metrics.getConsumerDegradedReason());
+        assertCompletion(validRecord(), true);
+        assertTrue(metrics.getConsumerTerminalStop().failure().completion().insertCompleted());
     }
 
     @Test
@@ -574,6 +752,7 @@ class ClickHouseTelemetryConsumerTest {
 
     @Test
     void interruptedLargeBackoffRetainsSafeCauseAndDoesNotAcknowledge() throws Exception {
+        observeTerminalStart();
         var extended = new ClickHouseTelemetryConsumer(clickHouseClient, objectMapper, metrics, 2, 1001);
         doThrow(new java.net.ConnectException(SUPER_SECRET_SENTINEL_DO_NOT_LOG)).when(clickHouseClient).insertNumericBatch(anyList());
         var ack = mock(Acknowledgment.class);
@@ -589,6 +768,9 @@ class ClickHouseTelemetryConsumerTest {
             verify(clickHouseClient, times(1)).insertNumericBatch(anyList());
             verifyNoInteractions(ack);
             assertTrue(metrics.isConsumerDegraded());
+            assertCompletion(record, false);
+            assertTrue(metrics.getConsumerTerminalStop().failure().completion().persistenceUncertain());
+            assertEquals(TelemetryConsumerFailure.SHUTDOWN, metrics.getConsumerTerminalStop().failure().reason());
         } finally {
             Thread.interrupted();
         }

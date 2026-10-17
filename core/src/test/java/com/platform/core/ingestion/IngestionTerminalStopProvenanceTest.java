@@ -72,6 +72,79 @@ class IngestionTerminalStopProvenanceTest {
     }
 
     @Test
+    void terminalSnapshotIsImmutableAndLegacyEvidenceRemainsConservative() {
+        configure(1);
+        starting(0);
+        var initial = new IngestionMetrics.InsertCompletion(false, false);
+        metrics.recordConsumerFailure(record(0), TelemetryConsumerFailure.DEPENDENCY, initial);
+        metrics.recordTerminalFailure(record(0), TelemetryConsumerFailure.DEPENDENCY,
+                new RuntimeException("sanitized")); // Legacy caller has no history proof.
+        var snapshot = metrics.getConsumerTerminalStop().failure();
+        assertFalse(snapshot.completion().insertCompleted());
+        assertTrue(snapshot.completion().persistenceUncertain());
+        metrics.recordConsumerFailure(record(0), TelemetryConsumerFailure.ACK_UNCERTAIN,
+                new IngestionMetrics.InsertCompletion(true, false));
+        assertTrue(metrics.consumerInsertCompletion(record(0)).insertCompleted());
+        assertFalse(snapshot.completion().insertCompleted(), "terminal facts cannot change after publication");
+        assertTrue(snapshot.completion().persistenceUncertain());
+    }
+
+    @Test
+    void sameRecordFactsSurviveGenerationsAndLegacyHealthButRequireBothProofsToClear() {
+        configure(1);
+        starting(0);
+        metrics.recordConsumerFailure(record(0), TelemetryConsumerFailure.DEPENDENCY,
+                new IngestionMetrics.InsertCompletion(false, true));
+        metrics.recordConsumerFailure(record(0), TelemetryConsumerFailure.ACK_UNCERTAIN,
+                new IngestionMetrics.InsertCompletion(true, false));
+        provenance.beginGeneration();
+        provenance.establishChildren(children);
+        starting(0);
+        terminal(0, TelemetryConsumerFailure.SCHEMA);
+        var facts = metrics.getConsumerTerminalStop().failure().completion();
+        assertTrue(facts.insertCompleted());
+        assertTrue(facts.persistenceUncertain());
+        metrics.recordConsumerHealthy();
+        metrics.recordConsumerHealthy(record(0));
+        metrics.recordConsumerHealthy(record(0), true, false);
+        metrics.recordConsumerHealthy(record(0), false, true);
+        assertTrue(metrics.isConsumerDegraded());
+        assertEquals(facts, metrics.consumerInsertCompletion(record(0)));
+        metrics.recordConsumerHealthy(record(0), true, true);
+        assertFalse(metrics.isConsumerDegraded());
+        assertEquals(IngestionMetrics.InsertCompletion.UNKNOWN, metrics.consumerInsertCompletion(record(0)));
+        assertEquals(facts, metrics.getConsumerTerminalStop().failure().completion());
+    }
+
+    @Test
+    void laterOffsetsAndSiblingPartitionsCannotReplaceOrInheritRetainedCompletion() throws Exception {
+        configure(2);
+        var retained = new IngestionMetrics.InsertCompletion(true, true);
+        metrics.recordConsumerFailure(record(0), TelemetryConsumerFailure.ACK_UNCERTAIN, retained);
+        var later = new ConsumerRecord<>(record(0).topic(), 0, 18L, "key", "payload");
+        for (long offset = 18; offset < 1018; offset++) {
+            var next = new ConsumerRecord<>(record(0).topic(), 0, offset, "key", "payload");
+            assertEquals(IngestionMetrics.InsertCompletion.UNKNOWN, metrics.consumerInsertCompletion(next));
+            metrics.recordConsumerFailure(next, TelemetryConsumerFailure.SCHEMA,
+                    new IngestionMetrics.InsertCompletion(false, false));
+            metrics.recordConsumerHealthy(next, true, true);
+        }
+        assertEquals(retained, metrics.consumerInsertCompletion(record(0)));
+        assertEquals(IngestionMetrics.InsertCompletion.UNKNOWN, metrics.consumerInsertCompletion(record(1)));
+        assertEquals(IngestionMetrics.InsertCompletion.UNKNOWN,
+                metrics.consumerInsertCompletion(new ConsumerRecord<>("another.topic", 0, 17L, "key", "payload")));
+        starting(0);
+        metrics.recordTerminalFailure(later, TelemetryConsumerFailure.SCHEMA, new RuntimeException("sanitized"),
+                metrics.consumerInsertCompletion(later));
+        assertFalse(metrics.getConsumerTerminalStop().failure().completion().insertCompleted());
+        metrics.recordConsumerHealthy(record(1), true, true);
+        assertTrue(metrics.isConsumerDegraded());
+        var field = IngestionMetrics.class.getDeclaredField("consumerFailures");
+        field.setAccessible(true);
+        assertEquals(1, ((java.util.Map<?, ?>) field.get(metrics)).size(), "one bounded slot, no offset history");
+    }
+
+    @Test
     void retiredChildEventsCannotAlterCompletedNewGenerationEvidence() {
         configure(1);
         starting(0);
@@ -178,7 +251,7 @@ class IngestionTerminalStopProvenanceTest {
         stopped(0);
         assertEquals("RECOVERABLE_DEPENDENCY_STOP", metrics.getConsumerTerminalStop().status());
         assertTrue(metrics.isConsumerDegraded());
-        metrics.recordConsumerHealthy(record(0)); // Existing exact-record persistence-plus-ACK proof.
+        metrics.recordConsumerHealthy(record(0), true, true); // Explicit exact-record persistence-plus-ACK proof.
         assertFalse(metrics.isConsumerDegraded());
     }
 

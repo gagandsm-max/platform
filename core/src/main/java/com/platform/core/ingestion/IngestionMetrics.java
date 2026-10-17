@@ -26,7 +26,17 @@ public class IngestionMetrics implements org.springframework.context.Application
     private final AtomicBoolean consumerDegraded = new AtomicBoolean(false);
     private final AtomicReference<String> consumerDegradedReason = new AtomicReference<>("");
     // One retained failure per blocked partition. A sibling's success cannot clear it.
-    private record ConsumerFailure(long offset, TelemetryConsumerFailure reason) { }
+    // A validated INSERT return is not a no-write proof for earlier attempts/redeliveries.
+    // Missing history is uncertain; these facts never authorize replay.
+    record InsertCompletion(boolean insertCompleted, boolean persistenceUncertain) {
+        static final InsertCompletion UNKNOWN = new InsertCompletion(false, true);
+
+        InsertCompletion merge(InsertCompletion other) {
+            return new InsertCompletion(insertCompleted || other.insertCompleted,
+                    persistenceUncertain || other.persistenceUncertain);
+        }
+    }
+    private record ConsumerFailure(long offset, TelemetryConsumerFailure reason, InsertCompletion completion) { }
     private final java.util.Map<org.apache.kafka.common.TopicPartition, ConsumerFailure> consumerFailures =
             new java.util.LinkedHashMap<>();
 
@@ -59,7 +69,7 @@ public class IngestionMetrics implements org.springframework.context.Application
     }
 
     record TerminalFailure(String listener, String child, String topic, int partition, long offset,
-                           TelemetryConsumerFailure reason, long stopEpoch) { }
+                           TelemetryConsumerFailure reason, long stopEpoch, InsertCompletion completion) { }
     record TerminalStop(TerminalFailure failure, String status, boolean stopCompleted) { }
     record StopRequest(TerminalStopProvenance provenance, long epoch, Object child) { }
 
@@ -74,8 +84,15 @@ public class IngestionMetrics implements org.springframework.context.Application
 
     void recordTerminalFailure(org.apache.kafka.clients.consumer.ConsumerRecord<?, ?> record,
                                TelemetryConsumerFailure reason, RuntimeException failure) {
+        recordTerminalFailure(record, reason, failure, InsertCompletion.UNKNOWN);
+    }
+
+    void recordTerminalFailure(org.apache.kafka.clients.consumer.ConsumerRecord<?, ?> record,
+                               TelemetryConsumerFailure reason, RuntimeException failure, InsertCompletion completion) {
+        // Finish the metrics update before acquiring the lifecycle monitor.
+        var retained = recordConsumerFailure(record, reason, completion);
         var provenance = terminalStops;
-        if (provenance != null) provenance.terminal(record, reason, failure);
+        if (provenance != null) provenance.terminal(record, reason, failure, retained);
     }
 
     void bindTerminalStop(Exception failure, java.util.List<? extends org.apache.kafka.clients.consumer.ConsumerRecord<?, ?>> records,
@@ -262,7 +279,7 @@ public class IngestionMetrics implements org.springframework.context.Application
         }
 
         synchronized void terminal(org.apache.kafka.clients.consumer.ConsumerRecord<?, ?> record,
-                                   TelemetryConsumerFailure reason, RuntimeException failure) {
+                                   TelemetryConsumerFailure reason, RuntimeException failure, InsertCompletion completion) {
             var child = currentChild();
             if (child == null) return;
             if (child.terminal != null) {
@@ -273,7 +290,7 @@ public class IngestionMetrics implements org.springframework.context.Application
                     .map(java.util.Map.Entry::getKey).findFirst().orElseThrow();
             child.terminal = new TerminalFailure(parent.getListenerId(),
                     ((org.springframework.kafka.listener.MessageListenerContainer) source).getListenerId(),
-                    record.topic(), record.partition(), record.offset(), reason, epoch);
+                    record.topic(), record.partition(), record.offset(), reason, epoch, completion);
             if (firstTerminal == null) firstTerminal = child.terminal;
             child.exception = failure; // sanitized exception identity, discarded on bind/stop
         }
@@ -403,13 +420,35 @@ public class IngestionMetrics implements org.springframework.context.Application
 
     synchronized void recordConsumerFailure(org.apache.kafka.clients.consumer.ConsumerRecord<?, ?> record,
                                             TelemetryConsumerFailure reason) {
-        consumerFailures.compute(new org.apache.kafka.common.TopicPartition(record.topic(), record.partition()),
-                (key, blocked) -> blocked == null || blocked.offset() == record.offset()
-                        ? new ConsumerFailure(record.offset(), reason) : blocked);
+        recordConsumerFailure(record, reason, InsertCompletion.UNKNOWN);
+    }
+
+    synchronized InsertCompletion consumerInsertCompletion(org.apache.kafka.clients.consumer.ConsumerRecord<?, ?> record) {
+        var blocked = consumerFailures.get(new org.apache.kafka.common.TopicPartition(record.topic(), record.partition()));
+        return blocked != null && blocked.offset() == record.offset() ? blocked.completion() : InsertCompletion.UNKNOWN;
+    }
+
+    synchronized InsertCompletion recordConsumerFailure(org.apache.kafka.clients.consumer.ConsumerRecord<?, ?> record,
+                                                        TelemetryConsumerFailure reason, InsertCompletion completion) {
+        var key = new org.apache.kafka.common.TopicPartition(record.topic(), record.partition());
+        var blocked = consumerFailures.get(key);
+        if (blocked == null || blocked.offset() == record.offset()) {
+            if (blocked != null) completion = blocked.completion().merge(completion);
+            consumerFailures.put(key, new ConsumerFailure(record.offset(), reason, completion));
+        }
+        // A different offset must neither replace the retained slot nor inherit its completion.
         lastError.set(reason.reasonCode);
+        return completion;
     }
 
     synchronized void recordConsumerHealthy(org.apache.kafka.clients.consumer.ConsumerRecord<?, ?> record) {
+        // Legacy notification carries no persistence/ACK proof.
+        recordConsumerHealthy(record, false, false);
+    }
+
+    synchronized void recordConsumerHealthy(org.apache.kafka.clients.consumer.ConsumerRecord<?, ?> record,
+                                            boolean insertCompleted, boolean acknowledged) {
+        if (!insertCompleted || !acknowledged) return;
         var key = new org.apache.kafka.common.TopicPartition(record.topic(), record.partition());
         var blocked = consumerFailures.get(key);
         // Only successful persistence AND ACK of the exact retained record proves recovery.

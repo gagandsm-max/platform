@@ -386,6 +386,38 @@ class TelemetryKafkaTransactionVisibilityTest {
         assertRestartGenerationIsolation(false);
     }
 
+    @Test
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void registeredTerminalStopRetainsUnprovenInsertAcrossFinalReasonChange() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var metrics = new IngestionMetrics();
+        var client = mock(ClickHouseClient.class);
+        org.mockito.Mockito.doThrow(new java.io.EOFException("PRIVATE_RESPONSE_SENTINEL"))
+                .doThrow(new TelemetryConsumerFailure.InsertFailure(TelemetryConsumerFailure.SCHEMA, 422))
+                .when(client).insertNumericBatch(anyList());
+        String bootstrap = embeddedKafka.getBrokersAsString();
+        String group = "k2b-completion-" + UUID.randomUUID();
+        context = createListenerContext(bootstrap, group, client, mapper, metrics);
+        registeredListener().start();
+        String valid = mapper.writeValueAsString(observation("retained-completion"));
+        createTransactionalTemplate(bootstrap).executeInTransaction(ops -> {
+            sendPartition(ops, 0, "failed", valid);
+            sendPartition(ops, 0, "following", valid);
+            return true;
+        });
+        awaitCondition(() -> metrics.getConsumerTerminalStop() != null
+                && metrics.getConsumerTerminalStop().stopCompleted(), 30, "observe actual terminal stop completion");
+        assertFalse(registeredListener().isRunning());
+        assertEquals(null, committedOffset(bootstrap, group), "unproven INSERT and following record cannot advance offset");
+        verify(client, times(2)).insertNumericBatch(anyList());
+        assertEquals(TelemetryConsumerFailure.SCHEMA, metrics.getConsumerTerminalStop().failure().reason());
+        assertEquals("INELIGIBLE_STOP", metrics.getConsumerTerminalStop().status());
+        var details = context.getBean(TelemetryConsumerHealthIndicator.class).health().getDetails();
+        assertEquals(Boolean.TRUE, details.get("terminalPersistenceUncertain"));
+        assertEquals(Boolean.FALSE, details.get("terminalInsertCompleted"));
+        assertFalse(details.toString().contains("PRIVATE_RESPONSE_SENTINEL"));
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"1,false", "1,true", "2,false", "2,true"})
     @Timeout(value = 120, unit = TimeUnit.SECONDS)
