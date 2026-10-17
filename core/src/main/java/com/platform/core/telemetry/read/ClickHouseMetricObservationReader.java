@@ -1,5 +1,6 @@
 package com.platform.core.telemetry.read;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.domain.DomainException;
@@ -11,23 +12,28 @@ import org.springframework.stereotype.Component;
 import java.io.BufferedReader;
 import java.io.StringReader;
 import java.math.BigInteger;
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
 /**
  * Bounded ClickHouse read accessor for canonical FINAL views only.
  * Does not share the ingestion write client; never queries {@code *_raw} tables.
+ * Selects the true latest N+1 observations (DESC), then reorders ASC for presentation.
  */
 @Component
 public class ClickHouseMetricObservationReader {
@@ -37,6 +43,8 @@ public class ClickHouseMetricObservationReader {
             .withZone(ZoneOffset.UTC);
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(5);
     private static final BigInteger MAX_UINT64 = new BigInteger("18446744073709551615");
+    static final String SELECTION_ORDERING = "ts DESC, sensor_id DESC, sequence_id DESC";
+    static final String PRESENTATION_ORDERING = "ts ASC, sensor_id ASC, sequence_id ASC";
 
     private final String baseUrl;
     private final String authHeader;
@@ -75,7 +83,8 @@ public class ClickHouseMetricObservationReader {
         this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout");
     }
 
-    public List<MetricObservationRow> read(MetricObservationQuery query) {
+    public MetricObservationPage read(MetricObservationQuery query) {
+        int fetchLimit = query.limit() + 1; // N+1 to detect truthful truncation
         String sql = buildStaticSql(query.selector().valueKind());
         String uri = baseUrl
                 + "/?param_tenant_id=" + enc(query.tenantId().toString())
@@ -83,7 +92,7 @@ public class ClickHouseMetricObservationReader {
                 + "&param_metric_id=" + enc(query.selector().metricId())
                 + "&param_from_ts=" + enc(CH_TS.format(query.fromInclusive()))
                 + "&param_to_ts=" + enc(CH_TS.format(query.toExclusive()))
-                + "&param_row_limit=" + query.limit()
+                + "&param_row_limit=" + fetchLimit
                 + "&output_format_json_quote_64bit_integers=1"
                 + "&max_execution_time=4";
 
@@ -101,11 +110,17 @@ public class ClickHouseMetricObservationReader {
                 log.warn("ClickHouse metric read failed status={}", response.statusCode());
                 throw new DomainException("DATABASE_UNAVAILABLE", "Telemetry store temporarily unavailable");
             }
-            return parseRows(response.body(), query.selector().valueKind(), query.limit());
+            return parseLatestPage(response.body(), query.selector().valueKind(), query.limit());
         } catch (DomainException ex) {
             throw ex;
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
+            throw new DomainException("DATABASE_UNAVAILABLE", "Telemetry store temporarily unavailable");
+        } catch (HttpTimeoutException ex) {
+            log.warn("ClickHouse metric read timeout failureClass={}", ex.getClass().getSimpleName());
+            throw new DomainException("DATABASE_UNAVAILABLE", "Telemetry store temporarily unavailable");
+        } catch (ConnectException ex) {
+            log.warn("ClickHouse metric read unavailable failureClass={}", ex.getClass().getSimpleName());
             throw new DomainException("DATABASE_UNAVAILABLE", "Telemetry store temporarily unavailable");
         } catch (Exception ex) {
             log.warn("ClickHouse metric read unavailable failureClass={}", ex.getClass().getSimpleName());
@@ -113,7 +128,10 @@ public class ClickHouseMetricObservationReader {
         }
     }
 
-    /** Package-visible: static SQL uses canonical FINAL views only; parameters are never concatenated. */
+    /**
+     * Package-visible: static SQL uses canonical FINAL views only; parameters are never concatenated.
+     * Selection is newest-first with deterministic sensor/sequence ties; callers reorder for presentation.
+     */
     static String buildStaticSql(MetricValueKind kind) {
         String view = kind == MetricValueKind.COUNTER64
                 ? "platform.metric_counter"
@@ -126,13 +144,28 @@ public class ClickHouseMetricObservationReader {
                   AND metric_id = {metric_id:String}
                   AND ts >= toDateTime64({from_ts:String}, 3, 'UTC')
                   AND ts < toDateTime64({to_ts:String}, 3, 'UTC')
-                ORDER BY ts ASC, sequence_id ASC
+                ORDER BY ts DESC, sensor_id DESC, sequence_id DESC
                 LIMIT {row_limit:UInt32}
                 FORMAT JSONEachRow
                 """.formatted(view).trim();
     }
 
-    List<MetricObservationRow> parseRows(String body, MetricValueKind kind, int limit) throws Exception {
+    /**
+     * Parses ClickHouse JSONEachRow body already ordered newest-first.
+     * Keeps at most {@code limit} rows, sets truncation from the N+1 probe row,
+     * then reorders ascending for presentation only.
+     */
+    MetricObservationPage parseLatestPage(String body, MetricValueKind kind, int limit) {
+        List<MetricObservationRow> newestFirst = parseRowsNewestFirst(body, kind, limit + 1);
+        boolean truncated = newestFirst.size() > limit;
+        List<MetricObservationRow> selected = truncated
+                ? new ArrayList<>(newestFirst.subList(0, limit))
+                : new ArrayList<>(newestFirst);
+        Collections.reverse(selected); // presentation: oldest → newest within the selected latest window
+        return new MetricObservationPage(selected, truncated);
+    }
+
+    private List<MetricObservationRow> parseRowsNewestFirst(String body, MetricValueKind kind, int maxRows) {
         List<MetricObservationRow> rows = new ArrayList<>();
         if (body == null || body.isBlank()) {
             return rows;
@@ -143,36 +176,57 @@ public class ClickHouseMetricObservationReader {
                 if (line.isBlank()) {
                     continue;
                 }
-                if (rows.size() >= limit) {
+                if (rows.size() >= maxRows) {
                     break;
                 }
-                JsonNode node = objectMapper.readTree(line);
-                Instant ts = parseTimestamp(node.get("ts"));
-                int quality = node.path("quality").asInt(0);
-                int flags = node.path("flags").asInt(0);
-                String sensorId = textOrEmpty(node, "sensor_id");
-                String sequenceId = textOrEmpty(node, "sequence_id");
-                String sourceProtocol = textOrEmpty(node, "source_protocol");
-                if (kind == MetricValueKind.COUNTER64) {
-                    String counter = parseCounter64(node.get("value"));
-                    rows.add(new MetricObservationRow(
-                            ts, null, counter, quality, flags, sensorId, sequenceId, sourceProtocol));
-                } else {
-                    if (!node.has("value") || !node.get("value").isNumber()) {
-                        throw new DomainException("VALIDATION_FAILED", "numeric observation value is malformed");
-                    }
-                    double value = node.get("value").asDouble();
-                    rows.add(new MetricObservationRow(
-                            ts, value, null, quality, flags, sensorId, sequenceId, sourceProtocol));
+                try {
+                    JsonNode node = objectMapper.readTree(line);
+                    rows.add(parseRow(node, kind));
+                } catch (DomainException ex) {
+                    throw ex;
+                } catch (JsonProcessingException | IllegalArgumentException | DateTimeParseException ex) {
+                    throw new DomainException(
+                            "DATA_INTEGRITY_ERROR",
+                            "Telemetry store returned malformed observation data");
                 }
             }
+        } catch (DomainException ex) {
+            throw ex;
+        } catch (java.io.IOException ex) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
         }
         return rows;
     }
 
+    private MetricObservationRow parseRow(JsonNode node, MetricValueKind kind) {
+        Instant ts = parseTimestamp(node.get("ts"));
+        int quality = requireInt(node, "quality");
+        int flags = requireInt(node, "flags");
+        String sensorId = textOrEmpty(node, "sensor_id");
+        String sequenceId = textOrEmpty(node, "sequence_id");
+        String sourceProtocol = textOrEmpty(node, "source_protocol");
+        if (kind == MetricValueKind.COUNTER64) {
+            String counter = parseCounter64(node.get("value"));
+            return new MetricObservationRow(
+                    ts, null, counter, quality, flags, sensorId, sequenceId, sourceProtocol);
+        }
+        if (!node.has("value") || node.get("value").isNull() || !node.get("value").isNumber()) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
+        double value = node.get("value").asDouble();
+        return new MetricObservationRow(
+                ts, value, null, quality, flags, sensorId, sequenceId, sourceProtocol);
+    }
+
     private static Instant parseTimestamp(JsonNode node) {
         if (node == null || node.isNull()) {
-            throw new DomainException("VALIDATION_FAILED", "observation timestamp missing");
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
         }
         String raw = node.asText();
         // ClickHouse JSONEachRow DateTime64 may arrive as "YYYY-MM-DD HH:mm:ss.SSS".
@@ -181,12 +235,20 @@ public class ClickHouseMetricObservationReader {
         } else if (!raw.endsWith("Z") && raw.indexOf('+') < 0) {
             raw = raw + "Z";
         }
-        return Instant.parse(raw);
+        try {
+            return Instant.parse(raw);
+        } catch (DateTimeParseException ex) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
     }
 
     static String parseCounter64(JsonNode valueNode) {
         if (valueNode == null || valueNode.isNull()) {
-            throw new DomainException("VALIDATION_FAILED", "counter observation value missing");
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
         }
         String decimal;
         if (valueNode.isTextual()) {
@@ -195,16 +257,36 @@ public class ClickHouseMetricObservationReader {
             // Only safe for values that fit Java long; still normalize via BigInteger.
             decimal = valueNode.bigIntegerValue().toString();
         } else {
-            throw new DomainException("VALIDATION_FAILED", "counter observation value must be unsigned decimal");
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
         }
         if (!decimal.matches("^[0-9]+$")) {
-            throw new DomainException("VALIDATION_FAILED", "counter observation value must be unsigned decimal");
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
         }
         BigInteger exact = new BigInteger(decimal);
         if (exact.signum() < 0 || exact.compareTo(MAX_UINT64) > 0) {
-            throw new DomainException("VALIDATION_FAILED", "counter observation value outside UInt64");
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
         }
         return exact.toString();
+    }
+
+    private static int requireInt(JsonNode node, String field) {
+        JsonNode child = node.get(field);
+        if (child == null || child.isNull()) {
+            // Absent quality defaults to 0 (UNKNOWN) per IngestionValidator; absent flags → 0.
+            return 0;
+        }
+        if (!child.isIntegralNumber()) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
+        return child.asInt();
     }
 
     private static String textOrEmpty(JsonNode node, String field) {

@@ -11,6 +11,7 @@ import java.util.List;
 /**
  * Per-entity metric observation read orchestration.
  * Proves parent entity existence under tenant scope before querying ClickHouse.
+ * Distinguishes historical observation-window freshness from current monitoring liveness.
  */
 @Service
 public class EntityMetricObservationService {
@@ -32,13 +33,13 @@ public class EntityMetricObservationService {
     public EntityMetricObservationResult read(MetricObservationQuery query, Instant evaluatedAt) {
         // Tenant+entity existence (404 ENTITY_NOT_FOUND). Authorization is filter-enforced separately.
         entities.get(query.tenantId(), query.entityId());
-        List<MetricObservationRow> rows = reader.read(query);
-        return classify(query, rows, evaluatedAt == null ? Instant.now() : evaluatedAt);
+        MetricObservationPage page = reader.read(query);
+        return classify(query, page, evaluatedAt == null ? Instant.now() : evaluatedAt);
     }
 
     EntityMetricObservationResult classify(
             MetricObservationQuery query,
-            List<MetricObservationRow> rows,
+            MetricObservationPage page,
             Instant evaluatedAt
     ) {
         String view = query.selector().valueKind() == MetricValueKind.COUNTER64
@@ -46,48 +47,94 @@ public class EntityMetricObservationService {
                 : "platform.metric_numeric";
         MetricObservationProvenance provenance = new MetricObservationProvenance(
                 view,
-                "ts ASC, sequence_id ASC",
+                ClickHouseMetricObservationReader.SELECTION_ORDERING
+                        + " then present "
+                        + ClickHouseMetricObservationReader.PRESENTATION_ORDERING,
                 "clickhouse-canonical-final-view"
         );
 
-        if (rows == null || rows.isEmpty()) {
+        List<MetricObservationRow> rows = page == null ? List.of() : page.observations();
+        boolean truncated = page != null && page.truncated();
+
+        if (rows.isEmpty()) {
             return new EntityMetricObservationResult(
                     query,
-                    ObservationReadState.UNKNOWN,
+                    ObservationReadState.NO_DATA,
                     FreshnessClass.MISSING,
                     List.of(),
+                    truncated,
                     provenance,
-                    "No observations in the requested window; not DEVICE_DOWN."
+                    "No observations in the requested window; NO_DATA, not DEVICE_DOWN."
             );
         }
 
-        Instant newest = rows.get(rows.size() - 1).timestamp();
-        Duration age = Duration.between(newest, evaluatedAt);
-        boolean stale = age.compareTo(freshnessThreshold) > 0;
-        boolean degradedQuality = rows.stream().anyMatch(r -> r.quality() == 2);
+        boolean historicalWindow = isHistoricalWindow(query.toExclusive(), evaluatedAt);
+        boolean hasUnknownQuality = rows.stream().anyMatch(r -> r.quality() == 0);
+        boolean hasDegradedQuality = rows.stream().anyMatch(r -> r.quality() == 2);
 
         ObservationReadState state;
         FreshnessClass freshness;
         String note;
-        if (stale && degradedQuality) {
-            state = ObservationReadState.MONITORING_DEGRADED;
-            freshness = FreshnessClass.STALE;
-            note = "Stale observations with degraded quality; not DEVICE_DOWN.";
-        } else if (stale) {
-            state = ObservationReadState.STALE;
-            freshness = FreshnessClass.STALE;
-            note = "Newest observation exceeds freshness threshold; not DEVICE_DOWN.";
-        } else if (degradedQuality) {
-            state = ObservationReadState.MONITORING_DEGRADED;
-            freshness = FreshnessClass.FRESH;
-            note = "Fresh observations with degraded quality; not DEVICE_DOWN.";
+
+        if (historicalWindow) {
+            freshness = FreshnessClass.HISTORICAL;
+            if (hasDegradedQuality) {
+                state = ObservationReadState.MONITORING_DEGRADED;
+                note = "Historical observation window with degraded quality; not current-liveness STALE; not DEVICE_DOWN.";
+            } else if (hasUnknownQuality) {
+                state = ObservationReadState.UNKNOWN;
+                note = "Historical observation window with unknown quality; not promoted to healthy; not DEVICE_DOWN.";
+            } else {
+                state = ObservationReadState.OK;
+                note = "Historical observation window returned; freshness is HISTORICAL, not current-liveness FRESH.";
+            }
         } else {
-            state = ObservationReadState.OK;
-            freshness = FreshnessClass.FRESH;
-            note = "Bounded observations returned from canonical view.";
+            Instant newest = rows.get(rows.size() - 1).timestamp();
+            Duration age = Duration.between(newest, evaluatedAt);
+            boolean stale = age.compareTo(freshnessThreshold) > 0;
+
+            if (stale && hasDegradedQuality) {
+                state = ObservationReadState.MONITORING_DEGRADED;
+                freshness = FreshnessClass.STALE;
+                note = "Stale observations with degraded quality; not DEVICE_DOWN.";
+            } else if (stale && hasUnknownQuality) {
+                state = ObservationReadState.UNKNOWN;
+                freshness = FreshnessClass.STALE;
+                note = "Stale observations with unknown quality; not promoted to healthy; not DEVICE_DOWN.";
+            } else if (stale) {
+                state = ObservationReadState.STALE;
+                freshness = FreshnessClass.STALE;
+                note = "Newest observation exceeds freshness threshold; not DEVICE_DOWN.";
+            } else if (hasDegradedQuality) {
+                state = ObservationReadState.MONITORING_DEGRADED;
+                freshness = FreshnessClass.FRESH;
+                note = "Fresh observations with degraded quality; not DEVICE_DOWN.";
+            } else if (hasUnknownQuality) {
+                state = ObservationReadState.UNKNOWN;
+                freshness = FreshnessClass.FRESH;
+                note = "Fresh observations with unknown quality; not promoted to healthy; not DEVICE_DOWN.";
+            } else {
+                state = ObservationReadState.OK;
+                freshness = FreshnessClass.FRESH;
+                note = "Bounded observations returned from canonical view.";
+            }
         }
 
-        return new EntityMetricObservationResult(query, state, freshness, List.copyOf(rows), provenance, note);
+        if (truncated) {
+            note = note + " Result truncated to latest " + query.limit() + " observations.";
+        }
+
+        return new EntityMetricObservationResult(
+                query, state, freshness, List.copyOf(rows), truncated, provenance, note);
+    }
+
+    /**
+     * A window whose exclusive end is entirely before the live freshness horizon is historical:
+     * wall-clock advance alone must not reclassify valid history as current-monitoring STALE.
+     */
+    boolean isHistoricalWindow(Instant toExclusive, Instant evaluatedAt) {
+        Instant liveHorizonStart = evaluatedAt.minus(freshnessThreshold);
+        return toExclusive.isBefore(liveHorizonStart) || toExclusive.equals(liveHorizonStart);
     }
 
     public record MetricObservationProvenance(
@@ -102,6 +149,7 @@ public class EntityMetricObservationService {
             ObservationReadState observationState,
             FreshnessClass freshness,
             List<MetricObservationRow> observations,
+            boolean truncated,
             MetricObservationProvenance provenance,
             String qualityNote
     ) {

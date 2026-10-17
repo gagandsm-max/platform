@@ -38,6 +38,7 @@ public final class EntityMetricObservationDtos {
             String to,
             int limit,
             int returned,
+            boolean truncated,
             String observationState,
             String freshness,
             String qualityNote,

@@ -58,6 +58,7 @@ public class EntityMetricObservationController {
                 query.toExclusive().toString(),
                 query.limit(),
                 result.observations().size(),
+                result.truncated(),
                 result.observationState().name(),
                 result.freshness().name(),
                 result.qualityNote(),
