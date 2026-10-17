@@ -3,21 +3,26 @@ package com.platform.core.telemetry.read;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.domain.DomainException;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 
 import java.math.BigInteger;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
+import java.util.Map;
 import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -194,6 +199,116 @@ class ClickHouseMetricObservationReaderTest {
                 "http://clickhouse:8123", "Basic dGVzdA==",
                 mock(HttpClient.class), new ObjectMapper(), timeout);
         assertEquals(ClickHouseMetricObservationReader.class, reader.getClass());
+    }
+
+    @Test
+    void springSelectsProductionConstructorWithObjectMapperAndProperties() {
+        assertEquals(2, ClickHouseMetricObservationReader.class.getDeclaredConstructors().length);
+
+        AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
+        context.getEnvironment().getPropertySources().addFirst(new MapPropertySource(
+                "issue105-clickhouse-reader",
+                Map.of(
+                        "platform.clickhouse.host", "clickhouse",
+                        "platform.clickhouse.port", "8123",
+                        "platform.clickhouse.user", "platform_app",
+                        "platform.clickhouse.password", "platform_dev_ch_password_change_in_prod"
+                )));
+        context.getDefaultListableBeanFactory().registerSingleton("objectMapper", new ObjectMapper());
+        context.register(ClickHouseMetricObservationReader.class);
+        context.refresh();
+
+        assertNotNull(context.getBean(ClickHouseMetricObservationReader.class));
+        context.close();
+    }
+
+    @Test
+    void preservesUInt32FlagsMaxThroughRow() {
+        ClickHouseMetricObservationReader reader = newReader(mock(HttpClient.class));
+        String body = """
+                {"ts":"2026-10-16 00:00:01.000","value":1.0,"quality":1,"flags":4294967295,"sensor_id":"s1","sequence_id":"a","source_protocol":"agent"}
+                """;
+        MetricObservationPage page = reader.parseLatestPage(body, MetricValueKind.NUMERIC, 10);
+        assertEquals(1, page.observations().size());
+        assertEquals(4_294_967_295L, page.observations().get(0).flags());
+        assertEquals(1, page.observations().get(0).quality());
+    }
+
+    @Test
+    void rejectsOutOfRangeFlagsWithDataIntegrityError() {
+        ClickHouseMetricObservationReader reader = newReader(mock(HttpClient.class));
+        String body = """
+                {"ts":"2026-10-16 00:00:01.000","value":1.0,"quality":1,"flags":4294967296,"sensor_id":"s1","sequence_id":"a","source_protocol":"agent"}
+                """;
+        DomainException ex = assertThrows(DomainException.class,
+                () -> reader.parseLatestPage(body, MetricValueKind.NUMERIC, 10));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
+    void rejectsUnsupportedQualityThreeWithDataIntegrityError() {
+        ClickHouseMetricObservationReader reader = newReader(mock(HttpClient.class));
+        String body = """
+                {"ts":"2026-10-16 00:00:01.000","value":1.0,"quality":3,"flags":0,"sensor_id":"s1","sequence_id":"a","source_protocol":"agent"}
+                """;
+        DomainException ex = assertThrows(DomainException.class,
+                () -> reader.parseLatestPage(body, MetricValueKind.NUMERIC, 10));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
+    void rejectsQualityIntegralOverflowThatWouldWrapToGood() {
+        ClickHouseMetricObservationReader reader = newReader(mock(HttpClient.class));
+        // 4294967297 as signed int truncates/wraps toward 1; must not become GOOD.
+        String body = """
+                {"ts":"2026-10-16 00:00:01.000","value":1.0,"quality":4294967297,"flags":0,"sensor_id":"s1","sequence_id":"a","source_protocol":"agent"}
+                """;
+        DomainException ex = assertThrows(DomainException.class,
+                () -> reader.parseLatestPage(body, MetricValueKind.NUMERIC, 10));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
+    void ceilBoundsForSubMillisecondWindowSelectCorrectDateTime64Interval() throws Exception {
+        HttpClient httpClient = mock(HttpClient.class);
+        @SuppressWarnings("unchecked")
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn("");
+        AtomicReference<HttpRequest> captured = new AtomicReference<>();
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenAnswer(invocation -> {
+                    captured.set(invocation.getArgument(0));
+                    return response;
+                });
+
+        Instant from = Instant.parse("2026-10-16T00:00:00.000500Z");
+        Instant to = Instant.parse("2026-10-16T00:00:00.001500Z");
+        ClickHouseMetricObservationReader reader = newReader(httpClient);
+        MetricObservationQuery query = MetricObservationQuery.parse(
+                TENANT, ENTITY, "system.cpu.utilization", "NUMERIC", from, to, 10);
+        reader.read(query);
+
+        // Original API request bounds preserved on the query object.
+        assertEquals(from, query.fromInclusive());
+        assertEquals(to, query.toExclusive());
+
+        String uri = URLDecoder.decode(captured.get().uri().toString(), StandardCharsets.UTF_8);
+        assertTrue(uri.contains("param_from_ts=2026-10-16 00:00:00.001"), uri);
+        assertTrue(uri.contains("param_to_ts=2026-10-16 00:00:00.002"), uri);
+        // Floored SQL [.000,.001) must not be used — that would admit .000 and exclude .001.
+        assertFalse(uri.contains("param_from_ts=2026-10-16 00:00:00.000"));
+    }
+
+    @Test
+    void alreadyAlignedMillisecondBoundsAreUnchanged() {
+        Instant aligned = Instant.parse("2026-10-16T00:00:00.001Z");
+        assertEquals(aligned, ClickHouseMetricObservationReader.ceilToMillis(aligned));
+        assertEquals("2026-10-16 00:00:00.001",
+                ClickHouseMetricObservationReader.formatClickHouseBound(aligned));
+        Instant zero = Instant.parse("2026-10-16T00:00:00.000Z");
+        assertEquals("2026-10-16 00:00:00.000",
+                ClickHouseMetricObservationReader.formatClickHouseBound(zero));
     }
 
     private static ClickHouseMetricObservationReader newReader(HttpClient httpClient) {

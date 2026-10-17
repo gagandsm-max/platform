@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.domain.DomainException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -43,6 +44,8 @@ public class ClickHouseMetricObservationReader {
             .withZone(ZoneOffset.UTC);
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(5);
     private static final BigInteger MAX_UINT64 = new BigInteger("18446744073709551615");
+    private static final BigInteger MAX_UINT32 = BigInteger.valueOf(4_294_967_295L);
+    private static final long NANOS_PER_MILLI = 1_000_000L;
     static final String SELECTION_ORDERING = "ts DESC, sensor_id DESC, sequence_id DESC";
     static final String PRESENTATION_ORDERING = "ts ASC, sensor_id ASC, sequence_id ASC";
 
@@ -52,6 +55,11 @@ public class ClickHouseMetricObservationReader {
     private final ObjectMapper objectMapper;
     private final Duration requestTimeout;
 
+    /**
+     * Production constructor selected by Spring DI. The package-visible test constructor
+     * must not compete for autowiring (Spring 6.1+ counts all constructors).
+     */
+    @Autowired
     public ClickHouseMetricObservationReader(
             @Value("${platform.clickhouse.host:clickhouse}") String host,
             @Value("${platform.clickhouse.port:8123}") int port,
@@ -90,8 +98,8 @@ public class ClickHouseMetricObservationReader {
                 + "/?param_tenant_id=" + enc(query.tenantId().toString())
                 + "&param_entity_id=" + enc(query.entityId().toString())
                 + "&param_metric_id=" + enc(query.selector().metricId())
-                + "&param_from_ts=" + enc(CH_TS.format(query.fromInclusive()))
-                + "&param_to_ts=" + enc(CH_TS.format(query.toExclusive()))
+                + "&param_from_ts=" + enc(formatClickHouseBound(query.fromInclusive()))
+                + "&param_to_ts=" + enc(formatClickHouseBound(query.toExclusive()))
                 + "&param_row_limit=" + fetchLimit
                 + "&output_format_json_quote_64bit_integers=1"
                 + "&max_execution_time=4";
@@ -202,8 +210,8 @@ public class ClickHouseMetricObservationReader {
 
     private MetricObservationRow parseRow(JsonNode node, MetricValueKind kind) {
         Instant ts = parseTimestamp(node.get("ts"));
-        int quality = requireInt(node, "quality");
-        int flags = requireInt(node, "flags");
+        int quality = requireQuality(node);
+        long flags = requireUInt32(node, "flags");
         String sensorId = textOrEmpty(node, "sensor_id");
         String sequenceId = textOrEmpty(node, "sequence_id");
         String sourceProtocol = textOrEmpty(node, "source_protocol");
@@ -220,6 +228,26 @@ public class ClickHouseMetricObservationReader {
         double value = node.get("value").asDouble();
         return new MetricObservationRow(
                 ts, value, null, quality, flags, sensorId, sequenceId, sourceProtocol);
+    }
+
+    /**
+     * Formats an API Instant as a DateTime64(3) bound string.
+     * Sub-millisecond instants round UP to the next millisecond so the SQL
+     * {@code [from,to)} interval preserves inclusive-from / exclusive-to semantics
+     * against millisecond-stored observations. Already-aligned bounds are unchanged.
+     * Original API request Instants remain unmodified on the query/response.
+     */
+    static String formatClickHouseBound(Instant instant) {
+        return CH_TS.format(ceilToMillis(instant));
+    }
+
+    static Instant ceilToMillis(Instant instant) {
+        int nano = instant.getNano();
+        int subMilli = nano % (int) NANOS_PER_MILLI;
+        if (subMilli == 0) {
+            return instant;
+        }
+        return instant.plusNanos(NANOS_PER_MILLI - subMilli);
     }
 
     private static Instant parseTimestamp(JsonNode node) {
@@ -275,10 +303,13 @@ public class ClickHouseMetricObservationReader {
         return exact.toString();
     }
 
-    private static int requireInt(JsonNode node, String field) {
-        JsonNode child = node.get(field);
+    /**
+     * Populated quality must be UNKNOWN=0, GOOD=1 or DEGRADED=2.
+     * Absent/null defaults to UNKNOWN. Unsupported/malformed values fail closed.
+     */
+    private static int requireQuality(JsonNode node) {
+        JsonNode child = node.get("quality");
         if (child == null || child.isNull()) {
-            // Absent quality defaults to 0 (UNKNOWN) per IngestionValidator; absent flags → 0.
             return 0;
         }
         if (!child.isIntegralNumber()) {
@@ -286,7 +317,37 @@ public class ClickHouseMetricObservationReader {
                     "DATA_INTEGRITY_ERROR",
                     "Telemetry store returned malformed observation data");
         }
-        return child.asInt();
+        BigInteger exact = child.bigIntegerValue();
+        if (exact.compareTo(BigInteger.ZERO) < 0 || exact.compareTo(BigInteger.valueOf(2L)) > 0) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
+        return exact.intValueExact();
+    }
+
+    /** ClickHouse flags are UInt32: preserve the full 0..4294967295 range as Java long. */
+    private static long requireUInt32(JsonNode node, String field) {
+        JsonNode child = node.get(field);
+        if (child == null || child.isNull()) {
+            return 0L;
+        }
+        BigInteger exact;
+        if (child.isIntegralNumber()) {
+            exact = child.bigIntegerValue();
+        } else if (child.isTextual() && child.asText().matches("^[0-9]+$")) {
+            exact = new BigInteger(child.asText());
+        } else {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
+        if (exact.signum() < 0 || exact.compareTo(MAX_UINT32) > 0) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
+        return exact.longValueExact();
     }
 
     private static String textOrEmpty(JsonNode node, String field) {

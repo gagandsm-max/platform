@@ -15,7 +15,7 @@ public final class EntityMetricObservationDtos {
             Double value,
             String counterValue,
             int quality,
-            int flags,
+            long flags,
             String sensorId,
             String sequenceId,
             String sourceProtocol

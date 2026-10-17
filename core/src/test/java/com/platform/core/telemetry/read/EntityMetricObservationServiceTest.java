@@ -164,6 +164,17 @@ class EntityMetricObservationServiceTest {
     }
 
     @Test
+    void unsupportedQualityThreeCannotBecomeHealthy() {
+        MetricObservationQuery query = liveQuery();
+        DomainException ex = assertThrows(DomainException.class, () -> service.classify(
+                query,
+                new MetricObservationPage(List.of(row(Instant.parse("2026-10-16T00:55:00Z"), 3)), false),
+                Instant.parse("2026-10-16T01:00:00Z")
+        ));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
     void entityLookupFailureNeverInvokesReader() {
         MetricObservationQuery query = liveQuery();
         when(entities.get(TENANT, ENTITY))

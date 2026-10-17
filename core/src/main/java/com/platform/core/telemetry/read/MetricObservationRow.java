@@ -11,7 +11,7 @@ public record MetricObservationRow(
         Double numericValue,
         String counterValue,
         int quality,
-        int flags,
+        long flags,
         String sensorId,
         String sequenceId,
         String sourceProtocol

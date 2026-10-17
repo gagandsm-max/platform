@@ -1,5 +1,6 @@
 package com.platform.core.telemetry.read;
 
+import com.platform.core.domain.DomainException;
 import com.platform.core.domain.inventory.EntityService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -68,9 +69,19 @@ public class EntityMetricObservationService {
             );
         }
 
+        for (MetricObservationRow row : rows) {
+            int quality = row.quality();
+            if (quality != 0 && quality != 1 && quality != 2) {
+                throw new DomainException(
+                        "DATA_INTEGRITY_ERROR",
+                        "Telemetry store returned malformed observation data");
+            }
+        }
+
         boolean historicalWindow = isHistoricalWindow(query.toExclusive(), evaluatedAt);
         boolean hasUnknownQuality = rows.stream().anyMatch(r -> r.quality() == 0);
         boolean hasDegradedQuality = rows.stream().anyMatch(r -> r.quality() == 2);
+        boolean allGoodQuality = rows.stream().allMatch(r -> r.quality() == 1);
 
         ObservationReadState state;
         FreshnessClass freshness;
@@ -84,9 +95,13 @@ public class EntityMetricObservationService {
             } else if (hasUnknownQuality) {
                 state = ObservationReadState.UNKNOWN;
                 note = "Historical observation window with unknown quality; not promoted to healthy; not DEVICE_DOWN.";
-            } else {
+            } else if (allGoodQuality) {
                 state = ObservationReadState.OK;
                 note = "Historical observation window returned; freshness is HISTORICAL, not current-liveness FRESH.";
+            } else {
+                throw new DomainException(
+                        "DATA_INTEGRITY_ERROR",
+                        "Telemetry store returned malformed observation data");
             }
         } else {
             Instant newest = rows.get(rows.size() - 1).timestamp();
@@ -101,7 +116,7 @@ public class EntityMetricObservationService {
                 state = ObservationReadState.UNKNOWN;
                 freshness = FreshnessClass.STALE;
                 note = "Stale observations with unknown quality; not promoted to healthy; not DEVICE_DOWN.";
-            } else if (stale) {
+            } else if (stale && allGoodQuality) {
                 state = ObservationReadState.STALE;
                 freshness = FreshnessClass.STALE;
                 note = "Newest observation exceeds freshness threshold; not DEVICE_DOWN.";
@@ -113,10 +128,14 @@ public class EntityMetricObservationService {
                 state = ObservationReadState.UNKNOWN;
                 freshness = FreshnessClass.FRESH;
                 note = "Fresh observations with unknown quality; not promoted to healthy; not DEVICE_DOWN.";
-            } else {
+            } else if (allGoodQuality) {
                 state = ObservationReadState.OK;
                 freshness = FreshnessClass.FRESH;
                 note = "Bounded observations returned from canonical view.";
+            } else {
+                throw new DomainException(
+                        "DATA_INTEGRITY_ERROR",
+                        "Telemetry store returned malformed observation data");
             }
         }
 

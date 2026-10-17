@@ -97,6 +97,42 @@ class EntityMetricObservationApiTest {
     }
 
     @Test
+    void uint32FlagsMaxPreservedInResponse() throws Exception {
+        MetricObservationQuery query = MetricObservationQuery.parse(
+                TENANT, ENTITY, "system.cpu.utilization", "NUMERIC",
+                Instant.parse("2026-10-16T00:00:00.000500Z"),
+                Instant.parse("2026-10-16T00:00:00.001500Z"),
+                10
+        );
+        when(service.read(eq(query), any(Instant.class))).thenReturn(new EntityMetricObservationResult(
+                query,
+                ObservationReadState.OK,
+                FreshnessClass.FRESH,
+                List.of(new MetricObservationRow(
+                        Instant.parse("2026-10-16T00:00:00.001Z"), 0.42, null, 1, 4_294_967_295L,
+                        "s1", "seq-1", "agent")),
+                false,
+                new MetricObservationProvenance(
+                        "platform.metric_numeric",
+                        "ts DESC, sensor_id DESC, sequence_id DESC then present ts ASC, sensor_id ASC, sequence_id ASC",
+                        "clickhouse-canonical-final-view"),
+                "Bounded observations returned from canonical view."
+        ));
+
+        mockMvc.perform(get("/api/v1/tenants/" + TENANT + "/entities/" + ENTITY + "/metric-observations")
+                        .param("metricId", "system.cpu.utilization")
+                        .param("valueKind", "NUMERIC")
+                        .param("from", "2026-10-16T00:00:00.000500Z")
+                        .param("to", "2026-10-16T00:00:00.001500Z")
+                        .param("limit", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.from").value("2026-10-16T00:00:00.000500Z"))
+                .andExpect(jsonPath("$.to").value("2026-10-16T00:00:00.001500Z"))
+                .andExpect(jsonPath("$.observations[0].flags").value(4_294_967_295L))
+                .andExpect(jsonPath("$.observations[0].quality").value(1));
+    }
+
+    @Test
     void agentCpuKeyAcceptedAtApiBoundary() throws Exception {
         MetricObservationQuery query = MetricObservationQuery.parse(
                 TENANT, ENTITY, AllowedMetricSelector.AGENT_CPU_UTILIZATION, "NUMERIC",
