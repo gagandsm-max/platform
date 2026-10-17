@@ -153,6 +153,22 @@ public class IngestionMetrics implements org.springframework.context.Application
             // Deliberately retain consumerFailures: only persistence plus ACK clears them.
         }
 
+        synchronized org.springframework.context.ApplicationEventPublisher beginGenerationPublisher(
+                org.springframework.context.ApplicationEventPublisher downstream) {
+            beginGeneration();
+            long generation = epoch;
+            return event -> {
+                onGenerationEvent(generation, event);
+                if (downstream != null) downstream.publishEvent(event);
+            };
+        }
+
+        private synchronized void onGenerationEvent(long generation, Object event) {
+            // Children inherit this immutable stamp before their consumer threads start.
+            // Reject retired publishers BEFORE provisional child capacity is considered.
+            if (terminalStops == this && generation == epoch) onEvent(event);
+        }
+
         synchronized void establishChildren(java.util.List<? extends org.springframework.kafka.listener.MessageListenerContainer> actual) {
             if (actual.size() > expectedChildren) {
                 ineligible = true;

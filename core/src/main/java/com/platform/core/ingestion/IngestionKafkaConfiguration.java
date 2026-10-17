@@ -139,12 +139,7 @@ public class IngestionKafkaConfiguration {
             if ("telemetryNumericListener".equals(container.getListenerId())) {
                 var provenance = metrics.trackTerminalStops(container);
                 ((ProvenanceListenerContainer) container).provenance = provenance;
-                // Children inherit this publisher in 3.2.4. Correlate on the publishing
-                // consumer thread even when the application's multicaster is asynchronous.
-                container.setApplicationEventPublisher(event -> {
-                    provenance.onEvent(event);
-                    publisher.publishEvent(event);
-                });
+                container.setApplicationEventPublisher(publisher);
             }
         });
         return factory;
@@ -154,16 +149,27 @@ public class IngestionKafkaConfiguration {
     static final class ProvenanceListenerContainer
             extends org.springframework.kafka.listener.ConcurrentMessageListenerContainer<String, String> {
         private IngestionMetrics.TerminalStopProvenance provenance;
+        private org.springframework.context.ApplicationEventPublisher downstreamPublisher;
 
         ProvenanceListenerContainer(ConsumerFactory<? super String, ? super String> factory, ContainerProperties properties) {
             super(factory, properties);
         }
 
         @Override
+        public void setApplicationEventPublisher(org.springframework.context.ApplicationEventPublisher publisher) {
+            downstreamPublisher = publisher;
+            super.setApplicationEventPublisher(publisher);
+        }
+
+        @Override
         protected void doStart() {
             // AbstractMessageListenerContainer.start() invokes this once under lifecycleLock.
             // This is an actual start boundary, never a child-side isRunning() heuristic.
-            if (provenance != null) provenance.beginGeneration();
+            if (provenance != null) {
+                // Keep one downstream publisher, not the previous generation's wrapper.
+                // Spring copies this stamped publisher into each child before child.start().
+                super.setApplicationEventPublisher(provenance.beginGenerationPublisher(downstreamPublisher));
+            }
             try {
                 super.doStart();
             } finally {

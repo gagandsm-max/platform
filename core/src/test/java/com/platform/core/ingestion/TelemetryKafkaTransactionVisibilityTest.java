@@ -386,6 +386,72 @@ class TelemetryKafkaTransactionVisibilityTest {
         assertRestartGenerationIsolation(false);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"1,false", "1,true", "2,false", "2,true"})
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void retiredStartsBeforeCurrentStartsCannotSuppressRegisteredFailStop(int concurrency, boolean oldAuth) throws Exception {
+        embeddedKafka.destroy();
+        var broker = new EmbeddedKafkaKraftBroker(1, concurrency, TOPIC);
+        broker.brokerProperty("transaction.state.log.replication.factor", "1");
+        broker.brokerProperty("transaction.state.log.min.isr", "1");
+        broker.afterPropertiesSet();
+        embeddedKafka = broker;
+        String bootstrap = broker.getBrokersAsString();
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var metrics = new IngestionMetrics();
+        var client = mock(ClickHouseClient.class);
+        var group = "k2a-startup-" + UUID.randomUUID();
+        context = createListenerContext(bootstrap, group, client, mapper, metrics);
+        var container = (org.springframework.kafka.listener.ConcurrentMessageListenerContainer<?, ?>) registeredListener();
+        container.setConcurrency(concurrency);
+        var queuedStops = new java.util.concurrent.LinkedBlockingQueue<Runnable>();
+        container.setCommonErrorHandler(IngestionKafkaConfiguration.terminalStoppingErrorHandler(metrics, queuedStops::add));
+        container.start();
+        awaitCondition(() -> container.getAssignedPartitions() != null
+                && container.getAssignedPartitions().size() == concurrency, 30, "old generation assigned");
+        var retiredChildren = List.copyOf(container.getContainers());
+        var retiredPublisher = container.getApplicationEventPublisher();
+        container.stop();
+        var injected = new java.util.concurrent.atomic.AtomicBoolean();
+        var factory = context.getBean(IngestionKafkaConfiguration.TELEMETRY_KAFKA_CONSUMER_FACTORY,
+                org.springframework.kafka.core.ConsumerFactory.class);
+        factory.addListener(new org.springframework.kafka.core.ConsumerFactory.Listener<String, String>() {
+            @Override
+            public void consumerAdded(String id, Consumer<String, String> consumer) {
+                if (!injected.compareAndSet(false, true)) return;
+                // Spring creates the real consumer before its child publishes Starting,
+                // while the parent has not yet reconciled the new child collection.
+                for (var retired : retiredChildren) {
+                    retiredPublisher.publishEvent(new org.springframework.kafka.event.ConsumerStartingEvent(retired, container));
+                    if (oldAuth) retiredPublisher.publishEvent(new org.springframework.kafka.event.ConsumerStoppedEvent(
+                            retired, container, org.springframework.kafka.event.ConsumerStoppedEvent.Reason.AUTH));
+                }
+            }
+        });
+        container.start();
+        assertTrue(injected.get(), "retired publication injected during actual child construction");
+        awaitCondition(() -> container.getAssignedPartitions() != null
+                && container.getAssignedPartitions().size() == concurrency, 30, "current generation assigned");
+        Long before = committedOffset(bootstrap, group);
+        var template = createTransactionalTemplate(bootstrap);
+        String followingValid = mapper.writeValueAsString(observation("following-valid"));
+        template.executeInTransaction(ops -> {
+            sendPartition(ops, 0, "failed", "{invalid");
+            sendPartition(ops, 0, "following-valid", followingValid);
+            return true;
+        });
+        var stop = queuedStops.poll(30, TimeUnit.SECONDS);
+        assertNotNull(stop, "actual error handler submitted its physical stopping action");
+        stop.run();
+        assertFalse(container.isRunning(), "current failed consumer must physically stop, not discard a null token");
+        assertNotNull(metrics.getConsumerTerminalStop(), "current start/thread must retain terminal attribution");
+        awaitCondition(() -> metrics.getConsumerTerminalStop().stopCompleted(), 30, "all current children completed");
+        assertEquals("INELIGIBLE_STOP", metrics.getConsumerTerminalStop().status(), "poison is never recovery authority");
+        assertTrue(metrics.isConsumerDegraded());
+        assertEquals(before, committedOffset(bootstrap, group), "failed then valid cannot commit past failure");
+        verify(client, org.mockito.Mockito.never()).insertNumericBatch(anyList());
+    }
+
     @Test
     @Timeout(value = 120, unit = TimeUnit.SECONDS)
     void queuedOldStopCannotStopNewRegisteredListenerGeneration() throws Exception {
@@ -408,22 +474,24 @@ class TelemetryKafkaTransactionVisibilityTest {
         container.setConcurrency(2);
         var queuedStops = new java.util.concurrent.LinkedBlockingQueue<Runnable>();
         container.setCommonErrorHandler(IngestionKafkaConfiguration.terminalStoppingErrorHandler(metrics, queuedStops::add));
-        var originalPublisher = container.getApplicationEventPublisher();
         var dropOneCompletion = new java.util.concurrent.atomic.AtomicBoolean(true);
         var observedCompletions = new AtomicInteger();
-        container.setApplicationEventPublisher(event -> {
-            if (event instanceof org.springframework.kafka.event.ConsumerStoppedEvent) {
-                observedCompletions.incrementAndGet();
-                // Inject loss at the real child publication boundary, not a fabricated child identity.
-                if (dropOneCompletion.compareAndSet(true, false)) return;
-            }
-            originalPublisher.publishEvent(event);
-        });
         container.start();
         awaitCondition(() -> container.getContainers().size() == 2
                 && container.getAssignedPartitions() != null && container.getAssignedPartitions().size() == 2,
                 30, "first registered generation owns both partitions");
         var oldChildren = List.copyOf(container.getContainers());
+        for (var child : oldChildren) {
+            var inheritedPublisher = child.getApplicationEventPublisher();
+            child.setApplicationEventPublisher(event -> {
+                if (event instanceof org.springframework.kafka.event.ConsumerStoppedEvent) {
+                    observedCompletions.incrementAndGet();
+                    // Drop at the real child boundary before the stamped provenance publisher.
+                    if (dropOneCompletion.compareAndSet(true, false)) return;
+                }
+                inheritedPublisher.publishEvent(event);
+            });
+        }
         createTransactionalTemplate(bootstrap).executeInTransaction(ops -> {
             sendPartition(ops, 0, "poison", "{invalid");
             return true;

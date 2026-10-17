@@ -239,6 +239,56 @@ class IngestionTerminalStopProvenanceTest {
                 "only actual current members can veto this generation");
     }
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"1,false", "1,true", "2,false", "2,true"})
+    void stampedPublishersPreserveCurrentStartsBeforeMembership(int concurrency, boolean oldAuth) throws Exception {
+        configure(concurrency);
+        var downstream = mock(org.springframework.context.ApplicationEventPublisher.class);
+        var retiredPublisher = provenance.beginGenerationPublisher(downstream);
+        var retired = List.copyOf(children);
+        var currentPublisher = provenance.beginGenerationPublisher(downstream);
+        for (var child : retired) {
+            retiredPublisher.publishEvent(new ConsumerStartingEvent(child, parent));
+            if (oldAuth) retiredPublisher.publishEvent(new ConsumerStoppedEvent(child, parent, ConsumerStoppedEvent.Reason.AUTH));
+        }
+        var threads = new ArrayList<java.util.concurrent.ExecutorService>();
+        try {
+            for (int i = 0; i < concurrency; i++) {
+                var child = mock(KafkaMessageListenerContainer.class);
+                when(child.getListenerId()).thenReturn("telemetryNumericListener-" + i);
+                children.set(i, child);
+                var thread = Executors.newSingleThreadExecutor();
+                threads.add(thread);
+                thread.submit(() -> currentPublisher.publishEvent(new ConsumerStartingEvent(child, parent)))
+                        .get(5, TimeUnit.SECONDS);
+            }
+            // Every current Starting event precedes authoritative reconciliation, just as in Spring.
+            threads.get(0).submit(() -> requestStop(terminal(0, TelemetryConsumerFailure.DEPENDENCY), record(0)))
+                    .get(5, TimeUnit.SECONDS);
+            assertEquals("GENERATION_UNCERTAIN", metrics.getConsumerTerminalStop().status());
+            assertFalse(metrics.getConsumerTerminalStop().stopCompleted());
+            provenance.establishChildren(children);
+            stopTasks.remove(0).run();
+            verify(parent, times(1)).stopAbnormally(any(Runnable.class));
+            assertFalse(metrics.getConsumerTerminalStop().stopCompleted(), "initiation is not completion");
+            for (int i = 0; i < concurrency; i++) {
+                var child = children.get(i);
+                threads.get(i).submit(() -> currentPublisher.publishEvent(
+                        new ConsumerStoppedEvent(child, parent, ConsumerStoppedEvent.Reason.NORMAL)))
+                        .get(5, TimeUnit.SECONDS);
+            }
+            var completed = metrics.getConsumerTerminalStop();
+            assertEquals("RECOVERABLE_DEPENDENCY_STOP", completed.status());
+            retiredPublisher.publishEvent(new ConsumerStartingEvent(retired.get(0), parent));
+            assertEquals(completed, metrics.getConsumerTerminalStop());
+            // One downstream delivery per event; no generation wrapper chains.
+            int events = concurrency * (oldAuth ? 4 : 3) + 1;
+            verify(downstream, times(events)).publishEvent(any(Object.class));
+        } finally {
+            threads.forEach(java.util.concurrent.ExecutorService::shutdownNow);
+        }
+    }
+
     @Test
     void onlyMatchedConsumerCompletionMakesDependencyStopCandidate() {
         configure(1);
@@ -362,7 +412,7 @@ class IngestionTerminalStopProvenanceTest {
         var tracker = (IngestionMetrics.TerminalStopProvenance)
                 org.springframework.test.util.ReflectionTestUtils.getField(container, "provenance");
         assertNotNull(tracker);
-        tracker.beginGeneration();
+        publisher = tracker.beginGenerationPublisher(publisher);
         tracker.establishChildren(List.of(child));
         publisher.publishEvent(new ConsumerStartingEvent(child, container));
         metrics.recordTerminalFailure(record(0), TelemetryConsumerFailure.DEPENDENCY, new RuntimeException("safe"));
