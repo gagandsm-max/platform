@@ -145,11 +145,16 @@ CREATE INDEX IF NOT EXISTS idx_spg_tenant_endpoint
     ON platform.sensor_poll_grant (tenant_id, entity_id, endpoint_id);
 
 -- Enforce immutability of issuance fields while permitting governed status/revocation updates.
+-- Terminal REVOKED/SUPERSEDED rows cannot reactivate to ISSUED.
 CREATE OR REPLACE FUNCTION platform.sensor_poll_grant_protect_issued()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF OLD.status IN ('REVOKED', 'SUPERSEDED') AND NEW.status = 'ISSUED' THEN
+        RAISE EXCEPTION 'sensor_poll_grant terminal status cannot reactivate to ISSUED (trg_spg_protect_issued)'
+            USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
     IF NEW.grant_id IS DISTINCT FROM OLD.grant_id
         OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
         OR NEW.sensor_id IS DISTINCT FROM OLD.sensor_id

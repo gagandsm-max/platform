@@ -1117,13 +1117,114 @@ class MigrationIntegrationTest {
                  WHERE grant_id = ?::uuid
                 """, grantId);
         Map<String, Object> revoked = jdbc.queryForMap("""
-                SELECT status, issued_address, revocation_class, revoked_by
+                SELECT status, issued_address, revocation_class, revoked_by,
+                       revoked_at, revocation_reason, updated_at
                   FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid
                 """, grantId);
         assertEquals("REVOKED", revoked.get("status"));
         assertEquals("10.0.0.10", revoked.get("issued_address"));
         assertEquals("SECURITY", revoked.get("revocation_class"));
         assertEquals("security-officer", revoked.get("revoked_by"));
+        assertEquals("credential-compromised", revoked.get("revocation_reason"));
+        assertNotNull(revoked.get("revoked_at"));
+
+        // REVOKED -> ISSUED with all revocation fields cleared must be rejected.
+        Exception revokedToIssued = assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_poll_grant
+                   SET status = 'ISSUED',
+                       revoked_at = NULL,
+                       revoked_by = NULL,
+                       revocation_class = NULL,
+                       revocation_reason = NULL,
+                       updated_at = NOW()
+                 WHERE grant_id = ?::uuid
+                """, grantId));
+        assertConstraintViolation(revokedToIssued, "terminal status cannot reactivate");
+        Map<String, Object> revokedAfterRejectedReissue = jdbc.queryForMap("""
+                SELECT status, issued_address, revocation_class, revoked_by,
+                       revoked_at, revocation_reason, updated_at
+                  FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid
+                """, grantId);
+        assertEquals(revoked.get("status"), revokedAfterRejectedReissue.get("status"));
+        assertEquals(revoked.get("issued_address"), revokedAfterRejectedReissue.get("issued_address"));
+        assertEquals(revoked.get("revocation_class"), revokedAfterRejectedReissue.get("revocation_class"));
+        assertEquals(revoked.get("revoked_by"), revokedAfterRejectedReissue.get("revoked_by"));
+        assertEquals(revoked.get("revocation_reason"), revokedAfterRejectedReissue.get("revocation_reason"));
+        assertEquals(String.valueOf(revoked.get("revoked_at")),
+                String.valueOf(revokedAfterRejectedReissue.get("revoked_at")));
+        assertEquals(String.valueOf(revoked.get("updated_at")),
+                String.valueOf(revokedAfterRejectedReissue.get("updated_at")));
+
+        UUID supersededGrantId = UUID.fromString("018f0e0a-0000-7000-8000-000000000106");
+        jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address,
+                    profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by,
+                    status, revoked_at, revoked_by, revocation_class, revocation_reason, updated_at)
+                VALUES (
+                    ?::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
+                    2, 3, 'SNMP',
+                    'IPV4', '10.0.0.10',
+                    'profile.plan.snmp.default', '1.0.0',
+                    '2026-10-17 10:00:00+00'::timestamptz,
+                    '2026-10-17 09:00:00+00'::timestamptz,
+                    '2026-10-17 11:00:00+00'::timestamptz,
+                    'core-issuer-test',
+                    'ISSUED', NULL, NULL, NULL, NULL, NOW())
+                """, supersededGrantId, tenantA, claimedSensorId, entityA1, endpointA1);
+
+        // ISSUED -> SUPERSEDED positive control.
+        jdbc.update("""
+                UPDATE platform.sensor_poll_grant
+                   SET status = 'SUPERSEDED',
+                       revoked_at = '2026-10-17 10:45:00+00'::timestamptz,
+                       revoked_by = 'grant-rotator',
+                       revocation_class = 'SUPERSEDED',
+                       revocation_reason = 'replaced-by-newer-generation',
+                       updated_at = NOW()
+                 WHERE grant_id = ?::uuid
+                """, supersededGrantId);
+        Map<String, Object> superseded = jdbc.queryForMap("""
+                SELECT status, issued_address, revocation_class, revoked_by,
+                       revoked_at, revocation_reason, updated_at
+                  FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid
+                """, supersededGrantId);
+        assertEquals("SUPERSEDED", superseded.get("status"));
+        assertEquals("10.0.0.10", superseded.get("issued_address"));
+        assertEquals("SUPERSEDED", superseded.get("revocation_class"));
+        assertEquals("grant-rotator", superseded.get("revoked_by"));
+        assertEquals("replaced-by-newer-generation", superseded.get("revocation_reason"));
+        assertNotNull(superseded.get("revoked_at"));
+
+        // SUPERSEDED -> ISSUED with all revocation fields cleared must be rejected.
+        Exception supersededToIssued = assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_poll_grant
+                   SET status = 'ISSUED',
+                       revoked_at = NULL,
+                       revoked_by = NULL,
+                       revocation_class = NULL,
+                       revocation_reason = NULL,
+                       updated_at = NOW()
+                 WHERE grant_id = ?::uuid
+                """, supersededGrantId));
+        assertConstraintViolation(supersededToIssued, "terminal status cannot reactivate");
+        Map<String, Object> supersededAfterRejectedReissue = jdbc.queryForMap("""
+                SELECT status, issued_address, revocation_class, revoked_by,
+                       revoked_at, revocation_reason, updated_at
+                  FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid
+                """, supersededGrantId);
+        assertEquals(superseded.get("status"), supersededAfterRejectedReissue.get("status"));
+        assertEquals(superseded.get("issued_address"), supersededAfterRejectedReissue.get("issued_address"));
+        assertEquals(superseded.get("revocation_class"), supersededAfterRejectedReissue.get("revocation_class"));
+        assertEquals(superseded.get("revoked_by"), supersededAfterRejectedReissue.get("revoked_by"));
+        assertEquals(superseded.get("revocation_reason"), supersededAfterRejectedReissue.get("revocation_reason"));
+        assertEquals(String.valueOf(superseded.get("revoked_at")),
+                String.valueOf(supersededAfterRejectedReissue.get("revoked_at")));
+        assertEquals(String.valueOf(superseded.get("updated_at")),
+                String.valueOf(supersededAfterRejectedReissue.get("updated_at")));
 
         jdbc.update("""
                 UPDATE platform.entity_management_endpoint
@@ -1140,7 +1241,7 @@ class MigrationIntegrationTest {
         pg.migrate();
         assertEquals(15, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
-        assertEquals(1, jdbc.queryForObject(
+        assertEquals(2, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
     }
 
