@@ -37,6 +37,13 @@ public final class IcmpObservationDecoder {
     /** Matches Sensor ICMP bootstrap {@code MaxSamples: 8}. */
     public static final int MAX_SAMPLES = 8;
     public static final int MAX_ENVELOPE_BYTES = 512 * 1024;
+    /**
+     * Maximum OBJECT/ARRAY nesting depth for preflight descent (root = depth 0).
+     * Legitimate {@code icmp_observation_v1} nesting is shallow (envelope → job/payload →
+     * samples → sample). Bound stops deep small trees from exhausting the call stack
+     * before the byte budget can reject them.
+     */
+    public static final int MAX_ENVELOPE_NESTING_DEPTH = 16;
     public static final int MAX_IDENTITY_CHARS = 256;
     public static final int MAX_BATCH_ID_CHARS = 128;
     public static final int MAX_RECORD_TYPE_CHARS = 128;
@@ -301,7 +308,7 @@ public final class IcmpObservationDecoder {
      */
     private static void preflightEnvelopeNodeBound(JsonNode envelopeNode) {
         try {
-            chargeNode(envelopeNode, new ByteBudget(MAX_ENVELOPE_BYTES));
+            chargeNode(envelopeNode, new ByteBudget(MAX_ENVELOPE_BYTES), 0);
         } catch (BoundExceededException ex) {
             throw new IcmpDecodeException(
                     IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
@@ -310,7 +317,8 @@ public final class IcmpObservationDecoder {
         }
     }
 
-    private static void chargeNode(JsonNode node, ByteBudget budget) throws BoundExceededException {
+    private static void chargeNode(JsonNode node, ByteBudget budget, int depth)
+            throws BoundExceededException {
         if (node == null || node.isMissingNode()) {
             throw new IcmpDecodeException(
                     IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
@@ -319,8 +327,16 @@ public final class IcmpObservationDecoder {
         }
         JsonNodeType type = node.getNodeType();
         switch (type) {
-            case OBJECT -> chargeObject(node, budget);
-            case ARRAY -> chargeArray(node, budget);
+            case OBJECT -> {
+                // Depth gate before descending into fields — byte budget alone cannot stop
+                // a deep chain of tiny containers from exhausting the stack first.
+                requireNestingDepth(depth);
+                chargeObject(node, budget, depth);
+            }
+            case ARRAY -> {
+                requireNestingDepth(depth);
+                chargeArray(node, budget, depth);
+            }
             case STRING -> chargeJsonString(node.asText(), budget);
             case NUMBER -> chargeNumber(node, budget);
             case BOOLEAN -> budget.charge(node.booleanValue() ? 4 : 5); // true / false
@@ -332,7 +348,18 @@ public final class IcmpObservationDecoder {
         }
     }
 
-    private static void chargeObject(JsonNode node, ByteBudget budget) throws BoundExceededException {
+    private static void requireNestingDepth(int depth) {
+        if (depth >= MAX_ENVELOPE_NESTING_DEPTH) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
+                    "ICMP observation envelope exceeds maximum nesting depth of "
+                            + MAX_ENVELOPE_NESTING_DEPTH
+            );
+        }
+    }
+
+    private static void chargeObject(JsonNode node, ByteBudget budget, int depth)
+            throws BoundExceededException {
         budget.charge(2); // { }
         Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
         boolean first = true;
@@ -344,18 +371,19 @@ public final class IcmpObservationDecoder {
             first = false;
             chargeJsonString(entry.getKey(), budget);
             budget.charge(1); // colon
-            // Recurse immediately; BoundExceededException aborts before later siblings.
-            chargeNode(entry.getValue(), budget);
+            // Recurse immediately; BoundExceededException / depth gate abort before later siblings.
+            chargeNode(entry.getValue(), budget, depth + 1);
         }
     }
 
-    private static void chargeArray(JsonNode node, ByteBudget budget) throws BoundExceededException {
+    private static void chargeArray(JsonNode node, ByteBudget budget, int depth)
+            throws BoundExceededException {
         budget.charge(2); // [ ]
         for (int i = 0; i < node.size(); i++) {
             if (i > 0) {
                 budget.charge(1); // comma
             }
-            chargeNode(node.get(i), budget);
+            chargeNode(node.get(i), budget, depth + 1);
         }
     }
 

@@ -1,5 +1,6 @@
 package com.platform.core.ingestion.icmp;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.JsonNodeType;
@@ -247,6 +248,42 @@ class IcmpObservationDecoderTest {
         IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
         assertEquals(IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, ex.getCode());
         assertTrue(ex.getMessage().contains("unsupported JSON node type"));
+    }
+
+    /**
+     * Bounded deep-container canary: nesting at the production depth limit (root=0) must be
+     * rejected by the preflight depth gate before recursive descent continues. Tree stays
+     * tiny (well under the byte budget) so the host stack is never the signal.
+     * <p>Uses reflection for the limit so this test still compiles against unchanged a44a5f4
+     * production (constant absent) during failing-first; corrected decoder aligns to 16.
+     */
+    @Test
+    void rejectsDeeplyNestedContainersBeforeDescent() {
+        int depthLimit = envelopeNestingDepthLimitOrCanary();
+        JsonNode node = JsonNodeFactory.instance.objectNode();
+        for (int i = 0; i < depthLimit; i++) {
+            ObjectNode outer = JsonNodeFactory.instance.objectNode();
+            outer.set("n", node);
+            node = outer;
+        }
+        // Innermost sits at depth == depthLimit; byte size remains negligible.
+        assertTrue(node.toString().length() < 1024);
+        ObjectNode root = (ObjectNode) node;
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+        assertTrue(ex.getMessage().contains("nesting depth"));
+    }
+
+    /**
+     * Positive control: source-faithful ICMP envelope nesting (envelope → job/payload →
+     * samples → sample) remains well within the depth gate and continues to decode.
+     */
+    @Test
+    void acceptsDeepestValidIcmpEnvelopeNesting() {
+        IcmpObservationV1 obs = decoder.decode(goodIpv4EnvelopeJson());
+        assertEquals(IcmpQuality.GOOD, obs.quality());
+        assertEquals(2, obs.evidence().samples().size());
+        assertEquals(120L, obs.evidence().samples().get(0).rttMicros());
     }
 
     @Test
@@ -1073,6 +1110,18 @@ class IcmpObservationDecoderTest {
                   "protocolPayload":%s
                 }
                 """.formatted(COLLECTED_AT, TENANT_ID, ENTITY_ID, protocolVersion, status, quality, evidenceJson);
+    }
+
+    /**
+     * Depth canary limit: prefer the production constant when present; otherwise use the
+     * documented ICMP envelope depth bound (16) so failing-first compiles against a44a5f4.
+     */
+    private static int envelopeNestingDepthLimitOrCanary() {
+        try {
+            return IcmpObservationDecoder.class.getField("MAX_ENVELOPE_NESTING_DEPTH").getInt(null);
+        } catch (ReflectiveOperationException ex) {
+            return 16;
+        }
     }
 
     /** Counts decimal rendering attempts without allocating the oversized digit string first. */
