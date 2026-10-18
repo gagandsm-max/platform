@@ -3,6 +3,7 @@ package com.platform.core.ingestion.icmp;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeType;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -270,6 +271,9 @@ public final class IcmpObservationDecoder {
     }
 
     private void enforceEnvelopeByteBound(JsonNode envelopeNode) {
+        // Structural/scalar preflight rejects oversized or unsupported nodes before Jackson
+        // can convert a huge BigInteger/BigDecimal into decimal text (writeNumber → toString).
+        preflightEnvelopeNodeBound(envelopeNode);
         // Count serialized UTF-8 bytes without retaining an arbitrarily large copy.
         BoundingOutputStream bound = new BoundingOutputStream(MAX_ENVELOPE_BYTES);
         try {
@@ -289,6 +293,194 @@ public final class IcmpObservationDecoder {
         }
     }
 
+    /**
+     * Walk the pre-parsed tree and charge a conservative UTF-8 serialization estimate.
+     * Stops immediately when the envelope byte budget is exhausted. Numeric scalars are
+     * sized from magnitude ({@code bitLength} / digit arithmetic) — never via
+     * {@link BigInteger#toString()} or {@link BigDecimal#toPlainString()}.
+     */
+    private static void preflightEnvelopeNodeBound(JsonNode envelopeNode) {
+        try {
+            chargeNode(envelopeNode, new ByteBudget(MAX_ENVELOPE_BYTES));
+        } catch (BoundExceededException ex) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
+                    "ICMP observation envelope exceeds maximum of " + MAX_ENVELOPE_BYTES + " bytes"
+            );
+        }
+    }
+
+    private static void chargeNode(JsonNode node, ByteBudget budget) throws BoundExceededException {
+        if (node == null || node.isMissingNode()) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
+                    "ICMP observation envelope contains a missing JSON node"
+            );
+        }
+        JsonNodeType type = node.getNodeType();
+        switch (type) {
+            case OBJECT -> chargeObject(node, budget);
+            case ARRAY -> chargeArray(node, budget);
+            case STRING -> chargeJsonString(node.asText(), budget);
+            case NUMBER -> chargeNumber(node, budget);
+            case BOOLEAN -> budget.charge(node.booleanValue() ? 4 : 5); // true / false
+            case NULL -> budget.charge(4); // null
+            default -> throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
+                    "ICMP observation envelope contains unsupported JSON node type " + type
+            );
+        }
+    }
+
+    private static void chargeObject(JsonNode node, ByteBudget budget) throws BoundExceededException {
+        budget.charge(2); // { }
+        Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+        boolean first = true;
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            if (!first) {
+                budget.charge(1); // comma
+            }
+            first = false;
+            chargeJsonString(entry.getKey(), budget);
+            budget.charge(1); // colon
+            // Recurse immediately; BoundExceededException aborts before later siblings.
+            chargeNode(entry.getValue(), budget);
+        }
+    }
+
+    private static void chargeArray(JsonNode node, ByteBudget budget) throws BoundExceededException {
+        budget.charge(2); // [ ]
+        for (int i = 0; i < node.size(); i++) {
+            if (i > 0) {
+                budget.charge(1); // comma
+            }
+            chargeNode(node.get(i), budget);
+        }
+    }
+
+    /** Charges quoted JSON string bytes including conservative UTF-8 escape overhead. */
+    private static void chargeJsonString(String value, ByteBudget budget) throws BoundExceededException {
+        budget.charge(2); // quotes
+        for (int i = 0; i < value.length(); ) {
+            int cp = value.codePointAt(i);
+            i += Character.charCount(cp);
+            if (cp == '"' || cp == '\\' || cp == '\b' || cp == '\f' || cp == '\n'
+                    || cp == '\r' || cp == '\t') {
+                budget.charge(2); // short escape
+            } else if (cp < 0x20) {
+                budget.charge(6); // JSON unicode escape form (6 chars)
+            } else {
+                budget.charge(utf8BytesForCodePoint(cp));
+            }
+        }
+    }
+
+    private static void chargeNumber(JsonNode node, ByteBudget budget) throws BoundExceededException {
+        if (node.isBigInteger()) {
+            chargeBigIntegerDecimal(node.bigIntegerValue(), budget);
+            return;
+        }
+        if (node.isIntegralNumber()) {
+            // Long/Int/Short nodes — digit length without String conversion of the value.
+            chargeLongDecimal(node.longValue(), budget);
+            return;
+        }
+        if (node.isBigDecimal()) {
+            chargeBigDecimalDecimal(node.decimalValue(), budget);
+            return;
+        }
+        if (node.isFloatingPointNumber()) {
+            // Finite IEEE doubles/floats serialize to a short decimal form.
+            double value = node.doubleValue();
+            if (!Double.isFinite(value)) {
+                throw new IcmpDecodeException(
+                        IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
+                        "ICMP observation envelope contains a non-finite JSON number"
+                );
+            }
+            budget.charge(32);
+            return;
+        }
+        throw new IcmpDecodeException(
+                IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
+                "ICMP observation envelope contains an unsupported JSON number form"
+        );
+    }
+
+    /**
+     * Conservative decimal-digit upper bound from {@link BigInteger#bitLength()} —
+     * never materializes the decimal text.
+     */
+    private static void chargeBigIntegerDecimal(BigInteger value, ByteBudget budget)
+            throws BoundExceededException {
+        if (value.signum() < 0) {
+            budget.charge(1);
+            value = value.negate();
+        }
+        if (value.signum() == 0) {
+            budget.charge(1);
+            return;
+        }
+        int bitLen = value.bitLength();
+        // digits <= floor(bitLength * log10(2)) + 1; log10(2) < 30103/100000.
+        long digits = (bitLen * 30103L) / 100_000L + 1L;
+        if (digits > Integer.MAX_VALUE) {
+            throw new BoundExceededException();
+        }
+        budget.charge((int) digits);
+    }
+
+    private static void chargeLongDecimal(long value, ByteBudget budget) throws BoundExceededException {
+        if (value == Long.MIN_VALUE) {
+            // "-9223372036854775808"
+            budget.charge(20);
+            return;
+        }
+        if (value < 0) {
+            budget.charge(1);
+            value = -value;
+        }
+        int digits = 1;
+        while (value >= 10) {
+            value /= 10;
+            digits++;
+        }
+        budget.charge(digits);
+    }
+
+    /**
+     * Sizes a BigDecimal from unscaled magnitude and scale without {@code toPlainString()}.
+     */
+    private static void chargeBigDecimalDecimal(BigDecimal value, ByteBudget budget)
+            throws BoundExceededException {
+        if (value.signum() < 0) {
+            budget.charge(1);
+            value = value.negate();
+        }
+        BigInteger unscaled = value.unscaledValue();
+        int scale = value.scale();
+        if (scale <= 0) {
+            // Integer plain form, possibly with trailing zeros to the left of an implied point.
+            chargeBigIntegerDecimal(unscaled, budget);
+            if (scale < 0) {
+                long trailing = (long) (-scale);
+                if (trailing > Integer.MAX_VALUE) {
+                    throw new BoundExceededException();
+                }
+                budget.charge((int) trailing);
+            }
+            return;
+        }
+        // plain: digits + '.'  (leading zero before point when unscaled digits <= scale)
+        chargeBigIntegerDecimal(unscaled, budget);
+        budget.charge(1); // decimal point
+        // Extra leading zeros after the decimal when scale exceeds unscaled digit count are
+        // bounded by scale itself; charging scale is a safe upper bound for the fractional part
+        // overhead already partially covered by unscaled digits.
+        budget.charge(scale);
+    }
+
     private static boolean isBoundExceeded(Throwable ex) {
         for (Throwable cursor = ex; cursor != null; cursor = cursor.getCause()) {
             if (cursor instanceof BoundExceededException) {
@@ -296,6 +488,25 @@ public final class IcmpObservationDecoder {
             }
         }
         return false;
+    }
+
+    /** Mutable remaining-capacity counter for structural preflight. */
+    private static final class ByteBudget {
+        private int remaining;
+
+        ByteBudget(int maxBytes) {
+            this.remaining = maxBytes;
+        }
+
+        void charge(int bytes) throws BoundExceededException {
+            if (bytes < 0) {
+                throw new BoundExceededException();
+            }
+            if (bytes > remaining) {
+                throw new BoundExceededException();
+            }
+            remaining -= bytes;
+        }
     }
 
     private static void validateCollectedAtCompletedAt(Instant collectedAt, Instant completedAt) {

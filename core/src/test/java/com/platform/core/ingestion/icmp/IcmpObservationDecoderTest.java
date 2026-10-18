@@ -1,12 +1,17 @@
 package com.platform.core.ingestion.icmp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.JsonNodeType;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.POJONode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -184,6 +189,64 @@ class IcmpObservationDecoderTest {
         root.put("pad", "x".repeat(IcmpObservationDecoder.MAX_ENVELOPE_BYTES));
         IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
         assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+    }
+
+    /**
+     * Oversized BigInteger must be rejected from bitLength/digit budgeting — never by first
+     * rendering its decimal text (Jackson BigIntegerNode.serialize → toString).
+     */
+    @Test
+    void rejectsOversizedBigIntegerBeforeDecimalRendering() {
+        AtomicInteger toStringCalls = new AtomicInteger();
+        // ~530 KiB decimal digits ⇒ > MAX_ENVELOPE_BYTES without allocating the decimal string.
+        int targetDecimalDigits = IcmpObservationDecoder.MAX_ENVELOPE_BYTES + 16 * 1024;
+        int bitLength = (int) Math.ceil(targetDecimalDigits * Math.log(10) / Math.log(2)) + 8;
+        byte[] magnitude = new byte[(bitLength + 7) / 8];
+        magnitude[0] = 0x7f; // ensure positive, high bit clear for sign
+        for (int i = 1; i < magnitude.length; i++) {
+            magnitude[i] = (byte) 0xA5;
+        }
+        BigInteger probe = new ProbeBigInteger(magnitude, toStringCalls);
+        assertTrue(probe.bitLength() >= bitLength - 8);
+        ObjectNode root = JsonNodeFactory.instance.objectNode();
+        root.set("assignmentVersion", JsonNodeFactory.instance.numberNode(probe));
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+        assertEquals(0, toStringCalls.get(), "decimal toString must not run before bound rejection");
+    }
+
+    /**
+     * After an oversized leading scalar exhausts the budget, later siblings must not be visited.
+     * VisitProbe records touches from {@code getNodeType}/{@code isNull}/serialize paths.
+     */
+    @Test
+    void stopsJsonNodeTraversalAfterOversizedPrefix() {
+        AtomicInteger toStringCalls = new AtomicInteger();
+        AtomicBoolean laterVisited = new AtomicBoolean();
+        int targetDecimalDigits = IcmpObservationDecoder.MAX_ENVELOPE_BYTES + 4096;
+        int bitLength = (int) Math.ceil(targetDecimalDigits * Math.log(10) / Math.log(2)) + 8;
+        byte[] magnitude = new byte[(bitLength + 7) / 8];
+        magnitude[0] = 0x7f;
+        for (int i = 1; i < magnitude.length; i++) {
+            magnitude[i] = (byte) 0x5A;
+        }
+        ObjectNode root = JsonNodeFactory.instance.objectNode();
+        // Insertion order: oversized numeric first, instrumented sibling second.
+        root.set("pad", JsonNodeFactory.instance.numberNode(new ProbeBigInteger(magnitude, toStringCalls)));
+        root.set("later", new VisitProbeNode(laterVisited));
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+        assertEquals(0, toStringCalls.get());
+        assertFalse(laterVisited.get(), "later sibling must not be visited after budget exhaustion");
+    }
+
+    @Test
+    void rejectsUnsupportedBinaryJsonNodeForm() {
+        ObjectNode root = JsonNodeFactory.instance.objectNode();
+        root.set("pad", JsonNodeFactory.instance.binaryNode(new byte[] {1, 2, 3}));
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, ex.getCode());
+        assertTrue(ex.getMessage().contains("unsupported JSON node type"));
     }
 
     @Test
@@ -768,6 +831,18 @@ class IcmpObservationDecoderTest {
     }
 
     @Test
+    void acceptsIdentityFieldAtExactUtf8ByteLimitWithMultibyte() throws Exception {
+        // 128 × U+00E9 = 128 UTF-16 units / exactly 256 UTF-8 bytes (MAX_IDENTITY_CHARS).
+        String sensorId = "é".repeat(IcmpObservationDecoder.MAX_IDENTITY_CHARS / 2);
+        assertEquals(IcmpObservationDecoder.MAX_IDENTITY_CHARS / 2, sensorId.length());
+        assertEquals(IcmpObservationDecoder.MAX_IDENTITY_CHARS, sensorId.getBytes(StandardCharsets.UTF_8).length);
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        root.put("sensorId", sensorId);
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(sensorId, obs.sensorId());
+    }
+
+    @Test
     void rejectsIdentityFieldCrossingUtf8ByteBoundaryWithMultibyteTail() throws Exception {
         // 255 ASCII + one U+00E9 = 257 UTF-8 bytes.
         String sensorId = "a".repeat(255) + "é";
@@ -998,5 +1073,46 @@ class IcmpObservationDecoderTest {
                   "protocolPayload":%s
                 }
                 """.formatted(COLLECTED_AT, TENANT_ID, ENTITY_ID, protocolVersion, status, quality, evidenceJson);
+    }
+
+    /** Counts decimal rendering attempts without allocating the oversized digit string first. */
+    private static final class ProbeBigInteger extends BigInteger {
+        private final AtomicInteger toStringCalls;
+
+        ProbeBigInteger(byte[] magnitude, AtomicInteger toStringCalls) {
+            super(1, magnitude);
+            this.toStringCalls = toStringCalls;
+        }
+
+        @Override
+        public String toString() {
+            toStringCalls.incrementAndGet();
+            return super.toString();
+        }
+
+        @Override
+        public String toString(int radix) {
+            toStringCalls.incrementAndGet();
+            return super.toString(radix);
+        }
+    }
+
+    /**
+     * Marks visitation when structural preflight inspects node type — proves later siblings
+     * are not entered after an oversized prefix exhausts the budget.
+     */
+    private static final class VisitProbeNode extends POJONode {
+        private final AtomicBoolean visited;
+
+        VisitProbeNode(AtomicBoolean visited) {
+            super("visit-probe");
+            this.visited = visited;
+        }
+
+        @Override
+        public JsonNodeType getNodeType() {
+            visited.set(true);
+            return super.getNodeType();
+        }
     }
 }
