@@ -107,18 +107,51 @@ trap cleanup_probe_body EXIT
 
 https_probe_status() {
     # Args: url [extra curl args...]
-    # Prints HTTP status code on stdout. Returns curl exit status.
+    # Status-only probe: discard response body. Prints HTTP status on stdout.
     local url="$1"
     shift
-    : > "${PROBE_BODY}"
     curl -sS \
         --cacert "${CA_CERT}" \
         --connect-timeout 5 \
         --max-time 15 \
-        -o "${PROBE_BODY}" \
+        -o /dev/null \
         -w "%{http_code}" \
         "$@" \
         "${url}"
+}
+
+https_probe_heartbeat() {
+    # Args: url [extra curl args...]
+    # Stream the body with a hard byte ceiling. Retains at most MAX+1 bytes so
+    # the schema validator can distinguish overflow; closes the consumer early
+    # to cancel/reap the producer even when Content-Length is absent/chunked.
+    # Prints HTTP status on stdout. Returns curl exit status (write-error from
+    # intentional ceiling cancel is expected when retained > MAX).
+    local url="$1"
+    shift
+    local http_code="" curl_ec=0
+    : > "${PROBE_BODY}"
+    set +e
+    http_code="$(
+        curl -sS \
+            --cacert "${CA_CERT}" \
+            --connect-timeout 5 \
+            --max-time 15 \
+            -o >(head -c "$((MAX_HEARTBEAT_BYTES + 1))" > "${PROBE_BODY}") \
+            -w "%{http_code}" \
+            "$@" \
+            "${url}"
+    )"
+    curl_ec=$?
+    # Reap process-substitution children (head) so lifetime stays bounded.
+    wait 2>/dev/null || true
+    set -e
+    printf '%s' "${http_code}"
+    return "${curl_ec}"
+}
+
+probe_body_retained_bytes() {
+    wc -c < "${PROBE_BODY}" | tr -d '[:space:]'
 }
 
 validate_sensor_heartbeat_body() {
@@ -255,7 +288,7 @@ if [ ! -f "${CA_CERT}" ] || [ ! -f "${SENSOR_CERT}" ] || [ ! -f "${SENSOR_KEY}" 
     FAILED=$((FAILED + 1))
 else
     set +e
-    HB_STATUS="$(https_probe_status "https://127.0.0.1:28443/api/v1/sensor/heartbeat" \
+    HB_STATUS="$(https_probe_heartbeat "https://127.0.0.1:28443/api/v1/sensor/heartbeat" \
         --cert "${SENSOR_CERT}" \
         --key "${SENSOR_KEY}" \
         -X POST \
@@ -263,7 +296,13 @@ else
         -d '{"sensor_id":"sensor-net-01"}')"
     HB_CURL_EC=$?
     set -e
-    if [ "${HB_CURL_EC}" -ne 0 ]; then
+    HB_RETAINED="$(probe_body_retained_bytes)"
+    # Byte-ceiling cancel closes the body pipe early; curl may then exit with a
+    # write error. Prefer the size/validation path over a false transport fail.
+    if [ "${HB_RETAINED}" -gt "${MAX_HEARTBEAT_BYTES}" ]; then
+        echo "[FAIL] Sensor heartbeat response failed authority/schema validation (code=2)."
+        FAILED=$((FAILED + 1))
+    elif [ "${HB_CURL_EC}" -ne 0 ]; then
         echo "[FAIL] Sensor heartbeat transport failed (curl_exit=${HB_CURL_EC})."
         FAILED=$((FAILED + 1))
     elif [ "${HB_STATUS}" != "200" ]; then

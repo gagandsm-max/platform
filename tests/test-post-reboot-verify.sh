@@ -119,6 +119,23 @@ esac
 EOF
 chmod +x "${STUB_BIN}/docker"
 
+# head stub: prove download-path byte ceiling and retained size for heartbeat.
+cat > "${STUB_BIN}/head" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+STATE_DIR="${POST_REBOOT_FIXTURE_STATE:?}"
+{
+  printf 'ARGV:'
+  printf ' %q' "$@"
+  printf '\n'
+} >> "${STATE_DIR}/head-invocations.log"
+out_tmp="${STATE_DIR}/head-retained.bin"
+/usr/bin/head "$@" > "${out_tmp}"
+wc -c < "${out_tmp}" | tr -d '[:space:]' > "${STATE_DIR}/head-retained.bytes"
+cat "${out_tmp}"
+EOF
+chmod +x "${STUB_BIN}/head"
+
 cat > "${STUB_BIN}/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -213,9 +230,69 @@ read_body_file() {
   fi
 }
 
+write_body_to_outfile() {
+  local dest="${1:-}"
+  local payload="${2:-}"
+  if [ -z "${dest}" ]; then
+    printf '%s' "${payload}"
+    return 0
+  fi
+  # Status-only probes discard bodies to /dev/null.
+  if [ "${dest}" = "/dev/null" ]; then
+    printf 'DISCARD_BODY=1\n' >> "${STATE_DIR}/curl-body-disposition.log"
+    return 0
+  fi
+  # Consumer may close early on the heartbeat byte ceiling (SIGPIPE/EPIPE).
+  set +e
+  printf '%s' "${payload}" > "${dest}" 2>/dev/null
+  set -e
+  return 0
+}
+
+# Controlled excess producer: stream well past the ceiling; record cancel/bound.
+stream_excess_to_outfile() {
+  local dest="${1:?}"
+  local attempt_bytes="${2:?}"
+  local chunk_size=4096
+  python3 - "${dest}" "${attempt_bytes}" "${chunk_size}" "${STATE_DIR}/curl-stream.log" <<'PY'
+import sys
+dest, attempt_s, chunk_s, log_path = sys.argv[1:5]
+attempt = int(attempt_s)
+chunk_size = int(chunk_s)
+chunk = b"x" * chunk_size
+written = 0
+cancelled = 0
+try:
+    with open(dest, "wb", buffering=0) as fh:
+        while written < attempt:
+            n = min(chunk_size, attempt - written)
+            try:
+                fh.write(chunk[:n])
+            except BrokenPipeError:
+                cancelled = 1
+                break
+            written += n
+except BrokenPipeError:
+    cancelled = 1
+except OSError as exc:
+    # EPIPE on some platforms surfaces as OSError errno 32.
+    if getattr(exc, "errno", None) == 32:
+        cancelled = 1
+    else:
+        raise
+with open(log_path, "w", encoding="utf-8") as log:
+    log.write(f"ATTEMPT_BYTES={attempt}\n")
+    log.write(f"BYTES_WRITTEN={written}\n")
+    log.write(f"CANCELLED={cancelled}\n")
+# Mimic curl write-error after consumer closes the pipe.
+sys.exit(23 if cancelled else 0)
+PY
+}
+
 body=""
 http="200"
 ec=0
+stream_excess=0
 case "${url}" in
   https://127.0.0.1:23000/|https://127.0.0.1:23000)
     body="$(read_body_file "${UI_BODY_FILE:-}")"
@@ -231,6 +308,7 @@ case "${url}" in
     body="$(read_body_file "${HB_BODY_FILE:-}")"
     http="${HB_HTTP:-200}"
     ec="${HB_CURL_EC:-0}"
+    stream_excess="${HB_STREAM_EXCESS:-0}"
     if [ "${have_cert}" -ne 1 ] || [ "${have_key}" -ne 1 ]; then
       echo "curl-fixture: heartbeat requires --cert and --key" >&2
       exit 93
@@ -242,11 +320,26 @@ case "${url}" in
     ;;
 esac
 
-if [ -n "${outfile}" ]; then
-  printf '%s' "${body}" > "${outfile}"
-else
-  printf '%s' "${body}"
+if [ "${stream_excess}" = "1" ]; then
+  if [ -z "${outfile}" ] || [ "${outfile}" = "/dev/null" ]; then
+    echo "curl-fixture: excess stream requires a body outfile" >&2
+    exit 94
+  fi
+  set +e
+  stream_excess_to_outfile "${outfile}" "${HB_STREAM_ATTEMPT_BYTES:-2097152}"
+  stream_ec=$?
+  set -e
+  if [ -n "${write_fmt}" ]; then
+    printf '%s' "${http}"
+  fi
+  # Prefer scenario ec if explicitly forcing transport failure; else stream ec.
+  if [ "${HB_CURL_EC:-0}" != "0" ]; then
+    exit "${HB_CURL_EC}"
+  fi
+  exit "${stream_ec}"
 fi
+
+write_body_to_outfile "${outfile}" "${body}"
 if [ -n "${write_fmt}" ]; then
   # Only %{http_code} is used by the verifier.
   printf '%s' "${http}"
@@ -448,16 +541,146 @@ run_case "duplicate-json-keys" fail \
   "HB_HTTP=200" "HB_CURL_EC=0" \
   --body '{"status":"ERROR","authenticated":false,"sensor_identity":"sensor-net-01","tenant_id":"018f0e0a-0000-7000-8000-000000000001","received_at":"2026-10-17T12:00:00.000Z","status":"ACCEPTED","authenticated":true}'
 
-# Oversized response
-OVERSIZED="$(python3 - <<PY
-print("{\"status\":\"ACCEPTED\",\"authenticated\":true,\"sensor_identity\":\"sensor-net-01\",\"tenant_id\":\"${EXPECTED_TENANT}\",\"received_at\":\"${VALID_RECEIVED_AT}\",\"pad\":\"" + ("x" * ${MAX_HEARTBEAT_BYTES}) + "\"}")
+# Byte-gate isolation: legal exact-authority shape + trailing whitespace over the
+# cap (no forbidden extra JSON properties). Size check must fire before schema.
+OVERSIZED_WHITESPACE="$(python3 - <<PY
+import json
+base = json.dumps({
+    "status": "ACCEPTED",
+    "authenticated": True,
+    "sensor_identity": "sensor-net-01",
+    "tenant_id": "${EXPECTED_TENANT}",
+    "received_at": "${VALID_RECEIVED_AT}",
+}, separators=(",", ":"))
+need = ${MAX_HEARTBEAT_BYTES} + 1
+if len(base) > need:
+    raise SystemExit("fixture base already exceeds cap")
+print(base + (" " * (need - len(base))), end="")
 PY
 )"
-run_case "oversized-response" fail \
+run_case "oversized-whitespace-legal-shape" fail \
   "UI_HTTP=200" "UI_CURL_EC=0" \
   "CORE_HTTP=200" "CORE_CURL_EC=0" \
   "HB_HTTP=200" "HB_CURL_EC=0" \
-  --body "${OVERSIZED}"
+  --body "${OVERSIZED_WHITESPACE}"
+
+# Valid response exactly at the byte ceiling (compact JSON + spaces).
+EXACT_CAP="$(python3 - <<PY
+import json
+base = json.dumps({
+    "status": "ACCEPTED",
+    "authenticated": True,
+    "sensor_identity": "sensor-net-01",
+    "tenant_id": "${EXPECTED_TENANT}",
+    "received_at": "${VALID_RECEIVED_AT}",
+}, separators=(",", ":"))
+need = ${MAX_HEARTBEAT_BYTES}
+if len(base) > need:
+    raise SystemExit("fixture base already exceeds cap")
+body = base + (" " * (need - len(base)))
+assert len(body) == need
+print(body, end="")
+PY
+)"
+run_case "valid-exact-byte-cap" pass \
+  "UI_HTTP=200" "UI_CURL_EC=0" \
+  "CORE_HTTP=200" "CORE_CURL_EC=0" \
+  "HB_HTTP=200" "HB_CURL_EC=0" \
+  --body "${EXACT_CAP}"
+
+# Controlled excess producer: stream >> cap; prove cancel + bounded retain.
+run_case_stream_excess() {
+  local name="excess-stream-cancelled-bounded"
+  local state="${WORK}/state/${name}"
+  rm -rf "${state}"
+  mkdir -p "${state}"
+  # Empty HB body file — producer ignores it and streams excess instead.
+  : > "${state}/hb.body"
+  write_scenario "${state}/scenario.env" \
+    "UI_HTTP=200" "UI_CURL_EC=0" \
+    "CORE_HTTP=200" "CORE_CURL_EC=0" \
+    "HB_HTTP=200" "HB_CURL_EC=0" \
+    "HB_STREAM_EXCESS=1" \
+    "HB_STREAM_ATTEMPT_BYTES=2097152" \
+    "HB_BODY_FILE=${state}/hb.body" \
+    "UI_BODY_FILE=" \
+    "CORE_BODY_FILE="
+
+  local out ec
+  set +e
+  out="$(
+    cd "${FIXTURE_ROOT}"
+    env -i \
+      PATH="${STUB_BIN}:/usr/local/bin:/usr/bin:/bin" \
+      HOME="${WORK}/home" \
+      POST_REBOOT_FIXTURE_STATE="${state}" \
+      CURL_FIXTURE_ALLOW_INSECURE="${CURL_FIXTURE_ALLOW_INSECURE:-0}" \
+      VALKEY_PASSWORD="fixture-not-a-secret" \
+      bash "./scripts/post-reboot-verify.sh" 2>&1
+  )"
+  ec=$?
+  set -e
+  printf '%s\n' "${out}" > "${state}/stdout.txt"
+  printf '%s\n' "${ec}" > "${state}/exit.txt"
+
+  if [[ "${ec}" -eq 0 ]]; then
+    fail "${name}: expected nonzero failure on excess stream"
+    return 0
+  fi
+  if ! grep -q 'VERIFICATION RESULT: .*FAILED' <<<"${out}"; then
+    fail "${name}: missing FAILED verification result"
+    return 0
+  fi
+  if grep -q 'Sensor heartbeat transport failed' <<<"${out}"; then
+    fail "${name}: excess ceiling cancel misclassified as transport failure"
+    return 0
+  fi
+  if ! grep -q 'authority/schema validation (code=2)' <<<"${out}"; then
+    fail "${name}: expected byte-ceiling validation code=2"
+    return 0
+  fi
+
+  # head stub must retain at most MAX+1 bytes (download-path ceiling).
+  if [ ! -f "${state}/head-retained.bytes" ]; then
+    fail "${name}: missing head retained-byte evidence (download ceiling not applied)"
+    return 0
+  fi
+  local retained
+  retained="$(tr -d '[:space:]' < "${state}/head-retained.bytes")"
+  if [ "${retained}" -gt $((MAX_HEARTBEAT_BYTES + 1)) ]; then
+    fail "${name}: retained tempfile bytes ${retained} exceed MAX+1"
+    return 0
+  fi
+  if [ "${retained}" -le "${MAX_HEARTBEAT_BYTES}" ]; then
+    fail "${name}: expected retained MAX+1 overflow sentinel, got ${retained}"
+    return 0
+  fi
+  grep -Eq -- '-c[[:space:]]+'"$((MAX_HEARTBEAT_BYTES + 1))" "${state}/head-invocations.log" \
+    || fail "${name}: head not invoked with -c MAX+1"
+
+  # Producer must cancel well before the full 2MiB attempt (pipe buffer slack OK).
+  if [ ! -f "${state}/curl-stream.log" ]; then
+    fail "${name}: missing curl stream log"
+    return 0
+  fi
+  # shellcheck disable=SC1090
+  source "${state}/curl-stream.log"
+  if [ "${CANCELLED:-0}" != "1" ]; then
+    fail "${name}: excess producer was not cancelled (CANCELLED=${CANCELLED:-unset})"
+    return 0
+  fi
+  if [ "${BYTES_WRITTEN:-0}" -ge "${ATTEMPT_BYTES:-2097152}" ]; then
+    fail "${name}: producer wrote full attempt (${BYTES_WRITTEN}) — unbounded"
+    return 0
+  fi
+  # Bound producer progress: retained ceiling + typical pipe capacity headroom.
+  if [ "${BYTES_WRITTEN:-0}" -gt 1048576 ]; then
+    fail "${name}: producer wrote ${BYTES_WRITTEN} before cancel — not adequately bounded"
+    return 0
+  fi
+  pass "${name} (cancelled; retained=${retained}; written=${BYTES_WRITTEN})"
+}
+run_case_stream_excess
 
 # Missing CA: remove trust file after fixture setup
 run_case_missing_ca() {
@@ -530,6 +753,27 @@ else
   cacert_count="$(grep -c -- '--cacert' "${POS_LOG}" || true)"
   [[ "${cacert_count}" -ge 3 ]] || fail "expected >=3 --cacert uses, got ${cacert_count}"
   pass "curl fixture enforced --cacert and rejected insecure flags"
+
+  # UI/Core status probes must discard bodies (/dev/null); heartbeat retains.
+  POS_DISPOSITION="${WORK}/state/valid-exact-authority/curl-body-disposition.log"
+  if [ -f "${POS_DISPOSITION}" ]; then
+    discard_count="$(grep -c 'DISCARD_BODY=1' "${POS_DISPOSITION}" || true)"
+    [[ "${discard_count}" -ge 2 ]] || fail "expected >=2 status-only body discards, got ${discard_count}"
+    pass "UI/Core status probes discarded response bodies"
+  else
+    fail "missing curl body-disposition log for status-only discards"
+  fi
+
+  POS_HEAD_LOG="${WORK}/state/valid-exact-authority/head-invocations.log"
+  [[ -f "${POS_HEAD_LOG}" ]] || fail "positive case missing head download-ceiling invocation"
+  grep -Eq -- '-c[[:space:]]+'"$((MAX_HEARTBEAT_BYTES + 1))" "${POS_HEAD_LOG}" \
+    || fail "positive case head not invoked with -c MAX+1"
+  POS_RETAINED="${WORK}/state/valid-exact-authority/head-retained.bytes"
+  [[ -f "${POS_RETAINED}" ]] || fail "positive case missing head retained-byte evidence"
+  pos_retained="$(tr -d '[:space:]' < "${POS_RETAINED}")"
+  [[ "${pos_retained}" -le "${MAX_HEARTBEAT_BYTES}" ]] \
+    || fail "positive case retained ${pos_retained} exceeds MAX"
+  pass "heartbeat download path applied head -c ceiling (retained=${pos_retained})"
 fi
 
 echo "========================================================================"
