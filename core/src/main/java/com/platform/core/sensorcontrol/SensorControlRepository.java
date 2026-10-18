@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -180,6 +181,59 @@ public class SensorControlRepository {
             throw new SensorControlException(SensorControlException.ERR_SENSOR_NOT_FOUND, "Sensor not found");
         }
         return rows.get(0);
+    }
+
+    /**
+     * Acquire {@code FOR SHARE} on the sensor principal in the caller's open transaction.
+     * Locks are retained until that caller commits or rolls back. Rejects use without a transaction.
+     * Does not open a nested transaction ({@code REQUIRES_NEW} is prohibited for held authority).
+     */
+    public SensorPrincipal lockPrincipalForShare(UUID tenantId, String sensorId) {
+        requireActiveCallerTransaction("lockPrincipalForShare");
+        List<SensorPrincipal> rows = jdbc.query("""
+                SELECT * FROM platform.sensor
+                 WHERE tenant_id = :tenantId AND sensor_id = :sensorId
+                 FOR SHARE
+                """,
+                new MapSqlParameterSource()
+                        .addValue("tenantId", tenantId)
+                        .addValue("sensorId", sensorId),
+                PRINCIPAL_MAPPER);
+        if (rows.isEmpty()) {
+            throw new SensorControlException(SensorControlException.ERR_SENSOR_NOT_FOUND, "Sensor not found");
+        }
+        return rows.get(0);
+    }
+
+    /**
+     * Acquire {@code FOR SHARE} on the credential row in the caller's open transaction.
+     * Must follow {@link #lockPrincipalForShare} (principal-then-credential order).
+     * Locks are retained until that caller commits or rolls back. Rejects use without a transaction.
+     */
+    public SensorCertificateCredential lockCredentialForShare(UUID credentialId) {
+        requireActiveCallerTransaction("lockCredentialForShare");
+        List<SensorCertificateCredential> rows = jdbc.query("""
+                SELECT * FROM platform.sensor_certificate_credential
+                 WHERE credential_id = :credentialId
+                 FOR SHARE
+                """,
+                new MapSqlParameterSource().addValue("credentialId", credentialId),
+                CREDENTIAL_MAPPER);
+        if (rows.isEmpty()) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_SENSOR_CREDENTIAL_NOT_FOUND,
+                    "Sensor credential not found");
+        }
+        return rows.get(0);
+    }
+
+    private static void requireActiveCallerTransaction(String helperName) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Active PostgreSQL transaction required for " + helperName
+                            + "; unlocked lookup is not held authority");
+        }
     }
 
     public void updateCredentialStatus(

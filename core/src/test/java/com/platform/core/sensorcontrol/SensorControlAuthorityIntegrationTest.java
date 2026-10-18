@@ -12,6 +12,7 @@ import com.platform.core.domain.tenant.TenantMode;
 import com.platform.core.domain.tenant.TenantService;
 import com.platform.core.domain.tenant.TenantStatus;
 import com.platform.core.ingestion.IngestionException;
+import com.platform.core.ingestion.authority.ResolvedSensorAuthority;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.persistence.DiscoveryRepository;
 import com.platform.core.persistence.SiteRepository;
@@ -26,26 +27,34 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
 import java.math.BigInteger;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -674,6 +683,374 @@ class SensorControlAuthorityIntegrationTest {
         assertEquals(1, active.size());
         assertEquals(oldFp, active.get(0).fingerprintSha256());
         assertTrue(sensorRepo.findCredentialByFingerprint(newFp).isEmpty());
+    }
+
+    private void insertEntity(UUID tenantId, UUID entityId, String displayName) {
+        pg.namedJdbc().update("""
+                INSERT INTO platform.entity(entity_id, tenant_id, entity_type, display_name, description, discovered_name,
+                  lifecycle_state, site_id, criticality, owner_team_id, device_pack_id, device_pack_version,
+                  first_seen_at, last_seen_at, created_by, created_at, updated_at)
+                VALUES (:entityId, :tenantId, 'NETWORK_DEVICE', :displayName, NULL, NULL, 'ACTIVE',
+                        NULL, NULL, NULL, NULL, NULL, NOW(), NOW(), 'test', NOW(), NOW())
+                """,
+                new MapSqlParameterSource()
+                        .addValue("entityId", entityId)
+                        .addValue("tenantId", tenantId)
+                        .addValue("displayName", displayName));
+    }
+
+    @Test
+    void resolveAuthorityReturnsActualDerMatchedCredential() throws Exception {
+        Tenant tenant = tenantService.create("Authority Der Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-der", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        X509Certificate cert = mockCert(new byte[]{31, 32, 33}, "d101", notBefore, notAfter);
+        String fp = CertificateFingerprints.sha256DerHex(cert);
+        sensorControl.bindCertificate("sensor-der", cert);
+
+        ResolvedSensorAuthority authority = resolver.resolveAuthority(cert);
+        assertEquals("sensor-der", authority.scope().sensorId());
+        assertEquals(tenant.tenantId(), authority.scope().tenantId());
+        assertEquals(fp, authority.fingerprintSha256());
+        assertEquals(fp, sensorRepo.findCredentialByFingerprint(fp).orElseThrow().fingerprintSha256());
+        assertEquals(
+                sensorRepo.findCredentialByFingerprint(fp).orElseThrow().credentialId(),
+                authority.credentialId());
+        assertEquals(authority.scope(), resolver.resolve(cert));
+    }
+
+    @Test
+    void resolveAuthorityNegatives_wrongExpiredRevokedUnknownAndTenantSensor() throws Exception {
+        Tenant tenantA = tenantService.create("Auth Neg A", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        Tenant tenantB = tenantService.create("Auth Neg B", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-neg-a", tenantA.tenantId(), null, SensorRole.NETWORK, true);
+        sensorControl.enrollSensor("sensor-neg-b", tenantB.tenantId(), null, SensorRole.NETWORK, true);
+
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        X509Certificate activeCert = mockCert(new byte[]{41, 42, 43}, "c101", notBefore, notAfter);
+        sensorControl.bindCertificate("sensor-neg-a", activeCert);
+
+        X509Certificate unknown = mockCert(new byte[]{9, 9, 9}, "c199", notBefore, notAfter);
+        assertEquals("ERR_SENSOR_CREDENTIAL_UNKNOWN",
+                assertThrows(IngestionException.class, () -> resolver.resolveAuthority(unknown)).getCode());
+
+        Instant expiredBefore = Instant.now().minus(48, ChronoUnit.HOURS);
+        Instant expiredAfter = Instant.now().minus(1, ChronoUnit.HOURS);
+        String expiredFp = CertificateFingerprints.sha256Hex(new byte[]{44, 44, 44});
+        sensorControl.bindCertificateFromMetadata(
+                "sensor-neg-a", expiredFp, null, "c102", "CN=CA", null, expiredBefore, expiredAfter);
+        X509Certificate expiredCert = mockCert(new byte[]{44, 44, 44}, "c102", expiredBefore, expiredAfter);
+        assertEquals("ERR_SENSOR_CREDENTIAL_EXPIRED",
+                assertThrows(IngestionException.class, () -> resolver.resolveAuthority(expiredCert)).getCode());
+
+        X509Certificate revokeCert = mockCert(new byte[]{45, 45, 45}, "c103", notBefore, notAfter);
+        String revokeFp = CertificateFingerprints.sha256DerHex(revokeCert);
+        sensorControl.bindCertificate("sensor-neg-a", revokeCert);
+        sensorControl.revokeCredential(revokeFp);
+        assertEquals("ERR_SENSOR_CREDENTIAL_REVOKED",
+                assertThrows(IngestionException.class, () -> resolver.resolveAuthority(revokeCert)).getCode());
+
+        // Wrong Sensor/tenant: cert bound to A must not authorize as B's scope.
+        ResolvedSensorAuthority aAuthority = resolver.resolveAuthority(activeCert);
+        assertNotEquals("sensor-neg-b", aAuthority.scope().sensorId());
+        assertEquals(tenantA.tenantId(), aAuthority.scope().tenantId());
+        assertNotEquals(tenantB.tenantId(), aAuthority.scope().tenantId());
+    }
+
+    @Test
+    void shareHelpersRejectUseWithoutCallerTransaction() {
+        Tenant tenant = tenantService.create("Share Tx Required", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-share-tx", tenant.tenantId(), null, SensorRole.NETWORK, true);
+
+        SensorControlException principalEx = assertThrows(SensorControlException.class,
+                () -> sensorRepo.lockPrincipalForShare(tenant.tenantId(), "sensor-share-tx"));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, principalEx.getCode());
+        assertTrue(principalEx.getMessage().contains("Active PostgreSQL transaction required"));
+
+        UUID fakeCredential = UUID.fromString("018f0e0a-0000-7000-8000-0000000000ff");
+        SensorControlException credentialEx = assertThrows(SensorControlException.class,
+                () -> sensorRepo.lockCredentialForShare(fakeCredential));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, credentialEx.getCode());
+    }
+
+    @Test
+    void heldShareBlocksAllowlistReplacementBeforeChildDml_failingFirstDocumentsGap() throws Exception {
+        // Deterministic failing-first for the historical allowlist lock gap:
+        // caller-held principal FOR SHARE must block replaceEntityAllowlist before child DML.
+        // Without principal FOR UPDATE at the start of replaceEntityAllowlist this assertion fails.
+        Tenant tenant = tenantService.create("Allowlist Lock Gap Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-al-gap", tenant.tenantId(), null, SensorRole.NETWORK, false);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        X509Certificate cert = mockCert(new byte[]{51, 52, 53}, "a901", notBefore, notAfter);
+        sensorControl.bindCertificate("sensor-al-gap", cert);
+        UUID entityId = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e9");
+        insertEntity(tenant.tenantId(), entityId, "gap-entity");
+
+        ChildDmlProbeRepository probeRepo = new ChildDmlProbeRepository(pg.namedJdbc());
+        PostgresSensorAuthorityResolver probedResolver =
+                new PostgresSensorAuthorityResolver(probeRepo, new SensorAuthorityMetrics());
+
+        CountDownLatch shareHeld = new CountDownLatch(1);
+        CountDownLatch releaseShare = new CountDownLatch(1);
+        AtomicBoolean replaceFinished = new AtomicBoolean(false);
+        AtomicReference<Throwable> replaceFailure = new AtomicReference<>();
+
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+            ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+            ctx.register(PersistenceConfig.class);
+            ctx.registerBean(SensorControlRepository.class, () -> probeRepo);
+            ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+            ctx.register(SensorControlService.class);
+            ctx.refresh();
+            SensorControlService probedService = ctx.getBean(SensorControlService.class);
+
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                Future<?> holder = pool.submit(() -> {
+                    TransactionTemplate tx = pg.tx();
+                    tx.executeWithoutResult(status -> {
+                        probedResolver.resolveAuthorityHoldingShare(cert);
+                        shareHeld.countDown();
+                        try {
+                            assertTrue(releaseShare.await(30, TimeUnit.SECONDS));
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(e);
+                        }
+                    });
+                    return null;
+                });
+
+                Future<?> replacer = pool.submit(() -> {
+                    assertTrue(shareHeld.await(30, TimeUnit.SECONDS));
+                    try {
+                        probedService.replaceEntityAllowlist("sensor-al-gap", false, Set.of(entityId));
+                        replaceFinished.set(true);
+                    } catch (Throwable t) {
+                        replaceFailure.set(t);
+                    }
+                    return null;
+                });
+
+                assertTrue(shareHeld.await(30, TimeUnit.SECONDS));
+                // While SHARE is held, FOR UPDATE (when present) must keep child DML from starting.
+                Thread.sleep(750);
+                assertFalse(probeRepo.childDmlStarted.get(),
+                        "allowlist child DML must not start while caller holds principal FOR SHARE");
+                assertFalse(replaceFinished.get(),
+                        "replaceEntityAllowlist must remain blocked while FOR SHARE is held");
+
+                releaseShare.countDown();
+                holder.get(30, TimeUnit.SECONDS);
+                replacer.get(30, TimeUnit.SECONDS);
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        assertNull(replaceFailure.get());
+        assertTrue(replaceFinished.get());
+        assertTrue(probeRepo.childDmlStarted.get());
+        assertEquals(Set.of(entityId), sensorRepo.listAllowedEntityIds(tenant.tenantId(), "sensor-al-gap"));
+    }
+
+    @Test
+    void reverseOrdering_shareAfterCommittedAllowlistSeesCommittedChanges() throws Exception {
+        Tenant tenant = tenantService.create("Allowlist Reverse Order Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-al-rev", tenant.tenantId(), null, SensorRole.NETWORK, false);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        X509Certificate cert = mockCert(new byte[]{54, 55, 56}, "a902", notBefore, notAfter);
+        sensorControl.bindCertificate("sensor-al-rev", cert);
+        UUID entityId = UUID.fromString("018f0e0a-0000-7000-8000-0000000000ea");
+        insertEntity(tenant.tenantId(), entityId, "rev-entity");
+
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+            ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+            ctx.register(PersistenceConfig.class);
+            ctx.registerBean(SensorControlRepository.class, () -> sensorRepo);
+            ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+            ctx.register(SensorControlService.class);
+            ctx.refresh();
+            SensorControlService txService = ctx.getBean(SensorControlService.class);
+            txService.replaceEntityAllowlist("sensor-al-rev", false, Set.of(entityId));
+        }
+
+        TransactionTemplate tx = pg.tx();
+        ResolvedSensorAuthority held = tx.execute(status -> resolver.resolveAuthorityHoldingShare(cert));
+        assertTrue(held.scope().isEntityAllowed(entityId));
+        assertEquals(Set.of(entityId), held.scope().allowedEntityIds());
+    }
+
+    @Test
+    void replaceEntityAllowlistRollbackIsAtomic() throws Exception {
+        Tenant tenant = tenantService.create("Allowlist Rollback Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-al-rb", tenant.tenantId(), null, SensorRole.NETWORK, false);
+        UUID entityOk = UUID.fromString("018f0e0a-0000-7000-8000-0000000000eb");
+        UUID entityMissing = UUID.fromString("018f0e0a-0000-7000-8000-0000000000ec");
+        insertEntity(tenant.tenantId(), entityOk, "rb-ok");
+        sensorControl.replaceEntityAllowlist("sensor-al-rb", false, Set.of(entityOk));
+        assertEquals(Set.of(entityOk), sensorRepo.listAllowedEntityIds(tenant.tenantId(), "sensor-al-rb"));
+
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+            ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+            ctx.register(PersistenceConfig.class);
+            ctx.registerBean(SensorControlRepository.class, () -> sensorRepo);
+            ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+            ctx.register(SensorControlService.class);
+            ctx.refresh();
+            SensorControlService txService = ctx.getBean(SensorControlService.class);
+            SensorControlException ex = assertThrows(SensorControlException.class,
+                    () -> txService.replaceEntityAllowlist("sensor-al-rb", false, Set.of(entityOk, entityMissing)));
+            assertEquals(SensorControlException.ERR_SENSOR_ENTITY_INVALID, ex.getCode());
+        }
+
+        assertEquals(Set.of(entityOk), sensorRepo.listAllowedEntityIds(tenant.tenantId(), "sensor-al-rb"));
+        assertFalse(sensorRepo.findPrincipalById("sensor-al-rb").orElseThrow().allowAllTenantEntities());
+    }
+
+    @Test
+    void independentPrincipalsRemainConcurrentUnderShareAndAllowlist() throws Exception {
+        Tenant tenant = tenantService.create("Allowlist Indep Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-al-a", tenant.tenantId(), null, SensorRole.NETWORK, false);
+        sensorControl.enrollSensor("sensor-al-b", tenant.tenantId(), null, SensorRole.NETWORK, false);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        X509Certificate certA = mockCert(new byte[]{61, 61, 61}, "b101", notBefore, notAfter);
+        X509Certificate certB = mockCert(new byte[]{62, 62, 62}, "b201", notBefore, notAfter);
+        sensorControl.bindCertificate("sensor-al-a", certA);
+        sensorControl.bindCertificate("sensor-al-b", certB);
+        UUID entityA = UUID.fromString("018f0e0a-0000-7000-8000-0000000000ed");
+        UUID entityB = UUID.fromString("018f0e0a-0000-7000-8000-0000000000ee");
+        insertEntity(tenant.tenantId(), entityA, "indep-a");
+        insertEntity(tenant.tenantId(), entityB, "indep-b");
+
+        CountDownLatch shareHeldOnA = new CountDownLatch(1);
+        CountDownLatch releaseShareOnA = new CountDownLatch(1);
+        AtomicBoolean bFinishedWhileAHeld = new AtomicBoolean(false);
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> holdA = pool.submit(() -> {
+                pg.tx().executeWithoutResult(status -> {
+                    resolver.resolveAuthorityHoldingShare(certA);
+                    shareHeldOnA.countDown();
+                    try {
+                        assertTrue(releaseShareOnA.await(30, TimeUnit.SECONDS));
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(e);
+                    }
+                });
+                return null;
+            });
+
+            Future<?> mutateB = pool.submit(() -> {
+                assertTrue(shareHeldOnA.await(30, TimeUnit.SECONDS));
+                try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+                    ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+                    ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+                    ctx.register(PersistenceConfig.class);
+                    ctx.registerBean(SensorControlRepository.class, () -> sensorRepo);
+                    ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+                    ctx.register(SensorControlService.class);
+                    ctx.refresh();
+                    ctx.getBean(SensorControlService.class)
+                            .replaceEntityAllowlist("sensor-al-b", false, Set.of(entityB));
+                }
+                bFinishedWhileAHeld.set(true);
+                return null;
+            });
+
+            assertTrue(shareHeldOnA.await(30, TimeUnit.SECONDS));
+            mutateB.get(30, TimeUnit.SECONDS);
+            assertTrue(bFinishedWhileAHeld.get(),
+                    "independent principal B must proceed while A holds FOR SHARE");
+            releaseShareOnA.countDown();
+            holdA.get(30, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertEquals(Set.of(entityB), sensorRepo.listAllowedEntityIds(tenant.tenantId(), "sensor-al-b"));
+        assertTrue(sensorRepo.listAllowedEntityIds(tenant.tenantId(), "sensor-al-a").isEmpty());
+    }
+
+    @Test
+    void replaceEntityAllowlist_acquiresPrincipalForUpdateBeforeEntityChecksAndChildDml() throws Exception {
+        Tenant tenant = tenantService.create("Allowlist Lock Order Corp", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-al-order", tenant.tenantId(), null, SensorRole.NETWORK, false);
+        UUID entityId = UUID.fromString("018f0e0a-0000-7000-8000-0000000000ef");
+        insertEntity(tenant.tenantId(), entityId, "order-entity");
+
+        OrderProbeRepository orderRepo = new OrderProbeRepository(pg.namedJdbc());
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.registerBean(DataSource.class, pg::dataSource, def -> def.setDestroyMethodName(""));
+            ctx.registerBean(NamedParameterJdbcTemplate.class, pg::namedJdbc);
+            ctx.register(PersistenceConfig.class);
+            ctx.registerBean(SensorControlRepository.class, () -> orderRepo);
+            ctx.registerBean(SecurityAuditEmitter.class, SecurityAuditEmitter::new);
+            ctx.register(SensorControlService.class);
+            ctx.refresh();
+            ctx.getBean(SensorControlService.class)
+                    .replaceEntityAllowlist("sensor-al-order", false, Set.of(entityId));
+        }
+
+        List<String> events = orderRepo.events;
+        int lockIdx = events.indexOf("lockPrincipalForUpdate");
+        int entityIdx = events.indexOf("entityExists");
+        int childIdx = events.indexOf("replaceAllowedEntities");
+        assertTrue(lockIdx >= 0, "principal FOR UPDATE must be acquired");
+        assertTrue(entityIdx >= 0, "entityExists must run");
+        assertTrue(childIdx >= 0, "child allowlist DML must run");
+        assertTrue(lockIdx < entityIdx, "FOR UPDATE must precede entity checks");
+        assertTrue(lockIdx < childIdx, "FOR UPDATE must precede child allowlist DML");
+    }
+
+    public static class ChildDmlProbeRepository extends SensorControlRepository {
+        private final AtomicBoolean childDmlStarted = new AtomicBoolean(false);
+
+        public ChildDmlProbeRepository(NamedParameterJdbcTemplate jdbc) {
+            super(jdbc);
+        }
+
+        @Override
+        public void replaceAllowedEntities(UUID tenantId, String sensorId, Set<UUID> entityIds, Instant createdAt) {
+            childDmlStarted.set(true);
+            super.replaceAllowedEntities(tenantId, sensorId, entityIds, createdAt);
+        }
+    }
+
+    public static class OrderProbeRepository extends SensorControlRepository {
+        private final List<String> events = Collections.synchronizedList(new ArrayList<>());
+
+        public OrderProbeRepository(NamedParameterJdbcTemplate jdbc) {
+            super(jdbc);
+        }
+
+        @Override
+        public SensorPrincipal lockPrincipalForUpdate(UUID tenantId, String sensorId) {
+            events.add("lockPrincipalForUpdate");
+            return super.lockPrincipalForUpdate(tenantId, sensorId);
+        }
+
+        @Override
+        public boolean entityExists(UUID tenantId, UUID entityId) {
+            events.add("entityExists");
+            return super.entityExists(tenantId, entityId);
+        }
+
+        @Override
+        public void replaceAllowedEntities(UUID tenantId, String sensorId, Set<UUID> entityIds, Instant createdAt) {
+            events.add("replaceAllowedEntities");
+            super.replaceAllowedEntities(tenantId, sensorId, entityIds, createdAt);
+        }
     }
 
     public static class FailingInsertSensorControlRepository extends SensorControlRepository {
