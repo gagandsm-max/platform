@@ -2,28 +2,45 @@ package com.platform.core.telemetry.read;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.domain.DomainException;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.env.MapPropertySource;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.math.BigInteger;
+import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -33,6 +50,38 @@ class ClickHouseMetricObservationReaderTest {
 
     private static final UUID TENANT = UUID.fromString("018f0e0a-0000-7000-8000-0000000000a1");
     private static final UUID ENTITY = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e1");
+
+    private final List<HttpServer> wireServers = new ArrayList<>();
+    private final List<ExecutorService> fixtureExecutors = new ArrayList<>();
+
+    @AfterEach
+    void tearDownWireFixtures() throws InterruptedException {
+        for (HttpServer server : wireServers) {
+            server.stop(0);
+        }
+        wireServers.clear();
+        for (ExecutorService executor : fixtureExecutors) {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS),
+                    "wire fixture executor failed to terminate");
+        }
+        fixtureExecutors.clear();
+        // Fixture-owned executors must fully terminate so no issue105-wire-* threads remain.
+        // Per-test cancel evidence is asserted via server-side cancelled/handlerFinished flags.
+        long leftover = -1L;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        do {
+            leftover = Thread.getAllStackTraces().keySet().stream()
+                    .filter(t -> t.getName().startsWith("issue105-wire-"))
+                    .filter(Thread::isAlive)
+                    .count();
+            if (leftover == 0L) {
+                break;
+            }
+            Thread.sleep(50L);
+        } while (System.nanoTime() < deadline);
+        assertEquals(0L, leftover, "fixture issue105-wire-* threads must terminate after shutdown");
+    }
 
     @Test
     void preservesCounter64AboveJsSafeIntegerAsString() {
@@ -127,10 +176,10 @@ class ClickHouseMetricObservationReaderTest {
     }
 
     @Test
-    void clickHouseOfflineMapsToSanitizedUnavailable() throws Exception {
+    void clickHouseOfflineMapsToSanitizedUnavailable() {
         HttpClient httpClient = mock(HttpClient.class);
-        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenThrow(new java.net.ConnectException("connection refused"));
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.failedFuture(new java.net.ConnectException("connection refused")));
         ClickHouseMetricObservationReader reader = newReader(httpClient);
 
         MetricObservationQuery query = agentCpuQuery(10);
@@ -140,10 +189,10 @@ class ClickHouseMetricObservationReaderTest {
     }
 
     @Test
-    void realTimeoutMapsToSanitizedUnavailable() throws Exception {
+    void realTimeoutMapsToSanitizedUnavailable() {
         HttpClient httpClient = mock(HttpClient.class);
-        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenThrow(new HttpTimeoutException("request timed out"));
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.failedFuture(new HttpTimeoutException("request timed out")));
         ClickHouseMetricObservationReader reader = newReader(httpClient);
 
         DomainException ex = assertThrows(DomainException.class, () -> reader.read(agentCpuQuery(10)));
@@ -158,11 +207,12 @@ class ClickHouseMetricObservationReaderTest {
         HttpResponse<String> response = mock(HttpResponse.class);
         when(response.statusCode()).thenReturn(200);
         when(response.body()).thenReturn("");
+        when(response.headers()).thenReturn(HttpHeaders.of(Map.of(), (a, b) -> true));
         AtomicReference<HttpRequest> captured = new AtomicReference<>();
-        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenAnswer(invocation -> {
                     captured.set(invocation.getArgument(0));
-                    return response;
+                    return CompletableFuture.completedFuture(response);
                 });
 
         ClickHouseMetricObservationReader reader = newReader(httpClient);
@@ -199,6 +249,7 @@ class ClickHouseMetricObservationReaderTest {
                 "http://clickhouse:8123", "Basic dGVzdA==",
                 mock(HttpClient.class), new ObjectMapper(), timeout);
         assertEquals(ClickHouseMetricObservationReader.class, reader.getClass());
+        assertEquals(2 * 1024 * 1024, ClickHouseMetricObservationReader.MAX_RESPONSE_BYTES);
     }
 
     @Test
@@ -269,17 +320,18 @@ class ClickHouseMetricObservationReaderTest {
     }
 
     @Test
-    void ceilBoundsForSubMillisecondWindowSelectCorrectDateTime64Interval() throws Exception {
+    void ceilBoundsForSubMillisecondWindowSelectCorrectDateTime64Interval() {
         HttpClient httpClient = mock(HttpClient.class);
         @SuppressWarnings("unchecked")
         HttpResponse<String> response = mock(HttpResponse.class);
         when(response.statusCode()).thenReturn(200);
         when(response.body()).thenReturn("");
+        when(response.headers()).thenReturn(HttpHeaders.of(Map.of(), (a, b) -> true));
         AtomicReference<HttpRequest> captured = new AtomicReference<>();
-        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenAnswer(invocation -> {
                     captured.set(invocation.getArgument(0));
-                    return response;
+                    return CompletableFuture.completedFuture(response);
                 });
 
         Instant from = Instant.parse("2026-10-16T00:00:00.000500Z");
@@ -311,6 +363,289 @@ class ClickHouseMetricObservationReaderTest {
                 ClickHouseMetricObservationReader.formatClickHouseBound(zero));
     }
 
+    @Test
+    void malformedTailAfterNPlusOneProbeMapsToDataIntegrityError() {
+        ClickHouseMetricObservationReader reader = newReader(mock(HttpClient.class));
+        StringJoiner joiner = new StringJoiner("\n");
+        // limit=3 → maxRows=4 exact probe rows, then late nonblank backend error text.
+        for (int i = 4; i >= 1; i--) {
+            joiner.add(numericLine(i, "sensor-a", "seq-" + i));
+        }
+        joiner.add("Code: 241. DB::Exception: Memory limit exceeded");
+        DomainException ex = assertThrows(DomainException.class,
+                () -> reader.parseLatestPage(joiner.toString(), MetricValueKind.NUMERIC, 3));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
+    void trailingJsonTokensWithinRowMapToDataIntegrityError() {
+        ClickHouseMetricObservationReader reader = newReader(mock(HttpClient.class));
+        String body = """
+                {"ts":"2026-10-16 00:00:01.000","value":1.0,"quality":1,"flags":0,"sensor_id":"s1","sequence_id":"a","source_protocol":"agent"}{"extra":true}
+                """;
+        DomainException ex = assertThrows(DomainException.class,
+                () -> reader.parseLatestPage(body.trim(), MetricValueKind.NUMERIC, 10));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
+    void nonzeroClickHouseExceptionCodeHeaderMapsToDataIntegrityError() {
+        HttpClient httpClient = mock(HttpClient.class);
+        @SuppressWarnings("unchecked")
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn("");
+        when(response.headers()).thenReturn(HttpHeaders.of(
+                Map.of("X-ClickHouse-Exception-Code", List.of("241")), (a, b) -> true));
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(response));
+
+        DomainException ex = assertThrows(DomainException.class,
+                () -> newReader(httpClient).read(agentCpuQuery(10)));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
+    void malformedClickHouseExceptionCodeHeaderMapsToDataIntegrityError() {
+        HttpClient httpClient = mock(HttpClient.class);
+        @SuppressWarnings("unchecked")
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn(numericLine(1, "s1", "a"));
+        when(response.headers()).thenReturn(HttpHeaders.of(
+                Map.of("X-ClickHouse-Exception-Code", List.of("not-a-code")), (a, b) -> true));
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(response));
+
+        DomainException ex = assertThrows(DomainException.class,
+                () -> newReader(httpClient).read(agentCpuQuery(10)));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
+    void zeroClickHouseExceptionCodeHeaderAllowsEmptyBody() {
+        HttpClient httpClient = mock(HttpClient.class);
+        @SuppressWarnings("unchecked")
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn("");
+        when(response.headers()).thenReturn(HttpHeaders.of(
+                Map.of("X-ClickHouse-Exception-Code", List.of("0")), (a, b) -> true));
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(response));
+
+        MetricObservationPage page = newReader(httpClient).read(agentCpuQuery(10));
+        assertEquals(0, page.observations().size());
+        assertFalse(page.truncated());
+    }
+
+    @Test
+    void validMaximumPagePositiveControlUnderByteCeiling() {
+        ClickHouseMetricObservationReader reader = newReader(mock(HttpClient.class));
+        int limit = MetricObservationQuery.MAX_LIMIT; // 500 → fetch 501
+        StringJoiner joiner = new StringJoiner("\n");
+        for (int i = 501; i >= 1; i--) {
+            joiner.add(numericLine(i, "sensor-a", "seq-" + i));
+        }
+        String body = joiner.toString();
+        assertTrue(body.getBytes(StandardCharsets.UTF_8).length
+                < ClickHouseMetricObservationReader.MAX_RESPONSE_BYTES);
+        MetricObservationPage page = reader.parseLatestPage(body, MetricValueKind.NUMERIC, limit);
+        assertEquals(limit, page.observations().size());
+        assertTrue(page.truncated());
+        assertEquals(Instant.parse("2026-10-16T00:00:02.000Z"), page.observations().get(0).timestamp());
+        assertEquals(Instant.parse("2026-10-16T00:08:21.000Z"), page.observations().get(limit - 1).timestamp());
+    }
+
+    @Test
+    void wireStalledBodyAfter200HeadersMapsToUnavailableWithinBudget() throws Exception {
+        CountDownLatch headersSent = new CountDownLatch(1);
+        CountDownLatch handlerFinished = new CountDownLatch(1);
+        AtomicBoolean writeCancelled = new AtomicBoolean(false);
+        AtomicInteger openExchanges = new AtomicInteger(0);
+        HttpServer server = startWireServer((exchange, mode) -> {
+            openExchanges.incrementAndGet();
+            try {
+                exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=UTF-8");
+                // Large declared length; body barely trickles so headers complete first and
+                // subsequent writes surface client cancel after the absolute deadline aborts.
+                exchange.sendResponseHeaders(200, 10_000_000);
+                headersSent.countDown();
+                OutputStream os = exchange.getResponseBody();
+                try {
+                    for (int i = 0; i < 200_000; i++) {
+                        os.write('x');
+                        os.flush();
+                        Thread.sleep(25L);
+                    }
+                } catch (InterruptedException | IOException ex) {
+                    writeCancelled.set(true);
+                    if (ex instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                    }
+                } finally {
+                    try {
+                        os.close();
+                    } catch (IOException ignored) {
+                        // exchange teardown
+                    }
+                }
+            } catch (IOException ex) {
+                writeCancelled.set(true);
+                headersSent.countDown();
+            } finally {
+                openExchanges.decrementAndGet();
+                handlerFinished.countDown();
+            }
+        });
+
+        Duration budget = Duration.ofMillis(800);
+        ClickHouseMetricObservationReader reader = realWireReader(server, budget);
+        long started = System.nanoTime();
+        DomainException ex = assertTimeoutPreemptively(Duration.ofSeconds(3), () ->
+                assertThrows(DomainException.class, () -> reader.read(agentCpuQuery(10))));
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+        assertEquals("DATABASE_UNAVAILABLE", ex.getCode());
+        assertTrue(elapsedMs < 2_500L, "absolute deadline must bound return, elapsedMs=" + elapsedMs);
+        assertTrue(headersSent.await(1, TimeUnit.SECONDS));
+        assertTrue(handlerFinished.await(5, TimeUnit.SECONDS),
+                "server handler must finish after client cancel (no blocked background read)");
+        assertTrue(writeCancelled.get() || openExchanges.get() == 0,
+                "exchange/subscription must cancel without leaving a blocked background read");
+    }
+
+    @Test
+    void wireSlowTrickleBodyExceedingDeadlineMapsToUnavailable() throws Exception {
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        CountDownLatch handlerFinished = new CountDownLatch(1);
+        HttpServer server = startWireServer((exchange, mode) -> {
+            try {
+                exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=UTF-8");
+                exchange.sendResponseHeaders(200, 0);
+                OutputStream os = exchange.getResponseBody();
+                try {
+                    for (int i = 0; i < 200; i++) {
+                        os.write((numericLine(i + 1, "s", "q" + i) + "\n")
+                                .getBytes(StandardCharsets.UTF_8));
+                        os.flush();
+                        Thread.sleep(100L);
+                    }
+                } catch (InterruptedException | IOException ex) {
+                    cancelled.set(true);
+                    if (ex instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                    }
+                } finally {
+                    try {
+                        os.close();
+                    } catch (IOException ignored) {
+                        // teardown
+                    }
+                }
+            } catch (IOException ex) {
+                cancelled.set(true);
+            } finally {
+                handlerFinished.countDown();
+            }
+        });
+
+        ClickHouseMetricObservationReader reader = realWireReader(server, Duration.ofMillis(700));
+        DomainException ex = assertTimeoutPreemptively(Duration.ofSeconds(3), () ->
+                assertThrows(DomainException.class, () -> reader.read(agentCpuQuery(10))));
+        assertEquals("DATABASE_UNAVAILABLE", ex.getCode());
+        assertTrue(handlerFinished.await(5, TimeUnit.SECONDS),
+                "slow-trickle handler must finish after absolute-deadline cancel");
+        assertTrue(cancelled.get() || handlerFinished.getCount() == 0L,
+                "slow trickle must be cancelled on absolute deadline");
+    }
+
+    @Test
+    void wireOversizeBodyMapsToDataIntegrityAndCancels() throws Exception {
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        CountDownLatch handlerFinished = new CountDownLatch(1);
+        byte[] huge = new byte[ClickHouseMetricObservationReader.MAX_RESPONSE_BYTES + 64 * 1024];
+        for (int i = 0; i < huge.length; i++) {
+            huge[i] = (byte) ('a' + (i % 26));
+        }
+        HttpServer server = startWireServer((exchange, mode) -> {
+            try {
+                exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=UTF-8");
+                exchange.sendResponseHeaders(200, huge.length);
+                OutputStream os = exchange.getResponseBody();
+                try {
+                    int offset = 0;
+                    while (offset < huge.length) {
+                        int chunk = Math.min(8 * 1024, huge.length - offset);
+                        os.write(huge, offset, chunk);
+                        os.flush();
+                        offset += chunk;
+                        Thread.sleep(2L);
+                    }
+                } catch (InterruptedException | IOException ex) {
+                    cancelled.set(true);
+                    if (ex instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                    }
+                } finally {
+                    try {
+                        os.close();
+                    } catch (IOException ignored) {
+                        // teardown
+                    }
+                }
+            } catch (IOException ex) {
+                cancelled.set(true);
+            } finally {
+                handlerFinished.countDown();
+            }
+        });
+
+        ClickHouseMetricObservationReader reader = realWireReader(server, Duration.ofSeconds(5));
+        DomainException ex = assertTimeoutPreemptively(Duration.ofSeconds(8), () ->
+                assertThrows(DomainException.class, () -> reader.read(agentCpuQuery(10))));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+        assertTrue(handlerFinished.await(5, TimeUnit.SECONDS),
+                "oversize handler must finish after subscription cancel");
+        assertTrue(cancelled.get() || handlerFinished.getCount() == 0L,
+                "oversize body must cancel the exchange/subscription");
+    }
+
+    private ClickHouseMetricObservationReader realWireReader(HttpServer server, Duration budget) {
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        ExecutorService httpExecutor = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "issue105-wire-http-" + System.nanoTime());
+            t.setDaemon(true);
+            return t;
+        });
+        fixtureExecutors.add(httpExecutor);
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(2))
+                .executor(httpExecutor)
+                .build();
+        return new ClickHouseMetricObservationReader(
+                base, "Basic dGVzdA==", client, new ObjectMapper(), budget);
+    }
+
+    @FunctionalInterface
+    private interface WireHandler {
+        void handle(HttpExchange exchange, String mode) throws IOException;
+    }
+
+    private HttpServer startWireServer(WireHandler handler) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> handler.handle(exchange, "default"));
+        ExecutorService serverExecutor = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "issue105-wire-server-" + System.nanoTime());
+            t.setDaemon(true);
+            return t;
+        });
+        fixtureExecutors.add(serverExecutor);
+        server.setExecutor(serverExecutor);
+        server.start();
+        wireServers.add(server);
+        return server;
+    }
+
     private static ClickHouseMetricObservationReader newReader(HttpClient httpClient) {
         return new ClickHouseMetricObservationReader(
                 "http://clickhouse:8123", "Basic dGVzdA==",
@@ -327,7 +662,7 @@ class ClickHouseMetricObservationReaderTest {
     }
 
     private static String numericLine(int secondOffset, String sensor, String seq) {
-        // secondOffset 1 → 00:00:01, 200 → 00:03:20
+        // secondOffset 1 → 00:00:01, 200 → 00:03:20, 501 → 00:08:21
         int totalSeconds = secondOffset;
         int minutes = totalSeconds / 60;
         int seconds = totalSeconds % 60;

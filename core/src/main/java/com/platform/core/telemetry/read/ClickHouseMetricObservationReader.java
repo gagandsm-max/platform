@@ -1,6 +1,8 @@
 package com.platform.core.telemetry.read;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.domain.DomainException;
@@ -11,6 +13,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.StringReader;
 import java.math.BigInteger;
 import java.net.ConnectException;
@@ -20,6 +24,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,11 +35,22 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Flow;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Bounded ClickHouse read accessor for canonical FINAL views only.
  * Does not share the ingestion write client; never queries {@code *_raw} tables.
  * Selects the true latest N+1 observations (DESC), then reorders ASC for presentation.
+ *
+ * <p>Response exchange uses an absolute completion deadline covering headers and body,
+ * plus a hard retained-byte ceiling. {@link HttpRequest#timeout()} alone is insufficient
+ * on the evidenced Java 21.0.7 HttpClient (request timer is cleared before body read).
  */
 @Component
 public class ClickHouseMetricObservationReader {
@@ -46,8 +62,20 @@ public class ClickHouseMetricObservationReader {
     private static final BigInteger MAX_UINT64 = new BigInteger("18446744073709551615");
     private static final BigInteger MAX_UINT32 = BigInteger.valueOf(4_294_967_295L);
     private static final long NANOS_PER_MILLI = 1_000_000L;
+
+    /**
+     * Hard ceiling on retained ClickHouse HTTP response bytes for this reader.
+     * Phase-1 {@link MetricObservationQuery#MAX_LIMIT} is 500; selection fetches N+1 = 501
+     * JSONEachRow lines. Allowlisted observation projections are a bounded field set; a
+     * conservative ~4 KiB/line envelope for long OID/sensor/sequence identifiers yields
+     * {@code 501 × 4 KiB ≈ 2 MiB}. This ceiling admits a valid maximum-page positive control
+     * with headroom while failing closed on multi-megabyte dumps.
+     */
+    static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+
     static final String SELECTION_ORDERING = "ts DESC, sensor_id DESC, sequence_id DESC";
     static final String PRESENTATION_ORDERING = "ts ASC, sensor_id ASC, sequence_id ASC";
+    private static final String CH_EXCEPTION_CODE_HEADER = "X-ClickHouse-Exception-Code";
 
     private final String baseUrl;
     private final String authHeader;
@@ -104,35 +132,48 @@ public class ClickHouseMetricObservationReader {
                 + "&output_format_json_quote_64bit_integers=1"
                 + "&max_execution_time=4";
 
+        // Absolute deadline is enforced below via CompletableFuture.get; HttpRequest.timeout
+        // is intentionally omitted because JDK 21.0.7 clears that timer before body completion.
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(uri))
-                .timeout(requestTimeout)
                 .header("Authorization", authHeader)
                 .header("Content-Type", "text/plain; charset=UTF-8")
                 .POST(HttpRequest.BodyPublishers.ofString(sql, StandardCharsets.UTF_8))
                 .build();
 
+        long deadlineNanos = System.nanoTime() + requestTimeout.toNanos();
+        CompletableFuture<HttpResponse<String>> future = httpClient.sendAsync(
+                request, boundedStringHandler(MAX_RESPONSE_BYTES));
         try {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            long remaining = deadlineNanos - System.nanoTime();
+            if (remaining <= 0L) {
+                cancelExchange(future);
+                throw unavailable();
+            }
+            HttpResponse<String> response = future.get(remaining, TimeUnit.NANOSECONDS);
             if (response.statusCode() != 200) {
                 log.warn("ClickHouse metric read failed status={}", response.statusCode());
-                throw new DomainException("DATABASE_UNAVAILABLE", "Telemetry store temporarily unavailable");
+                throw unavailable();
             }
+            assertNoClickHouseExceptionMetadata(response);
             return parseLatestPage(response.body(), query.selector().valueKind(), query.limit());
         } catch (DomainException ex) {
             throw ex;
+        } catch (TimeoutException ex) {
+            cancelExchange(future);
+            log.warn("ClickHouse metric read absolute deadline exceeded failureClass={}",
+                    ex.getClass().getSimpleName());
+            throw unavailable();
         } catch (InterruptedException ex) {
+            cancelExchange(future);
             Thread.currentThread().interrupt();
-            throw new DomainException("DATABASE_UNAVAILABLE", "Telemetry store temporarily unavailable");
-        } catch (HttpTimeoutException ex) {
-            log.warn("ClickHouse metric read timeout failureClass={}", ex.getClass().getSimpleName());
-            throw new DomainException("DATABASE_UNAVAILABLE", "Telemetry store temporarily unavailable");
-        } catch (ConnectException ex) {
-            log.warn("ClickHouse metric read unavailable failureClass={}", ex.getClass().getSimpleName());
-            throw new DomainException("DATABASE_UNAVAILABLE", "Telemetry store temporarily unavailable");
+            throw unavailable();
+        } catch (ExecutionException ex) {
+            throw mapExecutionFailure(ex);
         } catch (Exception ex) {
+            cancelExchange(future);
             log.warn("ClickHouse metric read unavailable failureClass={}", ex.getClass().getSimpleName());
-            throw new DomainException("DATABASE_UNAVAILABLE", "Telemetry store temporarily unavailable");
+            throw unavailable();
         }
     }
 
@@ -160,8 +201,9 @@ public class ClickHouseMetricObservationReader {
 
     /**
      * Parses ClickHouse JSONEachRow body already ordered newest-first.
-     * Keeps at most {@code limit} rows, sets truncation from the N+1 probe row,
-     * then reorders ascending for presentation only.
+     * Validates the complete bounded response (including any content beyond the N+1 probe),
+     * then keeps at most {@code limit} rows, sets truncation from the N+1 probe row,
+     * and reorders ascending for presentation only.
      */
     MetricObservationPage parseLatestPage(String body, MetricValueKind kind, int limit) {
         List<MetricObservationRow> newestFirst = parseRowsNewestFirst(body, kind, limit + 1);
@@ -185,27 +227,49 @@ public class ClickHouseMetricObservationReader {
                     continue;
                 }
                 if (rows.size() >= maxRows) {
-                    break;
-                }
-                try {
-                    JsonNode node = objectMapper.readTree(line);
-                    rows.add(parseRow(node, kind));
-                } catch (DomainException ex) {
-                    throw ex;
-                } catch (JsonProcessingException | IllegalArgumentException | DateTimeParseException ex) {
+                    // Extra nonblank content beyond the allowed N+1 probe rows — fail closed.
                     throw new DomainException(
                             "DATA_INTEGRITY_ERROR",
                             "Telemetry store returned malformed observation data");
                 }
+                rows.add(parseStrictJsonLine(line, kind));
             }
         } catch (DomainException ex) {
             throw ex;
-        } catch (java.io.IOException ex) {
+        } catch (IOException ex) {
             throw new DomainException(
                     "DATA_INTEGRITY_ERROR",
                     "Telemetry store returned malformed observation data");
         }
         return rows;
+    }
+
+    private MetricObservationRow parseStrictJsonLine(String line, MetricValueKind kind) {
+        try (JsonParser parser = objectMapper.getFactory().createParser(line)) {
+            JsonNode node = objectMapper.readTree(parser);
+            if (node == null) {
+                throw new DomainException(
+                        "DATA_INTEGRITY_ERROR",
+                        "Telemetry store returned malformed observation data");
+            }
+            JsonToken trailing = parser.nextToken();
+            if (trailing != null) {
+                throw new DomainException(
+                        "DATA_INTEGRITY_ERROR",
+                        "Telemetry store returned malformed observation data");
+            }
+            return parseRow(node, kind);
+        } catch (DomainException ex) {
+            throw ex;
+        } catch (JsonProcessingException | IllegalArgumentException | DateTimeParseException ex) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        } catch (IOException ex) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
     }
 
     private MetricObservationRow parseRow(JsonNode node, MetricValueKind kind) {
@@ -355,6 +419,67 @@ public class ClickHouseMetricObservationReader {
         return child == null || child.isNull() ? "" : child.asText();
     }
 
+    private static void assertNoClickHouseExceptionMetadata(HttpResponse<?> response) {
+        Optional<String> codeHeader = response.headers().firstValue(CH_EXCEPTION_CODE_HEADER);
+        if (codeHeader.isEmpty()) {
+            return;
+        }
+        String raw = codeHeader.get().trim();
+        if (raw.isEmpty()) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
+        if (!raw.matches("^[0-9]+$")) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
+        BigInteger code = new BigInteger(raw);
+        if (!BigInteger.ZERO.equals(code)) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
+    }
+
+    private static DomainException mapExecutionFailure(ExecutionException ex) {
+        Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+        if (cause instanceof DomainException domain) {
+            return domain;
+        }
+        if (cause instanceof ResponseBoundExceededException) {
+            return new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
+        if (cause instanceof InterruptedException) {
+            Thread.currentThread().interrupt();
+            return unavailable();
+        }
+        if (cause instanceof HttpTimeoutException || cause instanceof ConnectException
+                || cause instanceof TimeoutException) {
+            log.warn("ClickHouse metric read unavailable failureClass={}", cause.getClass().getSimpleName());
+            return unavailable();
+        }
+        log.warn("ClickHouse metric read unavailable failureClass={}", cause.getClass().getSimpleName());
+        return unavailable();
+    }
+
+    private static DomainException unavailable() {
+        return new DomainException("DATABASE_UNAVAILABLE", "Telemetry store temporarily unavailable");
+    }
+
+    private static void cancelExchange(CompletableFuture<?> future) {
+        if (future != null) {
+            future.cancel(true);
+        }
+    }
+
+    static HttpResponse.BodyHandler<String> boundedStringHandler(int maxBytes) {
+        return responseInfo -> new BoundedStringSubscriber(maxBytes);
+    }
+
     private static String enc(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
@@ -362,5 +487,90 @@ public class ClickHouseMetricObservationReader {
     private static String basicAuth(String user, String password) {
         String creds = user + ":" + password;
         return "Basic " + java.util.Base64.getEncoder().encodeToString(creds.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Fail-closed signal when retained ClickHouse body exceeds {@link #MAX_RESPONSE_BYTES}. */
+    static final class ResponseBoundExceededException extends RuntimeException {
+        ResponseBoundExceededException() {
+            super("ClickHouse response exceeded retained byte ceiling");
+        }
+    }
+
+    /**
+     * Retains at most {@code maxBytes} of response body on the HttpClient executor / calling
+     * subscriber path. Overflow cancels the subscription immediately and does not grow the buffer.
+     */
+    static final class BoundedStringSubscriber implements HttpResponse.BodySubscriber<String> {
+        private final int maxBytes;
+        private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        private final CompletableFuture<String> result = new CompletableFuture<>();
+        private final AtomicBoolean done = new AtomicBoolean(false);
+        private volatile Flow.Subscription subscription;
+
+        BoundedStringSubscriber(int maxBytes) {
+            if (maxBytes < 1) {
+                throw new IllegalArgumentException("maxBytes must be positive");
+            }
+            this.maxBytes = maxBytes;
+        }
+
+        @Override
+        public void onSubscribe(Flow.Subscription subscription) {
+            this.subscription = subscription;
+            subscription.request(Long.MAX_VALUE);
+        }
+
+        @Override
+        public void onNext(List<ByteBuffer> items) {
+            if (done.get()) {
+                return;
+            }
+            for (ByteBuffer item : items) {
+                int remaining = item.remaining();
+                if (remaining <= 0) {
+                    continue;
+                }
+                if (buffer.size() + remaining > maxBytes) {
+                    failOverflow();
+                    return;
+                }
+                byte[] chunk = new byte[remaining];
+                item.get(chunk);
+                buffer.write(chunk, 0, chunk.length);
+            }
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+            if (done.compareAndSet(false, true)) {
+                buffer.reset();
+                result.completeExceptionally(throwable);
+            }
+        }
+
+        @Override
+        public void onComplete() {
+            if (done.compareAndSet(false, true)) {
+                result.complete(buffer.toString(StandardCharsets.UTF_8));
+                buffer.reset();
+            }
+        }
+
+        @Override
+        public CompletableFuture<String> getBody() {
+            return result;
+        }
+
+        private void failOverflow() {
+            if (!done.compareAndSet(false, true)) {
+                return;
+            }
+            Flow.Subscription sub = subscription;
+            if (sub != null) {
+                sub.cancel();
+            }
+            buffer.reset();
+            result.completeExceptionally(new ResponseBoundExceededException());
+        }
     }
 }
