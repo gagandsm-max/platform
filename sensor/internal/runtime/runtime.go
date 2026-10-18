@@ -233,6 +233,11 @@ func (r *Runtime) RefreshHealth(ctx context.Context) error {
 		statuses[capability] = status
 	}
 	r.mu.Lock()
+	// Discard stale refresh once lifecycle advanced past active health publication.
+	if r.state == StateDraining || r.state == StateStopping || r.state == StateStopped || r.state == StateFailed {
+		r.mu.Unlock()
+		return nil
+	}
 	for k, v := range statuses {
 		r.componentStatus[k] = v
 	}
