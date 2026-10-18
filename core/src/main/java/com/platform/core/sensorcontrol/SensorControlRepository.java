@@ -4,10 +4,14 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.datasource.ConnectionHolder;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HashSet;
@@ -227,12 +231,62 @@ public class SensorControlRepository {
         return rows.get(0);
     }
 
-    private static void requireActiveCallerTransaction(String helperName) {
+    /**
+     * Fail closed unless this repository's DataSource connection participates in the caller's
+     * active PostgreSQL transaction and is non-autocommit. A thread-local actual-transaction
+     * flag or an unrelated resource binding alone is insufficient; do not open a replacement
+     * or {@code REQUIRES_NEW} transaction here.
+     */
+    private void requireActiveCallerTransaction(String helperName) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new SensorControlException(
                     SensorControlException.ERR_SENSOR_STATE_INVALID,
                     "Active PostgreSQL transaction required for " + helperName
                             + "; unlocked lookup is not held authority");
+        }
+        DataSource dataSource = jdbc.getJdbcTemplate().getDataSource();
+        if (dataSource == null) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Active PostgreSQL transaction required for " + helperName
+                            + "; repository DataSource is unavailable");
+        }
+        Object resource = TransactionSynchronizationManager.getResource(dataSource);
+        if (!(resource instanceof ConnectionHolder holder)) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Active PostgreSQL transaction required for " + helperName
+                            + "; repository connection is not bound to the caller transaction");
+        }
+        if (!holder.isSynchronizedWithTransaction()) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Active PostgreSQL transaction required for " + helperName
+                            + "; repository connection is not synchronized with the caller transaction");
+        }
+        final Connection connection;
+        try {
+            connection = holder.getConnection();
+        } catch (IllegalStateException e) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Active PostgreSQL transaction required for " + helperName
+                            + "; repository connection is not bound to the caller transaction");
+        }
+        final boolean autoCommit;
+        try {
+            autoCommit = connection.getAutoCommit();
+        } catch (SQLException e) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Active PostgreSQL transaction required for " + helperName
+                            + "; unable to verify caller transaction participation");
+        }
+        if (autoCommit) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Active PostgreSQL transaction required for " + helperName
+                            + "; bound repository connection remains autocommit");
         }
     }
 

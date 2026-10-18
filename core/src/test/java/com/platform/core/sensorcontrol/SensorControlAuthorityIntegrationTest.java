@@ -29,11 +29,15 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.datasource.ConnectionHolder;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
 import java.math.BigInteger;
 import java.security.cert.X509Certificate;
+import java.sql.Connection;
+import java.sql.DriverManager;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -773,6 +777,120 @@ class SensorControlAuthorityIntegrationTest {
         SensorControlException credentialEx = assertThrows(SensorControlException.class,
                 () -> sensorRepo.lockCredentialForShare(fakeCredential));
         assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, credentialEx.getCode());
+    }
+
+    @Test
+    void shareHelpersRejectUnrelatedResourceTransactionMarker() {
+        Tenant tenant = tenantService.create("Share Unrelated Tx", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-share-unrel", tenant.tenantId(), null, SensorRole.NETWORK, true);
+
+        Object foreignKey = new Object();
+        Object foreignResource = new Object();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.bindResource(foreignKey, foreignResource);
+        try {
+            SensorControlException principalEx = assertThrows(SensorControlException.class,
+                    () -> sensorRepo.lockPrincipalForShare(tenant.tenantId(), "sensor-share-unrel"));
+            assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, principalEx.getCode());
+            assertTrue(principalEx.getMessage().contains("not bound to the caller transaction")
+                    || principalEx.getMessage().contains("Active PostgreSQL transaction required"));
+
+            UUID fakeCredential = UUID.fromString("018f0e0a-0000-7000-8000-0000000000fe");
+            SensorControlException credentialEx = assertThrows(SensorControlException.class,
+                    () -> sensorRepo.lockCredentialForShare(fakeCredential));
+            assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, credentialEx.getCode());
+        } finally {
+            if (TransactionSynchronizationManager.hasResource(foreignKey)) {
+                TransactionSynchronizationManager.unbindResource(foreignKey);
+            }
+            TransactionSynchronizationManager.clear();
+        }
+    }
+
+    @Test
+    void shareHelpersRejectBoundAutocommitConnection() throws Exception {
+        Tenant tenant = tenantService.create("Share Autocommit Tx", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-share-ac", tenant.tenantId(), null, SensorRole.NETWORK, true);
+
+        try (Connection conn = DriverManager.getConnection(pg.jdbcUrl(), "platform_app", "platform_test")) {
+            conn.setAutoCommit(true);
+            ConnectionHolder holder = new ConnectionHolder(conn);
+            holder.setSynchronizedWithTransaction(true);
+            TransactionSynchronizationManager.setActualTransactionActive(true);
+            TransactionSynchronizationManager.bindResource(pg.dataSource(), holder);
+            try {
+                SensorControlException principalEx = assertThrows(SensorControlException.class,
+                        () -> sensorRepo.lockPrincipalForShare(tenant.tenantId(), "sensor-share-ac"));
+                assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, principalEx.getCode());
+                assertTrue(principalEx.getMessage().contains("autocommit"));
+
+                UUID fakeCredential = UUID.fromString("018f0e0a-0000-7000-8000-0000000000fd");
+                SensorControlException credentialEx = assertThrows(SensorControlException.class,
+                        () -> sensorRepo.lockCredentialForShare(fakeCredential));
+                assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, credentialEx.getCode());
+                assertTrue(credentialEx.getMessage().contains("autocommit"));
+            } finally {
+                if (TransactionSynchronizationManager.hasResource(pg.dataSource())) {
+                    TransactionSynchronizationManager.unbindResource(pg.dataSource());
+                }
+                TransactionSynchronizationManager.clear();
+            }
+        }
+    }
+
+    @Test
+    void heldShareLocksRemainUntilCallerTransactionCompletes() throws Exception {
+        Tenant tenant = tenantService.create("Share Hold Until Complete", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor("sensor-share-hold", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        Instant notBefore = Instant.now().minusSeconds(60);
+        Instant notAfter = Instant.now().plusSeconds(3600);
+        X509Certificate cert = mockCert(new byte[]{71, 72, 73}, "e901", notBefore, notAfter);
+        sensorControl.bindCertificate("sensor-share-hold", cert);
+
+        CountDownLatch shareHeld = new CountDownLatch(1);
+        CountDownLatch releaseShare = new CountDownLatch(1);
+        CountDownLatch forUpdateReached = new CountDownLatch(1);
+        AtomicBoolean forUpdateFinishedWhileShareHeld = new AtomicBoolean(false);
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> holder = pool.submit(() -> {
+                pg.tx().executeWithoutResult(status -> {
+                    resolver.resolveAuthorityHoldingShare(cert);
+                    shareHeld.countDown();
+                    try {
+                        assertTrue(releaseShare.await(30, TimeUnit.SECONDS));
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(e);
+                    }
+                });
+                return null;
+            });
+
+            Future<?> updater = pool.submit(() -> {
+                assertTrue(shareHeld.await(30, TimeUnit.SECONDS));
+                pg.tx().executeWithoutResult(status -> {
+                    forUpdateReached.countDown();
+                    sensorRepo.lockPrincipalForUpdate(tenant.tenantId(), "sensor-share-hold");
+                    forUpdateFinishedWhileShareHeld.set(true);
+                });
+                return null;
+            });
+
+            assertTrue(shareHeld.await(30, TimeUnit.SECONDS));
+            assertTrue(forUpdateReached.await(30, TimeUnit.SECONDS),
+                    "FOR UPDATE waiter must reach the lock attempt while SHARE is held");
+            assertFalse(forUpdateFinishedWhileShareHeld.get(),
+                    "FOR UPDATE must remain blocked until caller releases SHARE");
+
+            releaseShare.countDown();
+            holder.get(30, TimeUnit.SECONDS);
+            updater.get(30, TimeUnit.SECONDS);
+            assertTrue(forUpdateFinishedWhileShareHeld.get());
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     @Test

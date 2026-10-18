@@ -104,7 +104,7 @@ public class PostgresSensorAuthorityResolver implements SensorAuthorityResolver 
     }
 
     private ResolvedSensorAuthority resolveByFingerprint(String fingerprint, boolean holdShare) {
-        Instant now = clock.instant();
+        Instant tipObservedAt = clock.instant();
 
         SensorCertificateCredential tip = repository.findCredentialByFingerprint(fingerprint).orElse(null);
         if (tip == null) {
@@ -114,7 +114,8 @@ public class PostgresSensorAuthorityResolver implements SensorAuthorityResolver 
         }
 
         // Fail closed on credential lifecycle before principal lookup (unlocked tip path).
-        validateCredentialLifecycle(tip, now);
+        // Held-share path re-samples authoritative time after required locks below.
+        validateCredentialLifecycle(tip, tipObservedAt);
 
         final SensorPrincipal principal;
         final SensorCertificateCredential credential;
@@ -133,8 +134,9 @@ public class PostgresSensorAuthorityResolver implements SensorAuthorityResolver 
                 throw new IngestionException(HttpStatus.FORBIDDEN, "ERR_SENSOR_AUTHORITY_UNAVAILABLE",
                         "Locked credential does not belong to locked Sensor principal");
             }
-            // Revalidate locked credential after SHARE acquisition.
-            validateCredentialLifecycle(credential, now);
+            // Authoritative validity time is after SHARE acquisition (lock waits may have elapsed).
+            Instant lockedObservedAt = clock.instant();
+            validateCredentialLifecycle(credential, lockedObservedAt);
         } else {
             credential = tip;
             principal = repository.findPrincipalByTenantAndId(credential.tenantId(), credential.sensorId())

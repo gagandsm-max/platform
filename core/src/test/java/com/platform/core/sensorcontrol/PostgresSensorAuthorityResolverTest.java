@@ -10,10 +10,12 @@ import org.springframework.http.HttpStatus;
 import java.security.cert.X509Certificate;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -147,6 +149,90 @@ class PostgresSensorAuthorityResolverTest {
         IngestionException ex = assertThrows(IngestionException.class,
                 () -> resolver.resolveAuthorityHoldingShare(cert));
         assertEquals("ERR_SENSOR_AUTHORITY_UNAVAILABLE", ex.getCode());
+    }
+
+    @Test
+    void resolveAuthorityHoldingShareRejectsWhenClockAdvancesPastExpiryDuringLockWait() {
+        Instant tipTime = NOW;
+        Instant afterLocks = NOW.plusSeconds(3601);
+        Instant notBefore = NOW.minusSeconds(60);
+        Instant notAfter = NOW.plusSeconds(3600);
+        AtomicReference<Instant> clockInstant = new AtomicReference<>(tipTime);
+        Clock advancing = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return clockInstant.get();
+            }
+        };
+        resolver = new PostgresSensorAuthorityResolver(repository, metrics, advancing);
+
+        SensorCertificateCredential active = credential(SensorCredentialStatus.ACTIVE, notBefore, notAfter);
+        SensorPrincipal lockedPrincipal = principal(SensorLifecycleStatus.ACTIVE, true);
+        when(repository.findCredentialByFingerprint(fingerprint)).thenReturn(Optional.of(active));
+        when(repository.lockPrincipalForShare(TENANT, "sensor-net-01")).thenAnswer(invocation -> {
+            clockInstant.set(afterLocks);
+            return lockedPrincipal;
+        });
+        when(repository.lockCredentialForShare(active.credentialId())).thenReturn(active);
+
+        IngestionException ex = assertThrows(IngestionException.class,
+                () -> resolver.resolveAuthorityHoldingShare(cert));
+        assertEquals("ERR_SENSOR_CREDENTIAL_EXPIRED", ex.getCode());
+        assertEquals(1, metrics.getReasonCount(SensorAuthorityMetrics.REASON_CREDENTIAL_EXPIRED));
+        verify(repository).lockPrincipalForShare(TENANT, "sensor-net-01");
+        verify(repository).lockCredentialForShare(active.credentialId());
+    }
+
+    @Test
+    void resolveAuthorityHoldingShareAcceptsWhenStillValidAfterLockWaitClockAdvance() {
+        Instant tipTime = NOW;
+        Instant afterLocks = NOW.plusSeconds(30);
+        Instant notBefore = NOW.minusSeconds(60);
+        Instant notAfter = NOW.plusSeconds(3600);
+        AtomicReference<Instant> clockInstant = new AtomicReference<>(tipTime);
+        Clock advancing = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return clockInstant.get();
+            }
+        };
+        resolver = new PostgresSensorAuthorityResolver(repository, metrics, advancing);
+
+        SensorCertificateCredential active = credential(SensorCredentialStatus.ACTIVE, notBefore, notAfter);
+        SensorPrincipal lockedPrincipal = principal(SensorLifecycleStatus.ACTIVE, true);
+        when(repository.findCredentialByFingerprint(fingerprint)).thenReturn(Optional.of(active));
+        when(repository.lockPrincipalForShare(TENANT, "sensor-net-01")).thenAnswer(invocation -> {
+            clockInstant.set(afterLocks);
+            return lockedPrincipal;
+        });
+        when(repository.lockCredentialForShare(active.credentialId())).thenReturn(active);
+        when(repository.tenantExists(TENANT)).thenReturn(true);
+        when(repository.siteExists(TENANT, SITE)).thenReturn(true);
+
+        ResolvedSensorAuthority authority = resolver.resolveAuthorityHoldingShare(cert);
+        assertEquals(active.credentialId(), authority.credentialId());
+        assertEquals(fingerprint, authority.fingerprintSha256());
+        assertEquals(1, metrics.getResolveSuccesses());
     }
 
     @Test
