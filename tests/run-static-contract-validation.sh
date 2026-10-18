@@ -92,6 +92,7 @@ done
 
 echo "--> Dev disk hygiene guardrails"
 bash "${ROOT_DIR}/tests/test-dev-disk-hygiene.sh"
+bash "${ROOT_DIR}/tests/test-kafka-health-probe-bounds.sh"
 
 echo "--> Mother Reference validator unit tests"
 python3 -m unittest discover -s "${ROOT_DIR}/project_documentation/tools" -p 'test_validate_mother_references.py' -v

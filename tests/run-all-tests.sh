@@ -3,6 +3,148 @@
 # Platform Verification Suite (20 Automated Acceptance Tests)
 # Governing Specs: AGENTS.md, Platform_03_Architecture.md, Platform_04_HLD.md
 # ==============================================================================
+# Test19 runs in a subshell: sourcing this file does not change options, traps,
+# directory, environment or deployment state. Durations are positive integer ms.
+platform_test19_kafka_health() (
+    set +e
+    set +u
+    local url="$1" broker_id snapshot code rc deadline remaining duration value name
+    local restore_needed=false restore_deadline=0
+    local down_ms=${PLATFORM_TEST19_DOWN_MS-15000} up_ms=${PLATFORM_TEST19_UP_MS-30000}
+    local docker_ms=${PLATFORM_TEST19_DOCKER_MS-5000} cleanup_ms=${PLATFORM_TEST19_CLEANUP_MS-5000}
+    local connect_ms=${PLATFORM_TEST19_CONNECT_MS-1000} request_ms=${PLATFORM_TEST19_REQUEST_MS-3000}
+    local poll_ms=${PLATFORM_TEST19_POLL_MS-1000}
+    for name in down_ms up_ms docker_ms cleanup_ms connect_ms request_ms poll_ms; do
+        value=${!name}
+        if [[ ! $value =~ ^[1-9][0-9]{0,5}$ ]] || (( value > 600000 )); then
+            echo "Test19: invalid duration: $name (positive integer milliseconds, maximum 600000)" >&2
+            return 2
+        fi
+    done
+    if [[ ! $url =~ ^https?://127[.]0[.]0[.]1:([1-9][0-9]{0,4})/actuator/health$ ]] || \
+       (( BASH_REMATCH[1] > 65535 )); then
+        echo 'Test19: expected an explicit loopback health URL and valid port' >&2
+        return 2
+    fi
+    command -v timeout >/dev/null || { echo 'Test19: timeout is required' >&2; return 2; }
+
+    # /proc/uptime is monotonic Linux boot time, unaffected by wall-clock changes.
+    _t19_now() {
+        local uptime unused seconds fraction
+        read -r uptime unused < /proc/uptime || return 1
+        seconds=${uptime%.*}; fraction=${uptime#*.}000
+        REPLY=$((10#$seconds * 1000 + 10#${fraction:0:3}))
+    }
+    _t19_seconds() { printf '%d.%03d' "$(( $1 / 1000 ))" "$(( $1 % 1000 ))"; }
+    _t19_run() {
+        local end=$1 cap=$2; shift 2
+        _t19_now || return 125
+        local left=$((end - REPLY))
+        (( left > 0 )) || return 124
+        (( cap < left )) && left=$cap
+        # Hard deadline also bounds CLI failure/cleanup; no kill-grace extension.
+        timeout --signal=KILL "$(_t19_seconds "$left")s" "$@"
+    }
+    _t19_inspect() {
+        snapshot=$(_t19_run "$1" "$docker_ms" docker inspect --type container \
+            --format '{{.Id}} {{.State.Running}} {{.State.Paused}}' "$2") || return 1
+    }
+    _t19_restore() {
+        [[ $restore_needed == true ]] || return 0
+        if (( restore_deadline == 0 )); then
+            _t19_now || return 1
+            restore_deadline=$((REPLY + cleanup_ms))
+        fi
+        _t19_inspect "$restore_deadline" "$broker_id" || return 1
+        if [[ $snapshot == "$broker_id true true" ]]; then
+            # Even a failed CLI can have taken effect: verify state independently.
+            _t19_run "$restore_deadline" "$docker_ms" docker unpause "$broker_id" >/dev/null 2>&1
+            _t19_inspect "$restore_deadline" "$broker_id" || return 1
+        fi
+        [[ $snapshot == "$broker_id true false" ]] || return 1
+        restore_needed=false
+        echo "Test19: restoration verified on $broker_id"
+    }
+    _t19_exit() {
+        local status=$?
+        trap '' INT TERM HUP
+        if ! _t19_restore; then
+            echo "Test19: restoration FAILED/UNKNOWN on $broker_id; abort before Compose restart" >&2
+            status=2
+        fi
+        trap - EXIT
+        exit "$status"
+    }
+    _t19_wait_http() {
+        local end=$1 expected=$2 attempts=$3 attempt
+        for ((attempt=1; attempt<=attempts; attempt++)); do
+            _t19_now || return 1
+            remaining=$((end - REPLY))
+            (( remaining > 0 )) || break
+            duration=$request_ms
+            (( remaining < duration )) && duration=$remaining
+            local connect=$connect_ms
+            (( duration < connect )) && connect=$duration
+            # -q MUST be first: ignore curlrc. Loopback bypasses every proxy;
+            # retry=0 is explicit. HTTP status is valid only after curl completes.
+            code=$(_t19_run "$end" "$duration" curl -q --proxy '' --noproxy '*' --retry 0 \
+                -k -sS --connect-timeout "$(_t19_seconds "$connect")" \
+                --max-time "$(_t19_seconds "$duration")" -o /dev/null -w '%{http_code}' "$url")
+            rc=$?
+            echo "Test19: expected=$expected attempt=$attempt curl_exit=$rc http=$code" >&2
+            if (( rc == 0 )) && [[ $code == "$expected" ]]; then
+                _t19_now || return 1
+                (( REPLY < end )) && return 0
+            fi
+            (( attempt < attempts )) || break
+            _t19_now || return 1
+            remaining=$((end - REPLY))
+            (( remaining > 0 )) || break
+            duration=$poll_ms
+            (( remaining < duration )) && duration=$remaining
+            _t19_run "$end" "$remaining" sleep "$(_t19_seconds "$duration")" || break
+        done
+        echo "Test19: HTTP $expected phase failed (attempt/deadline bound)" >&2
+        return 1
+    }
+
+    _t19_now || return 2
+    deadline=$((REPLY + down_ms))
+    _t19_inspect "$deadline" platform-kafka || { echo 'Test19: initial broker ownership unknown' >&2; return 2; }
+    if [[ ! $snapshot =~ ^([a-f0-9]{64})\ true\ false$ ]]; then
+        echo 'Test19: broker is not initially running and unpaused; left untouched' >&2
+        return 2
+    fi
+    broker_id=${BASH_REMATCH[1]}
+    # Scoped restoration is installed BEFORE any pause side effect can occur.
+    restore_needed=true
+    trap _t19_exit EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'exit 129' HUP
+    if ! _t19_run "$deadline" "$docker_ms" docker pause "$broker_id" >/dev/null 2>&1; then
+        echo 'Test19: pause CLI failed; restoring possibly paused broker' >&2
+        return 1
+    fi
+    if ! _t19_inspect "$deadline" "$broker_id" || [[ $snapshot != "$broker_id true true" ]]; then
+        echo 'Test19: pause not verified; restoring owned broker' >&2
+        return 1
+    fi
+    local down_ok=false
+    _t19_wait_http "$deadline" 503 8 && down_ok=true
+    if ! _t19_restore; then return 2; fi
+    _t19_now || return 2
+    deadline=$((REPLY + up_ms))
+    local up_ok=false
+    _t19_wait_http "$deadline" 200 15 && up_ok=true
+    [[ $down_ok == true && $up_ok == true ]]
+)
+
+# Source only the helper, before .env, shell-option or deployment side effects.
+if [[ ${BASH_SOURCE[0]} != "$0" ]]; then
+    return 0
+fi
+
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -400,34 +542,16 @@ fi
 TEST_NUM=19
 TEST_DESC="Kafka Core-Dependency Failure Observability & Automatic Recovery"
 echo "Testing Kafka failure detection by Core..."
-docker pause platform-kafka > /dev/null 2>&1
-
-KAFKA_DOWN_DETECTED=false
-for i in $(seq 1 8); do
-    HEALTH_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}/actuator/health" || echo "000")
-    if [ "${HEALTH_CODE}" = "503" ]; then
-        KAFKA_DOWN_DETECTED=true
-        break
-    fi
-    sleep 1
-done
-
-docker unpause platform-kafka > /dev/null 2>&1
-
-KAFKA_RECOVERED=false
-for i in $(seq 1 15); do
-    HEALTH_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}/actuator/health" || echo "000")
-    if [ "${HEALTH_CODE}" = "200" ]; then
-        KAFKA_RECOVERED=true
-        break
-    fi
-    sleep 1
-done
-
-if [ "${KAFKA_DOWN_DETECTED}" = "true" ] && [ "${KAFKA_RECOVERED}" = "true" ]; then
-    pass ${TEST_NUM} "${TEST_DESC} (Degraded to 503 upon pause, recovered to 200 upon unpause)"
+if platform_test19_kafka_health "https://127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}/actuator/health"; then
+    pass ${TEST_NUM} "${TEST_DESC} (Completed 503 while paused, completed 200 after verified restoration)"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "Down detected: ${KAFKA_DOWN_DETECTED}, Recovered: ${KAFKA_RECOVERED}"
+    TEST19_STATUS=$?
+    fail ${TEST_NUM} "${TEST_DESC}" "Bounded health probe failed (status ${TEST19_STATUS})"
+    # Only an ordinary failure with VERIFIED restoration may proceed to Test20.
+    if [ "${TEST19_STATUS}" -ne 1 ]; then
+        echo "Aborting before Test20: broker ownership/restoration uncertain or probe interrupted" >&2
+        exit 1
+    fi
 fi
 
 # ------------------------------------------------------------------------------
