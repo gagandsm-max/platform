@@ -11,6 +11,11 @@ import java.math.BigInteger;
 import java.math.MathContext;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharsetEncoder;
+import java.nio.charset.CoderResult;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -46,11 +51,11 @@ public final class IcmpObservationDecoder {
      */
     public static final long MAX_RTT_MICROS = Long.MAX_VALUE / 1000L;
     /**
-     * Mother B000-D016 / Platform_05 §7.0: JSON-carried assignment/config/policy/generation
-     * counters MUST NOT exceed {@code MAX_SAFE_SEQUENCE} ({@code 2^53-1}). Do not widen to
-     * full Go {@code uint64} wire range contrary to that governing bound.
+     * Exact Go {@code observation.JobCorrelation.AssignmentVersion} {@code uint64} maximum
+     * ({@code 18446744073709551615}). Preserved as payload provenance only — not authorization.
      */
-    public static final long MAX_ASSIGNMENT_VERSION = 9007199254740991L;
+    public static final BigInteger MAX_ASSIGNMENT_VERSION =
+            new BigInteger("18446744073709551615");
     /** Sensor {@code observation.JobCorrelation.Attempt} is {@code uint32}. */
     public static final long MAX_ATTEMPT = 4_294_967_295L;
     public static final String EXPECTED_SOURCE = "SENSOR_PING_SOCKET";
@@ -131,7 +136,15 @@ public final class IcmpObservationDecoder {
                     "ICMP observation envelope text is required"
             );
         }
-        return decode(utf8Json.getBytes(StandardCharsets.UTF_8));
+        // Enforce 512 KiB on UTF-8 bytes before unbounded getBytes materialization.
+        // UTF-16 char length is a lower bound on UTF-8 size for all Java Strings.
+        if (utf8Json.length() > MAX_ENVELOPE_BYTES) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
+                    "ICMP observation envelope exceeds maximum of " + MAX_ENVELOPE_BYTES + " bytes"
+            );
+        }
+        return decode(encodeUtf8WithinBound(utf8Json, MAX_ENVELOPE_BYTES));
     }
 
     public IcmpObservationV1 decode(JsonNode envelopeNode) {
@@ -215,7 +228,9 @@ public final class IcmpObservationDecoder {
             );
         }
 
-        IcmpQuality quality = IcmpQuality.parseRequired(textOrNull(envelopeNode, "quality"));
+        String qualityText = requireBoundedText(envelopeNode, "quality", 1, MAX_PROTOCOL_FIELD_CHARS,
+                IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE);
+        IcmpQuality quality = IcmpQuality.parseRequired(qualityText);
         JsonNode payload = envelopeNode.get("protocolPayload");
         if (payload == null || payload.isNull() || !payload.isObject()) {
             throw new IcmpDecodeException(
@@ -306,8 +321,13 @@ public final class IcmpObservationDecoder {
                 IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE);
         String assignmentKey = requireBoundedText(jobNode, "assignmentKey", 1, MAX_IDENTITY_CHARS,
                 IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE);
-        long assignmentVersion = requireWireCounter(jobNode, "assignmentVersion", MAX_ASSIGNMENT_VERSION,
-                IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, "assignmentVersion");
+        BigInteger assignmentVersion = requireUint64(
+                jobNode,
+                "assignmentVersion",
+                MAX_ASSIGNMENT_VERSION,
+                IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
+                "assignmentVersion"
+        );
         long attempt = requireWireCounter(jobNode, "attempt", MAX_ATTEMPT,
                 IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, "attempt");
         return new IcmpJobCorrelation(jobId, assignmentKey, assignmentVersion, attempt);
@@ -782,6 +802,7 @@ public final class IcmpObservationDecoder {
 
     private static void validateTarget(String target, int ipVersion) {
         // Match Go net.ParseIP: reject scoped IPv6 (%zone) and ambiguous IPv4 (leading zeros).
+        // No DNS — only literal character shapes reach InetAddress.getByName.
         if (target.indexOf('%') >= 0
                 || target.indexOf('/') >= 0
                 || target.indexOf(' ') >= 0) {
@@ -791,15 +812,15 @@ public final class IcmpObservationDecoder {
             );
         }
         if (ipVersion == 4) {
-            if (!isStrictIpv4Literal(target)) {
-                throw new IcmpDecodeException(
-                        IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET,
-                        "ICMP target must be an IP literal"
-                );
+            if (isStrictIpv4Literal(target) || isIpv4MappedOrCompatibleLiteral(target)) {
+                return;
             }
-            return;
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET,
+                    "ICMP target must be an IP literal"
+            );
         }
-        if (!isStrictIpv6LiteralShape(target)) {
+        if (!isStrictIpv6LiteralShape(target) || hasDottedIpv4SuffixWithLeadingZeros(target)) {
             throw new IcmpDecodeException(
                     IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET,
                     "ICMP target must be an IP literal"
@@ -816,14 +837,83 @@ public final class IcmpObservationDecoder {
             );
         }
         byte[] raw = address.getAddress();
-        // Require a true 16-byte IPv6 result; reject forms Java collapses to Inet4Address
-        // (aligned with Go validate rejecting ip.To4() != nil for IPVersion 6).
-        if (raw == null || raw.length != 16) {
+        // Go validate: IPVersion 6 requires ip.To4() == nil (rejects IPv4-mapped / compatible).
+        if (raw == null || raw.length != 16 || isIpv4MappedAddress(raw)) {
             throw new IcmpDecodeException(
                     IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET,
                     "ICMP target does not match IPv6 selection"
             );
         }
+    }
+
+    /**
+     * Go {@code net.IP.To4()} is non-nil for IPv4-mapped {@code ::ffff:a.b.c.d} (not for
+     * deprecated IPv4-compatible {@code ::a.b.c.d}). Sensor validate allows mapped forms
+     * only when {@code ipVersion == 4}.
+     */
+    private static boolean isIpv4MappedOrCompatibleLiteral(String target) {
+        if (!isStrictIpv6LiteralShape(target) || hasDottedIpv4SuffixWithLeadingZeros(target)) {
+            return false;
+        }
+        if (!containsIpv4MappedMarker(target)) {
+            return false;
+        }
+        final InetAddress address;
+        try {
+            address = InetAddress.getByName(target);
+        } catch (UnknownHostException ex) {
+            return false;
+        }
+        byte[] raw = address.getAddress();
+        if (raw == null) {
+            return false;
+        }
+        // Java may collapse IPv4-mapped forms to Inet4Address (4 bytes).
+        if (raw.length == 4) {
+            return true;
+        }
+        return raw.length == 16 && isIpv4MappedAddress(raw);
+    }
+
+    /** True when the literal embeds the IPv4-mapped marker {@code ffff} as its own hextet. */
+    private static boolean containsIpv4MappedMarker(String target) {
+        String[] parts = target.split(":", -1);
+        for (String part : parts) {
+            if (part.equalsIgnoreCase("ffff")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** RFC 4291 IPv4-mapped address: {@code ::ffff:a.b.c.d}. */
+    private static boolean isIpv4MappedAddress(byte[] raw16) {
+        if (raw16.length != 16) {
+            return false;
+        }
+        for (int i = 0; i < 10; i++) {
+            if (raw16[i] != 0) {
+                return false;
+            }
+        }
+        return (raw16[10] & 0xff) == 0xff && (raw16[11] & 0xff) == 0xff;
+    }
+
+    /**
+     * When an IPv6 literal embeds a dotted IPv4 suffix, Go applies the same leading-zero
+     * rejection as plain IPv4 ({@code net.ParseIP}).
+     */
+    private static boolean hasDottedIpv4SuffixWithLeadingZeros(String target) {
+        int dot = target.indexOf('.');
+        if (dot < 0) {
+            return false;
+        }
+        int lastColon = target.lastIndexOf(':');
+        if (lastColon < 0 || lastColon >= target.length() - 1) {
+            return true;
+        }
+        String suffix = target.substring(lastColon + 1);
+        return !isStrictIpv4Literal(suffix);
     }
 
     /** Go {@code net.ParseIP} IPv4: dotted-decimal, no leading zeros per octet. */
@@ -890,20 +980,6 @@ public final class IcmpObservationDecoder {
         }
     }
 
-    private static String textOrNull(JsonNode node, String field) {
-        JsonNode child = node.get(field);
-        if (child == null || child.isNull()) {
-            return null;
-        }
-        if (!child.isTextual()) {
-            throw new IcmpDecodeException(
-                    IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
-                    "Field '" + field + "' must be a JSON string"
-            );
-        }
-        return child.asText();
-    }
-
     private static String requireBoundedText(
             JsonNode node,
             String field,
@@ -916,7 +992,9 @@ public final class IcmpObservationDecoder {
             throw new IcmpDecodeException(code, "Field '" + field + "' must be a non-null JSON string");
         }
         String value = child.asText();
-        if (value.length() < minInclusive || value.length() > maxInclusive) {
+        // Producer envelope.Validate uses len(string) = UTF-8 byte length, not UTF-16 units.
+        int utf8Bytes = utf8ByteLength(value);
+        if (utf8Bytes < minInclusive || utf8Bytes > maxInclusive) {
             throw new IcmpDecodeException(
                     code,
                     "Field '" + field + "' length must be within " + minInclusive + ".." + maxInclusive
@@ -926,6 +1004,66 @@ public final class IcmpObservationDecoder {
             throw new IcmpDecodeException(code, "Field '" + field + "' must not be blank");
         }
         return value;
+    }
+
+    /** Counts UTF-8 bytes without allocating an encoded copy. */
+    private static int utf8ByteLength(String value) {
+        int bytes = 0;
+        for (int i = 0; i < value.length(); ) {
+            int cp = value.codePointAt(i);
+            bytes += utf8BytesForCodePoint(cp);
+            if (bytes < 0) {
+                return Integer.MAX_VALUE;
+            }
+            i += Character.charCount(cp);
+        }
+        return bytes;
+    }
+
+    private static int utf8BytesForCodePoint(int cp) {
+        if (cp < 0) {
+            return 3; // defensive; should not occur for Java Strings
+        }
+        if (cp <= 0x7F) {
+            return 1;
+        }
+        if (cp <= 0x7FF) {
+            return 2;
+        }
+        if (cp <= 0xFFFF) {
+            return 3;
+        }
+        return 4;
+    }
+
+    /**
+     * Encodes {@code text} to UTF-8 into a buffer capped at {@code maxBytes}.
+     * Rejects without retaining an oversized full encoding when the bound is exceeded.
+     */
+    private static byte[] encodeUtf8WithinBound(String text, int maxBytes) {
+        CharsetEncoder encoder = StandardCharsets.UTF_8.newEncoder()
+                .onMalformedInput(CodingErrorAction.REPLACE)
+                .onUnmappableCharacter(CodingErrorAction.REPLACE);
+        ByteBuffer out = ByteBuffer.allocate(maxBytes);
+        CharBuffer in = CharBuffer.wrap(text);
+        CoderResult cr = encoder.encode(in, out, true);
+        if (cr.isOverflow() || in.hasRemaining()) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
+                    "ICMP observation envelope exceeds maximum of " + maxBytes + " bytes"
+            );
+        }
+        cr = encoder.flush(out);
+        if (cr.isOverflow()) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS,
+                    "ICMP observation envelope exceeds maximum of " + maxBytes + " bytes"
+            );
+        }
+        byte[] encoded = new byte[out.position()];
+        out.flip();
+        out.get(encoded);
+        return encoded;
     }
 
     private static String optionalBoundedText(
@@ -1012,15 +1150,37 @@ public final class IcmpObservationDecoder {
                     label + " must be a non-negative JSON integer"
             );
         }
-        // BigInteger implies value outside signed int64 — still outside B000-D016 / uint32 caps.
-        if (child.isBigInteger()) {
+        BigInteger value = child.bigIntegerValue();
+        if (value.signum() < 0 || value.compareTo(BigInteger.valueOf(maxInclusive)) > 0) {
             throw new IcmpDecodeException(
                     boundsCode,
-                    label + " exceeds governing wire-counter maximum of " + maxInclusive
+                    label + " must be within 0.." + maxInclusive
             );
         }
-        long value = child.asLong();
-        if (value < 0 || value > maxInclusive) {
+        return value.longValueExact();
+    }
+
+    /**
+     * Parses a non-negative JSON integer through the exact Go {@code uint64} domain.
+     * Values above signed {@code long} arrive as Jackson {@code BigInteger} nodes and
+     * remain exact — they are not authorization grants.
+     */
+    private static BigInteger requireUint64(
+            JsonNode node,
+            String field,
+            BigInteger maxInclusive,
+            IcmpDecodeException.Code boundsCode,
+            String label
+    ) {
+        JsonNode child = node.get(field);
+        if (child == null || child.isNull() || !child.isIntegralNumber()) {
+            throw new IcmpDecodeException(
+                    IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE,
+                    label + " must be a non-negative JSON integer"
+            );
+        }
+        BigInteger value = child.bigIntegerValue();
+        if (value.signum() < 0 || value.compareTo(maxInclusive) > 0) {
             throw new IcmpDecodeException(
                     boundsCode,
                     label + " must be within 0.." + maxInclusive
