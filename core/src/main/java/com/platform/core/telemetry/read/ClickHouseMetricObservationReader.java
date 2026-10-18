@@ -25,6 +25,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -35,7 +38,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
@@ -420,11 +422,19 @@ public class ClickHouseMetricObservationReader {
     }
 
     private static void assertNoClickHouseExceptionMetadata(HttpResponse<?> response) {
-        Optional<String> codeHeader = response.headers().firstValue(CH_EXCEPTION_CODE_HEADER);
-        if (codeHeader.isEmpty()) {
+        // Scalar field: JDK HttpHeaders preserves every occurrence; firstValue alone can hide a
+        // later nonzero/malformed code behind an earlier zero. Absent and a single well-formed
+        // zero remain the only non-error controls; duplicates/conflicts fail closed.
+        List<String> codeHeaders = response.headers().allValues(CH_EXCEPTION_CODE_HEADER);
+        if (codeHeaders.isEmpty()) {
             return;
         }
-        String raw = codeHeader.get().trim();
+        if (codeHeaders.size() != 1) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
+        String raw = codeHeaders.get(0).trim();
         if (raw.isEmpty()) {
             throw new DomainException(
                     "DATA_INTEGRITY_ERROR",
@@ -550,8 +560,22 @@ public class ClickHouseMetricObservationReader {
 
         @Override
         public void onComplete() {
-            if (done.compareAndSet(false, true)) {
-                result.complete(buffer.toString(StandardCharsets.UTF_8));
+            if (!done.compareAndSet(false, true)) {
+                return;
+            }
+            try {
+                // ByteArrayOutputStream#toString(Charset) replaces malformed input; report instead
+                // so altered provenance cannot be admitted as a GOOD observation.
+                CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT);
+                String body = decoder.decode(ByteBuffer.wrap(buffer.toByteArray())).toString();
+                result.complete(body);
+            } catch (CharacterCodingException ex) {
+                result.completeExceptionally(new DomainException(
+                        "DATA_INTEGRITY_ERROR",
+                        "Telemetry store returned malformed observation data"));
+            } finally {
                 buffer.reset();
             }
         }

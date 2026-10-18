@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.env.MapPropertySource;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigInteger;
@@ -23,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
@@ -34,6 +36,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -440,6 +443,41 @@ class ClickHouseMetricObservationReaderTest {
     }
 
     @Test
+    void firstZeroThenNonzeroClickHouseExceptionCodeHeaderMapsToDataIntegrityError() {
+        // firstValue("0") must not hide a later explicit error code (JDK preserves all values).
+        HttpClient httpClient = mock(HttpClient.class);
+        @SuppressWarnings("unchecked")
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn("");
+        when(response.headers()).thenReturn(HttpHeaders.of(
+                Map.of("X-ClickHouse-Exception-Code", List.of("0", "241")), (a, b) -> true));
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(response));
+
+        DomainException ex = assertThrows(DomainException.class,
+                () -> newReader(httpClient).read(agentCpuQuery(10)));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
+    void duplicateZeroClickHouseExceptionCodeHeaderMapsToDataIntegrityError() {
+        HttpClient httpClient = mock(HttpClient.class);
+        @SuppressWarnings("unchecked")
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn("");
+        when(response.headers()).thenReturn(HttpHeaders.of(
+                Map.of("X-ClickHouse-Exception-Code", List.of("0", "0")), (a, b) -> true));
+        when(httpClient.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(response));
+
+        DomainException ex = assertThrows(DomainException.class,
+                () -> newReader(httpClient).read(agentCpuQuery(10)));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
     void validMaximumPagePositiveControlUnderByteCeiling() {
         ClickHouseMetricObservationReader reader = newReader(mock(HttpClient.class));
         int limit = MetricObservationQuery.MAX_LIMIT; // 500 → fetch 501
@@ -562,23 +600,25 @@ class ClickHouseMetricObservationReaderTest {
     @Test
     void wireOversizeBodyMapsToDataIntegrityAndCancels() throws Exception {
         AtomicBoolean cancelled = new AtomicBoolean(false);
+        CountDownLatch pastCeiling = new CountDownLatch(1);
         CountDownLatch handlerFinished = new CountDownLatch(1);
-        byte[] huge = new byte[ClickHouseMetricObservationReader.MAX_RESPONSE_BYTES + 64 * 1024];
-        for (int i = 0; i < huge.length; i++) {
-            huge[i] = (byte) ('a' + (i % 26));
-        }
+        AtomicLong bytesWritten = new AtomicLong();
+        byte[] chunk = new byte[32 * 1024];
+        Arrays.fill(chunk, (byte) 'x');
         HttpServer server = startWireServer((exchange, mode) -> {
             try {
                 exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=UTF-8");
-                exchange.sendResponseHeaders(200, huge.length);
+                // Continuing producer: unknown length, never naturally completes under the ceiling.
+                exchange.sendResponseHeaders(200, 0);
                 OutputStream os = exchange.getResponseBody();
                 try {
-                    int offset = 0;
-                    while (offset < huge.length) {
-                        int chunk = Math.min(8 * 1024, huge.length - offset);
-                        os.write(huge, offset, chunk);
+                    while (true) {
+                        os.write(chunk);
                         os.flush();
-                        offset += chunk;
+                        long written = bytesWritten.addAndGet(chunk.length);
+                        if (written > ClickHouseMetricObservationReader.MAX_RESPONSE_BYTES) {
+                            pastCeiling.countDown();
+                        }
                         Thread.sleep(2L);
                     }
                 } catch (InterruptedException | IOException ex) {
@@ -604,10 +644,69 @@ class ClickHouseMetricObservationReaderTest {
         DomainException ex = assertTimeoutPreemptively(Duration.ofSeconds(8), () ->
                 assertThrows(DomainException.class, () -> reader.read(agentCpuQuery(10))));
         assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+        // Cancellation must be observed before teardown; handlerFinished alone is tautological
+        // after await and natural full-body completion must not satisfy this assertion.
+        long cancelDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!cancelled.get() && System.nanoTime() < cancelDeadline) {
+            Thread.sleep(20L);
+        }
+        assertTrue(cancelled.get(),
+                "oversize body must cancel the continuing producer before teardown");
+        assertTrue(
+                bytesWritten.get() > ClickHouseMetricObservationReader.MAX_RESPONSE_BYTES
+                        || pastCeiling.getCount() == 0L,
+                "continuing producer must have crossed the retained-byte ceiling before cancel");
         assertTrue(handlerFinished.await(5, TimeUnit.SECONDS),
                 "oversize handler must finish after subscription cancel");
-        assertTrue(cancelled.get() || handlerFinished.getCount() == 0L,
-                "oversize body must cancel the exchange/subscription");
+    }
+
+    @Test
+    void wireMalformedUtf8InOtherwiseValidJsonMapsToDataIntegrityError() throws Exception {
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        body.write(("{\"ts\":\"2026-10-16 00:00:01.000\",\"value\":1.0,\"quality\":1,\"flags\":0,"
+                + "\"sensor_id\":\"").getBytes(StandardCharsets.UTF_8));
+        body.write(0xFF); // malformed UTF-8; replacement decoding would admit altered provenance
+        body.write(("\",\"sequence_id\":\"a\",\"source_protocol\":\"agent\"}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        byte[] payload = body.toByteArray();
+
+        HttpServer server = startWireServer((exchange, mode) -> {
+            exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=UTF-8");
+            exchange.sendResponseHeaders(200, payload.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(payload);
+            }
+        });
+
+        ClickHouseMetricObservationReader reader = realWireReader(server, Duration.ofSeconds(5));
+        DomainException ex = assertTimeoutPreemptively(Duration.ofSeconds(5), () ->
+                assertThrows(DomainException.class, () -> reader.read(agentCpuQuery(10))));
+        assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+    }
+
+    @Test
+    void wireValidMultibyteUtf8ObservationIsPreserved() throws Exception {
+        String sensorId = "sensor-\u6e2c\u8a66-\u00e9"; // multibyte CJK + Latin-1 supplement
+        String line = """
+                {"ts":"2026-10-16 00:00:01.000","value":1.0,"quality":1,"flags":0,"sensor_id":"%s","sequence_id":"a","source_protocol":"agent"}
+                """.formatted(sensorId).trim() + "\n";
+        byte[] payload = line.getBytes(StandardCharsets.UTF_8);
+        assertTrue(payload.length > line.length(), "fixture must contain multibyte UTF-8");
+
+        HttpServer server = startWireServer((exchange, mode) -> {
+            exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=UTF-8");
+            exchange.sendResponseHeaders(200, payload.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(payload);
+            }
+        });
+
+        ClickHouseMetricObservationReader reader = realWireReader(server, Duration.ofSeconds(5));
+        MetricObservationPage page = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> reader.read(agentCpuQuery(10)));
+        assertEquals(1, page.observations().size());
+        assertEquals(sensorId, page.observations().get(0).sensorId());
+        assertEquals(1, page.observations().get(0).quality());
     }
 
     private ClickHouseMetricObservationReader realWireReader(HttpServer server, Duration budget) {
