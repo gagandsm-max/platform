@@ -125,29 +125,44 @@ https_probe_heartbeat() {
     # Stream the body with a hard byte ceiling. Retains at most MAX+1 bytes so
     # the schema validator can distinguish overflow; closes the consumer early
     # to cancel/reap the producer even when Content-Length is absent/chunked.
-    # Prints HTTP status on stdout. Returns curl exit status (write-error from
-    # intentional ceiling cancel is expected when retained > MAX).
-    # curl and >(head) run in this shell (http code via tempfile) so wait can reap.
+    # Prints HTTP status on stdout. Returns nonzero if the body consumer fails
+    # (fail closed even when curl/HTTP would otherwise pass); otherwise curl's
+    # exit (write-error from intentional ceiling cancel is expected when
+    # retained > MAX). Capture/reap the specific consumer PID — bare wait must
+    # not ignore a failed reader/writer that left a valid-looking prefix.
     local url="$1"
     shift
-    local http_code_file curl_ec=0
+    local http_code_file curl_ec=0 consumer_pid="" consumer_ec=0 consumer_fd
     http_code_file="$(mktemp)"
     : > "${PROBE_BODY}"
     set +e
+    exec {consumer_fd}> >(head -c "$((MAX_HEARTBEAT_BYTES + 1))" > "${PROBE_BODY}")
+    consumer_pid=$!
+    if [ -z "${consumer_pid}" ]; then
+        exec {consumer_fd}>&- 2>/dev/null
+        rm -f "${http_code_file}"
+        set -e
+        return 1
+    fi
     curl -sS \
         --cacert "${CA_CERT}" \
         --connect-timeout 5 \
         --max-time 15 \
-        -o >(head -c "$((MAX_HEARTBEAT_BYTES + 1))" > "${PROBE_BODY}") \
+        -o "/dev/fd/${consumer_fd}" \
         -w "%{http_code}" \
         "$@" \
         "${url}" > "${http_code_file}"
     curl_ec=$?
-    # Reap process-substitution children (head) so lifetime stays bounded.
-    wait 2>/dev/null || true
+    # Close the write end so the consumer sees EOF; reap this PID specifically.
+    exec {consumer_fd}>&-
+    wait "${consumer_pid}"
+    consumer_ec=$?
     set -e
     cat "${http_code_file}"
     rm -f "${http_code_file}"
+    if [ "${consumer_ec}" -ne 0 ]; then
+        return "${consumer_ec}"
+    fi
     return "${curl_ec}"
 }
 

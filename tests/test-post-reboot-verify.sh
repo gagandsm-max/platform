@@ -120,6 +120,8 @@ EOF
 chmod +x "${STUB_BIN}/docker"
 
 # head stub: prove download-path byte ceiling and retained size for heartbeat.
+# Optional fail-closed injection: when head-fail-after-prefix.bytes exists, retain
+# only that many stdin bytes (valid-looking prefix) then exit nonzero.
 cat > "${STUB_BIN}/head" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -130,8 +132,17 @@ STATE_DIR="${POST_REBOOT_FIXTURE_STATE:?}"
   printf '\n'
 } >> "${STATE_DIR}/head-invocations.log"
 out_tmp="${STATE_DIR}/head-retained.bin"
+if [ -f "${STATE_DIR}/head-fail-after-prefix.bytes" ]; then
+  prefix_n="$(tr -d '[:space:]' < "${STATE_DIR}/head-fail-after-prefix.bytes")"
+  /usr/bin/head -c "${prefix_n}" > "${out_tmp}"
+  wc -c < "${out_tmp}" | tr -d '[:space:]' > "${STATE_DIR}/head-retained.bytes"
+  printf '1\n' > "${STATE_DIR}/head-consumer.exit"
+  cat "${out_tmp}"
+  exit 1
+fi
 /usr/bin/head "$@" > "${out_tmp}"
 wc -c < "${out_tmp}" | tr -d '[:space:]' > "${STATE_DIR}/head-retained.bytes"
+printf '0\n' > "${STATE_DIR}/head-consumer.exit"
 cat "${out_tmp}"
 EOF
 chmod +x "${STUB_BIN}/head"
@@ -689,6 +700,145 @@ run_case_stream_excess() {
   pass "${name} (cancelled; retained=${retained}; written=${BYTES_WRITTEN})"
 }
 run_case_stream_excess
+
+# Consumer retains a valid heartbeat prefix from a response with an invalid tail,
+# then exits nonzero. Verifier must fail closed (not accept the prefix alone).
+run_case_consumer_fail_valid_prefix() {
+  local name="consumer-fail-valid-prefix-rejected"
+  local state="${WORK}/state/${name}"
+  rm -rf "${state}"
+  mkdir -p "${state}"
+  local tainted="${VALID_HEARTBEAT}NOT_JSON_TAIL"
+  printf '%s' "${tainted}" > "${state}/hb.body"
+  # Retain only the valid prefix bytes, then fail the consumer.
+  printf '%s\n' "${#VALID_HEARTBEAT}" > "${state}/head-fail-after-prefix.bytes"
+  write_scenario "${state}/scenario.env" \
+    "UI_HTTP=200" "UI_CURL_EC=0" \
+    "CORE_HTTP=200" "CORE_CURL_EC=0" \
+    "HB_HTTP=200" "HB_CURL_EC=0" \
+    "HB_BODY_FILE=${state}/hb.body" \
+    "UI_BODY_FILE=" \
+    "CORE_BODY_FILE="
+
+  local out ec
+  set +e
+  out="$(
+    cd "${FIXTURE_ROOT}"
+    env -i \
+      PATH="${STUB_BIN}:/usr/local/bin:/usr/bin:/bin" \
+      HOME="${WORK}/home" \
+      POST_REBOOT_FIXTURE_STATE="${state}" \
+      CURL_FIXTURE_ALLOW_INSECURE="${CURL_FIXTURE_ALLOW_INSECURE:-0}" \
+      VALKEY_PASSWORD="fixture-not-a-secret" \
+      bash "./scripts/post-reboot-verify.sh" 2>&1
+  )"
+  ec=$?
+  set -e
+  printf '%s\n' "${out}" > "${state}/stdout.txt"
+  printf '%s\n' "${ec}" > "${state}/exit.txt"
+
+  if [[ "${ec}" -eq 0 ]]; then
+    fail "${name}: expected nonzero failure when body consumer fails after valid prefix"
+    return 0
+  fi
+  if ! grep -q 'VERIFICATION RESULT: .*FAILED' <<<"${out}"; then
+    fail "${name}: missing FAILED verification result"
+    return 0
+  fi
+  if [ ! -f "${state}/head-consumer.exit" ]; then
+    fail "${name}: missing head consumer exit evidence"
+    return 0
+  fi
+  local consumer_ec
+  consumer_ec="$(tr -d '[:space:]' < "${state}/head-consumer.exit")"
+  if [ "${consumer_ec}" != "1" ]; then
+    fail "${name}: expected consumer exit 1, got ${consumer_ec}"
+    return 0
+  fi
+  if [ ! -f "${state}/head-retained.bytes" ]; then
+    fail "${name}: missing retained-byte evidence"
+    return 0
+  fi
+  local retained
+  retained="$(tr -d '[:space:]' < "${state}/head-retained.bytes")"
+  if [ "${retained}" -ne "${#VALID_HEARTBEAT}" ]; then
+    fail "${name}: expected retained valid-prefix ${#VALID_HEARTBEAT} bytes, got ${retained}"
+    return 0
+  fi
+  # Must not classify this as the intentional MAX+1 overflow path.
+  if grep -q 'authority/schema validation (code=2)' <<<"${out}"; then
+    fail "${name}: consumer failure misclassified as byte-ceiling overflow"
+    return 0
+  fi
+  if [ "${CURL_FIXTURE_ALLOW_INSECURE:-0}" != "1" ]; then
+    if grep -F "${VALID_HEARTBEAT}" <<<"${out}" >/dev/null 2>&1; then
+      fail "${name}: verifier leaked exact heartbeat body"
+      return 0
+    fi
+  fi
+  pass "${name} (consumer_exit=1 retained=${retained}; verifier rejected)"
+}
+run_case_consumer_fail_valid_prefix
+
+# Successful consumer control: ordinary valid response, consumer exit 0, verifier pass.
+run_case_consumer_success_valid_response() {
+  local name="consumer-success-valid-response"
+  local state="${WORK}/state/${name}"
+  rm -rf "${state}"
+  mkdir -p "${state}"
+  printf '%s' "${VALID_HEARTBEAT}" > "${state}/hb.body"
+  write_scenario "${state}/scenario.env" \
+    "UI_HTTP=200" "UI_CURL_EC=0" \
+    "CORE_HTTP=200" "CORE_CURL_EC=0" \
+    "HB_HTTP=200" "HB_CURL_EC=0" \
+    "HB_BODY_FILE=${state}/hb.body" \
+    "UI_BODY_FILE=" \
+    "CORE_BODY_FILE="
+
+  local out ec
+  set +e
+  out="$(
+    cd "${FIXTURE_ROOT}"
+    env -i \
+      PATH="${STUB_BIN}:/usr/local/bin:/usr/bin:/bin" \
+      HOME="${WORK}/home" \
+      POST_REBOOT_FIXTURE_STATE="${state}" \
+      CURL_FIXTURE_ALLOW_INSECURE="${CURL_FIXTURE_ALLOW_INSECURE:-0}" \
+      VALKEY_PASSWORD="fixture-not-a-secret" \
+      bash "./scripts/post-reboot-verify.sh" 2>&1
+  )"
+  ec=$?
+  set -e
+  printf '%s\n' "${out}" > "${state}/stdout.txt"
+  printf '%s\n' "${ec}" > "${state}/exit.txt"
+
+  if [[ "${ec}" -ne 0 ]]; then
+    fail "${name}: expected pass exit 0, got ${ec}"
+    return 0
+  fi
+  if ! grep -q 'ALL STRUCTURAL CHECKS PASSED' <<<"${out}"; then
+    fail "${name}: missing ALL STRUCTURAL CHECKS PASSED"
+    return 0
+  fi
+  if [ ! -f "${state}/head-consumer.exit" ]; then
+    fail "${name}: missing head consumer exit evidence"
+    return 0
+  fi
+  local consumer_ec
+  consumer_ec="$(tr -d '[:space:]' < "${state}/head-consumer.exit")"
+  if [ "${consumer_ec}" != "0" ]; then
+    fail "${name}: expected consumer exit 0, got ${consumer_ec}"
+    return 0
+  fi
+  local retained
+  retained="$(tr -d '[:space:]' < "${state}/head-retained.bytes")"
+  if [ "${retained}" -ne "${#VALID_HEARTBEAT}" ]; then
+    fail "${name}: expected retained ${#VALID_HEARTBEAT}, got ${retained}"
+    return 0
+  fi
+  pass "${name} (consumer_exit=0 retained=${retained})"
+}
+run_case_consumer_success_valid_response
 
 # Missing CA: remove trust file after fixture setup
 run_case_missing_ca() {
