@@ -127,26 +127,27 @@ https_probe_heartbeat() {
     # to cancel/reap the producer even when Content-Length is absent/chunked.
     # Prints HTTP status on stdout. Returns curl exit status (write-error from
     # intentional ceiling cancel is expected when retained > MAX).
+    # curl and >(head) run in this shell (http code via tempfile) so wait can reap.
     local url="$1"
     shift
-    local http_code="" curl_ec=0
+    local http_code_file curl_ec=0
+    http_code_file="$(mktemp)"
     : > "${PROBE_BODY}"
     set +e
-    http_code="$(
-        curl -sS \
-            --cacert "${CA_CERT}" \
-            --connect-timeout 5 \
-            --max-time 15 \
-            -o >(head -c "$((MAX_HEARTBEAT_BYTES + 1))" > "${PROBE_BODY}") \
-            -w "%{http_code}" \
-            "$@" \
-            "${url}"
-    )"
+    curl -sS \
+        --cacert "${CA_CERT}" \
+        --connect-timeout 5 \
+        --max-time 15 \
+        -o >(head -c "$((MAX_HEARTBEAT_BYTES + 1))" > "${PROBE_BODY}") \
+        -w "%{http_code}" \
+        "$@" \
+        "${url}" > "${http_code_file}"
     curl_ec=$?
     # Reap process-substitution children (head) so lifetime stays bounded.
     wait 2>/dev/null || true
     set -e
-    printf '%s' "${http_code}"
+    cat "${http_code_file}"
+    rm -f "${http_code_file}"
     return "${curl_ec}"
 }
 

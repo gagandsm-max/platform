@@ -563,6 +563,14 @@ run_case "oversized-whitespace-legal-shape" fail \
   "CORE_HTTP=200" "CORE_CURL_EC=0" \
   "HB_HTTP=200" "HB_CURL_EC=0" \
   --body "${OVERSIZED_WHITESPACE}"
+# Pin byte-gate isolation (code=2), not schema/key failure or transport.
+OW_OUT="${WORK}/state/oversized-whitespace-legal-shape/stdout.txt"
+[[ -f "${OW_OUT}" ]] || fail "oversized-whitespace-legal-shape: missing stdout"
+grep -q 'authority/schema validation (code=2)' "${OW_OUT}" \
+  || fail "oversized-whitespace-legal-shape: expected validation code=2"
+if grep -q 'Sensor heartbeat transport failed' "${OW_OUT}"; then
+  fail "oversized-whitespace-legal-shape: byte gate misclassified as transport failure"
+fi
 
 # Valid response exactly at the byte ceiling (compact JSON + spaces).
 EXACT_CAP="$(python3 - <<PY
@@ -673,8 +681,8 @@ run_case_stream_excess() {
     fail "${name}: producer wrote full attempt (${BYTES_WRITTEN}) — unbounded"
     return 0
   fi
-  # Bound producer progress: retained ceiling + typical pipe capacity headroom.
-  if [ "${BYTES_WRITTEN:-0}" -gt 1048576 ]; then
+  # Bound producer progress: retained ceiling + one typical Linux pipe buffer.
+  if [ "${BYTES_WRITTEN:-0}" -gt $((MAX_HEARTBEAT_BYTES + 1 + 65536)) ]; then
     fail "${name}: producer wrote ${BYTES_WRITTEN} before cancel — not adequately bounded"
     return 0
   fi
