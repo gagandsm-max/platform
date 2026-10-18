@@ -170,6 +170,7 @@ for arg in "$@"; do
 done
 
 cacert=""
+noproxy=""
 outfile=""
 write_fmt=""
 url=""
@@ -183,6 +184,10 @@ while [ "${i}" -lt "${#args[@]}" ]; do
     --cacert)
       i=$((i + 1))
       cacert="${args[$i]:-}"
+      ;;
+    --noproxy)
+      i=$((i + 1))
+      noproxy="${args[$i]:-}"
       ;;
     --cert)
       i=$((i + 1))
@@ -227,6 +232,20 @@ if [ "${CURL_FIXTURE_ALLOW_INSECURE:-0}" != "1" ]; then
   if [ ! -f "${cacert}" ]; then
     echo "curl-fixture: cacert missing: ${cacert}" >&2
     exit 92
+  fi
+fi
+
+# Default: -q first (disable ambient curlrc) and explicit --noproxy '*' for
+# fixed 127.0.0.1 probes. Failing-first against unchanged 925ad894 may set
+# CURL_FIXTURE_RELAX_CONFIG_ISOLATION=1 so construction assertions alone fail.
+if [ "${CURL_FIXTURE_RELAX_CONFIG_ISOLATION:-0}" != "1" ]; then
+  if [ "${1:-}" != "-q" ]; then
+    echo "curl-fixture: first argument must be -q (disable curlrc)" >&2
+    exit 93
+  fi
+  if [ "${noproxy}" != "*" ]; then
+    echo "curl-fixture: --noproxy '*' required for loopback probes" >&2
+    exit 94
   fi
 fi
 
@@ -417,6 +436,7 @@ run_case() {
       HOME="${WORK}/home" \
       POST_REBOOT_FIXTURE_STATE="${state}" \
       CURL_FIXTURE_ALLOW_INSECURE="${CURL_FIXTURE_ALLOW_INSECURE:-0}" \
+      CURL_FIXTURE_RELAX_CONFIG_ISOLATION="${CURL_FIXTURE_RELAX_CONFIG_ISOLATION:-0}" \
       VALKEY_PASSWORD="fixture-not-a-secret" \
       bash "./scripts/post-reboot-verify.sh" 2>&1
   )"
@@ -634,6 +654,7 @@ run_case_stream_excess() {
       HOME="${WORK}/home" \
       POST_REBOOT_FIXTURE_STATE="${state}" \
       CURL_FIXTURE_ALLOW_INSECURE="${CURL_FIXTURE_ALLOW_INSECURE:-0}" \
+      CURL_FIXTURE_RELAX_CONFIG_ISOLATION="${CURL_FIXTURE_RELAX_CONFIG_ISOLATION:-0}" \
       VALKEY_PASSWORD="fixture-not-a-secret" \
       bash "./scripts/post-reboot-verify.sh" 2>&1
   )"
@@ -729,6 +750,7 @@ run_case_consumer_fail_valid_prefix() {
       HOME="${WORK}/home" \
       POST_REBOOT_FIXTURE_STATE="${state}" \
       CURL_FIXTURE_ALLOW_INSECURE="${CURL_FIXTURE_ALLOW_INSECURE:-0}" \
+      CURL_FIXTURE_RELAX_CONFIG_ISOLATION="${CURL_FIXTURE_RELAX_CONFIG_ISOLATION:-0}" \
       VALKEY_PASSWORD="fixture-not-a-secret" \
       bash "./scripts/post-reboot-verify.sh" 2>&1
   )"
@@ -804,6 +826,7 @@ run_case_consumer_success_valid_response() {
       HOME="${WORK}/home" \
       POST_REBOOT_FIXTURE_STATE="${state}" \
       CURL_FIXTURE_ALLOW_INSECURE="${CURL_FIXTURE_ALLOW_INSECURE:-0}" \
+      CURL_FIXTURE_RELAX_CONFIG_ISOLATION="${CURL_FIXTURE_RELAX_CONFIG_ISOLATION:-0}" \
       VALKEY_PASSWORD="fixture-not-a-secret" \
       bash "./scripts/post-reboot-verify.sh" 2>&1
   )"
@@ -866,6 +889,7 @@ run_case_missing_ca() {
       HOME="${WORK}/home" \
       POST_REBOOT_FIXTURE_STATE="${state}" \
       CURL_FIXTURE_ALLOW_INSECURE="${CURL_FIXTURE_ALLOW_INSECURE:-0}" \
+      CURL_FIXTURE_RELAX_CONFIG_ISOLATION="${CURL_FIXTURE_RELAX_CONFIG_ISOLATION:-0}" \
       VALKEY_PASSWORD="fixture-not-a-secret" \
       bash "./scripts/post-reboot-verify.sh" 2>&1
   )"
@@ -895,7 +919,8 @@ run_case_missing_ca() {
 }
 run_case_missing_ca
 
-# Enforce curl construction on the positive path: --cacert present, no insecure flags.
+# Enforce curl construction on the positive path: --cacert present, no insecure
+# flags, first-argument -q, and explicit --noproxy '*' on all three probe calls.
 # Skipped only during intentional failing-first reproduction against the historical -k verifier.
 POS_LOG="${WORK}/state/valid-exact-authority/curl-invocations.log"
 [[ -f "${POS_LOG}" ]] || fail "missing curl invocation log for positive case"
@@ -910,7 +935,40 @@ else
   fi
   cacert_count="$(grep -c -- '--cacert' "${POS_LOG}" || true)"
   [[ "${cacert_count}" -ge 3 ]] || fail "expected >=3 --cacert uses, got ${cacert_count}"
-  pass "curl fixture enforced --cacert and rejected insecure flags"
+
+  probe_argv_count="$(grep -c '^ARGV:' "${POS_LOG}" || true)"
+  [[ "${probe_argv_count}" -eq 3 ]] \
+    || fail "expected exactly 3 curl probe invocations, got ${probe_argv_count}"
+  construction_ok=1
+  while IFS= read -r argv_line; do
+    case "${argv_line}" in
+      'ARGV: -q '*) ;;
+      *)
+        fail "probe curl missing first-argument -q: ${argv_line}"
+        construction_ok=0
+        break
+        ;;
+    esac
+    if ! grep -q -- '--cacert' <<<"${argv_line}"; then
+      fail "probe curl missing --cacert: ${argv_line}"
+      construction_ok=0
+      break
+    fi
+    if ! grep -Eq -- 'deploy/docker/certs/ca\.crt' <<<"${argv_line}"; then
+      fail "probe curl missing intended CA path: ${argv_line}"
+      construction_ok=0
+      break
+    fi
+    # printf %q renders '*' as \*
+    if ! grep -Eq -- '--noproxy[[:space:]]+(\\\*|\*)' <<<"${argv_line}"; then
+      fail "probe curl missing --noproxy '*': ${argv_line}"
+      construction_ok=0
+      break
+    fi
+  done < <(grep '^ARGV:' "${POS_LOG}")
+  if [ "${construction_ok}" -eq 1 ]; then
+    pass "curl fixture enforced -q/--cacert/--noproxy and rejected insecure flags"
+  fi
 
   # UI/Core status probes must discard bodies (/dev/null); heartbeat retains.
   POS_DISPOSITION="${WORK}/state/valid-exact-authority/curl-body-disposition.log"

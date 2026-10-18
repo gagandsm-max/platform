@@ -108,10 +108,14 @@ trap cleanup_probe_body EXIT
 https_probe_status() {
     # Args: url [extra curl args...]
     # Status-only probe: discard response body. Prints HTTP status on stdout.
+    # -q first disables ambient curlrc; --noproxy '*' keeps fixed loopback
+    # destinations off any configured proxy (does not edit user curl config).
     local url="$1"
     shift
-    curl -sS \
+    curl -q \
+        -sS \
         --cacert "${CA_CERT}" \
+        --noproxy '*' \
         --connect-timeout 5 \
         --max-time 15 \
         -o /dev/null \
@@ -144,8 +148,12 @@ https_probe_heartbeat() {
         set -e
         return 1
     fi
-    curl -sS \
+    # -q first disables ambient curlrc; --noproxy '*' keeps fixed loopback
+    # destinations off any configured proxy (does not edit user curl config).
+    curl -q \
+        -sS \
         --cacert "${CA_CERT}" \
+        --noproxy '*' \
         --connect-timeout 5 \
         --max-time 15 \
         -o "/dev/fd/${consumer_fd}" \
