@@ -38,6 +38,8 @@ import java.math.BigInteger;
 import java.security.cert.X509Certificate;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -58,9 +60,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -840,57 +844,200 @@ class SensorControlAuthorityIntegrationTest {
 
     @Test
     void heldShareLocksRemainUntilCallerTransactionCompletes() throws Exception {
-        Tenant tenant = tenantService.create("Share Hold Until Complete", TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
-        sensorControl.enrollSensor("sensor-share-hold", tenant.tenantId(), null, SensorRole.NETWORK, true);
+        // Completed conflicting DB evidence (FOR UPDATE NOWAIT / SQLSTATE 55P03), not a
+        // pre-lock scheduling latch. Cover holder commit and holder rollback completion.
+        assertHeldShareLocksConflictUntilHolderCompletes(true);
+        assertHeldShareLocksConflictUntilHolderCompletes(false);
+    }
+
+    private void assertHeldShareLocksConflictUntilHolderCompletes(boolean commitHolder) throws Exception {
+        String sensorId = commitHolder ? "sensor-share-hold-commit" : "sensor-share-hold-rollback";
+        String tenantName = commitHolder ? "Share Hold Until Commit" : "Share Hold Until Rollback";
+        byte[] der = commitHolder ? new byte[]{71, 72, 73} : new byte[]{74, 75, 76};
+        String serialHex = commitHolder ? "e901" : "e902";
+
+        Tenant tenant = tenantService.create(tenantName, TenantMode.SINGLE, TenantStatus.ACTIVE, "UTC");
+        sensorControl.enrollSensor(sensorId, tenant.tenantId(), null, SensorRole.NETWORK, true);
         Instant notBefore = Instant.now().minusSeconds(60);
         Instant notAfter = Instant.now().plusSeconds(3600);
-        X509Certificate cert = mockCert(new byte[]{71, 72, 73}, "e901", notBefore, notAfter);
-        sensorControl.bindCertificate("sensor-share-hold", cert);
+        X509Certificate cert = mockCert(der, serialHex, notBefore, notAfter);
+        sensorControl.bindCertificate(sensorId, cert);
 
         CountDownLatch shareHeld = new CountDownLatch(1);
         CountDownLatch releaseShare = new CountDownLatch(1);
-        CountDownLatch forUpdateReached = new CountDownLatch(1);
-        AtomicBoolean forUpdateFinishedWhileShareHeld = new AtomicBoolean(false);
+        AtomicReference<UUID> heldCredentialId = new AtomicReference<>();
+        AtomicReference<Throwable> holderFailure = new AtomicReference<>();
 
-        ExecutorService pool = Executors.newFixedThreadPool(2);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Future<?> holder = null;
         try {
-            Future<?> holder = pool.submit(() -> {
-                pg.tx().executeWithoutResult(status -> {
-                    resolver.resolveAuthorityHoldingShare(cert);
+            holder = pool.submit(() -> {
+                try {
+                    pg.tx().executeWithoutResult(status -> {
+                        ResolvedSensorAuthority authority = resolver.resolveAuthorityHoldingShare(cert);
+                        heldCredentialId.set(authority.credentialId());
+                        shareHeld.countDown();
+                        try {
+                            assertTrue(releaseShare.await(30, TimeUnit.SECONDS),
+                                    "holder must observe release signal while SHARE remains open");
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(e);
+                        }
+                        if (!commitHolder) {
+                            status.setRollbackOnly();
+                        }
+                    });
+                } catch (Throwable t) {
+                    holderFailure.set(t);
                     shareHeld.countDown();
-                    try {
-                        assertTrue(releaseShare.await(30, TimeUnit.SECONDS));
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new IllegalStateException(e);
+                    if (t instanceof Error error) {
+                        throw error;
                     }
-                });
+                    if (t instanceof RuntimeException runtime) {
+                        throw runtime;
+                    }
+                    throw new IllegalStateException(t);
+                }
                 return null;
             });
 
-            Future<?> updater = pool.submit(() -> {
-                assertTrue(shareHeld.await(30, TimeUnit.SECONDS));
-                pg.tx().executeWithoutResult(status -> {
-                    forUpdateReached.countDown();
-                    sensorRepo.lockPrincipalForUpdate(tenant.tenantId(), "sensor-share-hold");
-                    forUpdateFinishedWhileShareHeld.set(true);
-                });
-                return null;
-            });
+            assertTrue(shareHeld.await(30, TimeUnit.SECONDS),
+                    "holder must acquire real principal/credential FOR SHARE before contender probes");
+            UUID credentialId = heldCredentialId.get();
+            assertNotNull(credentialId, "holder must expose the exact credential row under SHARE");
+            assertNull(holderFailure.get(), "holder must remain open with SHARE locks");
 
-            assertTrue(shareHeld.await(30, TimeUnit.SECONDS));
-            assertTrue(forUpdateReached.await(30, TimeUnit.SECONDS),
-                    "FOR UPDATE waiter must reach the lock attempt while SHARE is held");
-            assertFalse(forUpdateFinishedWhileShareHeld.get(),
-                    "FOR UPDATE must remain blocked until caller releases SHARE");
+            try (Connection contender = openBoundedContenderConnection()) {
+                contender.setAutoCommit(false);
+                assertForUpdateNowaitConflict(contender,
+                        "SELECT sensor_id FROM platform.sensor WHERE tenant_id = ? AND sensor_id = ? FOR UPDATE NOWAIT",
+                        ps -> {
+                            ps.setObject(1, tenant.tenantId());
+                            ps.setString(2, sensorId);
+                        },
+                        "principal row must remain SHARE-locked (SQLSTATE 55P03) while holder is open");
+                contender.rollback();
+
+                assertForUpdateNowaitConflict(contender,
+                        "SELECT credential_id FROM platform.sensor_certificate_credential"
+                                + " WHERE credential_id = ? FOR UPDATE NOWAIT",
+                        ps -> ps.setObject(1, credentialId),
+                        "credential row must remain SHARE-locked (SQLSTATE 55P03) while holder is open");
+                contender.rollback();
+            }
 
             releaseShare.countDown();
             holder.get(30, TimeUnit.SECONDS);
-            updater.get(30, TimeUnit.SECONDS);
-            assertTrue(forUpdateFinishedWhileShareHeld.get());
+            assertNull(holderFailure.get());
+            holder = null;
+
+            try (Connection after = openBoundedContenderConnection()) {
+                after.setAutoCommit(false);
+                assertForUpdateNowaitAcquired(after,
+                        "SELECT sensor_id FROM platform.sensor WHERE tenant_id = ? AND sensor_id = ? FOR UPDATE NOWAIT",
+                        ps -> {
+                            ps.setObject(1, tenant.tenantId());
+                            ps.setString(2, sensorId);
+                        },
+                        "principal FOR UPDATE NOWAIT must succeed after holder "
+                                + (commitHolder ? "commit" : "rollback"));
+                after.rollback();
+
+                assertForUpdateNowaitAcquired(after,
+                        "SELECT credential_id FROM platform.sensor_certificate_credential"
+                                + " WHERE credential_id = ? FOR UPDATE NOWAIT",
+                        ps -> ps.setObject(1, credentialId),
+                        "credential FOR UPDATE NOWAIT must succeed after holder "
+                                + (commitHolder ? "commit" : "rollback"));
+                after.rollback();
+            }
         } finally {
+            releaseShare.countDown();
+            if (holder != null) {
+                try {
+                    holder.get(5, TimeUnit.SECONDS);
+                } catch (Exception ignored) {
+                    holder.cancel(true);
+                }
+            }
             pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS),
+                    "holder thread must terminate even after assertion failure");
         }
+    }
+
+    private Connection openBoundedContenderConnection() throws SQLException {
+        Connection conn = DriverManager.getConnection(pg.jdbcUrl(), "platform_app", "platform_test");
+        try {
+            conn.setNetworkTimeout(Runnable::run, 5_000);
+        } catch (SQLException | AbstractMethodError | UnsupportedOperationException ignored) {
+            // Best-effort bound; statement queryTimeout below remains mandatory.
+        }
+        return conn;
+    }
+
+    @FunctionalInterface
+    private interface SqlBinder {
+        void bind(PreparedStatement ps) throws SQLException;
+    }
+
+    private static void assertForUpdateNowaitConflict(
+            Connection conn, String sql, SqlBinder binder, String message) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(5);
+            binder.bind(ps);
+            try {
+                ps.executeQuery().close();
+                fail(message + "; contender unexpectedly acquired FOR UPDATE NOWAIT");
+            } catch (SQLException e) {
+                assertTrue(sqlStateInChain(e, "55P03"),
+                        message + "; expected SQLSTATE 55P03, got " + describeSqlStates(e));
+            }
+        }
+    }
+
+    private static void assertForUpdateNowaitAcquired(
+            Connection conn, String sql, SqlBinder binder, String message) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(5);
+            binder.bind(ps);
+            try {
+                var rs = ps.executeQuery();
+                assertTrue(rs.next(), message + "; exact row missing");
+                rs.close();
+            } catch (SQLException e) {
+                fail(message + "; got " + describeSqlStates(e));
+            }
+        }
+    }
+
+    private static boolean sqlStateInChain(Throwable t, String sqlState) {
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur instanceof SQLException sqlEx) {
+                for (SQLException walk = sqlEx; walk != null; walk = walk.getNextException()) {
+                    if (sqlState.equals(walk.getSQLState())) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static String describeSqlStates(Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur instanceof SQLException sqlEx) {
+                for (SQLException walk = sqlEx; walk != null; walk = walk.getNextException()) {
+                    if (!sb.isEmpty()) {
+                        sb.append(',');
+                    }
+                    sb.append(walk.getSQLState()).append(':').append(walk.getMessage());
+                }
+            }
+        }
+        return sb.isEmpty() ? String.valueOf(t) : sb.toString();
     }
 
     @Test
