@@ -821,3 +821,14 @@ A governed OpenTelemetry source onboarding flow records ingress profile, endpoin
 ### 15.3 Integration onboarding
 
 ITSM/CMDB connectors use the same governed onboarding principles: test network/TLS/proxy/authentication, discover API/version/capability/permissions, propose standard mappings, show unsupported/edition-limited features, exercise Integration Test Sandbox and activate only explicitly selected synchronization modes. Notification/onboarding events are deduplicated/rate-bounded so connector or reconciliation storms do not flood administrators.
+
+
+## Issue #252 — external delivery and notification safety reconciliation
+
+Governing decision: [Issue #252](https://github.com/gagandsm-max/platform/issues/252), 21 October 2026. This supplement is SPECIFIED only. It preserves version **3.3.0**, the existing formal IDs, the 25-file Mother Reference set and the frozen Issue #200 Phase 1 / Phase 1.5 envelopes. It neither certifies implementation nor removes an existing release obligation.
+
+The §4.3/§6.4 in-product Notification Center retains authoritative PostgreSQL notification/recipient/read state; external delivery remains Integration Service owned. Event notification, report distribution and ticket lifecycle are distinct typed operations. Recipient expansion, list/read/action, dispatch and linked-artifact retrieval recheck current tenant/RBAC/resource/export policy; persisted recipients and USER/TEAM labels never independently grant access.
+
+External profiles use write-only secrets, explicit endpoint/TLS/auth restrictions and exact revision-bound tests before activation. Deterministic incident-generation deduplication, bounded fan-out/cooldown/retry/jitter/deadlines/quotas and recovery policy preserve evidence and prevent storms. Marking read, acknowledging an alert, changing an ITSM ticket and provider acceptance remain distinct events. Sanitize provider metadata and retain auditable per-target attempts, including uncertain results.
+
+Connector impairment is visible in-product with deduplicated recovery notices; failed email cannot be its own sole failure signal. After shutdown/reboot, durable pending work is reconciled and re-admitted under current authority without duplicate flood or loss of deliberate pause. Issue #252 and the existing reporting owner govern PDF/CSV artifacts and formula/preview semantics; this Notification Center supplement creates neither a reporting engine nor a second alert/incident authority.

@@ -7482,3 +7482,14 @@ Synchronization/conflict UI keeps **Monitoring State** separate from **External 
 ### 15.6 Phase-1.5 specialist UX
 
 Endpoint & Switch-Port Intelligence adds MAC/IP/user-when-available/AP/switch/port/VLAN attachment history and provenance. Browser Journey Synthetics adds step/assertion/timing/failure-evidence views only after browser runtime admission. Database Performance Intelligence adds bounded fingerprint/wait/blocking/deadlock/regression/plan evidence. Virtualization Optimization shows evidence-backed recommendations requiring governed human action. None of these Phase-1.5 screens are first-GA implementation claims.
+
+
+## Issue #252 — notification, report delivery and formula UX reconciliation
+
+Governing decision: [Issue #252](https://github.com/gagandsm-max/platform/issues/252), 21 October 2026. This supplement is SPECIFIED only. It preserves version **3.3.0**, the existing formal IDs, the 25-file Mother Reference set and the frozen Issue #200 Phase 1 / Phase 1.5 envelopes. It neither certifies implementation nor removes an existing release obligation.
+
+Extend the existing Administration, UI-071 SLA, UI-080 Integration Health, Report Studio and single Notification Center surfaces. Profile workflows expose endpoint/TLS/auth choices, write-only secret replacement, revision-bound test status and controlled activation. Show separate event destinations and report distributions, authorized recipients/To/Cc/Bcc, policy-controlled severity/recovery behavior, sanitized attempt status and actionable channel health. An impaired email path must have an in-product failure signal. Preserve server-side authorization and the §4.7 Team identity/revocation readiness boundary.
+
+Report execution uses visible queued/running/partial/failed/completed/cancelled job state, execution history and authorized PDF/CSV download. Provider acceptance is distinct from confirmed delivery/read. Schedule and render timezones are separately disclosed; missed-run/pause/recovery state is visible. Artifact expiry/revocation and access failure must be actionable without exposing secrets or raw provider bodies.
+
+Existing governed calculation/custom policy authoring remains required for any certified surface that exposes it. The advanced visual formula editor and debounced, bounded, cancellable recent-data preview are additive Phase 1.1 UX, not a claim of a current engine. The Issue #252 detailed formula contract supplies catalogue discovery, type/unit/error/quality/cost behavior and shared preview/production semantics. Preview cannot dispatch email, finalize periods or mutate alert policy. Boot/recovery UX distinguishes deliberate persistent pause, unavailable dependencies, recovery and repeated failure; process existence alone is not readiness.

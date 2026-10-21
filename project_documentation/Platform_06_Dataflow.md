@@ -2474,3 +2474,14 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 |---|---|---|---|
 | **Phase 1** | DF-001 standalone Core; multi-Sensor enrollment/assignment/fencing; SNMP typed ingestion; DF-025 NCM backup subset; DF-047/048 backup/DR | Standalone deletion-ACK for certified recoverable failures; Sensors continue collect/buffer during Core unavailability within storage protection | No Core-HA claim from DF-001; no MSP isolation cert; Issue #218 ICMP Core acceptance gap open; DF-ACP-005 mass/canary privileged NCM automation not Phase 1 certified |
 | **Phase 1.5** | DF-002 HA pairing; DF-037/038 failover/rejoin; PG/Kafka/ClickHouse continuity; DF-ACP-005 NCM Change Assurance privileged automation; DF-026 single approved push | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures; Sensor reconnect/re-anchor + push continuity | Physical fencing/replication unselected; HA does not replace DR; no third Core/witness/journal preselected |
+
+
+## Issue #252 — notification/report/formula and recovery flow clarification
+
+Governing decision: [Issue #252](https://github.com/gagandsm-max/platform/issues/252), 21 October 2026. This supplement is SPECIFIED only. It preserves version **3.3.0**, the existing formal IDs, the 25-file Mother Reference set and the frozen Issue #200 Phase 1 / Phase 1.5 envelopes. It neither certifies implementation nor removes an existing release obligation.
+
+External delivery follows: authorized source state -> canonical incident/report operation -> transactional outbox -> bounded per-target connector attempt -> classified acceptance/failure/uncertain outcome -> sanitized delivery evidence and in-product health. Authenticated inbound events/polling enter inbox and governed lifecycle mapping; external ticket resolution never asserts monitored recovery. Recipient and export policy apply before egress.
+
+Report flow is: governed definition/version + authorized catalogue/scope -> durable schedule occurrence or authorized on-demand request -> current authorization and resource admission -> bounded query/calculation -> PDF/CSV artifact -> authorized distribution or expiring/revocable download. Recheck authority at execution, dispatch and retrieval. Preview uses the same compiler/semantic pipeline but cannot dispatch, finalize or mutate operational policy; the detailed formula contract remains owned by Issue #252.
+
+Shutdown/boot/reboot recovery in every phase starts from durable desired state and identity, preserves deliberate pause and reconciles pending/in-flight/uncertain work before re-admission. It does not resurrect process/flock/authentication state, blindly replay completed migrations or produce missed-run/retry storms. Recovery and cleanup evidence remain distinct from absence observed at one later time.

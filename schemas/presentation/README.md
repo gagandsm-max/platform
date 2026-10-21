@@ -173,7 +173,7 @@ Report definitions can represent:
 - `TEXT`, `TABLE`, `VISUALIZATION` and governed `IMAGE_REFERENCE` sections;
 - column/table/visualization/image references;
 - SLA/reporting policy references;
-- report formats required by the PRD: `PDF`, `CSV`, `XLSX`, `JSON`, `API`;
+- report artifact formats limited to `PDF` and/or `CSV` (at most two);
 - schedule intent through `scheduleRef`, timezone and enabled flag;
 - delivery intent for `DOWNLOAD`, `EMAIL` or `INTEGRATION` through governed target references.
 
@@ -183,7 +183,7 @@ Definitions contain no recipient addresses, notification credentials or delivery
 
 The schema does not define scheduler syntax or cron. `scheduleRef` points at a future governed schedule contract and timezone is explicit. Script hooks/commands are invalid.
 
-Export declarations only express supported/requested format metadata. They do not prove PDF/CSV/XLSX/JSON generation exists.
+Export declarations only express supported/requested format metadata. They do not prove PDF/CSV generation exists. `XLSX`, `JSON`, `API` and `PPTX` are rejected as report artifact formats.
 
 ## Scale/performance metadata
 
@@ -244,7 +244,7 @@ Directory validation is bounded, ignores symlinks and does not treat schema/fixt
 - APIs or backend persistence;
 - report scheduling workers/history;
 - SLA calculation;
-- PDF/CSV/XLSX/JSON rendering;
+- PDF/CSV rendering;
 - email/integration delivery;
 - RBAC/resource authorization or entitlement decisions;
 - customer-specific thresholds, SLA values, refresh periods, retention or value claims.

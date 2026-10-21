@@ -164,3 +164,19 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 |---|---|---|
 | **Phase 1** | Standalone Core; mTLS Sensor/Agent identity; tenant-aware RBAC/resource scope/audit; Credential Profile separation; assignment/fencing stale-work rejection; Inform local ACK != Core durable ACK; `No Data != Device Down` semantic integrity; backup/restore + site-loss DR security hooks | No Core-HA availability claim; no MSP/shared-tenant isolation certification claim; Issue #218 Core ICMP typed-acceptance gap is an integrity/availability risk until closed—not an authorization to invent false DOWN; NCM automation not Phase 1 default |
 | **Phase 1.5** | Exactly-two-Core HA peer fencing/split-brain prevention; PG/Kafka/ClickHouse continuity trust; HA deletion-ACK RPO=0 matrix; MSP/shared-tenant adversarial isolation across identity/API/RBAC/credentials/NCM/AI/audit; privileged automation guardrails | Physical fencing/replication mechanisms remain unselected; no third Core/witness/journal preselected; HA does not replace DR |
+
+
+## Issue #252 — outbound delivery, formulas and reboot threat clarification
+
+Governing decision: [Issue #252](https://github.com/gagandsm-max/platform/issues/252), 21 October 2026. This supplement is SPECIFIED only. It preserves version **3.3.0**, the existing formal IDs, the 25-file Mother Reference set and the frozen Issue #200 Phase 1 / Phase 1.5 envelopes. It neither certifies implementation nor removes an existing release obligation.
+
+| Threat | Required control outcome |
+|---|---|
+| Outbound profile or arbitrary recipient becomes exfiltration/SSRF | Tenant-owned profile, write-only secret references, explicit TLS/auth/destination validation, revision-bound activation test, current recipient/resource/export authorization and bounded payloads. |
+| Retry/reboot duplicates a ticket, report or privileged effect | Durable operation/occurrence identity, generation fencing, idempotent vendor mapping, explicit ambiguous outcome, bounded recovery and no generic exactly-once claim. |
+| Old recipient/token exposes revoked report data | Recheck run/dispatch/download authority; authenticated expiring/revocable artifacts; prior delivery/recipient state is not access authority. Attachments already sent are irreversible disclosures. |
+| Formula or preview becomes code/query injection or resource exhaustion | Issue #252 governed typed checked AST/catalogue pipeline, no arbitrary code/SQL/identifiers/UDFs/joins, unit/time/quality checks, bounded cost/output/concurrency and cancellation; preview has no operational side effects. |
+| Raw SMTP/HTTP data leaks credentials or sensitive recipient data | Sanitized status and bounded provider identifiers, private recipient handling, tamper-evident governed retention; no authorization headers, secrets or unrestricted response bodies. |
+| Engineering or product reboot falsely restores authority | Validate new boot/process identity and durable desired state; reacquire/reconcile locks/reservations and surviving Docker/CI/unknown effects; never claim an old FD or ephemeral auth survived; no unattended interactive OAuth or destructive cleanup. |
+
+These controls apply to installed/enabled long-lived components and engineering tools across development/test/build/production. Mandatory native recovery proof and the existing Phase-1 safety gates remain open; no source-only control or schema check certifies runtime security.

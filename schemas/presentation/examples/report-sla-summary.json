@@ -82,7 +82,7 @@
       "calculationRefs": ["calculation.example.sla-summary"]
     }
   ],
-  "allowedFormats": ["PDF", "CSV", "XLSX", "JSON", "API"],
+  "allowedFormats": ["PDF", "CSV"],
   "slaPolicyRef": "sla-policy.example.runtime-governed",
   "schedule": {
     "scheduleRef": "schedule.example.reporting-intent",

@@ -223,3 +223,14 @@ This reconciliation promotes the **requirement phase**, not implementation state
 - Deep specialist VoIP/CDR/CMR/MOS/call-path depth beyond existing operational network/VoIP monitoring remains **Phase 2**.
 
 These phase decisions reuse existing architecture owners and do not select new dependencies by themselves.
+
+
+## Issue #252 — Service Assurance and reporting acceptance clarification
+
+Governing decision: [Issue #252](https://github.com/gagandsm-max/platform/issues/252), 21 October 2026. This supplement is SPECIFIED only. It preserves version **3.3.0**, the existing formal IDs, the 25-file Mother Reference set and the frozen Issue #200 Phase 1 / Phase 1.5 envelopes. It neither certifies implementation nor removes an existing release obligation.
+
+PRD-EGC-003 / REQ-EGC-003 and §4.3 retain governed customer formulas, editable templates, historical simulation, immutable period/version/evidence semantics and PDF/CSV reporting. The lack of implementation does not silently defer those obligations. Advanced visual formula editing and bounded live-preview UX are additive Phase 1.1 work; the frozen Phase 1.5 HA/MSP architecture is separate.
+
+The Issue #252 detailed formula contract extends the governed query/metric catalogue and approved CEL direction with versioned declarative definitions and checked typed ASTs, type/unit/time/quality/exact-counter behavior, bounded cost and shared preview/production semantics. Arbitrary SQL/code/UDFs and a second query/data authority remain prohibited. Preview cannot finalize or restate a period, dispatch a report or change alert policy.
+
+Report schedules use durable occurrence identity, IANA timezone, generation fencing and explicit DST/misfire/pause/recovery rules. Recheck execution, dispatch and artifact-download authorization; private/oversized artifacts prefer an authenticated expiring/revocable route with bounded encoded message size. Preserve per-target sanitized delivery evidence and distinguish provider acceptance from delivery. Bounded report/render workers yield to protected monitoring. All enabled long-lived components recover authorized desired state across boot/reboot with native evidence; documentation or a valid static schema is not runtime proof.
