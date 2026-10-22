@@ -1197,3 +1197,88 @@ kbd {
   display: grid;
   gap: 0.35rem;
 }
+
+/* UI-010 entity metric observation panel (PR246 contract) */
+.workspace-entity-detail {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.metric-observation-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 0.35rem;
+  background: var(--surface-raised, transparent);
+}
+
+.metric-observation-panel__header h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.1rem;
+}
+
+.metric-observation-panel__subtitle {
+  margin: 0;
+  opacity: 0.85;
+  font-size: 0.92rem;
+}
+
+.metric-observation-panel__identity {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0;
+}
+
+.metric-observation-panel__identity dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+.metric-observation-panel__identity dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.92rem;
+  word-break: break-word;
+}
+
+.metric-observation-panel__table-wrap {
+  overflow-x: auto;
+}
+
+.metric-observation-panel__table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 44rem;
+  font-size: 0.9rem;
+}
+
+.metric-observation-panel__table th,
+.metric-observation-panel__table td {
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  text-align: left;
+  vertical-align: top;
+}
+
+.metric-observation-panel__table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+.metric-observation-panel__table code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.metric-observation-panel[data-truncated='true'] .metric-observation-panel__header::after {
+  content: 'Truncated result';
+  display: inline-block;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}

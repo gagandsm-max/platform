@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { PageState } from './PageState';
 import { InfrastructureHealthOverview } from './health-overview/InfrastructureHealthOverview';
 import { NetworkHealthOverview } from './health-overview/NetworkHealthOverview';
+import { EntityMetricObservationPanel } from './metric-observations/EntityMetricObservationPanel';
 import {
   AccessContext,
   WorkspaceDefinition,
@@ -12,6 +13,7 @@ import {
   workspaceTabPanelDomId,
 } from '../platform/navigation';
 import { resolveHealthOverviewHostDataState } from '../platform/health-overview';
+import type { MetricObservationBinding } from '../platform/metric-observations';
 import type { PageStateKind, ScreenDataState } from '../platform/screen-state';
 
 interface WorkspaceHostProps {
@@ -23,6 +25,11 @@ interface WorkspaceHostProps {
    * When omitted, foundation uses a non-Normal placeholder independent of capability status.
    */
   dataState?: ScreenDataState;
+  /**
+   * Optional explicit tenant/entity/query + injected transport for UI-010
+   * Overview/Monitoring metric observations. Never derived from FOUNDATION_ACCESS.
+   */
+  metricObservationBinding?: MetricObservationBinding | null;
 }
 
 /**
@@ -34,6 +41,7 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
   access,
   onNavigate,
   dataState,
+  metricObservationBinding = null,
 }) => {
   // Tab selection is indexed (not label-keyed) and remounted via key={workspace.id} from the parent.
   const [activeTabIndex, setActiveTabIndex] = useState(0);
@@ -189,6 +197,36 @@ export const WorkspaceHost: React.FC<WorkspaceHostProps> = ({
             dataState={dataState}
             dataBound={dataState !== undefined}
           />
+        ) : workspace.id === 'ui-010'
+          && (activeTabLabel === 'Overview' || activeTabLabel === 'Monitoring') ? (
+          <div className="workspace-entity-detail">
+            <PageState
+              kind={resolvedDataState}
+              title={
+                dataState
+                  ? `${workspace.label}`
+                  : 'No live data-state provider bound'
+              }
+              message={
+                dataState
+                  ? `Authoritative data state for this workspace is ${resolvedDataState}.`
+                  : `Capability status (${workspace.backendCapability}) is independent of screen/data state. Metric observations require an explicit authenticated binding and never invent tenant, token or demo data.${activeTabLabel ? ` Active view: ${activeTabLabel}.` : ''}`
+              }
+              evidence={[
+                `Capability availability: ${workspace.backendCapability}`,
+                `Resolved data state: ${resolvedDataState}`,
+                'FOUNDATION_ACCESS is presentation-only and never authorizes metric observation reads.',
+              ]}
+            />
+            <EntityMetricObservationPanel
+              binding={metricObservationBinding}
+              heading={
+                activeTabLabel === 'Monitoring'
+                  ? 'Monitoring · metric observations'
+                  : 'Overview · metric observations'
+              }
+            />
+          </div>
         ) : (
           <PageState
             kind={resolvedDataState}
