@@ -126,7 +126,18 @@ class JdbcMetricObservationSecurityIntegrationTest {
                 INSERT INTO platform.identity_provider_instance
                     (provider_instance_id, provider_type, issuer_uri, audience, status)
                 VALUES (?, 'OIDC', ?, ?, 'ACTIVE')
+                ON CONFLICT (provider_instance_id) DO NOTHING
                 """, PROVIDER, ISSUER, AUDIENCE);
+        var providers = PG.jdbc().queryForList("""
+                SELECT provider_type, issuer_uri, audience, status
+                FROM platform.identity_provider_instance WHERE provider_instance_id=?
+                """, PROVIDER);
+        assertEquals(1, providers.size());
+        var provider = providers.get(0);
+        assertEquals("OIDC", provider.get("provider_type"));
+        assertEquals(ISSUER, provider.get("issuer_uri"));
+        assertEquals(AUDIENCE, provider.get("audience"));
+        assertEquals("ACTIVE", provider.get("status"));
     }
 
     @AfterAll
