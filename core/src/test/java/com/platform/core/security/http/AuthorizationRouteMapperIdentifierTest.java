@@ -282,6 +282,44 @@ class AuthorizationRouteMapperIdentifierTest {
                 "/api/v1/tenants/" + TENANT + "/entities/" + OTHER_ENTITY + "/management-endpoints");
     }
 
+    @Test
+    void metricObservationsUseEntityReadOnEntityResource() {
+        PrincipalContext reader = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.ENTITY_READ,
+                        ResourceScope.named(ResourceType.ENTITY, Set.of(ENTITY))
+                )
+        );
+        PrincipalContext otherEntityOnly = principal(
+                TENANT,
+                new PermissionGrant(
+                        TENANT,
+                        PlatformPermissions.ENTITY_READ,
+                        ResourceScope.named(ResourceType.ENTITY, Set.of(OTHER_ENTITY))
+                )
+        );
+        PrincipalContext otherTenant = principal(
+                OTHER_TENANT,
+                new PermissionGrant(
+                        OTHER_TENANT,
+                        PlatformPermissions.ENTITY_READ,
+                        ResourceScope.named(ResourceType.ENTITY, Set.of(ENTITY))
+                )
+        );
+        PrincipalContext noPerms = principal(TENANT);
+
+        String path = "/api/v1/tenants/" + TENANT + "/entities/" + ENTITY + "/metric-observations";
+        assertAllowed(reader, "GET", path);
+        assertDenied(reader, "POST", path);
+        assertDenied(otherEntityOnly, "GET", path);
+        assertDenied(otherTenant, "GET", path);
+        assertDenied(noPerms, "GET", path);
+        assertDenied(reader, "GET",
+                "/api/v1/tenants/" + OTHER_TENANT + "/entities/" + ENTITY + "/metric-observations");
+    }
+
     private static PrincipalContext principal(UUID tenantScope, PermissionGrant... grants) {
         return new PrincipalContext(
                 "subject",
