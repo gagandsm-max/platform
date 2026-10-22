@@ -123,11 +123,20 @@ export class MetricObservationClientError extends Error {
     message: string,
     options?: { httpStatus?: number | null; correlationId?: string | null; cause?: unknown },
   ) {
-    super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
+    // ES2020 lib typings accept Error(message) only; attach cause without ErrorOptions.
+    super(message);
     this.name = 'MetricObservationClientError';
     this.code = code;
     this.httpStatus = options?.httpStatus ?? null;
     this.correlationId = options?.correlationId ?? null;
+    if (options?.cause !== undefined) {
+      Object.defineProperty(this, 'cause', {
+        value: options.cause,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
+    }
   }
 }
 
