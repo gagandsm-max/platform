@@ -262,16 +262,18 @@ class G0IamMigrationIntegrationTest {
 
     /**
      * Real-catalogue V016 failure: does not substitute migration SQL or mock the runner.
-     * <p>Failure mechanism derived from shipped V016: after the IAM {@code CREATE TABLE}/
-     * {@code CREATE INDEX} statements, V016 issues
-     * {@code CREATE OR REPLACE FUNCTION platform.prevent_identity_provider_trust_retarget()}.
-     * A test-owned TABLE of that exact name is an incompatible precondition; PostgreSQL rejects
-     * creating a function when the relation name is already occupied. Earlier V016 DDL is
-     * attempted inside the migration transaction and must roll back; the pre-existing blocker
-     * remains because it was committed outside that transaction.
+     * <p>Failure mechanism derived from shipped V016 and PostgreSQL CREATE FUNCTION rules:
+     * after IAM {@code CREATE TABLE}/{@code CREATE INDEX} statements, V016 issues
+     * {@code CREATE OR REPLACE FUNCTION platform.prevent_identity_provider_trust_retarget()
+     * RETURNS trigger}. A test-owned zero-argument function with the same identity arguments
+     * but {@code RETURNS integer} is an incompatible precondition: PostgreSQL refuses to change
+     * an existing function's return type via CREATE OR REPLACE
+     * (https://www.postgresql.org/docs/16/sql-createfunction.html). Earlier V016 DDL runs in the
+     * migration transaction and must roll back; the pre-existing blocker function remains because
+     * it was committed outside that transaction.
      */
     @Test
-    void realV016CatalogueFailsOnTestOwnedFunctionRelationCollision_thenRecoversAfterBlockerRemoval() {
+    void realV016CatalogueFailsOnTestOwnedIntegerReturnTypeConflict_thenRecoversAfterBlockerRemoval() {
         JdbcTemplate jdbc = pg.jdbc();
 
         pg.runner(catalogThroughVersion("V015")).applyPendingMigrations();
@@ -324,25 +326,29 @@ class G0IamMigrationIntegrationTest {
         assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
 
-        // Test-owned blocker only: occupies the exact relation name V016 later needs for its function.
+        assertEquals(0, countZeroArgTrustRetargetFunctions(jdbc),
+                "Zero-argument prevent_identity_provider_trust_retarget must be absent before blocker creation");
+
+        // Test-owned blocker: exact V016 identity arguments (), incompatible RETURNS integer.
         jdbc.execute("""
-                CREATE TABLE platform.prevent_identity_provider_trust_retarget (
-                    test_owned_blocker BOOLEAN PRIMARY KEY,
-                    blocker_marker TEXT NOT NULL
-                )
+                CREATE FUNCTION platform.prevent_identity_provider_trust_retarget()
+                RETURNS integer
+                LANGUAGE sql
+                IMMUTABLE
+                AS $$ SELECT 1 $$
                 """);
-        jdbc.update("""
-                INSERT INTO platform.prevent_identity_provider_trust_retarget (test_owned_blocker, blocker_marker)
-                VALUES (TRUE, 'D_REAL_V016_FAILURE_COVERAGE_20261022')
-                """);
-        assertEquals(1, jdbc.queryForObject("""
-                SELECT COUNT(*) FROM platform.prevent_identity_provider_trust_retarget
-                 WHERE blocker_marker = 'D_REAL_V016_FAILURE_COVERAGE_20261022'
-                """, Integer.class));
+        Map<String, Object> blockerBefore = queryZeroArgTrustRetargetFunction(jdbc);
+        assertEquals("", blockerBefore.get("identity_arguments"));
+        assertEquals("integer", blockerBefore.get("return_type"));
+        assertEquals("int4", blockerBefore.get("return_type_name"));
+        assertEquals(1, countZeroArgTrustRetargetFunctions(jdbc));
 
         // Real combined catalogue / unchanged V016 resource — no SQL substitution, no runner mock.
         MigrationException failure = assertThrows(MigrationException.class, pg::migrate);
         assertEquals("MIGRATION_SQL_FAILED", failure.getCode());
+        assertTrue(causeMentionsCannotChangeReturnType(failure),
+                "Underlying failure must be the PostgreSQL return-type conflict, not unrelated SQL; got: "
+                        + rootCauseSummary(failure));
 
         assertEquals(15, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class),
@@ -353,26 +359,13 @@ class G0IamMigrationIntegrationTest {
         assertEquals(0, countNamedPlatformTables(jdbc, IAM_TABLES),
                 "IAM tables created by the failed V016 attempt must roll back");
         assertEquals(0, countNamedConstraints(jdbc, IAM_CONSTRAINTS));
-        // Distinguish pre-existing blocker (remains as a table) from rolled-back V016 objects (absent).
-        assertEquals("r", jdbc.queryForObject("""
-                SELECT c.relkind::text
-                  FROM pg_class c
-                  JOIN pg_namespace n ON n.oid = c.relnamespace
-                 WHERE n.nspname = 'platform'
-                   AND c.relname = 'prevent_identity_provider_trust_retarget'
-                """, String.class),
-                "Test-owned blocker table must remain after migration rollback");
-        assertEquals(0, jdbc.queryForObject("""
-                SELECT COUNT(*) FROM pg_proc p
-                  JOIN pg_namespace n ON n.oid = p.pronamespace
-                 WHERE n.nspname = 'platform'
-                   AND p.proname = 'prevent_identity_provider_trust_retarget'
-                """, Integer.class),
-                "Failed V016 must not leave the trust-retarget function installed");
-        assertEquals(1, jdbc.queryForObject("""
-                SELECT COUNT(*) FROM platform.prevent_identity_provider_trust_retarget
-                 WHERE blocker_marker = 'D_REAL_V016_FAILURE_COVERAGE_20261022'
-                """, Integer.class));
+
+        // Distinguish pre-existing integer blocker (remains) from rolled-back V016 objects (absent).
+        Map<String, Object> blockerAfterFailure = queryZeroArgTrustRetargetFunction(jdbc);
+        assertEquals("", blockerAfterFailure.get("identity_arguments"));
+        assertEquals("integer", blockerAfterFailure.get("return_type"));
+        assertEquals("int4", blockerAfterFailure.get("return_type_name"));
+        assertEquals(1, countZeroArgTrustRetargetFunctions(jdbc));
         assertEquals(1, jdbc.queryForObject("""
                 SELECT COUNT(*) FROM information_schema.tables
                  WHERE table_schema='platform' AND table_name='sensor_poll_grant'
@@ -395,10 +388,9 @@ class G0IamMigrationIntegrationTest {
         assertTrue(Boolean.TRUE.equals(lockAcquired), "Advisory lock must be released after real V016 failure");
         jdbc.execute("SELECT pg_advisory_unlock(1346982994, 1296650836)");
 
-        // Repair ONLY the test-owned blocker, then apply the actual combined catalogue.
-        jdbc.execute("DROP TABLE platform.prevent_identity_provider_trust_retarget");
-        assertNull(jdbc.queryForObject(
-                "SELECT to_regclass('platform.prevent_identity_provider_trust_retarget')", String.class));
+        // Repair ONLY the exact test-owned blocker function, without CASCADE.
+        jdbc.execute("DROP FUNCTION platform.prevent_identity_provider_trust_retarget()");
+        assertEquals(0, countZeroArgTrustRetargetFunctions(jdbc));
 
         pg.migrate();
         assertEquals(16, jdbc.queryForObject(
@@ -408,16 +400,13 @@ class G0IamMigrationIntegrationTest {
         assertEquals(36, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
         assertEquals(6, countNamedPlatformTables(jdbc, IAM_TABLES));
         assertEquals(12, countNamedConstraints(jdbc, IAM_CONSTRAINTS));
-        assertNull(jdbc.queryForObject(
-                "SELECT to_regclass('platform.prevent_identity_provider_trust_retarget')", String.class),
-                "Successful V016 must not leave a table occupying the function name");
-        assertEquals(1, jdbc.queryForObject("""
-                SELECT COUNT(*) FROM pg_proc p
-                  JOIN pg_namespace n ON n.oid = p.pronamespace
-                 WHERE n.nspname = 'platform'
-                   AND p.proname = 'prevent_identity_provider_trust_retarget'
-                """, Integer.class),
-                "Successful V016 must install prevent_identity_provider_trust_retarget()");
+
+        Map<String, Object> installed = queryZeroArgTrustRetargetFunction(jdbc);
+        assertEquals("", installed.get("identity_arguments"));
+        assertEquals("trigger", installed.get("return_type"));
+        assertEquals("trigger", installed.get("return_type_name"));
+        assertEquals(1, countZeroArgTrustRetargetFunctions(jdbc),
+                "Successful V016 must install the zero-argument trigger-returning function");
 
         Map<String, Object> watermarkAfterSuccess = jdbc.queryForMap("""
                 SELECT * FROM platform.sensor_telemetry_watermark
@@ -434,6 +423,7 @@ class G0IamMigrationIntegrationTest {
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class),
                 "Successful repeat must remain idempotent at sixteen history rows");
         assertEquals(36, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
+        assertEquals("trigger", queryZeroArgTrustRetargetFunction(jdbc).get("return_type"));
     }
 
     private static void assertV015WatermarkConserved(Map<String, Object> before, Map<String, Object> after) {
@@ -453,6 +443,49 @@ class G0IamMigrationIntegrationTest {
         assertEquals(before.get("pending_authorization_version"), after.get("pending_authorization_version"));
         assertNull(after.get("pending_authorization_digest"));
         assertNull(after.get("pending_authorization_version"));
+    }
+
+    private static int countZeroArgTrustRetargetFunctions(JdbcTemplate jdbc) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM pg_proc p
+                  JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'platform'
+                   AND p.proname = 'prevent_identity_provider_trust_retarget'
+                   AND pg_catalog.pg_get_function_identity_arguments(p.oid) = ''
+                """, Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    private static Map<String, Object> queryZeroArgTrustRetargetFunction(JdbcTemplate jdbc) {
+        return jdbc.queryForMap("""
+                SELECT pg_catalog.pg_get_function_identity_arguments(p.oid) AS identity_arguments,
+                       pg_catalog.format_type(p.prorettype, NULL) AS return_type,
+                       t.typname AS return_type_name
+                  FROM pg_proc p
+                  JOIN pg_namespace n ON n.oid = p.pronamespace
+                  JOIN pg_type t ON t.oid = p.prorettype
+                 WHERE n.nspname = 'platform'
+                   AND p.proname = 'prevent_identity_provider_trust_retarget'
+                   AND pg_catalog.pg_get_function_identity_arguments(p.oid) = ''
+                """);
+    }
+
+    private static boolean causeMentionsCannotChangeReturnType(Throwable failure) {
+        for (Throwable cursor = failure; cursor != null; cursor = cursor.getCause()) {
+            String message = cursor.getMessage();
+            if (message != null && message.toLowerCase().contains("cannot change return type")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String rootCauseSummary(Throwable failure) {
+        Throwable cursor = failure;
+        while (cursor.getCause() != null) {
+            cursor = cursor.getCause();
+        }
+        return cursor.getClass().getName() + ": " + cursor.getMessage();
     }
 
     private static int countNamedPlatformTables(JdbcTemplate jdbc, String[] names) {
