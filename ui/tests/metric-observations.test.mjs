@@ -1004,16 +1004,21 @@ test('mixed-case valid UUID response is accepted; different tenant still rejecte
     (err) => err && err.code === 'CONTEXT_MISMATCH',
   );
   // metricId remains case-sensitive — not UUID-normalized.
+  // Use an alphabetic selector (OID digits alone are case-invariant).
+  const numericQuery = bindingToQuery(completeBinding({
+    metricId: 'system.cpu.utilization',
+    valueKind: 'NUMERIC',
+  }));
   assert.throws(
     () => assertResponseMatchesRequest({
       tenantId: FIXTURE_TENANT_A,
       entityId: FIXTURE_ENTITY,
-      metricId: BASE_BINDING.metricId.toUpperCase(),
-      valueKind: 'COUNTER64',
+      metricId: 'SYSTEM.CPU.UTILIZATION',
+      valueKind: 'NUMERIC',
       from: FIXTURE_WINDOW.from,
       to: FIXTURE_WINDOW.to,
       limit: 100,
-    }, query),
+    }, numericQuery),
     (err) => err && err.code === 'CONTEXT_MISMATCH',
   );
 });
