@@ -15,6 +15,7 @@ import {
   MetricObservationResponse,
   ObservationReadState,
   FreshnessClass,
+  bindingToQuery,
   isCompleteMetricObservationBinding,
   metricObservationInvalidLimitMessage,
   observationStateToPageKind,
@@ -175,13 +176,22 @@ function clearRowsView(
   errorCode: string | null,
   ownership: MetricObservationOwnership | null,
 ): MetricObservationPanelView {
+  // Bound loading must not inherit EMPTY_VIEW.observationState=SOURCE_UNAVAILABLE.
+  // Unbound keeps SOURCE_UNAVAILABLE; loading/error clears observationState.
+  const unbound = phase === 'unbound';
   return {
-    ...EMPTY_VIEW,
     phase,
     pageKind,
     title,
     message,
+    observationState: unbound ? 'SOURCE_UNAVAILABLE' : null,
+    freshness: null,
+    truncated: false,
+    qualityNote: null,
+    provenance: null,
     observations: [],
+    request: null,
+    correlationId: null,
     generation,
     retryCount,
     errorCode,
@@ -447,6 +457,9 @@ export class MetricObservationController {
     const abort = new AbortController();
     this.abort = abort;
     try {
+      // Client-side window/limit rejection must not count as a transport request.
+      // bindingToQuery validates before any HTTP; only then increment + fetch.
+      bindingToQuery(binding);
       this.requestCount += 1;
       const result = await fetchMetricObservations(binding, abort.signal);
       if (!shouldAcceptGeneration(this.generation, generation)) {

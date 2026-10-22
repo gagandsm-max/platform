@@ -73,6 +73,45 @@ export function mapHttpStatusToError(
 }
 
 /**
+ * Core ApiExceptionHandler body: { code, message, correlationId, timestamp }.
+ * Only the exact known code QUERY_LIMIT_EXCEEDED (HTTP 400) is remapped to
+ * QUERY_LIMIT. Arbitrary server messages are never surfaced.
+ */
+export async function mapHttpErrorResponse(
+  response: Response,
+  correlationId: string | null,
+): Promise<MetricObservationClientError> {
+  if (response.status === 400) {
+    const knownCode = await readExactErrorCode(response);
+    if (knownCode === 'QUERY_LIMIT_EXCEEDED') {
+      return new MetricObservationClientError(
+        'QUERY_LIMIT',
+        'Metric observation request exceeded query limits',
+        { httpStatus: 400, correlationId },
+      );
+    }
+  }
+  return mapHttpStatusToError(response.status, correlationId);
+}
+
+async function readExactErrorCode(response: Response): Promise<string | null> {
+  try {
+    const raw: unknown = await response.json();
+    if (
+      typeof raw === 'object'
+      && raw !== null
+      && !Array.isArray(raw)
+      && typeof (raw as { code?: unknown }).code === 'string'
+    ) {
+      return (raw as { code: string }).code;
+    }
+  } catch {
+    // Non-JSON / empty body → fall through to status mapping.
+  }
+  return null;
+}
+
+/**
  * Perform one bounded GET. Requires a complete binding. AbortSignal is forwarded
  * through the injected transport without inventing credentials.
  */
@@ -115,7 +154,7 @@ export async function fetchMetricObservations(
 
   const correlationId = correlationFrom(response);
   if (!response.ok) {
-    throw mapHttpStatusToError(response.status, correlationId);
+    throw await mapHttpErrorResponse(response, correlationId);
   }
 
   let raw: unknown;

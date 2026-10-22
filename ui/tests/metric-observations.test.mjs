@@ -34,17 +34,24 @@ import {
   isExactCounter64Decimal,
   isUuid,
   isValidMetricObservationLimit,
+  metricObservationInstantsEqual,
   metricObservationInvalidLimitMessage,
   observationStateToPageKind,
   ownershipFromBinding,
   ownershipMatchesBinding,
   parseExactFlags,
+  parseMetricObservationInstant,
   parseMetricObservationResponse,
   parseObservationItem,
   resolveMetricObservationLimit,
   tryEffectiveMetricObservationLimit,
+  uuidIdentityEquals,
 } from '../.test-dist/platform/metric-observations.js';
-import { fetchMetricObservations } from '../.test-dist/platform/metric-observation-client.js';
+import {
+  fetchMetricObservations,
+  mapHttpErrorResponse,
+  mapHttpStatusToError,
+} from '../.test-dist/platform/metric-observation-client.js';
 import {
   MetricObservationController,
   createInvalidLimitView,
@@ -867,4 +874,303 @@ test('createInvalidLimitView matches selector QUERY_LIMIT contract', () => {
   assertQueryLimitSurface(view);
   assert.equal(view.generation, 7);
   assert.equal(createPendingContextView(0).phase, 'loading');
+});
+
+// --- F_METRIC_CONTRACT_CORRECTION_AND_VALIDATION_20261022 ---
+
+test('same instant .000Z vs Z is accepted by semantic instant equality', () => {
+  assert.equal(
+    metricObservationInstantsEqual('2026-10-21T10:00:00.000Z', '2026-10-21T10:00:00Z'),
+    true,
+  );
+  assert.equal(
+    metricObservationInstantsEqual('2026-10-21T11:00:00Z', '2026-10-21T11:00:00.000Z'),
+    true,
+  );
+  const query = bindingToQuery(completeBinding({
+    from: '2026-10-21T10:00:00.000Z',
+    to: '2026-10-21T11:00:00.000Z',
+  }));
+  const body = counter64SuccessBody({
+    from: '2026-10-21T10:00:00Z',
+    to: '2026-10-21T11:00:00Z',
+  });
+  const parsed = parseMetricObservationResponse(body, query);
+  assert.equal(parsed.returned, 1);
+  assert.doesNotThrow(() => assertResponseMatchesRequest({
+    tenantId: FIXTURE_TENANT_A,
+    entityId: FIXTURE_ENTITY,
+    metricId: BASE_BINDING.metricId,
+    valueKind: 'COUNTER64',
+    from: '2026-10-21T10:00:00Z',
+    to: '2026-10-21T11:00:00Z',
+    limit: 100,
+  }, query));
+});
+
+test('semantically equal timezone offsets are accepted', () => {
+  assert.equal(
+    metricObservationInstantsEqual('2026-10-21T10:00:00Z', '2026-10-21T15:30:00+05:30'),
+    true,
+  );
+  assert.equal(
+    metricObservationInstantsEqual('2026-10-21T10:00:00.000Z', '2026-10-21T05:30:00-04:30'),
+    true,
+  );
+  const query = bindingToQuery(completeBinding({
+    from: '2026-10-21T10:00:00.000Z',
+    to: '2026-10-21T11:00:00.000Z',
+  }));
+  assert.doesNotThrow(() => assertResponseMatchesRequest({
+    tenantId: FIXTURE_TENANT_A,
+    entityId: FIXTURE_ENTITY,
+    metricId: BASE_BINDING.metricId,
+    valueKind: 'COUNTER64',
+    from: '2026-10-21T15:30:00+05:30',
+    to: '2026-10-21T16:30:00+05:30',
+    limit: 100,
+  }, query));
+});
+
+test('different nanoseconds are rejected; millisecond-equal is not enough', () => {
+  assert.equal(
+    metricObservationInstantsEqual(
+      '2026-10-21T10:00:00.123456789Z',
+      '2026-10-21T10:00:00.123456788Z',
+    ),
+    false,
+  );
+  assert.equal(
+    metricObservationInstantsEqual(
+      '2026-10-21T10:00:00.123000000Z',
+      '2026-10-21T10:00:00.123000001Z',
+    ),
+    false,
+  );
+  // Date.parse would collapse these to the same ms; contract must not.
+  assert.equal(
+    parseMetricObservationInstant('2026-10-21T10:00:00.123456789Z')?.nano,
+    123456789,
+  );
+  const query = bindingToQuery(completeBinding());
+  assert.throws(
+    () => assertResponseMatchesRequest({
+      tenantId: FIXTURE_TENANT_A,
+      entityId: FIXTURE_ENTITY,
+      metricId: BASE_BINDING.metricId,
+      valueKind: 'COUNTER64',
+      from: '2026-10-21T10:00:00.000000001Z',
+      to: FIXTURE_WINDOW.to,
+      limit: 100,
+    }, query),
+    (err) => err && err.code === 'CONTEXT_MISMATCH',
+  );
+});
+
+test('malformed timestamps are rejected', () => {
+  assert.equal(parseMetricObservationInstant(''), null);
+  assert.equal(parseMetricObservationInstant('not-an-instant'), null);
+  assert.equal(parseMetricObservationInstant('2026-10-21T10:00:00.1234567890Z'), null); // >9 frac
+  assert.equal(parseMetricObservationInstant('2026-10-21 10:00:00Z'), null);
+  assert.equal(metricObservationInstantsEqual('bogus', FIXTURE_WINDOW.from), false);
+  const query = bindingToQuery(completeBinding());
+  assert.throws(
+    () => parseMetricObservationResponse(
+      counter64SuccessBody({ from: 'not-an-instant' }),
+      query,
+    ),
+    (err) => err && err.code === 'MALFORMED_RESPONSE',
+  );
+});
+
+test('mixed-case valid UUID response is accepted; different tenant still rejected', () => {
+  const mixedTenant = FIXTURE_TENANT_A.toUpperCase();
+  const mixedEntity = FIXTURE_ENTITY.toUpperCase();
+  assert.equal(isUuid(mixedTenant), true);
+  assert.equal(uuidIdentityEquals(mixedTenant, FIXTURE_TENANT_A), true);
+  assert.equal(uuidIdentityEquals(FIXTURE_TENANT_A, FIXTURE_TENANT_B), false);
+  const query = bindingToQuery(completeBinding());
+  const parsed = parseMetricObservationResponse(
+    counter64SuccessBody({ tenantId: mixedTenant, entityId: mixedEntity }),
+    query,
+  );
+  assert.equal(parsed.tenantId, mixedTenant);
+  assert.equal(parsed.entityId, mixedEntity);
+  assert.throws(
+    () => parseMetricObservationResponse(
+      counter64SuccessBody({ tenantId: FIXTURE_TENANT_B.toUpperCase() }),
+      query,
+    ),
+    (err) => err && err.code === 'CONTEXT_MISMATCH',
+  );
+  // metricId remains case-sensitive — not UUID-normalized.
+  assert.throws(
+    () => assertResponseMatchesRequest({
+      tenantId: FIXTURE_TENANT_A,
+      entityId: FIXTURE_ENTITY,
+      metricId: BASE_BINDING.metricId.toUpperCase(),
+      valueKind: 'COUNTER64',
+      from: FIXTURE_WINDOW.from,
+      to: FIXTURE_WINDOW.to,
+      limit: 100,
+    }, query),
+    (err) => err && err.code === 'CONTEXT_MISMATCH',
+  );
+});
+
+test('loading observationState is null; unbound stays SOURCE_UNAVAILABLE', async () => {
+  const unbound = createUnboundMetricObservationView();
+  assert.equal(unbound.phase, 'unbound');
+  assert.equal(unbound.observationState, 'SOURCE_UNAVAILABLE');
+  assert.equal(unbound.pageKind, 'source-unavailable');
+
+  const pending = createPendingContextView(3);
+  assert.equal(pending.phase, 'loading');
+  assert.equal(pending.observationState, null);
+  assert.equal(pending.errorCode, null);
+
+  const deferred = createDeferred();
+  const controller = new MetricObservationController();
+  const binding = completeBinding({
+    transport: async () => {
+      await deferred.promise;
+      return jsonResponse(counter64SuccessBody());
+    },
+  });
+  controller.setBinding(binding);
+  await waitUntil(() => controller.getView().phase === 'loading', 'loading phase');
+  const loading = controller.getView();
+  assert.equal(loading.phase, 'loading');
+  assert.equal(loading.pageKind, 'loading');
+  assert.equal(loading.observationState, null);
+  assert.equal(loading.errorCode, null);
+  assert.equal(loading.observations.length, 0);
+  deferred.resolve();
+  await waitUntil(() => controller.getView().phase === 'ready', 'ready after load');
+  controller.setBinding(null);
+  assert.equal(controller.getView().phase, 'unbound');
+  assert.equal(controller.getView().observationState, 'SOURCE_UNAVAILABLE');
+  controller.dispose();
+});
+
+test('oversized returned/rows are rejected before row mapping', () => {
+  const query = bindingToQuery(completeBinding({ limit: 2 }));
+  const row = {
+    timestamp: '2026-10-21T10:30:00.000Z',
+    value: null,
+    counterValue: COUNTER64_ABOVE_SAFE_INTEGER,
+    quality: 1,
+    flags: 0,
+    sensorId: null,
+    sequenceId: null,
+    sourceProtocol: null,
+  };
+  assert.throws(
+    () => parseMetricObservationResponse(
+      counter64SuccessBody({
+        limit: 2,
+        returned: -1,
+        observations: [],
+      }),
+      query,
+    ),
+    (err) => err && err.code === 'MALFORMED_RESPONSE' && /non-negative/i.test(err.message),
+  );
+  assert.throws(
+    () => parseMetricObservationResponse(
+      counter64SuccessBody({
+        limit: 2,
+        returned: 3,
+        observations: [row, row, row],
+      }),
+      query,
+    ),
+    (err) => err && err.code === 'MALFORMED_RESPONSE' && /exceeds/i.test(err.message),
+  );
+  assert.throws(
+    () => parseMetricObservationResponse(
+      counter64SuccessBody({
+        limit: 2,
+        returned: 2,
+        observations: [row, row, row],
+      }),
+      query,
+    ),
+    (err) => err && err.code === 'MALFORMED_RESPONSE',
+  );
+  // Inconsistent returned vs length (within limit) still rejected.
+  assert.throws(
+    () => parseMetricObservationResponse(
+      counter64SuccessBody({
+        limit: 2,
+        returned: 1,
+        observations: [row, row],
+      }),
+      query,
+    ),
+    (err) => err && err.code === 'MALFORMED_RESPONSE' && /does not match/i.test(err.message),
+  );
+});
+
+test('server HTTP400 QUERY_LIMIT_EXCEEDED is classified as QUERY_LIMIT', async () => {
+  const body = {
+    code: 'QUERY_LIMIT_EXCEEDED',
+    message: 'server-private detail must not leak',
+    correlationId: 'corr-ql',
+    timestamp: '2026-10-22T00:00:00Z',
+  };
+  const mapped = await mapHttpErrorResponse(
+    jsonResponse(body, 400),
+    'corr-header',
+  );
+  assert.equal(mapped.code, 'QUERY_LIMIT');
+  assert.equal(mapped.httpStatus, 400);
+  assert.equal(mapped.message, 'Metric observation request exceeded query limits');
+  assert.equal(mapped.message.includes('server-private'), false);
+
+  // Unknown / missing code on HTTP400 remains VALIDATION (stable client message).
+  const validation = await mapHttpErrorResponse(
+    jsonResponse({ code: 'SOME_OTHER_CODE', message: 'nope' }, 400),
+    null,
+  );
+  assert.equal(validation.code, 'VALIDATION');
+  assert.equal(mapHttpStatusToError(400, null).code, 'VALIDATION');
+
+  const controller = new MetricObservationController();
+  const binding = completeBinding({
+    transport: async () => jsonResponse(body, 400),
+  });
+  controller.setBinding(binding);
+  await waitUntil(() => controller.getView().phase === 'error', 'query limit error');
+  assert.equal(controller.getView().errorCode, 'QUERY_LIMIT');
+  assert.equal(controller.getView().pageKind, 'query-limited');
+  assert.equal(
+    controller.getView().message.includes('server-private'),
+    false,
+  );
+  controller.dispose();
+});
+
+test('locally rejected query does not increment transport request count', async () => {
+  let transportCalls = 0;
+  const controller = new MetricObservationController();
+  const binding = completeBinding({
+    // 25h window exceeds 24h max — rejected client-side before transport.
+    from: '2026-10-20T10:00:00.000Z',
+    to: '2026-10-21T11:00:00.000Z',
+    transport: async () => {
+      transportCalls += 1;
+      return jsonResponse(counter64SuccessBody());
+    },
+  });
+  assert.equal(isCompleteMetricObservationBinding(binding), true);
+  assert.ok(
+    Date.parse(binding.to) - Date.parse(binding.from) > METRIC_OBSERVATION_MAX_WINDOW_MS,
+  );
+  controller.setBinding(binding);
+  await waitUntil(() => controller.getView().phase === 'error', 'local window reject');
+  assert.equal(transportCalls, 0);
+  assert.equal(controller.getTransportRequestCount(), 0);
+  assert.equal(controller.getView().errorCode, 'QUERY_LIMIT');
+  controller.dispose();
 });

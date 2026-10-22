@@ -155,6 +155,75 @@ export function isUuid(value: string): boolean {
   return UUID_RE.test(value);
 }
 
+/**
+ * Canonical UUID identity equality after shape validation.
+ * Core serializes lowercase; UI shape validation accepts mixed case.
+ * Tenant/entity only — never apply to arbitrary metricId strings.
+ */
+export function uuidIdentityEquals(a: string, b: string): boolean {
+  return isUuid(a) && isUuid(b) && a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * ISO-8601 instant with optional fractional seconds (1–9 digits) and Z / numeric
+ * offset. Fractional digits are preserved as nanoseconds — never truncated to ms
+ * before comparison (Date.parse alone would collapse sub-ms differences).
+ */
+const INSTANT_RE =
+  /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2}|[+-]\d{4})$/;
+
+export interface MetricObservationInstantParts {
+  /** Whole UTC seconds since Unix epoch (floor). */
+  epochSec: number;
+  /** Nanoseconds within the second [0, 999_999_999]. */
+  nano: number;
+}
+
+/**
+ * Parse a supported ISO-8601 instant, preserving nanosecond fraction.
+ * Returns null for malformed or unsupported forms (including >9 fractional digits).
+ */
+export function parseMetricObservationInstant(
+  iso: string,
+): MetricObservationInstantParts | null {
+  if (typeof iso !== 'string' || iso.length < 20 || iso.length > 40) {
+    return null;
+  }
+  const match = INSTANT_RE.exec(iso);
+  if (!match) {
+    return null;
+  }
+  const base = match[1];
+  const frac = match[2] ?? '';
+  let offset = match[3];
+  if (/^[+-]\d{4}$/.test(offset)) {
+    offset = `${offset.slice(0, 3)}:${offset.slice(3)}`;
+  }
+  // Parse whole-second wall time only — do not feed fractional digits to Date.
+  const ms = Date.parse(`${base}${offset}`);
+  if (!Number.isFinite(ms)) {
+    return null;
+  }
+  const nano = Number.parseInt(`${frac}${'0'.repeat(9 - frac.length)}`, 10);
+  if (!Number.isInteger(nano) || nano < 0 || nano > 999_999_999) {
+    return null;
+  }
+  return { epochSec: Math.floor(ms / 1000), nano };
+}
+
+/**
+ * Semantic instant equality: `.000Z` ≡ `Z`, equal offset forms of the same
+ * instant match, distinct nanoseconds do not. Malformed inputs are not equal.
+ */
+export function metricObservationInstantsEqual(a: string, b: string): boolean {
+  const left = parseMetricObservationInstant(a);
+  const right = parseMetricObservationInstant(b);
+  if (!left || !right) {
+    return false;
+  }
+  return left.epochSec === right.epochSec && left.nano === right.nano;
+}
+
 export function isExactCounter64Decimal(value: string): boolean {
   return COUNTER64_DECIMAL_RE.test(value);
 }
@@ -551,13 +620,37 @@ export function parseMetricObservationResponse(
       'observations must be an array',
     );
   }
-  const observations = raw.observations.map((item) => parseObservationItem(item, valueKind));
-  if (returned !== observations.length) {
+  // Bound/consistency checks BEFORE mapping rows — never silently truncate.
+  if (returned < 0) {
+    throw new MetricObservationClientError(
+      'MALFORMED_RESPONSE',
+      'returned count must be non-negative',
+    );
+  }
+  if (
+    returned > request.limit
+    || raw.observations.length > request.limit
+    || returned > METRIC_OBSERVATION_MAX_LIMIT
+    || raw.observations.length > METRIC_OBSERVATION_MAX_LIMIT
+  ) {
+    throw new MetricObservationClientError(
+      'MALFORMED_RESPONSE',
+      'observation page exceeds request or server maximum limit',
+    );
+  }
+  if (returned !== raw.observations.length) {
     throw new MetricObservationClientError(
       'MALFORMED_RESPONSE',
       'returned count does not match observations length',
     );
   }
+  if (!parseMetricObservationInstant(from) || !parseMetricObservationInstant(to)) {
+    throw new MetricObservationClientError(
+      'MALFORMED_RESPONSE',
+      'from and to must be ISO-8601 instants',
+    );
+  }
+  const observations = raw.observations.map((item) => parseObservationItem(item, valueKind));
 
   assertResponseMatchesRequest(
     {
@@ -597,13 +690,15 @@ export function assertResponseMatchesRequest(
   >,
   request: MetricObservationQuery,
 ): void {
+  // Tenant/entity: shape-valid then case-insensitive (Core lowercase canonical).
+  // metricId remains exact / case-sensitive. Instants compare semantically.
   if (
-    responseIdentity.tenantId !== request.tenantId
-    || responseIdentity.entityId !== request.entityId
+    !uuidIdentityEquals(responseIdentity.tenantId, request.tenantId)
+    || !uuidIdentityEquals(responseIdentity.entityId, request.entityId)
     || responseIdentity.metricId !== request.metricId
     || responseIdentity.valueKind !== request.valueKind
-    || responseIdentity.from !== request.from
-    || responseIdentity.to !== request.to
+    || !metricObservationInstantsEqual(responseIdentity.from, request.from)
+    || !metricObservationInstantsEqual(responseIdentity.to, request.to)
     || responseIdentity.limit !== request.limit
   ) {
     throw new MetricObservationClientError(
