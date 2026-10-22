@@ -1,5 +1,9 @@
 package com.platform.core.telemetry.read;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.JWSAlgorithm;
@@ -38,6 +42,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.security.authentication.AuthenticationServiceException;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
@@ -50,6 +56,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
 import java.security.KeyPair;
@@ -104,6 +111,7 @@ class JdbcMetricObservationSecurityIntegrationTest {
     @Autowired private MockMvc mvc;
     @Autowired private ObjectMapper mapper;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private IdentityDirectory identities;
     @Autowired private PermissionGrantDirectory grants;
     @Autowired private JwtDecoder decoder;
@@ -267,12 +275,39 @@ class JdbcMetricObservationSecurityIntegrationTest {
     }
 
     @Test
-    void grantWithoutActiveTenantMembershipCannotRead() throws Exception {
+    void inactiveMembershipWithoutActiveGrantsReceivesOpaqueDenial() throws Exception {
+        assertEquals(1, jdbc.update("""
+                UPDATE platform.permission_grant SET revoked_at=NOW()
+                WHERE subject_id=? AND tenant_id=? AND revoked_at IS NULL
+                """, NO_MEMBERSHIP, TENANT));
         denied(token(NO_MEMBERSHIP.toString()), TENANT, ENTITY, 404, "RESOURCE_NOT_FOUND");
     }
 
     @Test
-    void membershipRevocationDeniesNextRequestWithTheSameSignedToken() throws Exception {
+    void activeGrantAgainstInactiveMembershipIsDirectoryCorruption() throws Exception {
+        directoryCorruption(token(NO_MEMBERSHIP.toString()));
+    }
+
+    @Test
+    void atomicGrantAndMembershipRevocationDeniesTheSameSignedToken() throws Exception {
+        String bearer = token(GRANTED.toString());
+        allowed(bearer);
+        clearInvocations(reader, entities);
+        new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> {
+            assertEquals(1, jdbc.update("""
+                    UPDATE platform.permission_grant SET revoked_at=NOW()
+                    WHERE subject_id=? AND tenant_id=? AND revoked_at IS NULL
+                    """, GRANTED, TENANT));
+            assertEquals(1, jdbc.update("""
+                    UPDATE platform.subject_tenant_scope SET status='REVOKED'
+                    WHERE subject_id=? AND tenant_id=? AND status='ACTIVE'
+                    """, GRANTED, TENANT));
+        }); // Both authority changes are committed before the same bearer is replayed.
+        denied(bearer, TENANT, ENTITY, 404, "RESOURCE_NOT_FOUND");
+    }
+
+    @Test
+    void membershipOnlyRevocationLeavingActiveGrantIsDirectoryCorruption() throws Exception {
         String bearer = token(GRANTED.toString());
         allowed(bearer);
         clearInvocations(reader, entities);
@@ -280,7 +315,59 @@ class JdbcMetricObservationSecurityIntegrationTest {
                 UPDATE platform.subject_tenant_scope SET status='REVOKED'
                 WHERE subject_id=? AND tenant_id=?
                 """, GRANTED, TENANT));
-        denied(bearer, TENANT, ENTITY, 404, "RESOURCE_NOT_FOUND");
+        directoryCorruption(bearer);
+    }
+
+    // Filter propagation contract only: this does not prove deployed error-dispatch HTTP behavior.
+    private void directoryCorruption(String bearer) throws Exception {
+        Logger auditLogger = (Logger) LoggerFactory.getLogger(SecurityAuditEmitter.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        auditLogger.addAppender(appender);
+        SecurityContextHolder.clearContext();
+        try {
+            Exception observed = null;
+            try {
+                mvc.perform(request(TENANT, ENTITY, "100")
+                        .header("Authorization", "Bearer " + bearer)).andReturn();
+                fail("expected AuthenticationServiceException propagation from bearer filter");
+            } catch (Exception ex) {
+                observed = ex;
+            }
+            AuthenticationServiceException failure = findAuthenticationServiceException(observed);
+            assertNotNull(failure, "expected AuthenticationServiceException or servlet wrapper, got "
+                    + (observed == null ? "null" : observed.getClass().getName()));
+            assertEquals("Authorization directory failed", failure.getMessage());
+            assertNull(failure.getCause(), "directory details must not escape through a cause");
+            var authentication = SecurityContextHolder.getContext().getAuthentication();
+            assertTrue(authentication == null || !authentication.isAuthenticated(),
+                    "directory corruption must not leave a partially authenticated context");
+            String audit = appender.list.stream().map(ILoggingEvent::getFormattedMessage)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(audit.contains("reason=SECURITY_DIRECTORY_CORRUPT"));
+            assertFalse(audit.contains(bearer));
+            for (String forbidden : List.of("permission_grant", "subject_tenant_scope", "identity_mapping",
+                    "select ", "password", "stacktrace", "authenticationserviceexception")) {
+                assertFalse(audit.toLowerCase(java.util.Locale.ROOT).contains(forbidden),
+                        "audit must exclude sensitive directory/exception detail: " + forbidden);
+            }
+            assertTrue(appender.list.stream().allMatch(event -> event.getThrowableProxy() == null),
+                    "sanitized audit must not carry a throwable");
+            verifyNoInteractions(reader, entities);
+        } finally {
+            auditLogger.detachAppender(appender);
+            appender.stop();
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    private static AuthenticationServiceException findAuthenticationServiceException(Throwable thrown) {
+        Throwable cursor = thrown;
+        while (cursor != null) {
+            if (cursor instanceof AuthenticationServiceException failure) return failure;
+            cursor = cursor.getCause();
+        }
+        return null;
     }
 
     @Test
