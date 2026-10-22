@@ -11,9 +11,12 @@ import {
   COUNTER64_ABOVE_SAFE_INTEGER,
   FIXTURE_ENTITY,
   FIXTURE_ENTITY_ALT,
+  FIXTURE_ENTITY_V7,
   FIXTURE_PROVENANCE,
   FIXTURE_TENANT_A,
   FIXTURE_TENANT_B,
+  FIXTURE_TENANT_V7,
+  FIXTURE_TENANT_V7_B,
   FIXTURE_WINDOW,
   counter64SuccessBody,
   numericSuccessBody,
@@ -127,6 +130,114 @@ test('fixture tenant/entity IDs satisfy production isUuid', () => {
   assert.equal(isUuid(FIXTURE_TENANT_B), true);
   assert.equal(isUuid(FIXTURE_ENTITY), true);
   assert.equal(isUuid(FIXTURE_ENTITY_ALT), true);
+  assert.equal(isUuid(FIXTURE_TENANT_V7), true);
+  assert.equal(isUuid(FIXTURE_TENANT_V7_B), true);
+  assert.equal(isUuid(FIXTURE_ENTITY_V7), true);
+});
+
+// --- F_UUID_AND_SOURCE_BINDING_FIX_20261022: canonical UUID contract ---
+// Aligns with Core UUID.fromString / AuthorizationRouteMapper (no version 1–5
+// UI whitelist). Model/unit coverage only — not browser coverage.
+
+test('canonical v4 and v7 identities pass production isUuid', () => {
+  assert.equal(isUuid(FIXTURE_TENANT_A), true);
+  assert.equal(isUuid(FIXTURE_ENTITY), true);
+  assert.equal(isUuid(FIXTURE_TENANT_V7), true);
+  assert.equal(isUuid(FIXTURE_ENTITY_V7), true);
+  // Integrated Core example from Master (EntityMetricObservationApiTest).
+  assert.equal(isUuid('018f0e0a-0000-7000-8000-0000000000e1'), true);
+});
+
+test('malformed UUID shapes are rejected by production isUuid', () => {
+  const malformed = [
+    '',
+    '018f0e0a-0000-7000-8000-0000000000e', // short last group
+    '018f0e0a-0000-7000-8000-0000000000e1a', // long last group
+    '018f0e0a0000700080000000000000e1', // missing separators
+    '018f0e0a-0000-7000-8000-0000000000eg', // non-hex
+    '018f0e0a-0000-7000-8000-0000000000e1-extra', // trailing junk
+    'G18f0e0a-0000-7000-8000-0000000000e1', // non-hex prefix
+    '018f0e0a_0000_7000_8000_0000000000e1', // wrong separators
+    '018f0e0a-0000-7000-8000-0000000000E1 ', // trailing space
+    ' 018f0e0a-0000-7000-8000-0000000000e1', // leading space
+  ];
+  for (const value of malformed) {
+    assert.equal(isUuid(value), false, `expected reject: ${JSON.stringify(value)}`);
+  }
+});
+
+test('complete v7 tenant/entity binding is accepted by production selectors', () => {
+  const binding = completeBinding({
+    tenantId: FIXTURE_TENANT_V7,
+    entityId: FIXTURE_ENTITY_V7,
+  });
+  assert.equal(isCompleteMetricObservationBinding(binding), true);
+  const ownership = ownershipFromBinding(binding);
+  assert.ok(ownership);
+  assert.equal(ownership.tenantId, FIXTURE_TENANT_V7);
+  assert.equal(ownership.entityId, FIXTURE_ENTITY_V7);
+});
+
+test('v7 request path and matching response/context are accepted', () => {
+  const binding = completeBinding({
+    tenantId: FIXTURE_TENANT_V7,
+    entityId: FIXTURE_ENTITY_V7,
+  });
+  assert.equal(isCompleteMetricObservationBinding(binding), true);
+  const query = bindingToQuery(binding);
+  const path = buildMetricObservationRequestPath(query);
+  const url = new URL(path, 'https://platform.local');
+  assert.equal(
+    url.pathname,
+    `/api/v1/tenants/${FIXTURE_TENANT_V7}/entities/${FIXTURE_ENTITY_V7}/metric-observations`,
+  );
+  const body = counter64SuccessBody({
+    tenantId: FIXTURE_TENANT_V7,
+    entityId: FIXTURE_ENTITY_V7,
+  });
+  const parsed = parseMetricObservationResponse(body, query);
+  assert.equal(parsed.tenantId, FIXTURE_TENANT_V7);
+  assert.equal(parsed.entityId, FIXTURE_ENTITY_V7);
+  assert.equal(parsed.observations[0].counterValue, COUNTER64_ABOVE_SAFE_INTEGER);
+  assert.doesNotThrow(() => assertResponseMatchesRequest({
+    tenantId: FIXTURE_TENANT_V7,
+    entityId: FIXTURE_ENTITY_V7,
+    metricId: BASE_BINDING.metricId,
+    valueKind: 'COUNTER64',
+    from: FIXTURE_WINDOW.from,
+    to: FIXTURE_WINDOW.to,
+    limit: 100,
+  }, query));
+});
+
+test('render ownership accepts matching v7 context and rejects different-tenant v7', () => {
+  const transport = makeTransport('v7');
+  const bindingA = completeBinding({
+    tenantId: FIXTURE_TENANT_V7,
+    entityId: FIXTURE_ENTITY_V7,
+    transport,
+  });
+  const bindingB = completeBinding({
+    tenantId: FIXTURE_TENANT_V7_B,
+    entityId: FIXTURE_ENTITY_V7,
+    transport,
+  });
+  assert.equal(isCompleteMetricObservationBinding(bindingA), true);
+  assert.equal(isCompleteMetricObservationBinding(bindingB), true);
+  const stored = readyOwnedView(bindingA);
+  assert.equal(ownershipMatchesBinding(stored.ownership, bindingA), true);
+  assert.equal(selectRenderableMetricObservationView(stored, bindingA), stored);
+  assert.equal(ownershipMatchesBinding(stored.ownership, bindingB), false);
+  const rejected = selectRenderableMetricObservationView(stored, bindingB);
+  assertNoStaleObservationSurface(rejected);
+  assert.equal(rejected.phase, 'loading');
+  assert.throws(
+    () => parseMetricObservationResponse(
+      counter64SuccessBody({ tenantId: FIXTURE_TENANT_V7_B, entityId: FIXTURE_ENTITY_V7 }),
+      bindingToQuery(bindingA),
+    ),
+    /does not match the initiating request context/,
+  );
 });
 
 test('documents PR246 route, query params and server bounds', () => {

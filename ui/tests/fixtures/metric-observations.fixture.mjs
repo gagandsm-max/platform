@@ -5,8 +5,10 @@
  * use these fixtures for ownership and invalid-query regressions
  * (execution NOT_RUN under those dispatches).
  *
- * Tenant/entity IDs are RFC4122-shaped (version 1–5, variant 8/9/a/b) so they
- * pass production isUuid — do not weaken production validation for fixtures.
+ * Tenant/entity IDs use the same canonical 8-4-4-4-12 hexadecimal shape as
+ * production isUuid / Core UUID.fromString (including v4 and v7). Do not
+ * weaken production validation for fixtures or convert all IDs to v4 to hide
+ * a contract defect.
  */
 
 export const FIXTURE_PROVENANCE = Object.freeze({
@@ -16,11 +18,20 @@ export const FIXTURE_PROVENANCE = Object.freeze({
   backendContractPin: '006dfc53244b5e27f64db88d275fede518964d86',
 });
 
+/** Canonical v4-shaped fixtures (retained for existing suite coverage). */
 export const FIXTURE_TENANT_A = '11111111-1111-4111-8111-111111111111';
 export const FIXTURE_TENANT_B = '22222222-2222-4222-8222-222222222222';
 export const FIXTURE_ENTITY = '33333333-3333-4333-8333-333333333333';
 /** Alternate entity for same-tenant ownership-change cases. */
 export const FIXTURE_ENTITY_ALT = '44444444-4444-4444-8444-444444444444';
+
+/**
+ * Canonical v7 fixtures aligned to frozen PR246 / integrated Core tests
+ * (006dfc53244b5e27f64db88d275fede518964d86 EntityMetricObservationApiTest).
+ */
+export const FIXTURE_TENANT_V7 = '018f0e0a-0000-7000-8000-0000000000a1';
+export const FIXTURE_TENANT_V7_B = '018f0e0a-0000-7000-8000-0000000000b1';
+export const FIXTURE_ENTITY_V7 = '018f0e0a-0000-7000-8000-0000000000e1';
 
 /** Exact Counter64 decimal string above Number.MAX_SAFE_INTEGER (2^53-1). */
 export const COUNTER64_ABOVE_SAFE_INTEGER = '18446744073709551615';

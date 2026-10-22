@@ -140,8 +140,14 @@ export class MetricObservationClientError extends Error {
   }
 }
 
+/**
+ * Canonical textual UUID shape matching Core `UUID.fromString` / path binding:
+ * exact hexadecimal 8-4-4-4-12. No UI-only version 1–5 (or invented variant)
+ * whitelist — Integrated Core uses v7 IDs (e.g. 018f0e0a-0000-7000-8000-…).
+ * Tenant/entity path values remain selectors, never proof of authorization.
+ */
 const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const COUNTER64_DECIMAL_RE = /^[0-9]+$/;
 const DECIMAL_INSTANCE_RE = /^[1-9][0-9]*$/;
 
