@@ -16,9 +16,11 @@ import {
   ObservationReadState,
   FreshnessClass,
   isCompleteMetricObservationBinding,
+  metricObservationInvalidLimitMessage,
   observationStateToPageKind,
   ownershipFromBinding,
   ownershipMatchesBinding,
+  tryEffectiveMetricObservationLimit,
 } from './metric-observations.js';
 import type { PageStateKind } from './screen-state.js';
 
@@ -108,10 +110,39 @@ export function createPendingContextView(
 }
 
 /**
+ * Controlled QUERY_LIMIT surface for an otherwise-complete binding with an
+ * invalid explicit limit. No identity, rows, provenance, correlation or retry.
+ */
+export function createInvalidLimitView(
+  generation = 0,
+): MetricObservationPanelView {
+  return {
+    phase: 'error',
+    pageKind: 'query-limited',
+    title: 'Metric observation request failed',
+    message: metricObservationInvalidLimitMessage(),
+    observationState: null,
+    freshness: null,
+    truncated: false,
+    qualityNote: null,
+    provenance: null,
+    observations: [],
+    request: null,
+    errorCode: 'QUERY_LIMIT',
+    correlationId: null,
+    retryAvailable: false,
+    retryCount: 0,
+    generation,
+    ownership: null,
+  };
+}
+
+/**
  * Production render-time ownership gate used by EntityMetricObservationPanel.
  * Must be called before rendering observation-derived content or exposing retry.
  *
  * - Absent/incomplete binding → SOURCE_UNAVAILABLE, no stale content, no retry.
+ * - Complete binding with invalid limit → QUERY_LIMIT / query-limited (never throws).
  * - Complete binding whose stored view ownership does not match → safe empty/loading.
  * - Matching ownership → stored view is eligible for render.
  */
@@ -124,6 +155,9 @@ export function selectRenderableMetricObservationView(
       ...EMPTY_VIEW,
       generation: storedView.generation,
     };
+  }
+  if (tryEffectiveMetricObservationLimit(binding.limit) === null) {
+    return createInvalidLimitView(storedView.generation);
   }
   if (!ownershipMatchesBinding(storedView.ownership, binding)) {
     return createPendingContextView(storedView.generation);
@@ -224,6 +258,7 @@ function errorView(
     && error.code !== 'UNAUTHORIZED'
     && error.code !== 'FORBIDDEN'
     && error.code !== 'SOURCE_UNAVAILABLE'
+    && error.code !== 'QUERY_LIMIT'
     && error.code !== 'ABORTED';
   return {
     phase: 'error',
@@ -356,12 +391,45 @@ export class MetricObservationController {
   }
 
   private async load(generation: number, retryCount: number): Promise<void> {
+    // Outer guard: void setBinding/retry must never surface an unhandled rejection.
+    try {
+      await this.loadInner(generation, retryCount);
+    } catch (cause) {
+      if (!shouldAcceptGeneration(this.generation, generation)) {
+        return;
+      }
+      const error =
+        cause instanceof MetricObservationClientError
+          ? cause
+          : new MetricObservationClientError(
+            'NETWORK',
+            'Metric observation request failed',
+            { cause },
+          );
+      if (error.code === 'ABORTED') {
+        return;
+      }
+      this.emit(errorView(generation, retryCount, error, null));
+    }
+  }
+
+  private async loadInner(generation: number, retryCount: number): Promise<void> {
     const binding = this.binding;
     if (!binding) {
       return;
     }
-    const ownership = ownershipFromBinding(binding);
     this.retryCount = retryCount;
+
+    const ownership = ownershipFromBinding(binding);
+    if (!ownership) {
+      // Explicitly invalid limit: controlled QUERY_LIMIT, zero transport calls.
+      if (!shouldAcceptGeneration(this.generation, generation)) {
+        return;
+      }
+      this.emit(createInvalidLimitView(generation));
+      return;
+    }
+
     this.emit({
       ...clearRowsView(
         generation,

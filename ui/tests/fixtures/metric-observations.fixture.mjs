@@ -1,8 +1,12 @@
 /**
  * Test-only fixtures for PR246 entity metric observation UI contract.
  * NON_PRODUCTION — never use as live telemetry or demo estate data.
- * F_RENDER_BINDING_CORRECTION_20261022 continues to use these fixtures
- * for render-time ownership regression cases (execution NOT_RUN in that dispatch).
+ * F_RENDER_BINDING_CORRECTION_20261022 / F_RENDER_GUARD_EDGE_CASES_20261022
+ * use these fixtures for ownership and invalid-query regressions
+ * (execution NOT_RUN under those dispatches).
+ *
+ * Tenant/entity IDs are RFC4122-shaped (version 1–5, variant 8/9/a/b) so they
+ * pass production isUuid — do not weaken production validation for fixtures.
  */
 
 export const FIXTURE_PROVENANCE = Object.freeze({
@@ -12,9 +16,11 @@ export const FIXTURE_PROVENANCE = Object.freeze({
   backendContractPin: '006dfc53244b5e27f64db88d275fede518964d86',
 });
 
-export const FIXTURE_TENANT_A = '11111111-1111-1111-1111-111111111111';
-export const FIXTURE_TENANT_B = '22222222-2222-2222-2222-222222222222';
-export const FIXTURE_ENTITY = '33333333-3333-3333-3333-333333333333';
+export const FIXTURE_TENANT_A = '11111111-1111-4111-8111-111111111111';
+export const FIXTURE_TENANT_B = '22222222-2222-4222-8222-222222222222';
+export const FIXTURE_ENTITY = '33333333-3333-4333-8333-333333333333';
+/** Alternate entity for same-tenant ownership-change cases. */
+export const FIXTURE_ENTITY_ALT = '44444444-4444-4444-8444-444444444444';
 
 /** Exact Counter64 decimal string above Number.MAX_SAFE_INTEGER (2^53-1). */
 export const COUNTER64_ABOVE_SAFE_INTEGER = '18446744073709551615';

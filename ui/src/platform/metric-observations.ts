@@ -204,10 +204,40 @@ export function isCompleteMetricObservationBinding(
   return true;
 }
 
-/** Build ownership from a complete binding (resolves effective limit). */
+/**
+ * Non-throwing effective limit. Omitted/null → default. Explicitly invalid
+ * values return null (never clamped or substituted).
+ */
+export function tryEffectiveMetricObservationLimit(
+  limit: number | undefined | null,
+): number | null {
+  if (limit === undefined || limit === null) {
+    return METRIC_OBSERVATION_DEFAULT_LIMIT;
+  }
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > METRIC_OBSERVATION_MAX_LIMIT) {
+    return null;
+  }
+  return limit;
+}
+
+/** True when limit is omitted (default) or an integer in [1, MAX]. */
+export function isValidMetricObservationLimit(
+  limit: number | undefined | null,
+): boolean {
+  return tryEffectiveMetricObservationLimit(limit) !== null;
+}
+
+/**
+ * Build ownership from a complete binding with a valid effective limit.
+ * Returns null when the limit is explicitly invalid — never throws.
+ */
 export function ownershipFromBinding(
   binding: MetricObservationBinding,
-): MetricObservationOwnership {
+): MetricObservationOwnership | null {
+  const limit = tryEffectiveMetricObservationLimit(binding.limit);
+  if (limit === null) {
+    return null;
+  }
   return {
     tenantId: binding.tenantId,
     entityId: binding.entityId,
@@ -215,7 +245,7 @@ export function ownershipFromBinding(
     valueKind: binding.valueKind,
     from: binding.from,
     to: binding.to,
-    limit: resolveMetricObservationLimit(binding.limit),
+    limit,
     transport: binding.transport,
   };
 }
@@ -223,6 +253,7 @@ export function ownershipFromBinding(
 /**
  * True when stored ownership belongs to the CURRENT complete binding, including
  * transport identity. Used at render time before showing observation-derived UI.
+ * Never throws for invalid limits — returns false instead.
  */
 export function ownershipMatchesBinding(
   ownership: MetricObservationOwnership | null | undefined,
@@ -232,6 +263,9 @@ export function ownershipMatchesBinding(
     return false;
   }
   const expected = ownershipFromBinding(binding);
+  if (!expected) {
+    return false;
+  }
   return (
     ownership.tenantId === expected.tenantId
     && ownership.entityId === expected.entityId
@@ -245,16 +279,19 @@ export function ownershipMatchesBinding(
 }
 
 export function resolveMetricObservationLimit(limit: number | undefined): number {
-  if (limit === undefined || limit === null) {
-    return METRIC_OBSERVATION_DEFAULT_LIMIT;
-  }
-  if (!Number.isInteger(limit) || limit < 1 || limit > METRIC_OBSERVATION_MAX_LIMIT) {
+  const effective = tryEffectiveMetricObservationLimit(limit);
+  if (effective === null) {
     throw new MetricObservationClientError(
       'QUERY_LIMIT',
       `limit must be between 1 and ${METRIC_OBSERVATION_MAX_LIMIT}`,
     );
   }
-  return limit;
+  return effective;
+}
+
+/** Stable message for local QUERY_LIMIT (invalid explicit limit). */
+export function metricObservationInvalidLimitMessage(): string {
+  return `limit must be between 1 and ${METRIC_OBSERVATION_MAX_LIMIT}`;
 }
 
 export function assertMetricObservationWindow(fromIso: string, toIso: string): void {
