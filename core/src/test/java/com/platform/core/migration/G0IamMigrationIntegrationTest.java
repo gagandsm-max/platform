@@ -260,6 +260,201 @@ class G0IamMigrationIntegrationTest {
         assertNull(jdbc.queryForObject("SELECT to_regclass('platform.iam_failure_probe')", String.class));
     }
 
+    /**
+     * Real-catalogue V016 failure: does not substitute migration SQL or mock the runner.
+     * <p>Failure mechanism derived from shipped V016: after the IAM {@code CREATE TABLE}/
+     * {@code CREATE INDEX} statements, V016 issues
+     * {@code CREATE OR REPLACE FUNCTION platform.prevent_identity_provider_trust_retarget()}.
+     * A test-owned TABLE of that exact name is an incompatible precondition; PostgreSQL rejects
+     * creating a function when the relation name is already occupied. Earlier V016 DDL is
+     * attempted inside the migration transaction and must roll back; the pre-existing blocker
+     * remains because it was committed outside that transaction.
+     */
+    @Test
+    void realV016CatalogueFailsOnTestOwnedFunctionRelationCollision_thenRecoversAfterBlockerRemoval() {
+        JdbcTemplate jdbc = pg.jdbc();
+
+        pg.runner(catalogThroughVersion("V015")).applyPendingMigrations();
+        assertEquals(15, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V015'", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
+        assertEquals(0, countNamedPlatformTables(jdbc, IAM_TABLES));
+
+        UUID tenantA = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e1");
+        UUID publisherOwner = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e2");
+        String sensorId = "sensor-real-v016-failure";
+        String pendingChecksum = "ddeeff00112233445566778899aabbccddeeff00112233445566778899aabbcc";
+        String streamId = "stream-dddddddddddddddddddddddddddddddd";
+        String lastChecksum = "real-v016-failure-acked-checksum";
+        String pendingBatchId = "pending-batch-real-v016-failure";
+
+        jdbc.update("""
+                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                VALUES (?::uuid, 'Real V016 Failure Tenant', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
+                """, tenantA);
+        jdbc.update("""
+                INSERT INTO platform.sensor (
+                    sensor_id, tenant_id, site_id, role, status, allow_all_tenant_entities,
+                    created_at, updated_at)
+                VALUES (?, ?::uuid, NULL, 'NETWORK', 'ACTIVE', FALSE, NOW(), NOW())
+                """, sensorId, tenantA);
+        jdbc.update("""
+                INSERT INTO platform.sensor_telemetry_watermark (
+                    tenant_id, sensor_id, acked_through_sequence, last_first_sequence, last_last_sequence,
+                    last_checksum, last_batch_id, updated_at, stream_id,
+                    pending_first_sequence, pending_last_sequence, pending_checksum, pending_batch_id,
+                    pending_reserved_at, pending_publisher_owner, pending_publisher_epoch,
+                    pending_publisher_claimed_at, pending_publisher_lease_until,
+                    pending_authorization_digest, pending_authorization_version)
+                VALUES (?::uuid, ?, 9, 1, 9, ?, 'acked-batch-real-v016',
+                        '2026-10-22 08:00:00+00'::timestamptz, ?,
+                        10, 14, ?, ?,
+                        '2026-10-22 08:01:00+00'::timestamptz, ?::uuid, 4,
+                        '2026-10-22 08:01:00+00'::timestamptz, '2026-10-22 08:21:00+00'::timestamptz,
+                        NULL, NULL)
+                """, tenantA, sensorId, lastChecksum, streamId, pendingChecksum, pendingBatchId, publisherOwner);
+
+        Map<String, Object> watermarkBefore = jdbc.queryForMap("""
+                SELECT * FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, sensorId);
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
+
+        // Test-owned blocker only: occupies the exact relation name V016 later needs for its function.
+        jdbc.execute("""
+                CREATE TABLE platform.prevent_identity_provider_trust_retarget (
+                    test_owned_blocker BOOLEAN PRIMARY KEY,
+                    blocker_marker TEXT NOT NULL
+                )
+                """);
+        jdbc.update("""
+                INSERT INTO platform.prevent_identity_provider_trust_retarget (test_owned_blocker, blocker_marker)
+                VALUES (TRUE, 'D_REAL_V016_FAILURE_COVERAGE_20261022')
+                """);
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.prevent_identity_provider_trust_retarget
+                 WHERE blocker_marker = 'D_REAL_V016_FAILURE_COVERAGE_20261022'
+                """, Integer.class));
+
+        // Real combined catalogue / unchanged V016 resource — no SQL substitution, no runner mock.
+        MigrationException failure = assertThrows(MigrationException.class, pg::migrate);
+        assertEquals("MIGRATION_SQL_FAILED", failure.getCode());
+
+        assertEquals(15, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history", Integer.class),
+                "Failed real V016 must leave fifteen truthful history rows");
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class),
+                "Failed real V016 must not record successful V016 history");
+        assertEquals(0, countNamedPlatformTables(jdbc, IAM_TABLES),
+                "IAM tables created by the failed V016 attempt must roll back");
+        assertEquals(0, countNamedConstraints(jdbc, IAM_CONSTRAINTS));
+        // Distinguish pre-existing blocker (remains as a table) from rolled-back V016 objects (absent).
+        assertEquals("r", jdbc.queryForObject("""
+                SELECT c.relkind::text
+                  FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                 WHERE n.nspname = 'platform'
+                   AND c.relname = 'prevent_identity_provider_trust_retarget'
+                """, String.class),
+                "Test-owned blocker table must remain after migration rollback");
+        assertEquals(0, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM pg_proc p
+                  JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'platform'
+                   AND p.proname = 'prevent_identity_provider_trust_retarget'
+                """, Integer.class),
+                "Failed V016 must not leave the trust-retarget function installed");
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.prevent_identity_provider_trust_retarget
+                 WHERE blocker_marker = 'D_REAL_V016_FAILURE_COVERAGE_20261022'
+                """, Integer.class));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.tables
+                 WHERE table_schema='platform' AND table_name='sensor_poll_grant'
+                """, Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
+
+        Map<String, Object> watermarkAfterFailure = jdbc.queryForMap("""
+                SELECT * FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, sensorId);
+        assertV015WatermarkConserved(watermarkBefore, watermarkAfterFailure);
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.tenant WHERE tenant_id = ?::uuid", Integer.class, tenantA));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor WHERE sensor_id = ?", Integer.class, sensorId));
+
+        Boolean lockAcquired = jdbc.queryForObject(
+                "SELECT pg_try_advisory_lock(1346982994, 1296650836)", Boolean.class);
+        assertTrue(Boolean.TRUE.equals(lockAcquired), "Advisory lock must be released after real V016 failure");
+        jdbc.execute("SELECT pg_advisory_unlock(1346982994, 1296650836)");
+
+        // Repair ONLY the test-owned blocker, then apply the actual combined catalogue.
+        jdbc.execute("DROP TABLE platform.prevent_identity_provider_trust_retarget");
+        assertNull(jdbc.queryForObject(
+                "SELECT to_regclass('platform.prevent_identity_provider_trust_retarget')", String.class));
+
+        pg.migrate();
+        assertEquals(16, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
+        assertEquals(36, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
+        assertEquals(6, countNamedPlatformTables(jdbc, IAM_TABLES));
+        assertEquals(12, countNamedConstraints(jdbc, IAM_CONSTRAINTS));
+        assertNull(jdbc.queryForObject(
+                "SELECT to_regclass('platform.prevent_identity_provider_trust_retarget')", String.class),
+                "Successful V016 must not leave a table occupying the function name");
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM pg_proc p
+                  JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'platform'
+                   AND p.proname = 'prevent_identity_provider_trust_retarget'
+                """, Integer.class),
+                "Successful V016 must install prevent_identity_provider_trust_retarget()");
+
+        Map<String, Object> watermarkAfterSuccess = jdbc.queryForMap("""
+                SELECT * FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, sensorId);
+        assertV015WatermarkConserved(watermarkBefore, watermarkAfterSuccess);
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.permission_grant", Integer.class));
+
+        pg.migrate();
+        assertEquals(16, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history", Integer.class),
+                "Successful repeat must remain idempotent at sixteen history rows");
+        assertEquals(36, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
+    }
+
+    private static void assertV015WatermarkConserved(Map<String, Object> before, Map<String, Object> after) {
+        assertEquals(before.get("acked_through_sequence"), after.get("acked_through_sequence"));
+        assertEquals(before.get("last_first_sequence"), after.get("last_first_sequence"));
+        assertEquals(before.get("last_last_sequence"), after.get("last_last_sequence"));
+        assertEquals(before.get("last_checksum"), after.get("last_checksum"));
+        assertEquals(before.get("last_batch_id"), after.get("last_batch_id"));
+        assertEquals(before.get("stream_id"), after.get("stream_id"));
+        assertEquals(before.get("pending_first_sequence"), after.get("pending_first_sequence"));
+        assertEquals(before.get("pending_last_sequence"), after.get("pending_last_sequence"));
+        assertEquals(before.get("pending_checksum"), after.get("pending_checksum"));
+        assertEquals(before.get("pending_batch_id"), after.get("pending_batch_id"));
+        assertEquals(before.get("pending_publisher_owner"), after.get("pending_publisher_owner"));
+        assertEquals(before.get("pending_publisher_epoch"), after.get("pending_publisher_epoch"));
+        assertEquals(before.get("pending_authorization_digest"), after.get("pending_authorization_digest"));
+        assertEquals(before.get("pending_authorization_version"), after.get("pending_authorization_version"));
+        assertNull(after.get("pending_authorization_digest"));
+        assertNull(after.get("pending_authorization_version"));
+    }
+
     private static int countNamedPlatformTables(JdbcTemplate jdbc, String[] names) {
         StringBuilder inList = new StringBuilder();
         for (int i = 0; i < names.length; i++) {
