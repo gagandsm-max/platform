@@ -1258,9 +1258,12 @@ class MigrationIntegrationTest {
                 SELECT address FROM platform.entity_management_endpoint WHERE endpoint_id = ?::uuid
                 """, String.class, endpointA1));
 
+        // Full catalogue migrate advances the V015 checkpoint through IAM V016.
         pg.migrate();
-        assertEquals(15, jdbc.queryForObject(
+        assertEquals(16, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
         assertEquals(2, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
     }
