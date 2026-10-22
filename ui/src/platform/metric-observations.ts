@@ -5,8 +5,14 @@
 
 export const METRIC_OBSERVATION_DEFAULT_LIMIT = 100;
 export const METRIC_OBSERVATION_MAX_LIMIT = 500;
-/** Matches Core {@code MetricObservationQuery.MAX_WINDOW} = 24 hours. */
+/** Matches Core {@code MetricObservationQuery.MAX_WINDOW} = 24 hours (ms form; display/compat). */
 export const METRIC_OBSERVATION_MAX_WINDOW_MS = 24 * 60 * 60 * 1000;
+/**
+ * Exact 24h as nanoseconds — authoritative window bound for
+ * {@link assertMetricObservationWindow} (safe integer: 8.64e13 is below 2^53-1).
+ * Aligns with Core {@code Instant}/{@code Duration} nanosecond precision.
+ */
+export const METRIC_OBSERVATION_MAX_WINDOW_NS = 24 * 60 * 60 * 1_000_000_000;
 
 export const METRIC_VALUE_KINDS = ['NUMERIC', 'COUNTER64'] as const;
 export type MetricValueKind = (typeof METRIC_VALUE_KINDS)[number];
@@ -224,6 +230,31 @@ export function metricObservationInstantsEqual(a: string, b: string): boolean {
   return left.epochSec === right.epochSec && left.nano === right.nano;
 }
 
+/** Compare parsed instants: -1 if a before b, 0 if equal, 1 if a after b. */
+export function compareMetricObservationInstants(
+  a: MetricObservationInstantParts,
+  b: MetricObservationInstantParts,
+): number {
+  if (a.epochSec !== b.epochSec) {
+    return a.epochSec < b.epochSec ? -1 : 1;
+  }
+  if (a.nano !== b.nano) {
+    return a.nano < b.nano ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Duration in nanoseconds from {@code from} to {@code to}.
+ * Caller must ensure {@code to} is strictly after {@code from}.
+ */
+export function metricObservationWindowDurationNs(
+  from: MetricObservationInstantParts,
+  to: MetricObservationInstantParts,
+): number {
+  return (to.epochSec - from.epochSec) * 1_000_000_000 + (to.nano - from.nano);
+}
+
 export function isExactCounter64Decimal(value: string): boolean {
   return COUNTER64_DECIMAL_RE.test(value);
 }
@@ -378,22 +409,26 @@ export function metricObservationInvalidLimitMessage(): string {
   return `limit must be between 1 and ${METRIC_OBSERVATION_MAX_LIMIT}`;
 }
 
+/**
+ * Validate observation window using nanosecond Instant pairs (not Date.parse ms).
+ * Core MetricObservationQuery compares java.time.Instant / Duration at nano precision.
+ */
 export function assertMetricObservationWindow(fromIso: string, toIso: string): void {
-  const fromMs = Date.parse(fromIso);
-  const toMs = Date.parse(toIso);
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
+  const from = parseMetricObservationInstant(fromIso);
+  const to = parseMetricObservationInstant(toIso);
+  if (!from || !to) {
     throw new MetricObservationClientError(
       'VALIDATION',
       'from and to must be ISO-8601 instants',
     );
   }
-  if (!(toMs > fromMs)) {
+  if (compareMetricObservationInstants(to, from) <= 0) {
     throw new MetricObservationClientError(
       'VALIDATION',
       'to must be strictly after from',
     );
   }
-  if (toMs - fromMs > METRIC_OBSERVATION_MAX_WINDOW_MS) {
+  if (metricObservationWindowDurationNs(from, to) > METRIC_OBSERVATION_MAX_WINDOW_NS) {
     throw new MetricObservationClientError(
       'QUERY_LIMIT',
       'time window must be at most 24 hours',

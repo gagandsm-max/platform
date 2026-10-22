@@ -25,9 +25,12 @@ import {
   METRIC_OBSERVATION_DEFAULT_LIMIT,
   METRIC_OBSERVATION_MAX_LIMIT,
   METRIC_OBSERVATION_MAX_WINDOW_MS,
+  METRIC_OBSERVATION_MAX_WINDOW_NS,
+  assertMetricObservationWindow,
   assertResponseMatchesRequest,
   bindingToQuery,
   buildMetricObservationRequestPath,
+  compareMetricObservationInstants,
   escapeForText,
   isAllowlistedMetricSelector,
   isCompleteMetricObservationBinding,
@@ -36,6 +39,7 @@ import {
   isValidMetricObservationLimit,
   metricObservationInstantsEqual,
   metricObservationInvalidLimitMessage,
+  metricObservationWindowDurationNs,
   observationStateToPageKind,
   ownershipFromBinding,
   ownershipMatchesBinding,
@@ -251,6 +255,8 @@ test('documents PR246 route, query params and server bounds', () => {
   assert.equal(METRIC_OBSERVATION_DEFAULT_LIMIT, 100);
   assert.equal(METRIC_OBSERVATION_MAX_LIMIT, 500);
   assert.equal(METRIC_OBSERVATION_MAX_WINDOW_MS, 24 * 60 * 60 * 1000);
+  assert.equal(METRIC_OBSERVATION_MAX_WINDOW_NS, 24 * 60 * 60 * 1_000_000_000);
+  assert.ok(Number.isSafeInteger(METRIC_OBSERVATION_MAX_WINDOW_NS));
   const binding = completeBinding();
   assert.equal(isCompleteMetricObservationBinding(binding), true);
   const query = bindingToQuery(binding);
@@ -1169,11 +1175,142 @@ test('locally rejected query does not increment transport request count', async 
     },
   });
   assert.equal(isCompleteMetricObservationBinding(binding), true);
+  const fromParts = parseMetricObservationInstant(binding.from);
+  const toParts = parseMetricObservationInstant(binding.to);
+  assert.ok(fromParts && toParts);
   assert.ok(
-    Date.parse(binding.to) - Date.parse(binding.from) > METRIC_OBSERVATION_MAX_WINDOW_MS,
+    metricObservationWindowDurationNs(fromParts, toParts) > METRIC_OBSERVATION_MAX_WINDOW_NS,
   );
   controller.setBinding(binding);
   await waitUntil(() => controller.getView().phase === 'error', 'local window reject');
+  assert.equal(transportCalls, 0);
+  assert.equal(controller.getTransportRequestCount(), 0);
+  assert.equal(controller.getView().errorCode, 'QUERY_LIMIT');
+  controller.dispose();
+});
+
+// --- F_NANO_WINDOW_CONTRACT_PATCH_20261022 ---
+
+test('same-second window with 1ns difference passes', () => {
+  assert.doesNotThrow(() => assertMetricObservationWindow(
+    '2026-10-21T10:00:00.000000000Z',
+    '2026-10-21T10:00:00.000000001Z',
+  ));
+  const from = parseMetricObservationInstant('2026-10-21T10:00:00.000000000Z');
+  const to = parseMetricObservationInstant('2026-10-21T10:00:00.000000001Z');
+  assert.ok(from && to);
+  assert.equal(from.epochSec, to.epochSec);
+  assert.equal(metricObservationWindowDurationNs(from, to), 1);
+  assert.equal(compareMetricObservationInstants(to, from), 1);
+});
+
+test('same-millisecond window with positive nanosecond difference passes', () => {
+  assert.doesNotThrow(() => assertMetricObservationWindow(
+    '2026-10-21T10:00:00.123000000Z',
+    '2026-10-21T10:00:00.123000001Z',
+  ));
+  // Date.parse would collapse these to equal ms; nano authority must still accept.
+  assert.equal(
+    Date.parse('2026-10-21T10:00:00.123000000Z'),
+    Date.parse('2026-10-21T10:00:00.123000001Z'),
+  );
+});
+
+test('exact 24h window passes; 24h+1ns fails QUERY_LIMIT', () => {
+  assert.doesNotThrow(() => assertMetricObservationWindow(
+    '2026-10-21T10:00:00.000000000Z',
+    '2026-10-22T10:00:00.000000000Z',
+  ));
+  const from = parseMetricObservationInstant('2026-10-21T10:00:00.000000000Z');
+  const toExact = parseMetricObservationInstant('2026-10-22T10:00:00.000000000Z');
+  assert.ok(from && toExact);
+  assert.equal(
+    metricObservationWindowDurationNs(from, toExact),
+    METRIC_OBSERVATION_MAX_WINDOW_NS,
+  );
+  assert.throws(
+    () => assertMetricObservationWindow(
+      '2026-10-21T10:00:00.000000000Z',
+      '2026-10-22T10:00:00.000000001Z',
+    ),
+    (err) => err && err.code === 'QUERY_LIMIT',
+  );
+});
+
+test('equal and reversed windows fail VALIDATION', () => {
+  assert.throws(
+    () => assertMetricObservationWindow(
+      '2026-10-21T10:00:00.000000000Z',
+      '2026-10-21T10:00:00.000000000Z',
+    ),
+    (err) => err && err.code === 'VALIDATION',
+  );
+  assert.throws(
+    () => assertMetricObservationWindow(
+      '2026-10-21T11:00:00.000000000Z',
+      '2026-10-21T10:00:00.000000000Z',
+    ),
+    (err) => err && err.code === 'VALIDATION',
+  );
+  // Same second, reversed nanos.
+  assert.throws(
+    () => assertMetricObservationWindow(
+      '2026-10-21T10:00:00.000000002Z',
+      '2026-10-21T10:00:00.000000001Z',
+    ),
+    (err) => err && err.code === 'VALIDATION',
+  );
+});
+
+test('equivalent Z and offset instants share nano window behavior', () => {
+  assert.doesNotThrow(() => assertMetricObservationWindow(
+    '2026-10-21T10:00:00.000000000Z',
+    '2026-10-21T15:30:00.000000001+05:30',
+  ));
+  assert.doesNotThrow(() => assertMetricObservationWindow(
+    '2026-10-21T10:00:00Z',
+    '2026-10-22T15:30:00+05:30',
+  ));
+  assert.throws(
+    () => assertMetricObservationWindow(
+      '2026-10-21T10:00:00.000000000Z',
+      '2026-10-22T15:30:00.000000001+05:30',
+    ),
+    (err) => err && err.code === 'QUERY_LIMIT',
+  );
+});
+
+test('invalid ISO window bounds fail VALIDATION safely', () => {
+  assert.throws(
+    () => assertMetricObservationWindow('not-an-instant', '2026-10-21T11:00:00Z'),
+    (err) => err && err.code === 'VALIDATION',
+  );
+  assert.throws(
+    () => assertMetricObservationWindow('2026-10-21T10:00:00Z', '2026-10-21 11:00:00Z'),
+    (err) => err && err.code === 'VALIDATION',
+  );
+  assert.throws(
+    () => assertMetricObservationWindow(
+      '2026-10-21T10:00:00.1234567890Z',
+      '2026-10-21T11:00:00Z',
+    ),
+    (err) => err && err.code === 'VALIDATION',
+  );
+});
+
+test('24h+1ns local reject creates zero transport requests', async () => {
+  let transportCalls = 0;
+  const controller = new MetricObservationController();
+  const binding = completeBinding({
+    from: '2026-10-21T10:00:00.000000000Z',
+    to: '2026-10-22T10:00:00.000000001Z',
+    transport: async () => {
+      transportCalls += 1;
+      return jsonResponse(counter64SuccessBody());
+    },
+  });
+  controller.setBinding(binding);
+  await waitUntil(() => controller.getView().phase === 'error', '24h+1ns reject');
   assert.equal(transportCalls, 0);
   assert.equal(controller.getTransportRequestCount(), 0);
   assert.equal(controller.getView().errorCode, 'QUERY_LIMIT');
