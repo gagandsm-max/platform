@@ -168,6 +168,21 @@ export interface MetricObservationBinding {
   transport: AuthenticatedMetricTransport;
 }
 
+/**
+ * Explicit ownership of a panel view / controller result. Includes the injected
+ * transport function identity so a replacement transport cannot reuse prior data.
+ */
+export interface MetricObservationOwnership {
+  tenantId: string;
+  entityId: string;
+  metricId: string;
+  valueKind: MetricValueKind;
+  from: string;
+  to: string;
+  limit: number;
+  transport: AuthenticatedMetricTransport;
+}
+
 export function isCompleteMetricObservationBinding(
   binding: MetricObservationBinding | null | undefined,
 ): binding is MetricObservationBinding {
@@ -187,6 +202,46 @@ export function isCompleteMetricObservationBinding(
     return false;
   }
   return true;
+}
+
+/** Build ownership from a complete binding (resolves effective limit). */
+export function ownershipFromBinding(
+  binding: MetricObservationBinding,
+): MetricObservationOwnership {
+  return {
+    tenantId: binding.tenantId,
+    entityId: binding.entityId,
+    metricId: binding.metricId,
+    valueKind: binding.valueKind,
+    from: binding.from,
+    to: binding.to,
+    limit: resolveMetricObservationLimit(binding.limit),
+    transport: binding.transport,
+  };
+}
+
+/**
+ * True when stored ownership belongs to the CURRENT complete binding, including
+ * transport identity. Used at render time before showing observation-derived UI.
+ */
+export function ownershipMatchesBinding(
+  ownership: MetricObservationOwnership | null | undefined,
+  binding: MetricObservationBinding | null | undefined,
+): boolean {
+  if (!ownership || !isCompleteMetricObservationBinding(binding)) {
+    return false;
+  }
+  const expected = ownershipFromBinding(binding);
+  return (
+    ownership.tenantId === expected.tenantId
+    && ownership.entityId === expected.entityId
+    && ownership.metricId === expected.metricId
+    && ownership.valueKind === expected.valueKind
+    && ownership.from === expected.from
+    && ownership.to === expected.to
+    && ownership.limit === expected.limit
+    && ownership.transport === expected.transport
+  );
 }
 
 export function resolveMetricObservationLimit(limit: number | undefined): number {

@@ -8,6 +8,7 @@ import {
   MetricObservationController,
   MetricObservationPanelView,
   createUnboundMetricObservationView,
+  selectRenderableMetricObservationView,
 } from '../../platform/metric-observation-state';
 
 export interface EntityMetricObservationPanelProps {
@@ -64,18 +65,22 @@ export const EntityMetricObservationPanel: React.FC<EntityMetricObservationPanel
     controller.setBinding(binding);
   }, [controller, binding]);
 
+  // Render-time ownership gate: reject stored React state that belongs to a
+  // previous binding/transport before effects clear the controller.
+  const displayView = selectRenderableMetricObservationView(view, binding);
   const bound = isCompleteMetricObservationBinding(binding);
-  const showTable = view.phase === 'ready' && view.observations.length > 0;
+  const showTable = displayView.phase === 'ready' && displayView.observations.length > 0;
+  const retryEligible = displayView.retryAvailable;
 
   return (
     <section
       className="metric-observation-panel"
       aria-labelledby="metric-observation-heading"
-      data-phase={view.phase}
-      data-observation-state={view.observationState ?? 'none'}
-      data-freshness={view.freshness ?? 'none'}
+      data-phase={displayView.phase}
+      data-observation-state={displayView.observationState ?? 'none'}
+      data-freshness={displayView.freshness ?? 'none'}
       data-bound={bound ? 'true' : 'false'}
-      data-truncated={view.truncated ? 'true' : 'false'}
+      data-truncated={displayView.truncated ? 'true' : 'false'}
     >
       <header className="metric-observation-panel__header">
         <h2 id="metric-observation-heading">{heading}</h2>
@@ -85,70 +90,70 @@ export const EntityMetricObservationPanel: React.FC<EntityMetricObservationPanel
         </p>
       </header>
 
-      {view.request ? (
+      {displayView.request ? (
         <dl className="metric-observation-panel__identity">
           <div>
             <dt>Tenant</dt>
-            <dd><code>{view.request.tenantId}</code></dd>
+            <dd><code>{displayView.request.tenantId}</code></dd>
           </div>
           <div>
             <dt>Entity</dt>
-            <dd><code>{view.request.entityId}</code></dd>
+            <dd><code>{displayView.request.entityId}</code></dd>
           </div>
           <div>
             <dt>Metric</dt>
-            <dd><code>{view.request.metricId}</code></dd>
+            <dd><code>{displayView.request.metricId}</code></dd>
           </div>
           <div>
             <dt>Value kind</dt>
-            <dd>{view.request.valueKind}</dd>
+            <dd>{displayView.request.valueKind}</dd>
           </div>
           <div>
             <dt>Window</dt>
             <dd>
-              <time dateTime={view.request.from}>{view.request.from}</time>
+              <time dateTime={displayView.request.from}>{displayView.request.from}</time>
               {' → '}
-              <time dateTime={view.request.to}>{view.request.to}</time>
+              <time dateTime={displayView.request.to}>{displayView.request.to}</time>
               {' (to exclusive)'}
             </dd>
           </div>
           <div>
             <dt>Limit</dt>
-            <dd>{view.request.limit}</dd>
+            <dd>{displayView.request.limit}</dd>
           </div>
         </dl>
       ) : null}
 
       <div className="metric-observation-panel__state">
         <PageState
-          kind={view.pageKind}
-          title={view.title}
-          message={view.message}
+          kind={displayView.pageKind}
+          title={displayView.title}
+          message={displayView.message}
           context={
-            view.freshness
-              ? `Freshness: ${view.freshness}`
-                + (view.observationState ? ` · State: ${view.observationState}` : '')
-                + (view.truncated ? ' · Truncated' : '')
-              : view.observationState
-                ? `State: ${view.observationState}`
+            displayView.freshness
+              ? `Freshness: ${displayView.freshness}`
+                + (displayView.observationState ? ` · State: ${displayView.observationState}` : '')
+                + (displayView.truncated ? ' · Truncated' : '')
+              : displayView.observationState
+                ? `State: ${displayView.observationState}`
                 : undefined
           }
           evidence={[
-            ...(view.provenance
+            ...(displayView.provenance
               ? [
-                `Provenance class: ${view.provenance.provenanceClass}`,
-                `Source view: ${view.provenance.sourceView}`,
-                `Ordering: ${view.provenance.ordering}`,
+                `Provenance class: ${displayView.provenance.provenanceClass}`,
+                `Source view: ${displayView.provenance.sourceView}`,
+                `Ordering: ${displayView.provenance.ordering}`,
               ]
               : []),
-            ...(view.qualityNote ? [`Quality note: ${view.qualityNote}`] : []),
+            ...(displayView.qualityNote ? [`Quality note: ${displayView.qualityNote}`] : []),
             'FOUNDATION_ACCESS is presentation-only and never authorizes metric reads.',
             'NO_DATA / STALE / MONITORING_DEGRADED / UNKNOWN / SOURCE_UNAVAILABLE must not be collapsed to DEVICE_DOWN.',
           ]}
-          correlationId={view.correlationId ?? undefined}
-          errorId={view.errorCode ?? undefined}
-          actionLabel={view.retryAvailable ? 'Retry' : undefined}
-          onAction={view.retryAvailable ? () => controller.retry() : undefined}
+          correlationId={displayView.correlationId ?? undefined}
+          errorId={displayView.errorCode ?? undefined}
+          actionLabel={retryEligible ? 'Retry' : undefined}
+          onAction={retryEligible ? () => controller.retry() : undefined}
         />
       </div>
 
@@ -167,7 +172,7 @@ export const EntityMetricObservationPanel: React.FC<EntityMetricObservationPanel
               </tr>
             </thead>
             <tbody>
-              {view.observations.map((row) => (
+              {displayView.observations.map((row) => (
                 <tr key={`${row.timestamp}:${row.sequenceId ?? ''}:${row.counterValue ?? row.value}`}>
                   <td><time dateTime={row.timestamp}>{row.timestamp}</time></td>
                   <td>

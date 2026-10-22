@@ -1,6 +1,8 @@
 /**
  * Test-only fixtures for PR246 entity metric observation UI contract.
  * NON_PRODUCTION — never use as live telemetry or demo estate data.
+ * F_RENDER_BINDING_CORRECTION_20261022 continues to use these fixtures
+ * for render-time ownership regression cases (execution NOT_RUN in that dispatch).
  */
 
 export const FIXTURE_PROVENANCE = Object.freeze({

@@ -1,6 +1,9 @@
 /**
- * SOURCE_ONLY / NOT_RUN under F_C16_METRIC_OBSERVATION_UI_20261021.
- * Model/unit contract tests — not browser or component coverage.
+ * SOURCE_ONLY / NOT_RUN under F_C16_METRIC_OBSERVATION_UI_20261021
+ * and F_RENDER_BINDING_CORRECTION_20261022.
+ * Model/unit contract tests — not browser or React component coverage.
+ * Render-binding cases exercise selectRenderableMetricObservationView
+ * (the production ownership gate used by EntityMetricObservationPanel).
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,6 +29,8 @@ import {
   isCompleteMetricObservationBinding,
   isExactCounter64Decimal,
   observationStateToPageKind,
+  ownershipFromBinding,
+  ownershipMatchesBinding,
   parseExactFlags,
   parseMetricObservationResponse,
   parseObservationItem,
@@ -33,8 +38,22 @@ import {
 import { fetchMetricObservations } from '../.test-dist/platform/metric-observation-client.js';
 import {
   MetricObservationController,
+  createPendingContextView,
+  createUnboundMetricObservationView,
+  selectRenderableMetricObservationView,
   shouldAcceptGeneration,
 } from '../.test-dist/platform/metric-observation-state.js';
+
+/** Assert a selected view exposes none of the stale observation-derived surfaces. */
+function assertNoStaleObservationSurface(selected) {
+  assert.equal(selected.request, null);
+  assert.equal(selected.observations.length, 0);
+  assert.equal(selected.provenance, null);
+  assert.equal(selected.qualityNote, null);
+  assert.equal(selected.correlationId, null);
+  assert.equal(selected.retryAvailable, false);
+  assert.notEqual(selected.phase, 'ready');
+}
 
 const BASE_BINDING = {
   tenantId: FIXTURE_TENANT_A,
@@ -301,4 +320,212 @@ test('escapeForText supports XSS-safe text rendering in the harness', () => {
     escapeForText(`<script>alert("x")</script>&'`),
     '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;&#39;',
   );
+});
+
+// --- F_RENDER_BINDING_CORRECTION_20261022: render-time ownership gate ---
+// These cases exercise selectRenderableMetricObservationView — the same
+// production selector EntityMetricObservationPanel uses before paint.
+// They are NOT React/browser component execution coverage.
+
+function makeTransport(label) {
+  const fn = async () => new Response('{}');
+  fn.__label = label;
+  return fn;
+}
+
+function readyOwnedView(binding, overrides = {}) {
+  const ownership = ownershipFromBinding(binding);
+  const request = bindingToQuery(binding);
+  return {
+    phase: 'ready',
+    pageKind: 'normal',
+    title: 'Entity metric observations · OK',
+    message: 'ok',
+    observationState: 'OK',
+    freshness: 'HISTORICAL',
+    truncated: false,
+    qualityNote: 'Historical observation window returned',
+    provenance: {
+      sourceView: 'platform.metric_counter',
+      ordering: 'event_time ASC',
+      provenanceClass: 'clickhouse-canonical-final-view',
+    },
+    observations: [
+      {
+        timestamp: '2026-10-21T10:30:00.000Z',
+        value: null,
+        counterValue: COUNTER64_ABOVE_SAFE_INTEGER,
+        quality: 1,
+        flags: 0,
+        sensorId: 'sensor-fixture-1',
+        sequenceId: 'seq-1',
+        sourceProtocol: 'SNMP',
+      },
+    ],
+    request,
+    errorCode: null,
+    correlationId: null,
+    retryAvailable: false,
+    retryCount: 0,
+    generation: 1,
+    ownership,
+    ...overrides,
+  };
+}
+
+test('render gate: ready tenant-A view + tenant-B binding rejects A surfaces before effects', () => {
+  const transportA = makeTransport('A');
+  const transportB = makeTransport('B');
+  const bindingA = { ...BASE_BINDING, transport: transportA };
+  const bindingB = { ...BASE_BINDING, tenantId: FIXTURE_TENANT_B, transport: transportB };
+  const storedA = readyOwnedView(bindingA);
+  // Simulate React state still holding A while props already switched to B
+  // (before useEffect runs setBinding).
+  const selected = selectRenderableMetricObservationView(storedA, bindingB);
+  assertNoStaleObservationSurface(selected);
+  assert.equal(selected.phase, 'loading');
+  assert.equal(selected.pageKind, 'loading');
+  assert.notEqual(selected.request?.tenantId, FIXTURE_TENANT_A);
+  assert.equal(ownershipMatchesBinding(storedA.ownership, bindingB), false);
+});
+
+test('render gate: ready view + binding removed/incomplete → SOURCE_UNAVAILABLE, no request surface', () => {
+  const transport = makeTransport('T');
+  const binding = { ...BASE_BINDING, transport };
+  const stale = {
+    ...readyOwnedView(binding),
+    retryAvailable: true,
+    correlationId: 'corr-stale',
+  };
+  for (const incomplete of [null, undefined, { ...binding, transport: undefined }, { ...binding, tenantId: '' }]) {
+    const selected = selectRenderableMetricObservationView(stale, incomplete);
+    assert.equal(selected.phase, 'unbound');
+    assert.equal(selected.pageKind, 'source-unavailable');
+    assert.equal(selected.observationState, 'SOURCE_UNAVAILABLE');
+    assert.equal(selected.errorCode, 'SOURCE_UNAVAILABLE');
+    assertNoStaleObservationSurface(selected);
+    assert.equal(isCompleteMetricObservationBinding(incomplete), false);
+  }
+  // Controller still performs zero requests for incomplete binding.
+  const controller = new MetricObservationController();
+  const before = controller.getTransportRequestCount();
+  controller.setBinding(null);
+  assert.equal(controller.getTransportRequestCount(), before);
+  controller.dispose();
+});
+
+test('render gate: same tenant but changed entity/metric/kind/window/limit rejects old view', () => {
+  const transport = makeTransport('same');
+  const base = { ...BASE_BINDING, transport };
+  const stored = readyOwnedView(base);
+  const variants = [
+    { ...base, entityId: '44444444-4444-4444-4444-444444444444' },
+    { ...base, metricId: '.1.3.6.1.2.1.1.3.0' },
+    { ...base, metricId: 'system.cpu.utilization', valueKind: 'NUMERIC' },
+    { ...base, from: '2026-10-21T09:00:00.000Z' },
+    { ...base, to: '2026-10-21T12:00:00.000Z' },
+    { ...base, limit: 50 },
+  ];
+  for (const next of variants) {
+    assert.equal(ownershipMatchesBinding(stored.ownership, next), false);
+    const selected = selectRenderableMetricObservationView(stored, next);
+    assertNoStaleObservationSurface(selected);
+    assert.equal(selected.phase, 'loading');
+  }
+});
+
+test('render gate: same query but replacement transport rejects earlier transport result/action', () => {
+  const transportOld = makeTransport('old');
+  const transportNew = makeTransport('new');
+  const bindingOld = { ...BASE_BINDING, transport: transportOld };
+  const bindingNew = { ...BASE_BINDING, transport: transportNew };
+  const stored = readyOwnedView(bindingOld, {
+    retryAvailable: true,
+    phase: 'error',
+    pageKind: 'error',
+    errorCode: 'NETWORK',
+    correlationId: 'corr-old',
+    observations: [],
+    request: null,
+    provenance: null,
+    qualityNote: null,
+  });
+  assert.equal(ownershipMatchesBinding(stored.ownership, bindingNew), false);
+  const selected = selectRenderableMetricObservationView(stored, bindingNew);
+  assertNoStaleObservationSurface(selected);
+  assert.equal(selected.retryAvailable, false);
+  assert.equal(selected.errorCode, null);
+  assert.equal(selected.correlationId, null);
+  assert.notEqual(transportOld, transportNew);
+});
+
+test('render gate: matching current binding keeps Counter64 exact and surfaces eligible', () => {
+  const transport = makeTransport('match');
+  const binding = { ...BASE_BINDING, transport };
+  const stored = readyOwnedView(binding);
+  assert.equal(ownershipMatchesBinding(stored.ownership, binding), true);
+  const selected = selectRenderableMetricObservationView(stored, binding);
+  assert.equal(selected, stored);
+  assert.equal(selected.phase, 'ready');
+  assert.equal(selected.request.tenantId, FIXTURE_TENANT_A);
+  assert.equal(selected.observations.length, 1);
+  assert.equal(selected.observations[0].counterValue, COUNTER64_ABOVE_SAFE_INTEGER);
+  assert.notEqual(String(Number(selected.observations[0].counterValue)), selected.observations[0].counterValue);
+  assert.equal(selected.provenance?.provenanceClass, 'clickhouse-canonical-final-view');
+});
+
+test('render gate: late response after binding change cannot reappear via stored ownership', async () => {
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const transportA = async (_path, init) => {
+    await firstGate;
+    if (init.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    return new Response(JSON.stringify(counter64SuccessBody()), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  const transportB = async () => new Response(JSON.stringify(counter64SuccessBody({
+    tenantId: FIXTURE_TENANT_B,
+  })), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+  const bindingA = { ...BASE_BINDING, transport: transportA };
+  const bindingB = { ...BASE_BINDING, tenantId: FIXTURE_TENANT_B, transport: transportB };
+
+  const controller = new MetricObservationController();
+  // Simulate React holding the last emitted view without re-running effects.
+  let reactStored = createUnboundMetricObservationView();
+  controller.subscribe((v) => {
+    reactStored = v;
+  });
+
+  controller.setBinding(bindingA);
+  // Switch binding (generation bump + clear) before A resolves.
+  controller.setBinding(bindingB);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(controller.getView().request?.tenantId, FIXTURE_TENANT_B);
+
+  // Even if React somehow still held an A-owned ready view, the production
+  // selector must reject it against the current B binding.
+  const forgedStaleA = readyOwnedView(bindingA);
+  const gated = selectRenderableMetricObservationView(forgedStaleA, bindingB);
+  assertNoStaleObservationSurface(gated);
+
+  releaseFirst();
+  await new Promise((r) => setTimeout(r, 20));
+  // Controller generation check: A must not overwrite B.
+  assert.notEqual(controller.getView().request?.tenantId, FIXTURE_TENANT_A);
+  assert.equal(
+    selectRenderableMetricObservationView(controller.getView(), bindingB).request?.tenantId,
+    FIXTURE_TENANT_B,
+  );
+  // A late A view remaining in React state stays non-renderable for B.
+  assertNoStaleObservationSurface(selectRenderableMetricObservationView(forgedStaleA, bindingB));
+  assert.ok(reactStored);
+  assert.equal(createPendingContextView(0).phase, 'loading');
+  controller.dispose();
 });

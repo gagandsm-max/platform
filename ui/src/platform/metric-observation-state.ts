@@ -2,6 +2,7 @@
  * Metric observation panel state machine.
  * Unbound → SOURCE_UNAVAILABLE with zero requests.
  * Binding/context change cancels in-flight work and clears prior-tenant rows immediately.
+ * Render-time ownership selection rejects stored views that do not belong to the current binding.
  */
 
 import { fetchMetricObservations } from './metric-observation-client.js';
@@ -9,12 +10,15 @@ import {
   MetricObservationBinding,
   MetricObservationClientError,
   MetricObservationItem,
+  MetricObservationOwnership,
   MetricObservationQuery,
   MetricObservationResponse,
   ObservationReadState,
   FreshnessClass,
   isCompleteMetricObservationBinding,
   observationStateToPageKind,
+  ownershipFromBinding,
+  ownershipMatchesBinding,
 } from './metric-observations.js';
 import type { PageStateKind } from './screen-state.js';
 
@@ -44,6 +48,12 @@ export interface MetricObservationPanelView {
   retryCount: number;
   /** Generation token; responses with a lower generation must be ignored. */
   generation: number;
+  /**
+   * Ownership of the request/transport context that produced this view.
+   * Null when unbound / no matching context. Render paths must reject a view
+   * whose ownership does not match the current complete binding.
+   */
+  ownership: MetricObservationOwnership | null;
 }
 
 export type MetricObservationListener = (view: MetricObservationPanelView) => void;
@@ -66,7 +76,60 @@ const EMPTY_VIEW: MetricObservationPanelView = {
   retryAvailable: false,
   retryCount: 0,
   generation: 0,
+  ownership: null,
 };
+
+/**
+ * Safe transitional view for a complete binding whose stored React state still
+ * belongs to a previous context. No identity, rows, provenance, errors or retry.
+ */
+export function createPendingContextView(
+  generation = 0,
+): MetricObservationPanelView {
+  return {
+    phase: 'loading',
+    pageKind: 'loading',
+    title: 'Loading metric observations',
+    message: 'Requesting bounded observations for the selected entity.',
+    observationState: null,
+    freshness: null,
+    truncated: false,
+    qualityNote: null,
+    provenance: null,
+    observations: [],
+    request: null,
+    errorCode: null,
+    correlationId: null,
+    retryAvailable: false,
+    retryCount: 0,
+    generation,
+    ownership: null,
+  };
+}
+
+/**
+ * Production render-time ownership gate used by EntityMetricObservationPanel.
+ * Must be called before rendering observation-derived content or exposing retry.
+ *
+ * - Absent/incomplete binding → SOURCE_UNAVAILABLE, no stale content, no retry.
+ * - Complete binding whose stored view ownership does not match → safe empty/loading.
+ * - Matching ownership → stored view is eligible for render.
+ */
+export function selectRenderableMetricObservationView(
+  storedView: MetricObservationPanelView,
+  binding: MetricObservationBinding | null | undefined,
+): MetricObservationPanelView {
+  if (!isCompleteMetricObservationBinding(binding)) {
+    return {
+      ...EMPTY_VIEW,
+      generation: storedView.generation,
+    };
+  }
+  if (!ownershipMatchesBinding(storedView.ownership, binding)) {
+    return createPendingContextView(storedView.generation);
+  }
+  return storedView;
+}
 
 function clearRowsView(
   generation: number,
@@ -76,6 +139,7 @@ function clearRowsView(
   pageKind: PageStateKind,
   phase: MetricObservationPanelPhase,
   errorCode: string | null,
+  ownership: MetricObservationOwnership | null,
 ): MetricObservationPanelView {
   return {
     ...EMPTY_VIEW,
@@ -88,6 +152,7 @@ function clearRowsView(
     retryCount,
     errorCode,
     retryAvailable: false,
+    ownership,
   };
 }
 
@@ -96,6 +161,7 @@ function readyView(
   retryCount: number,
   response: MetricObservationResponse,
   request: MetricObservationQuery,
+  ownership: MetricObservationOwnership,
 ): MetricObservationPanelView {
   const pageKind = observationStateToPageKind(response.observationState);
   const historicalNote =
@@ -122,6 +188,7 @@ function readyView(
     retryAvailable: false,
     retryCount,
     generation,
+    ownership,
   };
 }
 
@@ -129,6 +196,7 @@ function errorView(
   generation: number,
   retryCount: number,
   error: MetricObservationClientError,
+  ownership: MetricObservationOwnership | null,
 ): MetricObservationPanelView {
   let pageKind: PageStateKind = 'error';
   switch (error.code) {
@@ -174,6 +242,7 @@ function errorView(
     retryAvailable,
     retryCount,
     generation,
+    ownership,
   };
 }
 
@@ -248,6 +317,7 @@ export class MetricObservationController {
         'source-unavailable',
         'unbound',
         'SOURCE_UNAVAILABLE',
+        null,
       ),
     );
 
@@ -265,6 +335,9 @@ export class MetricObservationController {
     if (!this.binding || !this.view.retryAvailable) {
       return;
     }
+    if (!ownershipMatchesBinding(this.view.ownership, this.binding)) {
+      return;
+    }
     if (this.retryCount >= METRIC_OBSERVATION_MAX_MANUAL_RETRIES) {
       return;
     }
@@ -279,7 +352,7 @@ export class MetricObservationController {
     this.generation += 1;
     this.binding = null;
     this.listeners.clear();
-    this.emit({ ...EMPTY_VIEW, generation: this.generation });
+    this.emit({ ...EMPTY_VIEW, generation: this.generation, ownership: null });
   }
 
   private async load(generation: number, retryCount: number): Promise<void> {
@@ -287,6 +360,7 @@ export class MetricObservationController {
     if (!binding) {
       return;
     }
+    const ownership = ownershipFromBinding(binding);
     this.retryCount = retryCount;
     this.emit({
       ...clearRowsView(
@@ -297,6 +371,7 @@ export class MetricObservationController {
         'loading',
         'loading',
         null,
+        ownership,
       ),
       retryAvailable: false,
     });
@@ -309,9 +384,15 @@ export class MetricObservationController {
       if (!shouldAcceptGeneration(this.generation, generation)) {
         return;
       }
-      this.emit(readyView(generation, retryCount, result.response, result.request));
+      if (!ownershipMatchesBinding(ownership, this.binding)) {
+        return;
+      }
+      this.emit(readyView(generation, retryCount, result.response, result.request, ownership));
     } catch (cause) {
       if (!shouldAcceptGeneration(this.generation, generation)) {
+        return;
+      }
+      if (!ownershipMatchesBinding(ownership, this.binding)) {
         return;
       }
       const error =
@@ -325,7 +406,7 @@ export class MetricObservationController {
       if (error.code === 'ABORTED') {
         return;
       }
-      this.emit(errorView(generation, retryCount, error));
+      this.emit(errorView(generation, retryCount, error, ownership));
     } finally {
       if (this.abort === abort) {
         this.abort = null;
