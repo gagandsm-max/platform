@@ -40,9 +40,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
@@ -74,6 +74,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -318,7 +320,6 @@ class JdbcMetricObservationSecurityIntegrationTest {
         directoryCorruption(bearer);
     }
 
-    // Filter propagation contract only: this does not prove deployed error-dispatch HTTP behavior.
     private void directoryCorruption(String bearer) throws Exception {
         Logger auditLogger = (Logger) LoggerFactory.getLogger(SecurityAuditEmitter.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -326,19 +327,19 @@ class JdbcMetricObservationSecurityIntegrationTest {
         auditLogger.addAppender(appender);
         SecurityContextHolder.clearContext();
         try {
-            Exception observed = null;
-            try {
-                mvc.perform(request(TENANT, ENTITY, "100")
-                        .header("Authorization", "Bearer " + bearer)).andReturn();
-                fail("expected AuthenticationServiceException propagation from bearer filter");
-            } catch (Exception ex) {
-                observed = ex;
-            }
-            AuthenticationServiceException failure = findAuthenticationServiceException(observed);
-            assertNotNull(failure, "expected AuthenticationServiceException or servlet wrapper, got "
-                    + (observed == null ? "null" : observed.getClass().getName()));
-            assertEquals("Authorization directory failed", failure.getMessage());
-            assertNull(failure.getCause(), "directory details must not escape through a cause");
+            String correlation = "metric-directory-corruption";
+            MvcResult result = mvc.perform(request(TENANT, ENTITY, "100")
+                            .header("X-Correlation-ID", correlation)
+                            .header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isInternalServerError())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                    .andExpect(header().string("X-Correlation-ID", correlation))
+                    .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                    .andExpect(jsonPath("$.message").value("Unexpected internal error"))
+                    .andExpect(jsonPath("$.correlationId").value(correlation))
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty())
+                    .andReturn();
+            assertSanitized(result, bearer);
             var authentication = SecurityContextHolder.getContext().getAuthentication();
             assertTrue(authentication == null || !authentication.isAuthenticated(),
                     "directory corruption must not leave a partially authenticated context");
@@ -359,15 +360,6 @@ class JdbcMetricObservationSecurityIntegrationTest {
             appender.stop();
             SecurityContextHolder.clearContext();
         }
-    }
-
-    private static AuthenticationServiceException findAuthenticationServiceException(Throwable thrown) {
-        Throwable cursor = thrown;
-        while (cursor != null) {
-            if (cursor instanceof AuthenticationServiceException failure) return failure;
-            cursor = cursor.getCause();
-        }
-        return null;
     }
 
     @Test

@@ -44,9 +44,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -70,10 +70,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -81,6 +78,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -325,13 +324,8 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
         verify(entityService, never()).list(any(), anyInt(), anyInt());
     }
 
-    /**
-     * Converter/filter propagation evidence (Spring Security 6.3.3): one signed-JWT/JDBC/MockMvc
-     * request; AuthenticationServiceException rethrown after SecurityContext clear. Deployed
-     * error-dispatch response envelope remains a later integration gate.
-     */
     @Test
-    void directoryCorruptionPropagatesAuthenticationServiceExceptionWithoutPartialAuthority() throws Exception {
+    void directoryCorruptionReturnsOpaque500WithoutPartialAuthority() throws Exception {
         jdbcTemplate.update("""
                 UPDATE platform.permission_grant
                    SET resource_type = 'ENTITY'
@@ -345,20 +339,17 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
         auditLogger.addAppender(appender);
         SecurityContextHolder.clearContext();
         try {
-            Exception observed = null;
-            try {
-                mockMvc.perform(get("/api/v1/tenants/" + TENANT_A)
-                                .header("Authorization", "Bearer " + token))
-                        .andReturn();
-                fail("expected AuthenticationServiceException propagation from bearer filter");
-            } catch (Exception ex) {
-                observed = ex;
-            }
-            AuthenticationServiceException ase = findAuthenticationServiceException(observed);
-            assertNotNull(ase, "expected AuthenticationServiceException (or servlet wrapper thereof), got "
-                    + (observed == null ? "null" : observed.getClass().getName()));
-            assertEquals("Authorization directory failed", ase.getMessage());
-            assertNull(ase.getCause(), "converter emits cause-free AuthenticationServiceException");
+            String correlation = "jdbc-directory-corruption";
+            mockMvc.perform(get("/api/v1/tenants/" + TENANT_A)
+                            .header("X-Correlation-ID", correlation)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isInternalServerError())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                    .andExpect(header().string("X-Correlation-ID", correlation))
+                    .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                    .andExpect(jsonPath("$.message").value("Unexpected internal error"))
+                    .andExpect(jsonPath("$.correlationId").value(correlation))
+                    .andExpect(jsonPath("$.timestamp").isNotEmpty());
             assertTrue(
                     SecurityContextHolder.getContext().getAuthentication() == null
                             || !SecurityContextHolder.getContext().getAuthentication().isAuthenticated(),
@@ -375,17 +366,6 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
             appender.stop();
             SecurityContextHolder.clearContext();
         }
-    }
-
-    private static AuthenticationServiceException findAuthenticationServiceException(Throwable thrown) {
-        Throwable cursor = thrown;
-        while (cursor != null) {
-            if (cursor instanceof AuthenticationServiceException ase) {
-                return ase;
-            }
-            cursor = cursor.getCause();
-        }
-        return null;
     }
 
     @Test
