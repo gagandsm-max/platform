@@ -78,18 +78,33 @@ public final class PlatformJwtAuthenticationConverter implements Converter<Jwt, 
         } catch (IdentityResolutionException ex) {
             auditEmitter.authenticationFailure(ex.failure().name());
             throw new InvalidBearerTokenException("Identity could not be resolved");
+        } catch (SecurityDirectoryConfiguration.DirectoryFailureException ex) {
+            auditEmitter.authenticationFailure(ex.reasonCode());
+            throw new AuthenticationServiceException("Identity directory failed");
         } catch (RuntimeException ex) {
             auditEmitter.authenticationFailure("AUTH_IDENTITY_ERROR");
             throw new AuthenticationServiceException("Identity resolution failed");
         }
 
-        PermissionGrantDirectory.PrincipalAuthorization authz = grantDirectory.load(resolved.platformSubject());
-        PrincipalContext principal = new PrincipalContext(
-                resolved.platformSubject().subjectId().toString(),
-                AuthenticationState.AUTHENTICATED,
-                authz.tenantScopes(),
-                authz.permissionGrants()
-        );
+        // Controlled failure boundary around grant load + principal construction.
+        // Never construct a partial principal; never leak SQL/private details to the client.
+        PermissionGrantDirectory.PrincipalAuthorization authz;
+        PrincipalContext principal;
+        try {
+            authz = grantDirectory.load(resolved.platformSubject());
+            principal = new PrincipalContext(
+                    resolved.platformSubject().subjectId().toString(),
+                    AuthenticationState.AUTHENTICATED,
+                    authz.tenantScopes(),
+                    authz.permissionGrants()
+            );
+        } catch (SecurityDirectoryConfiguration.DirectoryFailureException ex) {
+            auditEmitter.authenticationFailure(ex.reasonCode());
+            throw new AuthenticationServiceException("Authorization directory failed");
+        } catch (RuntimeException ex) {
+            auditEmitter.authenticationFailure("AUTH_GRANT_LOAD_ERROR");
+            throw new AuthenticationServiceException("Authorization directory failed");
+        }
         return new PlatformAuthenticationToken(resolved, principal);
     }
 }

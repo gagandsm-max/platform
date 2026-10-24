@@ -98,3 +98,13 @@ platform:
       issuer-uri: ${PLATFORM_OIDC_ISSUER_URI:}
       audience: ${PLATFORM_OIDC_AUDIENCE:}
       provider-instance-id: ${PLATFORM_OIDC_PROVIDER_INSTANCE_ID:platform-oidc}
+    directories:
+      # Default-off. Production enablement is not authorized by the Issue #249 source draft alone.
+      # Flag-off rollback requires restart/reload and restores Empty directories (not schema rollback).
+      persistence-enabled: ${PLATFORM_SECURITY_DIRECTORIES_PERSISTENCE_ENABLED:false}
+      query-timeout: ${PLATFORM_SECURITY_DIRECTORIES_QUERY_TIMEOUT:2s}
+      max-tenant-scopes: ${PLATFORM_SECURITY_DIRECTORIES_MAX_TENANT_SCOPES:256}
+      max-permission-grants: ${PLATFORM_SECURITY_DIRECTORIES_MAX_PERMISSION_GRANTS:1024}
+      max-named-resources-per-grant: ${PLATFORM_SECURITY_DIRECTORIES_MAX_NAMED_RESOURCES_PER_GRANT:1024}
+      # Defensive joined grant/resource row ceiling (not a product capacity claim).
+      max-materialized-authority-rows: ${PLATFORM_SECURITY_DIRECTORIES_MAX_MATERIALIZED_AUTHORITY_ROWS:8192}
