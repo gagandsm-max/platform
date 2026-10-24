@@ -50,6 +50,10 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
     private UUID tenantA;
     private UUID tenantB;
     private UUID subjectId;
+    // Record only successful auto-committed inserts, including tenants added by individual tests.
+    private final Set<UUID> ownedTenants = new LinkedHashSet<>();
+    private final Set<UUID> ownedSubjects = new LinkedHashSet<>();
+    private final Set<UUID> ownedGrants = new LinkedHashSet<>();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -65,7 +69,26 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
     @AfterEach
     void tearDown() {
         if (pg != null) {
-            pg.stop();
+            try {
+                if (!ownedTenants.isEmpty() || !ownedSubjects.isEmpty()) {
+                    new TransactionTemplate(new DataSourceTransactionManager(pg.dataSource()))
+                            .executeWithoutResult(transaction -> {
+                                // V016 cascades each exact grant's resource children first.
+                                for (UUID grant : ownedGrants) {
+                                    pg.jdbc().update("DELETE FROM platform.permission_grant WHERE grant_id=?", grant);
+                                }
+                                for (UUID subject : ownedSubjects) {
+                                    pg.jdbc().update("DELETE FROM platform.subject_tenant_scope WHERE subject_id=?", subject);
+                                    pg.jdbc().update("DELETE FROM platform.platform_subject WHERE subject_id=?", subject);
+                                }
+                                for (UUID tenant : ownedTenants) {
+                                    pg.jdbc().update("DELETE FROM platform.tenant WHERE tenant_id=?", tenant);
+                                }
+                            });
+                }
+            } finally {
+                pg.stop();
+            }
         }
     }
 
@@ -113,6 +136,7 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
                     (grant_id, subject_id, tenant_id, permission, resource_type, scope_kind)
                 VALUES (?, ?, ?, 'entity.read', 'ENTITY', 'NAMED_RESOURCES')
                 """, emptyNamed, subjectId, tenantA);
+        ownedGrants.add(emptyNamed);
         SecurityDirectoryConfiguration.DirectoryFailureException corrupt = assertThrows(
                 SecurityDirectoryConfiguration.DirectoryFailureException.class,
                 () -> directory.load(new PlatformSubject(subjectId))
@@ -127,11 +151,7 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
                 INSERT INTO platform.subject_tenant_scope (subject_id, tenant_id, status)
                 VALUES (?, ?, 'REVOKED')
                 """, subjectId, tenantA);
-        jdbc.update("""
-                INSERT INTO platform.permission_grant
-                    (grant_id, subject_id, tenant_id, permission, resource_type, scope_kind)
-                VALUES (?, ?, ?, 'tenant.read', 'TENANT', 'TENANT_WIDE')
-                """, UUID.randomUUID(), subjectId, tenantA);
+        insertTenantWideGrant(subjectId, tenantA, "tenant.read", "TENANT");
 
         SecurityDirectoryConfiguration.DirectoryFailureException missingMembership = assertThrows(
                 SecurityDirectoryConfiguration.DirectoryFailureException.class,
@@ -141,11 +161,7 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
 
         jdbc.update("DELETE FROM platform.permission_grant WHERE subject_id=?", subjectId);
         jdbc.update("UPDATE platform.subject_tenant_scope SET status='ACTIVE' WHERE subject_id=?", subjectId);
-        jdbc.update("""
-                INSERT INTO platform.permission_grant
-                    (grant_id, subject_id, tenant_id, permission, resource_type, scope_kind)
-                VALUES (?, ?, ?, 'tenant.read', 'ENTITY', 'TENANT_WIDE')
-                """, UUID.randomUUID(), subjectId, tenantA);
+        insertTenantWideGrant(subjectId, tenantA, "tenant.read", "ENTITY");
         SecurityDirectoryConfiguration.DirectoryFailureException incompatible = assertThrows(
                 SecurityDirectoryConfiguration.DirectoryFailureException.class,
                 () -> directory.load(new PlatformSubject(subjectId))
@@ -399,7 +415,6 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
         assertEquals(2, atBound.load(new PlatformSubject(subjectId)).permissionGrants()
                 .iterator().next().resourceScope().resourceIds().size());
 
-        pg.jdbc().update("DELETE FROM platform.permission_grant_resource");
         pg.jdbc().update("DELETE FROM platform.permission_grant WHERE subject_id=?", subjectId);
         insertNamedGrant(subjectId, tenantA, "entity.read", "ENTITY", Set.of(e1, e2, e3));
         JdbcPermissionGrantDirectory overflow = newDirectory(Duration.ofSeconds(2), 256, 1024, 2, 8192);
@@ -421,7 +436,6 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
         JdbcPermissionGrantDirectory atBound = newDirectory(Duration.ofSeconds(2), 256, 1024, 1024, 2);
         assertEquals(1, atBound.load(new PlatformSubject(subjectId)).permissionGrants().size());
 
-        pg.jdbc().update("DELETE FROM platform.permission_grant_resource");
         pg.jdbc().update("DELETE FROM platform.permission_grant WHERE subject_id=?", subjectId);
         insertNamedGrant(subjectId, tenantA, "entity.read", "ENTITY", Set.of(e1, e2, e3));
         JdbcPermissionGrantDirectory overflow = newDirectory(Duration.ofSeconds(2), 256, 1024, 1024, 2);
@@ -683,6 +697,7 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
                 INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
                 VALUES (?, ?, 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
                 """, id, name);
+        ownedTenants.add(id);
         return id;
     }
 
@@ -692,6 +707,7 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
                 INSERT INTO platform.platform_subject (subject_id, status)
                 VALUES (?, 'ACTIVE')
                 """, id);
+        ownedSubjects.add(id);
         return id;
     }
 
@@ -709,6 +725,7 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
                     (grant_id, subject_id, tenant_id, permission, resource_type, scope_kind)
                 VALUES (?, ?, ?, ?, ?, 'TENANT_WIDE')
                 """, grantId, subject, tenant, permission, resourceType);
+        ownedGrants.add(grantId);
         return grantId;
     }
 
@@ -721,6 +738,7 @@ class JdbcPermissionGrantDirectoryIntegrationTest {
                     (grant_id, subject_id, tenant_id, permission, resource_type, scope_kind)
                 VALUES (?, ?, ?, ?, ?, 'NAMED_RESOURCES')
                 """, grantId, subject, tenant, permission, resourceType);
+        ownedGrants.add(grantId); // Retain cleanup authority even if a later child insert fails.
         for (UUID resourceId : resources) {
             pg.jdbc().update("""
                     INSERT INTO platform.permission_grant_resource (grant_id, resource_id)

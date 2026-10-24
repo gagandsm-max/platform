@@ -292,6 +292,11 @@ public class ClickHouseMetricObservationReader {
                     "Telemetry store returned malformed observation data");
         }
         double value = node.get("value").asDouble();
+        if (!Double.isFinite(value)) {
+            throw new DomainException(
+                    "DATA_INTEGRITY_ERROR",
+                    "Telemetry store returned malformed observation data");
+        }
         return new MetricObservationRow(
                 ts, value, null, quality, flags, sensorId, sequenceId, sourceProtocol);
     }

@@ -148,6 +148,25 @@ class ClickHouseMetricObservationReaderTest {
     }
 
     @Test
+    void validJsonNumericExponentOverflowFailsClosedWhileFiniteControlIsPreserved() {
+        ClickHouseMetricObservationReader reader = newReader(mock(HttpClient.class));
+        // These are valid JSON number tokens, not quoted strings or bare NaN/Infinity.
+        String row = """
+                {"ts":"2026-10-16 00:00:01.000","value":%s,"quality":1,"flags":0,"sensor_id":"s1","sequence_id":"a","source_protocol":"agent"}
+                """;
+        for (String overflow : List.of("1e309", "-1e309")) {
+            DomainException ex = assertThrows(DomainException.class,
+                    () -> reader.parseLatestPage(row.formatted(overflow), MetricValueKind.NUMERIC, 10));
+            assertEquals("DATA_INTEGRITY_ERROR", ex.getCode());
+            assertEquals("Telemetry store returned malformed observation data", ex.getMessage());
+        }
+        MetricObservationPage page = reader.parseLatestPage(row.formatted("1.25"), MetricValueKind.NUMERIC, 10);
+        assertEquals(1, page.observations().size());
+        assertEquals(1.25, page.observations().get(0).numericValue());
+        assertFalse(page.truncated());
+    }
+
+    @Test
     void malformedNumericValueMapsToDataIntegrityError() {
         ClickHouseMetricObservationReader reader = newReader(mock(HttpClient.class));
         String body = """

@@ -24,6 +24,7 @@ import com.platform.core.security.identity.IdentityDirectory;
 import com.platform.core.security.identity.JdbcIdentityDirectory;
 import com.platform.core.support.PostgresTestSupport;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -106,9 +107,12 @@ class JdbcMetricObservationSecurityIntegrationTest {
     private static final UUID DISABLED = id("ac");
     private static final UUID NO_MEMBERSHIP = id("ad");
     private static final UUID GRANT = id("c1");
+    private static final UUID MEMBERSHIP_GRANT = id("c2");
     private static final KeyPair KEY = rsaKeyPair();
     private static final KeyPair WRONG_KEY = rsaKeyPair();
     private static final PostgresTestSupport PG = startPostgres();
+
+    private boolean fixtureOwned;
 
     @Autowired private MockMvc mvc;
     @Autowired private ObjectMapper mapper;
@@ -163,41 +167,86 @@ class JdbcMetricObservationSecurityIntegrationTest {
         assertFalse(mockingDetails(identities).isMock());
         assertFalse(mockingDetails(grants).isMock());
         assertFalse(mockingDetails(decoder).isMock());
-        // This class owns an isolated PostgresTestSupport database. Preserve immutable trust.
-        jdbc.update("DELETE FROM platform.permission_grant_resource");
-        jdbc.update("DELETE FROM platform.permission_grant");
-        jdbc.update("DELETE FROM platform.subject_tenant_scope");
-        jdbc.update("DELETE FROM platform.identity_mapping");
-        jdbc.update("DELETE FROM platform.platform_subject");
-        jdbc.update("DELETE FROM platform.tenant WHERE tenant_id IN (?, ?)", TENANT, OTHER_TENANT);
-        jdbc.update("""
-                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
-                VALUES (?, 'Metric A', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW()),
-                       (?, 'Metric B', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
-                """, TENANT, OTHER_TENANT);
-        for (UUID subject : List.of(GRANTED, NO_GRANT, DISABLED, NO_MEMBERSHIP)) {
-            jdbc.update("INSERT INTO platform.platform_subject (subject_id, status) VALUES (?, ?)",
-                    subject, subject.equals(DISABLED) ? "DISABLED" : "ACTIVE");
+        new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> {
+            refuseExistingFixture();
             jdbc.update("""
-                    INSERT INTO platform.identity_mapping
-                        (provider_type, provider_instance_id, external_subject, subject_id, disabled)
-                    VALUES ('OIDC', ?, ?, ?, ?)
-                    """, PROVIDER, subject.toString(), subject, false);
-            // Keep the required membership FK, but make this subject's membership inactive.
-            jdbc.update("""
-                    INSERT INTO platform.subject_tenant_scope (subject_id, tenant_id, status)
-                    VALUES (?, ?, ?)
-                    """, subject, TENANT, subject.equals(NO_MEMBERSHIP) ? "REVOKED" : "ACTIVE");
-        }
-        namedGrant(GRANT, GRANTED);
-        // A grant alone is insufficient without active tenant membership.
-        namedGrant(id("c2"), NO_MEMBERSHIP);
+                    INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                    VALUES (?, 'Metric A', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW()),
+                           (?, 'Metric B', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
+                    """, TENANT, OTHER_TENANT);
+            for (UUID subject : List.of(GRANTED, NO_GRANT, DISABLED, NO_MEMBERSHIP)) {
+                jdbc.update("INSERT INTO platform.platform_subject (subject_id, status) VALUES (?, ?)",
+                        subject, subject.equals(DISABLED) ? "DISABLED" : "ACTIVE");
+                jdbc.update("""
+                        INSERT INTO platform.identity_mapping
+                            (provider_type, provider_instance_id, external_subject, subject_id, disabled)
+                        VALUES ('OIDC', ?, ?, ?, ?)
+                        """, PROVIDER, subject.toString(), subject, false);
+                // Keep the required membership FK, but make this subject's membership inactive.
+                jdbc.update("""
+                        INSERT INTO platform.subject_tenant_scope (subject_id, tenant_id, status)
+                        VALUES (?, ?, ?)
+                        """, subject, TENANT, subject.equals(NO_MEMBERSHIP) ? "REVOKED" : "ACTIVE");
+            }
+            namedGrant(GRANT, GRANTED);
+            // A grant alone is insufficient without active tenant membership.
+            namedGrant(MEMBERSHIP_GRANT, NO_MEMBERSHIP);
+        });
+        fixtureOwned = true; // Claim only the successfully committed seed.
         when(entities.get(TENANT, ENTITY)).thenReturn(new Entity(
                 ENTITY, TENANT, "DEVICE", "Metric fixture", null, null, LifecycleState.ACTIVE,
                 null, null, null, null, null, FROM, FROM, "test", FROM, FROM));
         when(reader.read(any())).thenReturn(new MetricObservationPage(List.of(
                 new MetricObservationRow(FROM.plusSeconds(1), null, COUNTER, 1, 0,
                         "sensor-test", "7", "SNMP")), false));
+    }
+
+    private void refuseExistingFixture() {
+        for (UUID tenant : List.of(TENANT, OTHER_TENANT)) {
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM platform.tenant WHERE tenant_id=?", Integer.class, tenant));
+        }
+        for (UUID subject : List.of(GRANTED, NO_GRANT, DISABLED, NO_MEMBERSHIP)) {
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM platform.platform_subject WHERE subject_id=?", Integer.class, subject));
+            assertEquals(0, jdbc.queryForObject("""
+                    SELECT COUNT(*) FROM platform.identity_mapping
+                    WHERE subject_id=? OR (provider_type='OIDC' AND provider_instance_id=? AND external_subject=?)
+                    """, Integer.class, subject, PROVIDER, subject.toString()));
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM platform.subject_tenant_scope WHERE subject_id=?", Integer.class, subject));
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM platform.permission_grant WHERE subject_id=?", Integer.class, subject));
+        }
+        for (UUID grant : List.of(GRANT, MEMBERSHIP_GRANT)) {
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM platform.permission_grant WHERE grant_id=?", Integer.class, grant));
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM platform.permission_grant_resource WHERE grant_id=?", Integer.class, grant));
+        }
+    }
+
+    @AfterEach
+    void cleanOwnedFixture() {
+        if (!fixtureOwned) {
+            return;
+        }
+        new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> {
+            for (UUID grant : List.of(GRANT, MEMBERSHIP_GRANT)) {
+                jdbc.update("DELETE FROM platform.permission_grant_resource WHERE grant_id=? AND resource_id=?", grant, ENTITY);
+                jdbc.update("DELETE FROM platform.permission_grant WHERE grant_id=?", grant);
+            }
+            for (UUID subject : List.of(GRANTED, NO_GRANT, DISABLED, NO_MEMBERSHIP)) {
+                jdbc.update("DELETE FROM platform.subject_tenant_scope WHERE subject_id=? AND tenant_id=?", subject, TENANT);
+                jdbc.update("""
+                        DELETE FROM platform.identity_mapping
+                        WHERE provider_type='OIDC' AND provider_instance_id=? AND external_subject=? AND subject_id=?
+                        """, PROVIDER, subject.toString(), subject);
+                jdbc.update("DELETE FROM platform.platform_subject WHERE subject_id=?", subject);
+            }
+            jdbc.update("DELETE FROM platform.tenant WHERE tenant_id IN (?, ?)", TENANT, OTHER_TENANT);
+        });
+        fixtureOwned = false;
     }
 
     private void namedGrant(UUID grant, UUID subject) {
@@ -432,7 +481,7 @@ class JdbcMetricObservationSecurityIntegrationTest {
     }
 
     private static UUID id(String suffix) {
-        return UUID.fromString("018f0e0a-0000-7000-8000-0000000000" + suffix);
+        return UUID.fromString("018f2542-0000-7000-8000-0000000000" + suffix);
     }
 
     private static KeyPair rsaKeyPair() {

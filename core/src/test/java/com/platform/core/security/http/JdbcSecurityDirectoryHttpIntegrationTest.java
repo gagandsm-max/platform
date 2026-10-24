@@ -27,6 +27,7 @@ import com.platform.core.security.identity.IdentityDirectory;
 import com.platform.core.security.identity.JdbcIdentityDirectory;
 import com.platform.core.support.PostgresTestSupport;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -54,6 +55,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
 import java.security.KeyPair;
@@ -97,16 +99,16 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
     private static final String PROVIDER = "platform-oidc";
     private static final KeyPair KEY_PAIR = rsaKeyPair();
 
-    private static final UUID TENANT_A = UUID.fromString("018f0e0a-0000-7000-8000-0000000000a1");
-    private static final UUID TENANT_B = UUID.fromString("018f0e0a-0000-7000-8000-0000000000b1");
-    private static final UUID SUBJECT_GRANTED = UUID.fromString("018f0e0a-0000-7000-8000-0000000000aa");
-    private static final UUID SUBJECT_NO_GRANTS = UUID.fromString("018f0e0a-0000-7000-8000-0000000000ab");
-    private static final UUID SUBJECT_DISABLED = UUID.fromString("018f0e0a-0000-7000-8000-0000000000ac");
-    private static final UUID SUBJECT_NAMED = UUID.fromString("018f0e0a-0000-7000-8000-0000000000ad");
-    private static final UUID GRANT_A = UUID.fromString("018f0e0a-0000-7000-8000-0000000000c1");
-    private static final UUID GRANT_NAMED = UUID.fromString("018f0e0a-0000-7000-8000-0000000000c2");
-    private static final UUID ENTITY_E1 = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e1");
-    private static final UUID ENTITY_E2 = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e2");
+    private static final UUID TENANT_A = UUID.fromString("018f2541-0000-7000-8000-0000000000a1");
+    private static final UUID TENANT_B = UUID.fromString("018f2541-0000-7000-8000-0000000000b1");
+    private static final UUID SUBJECT_GRANTED = UUID.fromString("018f2541-0000-7000-8000-0000000000aa");
+    private static final UUID SUBJECT_NO_GRANTS = UUID.fromString("018f2541-0000-7000-8000-0000000000ab");
+    private static final UUID SUBJECT_DISABLED = UUID.fromString("018f2541-0000-7000-8000-0000000000ac");
+    private static final UUID SUBJECT_NAMED = UUID.fromString("018f2541-0000-7000-8000-0000000000ad");
+    private static final UUID GRANT_A = UUID.fromString("018f2541-0000-7000-8000-0000000000c1");
+    private static final UUID GRANT_NAMED = UUID.fromString("018f2541-0000-7000-8000-0000000000c2");
+    private static final UUID ENTITY_E1 = UUID.fromString("018f2541-0000-7000-8000-0000000000e1");
+    private static final UUID ENTITY_E2 = UUID.fromString("018f2541-0000-7000-8000-0000000000e2");
 
     private static final PostgresTestSupport PG = startPostgres();
 
@@ -121,6 +123,11 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    private boolean fixtureOwned;
 
     @MockBean
     private TenantService tenantService;
@@ -189,51 +196,48 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
         when(entityService.list(eq(TENANT_A), anyInt(), anyInt())).thenReturn(
                 new PageResult<>(List.of(entityE1), 1, 50, 1L, false));
 
-        // Mutable tables only — do not touch identity_provider_instance (immutable trust seed).
-        jdbcTemplate.update("DELETE FROM platform.permission_grant_resource");
-        jdbcTemplate.update("DELETE FROM platform.permission_grant");
-        jdbcTemplate.update("DELETE FROM platform.subject_tenant_scope");
-        jdbcTemplate.update("DELETE FROM platform.identity_mapping");
-        jdbcTemplate.update("DELETE FROM platform.platform_subject");
-        jdbcTemplate.update("DELETE FROM platform.tenant WHERE tenant_id IN (?, ?)", TENANT_A, TENANT_B);
+        // Source-scanned class namespace; never adopt or erase existing fixture rows.
+        new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> {
+            refuseExistingFixture();
+            jdbcTemplate.update("""
+                    INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                    VALUES (?, 'Tenant A', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW()),
+                           (?, 'Tenant B', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
+                    """, TENANT_A, TENANT_B);
+            jdbcTemplate.update("""
+                    INSERT INTO platform.platform_subject (subject_id, status)
+                    VALUES (?, 'ACTIVE'), (?, 'ACTIVE'), (?, 'ACTIVE'), (?, 'ACTIVE')
+                    """, SUBJECT_GRANTED, SUBJECT_NO_GRANTS, SUBJECT_DISABLED, SUBJECT_NAMED);
+            jdbcTemplate.update("""
+                    INSERT INTO platform.identity_mapping
+                        (provider_type, provider_instance_id, external_subject, subject_id, disabled)
+                    VALUES ('OIDC', ?, 'a254-http-granted', ?, FALSE),
+                           ('OIDC', ?, 'a254-http-no-grants', ?, FALSE),
+                           ('OIDC', ?, 'a254-http-disabled', ?, TRUE),
+                           ('OIDC', ?, 'a254-http-named', ?, FALSE)
+                    """, PROVIDER, SUBJECT_GRANTED, PROVIDER, SUBJECT_NO_GRANTS,
+                    PROVIDER, SUBJECT_DISABLED, PROVIDER, SUBJECT_NAMED);
 
-        jdbcTemplate.update("""
-                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
-                VALUES (?, 'Tenant A', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW()),
-                       (?, 'Tenant B', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
-                """, TENANT_A, TENANT_B);
-        jdbcTemplate.update("""
-                INSERT INTO platform.platform_subject (subject_id, status)
-                VALUES (?, 'ACTIVE'), (?, 'ACTIVE'), (?, 'ACTIVE'), (?, 'ACTIVE')
-                """, SUBJECT_GRANTED, SUBJECT_NO_GRANTS, SUBJECT_DISABLED, SUBJECT_NAMED);
-        jdbcTemplate.update("""
-                INSERT INTO platform.identity_mapping
-                    (provider_type, provider_instance_id, external_subject, subject_id, disabled)
-                VALUES ('OIDC', ?, 'user-granted', ?, FALSE),
-                       ('OIDC', ?, 'user-no-grants', ?, FALSE),
-                       ('OIDC', ?, 'user-disabled', ?, TRUE),
-                       ('OIDC', ?, 'user-named', ?, FALSE)
-                """, PROVIDER, SUBJECT_GRANTED, PROVIDER, SUBJECT_NO_GRANTS,
-                PROVIDER, SUBJECT_DISABLED, PROVIDER, SUBJECT_NAMED);
-
-        jdbcTemplate.update("""
-                INSERT INTO platform.subject_tenant_scope (subject_id, tenant_id, status)
-                VALUES (?, ?, 'ACTIVE'), (?, ?, 'ACTIVE')
-                """, SUBJECT_GRANTED, TENANT_A, SUBJECT_NAMED, TENANT_A);
-        jdbcTemplate.update("""
-                INSERT INTO platform.permission_grant
-                    (grant_id, subject_id, tenant_id, permission, resource_type, scope_kind)
-                VALUES (?, ?, ?, 'tenant.read', 'TENANT', 'TENANT_WIDE')
-                """, GRANT_A, SUBJECT_GRANTED, TENANT_A);
-        jdbcTemplate.update("""
-                INSERT INTO platform.permission_grant
-                    (grant_id, subject_id, tenant_id, permission, resource_type, scope_kind)
-                VALUES (?, ?, ?, 'entity.read', 'ENTITY', 'NAMED_RESOURCES')
-                """, GRANT_NAMED, SUBJECT_NAMED, TENANT_A);
-        jdbcTemplate.update("""
-                INSERT INTO platform.permission_grant_resource (grant_id, resource_id)
-                VALUES (?, ?)
-                """, GRANT_NAMED, ENTITY_E1);
+            jdbcTemplate.update("""
+                    INSERT INTO platform.subject_tenant_scope (subject_id, tenant_id, status)
+                    VALUES (?, ?, 'ACTIVE'), (?, ?, 'ACTIVE')
+                    """, SUBJECT_GRANTED, TENANT_A, SUBJECT_NAMED, TENANT_A);
+            jdbcTemplate.update("""
+                    INSERT INTO platform.permission_grant
+                        (grant_id, subject_id, tenant_id, permission, resource_type, scope_kind)
+                    VALUES (?, ?, ?, 'tenant.read', 'TENANT', 'TENANT_WIDE')
+                    """, GRANT_A, SUBJECT_GRANTED, TENANT_A);
+            jdbcTemplate.update("""
+                    INSERT INTO platform.permission_grant
+                        (grant_id, subject_id, tenant_id, permission, resource_type, scope_kind)
+                    VALUES (?, ?, ?, 'entity.read', 'ENTITY', 'NAMED_RESOURCES')
+                    """, GRANT_NAMED, SUBJECT_NAMED, TENANT_A);
+            jdbcTemplate.update("""
+                    INSERT INTO platform.permission_grant_resource (grant_id, resource_id)
+                    VALUES (?, ?)
+                    """, GRANT_NAMED, ENTITY_E1);
+        });
+        fixtureOwned = true; // TransactionTemplate returned only after seed commit.
 
         assertInstanceOf(JdbcIdentityDirectory.class, identityDirectory);
         assertInstanceOf(JdbcPermissionGrantDirectory.class, permissionGrantDirectory);
@@ -243,9 +247,62 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
         assertTrue(providers != null && providers == 1);
     }
 
+    private void refuseExistingFixture() {
+        for (UUID tenant : List.of(TENANT_A, TENANT_B)) {
+            assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM platform.tenant WHERE tenant_id=?", Integer.class, tenant));
+        }
+        List<UUID> subjects = List.of(SUBJECT_GRANTED, SUBJECT_NO_GRANTS, SUBJECT_DISABLED, SUBJECT_NAMED);
+        List<String> bindings = List.of("a254-http-granted", "a254-http-no-grants", "a254-http-disabled", "a254-http-named");
+        for (int i = 0; i < subjects.size(); i++) {
+            UUID subject = subjects.get(i);
+            assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM platform.platform_subject WHERE subject_id=?", Integer.class, subject));
+            assertEquals(0, jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM platform.identity_mapping
+                    WHERE subject_id=? OR (provider_type='OIDC' AND provider_instance_id=? AND external_subject=?)
+                    """, Integer.class, subject, PROVIDER, bindings.get(i)));
+            assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM platform.subject_tenant_scope WHERE subject_id=?", Integer.class, subject));
+            assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM platform.permission_grant WHERE subject_id=?", Integer.class, subject));
+        }
+        for (UUID grant : List.of(GRANT_A, GRANT_NAMED)) {
+            assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM platform.permission_grant WHERE grant_id=?", Integer.class, grant));
+            assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM platform.permission_grant_resource WHERE grant_id=?", Integer.class, grant));
+        }
+    }
+
+    @AfterEach
+    void cleanOwnedFixture() {
+        if (!fixtureOwned) {
+            return; // Refusal/rolled-back seed confers no deletion authority.
+        }
+        new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> {
+            jdbcTemplate.update("DELETE FROM platform.permission_grant_resource WHERE grant_id=? AND resource_id=?",
+                    GRANT_NAMED, ENTITY_E1);
+            jdbcTemplate.update("DELETE FROM platform.permission_grant WHERE grant_id IN (?, ?)", GRANT_A, GRANT_NAMED);
+            jdbcTemplate.update("DELETE FROM platform.subject_tenant_scope WHERE subject_id IN (?, ?) AND tenant_id=?",
+                    SUBJECT_GRANTED, SUBJECT_NAMED, TENANT_A);
+            List<UUID> subjects = List.of(SUBJECT_GRANTED, SUBJECT_NO_GRANTS, SUBJECT_DISABLED, SUBJECT_NAMED);
+            List<String> bindings = List.of("a254-http-granted", "a254-http-no-grants", "a254-http-disabled", "a254-http-named");
+            for (int i = 0; i < subjects.size(); i++) {
+                jdbcTemplate.update("""
+                        DELETE FROM platform.identity_mapping
+                        WHERE provider_type='OIDC' AND provider_instance_id=? AND external_subject=? AND subject_id=?
+                        """, PROVIDER, bindings.get(i), subjects.get(i));
+                jdbcTemplate.update("DELETE FROM platform.platform_subject WHERE subject_id=?", subjects.get(i));
+            }
+            jdbcTemplate.update("DELETE FROM platform.tenant WHERE tenant_id IN (?, ?)", TENANT_A, TENANT_B);
+        });
+        fixtureOwned = false;
+    }
+
     @Test
     void mappedPrincipalCanReadTenantViaRealJdbcPath() throws Exception {
-        String token = signedJwt("user-granted", Map.of());
+        String token = signedJwt("a254-http-granted", Map.of());
         mockMvc.perform(get("/api/v1/tenants/" + TENANT_A)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -255,7 +312,7 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
 
     @Test
     void signedJwtRoleClaimsProvideNoGrantsOnRealJdbcFilterPath() throws Exception {
-        String token = signedJwt("user-no-grants", Map.of(
+        String token = signedJwt("a254-http-no-grants", Map.of(
                 "roles", List.of("ADMIN"),
                 "permissions", List.of("tenant.read")
         ));
@@ -268,7 +325,7 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
 
     @Test
     void disabledMappingRejected() throws Exception {
-        String token = signedJwt("user-disabled", Map.of());
+        String token = signedJwt("a254-http-disabled", Map.of());
         mockMvc.perform(get("/api/v1/tenants/" + TENANT_A)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized())
@@ -278,7 +335,7 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
 
     @Test
     void committedRevocationObservedOnLaterRequest() throws Exception {
-        String token = signedJwt("user-granted", Map.of());
+        String token = signedJwt("a254-http-granted", Map.of());
         mockMvc.perform(get("/api/v1/tenants/" + TENANT_A)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
@@ -295,7 +352,7 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
     @Test
     void crossTenantTenantReadDeniedWithoutServiceInvocation() throws Exception {
         // Tenant B exists and would succeed if authorized — deny must be authz, not missing resource.
-        String token = signedJwt("user-granted", Map.of());
+        String token = signedJwt("a254-http-granted", Map.of());
         mockMvc.perform(get("/api/v1/tenants/" + TENANT_B)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isNotFound())
@@ -305,7 +362,7 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
 
     @Test
     void namedEntityE1AllowedE2AndCollectionDeniedWithoutServiceInvocation() throws Exception {
-        String token = signedJwt("user-named", Map.of());
+        String token = signedJwt("a254-http-named", Map.of());
         mockMvc.perform(get("/api/v1/tenants/" + TENANT_A + "/entities/" + ENTITY_E1)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
@@ -331,7 +388,7 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
                    SET resource_type = 'ENTITY'
                  WHERE grant_id = ?
                 """, GRANT_A);
-        String token = signedJwt("user-granted", Map.of());
+        String token = signedJwt("a254-http-granted", Map.of());
 
         Logger auditLogger = (Logger) LoggerFactory.getLogger(SecurityAuditEmitter.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -370,7 +427,7 @@ class JdbcSecurityDirectoryHttpIntegrationTest {
 
     @Test
     void unmappedSubjectUnauthorizedWithoutSqlLeak() throws Exception {
-        String token = signedJwt("user-unknown", Map.of());
+        String token = signedJwt("a254-http-unknown", Map.of());
         String body = mockMvc.perform(get("/api/v1/tenants/" + TENANT_A)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized())
