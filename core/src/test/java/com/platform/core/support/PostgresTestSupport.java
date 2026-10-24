@@ -16,10 +16,14 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.UUID;
+import java.util.Properties;
 
 /**
  * Ephemeral PostgreSQL helper for Day-02 Core integration tests.
- * Requires Docker. Does not use host PostgreSQL packages.
+ * Default mode requires Docker. Explicit external-compose mode uses JDBC only and
+ * leaves resource ownership with the private Compose fixture. Never uses host PostgreSQL packages.
+ * Set both PLATFORM_TEST_PG_MODE=external-compose and PLATFORM_TEST_PG_JDBC_URL
+ * to the exact EXTERNAL_JDBC_URL below; partial/unknown configuration fails closed.
  *
  * <p>Ephemeral storage policy: PostgreSQL data is mounted on tmpfs so the
  * image-declared VOLUME does not create anonymous Docker volumes. Teardown
@@ -34,13 +38,34 @@ public final class PostgresTestSupport {
 
     private final String containerName;
     private final String testRunId;
+    // Explicit test-only Compose contract; no arbitrary host, query options or credentials.
+    static final String EXTERNAL_MODE = "external-compose";
+    static final String EXTERNAL_JDBC_URL = "jdbc:postgresql://platform-test-postgres:5432/platform";
+    private final String externalJdbcUrl;
     private final int hostPort;
     private DataSource dataSource;
 
     public PostgresTestSupport() {
+        this(System.getenv("PLATFORM_TEST_PG_MODE"), System.getenv("PLATFORM_TEST_PG_JDBC_URL"));
+    }
+
+    // Package-private seam for no-I/O configuration controls; not a production service API.
+    PostgresTestSupport(String mode, String jdbcTarget) {
+        this.externalJdbcUrl = externalTarget(mode, jdbcTarget);
         this.testRunId = UUID.randomUUID().toString().substring(0, 8);
         this.containerName = "platform-day02-pg-" + testRunId;
-        this.hostPort = allocatePort();
+        this.hostPort = externalJdbcUrl == null ? allocatePort() : -1;
+    }
+
+    static String externalTarget(String mode, String jdbcTarget) {
+        if (mode == null && jdbcTarget == null) {
+            return null;
+        }
+        if (!EXTERNAL_MODE.equals(mode) || !EXTERNAL_JDBC_URL.equals(jdbcTarget)) {
+            // Do not echo an invalid URL: it may contain credentials or hostile query text.
+            throw new IllegalArgumentException("Invalid isolated external test PostgreSQL configuration");
+        }
+        return jdbcTarget;
     }
 
     public String containerName() {
@@ -61,6 +86,10 @@ public final class PostgresTestSupport {
     }
 
     public void start() throws Exception {
+        if (externalJdbcUrl != null) {
+            startExternal();
+            return;
+        }
         requireDockerAvailable();
         exec("docker", "run", "-d", "--rm",
                 "--name", containerName,
@@ -86,6 +115,52 @@ public final class PostgresTestSupport {
         this.dataSource = new HikariDataSource(config);
     }
 
+    private void startExternal() throws Exception {
+        waitExternalReady();
+        try (Connection connection = DriverManager.getConnection(jdbcUrl(), externalProperties());
+             Statement statement = connection.createStatement()) {
+            statement.setQueryTimeout(5);
+            statement.execute("CREATE SCHEMA IF NOT EXISTS platform;");
+        }
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(jdbcUrl());
+        config.setUsername("platform_app");
+        config.setPassword("platform_test");
+        config.addDataSourceProperty("connectTimeout", "2");
+        config.addDataSourceProperty("socketTimeout", "5");
+        config.setConnectionTimeout(5000);
+        config.setValidationTimeout(2000);
+        config.setMaximumPoolSize(4);
+        config.setMinimumIdle(0);
+        config.setPoolName("day02-pg-" + testRunId);
+        this.dataSource = new HikariDataSource(config);
+    }
+
+    private void waitExternalReady() throws Exception {
+        long started = System.nanoTime();
+        while (System.nanoTime() - started < Duration.ofSeconds(60).toNanos()) {
+            try (Connection connection = DriverManager.getConnection(jdbcUrl(), externalProperties());
+                 Statement statement = connection.createStatement()) {
+                statement.setQueryTimeout(5);
+                statement.execute("SELECT 1");
+                return;
+            } catch (SQLException ignored) {
+                // Bounded per-call connection/socket timeouts; no URL/SQL details in errors.
+                Thread.sleep(500);
+            }
+        }
+        throw new IllegalStateException("Isolated external test PostgreSQL did not become ready");
+    }
+
+    private static Properties externalProperties() {
+        Properties props = new Properties();
+        props.setProperty("user", "platform_app");
+        props.setProperty("password", "platform_test");
+        props.setProperty("connectTimeout", "2");
+        props.setProperty("socketTimeout", "5");
+        return props;
+    }
+
     public static void requireDockerAvailable() {
         try {
             Process p = new ProcessBuilder("docker", "info").redirectErrorStream(true).start();
@@ -104,6 +179,10 @@ public final class PostgresTestSupport {
             hikari.close();
         }
         dataSource = null;
+        if (externalJdbcUrl != null) {
+            // Compose owns the database. Never remove it from an externally managed fixture.
+            return;
+        }
         try {
             // -v removes anonymous volumes if any were created despite tmpfs.
             exec("docker", "rm", "-fv", containerName);
@@ -113,6 +192,9 @@ public final class PostgresTestSupport {
     }
 
     public String jdbcUrl() {
+        if (externalJdbcUrl != null) {
+            return externalJdbcUrl;
+        }
         return "jdbc:postgresql://127.0.0.1:" + hostPort + "/platform";
     }
 

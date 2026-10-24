@@ -58,16 +58,18 @@ class MigrationIntegrationTest {
                                      'tenant_capability_pack','tenant_capability_pack_activation',
                                      'sensor_capability_pack_assignment','sensor_capability_pack_state',
                                      'entity_management_endpoint','sensor_enrollment_authority',
-                                     'sensor_control_state')
+                                     'sensor_control_state','sensor_poll_grant',
+                                     'identity_provider_instance','platform_subject','identity_mapping',
+                                     'subject_tenant_scope','permission_grant','permission_grant_resource')
                 """,
                 Integer.class
         );
-        assertEquals(29, tables);
+        assertEquals(36, tables);
 
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, checksum FROM platform.schema_history ORDER BY version"
         );
-        assertEquals(14, history.size());
+        assertEquals(16, history.size());
         assertEquals("V001", history.get(0).get("version"));
         assertEquals("V002", history.get(1).get("version"));
         assertEquals("V003", history.get(2).get("version"));
@@ -82,11 +84,13 @@ class MigrationIntegrationTest {
         assertEquals("V012", history.get(11).get("version"));
         assertEquals("V013", history.get(12).get("version"));
         assertEquals("V014", history.get(13).get("version"));
+        assertEquals("V015", history.get(14).get("version"));
+        assertEquals("V016", history.get(15).get("version"));
         String checksum = String.valueOf(history.get(0).get("checksum"));
         assertTrue(checksum.matches("[a-f0-9]{64}"));
 
         pg.migrate();
-        assertEquals(14, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(16, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
 
         jdbc.update("UPDATE platform.schema_history SET checksum='deadbeef' WHERE version='V001'");
         MigrationException ex = assertThrows(MigrationException.class, pg::migrate);
@@ -196,12 +200,13 @@ class MigrationIntegrationTest {
 
         // 10. Assert restart is idempotent and does not alter data
         pg.migrate();
-        assertEquals(14, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(16, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
 
-        // 11. V001→V014 upgrade must materialize Sensor/Agent Control/Capability Pack,
+        // 11. V001→V016 combined upgrade must materialize Sensor/Agent Control/Capability Pack,
         // replay-reservation, publisher-lease, entity management-endpoint, enrollment-authority,
-        // BUILD-004 control-generation safety and Sensor control desired-state schema
+        // BUILD-004 control-generation safety, Sensor control desired-state, inert poll-grant ledger,
+        // and IAM identity/permission-grant directory tables.
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V004'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
@@ -225,8 +230,26 @@ class MigrationIntegrationTest {
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V014'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V015'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='platform' AND table_name='sensor_control_state'",
                 Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='platform' AND table_name='sensor_poll_grant'",
+                Integer.class));
+        Integer iamTables = jdbc.queryForObject(
+                """
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema='platform'
+                  AND table_name IN (
+                    'identity_provider_instance','platform_subject','identity_mapping',
+                    'subject_tenant_scope','permission_grant','permission_grant_resource')
+                """,
+                Integer.class
+        );
+        assertEquals(6, iamTables);
         Integer sensorControlTables = jdbc.queryForObject(
                 """
                 SELECT COUNT(*) FROM information_schema.tables
@@ -506,6 +529,8 @@ class MigrationIntegrationTest {
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V013'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V014'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V015'", Integer.class));
         assertEquals("uuid", jdbc.queryForObject("""
                 SELECT data_type FROM information_schema.columns
                  WHERE table_schema='platform' AND table_name='tenant' AND column_name='tenant_id'
@@ -779,6 +804,511 @@ class MigrationIntegrationTest {
                         '018f0e0a-0000-7000-8000-000000000012'::uuid,
                         '018f0e0a-0000-7000-8000-000000000041'::uuid,NOW())
                 """));
+    }
+
+    @Test
+    void v015InertPollGrantSchemaPreservesLegacyPendingAndEnforcesAuthority() {
+        JdbcTemplate jdbc = pg.jdbc();
+
+        pg.runner(catalogThroughVersion("V014")).applyPendingMigrations();
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V014'", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V015'", Integer.class));
+        assertEquals(0, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.tables
+                 WHERE table_schema='platform' AND table_name='sensor_poll_grant'
+                """, Integer.class));
+
+        UUID tenantA = UUID.fromString("018f0e0a-0000-7000-8000-0000000000a1");
+        UUID tenantB = UUID.fromString("018f0e0a-0000-7000-8000-0000000000b1");
+        UUID publisherOwner = UUID.fromString("018f0e0a-0000-7000-8000-0000000000c1");
+        String claimedSensorId = "sensor-claimed-legacy";
+        String orphanSensorId = "sensor-orphan-legacy-no-principal";
+        String claimedChecksum = "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899";
+        String orphanChecksum = "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff";
+        String claimedStream = "stream-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        String orphanStream = "stream-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+        jdbc.update("""
+                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                VALUES (?::uuid, 'Grant Tenant A', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW()),
+                       (?::uuid, 'Grant Tenant B', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
+                """, tenantA, tenantB);
+        jdbc.update("""
+                INSERT INTO platform.sensor (
+                    sensor_id, tenant_id, site_id, role, status, allow_all_tenant_entities,
+                    created_at, updated_at)
+                VALUES (?, ?::uuid, NULL, 'NETWORK', 'ACTIVE', FALSE, NOW(), NOW())
+                """, claimedSensorId, tenantA);
+
+        // Claimed PENDING with full publisher lease under a real Sensor principal.
+        jdbc.update("""
+                INSERT INTO platform.sensor_telemetry_watermark (
+                    tenant_id, sensor_id, acked_through_sequence, last_first_sequence, last_last_sequence,
+                    last_checksum, last_batch_id, updated_at, stream_id,
+                    pending_first_sequence, pending_last_sequence, pending_checksum, pending_batch_id,
+                    pending_reserved_at, pending_publisher_owner, pending_publisher_epoch,
+                    pending_publisher_claimed_at, pending_publisher_lease_until)
+                VALUES (?::uuid, ?, 10, 1, 10, 'legacy-acked-checksum', 'acked-batch',
+                        '2026-10-01 12:00:00+00'::timestamptz, ?,
+                        11, 20, ?, 'pending-batch-claimed',
+                        '2026-10-01 12:05:00+00'::timestamptz, ?::uuid, 7,
+                        '2026-10-01 12:05:00+00'::timestamptz, '2026-10-01 12:10:00+00'::timestamptz)
+                """, tenantA, claimedSensorId, claimedStream, claimedChecksum, publisherOwner);
+
+        // Valid legacy watermark WITHOUT a Sensor principal (sensor_id width/FK not retrofitted).
+        jdbc.update("""
+                INSERT INTO platform.sensor_telemetry_watermark (
+                    tenant_id, sensor_id, acked_through_sequence, last_first_sequence, last_last_sequence,
+                    last_checksum, last_batch_id, updated_at, stream_id,
+                    pending_first_sequence, pending_last_sequence, pending_checksum, pending_batch_id,
+                    pending_reserved_at, pending_publisher_owner, pending_publisher_epoch,
+                    pending_publisher_claimed_at, pending_publisher_lease_until)
+                VALUES (?::uuid, ?, 0, 0, 0, 'orphan-acked-checksum', NULL,
+                        '2026-10-01 11:00:00+00'::timestamptz, ?,
+                        1, 5, ?, 'pending-batch-orphan',
+                        '2026-10-01 11:01:00+00'::timestamptz, NULL, 0,
+                        NULL, NULL)
+                """, tenantA, orphanSensorId, orphanStream, orphanChecksum);
+
+        Map<String, Object> claimedBefore = jdbc.queryForMap("""
+                SELECT * FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, claimedSensorId);
+        Map<String, Object> orphanBefore = jdbc.queryForMap("""
+                SELECT * FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, orphanSensorId);
+
+        // Pre-V016 checkpoint: apply through V015 only (fifteen history rows) before IAM V016.
+        pg.runner(catalogThroughVersion("V015")).applyPendingMigrations();
+
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V015'", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
+        assertEquals(15, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.tables
+                 WHERE table_schema='platform' AND table_name='sensor_poll_grant'
+                """, Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class),
+                "V015 must seed zero operational grants");
+
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='sensor_telemetry_watermark'
+                   AND column_name='pending_authorization_digest'
+                """, Integer.class));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='sensor_telemetry_watermark'
+                   AND column_name='pending_authorization_version'
+                """, Integer.class));
+        assertEquals("character varying", jdbc.queryForObject("""
+                SELECT data_type FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='sensor_telemetry_watermark'
+                   AND column_name='sensor_id'
+                """, String.class));
+        assertEquals(255, jdbc.queryForObject("""
+                SELECT character_maximum_length FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='sensor_telemetry_watermark'
+                   AND column_name='sensor_id'
+                """, Integer.class));
+
+        Map<String, Object> claimedAfter = jdbc.queryForMap("""
+                SELECT * FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, claimedSensorId);
+        Map<String, Object> orphanAfter = jdbc.queryForMap("""
+                SELECT * FROM platform.sensor_telemetry_watermark
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, orphanSensorId);
+
+        assertLegacyWatermarkConserved(claimedBefore, claimedAfter);
+        assertLegacyWatermarkConserved(orphanBefore, orphanAfter);
+        assertNull(claimedAfter.get("pending_authorization_digest"));
+        assertNull(claimedAfter.get("pending_authorization_version"));
+        assertNull(orphanAfter.get("pending_authorization_digest"));
+        assertNull(orphanAfter.get("pending_authorization_version"));
+
+        // Authorization pair: NULL/NULL remains valid; inconsistent/malformed rejected.
+        jdbc.update("""
+                UPDATE platform.sensor_telemetry_watermark
+                   SET pending_authorization_digest = NULL,
+                       pending_authorization_version = NULL
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, claimedSensorId);
+        Exception authDigestOnly = assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_telemetry_watermark
+                   SET pending_authorization_digest = ?,
+                       pending_authorization_version = NULL
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, claimedChecksum, tenantA, claimedSensorId));
+        assertConstraintViolation(authDigestOnly, "chk_sensor_telemetry_pending_authorization_pair");
+        Exception authVersionOnly = assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_telemetry_watermark
+                   SET pending_authorization_digest = NULL,
+                       pending_authorization_version = 1
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, claimedSensorId));
+        assertConstraintViolation(authVersionOnly, "chk_sensor_telemetry_pending_authorization_pair");
+        Exception authMalformedDigest = assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_telemetry_watermark
+                   SET pending_authorization_digest = 'not-a-hex-digest',
+                       pending_authorization_version = 1
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, claimedSensorId));
+        assertConstraintViolation(authMalformedDigest, "chk_sensor_telemetry_pending_authorization_pair");
+        jdbc.update("""
+                UPDATE platform.sensor_telemetry_watermark
+                   SET pending_authorization_digest = ?,
+                       pending_authorization_version = 1
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, claimedChecksum, tenantA, claimedSensorId);
+        jdbc.update("""
+                UPDATE platform.sensor_telemetry_watermark
+                   SET pending_authorization_digest = NULL,
+                       pending_authorization_version = NULL
+                 WHERE tenant_id = ?::uuid AND sensor_id = ?
+                """, tenantA, claimedSensorId);
+
+        UUID entityA1 = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e1");
+        UUID entityA2 = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e2");
+        UUID entityB1 = UUID.fromString("018f0e0a-0000-7000-8000-0000000000e3");
+        UUID endpointA1 = UUID.fromString("018f0e0a-0000-7000-8000-0000000000f1");
+        UUID endpointA2 = UUID.fromString("018f0e0a-0000-7000-8000-0000000000f2");
+        UUID endpointB1 = UUID.fromString("018f0e0a-0000-7000-8000-0000000000f3");
+        UUID grantId = UUID.fromString("018f0e0a-0000-7000-8000-000000000101");
+
+        jdbc.update("""
+                INSERT INTO platform.entity (
+                    entity_id, tenant_id, entity_type, display_name, description, discovered_name,
+                    lifecycle_state, site_id, criticality, owner_team_id, device_pack_id, device_pack_version,
+                    first_seen_at, last_seen_at, created_by, created_at, updated_at)
+                VALUES
+                (?::uuid, ?::uuid, 'NETWORK_DEVICE', 'A1', NULL, NULL, 'ACTIVE', NULL, NULL, NULL, NULL, NULL,
+                 NOW(), NOW(), 'test', NOW(), NOW()),
+                (?::uuid, ?::uuid, 'NETWORK_DEVICE', 'A2', NULL, NULL, 'ACTIVE', NULL, NULL, NULL, NULL, NULL,
+                 NOW(), NOW(), 'test', NOW(), NOW()),
+                (?::uuid, ?::uuid, 'NETWORK_DEVICE', 'B1', NULL, NULL, 'ACTIVE', NULL, NULL, NULL, NULL, NULL,
+                 NOW(), NOW(), 'test', NOW(), NOW())
+                """, entityA1, tenantA, entityA2, tenantA, entityB1, tenantB);
+        jdbc.update("""
+                INSERT INTO platform.sensor (
+                    sensor_id, tenant_id, site_id, role, status, allow_all_tenant_entities,
+                    created_at, updated_at)
+                VALUES ('sensor-b', ?::uuid, NULL, 'NETWORK', 'ACTIVE', FALSE, NOW(), NOW())
+                """, tenantB);
+        jdbc.update("""
+                INSERT INTO platform.entity_management_endpoint (
+                    endpoint_id, tenant_id, entity_id, address_type, address, state, source,
+                    is_primary, created_by, created_at, updated_by, updated_at)
+                VALUES
+                (?::uuid, ?::uuid, ?::uuid, 'IPV4', '10.0.0.10', 'ACTIVE', 'MANUAL', TRUE,
+                 'test', NOW(), 'test', NOW()),
+                (?::uuid, ?::uuid, ?::uuid, 'IPV4', '10.0.0.11', 'ACTIVE', 'MANUAL', TRUE,
+                 'test', NOW(), 'test', NOW()),
+                (?::uuid, ?::uuid, ?::uuid, 'IPV4', '10.0.1.10', 'ACTIVE', 'MANUAL', TRUE,
+                 'test', NOW(), 'test', NOW())
+                """, endpointA1, tenantA, entityA1,
+                endpointA2, tenantA, entityA2,
+                endpointB1, tenantB, entityB1);
+
+        jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address,
+                    profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by,
+                    status, revoked_at, revoked_by, revocation_class, revocation_reason, updated_at)
+                VALUES (
+                    ?::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
+                    1, 3, 'ICMP',
+                    'IPV4', '10.0.0.10',
+                    'profile.plan.icmp.default', '1.0.0',
+                    '2026-10-17 10:00:00+00'::timestamptz,
+                    '2026-10-17 09:00:00+00'::timestamptz,
+                    '2026-10-17 11:00:00+00'::timestamptz,
+                    'core-issuer-test',
+                    'ISSUED', NULL, NULL, NULL, NULL, NOW())
+                """, grantId, tenantA, claimedSensorId, entityA1, endpointA1);
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
+
+        Exception crossTenantSensor = assertThrows(Exception.class, () -> jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address,
+                    profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by,
+                    status, updated_at)
+                VALUES (
+                    '018f0e0a-0000-7000-8000-000000000102'::uuid, ?::uuid, 'sensor-b', ?::uuid, ?::uuid,
+                    1, 1, 'ICMP', 'IPV4', '10.0.0.10', 'p', '1',
+                    '2026-10-17 10:00:00+00'::timestamptz,
+                    '2026-10-17 09:00:00+00'::timestamptz,
+                    '2026-10-17 11:00:00+00'::timestamptz,
+                    't', 'ISSUED', NOW())
+                """, tenantA, entityA1, endpointA1));
+        assertConstraintViolation(crossTenantSensor, "fk_spg_sensor_same_tenant");
+
+        Exception crossTenantEntity = assertThrows(Exception.class, () -> jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address,
+                    profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by,
+                    status, updated_at)
+                VALUES (
+                    '018f0e0a-0000-7000-8000-000000000103'::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
+                    1, 1, 'ICMP', 'IPV4', '10.0.0.10', 'p', '1',
+                    '2026-10-17 10:00:00+00'::timestamptz,
+                    '2026-10-17 09:00:00+00'::timestamptz,
+                    '2026-10-17 11:00:00+00'::timestamptz,
+                    't', 'ISSUED', NOW())
+                """, tenantA, claimedSensorId, entityB1, endpointA1));
+        assertConstraintViolation(crossTenantEntity, "fk_spg_entity_same_tenant");
+
+        Exception wrongEntityEndpoint = assertThrows(Exception.class, () -> jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address,
+                    profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by,
+                    status, updated_at)
+                VALUES (
+                    '018f0e0a-0000-7000-8000-000000000104'::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
+                    1, 1, 'ICMP', 'IPV4', '10.0.0.10', 'p', '1',
+                    '2026-10-17 10:00:00+00'::timestamptz,
+                    '2026-10-17 09:00:00+00'::timestamptz,
+                    '2026-10-17 11:00:00+00'::timestamptz,
+                    't', 'ISSUED', NOW())
+                """, tenantA, claimedSensorId, entityA1, endpointA2));
+        assertConstraintViolation(wrongEntityEndpoint, "fk_spg_endpoint_same_tenant_entity");
+
+        Exception crossTenantEndpoint = assertThrows(Exception.class, () -> jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address,
+                    profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by,
+                    status, updated_at)
+                VALUES (
+                    '018f0e0a-0000-7000-8000-000000000105'::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
+                    1, 1, 'ICMP', 'IPV4', '10.0.0.10', 'p', '1',
+                    '2026-10-17 10:00:00+00'::timestamptz,
+                    '2026-10-17 09:00:00+00'::timestamptz,
+                    '2026-10-17 11:00:00+00'::timestamptz,
+                    't', 'ISSUED', NOW())
+                """, tenantA, claimedSensorId, entityA1, endpointB1));
+        assertConstraintViolation(crossTenantEndpoint, "fk_spg_endpoint_same_tenant_entity");
+
+        Exception immutableIssued = assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_poll_grant
+                   SET issued_address = '10.9.9.9'
+                 WHERE grant_id = ?::uuid
+                """, grantId));
+        assertConstraintViolation(immutableIssued, "trg_spg_protect_issued");
+
+        Exception immutableWindow = assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_poll_grant
+                   SET window_end = '2026-10-17 12:00:00+00'::timestamptz
+                 WHERE grant_id = ?::uuid
+                """, grantId));
+        assertConstraintViolation(immutableWindow, "trg_spg_protect_issued");
+
+        jdbc.update("""
+                UPDATE platform.sensor_poll_grant
+                   SET status = 'REVOKED',
+                       revoked_at = '2026-10-17 10:30:00+00'::timestamptz,
+                       revoked_by = 'security-officer',
+                       revocation_class = 'SECURITY',
+                       revocation_reason = 'credential-compromised',
+                       updated_at = NOW()
+                 WHERE grant_id = ?::uuid
+                """, grantId);
+        Map<String, Object> revoked = jdbc.queryForMap("""
+                SELECT status, issued_address, revocation_class, revoked_by,
+                       revoked_at, revocation_reason, updated_at
+                  FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid
+                """, grantId);
+        assertEquals("REVOKED", revoked.get("status"));
+        assertEquals("10.0.0.10", revoked.get("issued_address"));
+        assertEquals("SECURITY", revoked.get("revocation_class"));
+        assertEquals("security-officer", revoked.get("revoked_by"));
+        assertEquals("credential-compromised", revoked.get("revocation_reason"));
+        assertNotNull(revoked.get("revoked_at"));
+
+        // REVOKED -> ISSUED with all revocation fields cleared must be rejected.
+        Exception revokedToIssued = assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_poll_grant
+                   SET status = 'ISSUED',
+                       revoked_at = NULL,
+                       revoked_by = NULL,
+                       revocation_class = NULL,
+                       revocation_reason = NULL,
+                       updated_at = NOW()
+                 WHERE grant_id = ?::uuid
+                """, grantId));
+        assertConstraintViolation(revokedToIssued, "terminal status cannot reactivate");
+        Map<String, Object> revokedAfterRejectedReissue = jdbc.queryForMap("""
+                SELECT status, issued_address, revocation_class, revoked_by,
+                       revoked_at, revocation_reason, updated_at
+                  FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid
+                """, grantId);
+        assertEquals(revoked.get("status"), revokedAfterRejectedReissue.get("status"));
+        assertEquals(revoked.get("issued_address"), revokedAfterRejectedReissue.get("issued_address"));
+        assertEquals(revoked.get("revocation_class"), revokedAfterRejectedReissue.get("revocation_class"));
+        assertEquals(revoked.get("revoked_by"), revokedAfterRejectedReissue.get("revoked_by"));
+        assertEquals(revoked.get("revocation_reason"), revokedAfterRejectedReissue.get("revocation_reason"));
+        assertEquals(String.valueOf(revoked.get("revoked_at")),
+                String.valueOf(revokedAfterRejectedReissue.get("revoked_at")));
+        assertEquals(String.valueOf(revoked.get("updated_at")),
+                String.valueOf(revokedAfterRejectedReissue.get("updated_at")));
+
+        UUID supersededGrantId = UUID.fromString("018f0e0a-0000-7000-8000-000000000106");
+        jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address,
+                    profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by,
+                    status, revoked_at, revoked_by, revocation_class, revocation_reason, updated_at)
+                VALUES (
+                    ?::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
+                    2, 3, 'SNMP',
+                    'IPV4', '10.0.0.10',
+                    'profile.plan.snmp.default', '1.0.0',
+                    '2026-10-17 10:00:00+00'::timestamptz,
+                    '2026-10-17 09:00:00+00'::timestamptz,
+                    '2026-10-17 11:00:00+00'::timestamptz,
+                    'core-issuer-test',
+                    'ISSUED', NULL, NULL, NULL, NULL, NOW())
+                """, supersededGrantId, tenantA, claimedSensorId, entityA1, endpointA1);
+
+        // ISSUED -> SUPERSEDED positive control.
+        jdbc.update("""
+                UPDATE platform.sensor_poll_grant
+                   SET status = 'SUPERSEDED',
+                       revoked_at = '2026-10-17 10:45:00+00'::timestamptz,
+                       revoked_by = 'grant-rotator',
+                       revocation_class = 'SUPERSEDED',
+                       revocation_reason = 'replaced-by-newer-generation',
+                       updated_at = NOW()
+                 WHERE grant_id = ?::uuid
+                """, supersededGrantId);
+        Map<String, Object> superseded = jdbc.queryForMap("""
+                SELECT status, issued_address, revocation_class, revoked_by,
+                       revoked_at, revocation_reason, updated_at
+                  FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid
+                """, supersededGrantId);
+        assertEquals("SUPERSEDED", superseded.get("status"));
+        assertEquals("10.0.0.10", superseded.get("issued_address"));
+        assertEquals("SUPERSEDED", superseded.get("revocation_class"));
+        assertEquals("grant-rotator", superseded.get("revoked_by"));
+        assertEquals("replaced-by-newer-generation", superseded.get("revocation_reason"));
+        assertNotNull(superseded.get("revoked_at"));
+
+        // SUPERSEDED -> ISSUED with all revocation fields cleared must be rejected.
+        Exception supersededToIssued = assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_poll_grant
+                   SET status = 'ISSUED',
+                       revoked_at = NULL,
+                       revoked_by = NULL,
+                       revocation_class = NULL,
+                       revocation_reason = NULL,
+                       updated_at = NOW()
+                 WHERE grant_id = ?::uuid
+                """, supersededGrantId));
+        assertConstraintViolation(supersededToIssued, "terminal status cannot reactivate");
+        Map<String, Object> supersededAfterRejectedReissue = jdbc.queryForMap("""
+                SELECT status, issued_address, revocation_class, revoked_by,
+                       revoked_at, revocation_reason, updated_at
+                  FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid
+                """, supersededGrantId);
+        assertEquals(superseded.get("status"), supersededAfterRejectedReissue.get("status"));
+        assertEquals(superseded.get("issued_address"), supersededAfterRejectedReissue.get("issued_address"));
+        assertEquals(superseded.get("revocation_class"), supersededAfterRejectedReissue.get("revocation_class"));
+        assertEquals(superseded.get("revoked_by"), supersededAfterRejectedReissue.get("revoked_by"));
+        assertEquals(superseded.get("revocation_reason"), supersededAfterRejectedReissue.get("revocation_reason"));
+        assertEquals(String.valueOf(superseded.get("revoked_at")),
+                String.valueOf(supersededAfterRejectedReissue.get("revoked_at")));
+        assertEquals(String.valueOf(superseded.get("updated_at")),
+                String.valueOf(supersededAfterRejectedReissue.get("updated_at")));
+
+        jdbc.update("""
+                UPDATE platform.entity_management_endpoint
+                   SET address = '10.0.0.99', updated_at = NOW(), updated_by = 'editor'
+                 WHERE endpoint_id = ?::uuid
+                """, endpointA1);
+        assertEquals("10.0.0.10", jdbc.queryForObject("""
+                SELECT issued_address FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid
+                """, String.class, grantId));
+        assertEquals("10.0.0.99", jdbc.queryForObject("""
+                SELECT address FROM platform.entity_management_endpoint WHERE endpoint_id = ?::uuid
+                """, String.class, endpointA1));
+
+        // Full catalogue migrate advances the V015 checkpoint through IAM V016.
+        pg.migrate();
+        assertEquals(16, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
+        assertEquals(2, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
+    }
+
+    private static void assertLegacyWatermarkConserved(Map<String, Object> before, Map<String, Object> after) {
+        assertEquals(before.get("acked_through_sequence"), after.get("acked_through_sequence"));
+        assertEquals(before.get("last_first_sequence"), after.get("last_first_sequence"));
+        assertEquals(before.get("last_last_sequence"), after.get("last_last_sequence"));
+        assertEquals(before.get("last_checksum"), after.get("last_checksum"));
+        assertEquals(before.get("last_batch_id"), after.get("last_batch_id"));
+        assertEquals(String.valueOf(before.get("updated_at")), String.valueOf(after.get("updated_at")));
+        assertEquals(before.get("stream_id"), after.get("stream_id"));
+        assertEquals(before.get("pending_first_sequence"), after.get("pending_first_sequence"));
+        assertEquals(before.get("pending_last_sequence"), after.get("pending_last_sequence"));
+        assertEquals(before.get("pending_checksum"), after.get("pending_checksum"));
+        assertEquals(before.get("pending_batch_id"), after.get("pending_batch_id"));
+        assertEquals(String.valueOf(before.get("pending_reserved_at")),
+                String.valueOf(after.get("pending_reserved_at")));
+        assertEquals(before.get("pending_publisher_owner") == null ? null
+                        : String.valueOf(before.get("pending_publisher_owner")),
+                after.get("pending_publisher_owner") == null ? null
+                        : String.valueOf(after.get("pending_publisher_owner")));
+        assertEquals(before.get("pending_publisher_epoch"), after.get("pending_publisher_epoch"));
+        assertEquals(String.valueOf(before.get("pending_publisher_claimed_at")),
+                String.valueOf(after.get("pending_publisher_claimed_at")));
+        assertEquals(String.valueOf(before.get("pending_publisher_lease_until")),
+                String.valueOf(after.get("pending_publisher_lease_until")));
+    }
+
+    private static void assertConstraintViolation(Throwable error, String constraintName) {
+        String message = flattenThrowableMessage(error);
+        assertTrue(message.contains(constraintName),
+                () -> "Expected constraint '" + constraintName + "' in failure, got: " + message);
+    }
+
+    private static String flattenThrowableMessage(Throwable error) {
+        StringBuilder sb = new StringBuilder();
+        Throwable cursor = error;
+        while (cursor != null) {
+            if (cursor.getMessage() != null) {
+                sb.append(cursor.getMessage()).append('\n');
+            }
+            cursor = cursor.getCause();
+        }
+        return sb.toString();
     }
 
     private static MigrationCatalog catalogThroughVersion(String maxInclusiveVersion) {
