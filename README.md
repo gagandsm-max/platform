@@ -101,7 +101,7 @@ Platform services bind exclusively to `127.0.0.1` in the `20000–29999` range:
 ## 5. Developer Quickstart
 
 ### Prerequisites
-- Docker Engine 24+ with Compose v2+
+- Docker Engine 24+; guarded Kafka launch/merge semantics validated with Compose 5.5.0
 - `make` utility
 - `openssl` (for TLS dev certificates)
 
@@ -117,6 +117,27 @@ make dev-build
 ```
 
 ### Step 3: Start Services
+
+Kafka guarded storage is an explicit opt-in overlay. Default `compose.yaml` keeps
+the legacy Kafka configuration unchanged; it does not provide persistent-storage
+certification. Governed launches fail closed for legacy or unknown installations
+before Compose can recreate the broker. Follow the
+[cold migration and cutover runbook](deploy/docker/kafka/STORAGE_MIGRATION.md)
+for existing state; never remove the original container to inspect it.
+
+For a deliberately new deployment, retain the unique volume, actual cluster UUID
+and storage identity in `.env`, and select
+`COMPOSE_FILE=compose.yaml:compose.kafka-guarded.yaml`. Follow the runbook's fresh
+provisioning procedure, including explicit shell authorization, before startup:
+
+```bash
+PLATFORM_KAFKA_NEW_VOLUME_CONFIRM=<retained-new-storage-identity> make kafka-provision-fresh
+```
+
+Ordinary startup never provisions or reformats Kafka. Makefile, integration,
+Agent E2E and stress launch paths use the same host preflight. Do not bypass it
+with direct `docker compose up` against the guarded overlay.
+
 ```bash
 make dev-up
 ```
@@ -182,7 +203,9 @@ make test
 
 ## 7. Reboot Safety & Data Persistence
 
-All stateful dev services (`postgres`, `clickhouse`, `kafka`, `valkey`, `sensor-net`, `sensor-infra`) use:
+Stateful dev services use the resources below. Kafka's legacy default mount does
+not contain its effective broker logs: persistent Kafka startup requires the
+explicit guarded overlay and verified fresh provisioning or cold migration.
 1. **Named Persistent Docker Volumes:**
    - `platform_pg_data`
    - `platform_ch_data`

@@ -10,7 +10,16 @@ export type ScreenDataState =
   | 'monitoring-degraded'
   | 'normal';
 
-export type PageStateKind = ScreenDataState | 'not-found';
+/**
+ * Page presentation kinds include Platform_09 §3.2 screen states plus
+ * health-overview semantic states (source unavailable / unknown) that must
+ * remain distinct from DEVICE_DOWN.
+ */
+export type PageStateKind =
+  | ScreenDataState
+  | 'not-found'
+  | 'source-unavailable'
+  | 'unknown';
 
 export const REQUIRED_SCREEN_STATES: readonly ScreenDataState[] = [
   'loading',
@@ -37,7 +46,16 @@ export const SCREEN_STATE_LABELS: Readonly<Record<PageStateKind, string>> = {
   'monitoring-degraded': 'Monitoring Degraded',
   normal: 'Normal',
   'not-found': 'Not Found',
+  'source-unavailable': 'Source Unavailable',
+  unknown: 'Unknown',
 };
+
+/**
+ * Page states that interrupt with assertive live regions.
+ * Static unbound `source-unavailable` preview must remain polite/status.
+ */
+export const isAssertivePageState = (kind: PageStateKind): boolean =>
+  kind === 'error' || kind === 'monitoring-degraded';
 
 export interface ScreenStateModel {
   kind: PageStateKind;
