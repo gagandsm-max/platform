@@ -1805,10 +1805,15 @@ func TestConcurrentRunOnceSingleFlightWhileOutstanding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); s.RunOnce(context.Background()) }()
-	go func() { defer wg.Done(); s.RunOnce(context.Background()) }()
+	// Launch both RunOnce ops concurrently, but do not release the held
+	// collector until both have finished their admission attempts. admitExecution
+	// rechecks outstanding/inFlight after semaphore acquisition; once Collect
+	// returns, those flags clear, so a late second admit is valid sequential
+	// execution (calls=2) and does not prove overlapping single-flight failure.
+	firstDone := make(chan struct{})
+	secondDone := make(chan struct{})
+	go func() { defer close(firstDone); s.RunOnce(context.Background()) }()
+	go func() { defer close(secondDone); s.RunOnce(context.Background()) }()
 
 	select {
 	case <-started:
@@ -1831,8 +1836,23 @@ func TestConcurrentRunOnceSingleFlightWhileOutstanding(t *testing.T) {
 		t.Fatalf("collector call count must stay 1 while outstanding, got %d", got)
 	}
 
+	// Barrier: while Collect remains held (outstanding stays true), both RunOnce
+	// ops must complete. The non-holder is skipped at the post-semaphore recheck.
+	select {
+	case <-secondDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second RunOnce did not finish while first remained outstanding")
+	}
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("holder RunOnce did not finish while collector remained outstanding")
+	}
+	if got := col.calls.Load(); got != 1 {
+		t.Fatalf("second RunOnce must be skipped while outstanding, calls=%d", got)
+	}
+
 	close(release)
-	wg.Wait()
 	if got := col.calls.Load(); got != 1 {
 		t.Fatalf("collector execution multiplied after release, calls=%d", got)
 	}

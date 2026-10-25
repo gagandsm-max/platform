@@ -19,7 +19,9 @@ mkdir -p "${EVIDENCE_DIR}" "${ARTIFACT_DIR}" 2>/dev/null || {
     mkdir -p "${ARTIFACT_DIR}"
 }
 
-COMPOSE=(docker compose --env-file .env -f compose.yaml -f "${E2E_DIR}/compose.override.yaml")
+COMPOSE=(docker compose --env-file .env -f compose.yaml -f compose.kafka-guarded.yaml -f "${E2E_DIR}/compose.override.yaml")
+# Validate this exact requested overlay before test resets/certs or Compose mutation.
+bash deploy/docker/kafka/deployment-preflight.sh check "${COMPOSE[@]:2}"
 TENANT="018f0e0a-0000-7000-8000-000000000001"
 FORGED_TENANT="018f0e0a-0000-7000-8000-000000000099"
 AGENT_ID="agent-e2e-01"
@@ -212,6 +214,7 @@ bash "${E2E_DIR}/generate-certs.sh"
 reset_test_volumes
 
 log "==> starting infrastructure with test-only Agent Receiver overlay"
+bash deploy/docker/kafka/deployment-preflight.sh check "${COMPOSE[@]:2}"
 "${COMPOSE[@]}" up -d postgres clickhouse kafka valkey core
 if ! wait_healthy platform-core 90; then
     fail_closed "infra-core-healthy" "platform-core did not become healthy"

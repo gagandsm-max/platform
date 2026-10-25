@@ -1,5 +1,5 @@
 import React from 'react';
-import { PageStateKind, SCREEN_STATE_LABELS } from '../platform/screen-state';
+import { isAssertivePageState, PageStateKind, SCREEN_STATE_LABELS } from '../platform/screen-state';
 
 interface PageStateProps {
   kind: PageStateKind;
@@ -28,7 +28,7 @@ export const PageState: React.FC<PageStateProps> = ({
   diagnosticLabel,
   onDiagnostic,
 }) => {
-  const urgent = kind === 'error' || kind === 'monitoring-degraded';
+  const urgent = isAssertivePageState(kind);
   const hasActions = Boolean((actionLabel && onAction) || (diagnosticLabel && onDiagnostic));
 
   return (

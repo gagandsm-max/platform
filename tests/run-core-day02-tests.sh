@@ -10,6 +10,15 @@ echo "========================================================================"
 LOG_FILE=$(mktemp /tmp/day02-pg-tests-XXXXXX.log)
 trap 'rm -f "${LOG_FILE}"' EXIT
 
+# Build a CI-only tool image from immutable inputs instead of fetching Alpine
+# packages during every test execution. Keep the existing Maven/Java base bytes.
+DAY02_IMAGE="platform-day02-postgres:$(git -C "${ROOT_DIR}" rev-parse HEAD)"
+docker build --progress=plain \
+  --file "${ROOT_DIR}/tests/ci/core-postgres.Dockerfile" \
+  --build-arg MAVEN_IMAGE=maven:3.9.9-eclipse-temurin-21-alpine@sha256:5a8b906c4faa11d33f6c74758f67db8eac25441e14b0729f6d50ff78992be58a \
+  --tag "${DAY02_IMAGE}" "${ROOT_DIR}/tests/ci"
+echo "Day-02 harness image: $(docker image inspect --format '{{.Id}}' "${DAY02_IMAGE}")"
+
 # Maven in this image runs as uid 0. A RW host bind of core/ would write
 # core/target as root onto persistent self-hosted CI workspaces and break
 # the next job's `git clean -ffdx`. Copy source into a container-local tree
@@ -21,8 +30,15 @@ docker run --rm \
   -v "${ROOT_DIR}/core:/src:ro" \
   -v platform-day02-maven-repo:/root/.m2 \
   --network host \
-  maven:3.9.9-eclipse-temurin-21-alpine \
-  sh -c 'apk add --no-cache docker-cli >/dev/null && cp -r /src /build && rm -rf /build/target && cd /build && mvn -B -Dgroups=postgres -DfailIfNoSpecifiedTests=true test' | tee "${LOG_FILE}"
+  "${DAY02_IMAGE}" \
+  sh -ec '
+    echo "Day-02 harness architecture: $(uname -m)"
+    docker --version
+    test -S /var/run/docker.sock
+    export DOCKER_HOST=unix:///var/run/docker.sock
+    docker version --format "Docker client={{.Client.Version}} ({{.Client.Os}}/{{.Client.Arch}}) API={{.Client.APIVersion}}; server={{.Server.Version}} ({{.Server.Os}}/{{.Server.Arch}}) API={{.Server.APIVersion}}"
+    cp -r /src /build && rm -rf /build/target && cd /build && mvn -B -Dgroups=postgres -DfailIfNoSpecifiedTests=true test
+  ' | tee "${LOG_FILE}"
 
 SUMMARY_LINE=$(grep -E "Tests run: [0-9]+, Failures: [0-9]+, Errors: [0-9]+, Skipped: [0-9]+" "${LOG_FILE}" | tail -n 1 || true)
 
