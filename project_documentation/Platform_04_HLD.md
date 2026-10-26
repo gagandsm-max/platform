@@ -620,6 +620,13 @@ Graph Service materializes/query-optimizes views for:
 
 ---
 
+### 13.3 LLDP/CDP evidence and correlation subsystem boundaries
+
+Use existing Network Sensor SNMP/Device Pack adapters for bounded LLDP-MIB and CISCO-CDP-MIB reads; approved CLI/API evidence is an optional capability. Provisioning/Inventory owns tenant-scoped entity and interface candidate reconciliation, while the existing Graph Service owns temporal neighbor-adjacency history and independently qualified directed dependency edges. There is no standalone discovery graph or new graph database.
+
+Alert Qualification and Incident Correlation query incident-time graph snapshots and multiple-vantage, routing/path, maintenance, redundancy and source-health evidence. Notification/ITSM controls reversible fan-out suppression, preserving every authorized child alert. The existing RCA service applies versioned deterministic rule/fault-signature evaluation without requiring ML/LLM; Graph and correlation may return INCONCLUSIVE when the source graph is stale or contradictory.
+
+
 ## 14. RCA HLD
 
 ```mermaid
@@ -653,6 +660,11 @@ Examples of rule families:
 - credential failure affecting a protocol without device reachability loss.
 
 Rules must be versioned and explainable.
+
+### 14.1.1 Root-cause and child-symptom safety
+
+A neighbor advertisement cannot establish physical failure parentage by itself. Before grouping a downstream cascade, require compatible time order, verified directional dependency, corroborated parent fault and a negative check for healthy alternate paths or independent child failures. Suppression never rewrites actual device status, historical evidence or SLA accounting. Parent recovery with persistent child faults lifts suppression. Missing neighbor data, monitoring-path failure and insufficient evidence retain UNKNOWN, UNREACHABLE, MONITORING_DEGRADED or INCONCLUSIVE as appropriate.
+
 
 ### 14.2 GNN layer
 

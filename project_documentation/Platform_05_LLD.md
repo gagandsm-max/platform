@@ -974,6 +974,15 @@ When a Capability Pack later declares a supported SNMP SET action, execution bel
 
 SET is never an implicit fallback of monitoring or discovery.
 
+### 12.10 LLDP/CDP neighbor fact collector — REQ-NET-007
+
+1. Validate enrolled tenant/device identity, authorized read-only SNMP credential, eligible Sensor and bounded execution assignment; do not default to community public or pivot to unapproved targets.
+2. Walk LLDP local/remote systems and Cisco cdpCacheTable with device-capability checks and row/byte/deadline/attempt limits; distinguish absent, disabled, unsupported, partial, stale and permission-denied results.
+3. Normalize immutable per-row facts with tenant, reporting Sensor/vantage, local canonical device/interface, raw LLDP chassis/port ID+subtype or CDP Device-ID/Port-ID/cdpCacheIfIndex, optional neighbor capabilities/address, observed/received time, TTL/freshness, evidence fingerprint, protocol and quality. Advertised identity is a claim.
+4. Reconcile local LLDP port IDs or CDP interface indices through canonical port identity/ifName/ifAlias/MAC/physical slot rules; never persist ifIndex as permanent identity. Bind remote identity only after tenant-scoped corroboration.
+5. Store source facts and derived **L2 adjacency** in the existing temporal graph; create directional upstream/dependent relationships only with independent routing/path/service/topology evidence. Keep one-sided/conflicting/expired facts for as-of investigation and conflict review; missing neighbor data is not a LINK_DOWN signal.
+6. Test mixed-vendor LLDP+CDP, one-sided and stale observations, conflicting neighbors, port renumber, LAG/STP/ECMP, unauthorized identity, bounded walks, replay, graph revisions and false parent inference.
+
 ---
 
 ## 13. ICMP/traceroute LLD
@@ -1257,6 +1266,12 @@ On qualified alert, retrieve events/alerts in configured temporal window and gra
 
 Attach child alert to incident, preserve original alert, update incident impact and trigger/retrigger RCA subject to debounce/cost policy.
 
+### 23.4 Topology incident grouping and downstream-notification gate
+
+On each qualified alert, select a governed event-time window and historical graph neighborhood with typed provenance, edge direction, freshness and redundancy. Deduplicate stable event/alert IDs independently of grouping. Compare a corroborated parent/link/path/device outage against ordered child UNREACHABLE symptoms, independent Sensor/path checks, maintenance and competing hypotheses. Do not infer a parent failure from LLDP/CDP adjacency alone, a Sensor-only outage or missing telemetry.
+
+If the hypothesis meets evidence/confidence policy with no blocking contradiction, attach original child alert IDs to one root incident and suppress only repeated child notification/ITSM fan-out. Persist reason, rule/version, graph snapshot, first/last occurrence, operator override, expiry and auditable reversible decision. Retain child event/alert/health/SLA states. On path redundancy, changed topology, parent recovery, independent child fault or new contrary evidence, recompute and unsuppress with revision. Otherwise return INCONCLUSIVE without fabricating a root alert.
+
 ---
 
 ## 24. RCA evidence model
@@ -1319,6 +1334,12 @@ High-level implementation stages:
 ### 25.1 No GNN-only truth
 
 A GNN score cannot override definitive protocol evidence such as authenticated device response proving the device is up, nor can it create nonexistent topology edges without provenance.
+
+### 25.2 Deterministic fault-signature and diagnostics evaluator
+
+Within BUILD-100, a versioned codebook maps candidate failures to required, supporting, contradictory and irrelevant symptoms. A bounded real-time vector assigns TRUE/FALSE/UNKNOWN based on quality-gated link, route, latency/loss, CPU, hardware and service evidence. UNKNOWN does not count as FALSE and missing data does not falsely improve ranking. Score with deterministic configured weights, explicit coverage, contradictions, time order and qualified graph applicability; the highest score alone cannot make a confirmed root cause.
+
+Complement codebook with static thresholds/hysteresis, expert if/then rules, attributed traps/syslogs, and a bounded diagnostic decision tree: local Sensor health and local gateway check, independent reachability, then authorized traceroute and target/protocol tests. A traceroute hop omitting ICMP replies does not by itself locate a fiber cut. Persist rejected alternatives, causal chain, evidence IDs, signature version and as-of graph revision in existing revisioned RCA output. Required negatives include redundant uplink survival, stale CDP, spurious traps, independent child failure, inconsistent codebook, unknown data, late events and persistent child failure after parent recovery.
 
 ---
 
@@ -2123,6 +2144,10 @@ RCA receives both evidence and quality. Confidence must decrease if evidence is 
 Relationship changes emit immutable `topology.observation` facts. Current relationship table represents latest valid state; ClickHouse/history stores intervals/facts so Graph Service can reconstruct `asOf` topology.
 
 Manual relationships are versioned/audited and never silently converted to discovered physical truth.
+
+### 54.1 Neighbor-adjacency and historical failure-dependency separation
+
+Immutable topology.observation records retain reporting Sensor/device, LLDP/CDP raw neighbor/port identifiers, time, quality and source reference. Reconciled current edges are projections; manual dependencies and conflicting observations must retain separate authority. As-of queries enforce valid-time intervals, identity mapping confidence and expiry. No absent advertisement can itself mark a link or target DOWN. Downstream-suppression reasoning uses only separately verified directionally dependent edges and preserves historical graph revisions.
 
 ---
 

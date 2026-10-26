@@ -1,0 +1,1167 @@
+package com.platform.core.ingestion.icmp;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.JsonNodeType;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.POJONode;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Deterministic contract tests for Issue #218 Slice A ICMP typed decoder.
+ * Fixtures mirror PR #217 {@code icmpintegration.Evidence} + {@code observation.Envelope}.
+ * Decoder remains NOT_WIRED to production ingestion.
+ */
+class IcmpObservationDecoderTest {
+
+    private static final String COLLECTED_AT = "2026-10-11T14:00:00Z";
+    private static final String STARTED_AT = "2026-10-11T13:59:59.900Z";
+    private static final String TENANT_ID = "11111111-1111-1111-1111-111111111111";
+    private static final String ENTITY_ID = "22222222-2222-2222-2222-222222222222";
+
+    private ObjectMapper objectMapper;
+    private IcmpObservationDecoder decoder;
+
+    @BeforeEach
+    void setUp() {
+        objectMapper = new ObjectMapper().findAndRegisterModules();
+        decoder = new IcmpObservationDecoder(objectMapper);
+    }
+
+    @Test
+    void decodesSourceFaithfulGoodIpv4Observation() throws Exception {
+        String json = goodIpv4EnvelopeJson();
+        IcmpObservationV1 obs = decoder.decode(json);
+
+        assertEquals(1, obs.schemaVersion());
+        assertEquals(IcmpObservationV1.RECORD_TYPE, obs.recordType());
+        assertEquals(IcmpObservationV1.PROTOCOL, obs.protocol());
+        assertEquals("ECHO", obs.operation());
+        assertEquals("COLLECTED", obs.status());
+        assertEquals(IcmpQuality.GOOD, obs.quality());
+        assertEquals(TENANT_ID, obs.tenantId());
+        assertEquals(ENTITY_ID, obs.entityId());
+        assertEquals("sensor-net-01", obs.sensorId());
+        assertEquals("icmp-job-1", obs.job().jobId());
+        assertEquals("icmp-assign-1", obs.job().assignmentKey());
+        assertEquals(BigInteger.ONE, obs.job().assignmentVersion());
+        assertEquals(1L, obs.job().attempt());
+
+        IcmpEvidence evidence = obs.evidence();
+        assertEquals("127.0.0.1", evidence.target());
+        assertEquals(4, evidence.ipVersion());
+        assertEquals("SENSOR_PING_SOCKET", evidence.source());
+        assertEquals(2, evidence.requestedSamples());
+        assertEquals(2, evidence.sent().orElseThrow());
+        assertEquals(2, evidence.received());
+        assertEquals(0.0d, evidence.packetLossPct());
+        assertEquals(120L, evidence.minRttMicros());
+        assertEquals(150L, evidence.avgRttMicros());
+        assertEquals(180L, evidence.maxRttMicros());
+        assertNull(evidence.errorCode());
+        assertEquals(2, evidence.samples().size());
+        assertTrue(evidence.samples().get(0).success());
+        assertEquals(120L, evidence.samples().get(0).rttMicros());
+        assertNull(evidence.samples().get(0).errorCode());
+    }
+
+    @Test
+    void preservesPartialQualityWithNullableLossSemantics() {
+        IcmpObservationV1 obs = decoder.decode(partialLossEnvelopeJson());
+        assertEquals(IcmpQuality.PARTIAL, obs.quality());
+        assertEquals("COLLECTED_WITH_LOSS", obs.status());
+        assertEquals(2, obs.evidence().sent().orElseThrow());
+        assertEquals(1, obs.evidence().received());
+        assertEquals(50.0d, obs.evidence().packetLossPct());
+        assertEquals(1000L, obs.evidence().avgRttMicros());
+        assertFalse(obs.evidence().samples().get(1).success());
+        assertEquals("ICMP_TIMEOUT", obs.evidence().samples().get(1).errorCode());
+        assertNull(obs.evidence().samples().get(1).rttMicros());
+    }
+
+    @Test
+    void preservesUnknownQualityWhenUnreachableOmitsPacketLoss() {
+        IcmpObservationV1 obs = decoder.decode(unreachableEnvelopeJson());
+        assertEquals(IcmpQuality.UNKNOWN, obs.quality());
+        assertEquals("PARTIAL", obs.status());
+        assertNull(obs.evidence().packetLossPct());
+        assertTrue(obs.evidence().packetLossPctOptional().isEmpty());
+        assertEquals("ICMP_UNREACHABLE", obs.evidence().samples().get(1).errorCode());
+        assertNotEquals("DEVICE_DOWN", obs.status());
+        assertNotEquals("DOWN", obs.quality().name());
+    }
+
+    @Test
+    void preservesUnknownCollectionFailureWithoutDummyNumericDown() {
+        IcmpObservationV1 obs = decoder.decode(collectionFailedEnvelopeJson());
+        assertEquals(IcmpQuality.UNKNOWN, obs.quality());
+        assertEquals("COLLECTION_FAILED", obs.status());
+        assertTrue(obs.evidence().sent().isEmpty());
+        assertNull(obs.evidence().requestedSamples());
+        assertEquals(0, obs.evidence().received());
+        assertNull(obs.evidence().packetLossPct());
+        assertNull(obs.evidence().avgRttMicros());
+        assertTrue(obs.evidence().samples().isEmpty());
+        assertEquals("ICMP_PERMISSION_DENIED", obs.evidence().errorCode());
+        // No invented numeric DOWN / loss projection.
+        assertFalse(obs.evidence().errorCode().contains("DEVICE_DOWN"));
+    }
+
+    @Test
+    void decodesIpv6TargetAndProtocolVersion() {
+        IcmpObservationV1 obs = decoder.decode(goodIpv6EnvelopeJson());
+        assertEquals(6, obs.evidence().ipVersion());
+        assertEquals("2001:db8::1", obs.evidence().target());
+        assertEquals("6", obs.protocolVersion());
+        assertEquals(IcmpQuality.GOOD, obs.quality());
+    }
+
+    @Test
+    void acceptsSourceFaithfulZeroMicrosecondSuccessOmitempty() {
+        // Go Sample.RTTMicros omitempty: RTT < 1µs serializes without rttMicros.
+        IcmpObservationV1 obs = decoder.decode(zeroMicrosecondOmitemptyEnvelopeJson());
+        assertEquals("COLLECTED", obs.status());
+        assertEquals(IcmpQuality.GOOD, obs.quality());
+        assertEquals(1, obs.evidence().received());
+        assertEquals(0L, obs.evidence().minRttMicros());
+        assertEquals(0L, obs.evidence().avgRttMicros());
+        assertEquals(0L, obs.evidence().maxRttMicros());
+        IcmpSample sample = obs.evidence().samples().get(0);
+        assertTrue(sample.success());
+        assertEquals(0L, sample.rttMicros());
+        assertNull(sample.errorCode());
+    }
+
+    @Test
+    void rejectsGoodQualityDespiteObservedLoss() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(partialLossEnvelopeJson());
+        root.put("status", "COLLECTED");
+        root.put("quality", "GOOD");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+    }
+
+    @Test
+    void rejectsGoodQualityWithUnreachableSample() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(unreachableEnvelopeJson());
+        root.put("status", "COLLECTED");
+        root.put("quality", "GOOD");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+    }
+
+    @Test
+    void rejectsCollectedWithLossWithIncompatibleQuality() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(partialLossEnvelopeJson());
+        root.put("quality", "GOOD");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY, ex.getCode());
+
+        root.put("quality", "UNKNOWN");
+        ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY, ex.getCode());
+    }
+
+    @Test
+    void rejectsCollectionFailedWithoutUnknownQuality() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(collectionFailedEnvelopeJson());
+        root.put("quality", "PARTIAL");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY, ex.getCode());
+    }
+
+    @Test
+    void rejectsJsonNodeEnvelopeLargerThanBound() throws Exception {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("pad", "x".repeat(IcmpObservationDecoder.MAX_ENVELOPE_BYTES));
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+    }
+
+    /**
+     * Oversized BigInteger must be rejected from bitLength/digit budgeting — never by first
+     * rendering its decimal text (Jackson BigIntegerNode.serialize → toString).
+     */
+    @Test
+    void rejectsOversizedBigIntegerBeforeDecimalRendering() {
+        AtomicInteger toStringCalls = new AtomicInteger();
+        // ~530 KiB decimal digits ⇒ > MAX_ENVELOPE_BYTES without allocating the decimal string.
+        int targetDecimalDigits = IcmpObservationDecoder.MAX_ENVELOPE_BYTES + 16 * 1024;
+        int bitLength = (int) Math.ceil(targetDecimalDigits * Math.log(10) / Math.log(2)) + 8;
+        byte[] magnitude = new byte[(bitLength + 7) / 8];
+        magnitude[0] = 0x7f; // ensure positive, high bit clear for sign
+        for (int i = 1; i < magnitude.length; i++) {
+            magnitude[i] = (byte) 0xA5;
+        }
+        BigInteger probe = new ProbeBigInteger(magnitude, toStringCalls);
+        assertTrue(probe.bitLength() >= bitLength - 8);
+        ObjectNode root = JsonNodeFactory.instance.objectNode();
+        root.set("assignmentVersion", JsonNodeFactory.instance.numberNode(probe));
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+        assertEquals(0, toStringCalls.get(), "decimal toString must not run before bound rejection");
+    }
+
+    /**
+     * After an oversized leading scalar exhausts the budget, later siblings must not be visited.
+     * VisitProbe records touches from {@code getNodeType}/{@code isNull}/serialize paths.
+     */
+    @Test
+    void stopsJsonNodeTraversalAfterOversizedPrefix() {
+        AtomicInteger toStringCalls = new AtomicInteger();
+        AtomicBoolean laterVisited = new AtomicBoolean();
+        int targetDecimalDigits = IcmpObservationDecoder.MAX_ENVELOPE_BYTES + 4096;
+        int bitLength = (int) Math.ceil(targetDecimalDigits * Math.log(10) / Math.log(2)) + 8;
+        byte[] magnitude = new byte[(bitLength + 7) / 8];
+        magnitude[0] = 0x7f;
+        for (int i = 1; i < magnitude.length; i++) {
+            magnitude[i] = (byte) 0x5A;
+        }
+        ObjectNode root = JsonNodeFactory.instance.objectNode();
+        // Insertion order: oversized numeric first, instrumented sibling second.
+        root.set("pad", JsonNodeFactory.instance.numberNode(new ProbeBigInteger(magnitude, toStringCalls)));
+        root.set("later", new VisitProbeNode(laterVisited));
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+        assertEquals(0, toStringCalls.get());
+        assertFalse(laterVisited.get(), "later sibling must not be visited after budget exhaustion");
+    }
+
+    @Test
+    void rejectsUnsupportedBinaryJsonNodeForm() {
+        ObjectNode root = JsonNodeFactory.instance.objectNode();
+        root.set("pad", JsonNodeFactory.instance.binaryNode(new byte[] {1, 2, 3}));
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, ex.getCode());
+        assertTrue(ex.getMessage().contains("unsupported JSON node type"));
+    }
+
+    /**
+     * Bounded deep-container canary: nesting at the production depth limit (root=0) must be
+     * rejected by the preflight depth gate before recursive descent continues. Tree stays
+     * tiny (well under the byte budget) so the host stack is never the signal.
+     * <p>Uses reflection for the limit so this test still compiles against unchanged a44a5f4
+     * production (constant absent) during failing-first; corrected decoder aligns to 16.
+     */
+    @Test
+    void rejectsDeeplyNestedContainersBeforeDescent() {
+        int depthLimit = envelopeNestingDepthLimitOrCanary();
+        JsonNode node = JsonNodeFactory.instance.objectNode();
+        for (int i = 0; i < depthLimit; i++) {
+            ObjectNode outer = JsonNodeFactory.instance.objectNode();
+            outer.set("n", node);
+            node = outer;
+        }
+        // Innermost sits at depth == depthLimit; byte size remains negligible.
+        assertTrue(node.toString().length() < 1024);
+        ObjectNode root = (ObjectNode) node;
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+        assertTrue(ex.getMessage().contains("nesting depth"));
+    }
+
+    /**
+     * Positive control: source-faithful ICMP envelope nesting (envelope → job/payload →
+     * samples → sample) remains well within the depth gate and continues to decode.
+     */
+    @Test
+    void acceptsDeepestValidIcmpEnvelopeNesting() {
+        IcmpObservationV1 obs = decoder.decode(goodIpv4EnvelopeJson());
+        assertEquals(IcmpQuality.GOOD, obs.quality());
+        assertEquals(2, obs.evidence().samples().size());
+        assertEquals(120L, obs.evidence().samples().get(0).rttMicros());
+    }
+
+    @Test
+    void rejectsCollectedAtNotEqualToCompletedAt() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        root.put("collectedAt", "2026-10-11T14:00:01Z");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+        assertTrue(ex.getMessage().contains("collectedAt"));
+    }
+
+    @Test
+    void rejectsMalformedEnvelopeJson() {
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode("{not-json"));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, ex.getCode());
+    }
+
+    @Test
+    void rejectsUnsupportedSchemaVersion() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        root.put("schemaVersion", 2);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_UNSUPPORTED_SCHEMA, ex.getCode());
+    }
+
+    @Test
+    void rejectsInvalidQualityIncludingDeviceDown() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        root.put("quality", "DEVICE_DOWN");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY, ex.getCode());
+
+        root.put("quality", "DEGRADED");
+        ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_QUALITY, ex.getCode());
+    }
+
+    @Test
+    void rejectsTargetIpVersionMismatch() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).put("ipVersion", 6);
+        root.put("protocolVersion", "6");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET, ex.getCode());
+    }
+
+    @Test
+    void rejectsHostnameTarget() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).put("target", "example.com");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET, ex.getCode());
+    }
+
+    @Test
+    void rejectsInconsistentPacketLoss() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(partialLossEnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).put("packetLossPct", 99.0d);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+    }
+
+    @Test
+    void rejectsInventedRttWhenNothingReceived() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(allTimeoutEnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("minRttMicros", 0);
+        payload.put("avgRttMicros", 0);
+        payload.put("maxRttMicros", 0);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+    }
+
+    @Test
+    void rejectsNumericProjectionMasqueradeInsideProtocolPayload() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("metric_id", "icmp.loss");
+        payload.put("value", 100);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_UNEXPECTED_FIELD, ex.getCode());
+    }
+
+    @Test
+    void rejectsUnknownEvidenceField() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).put("deviceDown", true);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_MALFORMED_EVIDENCE, ex.getCode());
+    }
+
+    @Test
+    void rejectsOversizeSampleCount() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 9);
+        payload.put("received", 9);
+        payload.putArray("samples");
+        for (int i = 1; i <= 9; i++) {
+            ObjectNode sample = payload.withArray("samples").addObject();
+            sample.put("sequence", i);
+            sample.put("success", true);
+            sample.put("rttMicros", 100);
+        }
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", 100);
+        payload.put("avgRttMicros", 100);
+        payload.put("maxRttMicros", 100);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+    }
+
+    @Test
+    void rejectsEnvelopeLargerThanBound() {
+        byte[] huge = ("{\"pad\":\"" + "x".repeat(IcmpObservationDecoder.MAX_ENVELOPE_BYTES) + "\"}")
+                .getBytes(StandardCharsets.UTF_8);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(huge));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+    }
+
+    @Test
+    void rejectsTrailingJsonTokensAfterValidEnvelope() {
+        String trailing = goodIpv4EnvelopeJson() + "\n{}";
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(trailing));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, ex.getCode());
+        assertTrue(ex.getMessage().contains("trailing"));
+    }
+
+    @Test
+    void acceptsAssignmentVersionAtUint64Max() {
+        String json = goodIpv4EnvelopeJson().replace(
+                "\"assignmentVersion\":1",
+                "\"assignmentVersion\":18446744073709551615"
+        );
+        IcmpObservationV1 obs = decoder.decode(json);
+        assertEquals(IcmpObservationDecoder.MAX_ASSIGNMENT_VERSION, obs.job().assignmentVersion());
+        assertEquals(new BigInteger("18446744073709551615"), obs.job().assignmentVersion());
+    }
+
+    @Test
+    void acceptsAssignmentVersionAboveSignedLongWithinUint64() {
+        // Exact Go uint64 values above signed long must remain exact provenance.
+        String json = goodIpv4EnvelopeJson().replace(
+                "\"assignmentVersion\":1",
+                "\"assignmentVersion\":9223372036854775808"
+        );
+        IcmpObservationV1 obs = decoder.decode(json);
+        assertEquals(new BigInteger("9223372036854775808"), obs.job().assignmentVersion());
+    }
+
+    @Test
+    void rejectsAssignmentVersionAboveUint64Max() {
+        String json = goodIpv4EnvelopeJson().replace(
+                "\"assignmentVersion\":1",
+                "\"assignmentVersion\":18446744073709551616"
+        );
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(json));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+    }
+
+    @Test
+    void acceptsAttemptAtUint32Max() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ((ObjectNode) root.get("job")).put("attempt", IcmpObservationDecoder.MAX_ATTEMPT);
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(IcmpObservationDecoder.MAX_ATTEMPT, obs.job().attempt());
+    }
+
+    @Test
+    void rejectsAttemptAboveUint32Max() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ((ObjectNode) root.get("job")).put("attempt", IcmpObservationDecoder.MAX_ATTEMPT + 1L);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+    }
+
+    @Test
+    void rejectsRttSummariesThatDoNotMatchSuccessfulSamples() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("minRttMicros", 1);
+        payload.put("avgRttMicros", 1);
+        payload.put("maxRttMicros", 1);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+    }
+
+    @Test
+    void acceptsSensorFaithfulAvgWithinNanosecondTruncationWindow() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("minRttMicros", 1);
+        payload.put("avgRttMicros", 1);
+        payload.put("maxRttMicros", 2);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", 1);
+        samples.addObject().put("sequence", 2).put("success", true).put("rttMicros", 2);
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(1L, obs.evidence().avgRttMicros());
+        payload.put("avgRttMicros", 2);
+        obs = decoder.decode(root);
+        assertEquals(2L, obs.evidence().avgRttMicros());
+    }
+
+    /**
+     * High-value RTTs still inside the Go {@code time.Duration} microsecond domain where
+     * {@code sumMicros * 1000} overflows signed long. Exact BigInteger sum must still
+     * accept Sensor-faithful avg bounds.
+     */
+    @Test
+    void acceptsHighValueRttAvgWhenSignedLongProductWouldOverflow() throws Exception {
+        // sum = 16e15; sum*1000 exceeds Long.MAX_VALUE. True avg window [5333333333333333, 5333333333333334].
+        // Both sample values remain <= MAX_RTT_MICROS (9223372036854775).
+        long low = 5_000_000_000_000_000L;
+        long high = 6_000_000_000_000_000L;
+        long avgLow = 5_333_333_333_333_333L;
+        long avgHigh = 5_333_333_333_333_334L;
+
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 3);
+        payload.put("received", 3);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", low);
+        payload.put("avgRttMicros", avgLow);
+        payload.put("maxRttMicros", high);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", low);
+        samples.addObject().put("sequence", 2).put("success", true).put("rttMicros", low);
+        samples.addObject().put("sequence", 3).put("success", true).put("rttMicros", high);
+
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(avgLow, obs.evidence().avgRttMicros());
+        assertEquals(low, obs.evidence().minRttMicros());
+        assertEquals(high, obs.evidence().maxRttMicros());
+
+        payload.put("avgRttMicros", avgHigh);
+        obs = decoder.decode(root);
+        assertEquals(avgHigh, obs.evidence().avgRttMicros());
+    }
+
+    /**
+     * Eight equal maximum-domain samples: signed long {@code sumMicros * 1000} overflows;
+     * exact BigInteger path must accept the Sensor-faithful average.
+     */
+    @Test
+    void acceptsEightSampleMaxDomainRttWhenNanosecondProductWouldOverflow() throws Exception {
+        long rtt = IcmpObservationDecoder.MAX_RTT_MICROS;
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 8);
+        payload.put("received", 8);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", rtt);
+        payload.put("avgRttMicros", rtt);
+        payload.put("maxRttMicros", rtt);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        for (int i = 1; i <= 8; i++) {
+            samples.addObject().put("sequence", i).put("success", true).put("rttMicros", rtt);
+        }
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(rtt, obs.evidence().avgRttMicros());
+        assertEquals(8, obs.evidence().samples().size());
+        assertEquals(IcmpQuality.GOOD, obs.quality());
+        assertEquals("SENSOR_PING_SOCKET", obs.evidence().source());
+    }
+
+    /**
+     * High-value RTTs with avg inside min..max but outside the Go truncation window.
+     */
+    @Test
+    void rejectsHighValueAvgOutsideNanosecondTruncationWindow() throws Exception {
+        long low = 5_000_000_000_000_000L;
+        long high = 6_000_000_000_000_000L;
+        // min <= avg <= max holds, but avg is outside [5333333333333333, 5333333333333334].
+        long inconsistentAvg = low;
+
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 3);
+        payload.put("received", 3);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", low);
+        payload.put("avgRttMicros", inconsistentAvg);
+        payload.put("maxRttMicros", high);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", low);
+        samples.addObject().put("sequence", 2).put("success", true).put("rttMicros", low);
+        samples.addObject().put("sequence", 3).put("success", true).put("rttMicros", high);
+
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+        assertTrue(ex.getMessage().contains("avgRttMicros"));
+    }
+
+    /**
+     * Single-sample maximum representable Sensor RTT must decode; provenance and GOOD preserved.
+     */
+    @Test
+    void acceptsMaximumRepresentableSampleRttMicros() throws Exception {
+        long rtt = IcmpObservationDecoder.MAX_RTT_MICROS;
+        assertEquals(9_223_372_036_854_775L, rtt);
+
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 1);
+        payload.put("received", 1);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", rtt);
+        payload.put("avgRttMicros", rtt);
+        payload.put("maxRttMicros", rtt);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", rtt);
+
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(rtt, obs.evidence().avgRttMicros());
+        assertEquals(rtt, obs.evidence().samples().get(0).rttMicros());
+        assertEquals(IcmpQuality.GOOD, obs.quality());
+        assertEquals("SENSOR_PING_SOCKET", obs.evidence().source());
+    }
+
+    /**
+     * Positive RTT one microsecond above Go {@code time.Duration.Microseconds()} max
+     * is outside the source representation domain.
+     */
+    @Test
+    void rejectsSampleRttMicrosAboveGoDurationBound() throws Exception {
+        long overMax = IcmpObservationDecoder.MAX_RTT_MICROS + 1L;
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 1);
+        payload.put("received", 1);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", overMax);
+        payload.put("avgRttMicros", overMax);
+        payload.put("maxRttMicros", overMax);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", overMax);
+
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+        assertTrue(ex.getMessage().contains("rttMicros")
+                || ex.getMessage().contains("minRttMicros")
+                || ex.getMessage().contains("avgRttMicros")
+                || ex.getMessage().contains("maxRttMicros"));
+    }
+
+    /**
+     * Eight-sample domain-valid aggregate: avg inside min..max but outside the
+     * Go nanosecond truncation window must still reject.
+     */
+    @Test
+    void rejectsInvalidAverageForEightSampleHighValueAggregate() throws Exception {
+        long low = 5_000_000_000_000_000L;
+        long high = 6_000_000_000_000_000L;
+        // 6*low + 2*high => exact avg window is [5250000000000000, 5250000000000000].
+        long inconsistentAvg = low;
+
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 8);
+        payload.put("received", 8);
+        payload.put("packetLossPct", 0.0d);
+        payload.put("minRttMicros", low);
+        payload.put("avgRttMicros", inconsistentAvg);
+        payload.put("maxRttMicros", high);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        for (int i = 1; i <= 6; i++) {
+            samples.addObject().put("sequence", i).put("success", true).put("rttMicros", low);
+        }
+        samples.addObject().put("sequence", 7).put("success", true).put("rttMicros", high);
+        samples.addObject().put("sequence", 8).put("success", true).put("rttMicros", high);
+
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+        assertTrue(ex.getMessage().contains("avgRttMicros"));
+    }
+
+    /**
+     * UNKNOWN quality with a domain-max successful sample must not collapse to DOWN
+     * and must still validate RTT summaries via BigInteger.
+     */
+    @Test
+    void preservesUnknownQualityWithHighValueSuccessfulSampleRtt() throws Exception {
+        long rtt = IcmpObservationDecoder.MAX_RTT_MICROS;
+        ObjectNode root = (ObjectNode) objectMapper.readTree(unreachableEnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("minRttMicros", rtt);
+        payload.put("avgRttMicros", rtt);
+        payload.put("maxRttMicros", rtt);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true).put("rttMicros", rtt);
+        samples.addObject().put("sequence", 2).put("success", false).put("errorCode", "ICMP_UNREACHABLE");
+
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(IcmpQuality.UNKNOWN, obs.quality());
+        assertEquals("PARTIAL", obs.status());
+        assertEquals(rtt, obs.evidence().avgRttMicros());
+        assertEquals("SENSOR_PING_SOCKET", obs.evidence().source());
+        assertNotEquals("DEVICE_DOWN", obs.status());
+        assertNotEquals("DOWN", obs.quality().name());
+    }
+
+    @Test
+    void rejectsCollectionLevelErrorCodeOnSuccessfulStatuses() throws Exception {
+        ObjectNode good = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ((ObjectNode) good.get("protocolPayload")).put("errorCode", "ICMP_PERMISSION_DENIED");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(good));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+
+        ObjectNode partial = (ObjectNode) objectMapper.readTree(partialLossEnvelopeJson());
+        ((ObjectNode) partial.get("protocolPayload")).put("errorCode", "ICMP_PERMISSION_DENIED");
+        ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(partial));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+    }
+
+    @Test
+    void rejectsCollectionLevelErrorCodeOnPartialStatus() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(unreachableEnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).put("errorCode", "ICMP_PERMISSION_DENIED");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+    }
+
+    @Test
+    void rejectsCollectionFailedWithoutErrorCode() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(collectionFailedEnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).remove("errorCode");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertTrue(
+                ex.getCode() == IcmpDecodeException.Code.ERR_ICMP_MALFORMED_EVIDENCE
+                        || ex.getCode() == IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES
+        );
+    }
+
+    @Test
+    void acceptsAllLossObservationWithoutRttAggregates() {
+        IcmpObservationV1 obs = decoder.decode(allTimeoutEnvelopeJson());
+        assertEquals("COLLECTED_WITH_LOSS", obs.status());
+        assertEquals(IcmpQuality.PARTIAL, obs.quality());
+        assertEquals(0, obs.evidence().received());
+        assertEquals(100.0d, obs.evidence().packetLossPct());
+        assertNull(obs.evidence().minRttMicros());
+        assertNull(obs.evidence().avgRttMicros());
+        assertNull(obs.evidence().maxRttMicros());
+        assertEquals(2, obs.evidence().samples().size());
+        assertFalse(obs.evidence().samples().get(0).success());
+        assertNull(obs.evidence().samples().get(0).rttMicros());
+        assertEquals("ICMP_TIMEOUT", obs.evidence().samples().get(0).errorCode());
+        assertNotEquals("DEVICE_DOWN", obs.status());
+    }
+
+    @Test
+    void acceptsMixedOmitemptyZeroSuccessAndLossWithoutInventingLostRtt() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(partialLossEnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 3);
+        payload.put("received", 2);
+        payload.put("packetLossPct", 100.0d / 3.0d);
+        payload.put("minRttMicros", 0);
+        payload.put("avgRttMicros", 500);
+        payload.put("maxRttMicros", 1000);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true); // omitempty sub-µs → 0
+        samples.addObject().put("sequence", 2).put("success", true).put("rttMicros", 1000);
+        samples.addObject().put("sequence", 3).put("success", false).put("errorCode", "ICMP_TIMEOUT");
+
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(0L, obs.evidence().minRttMicros());
+        assertEquals(500L, obs.evidence().avgRttMicros());
+        assertEquals(1000L, obs.evidence().maxRttMicros());
+        assertNull(obs.evidence().samples().get(2).rttMicros());
+    }
+
+    @Test
+    void rejectsAvgThatTreatsLostSamplesAsZeroRtt() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(partialLossEnvelopeJson());
+        ObjectNode payload = (ObjectNode) root.get("protocolPayload");
+        payload.put("requestedSamples", 3);
+        payload.put("received", 2);
+        payload.put("packetLossPct", 100.0d / 3.0d);
+        payload.put("minRttMicros", 0);
+        // If lost sample were treated as 0 RTT: (0+1000+0)/3 ≈ 333 — outside success-only window.
+        payload.put("avgRttMicros", 333);
+        payload.put("maxRttMicros", 1000);
+        var samples = payload.withArray("samples");
+        samples.removeAll();
+        samples.addObject().put("sequence", 1).put("success", true);
+        samples.addObject().put("sequence", 2).put("success", true).put("rttMicros", 1000);
+        samples.addObject().put("sequence", 3).put("success", false).put("errorCode", "ICMP_TIMEOUT");
+
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INCONSISTENT_SAMPLES, ex.getCode());
+    }
+
+    @Test
+    void rejectsAmbiguousIpv4LeadingZeros() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).put("target", "127.000.000.001");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET, ex.getCode());
+    }
+
+    @Test
+    void rejectsScopedIpv6Target() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv6EnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).put("target", "fe80::1%1");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET, ex.getCode());
+    }
+
+    @Test
+    void acceptsCompressedIpv6Literal() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv6EnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).put("target", "::1");
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals("::1", obs.evidence().target());
+        assertEquals(6, obs.evidence().ipVersion());
+    }
+
+    @Test
+    void acceptsIpv4MappedLiteralWhenIpVersion4() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).put("target", "::ffff:127.0.0.1");
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals("::ffff:127.0.0.1", obs.evidence().target());
+        assertEquals(4, obs.evidence().ipVersion());
+    }
+
+    @Test
+    void rejectsIpv4MappedLiteralWhenIpVersion6() throws Exception {
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv6EnvelopeJson());
+        ((ObjectNode) root.get("protocolPayload")).put("target", "::ffff:127.0.0.1");
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_TARGET, ex.getCode());
+    }
+
+    @Test
+    void rejectsStringEnvelopeWhenUtf8BytesExceedBoundDespiteShortCharLength() {
+        // U+0800 encodes to 3 UTF-8 bytes / 1 UTF-16 unit. Choose n so:
+        // charLength = overhead + n <= MAX, but UTF-8 bytes = overhead + 3n > MAX.
+        int max = IcmpObservationDecoder.MAX_ENVELOPE_BYTES;
+        int overhead = 10; // {"pad":""}
+        int n = ((max - overhead) / 2) + 1; // guarantees 3n + overhead > max while n + overhead < max
+        assertTrue(n + overhead < max);
+        assertTrue(3 * n + overhead > max);
+        String oversize = "{\"pad\":\"" + "\u0800".repeat(n) + "\"}";
+        assertTrue(oversize.length() < max);
+        assertTrue(oversize.getBytes(StandardCharsets.UTF_8).length > max);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(oversize));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_INVALID_BOUNDS, ex.getCode());
+    }
+
+    @Test
+    void rejectsIdentityFieldWhenUtf8BytesExceedLimitWithinUtf16CharBudget() throws Exception {
+        // 200 × U+00E9 = 200 UTF-16 units / 400 UTF-8 bytes > MAX_IDENTITY_CHARS (256).
+        String sensorId = "é".repeat(200);
+        assertEquals(200, sensorId.length());
+        assertEquals(400, sensorId.getBytes(StandardCharsets.UTF_8).length);
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        root.put("sensorId", sensorId);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, ex.getCode());
+    }
+
+    @Test
+    void acceptsIdentityFieldAtExactUtf8ByteLimit() throws Exception {
+        String sensorId = "a".repeat(IcmpObservationDecoder.MAX_IDENTITY_CHARS);
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        root.put("sensorId", sensorId);
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(sensorId, obs.sensorId());
+    }
+
+    @Test
+    void acceptsIdentityFieldAtExactUtf8ByteLimitWithMultibyte() throws Exception {
+        // 128 × U+00E9 = 128 UTF-16 units / exactly 256 UTF-8 bytes (MAX_IDENTITY_CHARS).
+        String sensorId = "é".repeat(IcmpObservationDecoder.MAX_IDENTITY_CHARS / 2);
+        assertEquals(IcmpObservationDecoder.MAX_IDENTITY_CHARS / 2, sensorId.length());
+        assertEquals(IcmpObservationDecoder.MAX_IDENTITY_CHARS, sensorId.getBytes(StandardCharsets.UTF_8).length);
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        root.put("sensorId", sensorId);
+        IcmpObservationV1 obs = decoder.decode(root);
+        assertEquals(sensorId, obs.sensorId());
+    }
+
+    @Test
+    void rejectsIdentityFieldCrossingUtf8ByteBoundaryWithMultibyteTail() throws Exception {
+        // 255 ASCII + one U+00E9 = 257 UTF-8 bytes.
+        String sensorId = "a".repeat(255) + "é";
+        assertEquals(256, sensorId.length());
+        assertEquals(257, sensorId.getBytes(StandardCharsets.UTF_8).length);
+        ObjectNode root = (ObjectNode) objectMapper.readTree(goodIpv4EnvelopeJson());
+        root.put("sensorId", sensorId);
+        IcmpDecodeException ex = assertThrows(IcmpDecodeException.class, () -> decoder.decode(root));
+        assertEquals(IcmpDecodeException.Code.ERR_ICMP_MALFORMED_ENVELOPE, ex.getCode());
+    }
+
+    @Test
+    void qualityEnumValuesRemainDistinct() {
+        assertEquals(3, IcmpQuality.values().length);
+        assertEquals(IcmpQuality.GOOD, IcmpQuality.parseRequired("good"));
+        assertEquals(IcmpQuality.PARTIAL, IcmpQuality.parseRequired("PARTIAL"));
+        assertEquals(IcmpQuality.UNKNOWN, IcmpQuality.parseRequired("Unknown"));
+        assertThrows(IcmpDecodeException.class, () -> IcmpQuality.parseRequired("DOWN"));
+    }
+
+    // --- source-faithful fixtures (PR #217 / characterization helpers) ---
+
+    private String goodIpv4EnvelopeJson() {
+        return envelope(
+                "COLLECTED",
+                "GOOD",
+                "4",
+                """
+                {
+                  "schemaVersion":1,
+                  "target":"127.0.0.1",
+                  "ipVersion":4,
+                  "source":"SENSOR_PING_SOCKET",
+                  "startedAt":"%s",
+                  "completedAt":"%s",
+                  "requestedSamples":2,
+                  "received":2,
+                  "packetLossPct":0.0,
+                  "minRttMicros":120,
+                  "avgRttMicros":150,
+                  "maxRttMicros":180,
+                  "samples":[
+                    {"sequence":1,"success":true,"rttMicros":120},
+                    {"sequence":2,"success":true,"rttMicros":180}
+                  ]
+                }
+                """.formatted(STARTED_AT, COLLECTED_AT)
+        );
+    }
+
+    /**
+     * Source-faithful Go wire: successful Echo Reply with RTT &lt; 1µs omits
+     * {@code rttMicros} via {@code omitempty}; Evidence pointer aggregates still
+     * emit explicit zeros when received &gt; 0.
+     */
+    private String zeroMicrosecondOmitemptyEnvelopeJson() {
+        return envelope(
+                "COLLECTED",
+                "GOOD",
+                "4",
+                """
+                {
+                  "schemaVersion":1,
+                  "target":"127.0.0.1",
+                  "ipVersion":4,
+                  "source":"SENSOR_PING_SOCKET",
+                  "startedAt":"%s",
+                  "completedAt":"%s",
+                  "requestedSamples":1,
+                  "received":1,
+                  "packetLossPct":0.0,
+                  "minRttMicros":0,
+                  "avgRttMicros":0,
+                  "maxRttMicros":0,
+                  "samples":[
+                    {"sequence":1,"success":true}
+                  ]
+                }
+                """.formatted(STARTED_AT, COLLECTED_AT)
+        );
+    }
+
+    private String goodIpv6EnvelopeJson() {
+        return envelope(
+                "COLLECTED",
+                "GOOD",
+                "6",
+                """
+                {
+                  "schemaVersion":1,
+                  "target":"2001:db8::1",
+                  "ipVersion":6,
+                  "source":"SENSOR_PING_SOCKET",
+                  "startedAt":"%s",
+                  "completedAt":"%s",
+                  "requestedSamples":1,
+                  "received":1,
+                  "packetLossPct":0.0,
+                  "minRttMicros":200,
+                  "avgRttMicros":200,
+                  "maxRttMicros":200,
+                  "samples":[
+                    {"sequence":1,"success":true,"rttMicros":200}
+                  ]
+                }
+                """.formatted(STARTED_AT, COLLECTED_AT)
+        );
+    }
+
+    private String partialLossEnvelopeJson() {
+        return envelope(
+                "COLLECTED_WITH_LOSS",
+                "PARTIAL",
+                "4",
+                """
+                {
+                  "schemaVersion":1,
+                  "target":"127.0.0.1",
+                  "ipVersion":4,
+                  "source":"SENSOR_PING_SOCKET",
+                  "startedAt":"%s",
+                  "completedAt":"%s",
+                  "requestedSamples":2,
+                  "received":1,
+                  "packetLossPct":50.0,
+                  "minRttMicros":1000,
+                  "avgRttMicros":1000,
+                  "maxRttMicros":1000,
+                  "samples":[
+                    {"sequence":1,"success":true,"rttMicros":1000},
+                    {"sequence":2,"success":false,"errorCode":"ICMP_TIMEOUT"}
+                  ]
+                }
+                """.formatted(STARTED_AT, COLLECTED_AT)
+        );
+    }
+
+    private String unreachableEnvelopeJson() {
+        return envelope(
+                "PARTIAL",
+                "UNKNOWN",
+                "4",
+                """
+                {
+                  "schemaVersion":1,
+                  "target":"127.0.0.1",
+                  "ipVersion":4,
+                  "source":"SENSOR_PING_SOCKET",
+                  "startedAt":"%s",
+                  "completedAt":"%s",
+                  "requestedSamples":2,
+                  "received":1,
+                  "minRttMicros":1000,
+                  "avgRttMicros":1000,
+                  "maxRttMicros":1000,
+                  "samples":[
+                    {"sequence":1,"success":true,"rttMicros":1000},
+                    {"sequence":2,"success":false,"errorCode":"ICMP_UNREACHABLE"}
+                  ]
+                }
+                """.formatted(STARTED_AT, COLLECTED_AT)
+        );
+    }
+
+    private String allTimeoutEnvelopeJson() {
+        return envelope(
+                "COLLECTED_WITH_LOSS",
+                "PARTIAL",
+                "4",
+                """
+                {
+                  "schemaVersion":1,
+                  "target":"127.0.0.1",
+                  "ipVersion":4,
+                  "source":"SENSOR_PING_SOCKET",
+                  "startedAt":"%s",
+                  "completedAt":"%s",
+                  "requestedSamples":2,
+                  "received":0,
+                  "packetLossPct":100.0,
+                  "samples":[
+                    {"sequence":1,"success":false,"errorCode":"ICMP_TIMEOUT"},
+                    {"sequence":2,"success":false,"errorCode":"ICMP_TIMEOUT"}
+                  ]
+                }
+                """.formatted(STARTED_AT, COLLECTED_AT)
+        );
+    }
+
+    private String collectionFailedEnvelopeJson() {
+        return envelope(
+                "COLLECTION_FAILED",
+                "UNKNOWN",
+                "4",
+                """
+                {
+                  "schemaVersion":1,
+                  "target":"127.0.0.1",
+                  "ipVersion":4,
+                  "source":"SENSOR_PING_SOCKET",
+                  "startedAt":"%s",
+                  "completedAt":"%s",
+                  "received":0,
+                  "errorCode":"ICMP_PERMISSION_DENIED"
+                }
+                """.formatted(STARTED_AT, COLLECTED_AT)
+        );
+    }
+
+    private String envelope(String status, String quality, String protocolVersion, String evidenceJson) {
+        // Match characterization / PR #217 envelope field set and semantics.
+        return """
+                {
+                  "schemaVersion":1,
+                  "batchId":"icmp-aabbccddeeff00112233445566778899",
+                  "recordType":"icmp_observation_v1",
+                  "collectedAt":"%s",
+                  "sensorId":"sensor-net-01",
+                  "tenantId":"%s",
+                  "entityId":"%s",
+                  "job":{"jobId":"icmp-job-1","assignmentKey":"icmp-assign-1","assignmentVersion":1,"attempt":1},
+                  "protocol":"ICMP",
+                  "protocolVersion":"%s",
+                  "operation":"ECHO",
+                  "status":"%s",
+                  "quality":"%s",
+                  "protocolSchemaVersion":1,
+                  "protocolPayload":%s
+                }
+                """.formatted(COLLECTED_AT, TENANT_ID, ENTITY_ID, protocolVersion, status, quality, evidenceJson);
+    }
+
+    /**
+     * Depth canary limit: prefer the production constant when present; otherwise use the
+     * documented ICMP envelope depth bound (16) so failing-first compiles against a44a5f4.
+     */
+    private static int envelopeNestingDepthLimitOrCanary() {
+        try {
+            return IcmpObservationDecoder.class.getField("MAX_ENVELOPE_NESTING_DEPTH").getInt(null);
+        } catch (ReflectiveOperationException ex) {
+            return 16;
+        }
+    }
+
+    /** Counts decimal rendering attempts without allocating the oversized digit string first. */
+    private static final class ProbeBigInteger extends BigInteger {
+        private final AtomicInteger toStringCalls;
+
+        ProbeBigInteger(byte[] magnitude, AtomicInteger toStringCalls) {
+            super(1, magnitude);
+            this.toStringCalls = toStringCalls;
+        }
+
+        @Override
+        public String toString() {
+            toStringCalls.incrementAndGet();
+            return super.toString();
+        }
+
+        @Override
+        public String toString(int radix) {
+            toStringCalls.incrementAndGet();
+            return super.toString(radix);
+        }
+    }
+
+    /**
+     * Marks visitation when structural preflight inspects node type — proves later siblings
+     * are not entered after an oversized prefix exhausts the budget.
+     */
+    private static final class VisitProbeNode extends POJONode {
+        private final AtomicBoolean visited;
+
+        VisitProbeNode(AtomicBoolean visited) {
+            super("visit-probe");
+            this.visited = visited;
+        }
+
+        @Override
+        public JsonNodeType getNodeType() {
+            visited.set(true);
+            return super.getNodeType();
+        }
+    }
+}

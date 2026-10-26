@@ -1,14 +1,18 @@
 package com.platform.core.security.http;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.AuthenticationServiceException;
+import org.springframework.security.config.annotation.ObjectPostProcessor;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
@@ -65,6 +69,10 @@ public class HttpSecurityConfiguration {
             SecurityAuditEmitter auditEmitter,
             AuthorizationEnforcementFilter authorizationEnforcementFilter
     ) throws Exception {
+        AuthenticationEntryPoint bearerAuthenticationEntryPoint = (request, response, ex) -> {
+            auditEmitter.authenticationFailure("AUTH_TOKEN_INVALID");
+            errorWriter.writeUnauthorized(request, response, "AUTH_TOKEN_INVALID");
+        };
         http.securityMatcher("/api/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(AbstractHttpConfigurer::disable)
@@ -72,11 +80,22 @@ public class HttpSecurityConfiguration {
                 .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
-                        .authenticationEntryPoint((request, response, ex) -> {
-                            auditEmitter.authenticationFailure("AUTH_TOKEN_INVALID");
-                            errorWriter.writeUnauthorized(request, response, "AUTH_TOKEN_INVALID");
-                        })
+                        .authenticationEntryPoint(bearerAuthenticationEntryPoint)
                         .accessDeniedHandler((request, response, ex) -> errorWriter.writeNotFound(response))
+                        .withObjectPostProcessor(new ObjectPostProcessor<BearerTokenAuthenticationFilter>() {
+                            @Override
+                            public <O extends BearerTokenAuthenticationFilter> O postProcess(O filter) {
+                                filter.setAuthenticationFailureHandler((request, response, failure) -> {
+                                    if (failure instanceof AuthenticationServiceException) {
+                                        errorWriter.write(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                                                "INTERNAL_ERROR", "Unexpected internal error");
+                                        return;
+                                    }
+                                    bearerAuthenticationEntryPoint.commence(request, response, failure);
+                                });
+                                return filter;
+                            }
+                        })
                 )
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((request, response, authEx) -> {

@@ -124,7 +124,14 @@ No contract may encode a universal “two signals always required” rule. Requi
 
 ---
 
+### 4.1 Downstream dependency correlation and reversible suppression safety
+
+Topology-based qualification uses incident-time, versioned, tenant-scoped graph edges with type, direction, source protocol, first/last observation and freshness/quality. LLDP/CDP supplies L2 adjacency; parent-child failure propagation requires corroborated routing/path/service/CMDB evidence and redundancy-aware reachability. A failed parent may explain child UNREACHABLE symptoms, but must not automatically mark all children DEVICE_DOWN or assert a confirmed root from timing alone.
+
+Suppress only redundant child **notifications/ticket fan-out**, never raw events, inspectable child alerts, actual availability, service impact or SLA evidence. Every suppression has a versioned policy, incident/root candidate, graph revision, reason, evidence/contradictions, expiry, audit and unsuppression path. Contradictory alternate-path success, stale/one-sided neighbors, Sensor failure, independent child fault, manual override or parent recovery with ongoing child failure require explicit reevaluation. Anomalies and LLM narrative do not authorize suppression.
+
 ## 5. Telemetry quality, evidence coverage and semantic state
+
 
 Before operational assertion, the evaluation path shall score whether expected evidence is present, fresh, schema-valid, time-aligned and produced by healthy collectors. Missing or degraded evidence lowers confidence and may change the state to `MONITORING_DEGRADED`, `UNKNOWN` or `STALE` instead of asserting target failure.
 
@@ -173,7 +180,14 @@ Process-to-network facts (TCP RTT spikes, retransmission storms, connection rese
 
 ---
 
+### 8.1 Deterministic non-AI fault isolation and measurable false-cause controls
+
+Existing BUILD-100/Core RCA must support graph propagation, expert-system if/then conditions, optional bounded deterministic codebook/fault-signature comparison, source-attributed SNMP Traps/Syslog, and bounded sequential gateway/reachability/traceroute/target checks with ML/GNN/LLM disabled. Signature matching treats missing/stale data as UNKNOWN, not negative proof. Highest match does not override contradiction, missing independent evidence or redundancy-success tests; INCONCLUSIVE remains valid.
+
+The regression corpus must include parent-link-down with child UNREACHABLE, redundant uplink survival without false impact/suppression, unrelated child failure, multiple simultaneous causes, Sensor-path outage, source-auth and spoofed-trap failures, stale/contradictory LLDP/CDP, codebook false-match/no-match/unknown, unstable timestamps/replay, silent/traceroute-filtered hops and recovery/unsuppression with child still failing. Track false-root cause, inappropriate suppression, precision/recall, compression and evidence completeness, without making fixed percentage success claims.
+
 ## 9. Operator feedback and learning governance
+
 
 Operator feedback is structured evidence, not an automatic production-policy mutation. Supported feedback may include confirmed/rejected cause, alert useful/not useful, false-positive reason, suppression reason, remediation success/failure and missing evidence. Feedback records actor, tenant, incident/policy/model version and timestamp.
 

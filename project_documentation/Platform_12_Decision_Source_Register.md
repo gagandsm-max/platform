@@ -75,7 +75,10 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 | Similar Incident storage/search | Use existing PostgreSQL/ClickHouse/analytics capabilities first; no dedicated vector database without benchmark/OSS justification | Fixed architecture direction |
 | Packet artifact storage | Use bounded encrypted artifact-storage abstraction and metadata references; do not store raw packet payload indiscriminately in PostgreSQL/ClickHouse or add an unapproved mandatory storage product | Fixed architecture direction |
 
+| LLDP/CDP topology and deterministic RCA safety — 2026-10-26 | Existing Network Sensor read-only SNMP LLDP-MIB/CISCO-CDP-MIB and Device Pack normalization feed the **existing** canonical temporal graph; raw neighbor adjacency is not directed failure parentage. Downstream grouping may reversibly suppress redundant notifications only after qualified incident-time directed dependency/redundancy checks; preserve child alerts and original state. Existing deterministic BUILD-100 rules may include an optional bounded tri-state symptom/codebook evaluator, never a new separate RCA service/database or mandatory AI. Requirements were already indexed REQ-NET-007 and REQ-RCA-003/004/005; no new formal IDs or Phase-envelope change. | ARCHITECTURE CLARIFICATION — SPECIFIED / IMPLEMENTATION AND CERTIFICATION NOT VERIFIED |
+
 ## 4. REFERENCE-LEARNING register
+
 
 ### 4.1 NetAI / graph-first learning
 

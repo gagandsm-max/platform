@@ -177,7 +177,9 @@ declare -F platform_test19_kafka_health >/dev/null
             'bash': '#!/bin/bash\nif [[ $1 == deploy/docker/kafka/deployment-preflight.sh ]]; then [[ $2 != down ]] || touch "$T19_FIXTURE/test20-entered"; exit 0; fi\nexec /bin/bash "$@"\n',
             'make':'#!/bin/bash\nexit 0\n',
             'sleep':'#!/bin/bash\nexec /bin/sleep "$@"\n',
-            'docker': '#!/bin/bash\nif [[ "$*" == *"INSERT INTO platform.tenant"* ]]; then touch "$T19_FIXTURE/test20-entered"; fi\nif [[ $1 == inspect && $* == *"--type container"* || $1 == pause || $1 == unpause ]]; then touch "$T19_FIXTURE/lifecycle"; exec "'+str(docker)+'" "$@"; fi\n[[ $1 != exec ]] || echo 1\nexit 0\n',
+            # Main's Test4/Test6 Core image-identity provenance must pass so the
+            # fixture can still reach Test19. Kafka pause/unpause stays fixture-owned.
+            'docker': '#!/bin/bash\nCORE_IMG=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nif [[ "$*" == *"INSERT INTO platform.tenant"* ]]; then touch "$T19_FIXTURE/test20-entered"; fi\nif [[ ($1 == image && $2 == inspect) || ($1 == inspect && "$*" == *platform-core:dev* && "$*" != *"--type container"*) ]]; then printf \'%s\\n\' "$CORE_IMG"; exit 0; fi\nif [[ $1 == inspect && $* == *"--type container"* && "$*" == *platform-core* ]]; then printf \'%s\\n\' "$CORE_IMG"; exit 0; fi\nif [[ $1 == inspect && $* == *"--type container"* || $1 == pause || $1 == unpause ]]; then touch "$T19_FIXTURE/lifecycle"; exec "'+str(docker)+'" "$@"; fi\n[[ $1 != exec ]] || echo 1\nexit 0\n',
             'curl': '#!/bin/bash\nif [[ -e "$T19_FIXTURE/lifecycle" ]]; then args=("$@"); args[${#args[@]}-1]="$T19_URL"; exec "'+str(curl)+'" "${args[@]}"; fi\nif [[ "$*" == *count* ]]; then echo 1; elif [[ "$*" == *http_code* ]]; then echo 200; else echo \'{"status":"UP","product":"Platform"}\'; fi\n'
         }
         for cmd,body in wrappers.items():p=path/'bin'/cmd;p.write_text(body);p.chmod(0o755)

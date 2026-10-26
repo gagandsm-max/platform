@@ -41,54 +41,9 @@ func (s *DiskSpool) recover() error {
 	if err := s.loadStateLocked(); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(s.dir)
+	maxSeq, err := s.reconcileEntriesLocked(true)
 	if err != nil {
-		return newError(CodeIO, "failed to scan spool directory", err)
-	}
-	var maxSeq uint64
-	for _, entry := range entries {
-		name := entry.Name()
-		if name == stateFileName || name == streamIDFileName || name == quarantineDirName || name == outboundWindowFileName {
-			continue
-		}
-		full := filepath.Join(s.dir, name)
-		if entry.Type()&os.ModeSymlink != 0 {
-			if err := s.quarantineLocked(full, "symlink"); err != nil {
-				return err
-			}
-			continue
-		}
-		if strings.HasSuffix(name, ".tmp") {
-			if err := s.quarantineLocked(full, "partial"); err != nil {
-				return err
-			}
-			continue
-		}
-		seq, ok := parseRecordFileName(name)
-		if !ok {
-			if strings.HasPrefix(name, "record-") {
-				if err := s.quarantineLocked(full, "invalid-name"); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-		rec, err := s.readRecordFileLocked(full, seq)
-		if err != nil {
-			if qerr := s.quarantineLocked(full, "corrupt"); qerr != nil {
-				return qerr
-			}
-			continue
-		}
-		if rec.Sequence <= s.state.AckedThrough {
-			if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
-				return newError(CodeIO, "failed to remove already acknowledged record during recovery", err)
-			}
-			continue
-		}
-		if rec.Sequence > maxSeq {
-			maxSeq = rec.Sequence
-		}
+		return err
 	}
 	floor := maxSeq + 1
 	if s.state.AckedThrough+1 > floor {
@@ -106,7 +61,75 @@ func (s *DiskSpool) recover() error {
 	if err := s.persistStateLocked(); err != nil {
 		return err
 	}
-	return syncDir(s.dir)
+	if err := syncDir(s.dir); err != nil {
+		return err
+	}
+	s.cleanupUnresolved = false
+	return nil
+}
+
+// reconcileEntriesLocked applies DiskSpool ownership rules to spool directory
+// entries. includePending=true validates unacked records (Open recover).
+// includePending=false leaves pending records unread so acked cleanup under
+// backlog does not re-scan/re-parse the live queue. Record-like artifacts are
+// never deleted solely from filename + watermark: symlinks/partials/invalid
+// names and corrupt bodies are quarantined; only checksum-validated records at
+// or below AckedThrough may be removed.
+func (s *DiskSpool) reconcileEntriesLocked(includePending bool) (uint64, error) {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return 0, newError(CodeIO, "failed to scan spool directory", err)
+	}
+	var maxSeq uint64
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == stateFileName || name == streamIDFileName || name == quarantineDirName || name == outboundWindowFileName {
+			continue
+		}
+		full := filepath.Join(s.dir, name)
+		if entry.Type()&os.ModeSymlink != 0 {
+			if err := s.quarantineLocked(full, "symlink"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		if strings.HasSuffix(name, ".tmp") {
+			if err := s.quarantineLocked(full, "partial"); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		seq, ok := parseRecordFileName(name)
+		if !ok {
+			if strings.HasPrefix(name, "record-") {
+				if err := s.quarantineLocked(full, "invalid-name"); err != nil {
+					return 0, err
+				}
+			}
+			continue
+		}
+		if !includePending && seq > s.state.AckedThrough {
+			// Pending live telemetry: leave intact without reading.
+			continue
+		}
+		rec, err := s.readRecordFileLocked(full, seq)
+		if err != nil {
+			if qerr := s.quarantineLocked(full, "corrupt"); qerr != nil {
+				return 0, qerr
+			}
+			continue
+		}
+		if rec.Sequence <= s.state.AckedThrough {
+			if err := s.removeRecordFileLocked(full); err != nil && !os.IsNotExist(err) {
+				return 0, newError(CodeIO, "failed to remove already acknowledged record during recovery", err)
+			}
+			continue
+		}
+		if rec.Sequence > maxSeq {
+			maxSeq = rec.Sequence
+		}
+	}
+	return maxSeq, nil
 }
 
 func (s *DiskSpool) loadOrCreateStreamID() error {

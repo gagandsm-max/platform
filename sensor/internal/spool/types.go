@@ -153,8 +153,18 @@ type DiskSpool struct {
 	state          diskState
 	closed         bool
 	degraded       bool
-	quarantined    uint64
-	space          func(int64) (spaceStatus, error)
+	// cleanupUnresolved is set when AckedThrough advanced but record removal,
+	// final directory fsync, or outbound-window sidecar clear/fsync did not
+	// complete. Cleared only by successful ReconcileAckedCleanup (or Open
+	// recover that fully removes acked orphans / stale sidecars).
+	cleanupUnresolved bool
+	quarantined       uint64
+	space             func(int64) (spaceStatus, error)
+	// removeFile is an optional test seam for post-ACK unlink failures. Nil uses os.Remove.
+	removeFile func(string) error
+	// removeOutboundWindow is an optional test seam for outbound-window sidecar
+	// unlink failures after durable ACK. Nil uses os.Remove.
+	removeOutboundWindow func(string) error
 }
 
 // Transitional compatibility only until production main wiring is replaced.
