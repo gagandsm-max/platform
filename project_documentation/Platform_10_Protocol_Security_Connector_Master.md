@@ -39,7 +39,15 @@
 | CDP/LLDP/ARP/FDB | SNMP/CLI/API/gNMI derived | underlying protocol endpoints | discovery profile | GoSNMP/CLI/gNMI | topology provenance/confidence/history |
 | Routing/state | BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VRF/STP/HSRP/VRRP/LACP/QoS/multicast/SD-WAN via SNMP/gNMI/NETCONF/REST/CLI | vendor-specific | Device Pack/Monitoring Profile | protocol foundations above | canonical graph and RCA semantics, not a routing daemon |
 
+### LLDP/CDP neighbor discovery evidence profile — REQ-NET-007
+
+- **Collection:** Existing Network Sensor uses read-only SNMPv3 authPriv where supported to retrieve LLDP-MIB local/remote chassis/port identifiers, timemark/age, capabilities and management-address facts, or CISCO-CDP-MIB cdpCacheTable with cdpCacheIfIndex, Device-ID, remote Port-ID and optional address/platform/capability. Vendor-approved CLI/API/gNMI is a bounded alternative; no default raw L2 packet capture, implicit community, credential downgrade or SNMP SET.
+- **Identity:** SNMP authenticates the reporting device, not every advertised remote neighbor. Reconcile LLDP local ports and CDP ifIndex against IF-MIB/bridge-port/ifName/ifAlias/physical-port identity; ifIndex may change after reboot. Advertised remote names/IP/MAC/device IDs are untrusted until tenant-scoped corroboration and cannot create privileged endpoints or cross-tenant links.
+- **Semantics:** These protocols reveal L2 adjacency evidence, not directed failure parentage. Preserve source, freshness/TTL, one-sided/contradictory rows, evidence quality and as-of history. Disabled/unsupported protocol, missing neighbor, truncated walk or expired row means UNKNOWN/stale evidence rather than confirmed outage.
+- **Safety/capacity:** Govern target eligibility, row/cardinality/byte/time/retry budgets and cleanup; block source spoofing and unauthorized discovery. Require multi-vendor, malformed row, port renumber, LAG/STP/ECMP, one-sided, stale, cross-tenant and storm/regression cases. Status: SPECIFIED, implementation/certification not inferred.
+
 ## 2.1 SNMP security, credential and execution supplement
+
 
 - **Preferred posture:** SNMPv3 `authPriv` using supported SHA-2 authentication and AES privacy where the managed device supports it. v1/v2c, MD5, SHA-1 and DES are legacy compatibility modes, explicitly selected, labelled and audited; they are not automatic downgrade/fallback paths.
 - **Credential Profiles:** normal jobs carry a profile reference/authorization context. `USE` does not imply `REVEAL`. Reusable community/auth/privacy material must not be returned to ordinary browsers, written to telemetry/event/audit records or retained in generic job history. Sensors receive/materialize only the minimum execution secret through the governed secret-delivery/resolution mechanism.

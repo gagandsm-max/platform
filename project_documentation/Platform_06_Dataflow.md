@@ -283,6 +283,13 @@ sequenceDiagram
 
 Discovery does not automatically consume monitoring licences unless policy explicitly allows auto-approval.
 
+### 9.1 LLDP/CDP evidence to temporal graph and deterministic RCA
+
+Network Sensor authorized SNMP LLDP-MIB/CDP cache observations → typed neighbor facts with tenant/source/time/quality → Core entity/port identity reconciliation → existing temporal graph adjacency and historical conflict state → independently qualified directed service/routing/failure dependencies → Alert Qualification → time-window/dependency correlation → deterministic rule/codebook/diagnostic RCA → root incident or INCONCLUSIVE → reversible downstream notification grouping (original child alerts and audit retained).
+
+A physical/L2 adjacency is not automatic upstream failure parentage. One-sided/missing/stale observations or a monitoring-path outage cannot be converted into link/device down. Correlation uses incident-time graph validity and alternate-path/redundancy checks. No new database or RCA engine; flow spans BUILD-041/043/046, 066/072, 080–084 and 100. This remains specified, not end-to-end certified.
+
+
 ---
 
 ## 10. Flow DF-009 — Sensor placement and capacity simulation

@@ -447,7 +447,19 @@ Platform defines a central, tenant-scoped branding configuration contract to sep
   - `confidentialityNotice`: optional / `null` / template-policy-controlled. Legal classification and document sensitivity markings are controlled per template/policy rather than universally imposing `"CONFIDENTIAL"`.
 - White-label/MSP tenants may configure custom brand overrides without altering internal Platform schemas, service names, or API contracts.
 
+## 8.4 Typed neighbor fact, dependency edge and suppression provenance — REQ-NET-007
+
+This is a **logical versioned event/data contract**, not a claim that a physical schema/topic/API is deployed. Reuse the canonical tenant/entity/interface ID, existing topology.observation history, event, alert, incident, policy, RCA and audit authorities. Do not add a second graph source or publish a typed record as an unaccounted numeric observation.
+
+- **Neighbor evidence:** tenant_id; source_entity_id; source_interface_ref plus local protocol index/port; advertised neighbor chassis/device-ID and port with ID subtype; optional management-address/capabilities; protocol LLDP|CDP; reporting Sensor/vantage; observed_at/received_at; TTL/first_seen/last_seen; quality/status; raw evidence reference, codec/Pack version and stable idempotency key. Remote advertisements are untrusted claims until canonical tenant-scoped identity corroboration.
+- **Graph relationship projection:** stable tenant-scoped endpoint/interface refs when resolved; edge layer/type PHYSICAL_ADJACENCY versus ROUTING_PATH or directed DEPENDS_ON/HOSTED_ON where independently qualified; validity interval, confidence, direction, evidence/protocol/source, conflict state and graph revision/as_of. Missing neighbor evidence may expire a projection but is not a proven link or device failure.
+- **Correlated alert/suppression decision:** tenant, incident ID, original immutable child alert/event IDs, hypothesized root reference, rule/codebook version, temporal window, graph snapshot/revision, evidence/contradiction/quality, explicit suppression reason and notification scope, actor/policy, created/expires/withdrawn time, history and idempotency key. Muting notification fan-out cannot erase source alerts or mark child devices DOWN.
+- **RCA/fault signature:** candidate cause, TRUE/FALSE/UNKNOWN expected symptom vector, matched/conflicting/missing evidence, rule/codebook version and independent path/redundancy tests; emits existing revisioned hypothesis/root or INCONCLUSIVE. AI anomaly score is a separate advisory evidence reference.
+
+Contract compatibility and physical tests must cover LLDP/CDP replay, duplicate and late topology facts, port renumbering, cross-tenant spoofed advertisement, contradictory edges, as-of replay, redundant-path counterfactual, suppression unmute, source/child-alert conservation and fail-closed decode/ACK. Specific implementation field names, topics, migrations and endpoint routes require subsequent approved BUILD-072/083/084 implementation review. These are **SPECIFIED, NOT IMPLEMENTED/CERTIFIED**.
+
 ## 9. Region, Sensor Pool and enrollment-control contract supplement — v3.2.2
+
 
 Logical control resources are additive to the existing tenant/site/Sensor/Agent model:
 

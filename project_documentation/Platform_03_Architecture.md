@@ -634,6 +634,15 @@ The graph includes:
 - Sensor assignment/monitoring dependencies;
 - incident causal edges.
 
+### 12.4.1 Protocol adjacency is distinct from failure dependency
+
+The existing Network Sensor/Device Pack layer normalizes governed LLDP-MIB and CISCO-CDP-MIB neighbor observations as typed evidence. Each source record has tenant, reporting entity/interface, advertised chassis/device and local/remote port IDs, source protocol/vantage, timestamp, TTL/freshness and quality. A remote advertisement is not authenticated identity. Interface reconciliation uses ifName/ifAlias/physical-port evidence and handles ifIndex renumbering.
+
+The **single existing canonical temporal Graph authority** owns versioned adjacency, conflicting one-sided observations and derivation of directional failure/service dependencies. LLDP/CDP L2 adjacency is not a parent-child arrow; directional edges require independent L3/route, forwarding, path, redundancy, service, configuration or approved CMDB/manual evidence. Graph as-of event-time snapshots and source/quality controls govern correlation. Neither absent CDP/LLDP nor stale topology proves DEVICE_DOWN.
+
+Ownership remains BUILD-041/043/046 discovery and interface evidence, BUILD-066 entity reconciliation, BUILD-072 graph, BUILD-080–084 alert/correlation and BUILD-100 deterministic RCA. No new graph store, microservice, permanent ifIndex authority or packet-capture dependency is selected.
+
+
 ### 12.5 Relationship provenance
 
 Every edge stores:
@@ -680,6 +689,13 @@ flowchart LR
     C --> O[Root Cause / Inconclusive + Evidence]
     O --> LLM[AI Gateway / LLM Explanation]
 ```
+
+### 13.2.1 Deterministic common-cause and fault-signature reasoning
+
+One Core evidence/RCA pipeline implements topology fault propagation, versioned expert rules, and optional small deterministic fault-signature/codebook scoring. Codebook hypotheses list required, supporting, contradictory and not-applicable symptoms; observed states are TRUE/FALSE/UNKNOWN, with UNKNOWN not treated as a failed or negative test. Compare evidence time, qualified graph direction, redundancy, alternate paths, expected effects and source trust. Explain each rank/rejection by rule version, graph snapshot and evidence IDs; choose INCONCLUSIVE if proof is insufficient.
+
+The incident/notification layer may reversibly silence duplicate downstream **notifications** only after qualified common-cause corroboration. It never deletes child alerts, changes device health, erases SLA evidence or treats ML scores as operational authority. AI anomaly/GNN models remain optional secondary scorers, never the only gate for parent selection or alert suppression.
+
 
 ### 13.3 GNN role
 
